@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home · FZN Band Boosters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/*
+  Club theme. The app derives these four values from the one colour a club picks:
+  --club       fill for the bar and the current set
+  --club-on    text and icons on that fill (white or ink, whichever passes 4.5:1)
+  --club-text  the club colour as text, links and focus ring on white paper (darkened to 4.5:1)
+  --club-tint  a pale wash for hover
+*/
+:root {
+  --club: #5b2a86;
+  --club-on: #ffffff;
+  --club-text: #5b2a86;
+  --club-tint: #f1ebf6;
+
+  --paper: #ffffff;
+  --grid: #e8eae6;
+  --ink: #14161a;
+  --ink-2: #4c5159;
+  --hair: #d9dcd6;
+
+  --done: #2f6b3a;
+  --due: #9a4f08;
+  --late: #a3261b;
+
+  --read: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --mark: "Barlow Condensed", "Arial Narrow", sans-serif;
+
+  --cell: 24px;             /* the chart grid; page gutters and gaps sit on it */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 48px;
+}
+/* Demo only: a light club colour, to prove the theme holds. Open with #gold. */
+:root[data-club="gold"] { --club: #f2c200; --club-on: #14161a; --club-text: #7a5c00; --club-tint: #fdf6d6; }
+
+* { box-sizing: border-box; margin: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  min-height: 100vh;
+  color: var(--ink);
+  font: 400 17px/1.45 var(--read);
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    linear-gradient(0deg, var(--grid) 1px, transparent 1px);
+  background-size: var(--cell) var(--cell);
+  padding-bottom: 88px;
+}
+::selection { background: var(--club); color: var(--club-on); }
+:focus-visible { outline: 3px solid var(--club-text); outline-offset: 2px; }
+.bar :focus-visible { outline-color: var(--club-on); } /* on the club fill, the ring uses the on-fill ink */
+a { color: inherit; text-underline-offset: 3px; }
+button { font: inherit; cursor: pointer; }
+.num { font-variant-numeric: tabular-nums lining-nums; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.wrap { max-width: 1032px; margin: 0 auto; padding: 0 var(--cell); }
+
+/* Club bar */
+.bar { background: var(--club); color: var(--club-on); }
+.bar .wrap { height: 56px; display: flex; align-items: center; gap: var(--s3); }
+.monogram { width: 34px; height: 34px; border-radius: 50%; background: var(--club-on); color: var(--club);
+  display: grid; place-items: center; font: 700 14px var(--mark); flex: none; }
+.club { font: 700 21px/1 var(--mark); letter-spacing: .01em; }
+.top-nav { display: none; margin-left: auto; gap: var(--s1); }
+.top-nav a { color: var(--club-on); text-decoration: none; font: 600 18px var(--mark); padding: 0 12px; min-height: 44px; display: inline-flex; align-items: center; }
+.top-nav a[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--club-on); }
+.account { margin-left: auto; width: 44px; height: 44px; border-radius: 50%; border: 2px solid currentColor;
+  background: transparent; color: var(--club-on); font: 700 14px var(--mark); }
+
+/* Season ruler: the club's season steps as yard-line cells. Not a control. */
+.season { background: var(--paper); border-bottom: 2px solid var(--ink); }
+.season .wrap { padding-top: var(--s3); padding-bottom: var(--s2); }
+.season h1 { font: 600 15px var(--mark); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+.season h1 b { color: var(--ink); }
+.sets { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(var(--count, 5), minmax(0, 1fr)); margin-top: var(--s2); }
+.sets li { position: relative; border-left: 2px solid var(--ink); padding: 6px 6px 14px 8px; min-height: 60px; }
+.sets li:last-child { border-right: 2px solid var(--ink); }
+/* yard-line hash ticks along the foot of each set */
+.sets li::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px;
+  background: linear-gradient(90deg, var(--ink) 2px, transparent 2px) 0 0 / 25% 100% repeat-x; opacity: .45; }
+.sets .n { display: flex; align-items: center; gap: 4px; font: 700 20px/1 var(--mark); color: var(--ink-2); }
+.sets .n svg { width: 15px; height: 15px; }
+.sets .label { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: normal; word-break: normal; hyphens: auto; font-size: 13px; line-height: 1.2; margin-top: 4px; color: var(--ink-2); }
+.sets .done .n { color: var(--done); }
+.sets [aria-current="step"] { background: var(--club); }
+.sets [aria-current="step"] .n, .sets [aria-current="step"] .label { color: var(--club-on); }
+.sets [aria-current="step"]::after { background-image: linear-gradient(90deg, var(--club-on) 2px, transparent 2px); }
+/* students stand on the current set: one dot each, at the foot of the cell */
+.on-set { display: flex; gap: 4px; margin-top: 6px; }
+.on-set i { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font: 700 12px var(--mark);
+  font-style: normal; background: var(--paper); color: var(--due); box-shadow: inset 0 0 0 2px var(--due); }
+.on-set i.done { background: var(--done); color: var(--paper); box-shadow: none; }
+/* many sets on a narrow screen: numbers only, the current set's name moves to the heading */
+.sets.many .label { display: none; }
+.sets.many li { min-height: 0; padding-right: 2px; }
+.current-name { display: none; }
+.season.has-many .current-name { display: inline; }
+@media (min-width: 760px) { .sets.many .label { display: -webkit-box; } .season.has-many .current-name { display: none; } }
+
+/* Layout */
+main.wrap { padding-top: var(--s5); display: grid; gap: var(--cell); }
+.box { background: var(--paper); border: 2px solid var(--ink); padding: var(--s4); }
+.box > h2 { font: 700 24px/1.1 var(--mark); letter-spacing: .005em; }
+.box > h2 + p { color: var(--ink-2); font-size: 15px; margin-top: 2px; }
+
+/* Money */
+.owed { margin-top: var(--s2); }
+.owed .amt { font: 700 40px/1 var(--read); letter-spacing: -.02em; }
+.owed .asof { font-size: 14px; color: var(--ink-2); margin-top: 6px; }
+.lines { list-style: none; padding: 0; margin-top: var(--s4); border-top: 1px solid var(--hair); }
+.lines li { display: grid; grid-template-columns: 1fr auto; gap: var(--s1) var(--s3); align-items: center;
+  padding: var(--s3) 0; border-bottom: 1px solid var(--hair); }
+.lines li:last-child { border-bottom: 0; }
+.lines .what { font-size: 16px; }
+.lines .when { display: block; font-size: 14px; color: var(--ink-2); }
+.lines .when.soon { color: var(--due); font-weight: 700; }
+.lines .when.late { color: var(--late); font-weight: 700; }
+.lines .amount { text-align: right; font-size: 17px; }
+.lines .pay { grid-column: 1 / -1; }
+.sum { display: flex; justify-content: space-between; padding-top: var(--s3); font-weight: 700; border-top: 2px solid var(--ink); }
+.help { margin-top: var(--s3); font-size: 15px; color: var(--ink-2); }
+.help a { color: var(--club-text); font-weight: 700; }
+.paid-up { margin-top: var(--s3); display: flex; align-items: center; gap: var(--s2); color: var(--done); font-weight: 700; }
+.paid-up svg { width: 20px; height: 20px; }
+
+.btn { min-height: 48px; padding: 0 20px; border: 2px solid var(--ink); background: var(--ink); color: var(--paper);
+  font-weight: 700; font-size: 17px; border-radius: 0; display: flex; align-items: center; justify-content: center;
+  gap: var(--s2); text-decoration: none; transition: background-color .15s ease-out, color .15s ease-out; }
+.btn:hover { background: var(--paper); color: var(--ink); }
+.btn svg { width: 18px; height: 18px; }
+.btn-line { background: var(--paper); color: var(--ink); min-height: 44px; font-size: 16px; }
+.btn-line:hover { background: var(--ink); color: var(--paper); }
+.btn-club { background: var(--paper); color: var(--club-text); border-color: var(--club-text); min-height: 44px; font-size: 16px; }
+.btn-club:hover { background: var(--club-tint); }
+.btn[aria-disabled="true"] { background: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
+
+/* Students */
+.students { list-style: none; padding: 0; margin-top: var(--s3); }
+.students li { display: grid; grid-template-columns: 1fr auto; gap: var(--s2) var(--s3); align-items: center;
+  padding: var(--s3) 0; border-top: 1px solid var(--hair); }
+.who b { font-size: 19px; }
+.who span { display: block; font-size: 14px; color: var(--ink-2); }
+.count { font: 600 16px var(--mark); letter-spacing: .03em; color: var(--ink-2); text-align: right; }
+.state { grid-column: 1 / -1; font: 700 15px var(--read); display: flex; align-items: center; gap: 6px; }
+.state svg { width: 16px; height: 16px; flex: none; }
+.state.todo { color: var(--due); }
+.state.done { color: var(--done); }
+.students .btn { grid-column: 1 / -1; }
+
+/* Details and history */
+dl.details { display: grid; grid-template-columns: auto 1fr; gap: var(--s2) var(--s4); margin-top: var(--s3); font-size: 16px; }
+dl.details dt { font: 600 15px var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); padding-top: 2px; }
+.box-foot { margin-top: var(--s4); }
+.paid { display: block; color: var(--done); font-weight: 700; font-size: 14px; }
+
+footer.wrap { padding-top: var(--s5); padding-bottom: var(--s5); color: var(--ink-2); font-size: 14px; }
+footer a { color: var(--club-text); }
+
+/* Bottom tabs on phones */
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; background: var(--paper); border-top: 2px solid var(--ink);
+  display: grid; grid-template-columns: repeat(4, 1fr); padding-bottom: env(safe-area-inset-bottom); }
+.tabs a { min-height: 64px; display: grid; place-items: center; align-content: center; gap: 2px; text-decoration: none;
+  color: var(--ink-2); font: 600 15px var(--mark); letter-spacing: .03em; }
+.tabs svg { width: 24px; height: 24px; }
+.tabs a[aria-current="page"] { color: var(--club-text); box-shadow: inset 0 3px 0 var(--club-text); }
+.tabs .badge { font: 700 12px/18px var(--read); background: var(--due); color: var(--paper); padding: 0 6px; margin-left: 4px; display: inline-block; }
+
+/* States shown by the demo switches (#late, #clear) */
+.only-late, .only-clear { display: none !important; }
+[data-state="late"] .only-late, [data-state="clear"] .only-clear { display: block !important; }
+[data-state="clear"] .paid-up.only-clear { display: flex !important; }
+[data-state="late"] .not-late, [data-state="clear"] .not-clear { display: none !important; }
+
+@media (min-width: 760px) {
+  body { padding-bottom: 0; }
+  .season .wrap { min-height: 142px; } /* bar 56 + band 142 + rule 2 = 200, so boxes start on the grid */
+  .tabs { display: none; }
+  .top-nav { display: flex; }
+  .account { margin-left: var(--s3); }
+  main.wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "money students" "paid details"; align-items: start; padding-top: 40px; } /* tops at 240, on a grid row */
+  .money { grid-area: money; } .students-box { grid-area: students; } .details-box { grid-area: details; } .paid-box { grid-area: paid; }
+  .lines li { grid-template-columns: 1fr auto auto; }
+  .lines .pay { grid-column: 2; grid-row: 1; min-width: 112px; }
+  .lines .amount { grid-column: 3; grid-row: 1; min-width: 96px; }
+  .lines li { grid-template-columns: 1fr auto auto; }
+  .sets .label { font-size: 15px; }
+}
+/* tile offset = (body width - 24px) x 50% - 480px = content left edge; ignores the scrollbar */
+@media (min-width: 1032px) { body { background-position: calc(50% - 480px) 0; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <span class="monogram" aria-hidden="true">FZN</span>
+    <span class="club">FZN Band Boosters</span>
+    <nav class="top-nav" aria-label="Main">
+      <a href="#" aria-current="page">Home</a><a href="#">Forms</a><a href="#">Payments</a><a href="#">Family</a>
+    </nav>
+    <button class="account" aria-label="Account for Ana Ramirez">AR</button>
+  </div>
+</header>
+
+<section class="season" aria-labelledby="season-h">
+  <div class="wrap">
+    <h1 id="season-h">Fall season · <b>Set 2 of 5<span class="current-name">: Forms</span></b></h1>
+    <ol class="sets" style="--count:5">
+      <li class="done"><span class="n"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>1</span><span class="label">Join</span><span class="visually-hidden">, done</span></li>
+      <li aria-current="step"><span class="n">2</span><span class="label">Forms</span><span class="visually-hidden">, current set</span>
+        <span class="on-set" aria-hidden="true"><i class="done" title="Leo is done">L</i><i title="Maya has forms left">M</i></span></li>
+      <li><span class="n">3</span><span class="label">Uniforms</span></li>
+      <li><span class="n">4</span><span class="label">Trip</span></li>
+      <li><span class="n">5</span><span class="label">Banquet</span></li>
+    </ol>
+  </div>
+</section>
+
+<main class="wrap">
+  <section class="box money" aria-labelledby="fam-h">
+    <h2 id="fam-h">Ramirez family</h2>
+    <div class="owed">
+      <div class="amt num not-clear">$185.00</div>
+      <div class="amt num only-clear">$0.00</div>
+      <div class="asof">Owed now. From QuickBooks, as of 2:14 pm.</div>
+    </div>
+
+    <div class="not-clear">
+      <ul class="lines">
+        <li>
+          <span><span class="what">Fall uniform fee, Maya</span>
+            <span class="when soon not-late">Due Nov 15, in 8 days</span>
+            <span class="when late only-late">Was due Oct 30</span></span>
+          <span class="amount num">$85.00</span>
+          <a class="btn pay" href="#" aria-label="Pay $85.00, fall uniform fee for Maya">Pay
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </li>
+        <li>
+          <span><span class="what">Spring trip deposit, Leo</span><span class="when">Due Nov 22</span></span>
+          <span class="amount num">$100.00</span>
+          <a class="btn btn-line pay" href="#" aria-label="Pay $100.00, spring trip deposit for Leo">Pay</a>
+        </li>
+      </ul>
+      <div class="sum"><span>Total</span><span class="num">$185.00</span></div>
+      <p class="help only-late">Need more time on the uniform fee? <a href="#">Ask the treasurer</a>. They're happy to work something out.</p>
+      <p class="help not-late">Each invoice opens on QuickBooks' secure payment page.</p>
+    </div>
+    <p class="paid-up only-clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11"/></svg>You're all paid up. Thank you!</p>
+  </section>
+
+  <section class="box students-box" aria-labelledby="stu-h">
+    <h2 id="stu-h">Your students</h2>
+    <p>Fall season forms</p>
+    <ul class="students">
+      <li>
+        <span class="who"><b>Maya</b><span>Flute · Grade 10</span></span>
+        <span class="count num">1 of 3 signed</span>
+        <span class="state todo"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5"/><circle cx="8" cy="11" r=".6" fill="currentColor"/></svg>2 forms to sign</span>
+        <a class="btn btn-club" href="#">Sign Maya's forms</a>
+      </li>
+      <li>
+        <span class="who"><b>Leo</b><span>Percussion · Grade 9</span></span>
+        <span class="count num">3 of 3 signed</span>
+        <span class="state done"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>All forms signed</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="box details-box" aria-labelledby="det-h">
+    <h2 id="det-h">Your details</h2>
+    <p>How the boosters reach you</p>
+    <dl class="details">
+      <dt>Email</dt><dd>ana.ramirez@example.com</dd>
+      <dt>Phone</dt><dd class="num">(555) 214-0187</dd>
+      <dt>Address</dt><dd>1418 Larkspur Lane<br>Springfield, MO 65804</dd>
+    </dl>
+    <div class="box-foot"><a class="btn btn-line" href="#">Update my details</a></div>
+  </section>
+
+  <section class="box paid-box" aria-labelledby="his-h">
+    <h2 id="his-h">Paid this season</h2>
+    <ul class="lines">
+      <li><span><span class="what">Fall membership dues</span><span class="when">Paid Aug 28</span></span><span class="amount num">$150.00<span class="paid">Paid</span></span></li>
+      <li><span><span class="what">Band camp, Maya</span><span class="when">Paid Jul 30</span></span><span class="amount num">$225.00<span class="paid">Paid</span></span></li>
+    </ul>
+  </section>
+</main>
+
+<footer class="wrap">Questions about a charge? Email <a href="#">treasurer@fznband.example</a>. Runs on Booster Rocket.</footer>
+
+<nav class="tabs" aria-label="Main">
+  <a href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z"/></svg>Home</a>
+  <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M9 13l2 2 4-4"/></svg><span>Forms<span class="badge num" aria-label="2 to sign">2</span></span></a>
+  <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="6" width="18" height="12"/><path d="M3 10h18M7 15h3"/></svg>Payments</a>
+  <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4"/></svg>Family</a>
+</nav>
+
+<script>
+  /* Reference-page switches only: #late, #clear, #gold (combine with +, e.g. #gold+late). */
+  for (const k of location.hash.slice(1).split('+')) {
+    if (k === 'gold') document.documentElement.dataset.club = 'gold';
+    if (k === 'late' || k === 'clear') document.body.dataset.state = k;
+    if (k === 'sets3' || k === 'sets8') {
+      const names = k === 'sets3' ? ['Auditions', 'Rehearsals', 'Performance week'] : ['Join', 'Auditions', 'Forms', 'Tech week', 'Uniforms', 'Competition season', 'Trip', 'Banquet'];
+      const cur = k === 'sets3' ? 1 : 3, ol = document.querySelector('.sets'), lis = ol.querySelectorAll('li');
+      const curLi = ol.querySelector('[aria-current]'), marks = curLi.querySelector('.on-set');
+      ol.innerHTML = ''; ol.style.setProperty('--count', names.length);
+      names.forEach((n, i) => {
+        const li = document.createElement('li');
+        if (i < cur) li.className = 'done';
+        const tick = i < cur ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>' : '';
+        li.innerHTML = '<span class="n">' + tick + (i + 1) + '</span><span class="label">' + n + '</span>' + (i < cur ? '<span class="visually-hidden">, done</span>' : '');
+        if (i === cur) { li.setAttribute('aria-current', 'step'); li.appendChild(marks); }
+        ol.appendChild(li);
+      });
+      if (names.length > 6) { ol.classList.add('many'); document.querySelector('.season').classList.add('has-many'); }
+      document.querySelector('#season-h b').innerHTML = 'Set ' + (cur + 1) + ' of ' + names.length + '<span class="current-name">: ' + names[cur] + '</span>';
+    }
+  }
+</script>
+</body>
+</html>

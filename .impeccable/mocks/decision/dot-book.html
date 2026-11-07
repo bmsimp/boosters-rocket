@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=390">
+<title>Dot Book</title>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#fff;--ink:#14161a;--ink2:#4c5159;--field:#2f6b3a;--club:#5b2a86;--grid:#e6e8e3;--due:#a8590c}
+*{box-sizing:border-box;margin:0}
+html,body{width:390px;height:844px;overflow:hidden;color:var(--ink);font:16px/1.4 "Atkinson Hyperlegible",system-ui,sans-serif;
+background:var(--paper) repeating-linear-gradient(90deg,transparent 0 23px,var(--grid) 23px 24px),repeating-linear-gradient(0deg,transparent 0 23px,var(--grid) 23px 24px)}
+.bar{background:var(--field);color:#fff;height:56px;display:flex;align-items:center;gap:10px;padding:0 16px}
+.bar b{font:700 20px "Barlow Condensed"}.logo{width:32px;height:32px;border-radius:50%;background:#fff;color:var(--field);display:grid;place-items:center;font:700 13px "Barlow Condensed"}
+.sets{background:var(--paper);border-bottom:2px solid var(--ink);padding:14px 16px 10px}
+.sets small{font:500 14px "Barlow Condensed";letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+.ruler{display:flex;margin-top:8px;position:relative}
+.ruler div{flex:1;border-left:2px solid var(--ink);padding:4px 0 0 6px;font:700 16px "Barlow Condensed";color:var(--ink2);height:44px}
+.ruler div.now{background:var(--club);color:#fff}
+.ruler div.done{color:var(--field)}
+.ruler span{display:block;font:400 11px "Atkinson Hyperlegible"}
+main{padding:16px;background:transparent}
+.card{background:var(--paper);border:2px solid var(--ink);padding:14px;margin-bottom:12px}
+.card h3{font:700 22px "Barlow Condensed"}
+.money{display:flex;justify-content:space-between;align-items:center}
+.amt{font:700 38px "Atkinson Hyperlegible";font-variant-numeric:tabular-nums}
+.pay{height:48px;padding:0 22px;border:0;background:var(--ink);color:#fff;font:700 17px "Atkinson Hyperlegible"}
+.row{display:flex;justify-content:space-between;border-top:1px solid var(--grid);padding:8px 0;font-size:15px}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--club);margin-right:8px}
+.coord{font:500 14px "Barlow Condensed";color:var(--ink2)}
+.next{color:var(--due);font-weight:700;font-size:14px}
+</style></head><body>
+<div class="bar"><div class="logo">FZN</div><b>FZN Band Boosters</b></div>
+<div class="sets"><small>Fall season · Set 2 of 5</small>
+  <div class="ruler"><div class="done">1<span>Join</span></div><div class="now">2<span>Forms</span></div><div>3<span>Uniforms</span></div><div>4<span>Trip</span></div><div>5<span>Banquet</span></div></div></div>
+<main>
+  <div class="card"><h3>Ramirez family</h3>
+    <div class="money"><div><div class="amt">$185.00</div><div class="coord">as of 2:14 pm</div></div><button class="pay">Pay</button></div>
+    <div class="row"><span>Fall uniform fee, Maya</span><span>$85.00</span></div>
+    <div class="row"><span>Spring trip deposit, Leo</span><span>$100.00</span></div></div>
+  <div class="card"><h3>Students</h3>
+    <div class="row"><span><i class="dot"></i>Maya · Flute</span><span class="next">2 forms</span></div>
+    <div class="row"><span><i class="dot" style="background:var(--field)"></i>Leo · Percussion</span><span class="coord">Set 2 done</span></div></div>
+</main>
+</body></html>
