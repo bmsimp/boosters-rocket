@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-07T14:02:30+00:00",
+  "generatedAt": "2026-11-07T14:29:48+00:00",
   "title": "Design System: Booster Rocket",
   "extensions": {
     "colorMeta": {
@@ -19,7 +19,7 @@
           "#d8c3f2",
           "#f5e8ff"
         ],
-        "derivation": "Runtime: the one colour the club picks."
+        "derivation": "Runtime: the one colour the club picks. Unchanged in every mode."
       },
       "club-on": {
         "role": "primary",
@@ -36,7 +36,7 @@
           "#cecece",
           "#eeeeee"
         ],
-        "derivation": "White if white on club >= 4.5:1, else ink #14161a."
+        "derivation": "White if white on club >= 4.5:1, else ink #14161a. Unchanged in every mode."
       },
       "club-text": {
         "role": "primary",
@@ -53,7 +53,7 @@
           "#d8c3f2",
           "#f5e8ff"
         ],
-        "derivation": "club if club on white >= 4.5:1, else darken club (lower OKLCH lightness, same hue) until it reaches 4.5:1."
+        "derivation": "Resolves per mode to club-text-l / -d / -lhc / -dhc."
       },
       "club-tint": {
         "role": "primary",
@@ -70,7 +70,7 @@
           "#cfccd1",
           "#efeef1"
         ],
-        "derivation": "Pale wash of club over paper; club-text must still reach 4.5:1 on it."
+        "derivation": "Resolves per theme to club-tint-l / -d."
       },
       "paper": {
         "role": "neutral",
@@ -102,7 +102,8 @@
           "#a4a5a2",
           "#cdcecc",
           "#eeefed"
-        ]
+        ],
+        "note": "High contrast: transparent (grid removed)."
       },
       "ink": {
         "role": "neutral",
@@ -150,7 +151,8 @@
           "#a3a5a1",
           "#cdcecb",
           "#eeefed"
-        ]
+        ],
+        "note": "High contrast: hair = ink."
       },
       "done": {
         "role": "tertiary",
@@ -199,6 +201,428 @@
           "#fbbcb2",
           "#ffe4dd"
         ]
+      },
+      "club-text-l": {
+        "role": "primary",
+        "displayName": "Club Text, light (derived)",
+        "canonical": "#5b2a86",
+        "oklch": "oklch(40.0% 0.148 305.0)",
+        "tonalRamp": [
+          "#0f0619",
+          "#2c193f",
+          "#4c2f69",
+          "#754ba0",
+          "#9870c4",
+          "#b99bdc",
+          "#dbc7f4",
+          "#f5e8ff"
+        ],
+        "derivation": "Light paper: club if >= 4.5:1 on white, else darkened (same hue)."
+      },
+      "club-text-d": {
+        "role": "primary",
+        "displayName": "Club Text, dark (derived)",
+        "canonical": "#c9a7ea",
+        "oklch": "oklch(78.2% 0.100 307.4)",
+        "tonalRamp": [
+          "#0e0814",
+          "#2a1d36",
+          "#49365b",
+          "#71558b",
+          "#9478af",
+          "#b6a0cb",
+          "#d9cae8",
+          "#f3eafd"
+        ],
+        "derivation": "Dark paper: lightened (same hue) until >= 4.5:1 on paper-dark."
+      },
+      "club-text-lhc": {
+        "role": "primary",
+        "displayName": "Club Text, light high contrast (derived)",
+        "canonical": "#45206a",
+        "oklch": "oklch(33.7% 0.124 303.3)",
+        "tonalRamp": [
+          "#0e0717",
+          "#2a1c3b",
+          "#493364",
+          "#715197",
+          "#9475bc",
+          "#b59fd5",
+          "#d8c9ef",
+          "#f3e9ff"
+        ],
+        "derivation": ">= 7:1 on white."
+      },
+      "club-text-dhc": {
+        "role": "primary",
+        "displayName": "Club Text, dark high contrast (derived)",
+        "canonical": "#e5d3f7",
+        "oklch": "oklch(89.3% 0.052 307.8)",
+        "tonalRamp": [
+          "#0d0a10",
+          "#27212d",
+          "#453b4e",
+          "#6b5c79",
+          "#8e7f9c",
+          "#b1a5bc",
+          "#d5cddd",
+          "#f1ecf6"
+        ],
+        "derivation": ">= 7:1 on black."
+      },
+      "club-tint-l": {
+        "role": "primary",
+        "displayName": "Club Wash, light (derived)",
+        "canonical": "#f1ebf6",
+        "oklch": "oklch(94.8% 0.016 310.1)",
+        "tonalRamp": [
+          "#0c0b0d",
+          "#252327",
+          "#413e44",
+          "#66616a",
+          "#89848d",
+          "#ada9b0",
+          "#d2d0d4",
+          "#efeef1"
+        ],
+        "derivation": "Pale wash over white; club-text-l >= 4.5:1 on it."
+      },
+      "club-tint-d": {
+        "role": "primary",
+        "displayName": "Club Wash, dark (derived)",
+        "canonical": "#2a2133",
+        "oklch": "oklch(26.6% 0.035 307.0)",
+        "tonalRamp": [
+          "#0c0a0e",
+          "#26222a",
+          "#433d4a",
+          "#685f72",
+          "#8b8295",
+          "#aea7b6",
+          "#d3cfd9",
+          "#f0edf4"
+        ],
+        "derivation": "Deep wash over near-black; club-text-d >= 4.5:1 on it."
+      },
+      "paper-dark": {
+        "role": "neutral",
+        "displayName": "Night Paper",
+        "canonical": "#16181c",
+        "oklch": "oklch(20.9% 0.009 264.4)",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#232426",
+          "#3e4043",
+          "#616368",
+          "#84868b",
+          "#a9abae",
+          "#d0d1d3",
+          "#eeeef0"
+        ]
+      },
+      "grid-dark": {
+        "role": "neutral",
+        "displayName": "Night Grid",
+        "canonical": "#22252b",
+        "oklch": "oklch(26.4% 0.012 264.3)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232427",
+          "#3e4044",
+          "#60636a",
+          "#83868d",
+          "#a8abb0",
+          "#cfd1d4",
+          "#edeef1"
+        ]
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "Night Ink",
+        "canonical": "#eceee9",
+        "oklch": "oklch(94.6% 0.007 124.5)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#242423",
+          "#3f403d",
+          "#626460",
+          "#858783",
+          "#aaaba8",
+          "#d0d1cf",
+          "#eeefed"
+        ]
+      },
+      "ink-2-dark": {
+        "role": "neutral",
+        "displayName": "Night Pencil",
+        "canonical": "#a9aeb6",
+        "oklch": "oklch(74.9% 0.013 259.8)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#222427",
+          "#3d4044",
+          "#5f636a",
+          "#82868d",
+          "#a8abb0",
+          "#cfd1d5",
+          "#edeef1"
+        ]
+      },
+      "hair-dark": {
+        "role": "neutral",
+        "displayName": "Night Hairline",
+        "canonical": "#3a3e45",
+        "oklch": "oklch(36.3% 0.013 261.7)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#222427",
+          "#3d4045",
+          "#5f636a",
+          "#82868d",
+          "#a8abb0",
+          "#cfd1d5",
+          "#edeef1"
+        ]
+      },
+      "done-dark": {
+        "role": "tertiary",
+        "displayName": "Field Green, dark",
+        "canonical": "#6fcf86",
+        "oklch": "oklch(77.7% 0.139 149.9)",
+        "tonalRamp": [
+          "#010f04",
+          "#052c12",
+          "#0d4d23",
+          "#1a763a",
+          "#499a5e",
+          "#81bb8c",
+          "#b6ddbc",
+          "#def6e1"
+        ]
+      },
+      "due-dark": {
+        "role": "tertiary",
+        "displayName": "Due Amber, dark",
+        "canonical": "#f0a24b",
+        "oklch": "oklch(77.3% 0.137 66.0)",
+        "tonalRamp": [
+          "#150700",
+          "#381c00",
+          "#603300",
+          "#925100",
+          "#b6762a",
+          "#d2a06d",
+          "#edcaa8",
+          "#ffead5"
+        ]
+      },
+      "late-dark": {
+        "role": "tertiary",
+        "displayName": "Past-Due Red, dark",
+        "canonical": "#ff8b7e",
+        "oklch": "oklch(76.1% 0.143 27.6)",
+        "tonalRamp": [
+          "#190503",
+          "#3f1411",
+          "#692722",
+          "#a04038",
+          "#c6665b",
+          "#e0948a",
+          "#f7c2bb",
+          "#ffe5e0"
+        ]
+      },
+      "paper-hc": {
+        "role": "neutral",
+        "displayName": "High-Contrast Paper (light)",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#636363",
+          "#868686",
+          "#ababab",
+          "#d1d1d1",
+          "#eeeeee"
+        ]
+      },
+      "ink-hc": {
+        "role": "neutral",
+        "displayName": "High-Contrast Ink (light)",
+        "canonical": "#000000",
+        "oklch": "oklch(0.0% 0.000 0.0)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#636363",
+          "#868686",
+          "#ababab",
+          "#d1d1d1",
+          "#eeeeee"
+        ]
+      },
+      "ink-2-hc": {
+        "role": "neutral",
+        "displayName": "High-Contrast Pencil (light)",
+        "canonical": "#1f2328",
+        "oklch": "oklch(25.4% 0.011 254.0)",
+        "tonalRamp": [
+          "#0a0b0c",
+          "#222427",
+          "#3d4044",
+          "#5f6469",
+          "#82878c",
+          "#a8abaf",
+          "#cfd1d4",
+          "#edeef0"
+        ]
+      },
+      "done-hc": {
+        "role": "tertiary",
+        "displayName": "Field Green, light HC",
+        "canonical": "#1c4d25",
+        "oklch": "oklch(37.6% 0.085 147.3)",
+        "tonalRamp": [
+          "#050e06",
+          "#162918",
+          "#2a482e",
+          "#446f49",
+          "#68936c",
+          "#94b597",
+          "#c2d8c3",
+          "#e5f3e6"
+        ]
+      },
+      "due-hc": {
+        "role": "tertiary",
+        "displayName": "Due Amber, light HC",
+        "canonical": "#6b3500",
+        "oklch": "oklch(39.2% 0.096 56.0)",
+        "tonalRamp": [
+          "#130802",
+          "#351e0d",
+          "#59361b",
+          "#89552e",
+          "#ad7953",
+          "#caa185",
+          "#e7cbb7",
+          "#fdeade"
+        ]
+      },
+      "late-hc": {
+        "role": "tertiary",
+        "displayName": "Past-Due Red, light HC",
+        "canonical": "#7d1a12",
+        "oklch": "oklch(38.8% 0.135 29.4)",
+        "tonalRamp": [
+          "#180503",
+          "#3e1611",
+          "#672a22",
+          "#9d4338",
+          "#c3685b",
+          "#dd968a",
+          "#f5c3bb",
+          "#ffe6e0"
+        ]
+      },
+      "paper-dark-hc": {
+        "role": "neutral",
+        "displayName": "High-Contrast Paper (dark)",
+        "canonical": "#000000",
+        "oklch": "oklch(0.0% 0.000 0.0)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#636363",
+          "#868686",
+          "#ababab",
+          "#d1d1d1",
+          "#eeeeee"
+        ]
+      },
+      "ink-dark-hc": {
+        "role": "neutral",
+        "displayName": "High-Contrast Ink (dark)",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#636363",
+          "#868686",
+          "#ababab",
+          "#d1d1d1",
+          "#eeeeee"
+        ]
+      },
+      "ink-2-dark-hc": {
+        "role": "neutral",
+        "displayName": "High-Contrast Pencil (dark)",
+        "canonical": "#e6e6e6",
+        "oklch": "oklch(92.5% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#404040",
+          "#636363",
+          "#868686",
+          "#ababab",
+          "#d1d1d1",
+          "#eeeeee"
+        ]
+      },
+      "done-dark-hc": {
+        "role": "tertiary",
+        "displayName": "Field Green, dark HC",
+        "canonical": "#8ff0a4",
+        "oklch": "oklch(87.6% 0.140 149.7)",
+        "tonalRamp": [
+          "#010f04",
+          "#052c11",
+          "#0d4d23",
+          "#197639",
+          "#499a5d",
+          "#81bb8c",
+          "#b6ddbc",
+          "#ddf6e1"
+        ]
+      },
+      "due-dark-hc": {
+        "role": "tertiary",
+        "displayName": "Due Amber, dark HC",
+        "canonical": "#ffc06e",
+        "oklch": "oklch(84.9% 0.123 72.1)",
+        "tonalRamp": [
+          "#140800",
+          "#351e00",
+          "#5a3700",
+          "#8a5700",
+          "#ae7b34",
+          "#cba372",
+          "#e7ccab",
+          "#fdebd7"
+        ]
+      },
+      "late-dark-hc": {
+        "role": "tertiary",
+        "displayName": "Past-Due Red, dark HC",
+        "canonical": "#ffaaa0",
+        "oklch": "oklch(81.8% 0.102 26.9)",
+        "tonalRamp": [
+          "#150705",
+          "#381a17",
+          "#5f302c",
+          "#914d46",
+          "#b67169",
+          "#d29b94",
+          "#edc7c1",
+          "#ffe8e5"
+        ]
       }
     },
     "typographyMeta": {
@@ -245,6 +669,18 @@
       "tab": {
         "displayName": "Tab",
         "purpose": "Phone bottom tab labels."
+      },
+      "setting-legend": {
+        "displayName": "Setting Legend",
+        "purpose": "Name of a choice group on settings pages."
+      },
+      "body-row": {
+        "displayName": "Body Row",
+        "purpose": "Invoice and history rows, detail values, secondary buttons."
+      },
+      "set-label": {
+        "displayName": "Set Label",
+        "purpose": "Season ruler set names; 0.8125rem phone, 0.9375rem at 760px+."
       }
     },
     "clubThemeExamples": [
@@ -252,15 +688,23 @@
         "name": "FZN purple (default)",
         "club": "#5b2a86",
         "club-on": "#ffffff",
-        "club-text": "#5b2a86",
-        "club-tint": "#f1ebf6"
+        "club-text-l": "#5b2a86",
+        "club-text-d": "#c9a7ea",
+        "club-text-lhc": "#45206a",
+        "club-text-dhc": "#e5d3f7",
+        "club-tint-l": "#f1ebf6",
+        "club-tint-d": "#2a2133"
       },
       {
         "name": "Gold (light club colour demo)",
         "club": "#f2c200",
         "club-on": "#14161a",
-        "club-text": "#7a5c00",
-        "club-tint": "#fdf6d6"
+        "club-text-l": "#7a5c00",
+        "club-text-d": "#f2c200",
+        "club-text-lhc": "#5c4500",
+        "club-text-dhc": "#ffd84d",
+        "club-tint-l": "#fdf6d6",
+        "club-tint-d": "#2e2a17"
       }
     ],
     "shadows": [
@@ -278,17 +722,28 @@
         "name": "dot-ring",
         "value": "inset 0 0 0 2px var(--due)",
         "purpose": "Student dot still to do on the current set."
+      },
+      {
+        "name": "choice-checked",
+        "value": "inset 0 0 0 1px var(--club-text)",
+        "purpose": "Doubles the 2px border of a checked choice option. An inset rule."
+      },
+      {
+        "name": "dot-edge-on-club",
+        "value": "outline: 2px solid var(--club-on)",
+        "purpose": "Every student dot on the club-filled current set; dot gap widens to 8px."
       }
     ],
     "focus": {
-      "value": "outline: 3px solid var(--club-text); outline-offset: 2px",
-      "purpose": "All focusable elements on paper."
+      "value": "outline: var(--ring) solid var(--club-text); outline-offset: 2px",
+      "ring": "3px; 4px in high contrast",
+      "purpose": "All focusable elements on paper; club-on inside the club bar; Highlight under forced colours."
     },
     "motion": [
       {
         "name": "state-colour",
         "value": "background-color .15s ease-out, color .15s ease-out",
-        "purpose": "Button hover. Removed under prefers-reduced-motion."
+        "purpose": "Button hover. Removed under prefers-reduced-motion or data-motion=\"reduce\"."
       }
     ],
     "breakpoints": [
@@ -299,6 +754,10 @@
       {
         "name": "content-max",
         "value": "1032px"
+      },
+      {
+        "name": "set-label-hide",
+        "value": "container max-width 76px (per ruler cell)"
       }
     ],
     "grid": {
@@ -309,11 +768,119 @@
     },
     "unresolved": [
       "Entrance motion moment not designed.",
-      "Dark mode undecided.",
       "Monogram fallback for a club without a logo is prototype only.",
       "Waiting and closed states: icon and colour not drawn.",
-      "Focus ring inside the club bar: club-text on club fill is invisible for dark club colours."
-    ]
+      "Inputs and forms beyond radio choice groups not designed."
+    ],
+    "displayModes": {
+      "storage": "localStorage key br-display, per device; applied before paint by display.js. Default for each is \"match my device\" (attribute removed).",
+      "attributes": [
+        {
+          "attr": "data-theme",
+          "values": [
+            "light",
+            "dark"
+          ],
+          "default": "prefers-color-scheme"
+        },
+        {
+          "attr": "data-contrast",
+          "values": [
+            "standard",
+            "more"
+          ],
+          "default": "prefers-contrast: more"
+        },
+        {
+          "attr": "data-text",
+          "values": [
+            "large",
+            "larger"
+          ],
+          "effect": "root font-size 112.5% / 125%; all type in rem"
+        },
+        {
+          "attr": "data-motion",
+          "values": [
+            "reduce"
+          ],
+          "default": "prefers-reduced-motion",
+          "effect": "transition: none on everything"
+        }
+      ],
+      "tokenSets": {
+        "light": {
+          "paper": "#ffffff",
+          "grid": "#e8eae6",
+          "ink": "#14161a",
+          "ink-2": "#4c5159",
+          "hair": "#d9dcd6",
+          "done": "#2f6b3a",
+          "due": "#9a4f08",
+          "late": "#a3261b",
+          "club-text": "club-text-l",
+          "club-tint": "club-tint-l",
+          "ring": "3px"
+        },
+        "dark": {
+          "note": "Chart paper at night: the world's ink becomes the paper.",
+          "paper": "#16181c",
+          "grid": "#22252b",
+          "ink": "#eceee9",
+          "ink-2": "#a9aeb6",
+          "hair": "#3a3e45",
+          "done": "#6fcf86",
+          "due": "#f0a24b",
+          "late": "#ff8b7e",
+          "club-text": "club-text-d",
+          "club-tint": "club-tint-d",
+          "ring": "3px"
+        },
+        "light-hc": {
+          "paper": "#ffffff",
+          "grid": "transparent",
+          "ink": "#000000",
+          "ink-2": "#1f2328",
+          "hair": "#000000",
+          "done": "#1c4d25",
+          "due": "#6b3500",
+          "late": "#7d1a12",
+          "club-text": "club-text-lhc",
+          "club-tint": "club-tint-l",
+          "ring": "4px"
+        },
+        "dark-hc": {
+          "paper": "#000000",
+          "grid": "transparent",
+          "ink": "#ffffff",
+          "ink-2": "#e6e6e6",
+          "hair": "#ffffff",
+          "done": "#8ff0a4",
+          "due": "#ffc06e",
+          "late": "#ffaaa0",
+          "club-text": "club-text-dhc",
+          "club-tint": "club-tint-d",
+          "ring": "4px"
+        }
+      },
+      "highContrastExtras": [
+        "Hash ticks at full opacity.",
+        "Disabled button: paper fill, dashed ink border, ink-2 text.",
+        "Link underline 2px."
+      ]
+    },
+    "forcedColors": [
+      "Page grid dropped; club bar gets a 2px CanvasText bottom rule; monogram a 2px CanvasText ring.",
+      "Current set: Highlight fill, HighlightText number/label/ticks (forced-color-adjust: none).",
+      "Hash ticks kept in CanvasText at full opacity (forced-color-adjust: none).",
+      "Student dots on Canvas with CanvasText initial and ring; done dots CanvasText fill, Canvas initial; outline HighlightText on the current set.",
+      "Current top-nav link and active tab underlined 3px; badge 1px CanvasText border.",
+      "Choice: ring CanvasText on Canvas; checked 3px Highlight border and Highlight dot; focus 3px dashed CanvasText, 4px offset.",
+      "All other focus rings: Highlight."
+    ],
+    "states": {
+      "qboOffline": "Last known figures stay; offline note under as-of in due, bold 0.875rem, role=status; every Pay disabled in place with the reason in its accessible name."
+    }
   },
   "components": [
     {
@@ -322,7 +889,7 @@
       "refersTo": "button-primary",
       "description": "Filled ink action; the soonest-due Pay.",
       "html": "<a class=\"ds-btn\" href=\"#\">Pay <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" aria-hidden=\"true\"><path d=\"M5 12h14M13 6l6 6-6 6\"/></svg></a>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:3px solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}"
     },
     {
       "name": "Line Button",
@@ -330,7 +897,7 @@
       "refersTo": "button-line",
       "description": "Outlined ink action; other Pay buttons and ordinary actions.",
       "html": "<a class=\"ds-btn ds-btn-line\" href=\"#\">Update my details</a>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:3px solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}.ds-btn-line{background:var(--paper);color:var(--ink);min-height:44px;font-size:16px}.ds-btn-line:hover{background:var(--ink);color:var(--paper)}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}.ds-btn-line{background:var(--paper);color:var(--ink);min-height:44px;font-size:16px}.ds-btn-line:hover{background:var(--ink);color:var(--paper)}"
     },
     {
       "name": "Club Button",
@@ -338,7 +905,15 @@
       "refersTo": "button-club",
       "description": "Outlined in club-text; season actions such as signing forms.",
       "html": "<a class=\"ds-btn ds-btn-club\" href=\"#\">Sign Maya’s forms</a>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:3px solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}.ds-btn-club{background:var(--paper);color:var(--club-text);border-color:var(--club-text);min-height:44px;font-size:16px}.ds-btn-club:hover{background:var(--club-tint);color:var(--club-text)}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--ink);background:var(--ink);color:var(--paper);font:700 17px var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;cursor:pointer;transition:background-color .15s ease-out,color .15s ease-out}.ds-btn:hover{background:var(--paper);color:var(--ink)}.ds-btn:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-btn svg{width:18px;height:18px}@media (prefers-reduced-motion:reduce){.ds-btn{transition:none}}.ds-btn-club{background:var(--paper);color:var(--club-text);border-color:var(--club-text);min-height:44px;font-size:16px}.ds-btn-club:hover{background:var(--club-tint);color:var(--club-text)}"
+    },
+    {
+      "name": "Disabled Pay (QuickBooks offline)",
+      "kind": "button",
+      "refersTo": "button-disabled",
+      "description": "Pay unavailable while QuickBooks is offline; stays in place, reason in its name.",
+      "html": "<p class=\"ds-off\" role=\"status\">We can’t reach QuickBooks right now. These are the last figures we have, and paying will work again shortly.</p><a class=\"ds-btn\" role=\"link\" aria-disabled=\"true\" aria-label=\"Pay $85.00, unavailable while QuickBooks is offline\">Pay</a>",
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-off{font:700 .875rem/1.45 var(--read);color:var(--due);margin:0 0 12px}.ds-btn{min-height:48px;padding:0 20px;border:2px solid var(--hair);background:var(--hair);color:var(--ink-2);font:700 1.0625rem var(--read);border-radius:0;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:not-allowed}@media (prefers-contrast:more){.ds-btn{background:var(--paper);border:2px dashed var(--ink)}}"
     },
     {
       "name": "Season Set Ruler",
@@ -346,7 +921,7 @@
       "refersTo": "set-cell",
       "description": "Signature: season steps as yard-line cells, current set filled in club colour, students as dots. Also the staff forms-matrix header.",
       "html": "<section class=\"ds-season\"><h1>Fall season · <b>Set 2 of 5</b></h1><ol class=\"ds-sets\" style=\"--count:5\"><li class=\"done\"><span class=\"n\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" aria-hidden=\"true\"><path d=\"M3 8.5l3 3 7-7\"/></svg>1</span><span class=\"label\">Join</span></li><li aria-current=\"step\"><span class=\"n\">2</span><span class=\"label\">Forms</span><span class=\"on-set\"><i class=\"done\">L</i><i>M</i></span></li><li><span class=\"n\">3</span><span class=\"label\">Uniforms</span></li><li><span class=\"n\">4</span><span class=\"label\">Trip</span></li><li><span class=\"n\">5</span><span class=\"label\">Banquet</span></li></ol></section>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-season{background:var(--paper);border-bottom:2px solid var(--ink);padding:12px 0 8px;font-family:var(--read);color:var(--ink)}.ds-season h1{font:600 15px var(--mark);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0}.ds-season h1 b{color:var(--ink)}.ds-sets{list-style:none;padding:0;margin:8px 0 0;display:grid;grid-template-columns:repeat(var(--count,5),minmax(0,1fr))}.ds-sets li{position:relative;border-left:2px solid var(--ink);padding:6px 6px 14px 8px;min-height:60px}.ds-sets li:last-child{border-right:2px solid var(--ink)}.ds-sets li::after{content:'';position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,var(--ink) 2px,transparent 2px) 0 0/25% 100% repeat-x;opacity:.45}.ds-sets .n{display:flex;align-items:center;gap:4px;font:700 20px/1 var(--mark);color:var(--ink-2)}.ds-sets .n svg{width:15px;height:15px}.ds-sets .label{display:block;font-size:13px;line-height:1.2;margin-top:4px;color:var(--ink-2)}.ds-sets .done .n{color:var(--done)}.ds-sets [aria-current=step]{background:var(--club)}.ds-sets [aria-current=step] .n,.ds-sets [aria-current=step] .label{color:var(--club-on)}.ds-sets [aria-current=step]::after{background-image:linear-gradient(90deg,var(--club-on) 2px,transparent 2px)}.on-set{display:flex;gap:4px;margin-top:6px}.on-set i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 12px var(--mark);font-style:normal;background:var(--paper);color:var(--due);box-shadow:inset 0 0 0 2px var(--due)}.on-set i.done{background:var(--done);color:var(--paper);box-shadow:none}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-season{background:var(--paper);border-bottom:2px solid var(--ink);padding:12px 0 8px;font-family:var(--read);color:var(--ink)}.ds-season h1{font:600 15px var(--mark);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0}.ds-season h1 b{color:var(--ink)}.ds-sets{list-style:none;padding:0;margin:8px 0 0;display:grid;grid-template-columns:repeat(var(--count,5),minmax(0,1fr))}.ds-sets li{position:relative;border-left:2px solid var(--ink);padding:6px 6px 14px 8px;min-height:60px}.ds-sets li:last-child{border-right:2px solid var(--ink)}.ds-sets li::after{content:'';position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,var(--ink) 2px,transparent 2px) 0 0/25% 100% repeat-x;opacity:.45}.ds-sets .n{display:flex;align-items:center;gap:4px;font:700 20px/1 var(--mark);color:var(--ink-2)}.ds-sets .n svg{width:15px;height:15px}.ds-sets .label{display:block;font-size:13px;line-height:1.2;margin-top:4px;color:var(--ink-2)}.ds-sets .done .n{color:var(--done)}.ds-sets [aria-current=step]{background:var(--club)}.ds-sets [aria-current=step] .n,.ds-sets [aria-current=step] .label{color:var(--club-on)}.ds-sets [aria-current=step]::after{background-image:linear-gradient(90deg,var(--club-on) 2px,transparent 2px)}.on-set{display:flex;gap:4px;margin-top:6px}.on-set i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 12px var(--mark);font-style:normal;background:var(--paper);color:var(--due);box-shadow:inset 0 0 0 2px var(--due)}.on-set i.done{background:var(--done);color:var(--paper);box-shadow:none}.ds-sets [aria-current=step] .on-set{gap:8px}.ds-sets [aria-current=step] .on-set i{outline:2px solid var(--club-on)}"
     },
     {
       "name": "Money Box",
@@ -354,14 +929,14 @@
       "refersTo": "box",
       "description": "Ruled box with owed figure, as-of line, urgency on the date line, and a 2px Total rule.",
       "html": "<section class=\"ds-box\"><h2>Ramirez family</h2><div class=\"amt\">$185.00</div><div class=\"asof\">Owed now. From QuickBooks, as of 2:14 pm.</div><ul class=\"lines\"><li><span><span class=\"what\">Fall uniform fee, Maya</span><span class=\"when soon\">Due Nov 15, in 8 days</span></span><span class=\"amount\">$85.00</span></li><li><span><span class=\"what\">Spring trip deposit, Leo</span><span class=\"when\">Due Nov 22</span></span><span class=\"amount\">$100.00</span></li></ul><div class=\"sum\"><span>Total</span><span>$185.00</span></div></section>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-box{background:var(--paper);border:2px solid var(--ink);border-radius:0;padding:16px;font:400 17px/1.45 var(--read);color:var(--ink)}.ds-box h2{font:700 24px/1.1 var(--mark);margin:0}.ds-box .amt{font:700 40px/1 var(--read);letter-spacing:-.02em;margin-top:8px;font-variant-numeric:tabular-nums lining-nums}.ds-box .asof{font-size:14px;color:var(--ink-2);margin-top:6px}.ds-box .lines{list-style:none;padding:0;margin:16px 0 0;border-top:1px solid var(--hair)}.ds-box .lines li{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--hair)}.ds-box .lines li:last-child{border-bottom:0}.ds-box .what{font-size:16px}.ds-box .when{display:block;font-size:14px;color:var(--ink-2)}.ds-box .when.soon{color:var(--due);font-weight:700}.ds-box .when.late{color:var(--late);font-weight:700}.ds-box .amount{text-align:right;font-variant-numeric:tabular-nums lining-nums}.ds-box .sum{display:flex;justify-content:space-between;padding-top:12px;font-weight:700;border-top:2px solid var(--ink);font-variant-numeric:tabular-nums lining-nums}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-box{background:var(--paper);border:2px solid var(--ink);border-radius:0;padding:16px;font:400 17px/1.45 var(--read);color:var(--ink)}.ds-box h2{font:700 24px/1.1 var(--mark);margin:0}.ds-box .amt{font:700 40px/1 var(--read);letter-spacing:-.02em;margin-top:8px;font-variant-numeric:tabular-nums lining-nums}.ds-box .asof{font-size:14px;color:var(--ink-2);margin-top:6px}.ds-box .lines{list-style:none;padding:0;margin:16px 0 0;border-top:1px solid var(--hair)}.ds-box .lines li{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--hair)}.ds-box .lines li:last-child{border-bottom:0}.ds-box .what{font-size:16px}.ds-box .when{display:block;font-size:14px;color:var(--ink-2)}.ds-box .when.soon{color:var(--due);font-weight:700}.ds-box .when.late{color:var(--late);font-weight:700}.ds-box .amount{text-align:right;font-variant-numeric:tabular-nums lining-nums}.ds-box .sum{display:flex;justify-content:space-between;padding-top:12px;font-weight:700;border-top:2px solid var(--ink);font-variant-numeric:tabular-nums lining-nums}"
     },
     {
       "name": "State Line",
       "kind": "chip",
       "description": "Status as icon plus words; to do in amber, done in green.",
       "html": "<div class=\"ds-state todo\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"8\" cy=\"8\" r=\"6\"/><path d=\"M8 5v3.5\"/><circle cx=\"8\" cy=\"11\" r=\".6\" fill=\"currentColor\"/></svg>2 forms to sign</div><div class=\"ds-state done\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" aria-hidden=\"true\"><path d=\"M3 8.5l3 3 7-7\"/></svg>All forms signed</div>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-state{font:700 15px var(--read);display:flex;align-items:center;gap:6px;margin:4px 0}.ds-state svg{width:16px;height:16px;flex:none}.ds-state.todo{color:var(--due)}.ds-state.done{color:var(--done)}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-state{font:700 15px var(--read);display:flex;align-items:center;gap:6px;margin:4px 0}.ds-state svg{width:16px;height:16px;flex:none}.ds-state.todo{color:var(--due)}.ds-state.done{color:var(--done)}"
     },
     {
       "name": "Club Bar with Top Nav",
@@ -369,7 +944,7 @@
       "refersTo": "club-bar",
       "description": "Club-coloured header; desktop nav with an inset underline on the current page.",
       "html": "<header class=\"ds-bar\"><span class=\"mono\">FZN</span><span class=\"club\">FZN Band Boosters</span><nav><a href=\"#\" aria-current=\"page\">Home</a><a href=\"#\">Forms</a><a href=\"#\">Payments</a><a href=\"#\">Family</a></nav></header>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-bar{background:var(--club);color:var(--club-on);height:56px;display:flex;align-items:center;gap:12px;padding:0 24px}.ds-bar .mono{width:34px;height:34px;border-radius:50%;background:var(--club-on);color:var(--club);display:grid;place-items:center;font:700 14px var(--mark)}.ds-bar .club{font:700 21px/1 var(--mark);letter-spacing:.01em}.ds-bar nav{margin-left:auto;display:flex;gap:4px}.ds-bar a{color:var(--club-on);text-decoration:none;font:600 18px var(--mark);padding:6px 12px}.ds-bar a[aria-current=page]{box-shadow:inset 0 -3px 0 var(--club-on)}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-bar{background:var(--club);color:var(--club-on);height:56px;display:flex;align-items:center;gap:12px;padding:0 24px}.ds-bar .mono{width:34px;height:34px;border-radius:50%;background:var(--club-on);color:var(--club);display:grid;place-items:center;font:700 14px var(--mark)}.ds-bar .club{font:700 21px/1 var(--mark);letter-spacing:.01em}.ds-bar nav{margin-left:auto;display:flex;gap:4px}.ds-bar a{color:var(--club-on);text-decoration:none;font:600 18px var(--mark);padding:6px 12px}.ds-bar a[aria-current=page]{box-shadow:inset 0 -3px 0 var(--club-on)}"
     },
     {
       "name": "Bottom Tabs",
@@ -377,28 +952,52 @@
       "refersTo": "tab",
       "description": "Phone tab bar; active tab in club-text with a 3px inset top rule; square amber count badge.",
       "html": "<nav class=\"ds-tabs\"><a href=\"#\" aria-current=\"page\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M3 11l9-7 9 7v9h-6v-6H9v6H3z\"/></svg>Home</a><a href=\"#\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M6 3h9l3 3v15H6z\"/><path d=\"M9 13l2 2 4-4\"/></svg><span>Forms<span class=\"badge\">2</span></span></a><a href=\"#\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><rect x=\"3\" y=\"6\" width=\"18\" height=\"12\"/><path d=\"M3 10h18M7 15h3\"/></svg>Payments</a><a href=\"#\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"9\" cy=\"8\" r=\"3\"/><circle cx=\"17\" cy=\"9\" r=\"2.5\"/><path d=\"M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4\"/></svg>Family</a></nav>",
-      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-tabs{background:var(--paper);border-top:2px solid var(--ink);display:grid;grid-template-columns:repeat(4,1fr)}.ds-tabs a{min-height:64px;display:grid;place-items:center;align-content:center;gap:2px;text-decoration:none;color:var(--ink-2);font:600 15px var(--mark);letter-spacing:.03em}.ds-tabs svg{width:24px;height:24px}.ds-tabs a[aria-current=page]{color:var(--club-text);box-shadow:inset 0 3px 0 var(--club-text)}.ds-tabs a:focus-visible{outline:3px solid var(--club-text);outline-offset:2px}.ds-tabs .badge{font:700 12px/18px var(--read);background:var(--due);color:var(--paper);padding:0 6px;margin-left:4px;display:inline-block}"
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-tabs{background:var(--paper);border-top:2px solid var(--ink);display:grid;grid-template-columns:repeat(4,1fr)}.ds-tabs a{min-height:64px;display:grid;place-items:center;align-content:center;gap:2px;text-decoration:none;color:var(--ink-2);font:600 15px var(--mark);letter-spacing:.03em}.ds-tabs svg{width:24px;height:24px}.ds-tabs a[aria-current=page]{color:var(--club-text);box-shadow:inset 0 3px 0 var(--club-text)}.ds-tabs a:focus-visible{outline:var(--ring) solid var(--club-text);outline-offset:2px}.ds-tabs .badge{font:700 12px/18px var(--read);background:var(--due);color:var(--paper);padding:0 6px;margin-left:4px;display:inline-block}"
+    },
+    {
+      "name": "Choice Group (ruled options)",
+      "kind": "input",
+      "refersTo": "choice",
+      "description": "Radios drawn as square ruled options; checked in club-text with a dot; the Display page is built from these.",
+      "html": "<fieldset class=\"ds-setting\"><legend>Appearance</legend><p class=\"hint\">Light or dark background.</p><div class=\"ds-choices\"><label class=\"ds-choice\"><input type=\"radio\" name=\"ds-theme\" checked><span><b>Match my device</b><small>Follows your phone or computer</small></span></label><label class=\"ds-choice\"><input type=\"radio\" name=\"ds-theme\"><span><b>Light</b><small>Dark text on white</small></span></label><label class=\"ds-choice\"><input type=\"radio\" name=\"ds-theme\"><span><b>Dark</b><small>Light text on near-black</small></span></label></div></fieldset>",
+      "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-setting{border:0;padding:0;margin:0;font:400 1.0625rem/1.45 var(--read);color:var(--ink)}.ds-setting legend{font:700 1.25rem/1.2 var(--mark);padding:0}.ds-setting .hint{color:var(--ink-2);font-size:.9375rem;margin:2px 0 0}.ds-choices{display:grid;gap:8px;margin-top:12px}.ds-choice{position:relative;display:block;cursor:pointer}.ds-choice input{position:absolute;opacity:0;width:1px;height:1px}.ds-choice span{display:grid;grid-template-columns:24px 1fr;gap:2px 12px;align-items:center;min-height:56px;padding:8px 16px;border:2px solid var(--ink);background:var(--paper)}.ds-choice span::before{content:'';width:20px;height:20px;border:2px solid var(--ink);border-radius:50%;grid-row:1/span 2;box-sizing:border-box}.ds-choice b{font-size:1.0625rem}.ds-choice small{grid-column:2;font-size:.875rem;color:var(--ink-2)}.ds-choice:hover span{background:var(--club-tint)}.ds-choice input:checked+span{border-color:var(--club-text);box-shadow:inset 0 0 0 1px var(--club-text)}.ds-choice input:checked+span::before{border-color:var(--club-text);background:radial-gradient(circle,var(--club-text) 0 5px,transparent 5.5px)}.ds-choice input:focus-visible+span{outline:var(--ring) solid var(--club-text);outline-offset:2px}@media (min-width:760px){.ds-choices{grid-template-columns:repeat(3,minmax(0,1fr))}}"
     }
   ],
   "narrative": {
     "northStar": "The Dot Book",
-    "overview": "The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own colour used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.\n\nThe system is white-label. Each club supplies one colour at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theatre or sports club fits as well as a marching band.\n\nDensity is calm and phone-first: one column of ruled boxes on phones, a two-column box grid at 760px and up. Money is set like a ledger, with tabular figures in one right-aligned column that visibly sums to its total. The reference build is `design/reference/parent-home.html`; every later surface, staff screens included, inherits from it.",
+    "overview": "The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own colour used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.\n\nThe system is white-label. Each club supplies one colour at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theatre or sports club fits as well as a marching band.\n\nDensity is calm and phone-first: one column of ruled boxes on phones, a two-column box grid at 760px and up. Money is set like a ledger, with tabular figures in one right-aligned column that visibly sums to its total. The reference build is `design/reference/parent-home.html` (with `display-settings.html` for the Display page); every later surface, staff screens included, inherits from it.\n\nThe same page is drawn in four ink sets: light, dark (\"chart paper at night\", where the world's ink becomes the paper), and a high-contrast version of each. Layout, rules and shapes never change between modes; only the token values do. Windows contrast themes are honoured on top of all four.",
     "keyCharacteristics": [
       "Chart paper ground: white with a 24px grid in `grid`, gutters and gaps on that grid.",
       "2px `ink` rules for structure, 1px `hair` rules for list rows, no shadows, no rounded containers.",
-      "One runtime club colour, derived into four roles, used for the bar, the current set, and club actions.",
+      "One runtime club colour, derived into per-mode roles, used for the bar, the current set, and club actions.",
       "Two faces: Atkinson Hyperlegible for anything read, Barlow Condensed for marks, labels and numbers on the chart.",
-      "Status is always a word plus an icon, never colour alone."
+      "Status is always a word plus an icon, never colour alone.",
+      "Four display modes chosen per device, each defaulting to \"match my device\"."
     ],
     "rules": [
       {
         "name": "The Derived Club Rule",
-        "body": "A club picks one colour; the app computes `club-on`, `club-text` and `club-tint` from it. No club setting may produce a pairing below 4.5:1, whatever colour is supplied.",
+        "body": "A club picks one colour; the app computes `club-on`, the four `club-text-*` tones and the two `club-tint-*` washes from it. No club setting may produce a pairing below 4.5:1 (7:1 in high contrast), whatever colour is supplied.",
         "section": "colors"
       },
       {
         "name": "The Highlighter Rule",
-        "body": "The club fill appears only on the club bar and the current set. Club colour elsewhere is `club-text`: links, the club outline button, the active tab, focus.",
+        "body": "The club fill appears only on the club bar and the current set. Club colour elsewhere is `club-text`: links, the club outline button, the active tab, the checked option, focus.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fixed Fill Rule",
+        "body": "`club` and `club-on` do not change between modes. The bar and the current set look the same by day and night; only club-text and club-tint adapt to the paper.",
+        "section": "colors"
+      },
+      {
+        "name": "The Night Chart Rule",
+        "body": "Dark mode is the same chart with ink and paper swapped: same rules, same layout, same grid (in `grid-dark`). Never introduce surfaces, greys or elevation that the light chart lacks.",
+        "section": "colors"
+      },
+      {
+        "name": "The Full-Ink Contrast Rule",
+        "body": "High contrast removes the grid, draws every hairline in full ink, sets text at 7:1 or better, and thickens the focus ring to 4px. Nothing else moves.",
         "section": "colors"
       },
       {
@@ -417,6 +1016,11 @@
         "section": "typography"
       },
       {
+        "name": "The Rem-Only Rule",
+        "body": "Every font size is in rem so the Text size setting and browser zoom scale all of it. Never set type in px.",
+        "section": "typography"
+      },
+      {
         "name": "The On-Grid Rule",
         "body": "Page gutters, box gaps and the header stack resolve to multiples of 24px so boxes sit on the paper's lines.",
         "section": "layout"
@@ -428,28 +1032,32 @@
       },
       {
         "name": "The Dots-Are-People Rule",
-        "body": "A circle means a person. Containers, buttons, chips and badges are never round or pill-shaped.",
+        "body": "A circle means a person. Containers, buttons, chips and badges are never round or pill-shaped. The radio mark is the one sanctioned exception, and it lives inside a square option.",
         "section": "shapes"
       }
     ],
     "dos": [
-      "Do derive `club-on`, `club-text` and `club-tint` from the club's one colour and check every pairing reaches 4.5:1.",
+      "Do derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one colour; check every pairing reaches 4.5:1, and 7:1 in high contrast.",
       "Do keep page gutters, box gaps and header heights on the 24px grid.",
       "Do draw structure with 2px `ink` rules and rows with 1px `hair` rules.",
       "Do set every amount in tabular figures, right-aligned in one column that sums to a 2px Total rule, with an \"as of\" time beside the owed figure.",
       "Do give each invoice its own Pay; fill only the soonest-due one.",
       "Do pair every status colour with a word, and an icon where there is room.",
-      "Do keep tap targets at 44px or more (48px for the primary button, 64px for tabs) and the focus ring 3px `club-text` with a 2px offset on paper.",
-      "Do reuse the season set ruler as the header of the staff forms matrix."
+      "Do keep tap targets at 44px or more (48px for the primary button, 56px for choice options, 64px for tabs) and the focus ring `club-text` 3px (4px in high contrast) with a 2px offset on paper (`club-on` inside the club bar).",
+      "Do reuse the season set ruler as the header of the staff forms matrix.",
+      "Do build every new colour from the mode tokens so all four modes and forced colours work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.",
+      "Do set type in rem and let layouts reflow at 125% text.",
+      "Do make \"Match my device\" the first and default choice of every display setting, and store display choices on the device."
     ],
     "donts": [
       "Don't use drop shadows, blur or offset shadows; inset rules only.",
-      "Don't round containers, buttons, badges or chips; circles are for people only.",
-      "Don't use the club fill beyond the club bar and the current set.",
+      "Don't round containers, buttons, badges or chips; circles are for people (and the radio mark) only.",
+      "Don't use the club fill beyond the club bar and the current set, or change it between modes.",
       "Don't colour an amount red; past-due red goes on the date line only.",
       "Don't set sentences in Barlow Condensed or numbers on the chart in Atkinson.",
       "Don't put a small uppercase label above a heading as decoration; labels name content beside them.",
-      "Don't load fonts from Google in the app; self-host them."
+      "Don't load fonts from Google in the app; self-host them.",
+      "Don't hide a Pay button when QuickBooks is offline; disable it in place and say why."
     ]
   }
 }
