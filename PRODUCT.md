@@ -59,9 +59,13 @@ themselves.
 ## Capabilities and Constraints
 
 - v1: sign-in, family roster stored in QuickBooks, balances and open invoices with pay links,
-  parent contact edits, seasonal commitment forms with signature tracking, staff permissions, and
-  an audit log.
-- Not v1: messaging, events, volunteer sign-ups, inventory, medical forms, student logins.
+  parent contact edits, seasonal commitment forms with signature tracking, admin-configured season
+  steps holding requirements (forms, payments, volunteering, checklist items), volunteer sign-up
+  with shifts, self check-in and paid buy-outs, staff permissions, and an audit log.
+- Not v1: messaging, a general events calendar, volunteer waitlists, inventory, medical forms,
+  student logins.
+- Many clubs require volunteering per family or per student; requirements must be configurable,
+  never hard-coded.
 - One family must never see another family's data; public pages show no family data at all.
 - Terminology: **family** (a QuickBooks customer), **student** (a sub-customer), **guardian**
   (a person who signs in for a family), **staff**, **season**, **form**.

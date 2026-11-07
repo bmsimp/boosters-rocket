@@ -37,7 +37,7 @@ public site stays where it is.
 3. **It is published as open source (AGPL-3.0).** Every club runs its own copy. There is no
    multi-club hosted service: one club's families never share a database with another's.
 4. **One family never sees another family's data, and anonymous visitors see none.** This is
-   enforced by test, not by convention (§10).
+   enforced by test, not by convention (§12).
 
 ## 2. Scope
 
@@ -48,13 +48,17 @@ public site stays where it is.
 - Family balance, open invoices, and a "Pay" link per invoice to QuickBooks' payment page
 - Parent contact-detail edits that write back to QuickBooks
 - Seasonal commitment forms signed in Documenso, with completion tracking
+- Season steps configured by admins, each holding requirements (forms, payments, volunteering,
+  checklist items), shown to parents as the season ruler
+- Volunteer sign-up: events with shifts and capacity, sign-up and cancellation, reminders,
+  self check-in, credit toward required and optional volunteering, and paid buy-outs
 - Permissions system for staff
 - Audit log
 - Setup flow, deployment image, backup/restore and QuickBooks runbooks
 
 ### Not in v1
 
-Messaging and announcements, events and calendar, volunteer sign-ups, uniform and instrument
+Messaging and announcements, a general events calendar, volunteer waitlists, uniform and instrument
 inventory, medical forms, fundraising credit, student logins, limiting a staff role to a subset of
 families (for example one section), and payments taken outside QuickBooks. The data model must
 not make these hard to add later, but none of them is designed here.
@@ -87,7 +91,7 @@ not make these hard to add later, but none of them is designed here.
 - **FZN hosting:** Azure App Service for Containers (portal, worker, Documenso on one plan) and
   Azure Database for PostgreSQL Flexible Server. Other clubs can run the same images anywhere that
   runs containers and Postgres. Cost estimate and plan size are confirmed during the Documenso
-  hands-on test (§13).
+  hands-on test (§15).
 
 Library choices (ORM, sign-in library, UI kit, job queue) are made in the implementation plan,
 within these rules: mainstream and actively maintained; no paid licence; supports generic OIDC
@@ -104,7 +108,7 @@ QuickBooks owns families and students. The portal owns only what QuickBooks cann
 | **Family** | Top-level `Customer` | `DisplayName` must be unique across customers, vendors and employees |
 | **Student** | Sub-customer: `Customer` with `ParentRef` = family, `Job = true`, `BillWithParent = true` | Invoices may be raised on the family or the student |
 | **Primary contact** | The family customer's `PrimaryEmailAddr`, phones, `BillAddr` | Belongs to the family's primary guardian |
-| **Invoices, payments, balances** | `Invoice`, `Payment`, `Customer.Balance`, `BalanceWithJobs` | Read only. Never written by the portal |
+| **Invoices, payments, balances** | `Invoice`, `Payment`, `Customer.Balance`, `BalanceWithJobs` | Read only, with one exception: the portal creates and voids volunteer buy-out invoices (§11.5) |
 
 ### Owned by the portal
 
@@ -114,13 +118,18 @@ QuickBooks owns families and students. The portal owns only what QuickBooks cann
 | `guardian` | A person who signs in for a family: name, email, phone, family QuickBooks id, `is_primary`, parent-sign-in subject id, status (invited, active, disabled) |
 | `staff_user` | A person who signs in through the staff door: name, email, provider, provider subject id, status |
 | `role`, `role_rule`, `role_assignment` | Custom roles and who holds them (§7) |
-| `season`, `form`, `form_template` | Seasons, the forms each season requires, and the Documenso template each form uses |
+| `season`, `season_step`, `requirement` | Seasons, their ordered steps, and the requirements in each step (§10) |
+| `requirement_progress` | Per family or student: progress toward each requirement, and waivers with a reason |
+| `form`, `form_template` | Form requirements and the Documenso template each uses |
+| `volunteer_event`, `volunteer_shift`, `volunteer_signup` | Volunteer events, their shifts with capacity, and who signed up for which shift (§11) |
+| `volunteer_credit` | Confirmed volunteering credited to a family or student, from a check-in or added by staff |
+| `buyout` | A family's or student's choice to pay instead of volunteering, and its QuickBooks invoice |
 | `signature_request` | One per student × form × season: Documenso envelope id, recipients, status, signed PDF SHA-256, consent record |
 | `signed_document` | Signed PDF and Documenso audit certificate, or a pointer to blob storage |
 | `email_change` | Pending email confirmations (hashed token, new address, expiry) |
 | `qbo_connection` | QuickBooks realm id, encrypted access and refresh tokens, refresh-token expiry |
 | `write_queue` | QuickBooks or Graph writes that failed and are being retried |
-| `audit_log` | Who did what, when, from where, before and after (§9) |
+| `audit_log` | Who did what, when, from where, before and after (§13) |
 | `setting` | Club name, branding, email settings and other runtime settings |
 
 Matching between portal and QuickBooks is always by QuickBooks customer id, never by name.
@@ -217,7 +226,8 @@ Modelled on CIPP's custom roles.
 
 - **Permissions** are strings declared in code, one per protected action, in the form
   `Area.Object.Level`, for example `Roster.Family.ReadWrite`, `Finance.Balance.Read`,
-  `Forms.Template.ReadWrite`, `Settings.QuickBooks.ReadWrite`. The code's registry is the full
+  `Forms.Template.ReadWrite`, `Season.Steps.ReadWrite`, `Volunteer.Event.ReadWrite`,
+  `Volunteer.Credit.ReadWrite`, `Settings.QuickBooks.ReadWrite`. The code's registry is the full
   list.
 - **ReadWrite includes Read.**
 - **A custom role** is a set of include patterns and exclude patterns, with `*` as a wildcard.
@@ -231,7 +241,7 @@ Modelled on CIPP's custom roles.
 - **Every server action and API route declares the permission it needs.** A test fails the build
   if any staff-facing handler has no declaration.
 - Parents are outside this system entirely. Parent access is derived only from the signed-in
-  guardian's family (§10).
+  guardian's family (§12).
 
 ## 8. Money: balances, invoices, payment
 
@@ -275,13 +285,15 @@ not current.
 | QuickBooks token refresh | Daily, so a quiet summer can't let it lapse |
 | Write-queue retries | Every few minutes, with back-off |
 | Signature reminders | As configured per form |
+| Volunteer reminders and requirement due-date nudges | Daily, plus the day-before shift reminder |
+| Buy-out invoice status | With the nightly reconciliation |
 | Expired email-change and session clean-up | Daily |
 
 ## 9. Commitment forms and signatures
 
 ### 9.1 Setup
 
-Staff with forms permissions create a **season** and the **forms** it requires. Each form points at a Documenso
+A form is a requirement inside a season step (§10). Each form points at a Documenso
 template, which staff author in Documenso (staff sign in to Documenso with the club's Entra
 tenant). The template has prefilled text fields for student and guardian names and one or two
 guardian signer roles. Each form sets **who must sign**: any one guardian, or every guardian on
@@ -315,7 +327,105 @@ The sealed PDF; Documenso's audit certificate; the template version; the consent
 SHA-256; and the audit-log entries showing which signed-in guardian opened and completed it.
 Clubs should have a lawyer review their form text; the docs say so and give no legal advice.
 
-## 10. Privacy invariants
+## 10. Season steps and requirements
+
+### 10.1 What admins configure
+
+Each **season** (for example "Fall 2027") has an ordered list of **steps** that staff with the
+right permission name, reorder, add and remove: for FZN, perhaps Join, Forms, Volunteer, Uniforms,
+Trip, Banquet. A step has an optional date range. A new season can be copied from the last one.
+New installs start with a template season (Join, Forms, Volunteer, Season, Wrap-up) that a club
+renames or trims.
+
+Each step holds **requirements**. Every requirement has:
+
+| Setting | Values |
+|---|---|
+| **Kind** | Form, payment, volunteer, or checklist item |
+| **Required or optional** | Optional items show progress but never hold a step open |
+| **Applies to** | Each family, or each student |
+| **Amount** | Volunteer only: a number of shifts, or a number of hours (admin picks per requirement) |
+| **Due date** | Optional; drives reminders and the "due soon" state |
+| **Who it covers** | Everyone, or a subset chosen by a simple filter (for example only students in one grade or section). A fixed set of filters, not free-form logic |
+
+### 10.2 How each kind is met
+
+| Kind | Met when |
+|---|---|
+| **Form** | Its Documenso document is completed by the required guardians (§9) |
+| **Payment** | It names a QuickBooks product or service. Met when invoices carrying that item for the family or student exist and none has an open balance |
+| **Volunteer** | Confirmed volunteer credit (§11.4) reaches the amount, or a buy-out (§11.5) is paid |
+| **Checklist item** | Staff tick it off for the family or student, one at a time or in bulk (for example "uniform fitting attended") |
+
+Staff with the right permission can **waive** any requirement for a family or student, with a
+reason that goes in the audit log.
+
+### 10.3 Steps and the ruler
+
+A step is **done** for a family or student when every required item in it is met or waived. The
+**current set** on a family's ruler is the club's current step by date or, with no dates, the first
+step not yet done by everyone in the family. Each student's marker shows whether they have finished
+the current step. Parents see each requirement's progress in words ("1 of 2 shifts", "4 of 6 hours",
+"Signed", "Paid"), never by colour alone.
+
+## 11. Volunteering
+
+### 11.1 Events and shifts
+
+Staff with volunteer permissions create **events** (name, date, location, description) with one or
+more **shifts**. Each shift has a start and end time, a capacity, an optional role ("concessions",
+"pit crew"), and the volunteer requirements it can count toward. A shift credits its length in
+hours, or one shift, depending on how the requirement counts. Recurring events, such as every home
+game, can be copied.
+
+### 11.2 Signing up
+
+- A guardian opens an event, picks a shift with a free place, and chooses **who** fills it:
+  themselves or one of their students. Students never sign in; the guardian signs them up.
+- Each requirement says whether it is met by a **family member** (any guardian or student of that
+  family) or by **that student**. Before confirming, the guardian sees which requirement the sign-up
+  will count toward.
+- Parents see "3 of 5 places filled", never who else signed up. Staff see the full list.
+- A guardian can cancel until the club's cut-off (a setting, for example 48 hours before). After the
+  cut-off they are asked to contact the event's coordinator.
+- A full shift is full. There is no waitlist in v1.
+
+### 11.3 Reminders
+
+The portal emails a confirmation with a calendar file on sign-up, a reminder the day before, and a
+notice if staff change or cancel the shift. Families with unmet required volunteering get reminders
+as the requirement's due date approaches.
+
+### 11.4 Check-in and credit
+
+- Each shift has a **check-in code**, shown as a QR code that staff print or display at the event.
+- Scanning it opens the portal, and the guardian must be signed in. They check in the person on the
+  sign-up: themselves or their student.
+- Check-in works only from 30 minutes before the shift starts until it ends. Outside that window the
+  page says so and records nothing.
+- A check-in creates **volunteer credit** for that shift. Staff can correct credit afterwards
+  (remove a check-in, add a missed one) and can credit volunteering done outside the portal, with a
+  note. Every change is in the audit log.
+- Credit fills **required** volunteer requirements before optional ones and never beyond the amount
+  needed; anything left over counts toward optional requirements.
+
+Accepted risk: a guardian could share a photo of the code. The time window, the sign-in requirement
+and staff correction keep this small. A rotating on-screen code can be added later if clubs need it.
+
+### 11.5 Buy-outs
+
+- A volunteer requirement can allow a **buy-out** at a set amount (for example $50 per required
+  shift), billed with a QuickBooks product or service the admin picks.
+- A guardian who chooses a buy-out confirms the amount. The portal creates a QuickBooks invoice for
+  the family (or the student's sub-customer, for a per-student requirement) with that item. It then
+  appears in the family's open invoices with its own Pay button.
+- The requirement shows "Buy-out invoiced" until that invoice is paid, then counts as met.
+- If the guardian switches back to volunteering before paying, the portal voids the invoice. Once it
+  is paid, only the treasurer can reverse it, in QuickBooks.
+- This is the only invoice the portal ever creates. Creating and voiding go through the write queue,
+  and the nightly reconciliation flags any buy-out invoice QuickBooks no longer shows.
+
+## 12. Privacy invariants
 
 Each is enforced by an automated test that fails the build.
 
@@ -330,14 +440,17 @@ Each is enforced by an automated test that fails the build.
 5. **No secret reaches the browser:** no QuickBooks, Graph or Documenso credentials, and no
    Documenso signing token except to its own recipient.
 6. **QuickBooks text is never rendered as HTML.**
+7. **Parents never see other families on volunteer shifts.** A test signs up two families for one
+   shift and checks each parent sees only a count and their own sign-up.
+8. **A check-in code credits only the signed-in family's own sign-up**, and only inside its window.
 
-## 11. Audit log
+## 13. Audit log
 
 Every write records: who (person and door), what (action and permission), which record, before
 and after values, when, and the request IP. Sign-ins and refusals are recorded too. Admins can
 view and export it. It is append-only from the app's point of view.
 
-## 12. Operations
+## 14. Operations
 
 - **Updates:** a club's host pulls the `stable` image tag. FZN uses App Service continuous
   deployment from the registry. Security updates to dependencies are automated in the repo, and
@@ -352,7 +465,7 @@ view and export it. It is append-only from the app's point of view.
   assessment; External ID tenant setup; Documenso setup and signing certificate; updates;
   restore; reconnecting QuickBooks.
 
-## 13. Verified before building on it
+## 15. Verified before building on it
 
 Short hands-on tests, done first in the implementation plan, because the design depends on them:
 
@@ -362,12 +475,14 @@ Short hands-on tests, done first in the implementation plan, because the design 
 | Can a user created through Graph sign in with email one-time code only, sign-up off? | §5.2. Microsoft's docs don't say |
 | Documenso: Entra staff sign-in with no licence key; embedding on Safari/iOS; one-recipient documents from a two-role template; emails off; signed PDF validates with timestamp; audit content; real webhook payloads; memory use; upgrade and restore | §9. Settles plan size and whether DocuSeal is needed as a fallback |
 
+| Can the portal create an invoice with a chosen item on a sub-customer, and void it, under the same app permissions? | §11.5. The only invoice the portal writes |
+
 If a test fails, the affected section is revised before its code is written.
 
-## 14. Testing
+## 16. Testing
 
 - Unit tests for balance computation, permission-rule expansion, email-change flow, webhook
   handling, and QuickBooks request building, against a fake QuickBooks client.
-- The privacy invariants of §10 as integration tests against a real Postgres.
+- The privacy invariants of §12 as integration tests against a real Postgres.
 - An end-to-end smoke test against the QuickBooks sandbox and a test Documenso, run before each
   release rather than on every commit.
