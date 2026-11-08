@@ -1,0 +1,16 @@
+.git
+.github
+.next
+node_modules
+.env
+.env.*
+!.env.example
+.superpowers
+.impeccable
+docs
+design
+tests
+test-results
+playwright-report
+coverage
+*.log

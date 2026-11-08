@@ -49,3 +49,13 @@ jobs:
           pnpm db:migrate
           pnpm tsx scripts/seed-e2e.ts
           pnpm e2e
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the production image
+        run: docker build -t booster-rocket-app:ci .
+      - name: Smoke-test the image
+        run: bash scripts/smoke-image.sh booster-rocket-app:ci
+      - name: No env-file secrets in the image
+        run: bash scripts/check-image-secrets.sh
