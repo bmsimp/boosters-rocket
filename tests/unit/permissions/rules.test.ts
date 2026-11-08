@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { matches, expandRules, validatePattern, validateRules } from "@/lib/permissions/rules";
-import { GRANTABLE, ADMIN_ONLY } from "@/lib/permissions/registry";
+import { GRANTABLE, ADMIN_ONLY, PERMISSIONS } from "@/lib/permissions/registry";
 
 const U = ["Roster.Family.Read", "Roster.Family.ReadWrite", "Roster.Student.Read", "Roster.Student.ReadWrite", "Finance.Balance.Read"] as const;
 
@@ -41,6 +41,11 @@ describe("expandRules", () => {
     for (const p of ADMIN_ONLY) expect(got.has(p)).toBe(false);
     expect(got.size).toBe(GRANTABLE.length);
   });
+  it("never grants admin-only permissions when the universe includes them", () => {
+    const got = expandRules({ include: ["*"], exclude: [] }, PERMISSIONS);
+    for (const p of ADMIN_ONLY) expect(got.has(p)).toBe(false);
+    expect(got.size).toBe(GRANTABLE.length);
+  });
   it("covers permissions added later through wildcards", () => {
     const later = [...U, "Roster.Guardian.Read"] as const;
     expect(expandRules({ include: ["Roster.*"], exclude: [] }, later).has("Roster.Guardian.Read" as never)).toBe(true);
@@ -57,5 +62,8 @@ describe("validation", () => {
   });
   it("rejects patterns that only match admin-only permissions", () => {
     expect(validateRules({ include: ["Admin.*"], exclude: [] })).toContain("“Admin.*” only matches Admin permissions, which can't be given to a role.");
+  });
+  it("rejects an exact admin-only permission as an include", () => {
+    expect(validateRules({ include: ["Admin.Roles.ReadWrite"], exclude: [] }).length).toBeGreaterThan(0);
   });
 });
