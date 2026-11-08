@@ -1,4 +1,5 @@
 name: booster-rocket
+# TZ below only affects server logs and psql output; the app stores times in UTC and the browser shows them in the viewer's own zone.
 
 services:
   db:

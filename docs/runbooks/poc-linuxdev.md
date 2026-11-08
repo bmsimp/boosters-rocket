@@ -320,7 +320,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
 (staff, parent or system), who, the action, and details. A refusal's reason is in the details as
 `reason`: each row has a **Details** line you can open, showing the saved before/after values
-(for example `{"reason":"no_guardian"}`). Times are shown in Central time. The person always sees the same
+(for example `{"reason":"no_guardian"}`). Times show in your own device's time zone; the database stores them in UTC (hover a time to see the exact UTC instant; `psql` output follows the server's zone, Central). The person always sees the same
 refusal page; the reason is only in the log. If the page itself is unavailable, read the log from the
 database on linuxdev:
 ```bash
