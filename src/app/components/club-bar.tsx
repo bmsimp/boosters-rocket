@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { TopNav } from "./top-nav";
 
-type NavItem = { href: string; label: string; current?: boolean };
+type NavItem = { href: string; label: string };
 
 export function ClubBar({ name, shortName, nav, account }: {
   name: string; shortName: string; nav: NavItem[]; account?: { href: string; initials: string; label: string; current?: boolean };
@@ -10,9 +11,7 @@ export function ClubBar({ name, shortName, nav, account }: {
       <div className="wrap">
         <span className="monogram" aria-hidden="true">{shortName}</span>
         <span className="club">{name}</span>
-        <nav className="top-nav" aria-label="Main">
-          {nav.map((n) => <Link key={n.href} href={n.href} aria-current={n.current ? "page" : undefined}>{n.label}</Link>)}
-        </nav>
+        <TopNav nav={nav} />
         {account && <Link className="account" href={account.href} aria-label={account.label} aria-current={account.current ? "page" : undefined}>{account.initials}</Link>}
       </div>
     </header>

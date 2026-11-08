@@ -1,7 +1,8 @@
 import { requireParentPage } from "@/lib/guards";
 import { getClubSettings } from "@/lib/settings/club";
 import { ClubBar, initials } from "../components/club-bar";
-import { ParentTabs, PARENT_NAV } from "../components/parent-tabs";
+import { ParentTabs } from "../components/parent-tabs";
+import { PARENT_NAV } from "../components/parent-nav";
 
 export default async function ParentLayout({ children }: { children: React.ReactNode }) {
   const [ctx, club] = await Promise.all([requireParentPage(), getClubSettings()]);
