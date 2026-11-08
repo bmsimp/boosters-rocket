@@ -32,10 +32,9 @@ export type ClubSettingsRead = ClubSettings & { storedColorValid: boolean };
 export async function getClubSettings(): Promise<ClubSettingsRead> {
   const [row] = await db.select().from(setting).where(eq(setting.key, KEY));
   if (!row) return { ...DEFAULTS, storedColorValid: true };
-  // Rows saved before the US English rename hold the color under the old "colour" key; accept it when "color" is absent.
-  const { colour: legacyColor, ...stored } = row.value as Partial<ClubSettings> & { colour?: unknown };
+  const stored = row.value as Partial<ClubSettings>;
   const merged = { ...DEFAULTS, ...stored };
-  const raw: unknown = stored.color !== undefined ? stored.color : legacyColor !== undefined ? legacyColor : DEFAULTS.color;
+  const raw: unknown = stored.color !== undefined ? stored.color : DEFAULTS.color;
   const hex = typeof raw === "string" ? normalizeHex(raw) : null;
   return { ...merged, color: hex ?? DEFAULT_COLOR, storedColorValid: hex !== null };
 }

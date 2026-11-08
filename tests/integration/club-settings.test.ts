@@ -40,21 +40,6 @@ describe("club settings", () => {
     expect(await getClubSettings()).toMatchObject({ color: "#f2c200", storedColorValid: true });
   });
 
-  it("still reads a row saved under the old colour key, and writes color from now on", async () => {
-    await db.insert(setting).values({ key: "club", value: { name: "Old Row", shortName: "OR", colour: "#F2C200", treasurerEmail: null } });
-    const read = await getClubSettings();
-    expect(read).toMatchObject({ name: "Old Row", color: "#f2c200", storedColorValid: true });
-    expect(read).not.toHaveProperty("colour");
-    await saveClubSettings({ name: "Old Row", shortName: "OR", color: "#112233", treasurerEmail: null }, actor, null);
-    const [row] = await db.select().from(setting);
-    expect(row?.value).toEqual({ name: "Old Row", shortName: "OR", color: "#112233", treasurerEmail: null });
-  });
-
-  it("flags an invalid value stored under the old colour key", async () => {
-    await db.insert(setting).values({ key: "club", value: { colour: "nope" } });
-    expect(await getClubSettings()).toMatchObject({ color: "#5b2a86", storedColorValid: false });
-  });
-
   it.each([
     [{ color: "red" }, "Color"],
     [{ color: "#000;}body{display:none" }, "Color"],
