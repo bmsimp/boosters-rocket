@@ -35,6 +35,11 @@ describe("claimBootstrapAdmin", () => {
     expect(await db.select().from(roleAssignment)).toHaveLength(1);
   });
 
+  it("still runs when the only Admin holder is an unredeemed invite", async () => {
+    await seedStaff({ email: "invited@club.org", admin: true, status: "invited" });
+    expect(await claimBootstrapAdmin("first.admin@club.org")).not.toBeNull();
+  });
+
   it("lets exactly one of two racing sign-ins win", async () => {
     const results = await Promise.all([claimBootstrapAdmin("first.admin@club.org"), claimBootstrapAdmin("first.admin@club.org")]);
     expect(results.filter(Boolean)).toHaveLength(1);

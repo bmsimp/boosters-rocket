@@ -71,11 +71,18 @@ export async function assignRole(roleId: string, staffUserId: string, actor: Act
   return { ok: true };
 }
 
-/** True when this person holds the Admin role and is counted by adminCount (not disabled). */
+/** True when this person holds the Admin role and is counted by adminCount (status active). */
 async function isCountedAdmin(tx: Tx, staffUserId: string): Promise<boolean> {
   const rows = await tx.execute(sql`SELECT 1 FROM role_assignment ra JOIN role r ON r.id = ra.role_id
     JOIN staff_user s ON s.id = ra.staff_user_id
-    WHERE r.key='admin' AND ra.staff_user_id=${staffUserId} AND s.status <> 'disabled'`);
+    WHERE r.key='admin' AND ra.staff_user_id=${staffUserId} AND s.status = 'active'`);
+  return Array.from(rows as ArrayLike<unknown>).length > 0;
+}
+
+/** True when this person holds the Admin role, whatever their status. */
+async function holdsAdminRole(tx: Tx, staffUserId: string): Promise<boolean> {
+  const rows = await tx.execute(sql`SELECT 1 FROM role_assignment ra JOIN role r ON r.id = ra.role_id
+    WHERE r.key='admin' AND ra.staff_user_id=${staffUserId}`);
   return Array.from(rows as ArrayLike<unknown>).length > 0;
 }
 
@@ -119,7 +126,10 @@ export async function inviteStaff(raw: { name: string; email: string }, actor: A
 
 const statusInput = z.enum(["active", "disabled"]);
 
-export async function setStaffStatus(id: string, rawStatus: "active" | "disabled", actor: Actor, ip: string | null) {
+const ADMIN_ONLY = "Only an admin can turn sign-in on or off for another admin.";
+
+/** `actorIsAdmin` is the signed-in actor's own Admin standing: only admins may change an admin's status. */
+export async function setStaffStatus(id: string, rawStatus: "active" | "disabled", actor: Actor, actorIsAdmin: boolean, ip: string | null) {
   const parsed = statusInput.safeParse(rawStatus);
   if (!parsed.success) return { ok: false, error: "That status isn't allowed." };
   const status = parsed.data;
@@ -127,6 +137,7 @@ export async function setStaffStatus(id: string, rawStatus: "active" | "disabled
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.admins'))`);
     const [s] = await tx.select().from(staffUser).where(eq(staffUser.id, id));
     if (!s) return { ok: false, error: "That person is no longer on the staff list." };
+    if (!actorIsAdmin && (await holdsAdminRole(tx, id))) return { ok: false, error: ADMIN_ONLY };
     if (status !== "active" && (await isCountedAdmin(tx, id)) && (await adminCount(tx)) <= 1) return { ok: false, error: LAST_ADMIN };
     await tx.update(staffUser).set({ status, updatedAt: new Date() }).where(eq(staffUser.id, id));
     await writeAudit({ actor, action: "staff.status", permission: "Staff.Users.ReadWrite", targetType: "staff_user", targetId: id,

@@ -12,5 +12,5 @@ export const inviteStaffAction = staffAction("Staff.Users.ReadWrite", async (ctx
 });
 
 export const setStaffStatusAction = staffAction("Staff.Users.ReadWrite", async (ctx, id: string, status: "active" | "disabled") => {
-  const r = await setStaffStatus(id, status, actor(ctx), ctx.ip); revalidatePath("/staff/people"); return r;
+  const r = await setStaffStatus(id, status, actor(ctx), ctx.effective.isAdmin, ctx.ip); revalidatePath("/staff/people"); return r;
 });

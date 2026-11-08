@@ -4,12 +4,12 @@ import { role, roleAssignment, staffUser } from "@/lib/db/schema";
 import { env } from "@/env";
 import { writeAudit } from "@/lib/audit/log";
 
-/** Number of active (not disabled) staff who hold the built-in Admin role. */
+/** Number of active staff who hold the built-in Admin role. Invited (not yet signed in) and disabled people do not count. */
 export async function adminCount(tx?: Tx): Promise<number> {
   const rows = await (tx ?? db).execute<{ n: number }>(sql`
     SELECT count(*)::int AS n FROM role_assignment ra
     JOIN role r ON r.id = ra.role_id JOIN staff_user s ON s.id = ra.staff_user_id
-    WHERE r.key = 'admin' AND s.status <> 'disabled'`);
+    WHERE r.key = 'admin' AND s.status = 'active'`);
   const first = Array.from(rows as ArrayLike<{ n: number }>)[0];
   return Number(first?.n ?? 0);
 }
