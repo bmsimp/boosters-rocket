@@ -56,7 +56,7 @@ export async function resolveGuardian(authUserId: string): Promise<ParentIdentit
   const [g] = au.objectId ? await db.select().from(guardian).where(eq(guardian.identityObjectId, au.objectId)) : [];
   if (!g || g.status === "disabled") {
     // The reason is for the audit trail only; the person always sees the same refusal (spec §5.1).
-    // missing_object_id usually means the ID token lacked `email`, so no verified `oid` was captured (see .env.example).
+    // missing_object_id means no verified `oid` was captured; parent.object_id_unverified in the audit log says why.
     const reason = !au.objectId ? "missing_object_id" : !g ? "no_guardian" : "disabled";
     await writeAudit({ actor: { door: "parent", id: null, label: au.email }, action: "signin.refused", targetType: "parent_auth_user", targetId: authUserId,
       after: { reason } });

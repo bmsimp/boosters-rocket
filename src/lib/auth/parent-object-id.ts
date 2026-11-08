@@ -1,0 +1,123 @@
+import { and, eq, isNull } from "drizzle-orm";
+import { createRemoteJWKSet, jwtVerify, errors, type JWTPayload, type JWTVerifyGetKey } from "jose";
+import { db } from "@/lib/db/client";
+import { parentAuthUser } from "@/lib/db/schema";
+import { writeAudit } from "@/lib/audit/log";
+import { env } from "@/env";
+
+export const PARENT_PROVIDER_ID = "parent-oidc";
+
+/** Verifies an ID token's signature and claims; resolves to its payload or throws. */
+export type ParentIdTokenVerifier = (idToken: string) => Promise<JWTPayload>;
+
+export type CaptureOutcome = "set" | "unchanged" | "conflict" | "unverified" | "skipped";
+
+/** The account fields the capture needs; Better Auth's account hooks pass the whole row. */
+export type ParentAccount = { userId: string; providerId: string; accountId: string; idToken?: string | null };
+
+// Same skew and required claims as Better Auth's own ID token check (@better-auth/core oauth2/verify-id-token).
+const CLOCK_TOLERANCE_SECONDS = 30;
+const REQUIRED_CLAIMS = ["iss", "sub", "aud", "exp", "iat"];
+
+export function createParentIdTokenVerifier(o: { jwks: JWTVerifyGetKey; issuer: string; audience: string; algorithms?: string[] }): ParentIdTokenVerifier {
+  return async (idToken) => (await jwtVerify(idToken, o.jwks, {
+    issuer: o.issuer, audience: o.audience, algorithms: o.algorithms,
+    requiredClaims: REQUIRED_CLAIMS, clockTolerance: CLOCK_TOLERANCE_SECONDS,
+  })).payload;
+}
+
+class DiscoveryError extends Error {}
+
+/** Builds the verifier from the provider's discovery document: its issuer, its JWKS, our client id as audience. */
+async function discoverVerifier(): Promise<ParentIdTokenVerifier> {
+  const url = env.PARENT_OIDC_DISCOVERY_URL;
+  const audience = env.PARENT_OIDC_CLIENT_ID;
+  if (!url || !audience) throw new DiscoveryError("parent door not configured");
+  let doc: { issuer?: unknown; jwks_uri?: unknown; id_token_signing_alg_values_supported?: unknown };
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    doc = await res.json();
+  } catch (e) {
+    throw new DiscoveryError(`discovery fetch failed: ${(e as Error).message}`);
+  }
+  if (typeof doc.issuer !== "string" || !doc.issuer || typeof doc.jwks_uri !== "string" || !doc.jwks_uri) {
+    throw new DiscoveryError("discovery document has no issuer or jwks_uri");
+  }
+  const algs = doc.id_token_signing_alg_values_supported;
+  return createParentIdTokenVerifier({
+    jwks: createRemoteJWKSet(new URL(doc.jwks_uri, url)),
+    issuer: doc.issuer,
+    audience,
+    algorithms: Array.isArray(algs) && algs.length > 0 && algs.every((a) => typeof a === "string") ? algs : undefined,
+  });
+}
+
+// Cached for the process (the remote JWKS caches and refreshes keys itself); a failed discovery is retried next time.
+let defaultVerifier: Promise<ParentIdTokenVerifier> | null = null;
+function getDefaultVerifier(): Promise<ParentIdTokenVerifier> {
+  defaultVerifier ??= discoverVerifier().catch((e) => { defaultVerifier = null; throw e; });
+  return defaultVerifier;
+}
+
+function invalidTokenReason(e: unknown): string {
+  if (e instanceof errors.JWTClaimValidationFailed) return `invalid_token:${e.code}:${e.claim}`;
+  if (e instanceof errors.JOSEError) return `invalid_token:${e.code}`;
+  return "invalid_token";
+}
+
+async function emailOf(userId: string): Promise<string | null> {
+  const [u] = await db.select({ email: parentAuthUser.email }).from(parentAuthUser).where(eq(parentAuthUser.id, userId));
+  return u?.email ?? null;
+}
+
+async function unverified(userId: string, reason: string): Promise<CaptureOutcome> {
+  await writeAudit({ actor: { door: "parent", id: null, label: await emailOf(userId) }, action: "parent.object_id_unverified",
+    targetType: "parent_auth_user", targetId: userId, after: { reason } });
+  return "unverified";
+}
+
+/**
+ * Records the parent's External ID object id (`oid`) on their auth user, taken only from an ID token
+ * this function has itself verified (signature against the provider's JWKS, issuer, audience, expiry).
+ *
+ * Better Auth cannot do this: `objectId` is `input: false` so a parent cannot set it through
+ * /update-user, and Better Auth also drops `input: false` fields from provider profiles. So this runs
+ * from the parent instance's account create/update hooks, once Better Auth has stored the account.
+ *
+ * Fails closed: an unverifiable token or one without `oid` changes nothing, so resolveGuardian keeps
+ * refusing the parent. A stored object id is never overwritten; a different verified `oid` is audited.
+ */
+export async function captureParentObjectId(account: ParentAccount, verify?: ParentIdTokenVerifier): Promise<CaptureOutcome> {
+  if (account.providerId !== PARENT_PROVIDER_ID) return "skipped";
+  const { userId } = account;
+  if (!account.idToken) return unverified(userId, "no_id_token");
+
+  let verifier: ParentIdTokenVerifier;
+  try {
+    verifier = verify ?? await getDefaultVerifier();
+  } catch (e) {
+    return unverified(userId, e instanceof DiscoveryError ? "discovery_failed" : "verifier_unavailable");
+  }
+  let payload: JWTPayload;
+  try {
+    payload = await verifier(account.idToken);
+  } catch (e) {
+    return unverified(userId, invalidTokenReason(e));
+  }
+  // The account is keyed by the token's subject; a token for someone else must not bind this user.
+  if (payload.sub !== account.accountId) return unverified(userId, "subject_mismatch");
+  const oid = payload.oid;
+  if (typeof oid !== "string" || oid.length === 0) return unverified(userId, "missing_oid");
+
+  const [set] = await db.update(parentAuthUser).set({ objectId: oid, updatedAt: new Date() })
+    .where(and(eq(parentAuthUser.id, userId), isNull(parentAuthUser.objectId))).returning({ id: parentAuthUser.id });
+  if (set) return "set";
+
+  const [u] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, userId));
+  if (!u) return "skipped";
+  if (u.objectId === oid) return "unchanged";
+  await writeAudit({ actor: { door: "parent", id: null, label: u.email }, action: "parent.object_id_conflict",
+    targetType: "parent_auth_user", targetId: userId, before: { objectId: u.objectId }, after: { objectId: oid } });
+  return "conflict";
+}
