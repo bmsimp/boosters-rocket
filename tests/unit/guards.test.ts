@@ -11,7 +11,6 @@ vi.mock("@/lib/permissions/effective", () => ({
   effectivePermissions: async () => ({ isAdmin: ident.admin, permissions: ident.perms }),
   can: (e: { isAdmin: boolean; permissions: Set<string> }, p: string) => e.isAdmin || e.permissions.has(p),
 }));
-vi.mock("server-only", () => ({}));
 vi.mock("@/lib/request", () => ({ requestIp: async () => "203.0.113.1" }));
 vi.mock("@/lib/audit/log", () => ({ writeAudit: vi.fn(async () => undefined) }));
 
