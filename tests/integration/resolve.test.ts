@@ -78,6 +78,20 @@ describe("resolveGuardian", () => {
     expect(await resolveGuardian("p3")).toBeNull();
   });
 
+  it("records why a parent was refused, without changing what the parent sees", async () => {
+    await seedGuardian({ name: "Leo Dad", familyQboId: "9", objectId: "oid-3", status: "disabled" });
+    await db.insert(parentAuthUser).values([
+      { id: "r1", name: "A", email: "a@example.com", emailVerified: true, objectId: null },
+      { id: "r2", name: "B", email: "b@example.com", emailVerified: true, objectId: "oid-nobody" },
+      { id: "r3", name: "C", email: "c@example.com", emailVerified: true, objectId: "oid-3" },
+    ]);
+    for (const id of ["r1", "r2", "r3"]) expect(await resolveGuardian(id)).toBeNull();
+    const rows = (await db.select().from(auditLog)).filter((a) => a.action === "signin.refused");
+    expect(Object.fromEntries(rows.map((r) => [r.targetId, r.after]))).toEqual({
+      r1: { reason: "missing_object_id" }, r2: { reason: "no_guardian" }, r3: { reason: "disabled" },
+    });
+  });
+
   it("never resolves a parent identity from an email match alone", async () => {
     await seedGuardian({ name: "Ana Ramirez", familyQboId: "123", objectId: "oid-1" });
     await db.insert(parentAuthUser).values({ id: "p4", name: "Ana", email: "ana.ramirez@example.com", emailVerified: true, objectId: null });
