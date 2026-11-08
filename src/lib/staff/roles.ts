@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import { role, roleRule, roleAssignment, staffUser } from "@/lib/db/schema";
 import { validateRules } from "@/lib/permissions/rules";
 import { adminCount } from "@/lib/auth/bootstrap";
@@ -71,13 +71,24 @@ export async function assignRole(roleId: string, staffUserId: string, actor: Act
   return { ok: true };
 }
 
+/** True when this person holds the Admin role and is counted by adminCount (not disabled). */
+async function isCountedAdmin(tx: Tx, staffUserId: string): Promise<boolean> {
+  const rows = await tx.execute(sql`SELECT 1 FROM role_assignment ra JOIN role r ON r.id = ra.role_id
+    JOIN staff_user s ON s.id = ra.staff_user_id
+    WHERE r.key='admin' AND ra.staff_user_id=${staffUserId} AND s.status <> 'disabled'`);
+  return Array.from(rows as ArrayLike<unknown>).length > 0;
+}
+
 export async function unassignRole(roleId: string, staffUserId: string, actor: Actor, ip: string | null) {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.admins'))`);
     const [r] = await tx.select().from(role).where(eq(role.id, roleId));
-    if (r?.key === "admin" && (await adminCount(tx)) <= 1) return { ok: false, error: LAST_ADMIN };
-    await tx.delete(roleAssignment).where(and(eq(roleAssignment.roleId, roleId), eq(roleAssignment.staffUserId, staffUserId)));
-    await writeAudit({ actor, action: "role.unassign", permission: PERM, targetType: "staff_user", targetId: staffUserId, before: { roleId }, ip }, tx);
+    if (r?.key === "admin" && (await isCountedAdmin(tx, staffUserId)) && (await adminCount(tx)) <= 1) return { ok: false, error: LAST_ADMIN };
+    const deleted = await tx.delete(roleAssignment)
+      .where(and(eq(roleAssignment.roleId, roleId), eq(roleAssignment.staffUserId, staffUserId))).returning();
+    if (deleted.length) {
+      await writeAudit({ actor, action: "role.unassign", permission: PERM, targetType: "staff_user", targetId: staffUserId, before: { roleId }, ip }, tx);
+    }
     return { ok: true };
   });
 }
@@ -106,15 +117,17 @@ export async function inviteStaff(raw: { name: string; email: string }, actor: A
   return { ok: true, id: s!.id };
 }
 
-export async function setStaffStatus(id: string, status: "active" | "disabled", actor: Actor, ip: string | null) {
+const statusInput = z.enum(["active", "disabled"]);
+
+export async function setStaffStatus(id: string, rawStatus: "active" | "disabled", actor: Actor, ip: string | null) {
+  const parsed = statusInput.safeParse(rawStatus);
+  if (!parsed.success) return { ok: false, error: "That status isn't allowed." };
+  const status = parsed.data;
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.admins'))`);
     const [s] = await tx.select().from(staffUser).where(eq(staffUser.id, id));
     if (!s) return { ok: false, error: "That person is no longer on the staff list." };
-    if (status === "disabled") {
-      const isAdmin = (await tx.execute(sql`SELECT 1 FROM role_assignment ra JOIN role r ON r.id = ra.role_id WHERE r.key='admin' AND ra.staff_user_id=${id}`)).length > 0;
-      if (isAdmin && (await adminCount(tx)) <= 1) return { ok: false, error: LAST_ADMIN };
-    }
+    if (status !== "active" && (await isCountedAdmin(tx, id)) && (await adminCount(tx)) <= 1) return { ok: false, error: LAST_ADMIN };
     await tx.update(staffUser).set({ status, updatedAt: new Date() }).where(eq(staffUser.id, id));
     await writeAudit({ actor, action: "staff.status", permission: "Staff.Users.ReadWrite", targetType: "staff_user", targetId: id,
       before: { status: s.status }, after: { status }, ip }, tx);
