@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth } from "better-auth/plugins";
 import { db } from "@/lib/db/client";
+import { recordSignin } from "./signin-audit";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env, parentDoorEnabled } from "@/env";
 
@@ -18,7 +19,9 @@ export const parentAuth = betterAuth({
   }),
   emailAndPassword: { enabled: false },
   account: { accountLinking: { enabled: false } },
-  advanced: { cookiePrefix: "br_parent" },
+  // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
+  advanced: { cookiePrefix: "br_parent", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
+  databaseHooks: { session: { create: { after: (session, ctx) => recordSignin("parent", session, ctx) } } },
   session: { expiresIn: 60 * 60 * 24 * 14, updateAge: 60 * 60 * 24 },
   user: { additionalFields: { objectId: { type: "string", required: false, input: false } } },
   plugins: parentDoorEnabled ? [genericOAuth({

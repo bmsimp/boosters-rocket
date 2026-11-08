@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/lib/db/client";
+import { recordSignin } from "./signin-audit";
 import { staffAuthUser, staffAuthSession, staffAuthAccount, staffAuthVerification } from "@/lib/db/schema";
 import { env, staffEntraEnabled, staffGoogleEnabled } from "@/env";
 
@@ -15,7 +16,9 @@ export const staffAuth = betterAuth({
   }),
   emailAndPassword: { enabled: false },
   account: { accountLinking: { enabled: false } },
-  advanced: { cookiePrefix: "br_staff" },
+  // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
+  advanced: { cookiePrefix: "br_staff", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
+  databaseHooks: { session: { create: { after: (session, ctx) => recordSignin("staff", session, ctx) } } },
   session: { expiresIn: 60 * 60 * 12, updateAge: 60 * 60 },
   socialProviders: {
     ...(staffEntraEnabled ? { microsoft: {
