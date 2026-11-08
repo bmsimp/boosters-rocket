@@ -50,6 +50,7 @@ describe("parent Better Auth instance account hooks", () => {
     await ctx.internalAdapter.createAccount({ userId: user.id, providerId: PARENT_PROVIDER_ID, accountId: "sub-ana", idToken: await token("sub-ana") });
     const [row] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, user.id));
     expect(row?.objectId).toBe(OID);
+    expect((await db.select().from(auditLog)).filter((a) => a.action === "parent.object_id_set")).toHaveLength(1);
     expect(await resolveGuardian(user.id)).toMatchObject({ door: "parent", guardianId: g.id });
   });
 
@@ -63,5 +64,6 @@ describe("parent Better Auth instance account hooks", () => {
     expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, user.id)))[0]?.objectId).toBe(OID);
     const reasons = (await db.select().from(auditLog)).filter((a) => a.action === "parent.object_id_unverified").map((a) => a.after);
     expect(reasons).toEqual([{ reason: "no_id_token" }]);
+    expect((await db.select().from(auditLog)).filter((a) => a.action === "parent.object_id_set").map((a) => a.after)).toEqual([{ objectId: OID }]);
   });
 });

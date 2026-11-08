@@ -3,6 +3,7 @@ import { createRemoteJWKSet, jwtVerify, errors, type JWTPayload, type JWTVerifyG
 import { db } from "@/lib/db/client";
 import { parentAuthUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
+import { clientIpFrom } from "@/lib/request";
 import { env } from "@/env";
 
 export const PARENT_PROVIDER_ID = "parent-oidc";
@@ -10,10 +11,13 @@ export const PARENT_PROVIDER_ID = "parent-oidc";
 /** Verifies an ID token's signature and claims; resolves to its payload or throws. */
 export type ParentIdTokenVerifier = (idToken: string) => Promise<JWTPayload>;
 
-export type CaptureOutcome = "set" | "unchanged" | "conflict" | "unverified" | "skipped";
+export type CaptureOutcome = "set" | "unchanged" | "conflict" | "unverified" | "user_missing" | "skipped";
 
 /** The account fields the capture needs; Better Auth's account hooks pass the whole row. */
 export type ParentAccount = { userId: string; providerId: string; accountId: string; idToken?: string | null };
+
+/** The Better Auth hook context, when there is a request behind the write. */
+export type HookContext = { headers?: Headers; request?: Request } | null | undefined;
 
 // Same skew and required claims as Better Auth's own ID token check (@better-auth/core oauth2/verify-id-token).
 const CLOCK_TOLERANCE_SECONDS = 30;
@@ -66,17 +70,6 @@ function invalidTokenReason(e: unknown): string {
   return "invalid_token";
 }
 
-async function emailOf(userId: string): Promise<string | null> {
-  const [u] = await db.select({ email: parentAuthUser.email }).from(parentAuthUser).where(eq(parentAuthUser.id, userId));
-  return u?.email ?? null;
-}
-
-async function unverified(userId: string, reason: string): Promise<CaptureOutcome> {
-  await writeAudit({ actor: { door: "parent", id: null, label: await emailOf(userId) }, action: "parent.object_id_unverified",
-    targetType: "parent_auth_user", targetId: userId, after: { reason } });
-  return "unverified";
-}
-
 /**
  * Records the parent's External ID object id (`oid`) on their auth user, taken only from an ID token
  * this function has itself verified (signature against the provider's JWKS, issuer, audience, expiry).
@@ -88,36 +81,54 @@ async function unverified(userId: string, reason: string): Promise<CaptureOutcom
  * Fails closed: an unverifiable token or one without `oid` changes nothing, so resolveGuardian keeps
  * refusing the parent. A stored object id is never overwritten; a different verified `oid` is audited.
  */
-export async function captureParentObjectId(account: ParentAccount, verify?: ParentIdTokenVerifier): Promise<CaptureOutcome> {
+export async function captureParentObjectId(account: ParentAccount, verify?: ParentIdTokenVerifier, ctx?: HookContext): Promise<CaptureOutcome> {
   if (account.providerId !== PARENT_PROVIDER_ID) return "skipped";
   const { userId } = account;
-  if (!account.idToken) return unverified(userId, "no_id_token");
+  const h = ctx?.headers ?? ctx?.request?.headers;
+  const ip = h ? clientIpFrom(h) : null;
+  const audit = (action: string, label: string | null, before: unknown, after: unknown) => writeAudit({
+    actor: { door: "parent", id: null, label }, action, targetType: "parent_auth_user", targetId: userId, before, after, ip });
+
+  const [u] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, userId));
+  if (!u) {
+    await audit("parent.object_id_unverified", null, undefined, { reason: "user_missing" });
+    return "user_missing";
+  }
+  // Once an object id is bound, a failed re-check (e.g. a stale token re-saved on refresh) changes nothing, so it is not audited.
+  const unverified = async (reason: string): Promise<CaptureOutcome> => {
+    if (u.objectId === null) await audit("parent.object_id_unverified", u.email, undefined, { reason });
+    return "unverified";
+  };
+  if (!account.idToken) return unverified("no_id_token");
 
   let verifier: ParentIdTokenVerifier;
   try {
     verifier = verify ?? await getDefaultVerifier();
   } catch (e) {
-    return unverified(userId, e instanceof DiscoveryError ? "discovery_failed" : "verifier_unavailable");
+    return unverified(e instanceof DiscoveryError ? "discovery_failed" : "verifier_unavailable");
   }
   let payload: JWTPayload;
   try {
     payload = await verifier(account.idToken);
   } catch (e) {
-    return unverified(userId, invalidTokenReason(e));
+    return unverified(invalidTokenReason(e));
   }
   // The account is keyed by the token's subject; a token for someone else must not bind this user.
-  if (payload.sub !== account.accountId) return unverified(userId, "subject_mismatch");
+  if (payload.sub !== account.accountId) return unverified("subject_mismatch");
   const oid = payload.oid;
-  if (typeof oid !== "string" || oid.length === 0) return unverified(userId, "missing_oid");
+  if (typeof oid !== "string" || oid.length === 0) return unverified("missing_oid");
 
   const [set] = await db.update(parentAuthUser).set({ objectId: oid, updatedAt: new Date() })
     .where(and(eq(parentAuthUser.id, userId), isNull(parentAuthUser.objectId))).returning({ id: parentAuthUser.id });
-  if (set) return "set";
+  if (set) {
+    await audit("parent.object_id_set", u.email, { objectId: null }, { objectId: oid });
+    return "set";
+  }
 
-  const [u] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, userId));
-  if (!u) return "skipped";
-  if (u.objectId === oid) return "unchanged";
-  await writeAudit({ actor: { door: "parent", id: null, label: u.email }, action: "parent.object_id_conflict",
-    targetType: "parent_auth_user", targetId: userId, before: { objectId: u.objectId }, after: { objectId: oid } });
+  // Re-read: another sign-in may have bound it between the first read and the update.
+  const [now] = await db.select({ objectId: parentAuthUser.objectId }).from(parentAuthUser).where(eq(parentAuthUser.id, userId));
+  if (!now) return "user_missing";
+  if (now.objectId === oid) return "unchanged";
+  await audit("parent.object_id_conflict", u.email, { objectId: now.objectId }, { objectId: oid });
   return "conflict";
 }

@@ -43,8 +43,12 @@ describe("captureParentObjectId", () => {
 
   it("sets object_id from the oid of a verified ID token", async () => {
     await parentUser("p1");
-    expect(await captureParentObjectId(account("p1", await idToken()), verify)).toBe("set");
+    const ctx = { headers: new Headers({ "cf-connecting-ip": "203.0.113.7" }) };
+    expect(await captureParentObjectId(account("p1", await idToken()), verify, ctx)).toBe("set");
     expect(await objectIdOf("p1")).toBe(OID);
+    const [a] = await audits("parent.object_id_set");
+    expect(a).toMatchObject({ door: "parent", actorId: null, actorLabel: "p1@example.com", targetType: "parent_auth_user", targetId: "p1",
+      before: { objectId: null }, after: { objectId: OID }, ip: "203.0.113.7" });
   });
 
   it("backfills a user created while object_id was never captured (later sign-in, account update)", async () => {
@@ -52,6 +56,8 @@ describe("captureParentObjectId", () => {
     await captureParentObjectId(account("p2", await idToken()), verify);
     expect(await objectIdOf("p2")).toBe(OID);
     expect(await audits("parent.object_id_unverified")).toHaveLength(0);
+    const [a] = await audits("parent.object_id_set");
+    expect(a).toMatchObject({ targetId: "p2", before: { objectId: null }, after: { objectId: OID }, ip: null });
   });
 
   it("is a no-op when the stored object_id already matches", async () => {
@@ -59,6 +65,22 @@ describe("captureParentObjectId", () => {
     expect(await captureParentObjectId(account("p3", await idToken()), verify)).toBe("unchanged");
     expect(await objectIdOf("p3")).toBe(OID);
     expect(await audits("parent.object_id_conflict")).toHaveLength(0);
+    expect(await audits("parent.object_id_set")).toHaveLength(0);
+  });
+
+  it("does not audit a failed re-check when the object id is already set (refresh with a stale token)", async () => {
+    await parentUser("p3b", OID);
+    const stale = await idToken({}, { exp: Math.floor(Date.now() / 1000) - 3600 });
+    expect(await captureParentObjectId(account("p3b", stale), verify)).toBe("unverified");
+    expect(await captureParentObjectId(account("p3b", null), verify)).toBe("unverified");
+    expect(await objectIdOf("p3b")).toBe(OID);
+    expect(await db.select().from(auditLog)).toHaveLength(0);
+  });
+
+  it("reports and audits a missing auth user instead of skipping", async () => {
+    expect(await captureParentObjectId(account("ghost", await idToken()), verify)).toBe("user_missing");
+    const [a] = await audits("parent.object_id_unverified");
+    expect(a).toMatchObject({ targetId: "ghost", after: { reason: "user_missing" } });
   });
 
   it.each([

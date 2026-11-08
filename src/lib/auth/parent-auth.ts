@@ -26,8 +26,8 @@ export const parentAuth = betterAuth({
     session: { create: { after: (session, ctx) => recordSignin("parent", session, ctx) } },
     // Better Auth drops `input: false` fields from provider profiles, so the verified `oid` is captured here instead.
     account: {
-      create: { after: async (account) => { await captureParentObjectId(account); } },
-      update: { after: async (account) => { if (account) await captureParentObjectId(account); } },
+      create: { after: async (account, ctx) => { await captureParentObjectId(account, undefined, ctx); } },
+      update: { after: async (account, ctx) => { if (account) await captureParentObjectId(account, undefined, ctx); } },
     },
   },
   session: { expiresIn: 60 * 60 * 24 * 14, updateAge: 60 * 60 * 24 },
