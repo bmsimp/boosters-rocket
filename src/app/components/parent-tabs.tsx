@@ -1,0 +1,25 @@
+"use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const TABS = [
+  { href: "/", label: "Home", icon: <path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z" /> },
+  { href: "/forms", label: "Forms", icon: <><path d="M6 3h9l3 3v15H6z" /><path d="M9 13l2 2 4-4" /></> },
+  { href: "/payments", label: "Payments", icon: <><rect x="3" y="6" width="18" height="12" /><path d="M3 10h18M7 15h3" /></> },
+  { href: "/family", label: "Family", icon: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3 20c0-3 3-5 6-5s6 2 6 5M15 15c3 0 6 1.5 6 4" /></> },
+];
+
+export function ParentTabs() {
+  const path = usePathname();
+  return (
+    <nav className="tabs" aria-label="Main">
+      {TABS.map((t) => (
+        <Link key={t.href} href={t.href} aria-current={path === t.href ? "page" : undefined}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">{t.icon}</svg>{t.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+export const PARENT_NAV = TABS.map(({ href, label }) => ({ href, label }));

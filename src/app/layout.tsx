@@ -1,28 +1,37 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Atkinson_Hyperlegible, Barlow_Condensed } from "next/font/google";
+import { getClubSettings } from "@/lib/settings/club";
+import { deriveClubTokens, clubCssVars, normalizeHex } from "@/lib/theme/contrast";
+import { DISPLAY_SCRIPT } from "./display-script";
+import "./booster.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const read = Atkinson_Hyperlegible({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-read", display: "swap" });
+const mark = Barlow_Condensed({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-mark", display: "swap" });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const DEFAULT_COLOUR = "#5b2a86";
 
-export const metadata: Metadata = {
-  title: "Booster Rocket",
-  description: "Parent portal for band booster clubs",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const club = await getClubSettings();
+  return { title: { default: club.name, template: `%s · ${club.name}` } };
+}
+export const viewport: Viewport = { width: "device-width", initialScale: 1 };
+export const dynamic = "force-dynamic";
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+/** A bad stored colour must never take every page down: fall back to the default. */
+function safeVars(colour: string) {
+  try {
+    return clubCssVars(deriveClubTokens(normalizeHex(colour) ?? DEFAULT_COLOUR));
+  } catch {
+    return clubCssVars(deriveClubTokens(DEFAULT_COLOUR));
+  }
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const club = await getClubSettings();
+  const vars = safeVars(club.colour); // values are hex only
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang="en" className={`${read.variable} ${mark.variable}`} style={vars as React.CSSProperties} suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: DISPLAY_SCRIPT }} /></head>
       <body>{children}</body>
     </html>
   );
