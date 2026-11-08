@@ -1,10 +1,12 @@
 "use client";
 import { useActionState } from "react";
 import { saveClubAction } from "./actions";
+import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import type { ClubSettings } from "@/lib/settings/club";
 
 export function ClubForm({ initial }: { initial: ClubSettings }) {
-  const [state, action, pending] = useActionState(async (_: unknown, f: FormData) => saveClubAction(f), null);
+  const [state, action, pending] = useActionState(async (_: unknown, f: FormData) =>
+    safely(() => saveClubAction(f), { ok: false as const, errors: [ACTION_FAILED] }), null);
   return (
     <form action={action} className="stack">
       <label className="field"><span>Club name</span><input name="name" defaultValue={initial.name} required maxLength={60} /></label>

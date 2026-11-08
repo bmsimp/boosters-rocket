@@ -308,3 +308,6 @@ main.wrap.single > .box { margin-top: var(--cell); max-width: 760px; }
 .signin .btn { width: 100%; margin-top: var(--s3); }
 main.wrap.signin { display: block; padding-top: var(--s6); } /* beat the two-column home grid */
 .signin [role="status"] { margin-top: var(--s3); }
+.sign-out { display: grid; gap: var(--s2); justify-items: start; margin-top: var(--s3); }
+p.errors, .sign-out .errors { padding-left: 0; }
+.inline-alert { margin-top: var(--s2); }

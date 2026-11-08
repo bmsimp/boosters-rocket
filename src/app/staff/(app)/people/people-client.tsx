@@ -2,9 +2,11 @@
 import { useActionState, useTransition, useState } from "react";
 import { inviteStaffAction, setStaffStatusAction } from "./actions";
 import { assignRoleAction, unassignRoleAction } from "../roles/actions";
+import { ACTION_FAILED, safely } from "@/app/components/action-error";
 
 export function InviteForm() {
-  const [state, action, pending] = useActionState(async (_: unknown, f: FormData) => inviteStaffAction(f), null);
+  const [state, action, pending] = useActionState(async (_: unknown, f: FormData) =>
+    safely(() => inviteStaffAction(f), { ok: false as const, errors: [ACTION_FAILED] }), null);
   return (
     <form action={action} className="stack">
       <label className="field"><span>Name</span><input name="name" required autoComplete="off" /></label>
@@ -21,7 +23,10 @@ type Person = { id: string; name: string; email: string; status: string; roles: 
 export function PersonRow({ person, roles, canEdit, canAssign }: { person: Person; roles: { id: string; name: string }[]; canEdit: boolean; canAssign: boolean }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const run = (fn: () => Promise<{ ok: boolean; error?: string }>) => start(async () => { const r = await fn(); setError(r.ok ? null : r.error ?? "That didn't work."); });
+  const run = (fn: () => Promise<{ ok: boolean; error?: string }>) => start(async () => {
+    const r = await safely(fn, { ok: false, error: ACTION_FAILED });
+    setError(r.ok ? null : r.error ?? ACTION_FAILED);
+  });
   return (
     <li>
       <span><span className="what">{person.name}</span><span className="when">{person.email} · {person.status}</span></span>

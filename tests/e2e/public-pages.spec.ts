@@ -27,3 +27,12 @@ test("no horizontal scroll on the sign-in page", async ({ page }) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(overflow).toBe(false);
 });
+
+test("pages that aren't built yet get the plain not-ready page, not the framework default", async ({ page }) => {
+  for (const path of ["/forms", "/payments", "/family", "/no-such-page"]) {
+    const res = await page.goto(path);
+    expect(res?.status()).toBe(404);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("This part of the portal isn't ready yet");
+    expect(await page.content()).not.toContain("Zelda");
+  }
+});
