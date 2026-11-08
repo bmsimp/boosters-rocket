@@ -7,7 +7,8 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 
 export type ClubSettings = { name: string; shortName: string; colour: string; treasurerEmail: string | null };
 
-const DEFAULTS: ClubSettings = { name: "Booster Rocket", shortName: "BR", colour: "#5b2a86", treasurerEmail: null };
+export const DEFAULT_COLOUR = "#5b2a86";
+const DEFAULTS: ClubSettings = { name: "Booster Rocket", shortName: "BR", colour: DEFAULT_COLOUR, treasurerEmail: null };
 const KEY = "club";
 
 const input = z.object({
@@ -22,16 +23,26 @@ const input = z.object({
     .or(z.literal("").transform(() => null)),
 });
 
-export async function getClubSettings(): Promise<ClubSettings> {
+/**
+ * The colour is always a validated hex: a stored value that fails normalization falls back to the default,
+ * and storedColourValid says whether that happened, so callers can warn instead of failing silently.
+ */
+export type ClubSettingsRead = ClubSettings & { storedColourValid: boolean };
+
+export async function getClubSettings(): Promise<ClubSettingsRead> {
   const [row] = await db.select().from(setting).where(eq(setting.key, KEY));
-  return row ? { ...DEFAULTS, ...(row.value as Partial<ClubSettings>) } : DEFAULTS;
+  if (!row) return { ...DEFAULTS, storedColourValid: true };
+  const merged = { ...DEFAULTS, ...(row.value as Partial<ClubSettings>) };
+  const hex = typeof merged.colour === "string" ? normalizeHex(merged.colour) : null;
+  return { ...merged, colour: hex ?? DEFAULT_COLOUR, storedColourValid: hex !== null };
 }
 
 export async function saveClubSettings(raw: unknown, actor: Actor, ip: string | null):
   Promise<{ ok: true } | { ok: false; errors: string[] }> {
   const parsed = input.safeParse(raw);
   if (!parsed.success) return { ok: false, errors: parsed.error.issues.map((i) => i.message) };
-  const before = await getClubSettings();
+  const { name, shortName, colour, treasurerEmail } = await getClubSettings();
+  const before: ClubSettings = { name, shortName, colour, treasurerEmail };
   await db.transaction(async (tx) => {
     await tx.insert(setting).values({ key: KEY, value: parsed.data })
       .onConflictDoUpdate({ target: setting.key, set: { value: parsed.data, updatedAt: new Date() } });
