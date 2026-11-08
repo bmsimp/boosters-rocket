@@ -94,9 +94,10 @@ export async function captureParentObjectId(account: ParentAccount, verify?: Par
     await audit("parent.object_id_unverified", null, undefined, { reason: "user_missing" });
     return "user_missing";
   }
-  // Once an object id is bound, a failed re-check (e.g. a stale token re-saved on refresh) changes nothing, so it is not audited.
-  const unverified = async (reason: string): Promise<CaptureOutcome> => {
-    if (u.objectId === null) await audit("parent.object_id_unverified", u.email, undefined, { reason });
+  // A refresh re-saves the old ID token, so once an object id is bound an *expired* re-check is expected
+  // and not audited. Every other failure signals something wrong and is always audited.
+  const unverified = async (reason: string, expired = false): Promise<CaptureOutcome> => {
+    if (!(expired && u.objectId !== null)) await audit("parent.object_id_unverified", u.email, undefined, { reason });
     return "unverified";
   };
   if (!account.idToken) return unverified("no_id_token");
@@ -111,7 +112,7 @@ export async function captureParentObjectId(account: ParentAccount, verify?: Par
   try {
     payload = await verifier(account.idToken);
   } catch (e) {
-    return unverified(invalidTokenReason(e));
+    return unverified(invalidTokenReason(e), e instanceof errors.JWTExpired);
   }
   // The account is keyed by the token's subject; a token for someone else must not bind this user.
   if (payload.sub !== account.accountId) return unverified("subject_mismatch");

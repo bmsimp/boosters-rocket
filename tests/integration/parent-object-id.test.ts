@@ -68,13 +68,27 @@ describe("captureParentObjectId", () => {
     expect(await audits("parent.object_id_set")).toHaveLength(0);
   });
 
-  it("does not audit a failed re-check when the object id is already set (refresh with a stale token)", async () => {
+  it("does not audit an expired re-check when the object id is already set (refresh re-saves the old token)", async () => {
     await parentUser("p3b", OID);
     const stale = await idToken({}, { exp: Math.floor(Date.now() / 1000) - 3600 });
     expect(await captureParentObjectId(account("p3b", stale), verify)).toBe("unverified");
-    expect(await captureParentObjectId(account("p3b", null), verify)).toBe("unverified");
     expect(await objectIdOf("p3b")).toBe(OID);
     expect(await db.select().from(auditLog)).toHaveLength(0);
+  });
+
+  it.each([
+    ["subject mismatch", async () => ({ ...account("p3c", await idToken()), accountId: "sub-someone-else" }), /^subject_mismatch$/],
+    ["bad signature", async () => account("p3c", await idToken({}, { key: otherKey })), /^invalid_token:ERR_JWS_SIGNATURE_VERIFICATION_FAILED$/],
+    ["wrong issuer", async () => account("p3c", await idToken({}, { iss: "https://evil.example.com/v2.0" })), /^invalid_token:.*:iss$/],
+    ["missing oid", async () => account("p3c", await idToken({ oid: undefined })), /^missing_oid$/],
+    ["no ID token", async () => account("p3c", null), /^no_id_token$/],
+  ])("still audits a %s when the object id is already set", async (_label, make, reason) => {
+    await parentUser("p3c", OID);
+    expect(await captureParentObjectId(await make(), verify)).toBe("unverified");
+    expect(await objectIdOf("p3c")).toBe(OID);
+    const rows = await audits("parent.object_id_unverified");
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.after as { reason: string }).reason).toMatch(reason);
   });
 
   it("reports and audits a missing auth user instead of skipping", async () => {
