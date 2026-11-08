@@ -21,3 +21,31 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Build with fake secrets
+        env:
+          DATABASE_URL: postgres://booster:booster@localhost:5433/booster_test
+          APP_URL: http://localhost:3100
+          BETTER_AUTH_SECRET: ci-fake-secret-ci-fake-secret-1234567890
+          STAFF_GOOGLE_CLIENT_ID: ci-google-id
+          STAFF_GOOGLE_CLIENT_SECRET: ci-fake-google-secret-abcdef
+          PARENT_OIDC_DISCOVERY_URL: https://login.example.com/.well-known/openid-configuration
+          PARENT_OIDC_CLIENT_ID: ci-parent-id
+          PARENT_OIDC_CLIENT_SECRET: ci-fake-parent-secret-abcdef
+        run: |
+          pnpm build
+          node scripts/check-client-bundle.mjs
+      - name: E2E
+        env:
+          DATABASE_URL: postgres://booster:booster@localhost:5433/booster_test
+          APP_URL: http://localhost:3100
+          BETTER_AUTH_SECRET: ci-fake-secret-ci-fake-secret-1234567890
+          STAFF_GOOGLE_CLIENT_ID: ci-google-id
+          STAFF_GOOGLE_CLIENT_SECRET: ci-fake-google-secret-abcdef
+          PARENT_OIDC_DISCOVERY_URL: https://login.example.com/.well-known/openid-configuration
+          PARENT_OIDC_CLIENT_ID: ci-parent-id
+          PARENT_OIDC_CLIENT_SECRET: ci-fake-parent-secret-abcdef
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm db:migrate
+          pnpm tsx scripts/seed-e2e.ts
+          pnpm e2e
