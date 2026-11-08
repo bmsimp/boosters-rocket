@@ -1,4 +1,5 @@
 import "server-only";
+import "./init";
 import { headers } from "next/headers";
 import { staffAuth } from "./staff-auth";
 import { parentAuth } from "./parent-auth";
