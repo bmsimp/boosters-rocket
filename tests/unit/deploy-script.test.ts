@@ -31,7 +31,9 @@ beforeEach(() => {
   stub("docker", `
     case "$*" in
       *"run --rm migrate"*) exit \${MIGRATE_FAIL:-0};;
-      *"inspect --format"*) echo "\${HEALTH:-healthy}";;
+      *" build app"*) exit \${BUILD_FAIL:-0};;
+      *"inspect --format {{.Image}}"*) [ -z "\${NO_RUNNING:-}" ] || exit 1; echo "sha256:running123";;
+      *"inspect --format {{.State.Health.Status}}"*) echo "\${HEALTH:-healthy}";;
       *"image inspect booster-rocket-app:previous"*) exit \${NO_PREVIOUS:-0};;
       *"image inspect booster-rocket-app:current"*) exit \${NO_CURRENT:-0};;
       *) exit 0;;
@@ -43,8 +45,8 @@ describe("scripts/poc/deploy.sh", () => {
     const r = run();
     expect(r.status).toBe(0);
     const c = calls();
-    const order = ["git pull --ff-only", "docker image tag booster-rocket-app:current booster-rocket-app:previous", "compose -f docker-compose.poc.yml --env-file .env.poc build app",
-      "run --rm migrate", "up -d --no-deps --force-recreate app", "inspect --format"];
+    const order = ["git pull --ff-only", "compose -f docker-compose.poc.yml --env-file .env.poc build app",
+      "run --rm migrate", "docker image tag sha256:running123 booster-rocket-app:previous", "up -d --no-deps --force-recreate app", "inspect --format {{.State.Health.Status}}"];
     let at = -1;
     for (const step of order) { const i = c.indexOf(step, at + 1); expect(i, `missing or out of order: ${step}\n${c}`).toBeGreaterThan(at); at = i; }
     expect(r.stdout).toContain("Deployed abc1234");
@@ -63,6 +65,16 @@ describe("scripts/poc/deploy.sh", () => {
     expect(r.status).toBe(3);
     expect(r.stderr).toContain("Migrations failed");
     expect(calls()).not.toContain("up -d");
+    expect(calls()).not.toContain("booster-rocket-app:previous");
+  });
+
+  it("stops when the build fails, before migrating or touching the app", () => {
+    const r = run([], { BUILD_FAIL: "1" });
+    expect(r.status).toBe(7);
+    expect(r.stderr).toContain("build failed");
+    expect(calls()).not.toContain("run --rm migrate");
+    expect(calls()).not.toContain("up -d");
+    expect(calls()).not.toContain("image tag");
   });
 
   it("fails loudly when the app never becomes healthy", () => {
@@ -92,6 +104,7 @@ describe("scripts/poc/deploy.sh", () => {
     expect(calls()).toContain("docker image tag booster-rocket-app:previous booster-rocket-app:current");
     expect(calls()).toContain("up -d --no-deps --force-recreate app");
     expect(calls()).not.toContain("git pull");
+    expect(r.stdout).toContain("migrations are not reversed");
   });
 
   it("says plainly when there is nothing to roll back to, and changes nothing", () => {
@@ -102,9 +115,10 @@ describe("scripts/poc/deploy.sh", () => {
     expect(calls()).not.toContain("image tag");
   });
 
-  it("skips tagging a previous image on the very first deploy", () => {
-    const r = run([], { NO_CURRENT: "1" });
+  it("does not tag a previous image when no container is running", () => {
+    const r = run([], { NO_RUNNING: "1" });
     expect(r.status).toBe(0);
-    expect(calls()).not.toContain("image tag booster-rocket-app:current booster-rocket-app:previous");
+    expect(calls()).not.toContain("booster-rocket-app:previous");
+    expect(calls()).toContain("up -d --no-deps --force-recreate app");
   });
 });

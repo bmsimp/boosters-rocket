@@ -2,7 +2,8 @@
 # Deploys (or rolls back) the Booster Rocket proof of concept on linuxdev.
 #   scripts/poc/deploy.sh             pull main, build, migrate, recreate app, wait healthy
 #   scripts/poc/deploy.sh --rollback  return to the previous image
-# Exit codes: 0 ok, 2 refused, 3 migrations failed (app untouched), 4 app unhealthy, 5 nothing to roll back to.
+# Exit codes: 0 ok, 2 refused (or another deploy running), 3 migrations failed (app untouched), 4 app unhealthy,
+# 5 nothing to roll back to, 6 git pull failed, 7 build failed (app untouched).
 set -euo pipefail
 
 BR_DIR="${BR_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -43,6 +44,7 @@ recreate_app() {
 if [ "${1:-}" = "--rollback" ]; then
   check_env_file
   docker image inspect "$APP_IMAGE:previous" >/dev/null 2>&1 || die 5 "No previous image to roll back to. Nothing was changed."
+  say "Note: database migrations are not reversed by a rollback."
   docker image tag "$APP_IMAGE:previous" "$APP_IMAGE:current"
   recreate_app
   say "Rolled back to the previous image."
@@ -52,11 +54,13 @@ fi
 [ -z "$(git status --porcelain)" ] || die 2 "This checkout has local changes. Commit or discard them before deploying."
 check_env_file
 
-git pull --ff-only
-if docker image inspect "$APP_IMAGE:current" >/dev/null 2>&1; then
-  docker image tag "$APP_IMAGE:current" "$APP_IMAGE:previous"
-fi
-"${COMPOSE[@]}" build app
+git pull --ff-only || die 6 "git pull failed. Nothing was changed."
+"${COMPOSE[@]}" build app || die 7 "The build failed. The running app was not touched."
 "${COMPOSE[@]}" run --rm migrate || die 3 "Migrations failed. The running app was not touched."
+# compose build has already moved :current to the new image, so remember what is actually running.
+running="$(docker inspect --format '{{.Image}}' booster-rocket-app 2>/dev/null || true)"
+if [ -n "$running" ]; then
+  docker image tag "$running" "$APP_IMAGE:previous"
+fi
 recreate_app
 say "Deployed $(git rev-parse --short HEAD)."

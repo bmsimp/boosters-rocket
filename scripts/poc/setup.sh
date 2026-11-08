@@ -16,10 +16,17 @@ else
 fi
 
 if [ ! -f .env.poc ]; then
+  [ -f .env.poc.example ] || { echo ".env.poc.example is missing; cannot create .env.poc." >&2; exit 2; }
   umask 077
-  sed -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
-      -e "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env.poc.example > .env.poc
-  chmod 600 .env.poc
+  tmp="$(mktemp ./.env.poc.XXXXXX)"
+  trap 'rm -f "$tmp"' EXIT
+  sed -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|"       -e "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env.poc.example > "$tmp"
+  for key in BETTER_AUTH_SECRET DB_PASSWORD; do
+    grep -Eq "^${key}=.+" "$tmp" || { echo "Could not generate ${key}; .env.poc was not created." >&2; exit 2; }
+  done
+  chmod 600 "$tmp"
+  mv "$tmp" .env.poc
+  trap - EXIT
   echo "Created .env.poc with fresh secrets. Fill in the Microsoft values from the runbook."
 else
   echo ".env.poc already exists; left as is."
