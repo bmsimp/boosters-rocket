@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
-import { staffAuthUser, staffAuthAccount, parentAuthUser, staffUser, auditLog } from "@/lib/db/schema";
+import { staffAuthUser, staffAuthAccount, parentAuthUser, staffUser, auditLog, guardian } from "@/lib/db/schema";
 import { resolveStaff, resolveGuardian } from "@/lib/auth/resolve";
 import { resetDb, seedStaff, seedGuardian } from "../helpers/db";
 import { eq } from "drizzle-orm";
@@ -15,11 +15,13 @@ describe("resolveStaff", () => {
 
   it("binds an invited staff user on first sign-in, matching email case- and space-insensitively", async () => {
     const s = await seedStaff({ email: "Pat@Club.org ", status: "invited" });
-    await staffAuthRow("u1", "pat@club.org", "google");
+    await staffAuthRow("u1", " PAT@Club.org ", "google");
     const id = await resolveStaff("u1");
     expect(id).toMatchObject({ door: "staff", staffUserId: s.id });
     const [row] = await db.select().from(staffUser).where(eq(staffUser.id, s.id));
     expect(row).toMatchObject({ authUserId: "u1", status: "active" });
+    const [bind] = (await db.select().from(auditLog)).filter((a) => a.action === "staff.bind");
+    expect(bind).toMatchObject({ door: "staff", actorId: s.id, targetId: s.id, before: { status: "invited", authUserId: null }, after: { status: "active", authUserId: "u1" } });
   });
 
   it("refuses an unknown email", async () => {
@@ -64,6 +66,8 @@ describe("resolveGuardian", () => {
     const g = await seedGuardian({ name: "Ana Ramirez", familyQboId: "123", objectId: "oid-1", status: "invited" });
     await db.insert(parentAuthUser).values({ id: "p1", name: "Ana", email: "ana@example.com", emailVerified: true, objectId: "oid-1" });
     expect(await resolveGuardian("p1")).toMatchObject({ door: "parent", guardianId: g.id, familyQboId: "123" });
+    const [act] = (await db.select().from(auditLog)).filter((a) => a.action === "guardian.activate");
+    expect(act).toMatchObject({ door: "parent", actorId: g.id, targetId: g.id, before: { status: "invited" }, after: { status: "active" } });
   });
 
   it("refuses a parent auth user with no matching guardian, or a disabled one", async () => {
@@ -78,5 +82,11 @@ describe("resolveGuardian", () => {
     await seedGuardian({ name: "Ana Ramirez", familyQboId: "123", objectId: "oid-1" });
     await db.insert(parentAuthUser).values({ id: "p4", name: "Ana", email: "ana.ramirez@example.com", emailVerified: true, objectId: null });
     expect(await resolveGuardian("p4")).toBeNull();
+  });
+
+  it("refuses a parent whose objectId differs even when the email matches a guardian", async () => {
+    await db.insert(guardian).values({ name: "Ana", email: "ana@example.com", familyQboId: "123", identityObjectId: "oid-1", status: "active" });
+    await db.insert(parentAuthUser).values({ id: "p5", name: "Ana", email: "ana@example.com", emailVerified: true, objectId: "oid-2" });
+    expect(await resolveGuardian("p5")).toBeNull();
   });
 });

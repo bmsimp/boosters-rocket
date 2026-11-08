@@ -30,7 +30,10 @@ export async function resolveStaff(authUserId: string): Promise<StaffIdentity | 
   if (invite) {
     const [row] = await db.update(staffUser).set({ authUserId, status: "active", updatedAt: new Date() })
       .where(and(eq(staffUser.id, invite.id), isNull(staffUser.authUserId))).returning();
-    return row ? toStaff(row) : null;
+    if (!row) return null;
+    await writeAudit({ actor: { door: "staff", id: row.id, label: row.email }, action: "staff.bind", targetType: "staff_user", targetId: row.id,
+      before: { status: invite.status, authUserId: null }, after: { status: "active", authUserId } });
+    return toStaff(row);
   }
 
   const createdId = await bootstrapHook(email);
@@ -55,6 +58,10 @@ export async function resolveGuardian(authUserId: string): Promise<ParentIdentit
     await writeAudit({ actor: { door: "parent", id: null, label: au.email }, action: "signin.refused", targetType: "parent_auth_user", targetId: authUserId });
     return null;
   }
-  if (g.status === "invited") await db.update(guardian).set({ status: "active", updatedAt: new Date() }).where(eq(guardian.id, g.id));
+  if (g.status === "invited") {
+    await db.update(guardian).set({ status: "active", updatedAt: new Date() }).where(eq(guardian.id, g.id));
+    await writeAudit({ actor: { door: "parent", id: g.id, label: g.name }, action: "guardian.activate", targetType: "guardian", targetId: g.id,
+      before: { status: "invited" }, after: { status: "active" } });
+  }
   return { door: "parent", guardianId: g.id, familyQboId: g.familyQboId, name: g.name };
 }
