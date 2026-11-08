@@ -81,7 +81,10 @@ export const auditLog = pgTable("audit_log", {
 }, (t) => [index("audit_at_ix").on(t.at)]);
 
 /* ---- Better Auth tables, one set per door (Better Auth core schema) ---- */
-function authTables(prefix: "staff_auth" | "parent_auth", extraUser: Record<string, ReturnType<typeof text>> = {}) {
+function authTables<X extends Record<string, ReturnType<typeof text>> = Record<never, never>>(
+  prefix: "staff_auth" | "parent_auth",
+  extraUser: X = {} as X,
+) {
   const user = pgTable(`${prefix}_user`, {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
