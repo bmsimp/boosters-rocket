@@ -2,8 +2,8 @@
 .github
 .next
 node_modules
-.env
-.env.*
+**/.env
+**/.env.*
 !.env.example
 .superpowers
 .impeccable

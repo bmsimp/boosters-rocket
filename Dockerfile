@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# check=skip=SecretsUsedInArgOrEnv
+# (the only secret-looking value in this file is the build-stage placeholder; the build stage is never shipped)
 FROM node:26-slim AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN npm install -g pnpm@12 && pnpm --version
@@ -33,10 +35,11 @@ COPY scripts/migrate.mjs scripts/seed-poc-guardian.mjs ./scripts/
 FROM node:26-slim AS run
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 TZ=America/Chicago
 WORKDIR /app
-COPY --from=build --chown=node:node /app/.next/standalone ./
-COPY --from=build --chown=node:node /app/.next/static ./.next/static
-COPY --from=build --chown=node:node /app/public ./public
-COPY --from=tools --chown=node:node /tools ./tools
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
+COPY --from=tools /tools ./tools
+RUN mkdir -p /app/.next/cache && chown -R node:node /app/.next/cache
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
