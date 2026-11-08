@@ -8,10 +8,10 @@ export default async function ClubSettingsPage() {
   return (
     <main className="wrap single">
       <h1 className="page-title">Club</h1>
-      {!club.storedColourValid && (
+      {!club.storedColorValid && (
         <p role="status" className="box">The saved club color wasn&apos;t valid, so the portal is using the default purple. Pick a color and save to fix it.</p>
       )}
-      <section className="box" aria-labelledby="club-h"><h2 id="club-h">Name and colour</h2><ClubForm initial={club} /></section>
+      <section className="box" aria-labelledby="club-h"><h2 id="club-h">Name and color</h2><ClubForm initial={club} /></section>
     </main>
   );
 }

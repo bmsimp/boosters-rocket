@@ -1,4 +1,4 @@
-export class InvalidColourError extends Error {}
+export class InvalidColorError extends Error {}
 
 const INK = "#14161a";
 const WHITE = "#ffffff";
@@ -77,7 +77,7 @@ export type ClubTokens = {
 
 export function deriveClubTokens(input: string): ClubTokens {
   const club = normalizeHex(input);
-  if (!club) throw new InvalidColourError(`“${input}” isn't a colour. Use a hex value like #5b2a86.`);
+  if (!club) throw new InvalidColorError(`“${input}” isn't a color. Use a hex value like #5b2a86.`);
   const clubOn = contrastRatio(WHITE, club) >= contrastRatio(INK, club) ? WHITE : INK;
   const textL = adjustUntil(club, PAPER_L, 4.5, "darker");
   const textD = adjustUntil(club, PAPER_D, 4.5, "lighter");

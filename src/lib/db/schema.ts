@@ -3,7 +3,7 @@ import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, ine
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updated = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
 
-/** Key/value runtime settings (club name, colour, monogram, …). */
+/** Key/value runtime settings (club name, color, monogram, …). */
 export const setting = pgTable("setting", {
   key: text("key").primaryKey(),
   value: jsonb("value").notNull(),

@@ -110,7 +110,7 @@ describe("roles", () => {
 describe("staff invites", () => {
   beforeEach(resetDb);
 
-  it("normalises email and refuses duplicates", async () => {
+  it("normalizes email and refuses duplicates", async () => {
     expect((await inviteStaff({ name: "Pat", email: " Pat@Club.org" }, actor, null)).ok).toBe(true);
     const dup = await inviteStaff({ name: "Pat 2", email: "pat@club.org" }, actor, null);
     expect(dup).toEqual({ ok: false, errors: ["Someone with that email is already on the staff list."] });

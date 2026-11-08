@@ -9,7 +9,7 @@ describe("normalizeHex", () => {
 });
 
 describe("contrastRatio", () => {
-  it("is 21 for black on white and 1 for equal colours", () => {
+  it("is 21 for black on white and 1 for equal colors", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 1);
     expect(contrastRatio("#777777", "#777777")).toBeCloseTo(1, 5);
   });
@@ -27,15 +27,15 @@ describe("deriveClubTokens", () => {
     expect(contrastRatio(t.textL, t.tintL)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(t.textD, t.tintD)).toBeGreaterThanOrEqual(4.5);
   });
-  it("keeps a club colour that already passes on white (FZN purple)", () => {
+  it("keeps a club color that already passes on white (FZN purple)", () => {
     expect(deriveClubTokens("#5b2a86").textL).toBe("#5b2a86");
     expect(deriveClubTokens("#5b2a86").clubOn).toBe("#ffffff");
   });
-  it("uses dark ink on a light club colour (gold)", () => {
+  it("uses dark ink on a light club color (gold)", () => {
     expect(deriveClubTokens("#f2c200").clubOn).toBe("#14161a");
   });
   it("throws on invalid input", () => {
-    expect(() => deriveClubTokens("red")).toThrow(/colour/i);
+    expect(() => deriveClubTokens("red")).toThrow(/color/i);
   });
   it("produces CSS variables containing only hex values", () => {
     const vars = clubCssVars(deriveClubTokens("#f2c200"));

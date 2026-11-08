@@ -13,9 +13,9 @@ from it.
 
 Audience and job: a non-technical parent on a phone, often outdoors or in a car, checking what
 their family owes, paying, and signing this season's forms for each student. Success: they finish
-without help. Constraints: WCAG 2.2 AA; the club's logo, name, colour and season step names come
-from runtime settings, so the screen must hold with any club colour and any club type (band,
-theatre, sports), not only marching band.
+without help. Constraints: WCAG 2.2 AA; the club's logo, name, color and season step names come
+from runtime settings, so the screen must hold with any club color and any club type (band,
+theater, sports), not only marching band.
 
 Must not feel like: a school district website, something childish or cartoony, or a generic SaaS
 dashboard.
@@ -23,10 +23,10 @@ dashboard.
 ## Direction contract
 
 THESIS: The season is a drill, and a family always knows its next set. It refuses the category
-default of stacked rounded cards (balance, forms, students) on a grey ground.
+default of stacked rounded cards (balance, forms, students) on a gray ground.
 
 OWN-WORLD: White chart paper with a faint 24px coordinate grid. Near-black ink rules at 2px; square
-corners; no shadows, no pills, no rounded cards. The club colour fills the top bar and marks the
+corners; no shadows, no pills, no rounded cards. The club color fills the top bar and marks the
 current set; field green marks done; amber marks due soon. Atkinson Hyperlegible for everything
 people read; Barlow Condensed for set numbers, section labels and coordinates. Every amount in
 tabular figures, right-aligned, and the family total is visibly the sum of its lines.
@@ -37,7 +37,7 @@ and signs Maya's forms without asking anyone.
 
 FIRST VIEWPORT: At 390×844: club bar (56px: logo, club name, account). Set ruler below it: "Fall
 season · Set 2 of 5" over ruled yard-line cells with hash ticks, the current set filled in club
-colour, finished sets ticked in green; under it, one marker per student showing where they stand on
+color, finished sets ticked in green; under it, one marker per student showing where they stand on
 the current set ("Leo is done", "Maya has 2 forms left"). Ruled family box: "Ramirez family",
 $185.00 at about 40px with "as of" time, then one row per open invoice with its own Pay button
 (QuickBooks pays one invoice at a time; the soonest-due is the filled black button), and a 2px
@@ -54,7 +54,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 ## Notes
 
 - Set names and count are per-club settings (for example "Join, Forms, Uniforms, Trip, Banquet"
-  for FZN), so a theatre or sports club gets its own steps; the grid reads as plain graph paper.
+  for FZN), so a theater or sports club gets its own steps; the grid reads as plain graph paper.
 - Disciplines kept from declined challengers: one state vocabulary (to do, waiting, done, closed)
   drawn the same everywhere; totals that visibly add up.
 - Unresolved: club logo handling when a club has none (monogram fallback), and dark mode.

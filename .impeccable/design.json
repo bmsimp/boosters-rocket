@@ -19,7 +19,7 @@
           "#d8c3f2",
           "#f5e8ff"
         ],
-        "derivation": "Runtime: the one colour the club picks. Unchanged in every mode."
+        "derivation": "Runtime: the one color the club picks. Unchanged in every mode."
       },
       "club-on": {
         "role": "primary",
@@ -696,7 +696,7 @@
         "club-tint-d": "#2a2133"
       },
       {
-        "name": "Gold (light club colour demo)",
+        "name": "Gold (light club color demo)",
         "club": "#f2c200",
         "club-on": "#14161a",
         "club-text-l": "#7a5c00",
@@ -737,11 +737,11 @@
     "focus": {
       "value": "outline: var(--ring) solid var(--club-text); outline-offset: 2px",
       "ring": "3px; 4px in high contrast",
-      "purpose": "All focusable elements on paper; club-on inside the club bar; Highlight under forced colours."
+      "purpose": "All focusable elements on paper; club-on inside the club bar; Highlight under forced colors."
     },
     "motion": [
       {
-        "name": "state-colour",
+        "name": "state-color",
         "value": "background-color .15s ease-out, color .15s ease-out",
         "purpose": "Button hover. Removed under prefers-reduced-motion or data-motion=\"reduce\"."
       }
@@ -769,7 +769,7 @@
     "unresolved": [
       "Entrance motion moment not designed.",
       "Monogram fallback for a club without a logo is prototype only.",
-      "Waiting and closed states: icon and colour not drawn.",
+      "Waiting and closed states: icon and color not drawn.",
       "Inputs and forms beyond radio choice groups not designed."
     ],
     "displayModes": {
@@ -919,7 +919,7 @@
       "name": "Season Set Ruler",
       "kind": "custom",
       "refersTo": "set-cell",
-      "description": "Signature: season steps as yard-line cells, current set filled in club colour, students as dots. Also the staff forms-matrix header.",
+      "description": "Signature: season steps as yard-line cells, current set filled in club color, students as dots. Also the staff forms-matrix header.",
       "html": "<section class=\"ds-season\"><h1>Fall season · <b>Set 2 of 5</b></h1><ol class=\"ds-sets\" style=\"--count:5\"><li class=\"done\"><span class=\"n\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" aria-hidden=\"true\"><path d=\"M3 8.5l3 3 7-7\"/></svg>1</span><span class=\"label\">Join</span></li><li aria-current=\"step\"><span class=\"n\">2</span><span class=\"label\">Forms</span><span class=\"on-set\"><i class=\"done\">L</i><i>M</i></span></li><li><span class=\"n\">3</span><span class=\"label\">Uniforms</span></li><li><span class=\"n\">4</span><span class=\"label\">Trip</span></li><li><span class=\"n\">5</span><span class=\"label\">Banquet</span></li></ol></section>",
       "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-season{background:var(--paper);border-bottom:2px solid var(--ink);padding:12px 0 8px;font-family:var(--read);color:var(--ink)}.ds-season h1{font:600 15px var(--mark);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0}.ds-season h1 b{color:var(--ink)}.ds-sets{list-style:none;padding:0;margin:8px 0 0;display:grid;grid-template-columns:repeat(var(--count,5),minmax(0,1fr))}.ds-sets li{position:relative;border-left:2px solid var(--ink);padding:6px 6px 14px 8px;min-height:60px}.ds-sets li:last-child{border-right:2px solid var(--ink)}.ds-sets li::after{content:'';position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,var(--ink) 2px,transparent 2px) 0 0/25% 100% repeat-x;opacity:.45}.ds-sets .n{display:flex;align-items:center;gap:4px;font:700 20px/1 var(--mark);color:var(--ink-2)}.ds-sets .n svg{width:15px;height:15px}.ds-sets .label{display:block;font-size:13px;line-height:1.2;margin-top:4px;color:var(--ink-2)}.ds-sets .done .n{color:var(--done)}.ds-sets [aria-current=step]{background:var(--club)}.ds-sets [aria-current=step] .n,.ds-sets [aria-current=step] .label{color:var(--club-on)}.ds-sets [aria-current=step]::after{background-image:linear-gradient(90deg,var(--club-on) 2px,transparent 2px)}.on-set{display:flex;gap:4px;margin-top:6px}.on-set i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font:700 12px var(--mark);font-style:normal;background:var(--paper);color:var(--due);box-shadow:inset 0 0 0 2px var(--due)}.on-set i.done{background:var(--done);color:var(--paper);box-shadow:none}.ds-sets [aria-current=step] .on-set{gap:8px}.ds-sets [aria-current=step] .on-set i{outline:2px solid var(--club-on)}"
     },
@@ -942,7 +942,7 @@
       "name": "Club Bar with Top Nav",
       "kind": "nav",
       "refersTo": "club-bar",
-      "description": "Club-coloured header; desktop nav with an inset underline on the current page.",
+      "description": "Club-colored header; desktop nav with an inset underline on the current page.",
       "html": "<header class=\"ds-bar\"><span class=\"mono\">FZN</span><span class=\"club\">FZN Band Boosters</span><nav><a href=\"#\" aria-current=\"page\">Home</a><a href=\"#\">Forms</a><a href=\"#\">Payments</a><a href=\"#\">Family</a></nav></header>",
       "css": ":host{--club:#5b2a86;--club-on:#fff;--club-text:#5b2a86;--club-tint:#f1ebf6;--paper:#fff;--grid:#e8eae6;--ink:#14161a;--ink-2:#4c5159;--hair:#d9dcd6;--done:#2f6b3a;--due:#9a4f08;--late:#a3261b;--ring:3px;--read:'Atkinson Hyperlegible',system-ui,sans-serif;--mark:'Barlow Condensed','Arial Narrow',sans-serif;}.ds-bar{background:var(--club);color:var(--club-on);height:56px;display:flex;align-items:center;gap:12px;padding:0 24px}.ds-bar .mono{width:34px;height:34px;border-radius:50%;background:var(--club-on);color:var(--club);display:grid;place-items:center;font:700 14px var(--mark)}.ds-bar .club{font:700 21px/1 var(--mark);letter-spacing:.01em}.ds-bar nav{margin-left:auto;display:flex;gap:4px}.ds-bar a{color:var(--club-on);text-decoration:none;font:600 18px var(--mark);padding:6px 12px}.ds-bar a[aria-current=page]{box-shadow:inset 0 -3px 0 var(--club-on)}"
     },
@@ -965,24 +965,24 @@
   ],
   "narrative": {
     "northStar": "The Dot Book",
-    "overview": "The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own colour used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.\n\nThe system is white-label. Each club supplies one colour at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theatre or sports club fits as well as a marching band.\n\nDensity is calm and phone-first: one column of ruled boxes on phones, a two-column box grid at 760px and up. Money is set like a ledger, with tabular figures in one right-aligned column that visibly sums to its total. The reference build is `design/reference/parent-home.html` (with `display-settings.html` for the Display page); every later surface, staff screens included, inherits from it.\n\nThe same page is drawn in four ink sets: light, dark (\"chart paper at night\", where the world's ink becomes the paper), and a high-contrast version of each. Layout, rules and shapes never change between modes; only the token values do. Windows contrast themes are honoured on top of all four.",
+    "overview": "The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own color used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.\n\nThe system is white-label. Each club supplies one color at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theater or sports club fits as well as a marching band.\n\nDensity is calm and phone-first: one column of ruled boxes on phones, a two-column box grid at 760px and up. Money is set like a ledger, with tabular figures in one right-aligned column that visibly sums to its total. The reference build is `design/reference/parent-home.html` (with `display-settings.html` for the Display page); every later surface, staff screens included, inherits from it.\n\nThe same page is drawn in four ink sets: light, dark (\"chart paper at night\", where the world's ink becomes the paper), and a high-contrast version of each. Layout, rules and shapes never change between modes; only the token values do. Windows contrast themes are honored on top of all four.",
     "keyCharacteristics": [
       "Chart paper ground: white with a 24px grid in `grid`, gutters and gaps on that grid.",
       "2px `ink` rules for structure, 1px `hair` rules for list rows, no shadows, no rounded containers.",
-      "One runtime club colour, derived into per-mode roles, used for the bar, the current set, and club actions.",
+      "One runtime club color, derived into per-mode roles, used for the bar, the current set, and club actions.",
       "Two faces: Atkinson Hyperlegible for anything read, Barlow Condensed for marks, labels and numbers on the chart.",
-      "Status is always a word plus an icon, never colour alone.",
+      "Status is always a word plus an icon, never color alone.",
       "Four display modes chosen per device, each defaulting to \"match my device\"."
     ],
     "rules": [
       {
         "name": "The Derived Club Rule",
-        "body": "A club picks one colour; the app computes `club-on`, the four `club-text-*` tones and the two `club-tint-*` washes from it. No club setting may produce a pairing below 4.5:1 (7:1 in high contrast), whatever colour is supplied.",
+        "body": "A club picks one color; the app computes `club-on`, the four `club-text-*` tones and the two `club-tint-*` washes from it. No club setting may produce a pairing below 4.5:1 (7:1 in high contrast), whatever color is supplied.",
         "section": "colors"
       },
       {
         "name": "The Highlighter Rule",
-        "body": "The club fill appears only on the club bar and the current set. Club colour elsewhere is `club-text`: links, the club outline button, the active tab, the checked option, focus.",
+        "body": "The club fill appears only on the club bar and the current set. Club color elsewhere is `club-text`: links, the club outline button, the active tab, the checked option, focus.",
         "section": "colors"
       },
       {
@@ -992,7 +992,7 @@
       },
       {
         "name": "The Night Chart Rule",
-        "body": "Dark mode is the same chart with ink and paper swapped: same rules, same layout, same grid (in `grid-dark`). Never introduce surfaces, greys or elevation that the light chart lacks.",
+        "body": "Dark mode is the same chart with ink and paper swapped: same rules, same layout, same grid (in `grid-dark`). Never introduce surfaces, grays or elevation that the light chart lacks.",
         "section": "colors"
       },
       {
@@ -1002,7 +1002,7 @@
       },
       {
         "name": "The Word-First Status Rule",
-        "body": "Every status colour travels with a word and usually an icon (\"Due Nov 15, in 8 days\", a tick plus \"All forms signed\"). Colour confirms; it never carries meaning alone.",
+        "body": "Every status color travels with a word and usually an icon (\"Due Nov 15, in 8 days\", a tick plus \"All forms signed\"). Color confirms; it never carries meaning alone.",
         "section": "colors"
       },
       {
@@ -1037,15 +1037,15 @@
       }
     ],
     "dos": [
-      "Do derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one colour; check every pairing reaches 4.5:1, and 7:1 in high contrast.",
+      "Do derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one color; check every pairing reaches 4.5:1, and 7:1 in high contrast.",
       "Do keep page gutters, box gaps and header heights on the 24px grid.",
       "Do draw structure with 2px `ink` rules and rows with 1px `hair` rules.",
       "Do set every amount in tabular figures, right-aligned in one column that sums to a 2px Total rule, with an \"as of\" time beside the owed figure.",
       "Do give each invoice its own Pay; fill only the soonest-due one.",
-      "Do pair every status colour with a word, and an icon where there is room.",
+      "Do pair every status color with a word, and an icon where there is room.",
       "Do keep tap targets at 44px or more (48px for the primary button, 56px for choice options, 64px for tabs) and the focus ring `club-text` 3px (4px in high contrast) with a 2px offset on paper (`club-on` inside the club bar).",
       "Do reuse the season set ruler as the header of the staff forms matrix.",
-      "Do build every new colour from the mode tokens so all four modes and forced colours work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.",
+      "Do build every new color from the mode tokens so all four modes and forced colors work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.",
       "Do set type in rem and let layouts reflow at 125% text.",
       "Do make \"Match my device\" the first and default choice of every display setting, and store display choices on the device."
     ],
@@ -1053,7 +1053,7 @@
       "Don't use drop shadows, blur or offset shadows; inset rules only.",
       "Don't round containers, buttons, badges or chips; circles are for people (and the radio mark) only.",
       "Don't use the club fill beyond the club bar and the current set, or change it between modes.",
-      "Don't colour an amount red; past-due red goes on the date line only.",
+      "Don't color an amount red; past-due red goes on the date line only.",
       "Don't set sentences in Barlow Condensed or numbers on the chart in Atkinson.",
       "Don't put a small uppercase label above a heading as decoration; labels name content beside them.",
       "Don't load fonts from Google in the app; self-host them.",

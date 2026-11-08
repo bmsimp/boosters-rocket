@@ -217,25 +217,25 @@ components:
 
 **Creative North Star: "The Dot Book"**
 
-The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own colour used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.
+The season is a drill, and a family always knows its next set. Every screen is a page from the dot book students carry: white chart paper ruled with a faint 24px coordinate grid, near-black 2px ink rules, square corners, and the club's own color used the way a drill writer uses a highlighter, to mark where you are now. Nothing floats; everything is drawn onto the paper.
 
-The system is white-label. Each club supplies one colour at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theatre or sports club fits as well as a marching band.
+The system is white-label. Each club supplies one color at runtime, and the app derives everything else from it (see Colors). The club leads; Booster Rocket is credited in the footer, never featured. The grid reads as plain graph paper, so a theater or sports club fits as well as a marching band.
 
 Density is calm and phone-first: one column of ruled boxes on phones, a two-column box grid at 760px and up. Money is set like a ledger, with tabular figures in one right-aligned column that visibly sums to its total. The reference build is `design/reference/parent-home.html` (with `display-settings.html` for the Display page); every later surface, staff screens included, inherits from it.
 
-The same page is drawn in four ink sets: light, dark ("chart paper at night", where the world's ink becomes the paper), and a high-contrast version of each. Layout, rules and shapes never change between modes; only the token values do. Windows contrast themes are honoured on top of all four.
+The same page is drawn in four ink sets: light, dark ("chart paper at night", where the world's ink becomes the paper), and a high-contrast version of each. Layout, rules and shapes never change between modes; only the token values do. Windows contrast themes are honored on top of all four.
 
 **Key Characteristics:**
 - Chart paper ground: white with a 24px grid in `grid`, gutters and gaps on that grid.
 - 2px `ink` rules for structure, 1px `hair` rules for list rows, no shadows, no rounded containers.
-- One runtime club colour, derived into per-mode roles, used for the bar, the current set, and club actions.
+- One runtime club color, derived into per-mode roles, used for the bar, the current set, and club actions.
 - Two faces: Atkinson Hyperlegible for anything read, Barlow Condensed for marks, labels and numbers on the chart.
-- Status is always a word plus an icon, never colour alone.
+- Status is always a word plus an icon, never color alone.
 - Four display modes chosen per device, each defaulting to "match my device".
 
 ## Colors
 
-A white-and-ink chart palette with one runtime club colour and three field-status colours, drawn in four modes.
+A white-and-ink chart palette with one runtime club color and three field-status colors, drawn in four modes.
 
 ### Display modes
 Modes are attributes on `<html>`, set before paint by `display.js` from the person's choices on the Display page. Choices are stored per device (`localStorage`, key `br-display`); every mode's default is "match my device", which removes the attribute and lets the media query decide.
@@ -245,14 +245,14 @@ Modes are attributes on `<html>`, set before paint by `display.js` from the pers
 - **Motion** `data-motion` `reduce` removes every transition; default follows `prefers-reduced-motion`.
 
 ### Primary (runtime, per club)
-The frontmatter values are FZN's purple default. The gold demo (`#gold`) hand-sets a light club colour: club `#f2c200`, club-on `#14161a`, club-text `#7a5c00` / `#f2c200` / `#5c4500` / `#ffd84d` (light / dark / light HC / dark HC), club-tint `#fdf6d6` / `#2e2a17` (light / dark). **The app must derive these, not ask clubs for them:**
-- **Club Fill** (`club`): the colour the club picked, unchanged in every mode. Fills the club bar, the current set cell and text selection.
+The frontmatter values are FZN's purple default. The gold demo (`#gold`) hand-sets a light club color: club `#f2c200`, club-on `#14161a`, club-text `#7a5c00` / `#f2c200` / `#5c4500` / `#ffd84d` (light / dark / light HC / dark HC), club-tint `#fdf6d6` / `#2e2a17` (light / dark). **The app must derive these, not ask clubs for them:**
+- **Club Fill** (`club`): the color the club picked, unchanged in every mode. Fills the club bar, the current set cell and text selection.
 - **On Club** (`club-on`): ink on the club fill, unchanged in every mode. White if white reaches 4.5:1 against the fill, otherwise `ink` `#14161a`.
-- **Club Text** (`club-text`): the club colour as text, link, outline button, checked option and focus ring on paper. It resolves per mode:
-  - `club-text-l`: 4.5:1 on light paper. The club colour itself if it passes, otherwise darkened (lower lightness, same hue). Gold becomes `#7a5c00` (6.25:1).
+- **Club Text** (`club-text`): the club color as text, link, outline button, checked option and focus ring on paper. It resolves per mode:
+  - `club-text-l`: 4.5:1 on light paper. The club color itself if it passes, otherwise darkened (lower lightness, same hue). Gold becomes `#7a5c00` (6.25:1).
   - `club-text-d`: 4.5:1 on dark paper. Lightened as needed; purple becomes `#c9a7ea` (8.63:1), gold stays `#f2c200` (10.57:1).
   - `club-text-lhc` / `club-text-dhc`: 7:1 on high-contrast paper (purple `#45206a` 12.59:1 / `#e5d3f7` 14.99:1; gold `#5c4500` 9.11:1 / `#ffd84d` 15.18:1).
-- **Club Wash** (`club-tint-l` / `club-tint-d`): a pale (or, in dark, deep) wash of the club colour for hover on club actions and choice options only. The mode's `club-text` must still reach 4.5:1 on it (7:1 in high contrast).
+- **Club Wash** (`club-tint-l` / `club-tint-d`): a pale (or, in dark, deep) wash of the club color for hover on club actions and choice options only. The mode's `club-text` must still reach 4.5:1 on it (7:1 in high contrast).
 
 ### Tertiary (status, per mode)
 | Role | Light | Dark | Light HC | Dark HC |
@@ -269,17 +269,17 @@ The frontmatter values are FZN's purple default. The gold demo (`#gold`) hand-se
 - **Hairline** (`hair`): 1px row dividers inside boxes; disabled button fill. Dark: `hair-dark`. High contrast: `hair` becomes `ink`, so every rule is full ink.
 
 ### Named Rules
-**The Derived Club Rule.** A club picks one colour; the app computes `club-on`, the four `club-text-*` tones and the two `club-tint-*` washes from it. No club setting may produce a pairing below 4.5:1 (7:1 in high contrast), whatever colour is supplied.
+**The Derived Club Rule.** A club picks one color; the app computes `club-on`, the four `club-text-*` tones and the two `club-tint-*` washes from it. No club setting may produce a pairing below 4.5:1 (7:1 in high contrast), whatever color is supplied.
 
-**The Highlighter Rule.** The club fill appears only on the club bar and the current set. Club colour elsewhere is `club-text`: links, the club outline button, the active tab, the checked option, focus.
+**The Highlighter Rule.** The club fill appears only on the club bar and the current set. Club color elsewhere is `club-text`: links, the club outline button, the active tab, the checked option, focus.
 
 **The Fixed Fill Rule.** `club` and `club-on` do not change between modes. The bar and the current set look the same by day and night; only club-text and club-tint adapt to the paper.
 
-**The Night Chart Rule.** Dark mode is the same chart with ink and paper swapped: same rules, same layout, same grid (in `grid-dark`). Never introduce surfaces, greys or elevation that the light chart lacks.
+**The Night Chart Rule.** Dark mode is the same chart with ink and paper swapped: same rules, same layout, same grid (in `grid-dark`). Never introduce surfaces, grays or elevation that the light chart lacks.
 
 **The Full-Ink Contrast Rule.** High contrast removes the grid, draws every hairline in full ink, sets text at 7:1 or better, and thickens the focus ring to 4px. Nothing else moves.
 
-**The Word-First Status Rule.** Every status colour travels with a word and usually an icon ("Due Nov 15, in 8 days", a tick plus "All forms signed"). Colour confirms; it never carries meaning alone.
+**The Word-First Status Rule.** Every status color travels with a word and usually an icon ("Due Nov 15, in 8 days", a tick plus "All forms signed"). Color confirms; it never carries meaning alone.
 
 ## Typography
 
@@ -336,7 +336,7 @@ Square corners everywhere (0px): boxes, buttons, badges, set cells, choice optio
 ## Components
 
 ### Club bar
-The club's own header. 56px, `club` fill, `club-on` text: monogram (34px circle, inverted colours, Barlow 700 0.875rem), club name, and on desktop the top nav and the account control; desktop nav links are 44px tall. The club's logo replaces the monogram when supplied.
+The club's own header. 56px, `club` fill, `club-on` text: monogram (34px circle, inverted colors, Barlow 700 0.875rem), club name, and on desktop the top nav and the account control; desktop nav links are 44px tall. The club's logo replaces the monogram when supplied.
 - **Account control:** a link (not a button) to Account / Display: 44px circle, 2px `club-on` outline, initials in Barlow 700. Its accessible name says where it goes ("Your account and display settings, Ana Ramirez"); `aria-current="page"` on the Display page.
 - **Focus on the club fill:** inside the bar the focus ring switches to `club-on`, because `club-text` can vanish against the fill.
 
@@ -346,7 +346,7 @@ The club's season steps drawn as yard-line cells. Not a control.
 - **Cells:** equal columns (`--count` = number of sets), 2px `ink` left rules with a closing right rule, min 60px tall; hash ticks along the foot (2px ink at 25% intervals, 45% opacity, 6px tall; full opacity in high contrast).
 - **States:** done sets show a tick and number in `done` plus hidden ", done"; the current set (`aria-current="step"`) fills with `club`, its number, label and ticks in `club-on`, plus hidden ", current set"; future sets in `ink-2`.
 - **Labels that don't fit:** each cell is a size container; under 76px wide (narrow phone, larger text, zoom) its label hides and the number stays. Labels clamp to two lines otherwise.
-- **Students on set:** one 20px dot per student under the current set, initial in Barlow 700 0.75rem. Finished: `done` fill, paper initial. Still to do: paper fill, `due` 2px inset ring and initial. On the club-filled current set every dot gets a 2px `club-on` outline and the dots spread to an 8px gap, so each keeps an edge whatever the club colour. Dots are decoration; the same facts are stated in words in the students box.
+- **Students on set:** one 20px dot per student under the current set, initial in Barlow 700 0.75rem. Finished: `done` fill, paper initial. Still to do: paper fill, `due` 2px inset ring and initial. On the club-filled current set every dot gets a 2px `club-on` outline and the dots spread to an 8px gap, so each keeps an edge whatever the club color. Dots are decoration; the same facts are stated in words in the students box.
 - **Many sets:** with more than 6 sets on a phone (<760px) every label hides and cells show numbers only. At 760px+ labels return.
 - **Reuse:** staff screens use the same ruler as the column header of the forms matrix, one column per set.
 
@@ -355,7 +355,7 @@ The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px
 
 ### Money lines and total
 - One row per open invoice: what ("Fall uniform fee, Maya"), a meta date line, and the amount right-aligned in tabular figures.
-- **Urgency ramp, on the date line only:** due later `ink-2` ("Due Nov 22"); due soon `due` bold with the distance ("Due Nov 15, in 8 days"); past due `late` bold ("Was due Oct 30"). Amounts never change colour. Paid rows show "Paid Aug 28" and a `done` "Paid" under the amount.
+- **Urgency ramp, on the date line only:** due later `ink-2` ("Due Nov 22"); due soon `due` bold with the distance ("Due Nov 15, in 8 days"); past due `late` bold ("Was due Oct 30"). Amounts never change color. Paid rows show "Paid Aug 28" and a `done` "Paid" under the amount.
 - **Total:** one amount column that sums to a 2px `ink` rule and a bold "Total". The big Display figure above equals the Total.
 - **One Pay per invoice:** QuickBooks pays one invoice at a time. The soonest-due invoice gets the filled black Pay with an arrow; others get outlined Pay. Each Pay's accessible name states the amount and invoice.
 - **As of:** the owed figure always carries its source and time ("Owed now. From QuickBooks, as of 2:14 pm.").
@@ -368,7 +368,7 @@ The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px
 - **Line** (paper, ink border and text, 44px, body-row size): other Pay buttons and ordinary actions ("Update my details"). Hover fills ink.
 - **Club** (paper, `club-text` border and text, 44px, body-row size): actions that belong to the club's season ("Sign Maya's forms"). Hover `club-tint`.
 - **Disabled** (`aria-disabled`): `hair` fill and border, `ink-2` text, not-allowed cursor. In high contrast (where `hair` is full ink) it becomes paper fill with a dashed `ink` border and `ink-2` text, so disabled never reads as a filled primary.
-- **Motion:** colour only, 150ms ease-out; none under reduced motion.
+- **Motion:** color only, 150ms ease-out; none under reduced motion.
 
 ### Choice group (ruled options)
 A set of radio buttons drawn as ruled options; the Display page is built from them. Inherit it for any single-choice setting.
@@ -381,20 +381,20 @@ A set of radio buttons drawn as ruled options; the Display page is built from th
 Account / Display, reached from the account control. One box of four choice groups, in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger, each option name previewed at its own size), **Motion** (Match my device, Reduce motion). "Match my device" is always first and is the default. Changes apply at once; a closing `ink-2` note says the choice is saved on this device only.
 
 ### State line
-One vocabulary across the product: **to do, waiting, done, closed**. Each is an icon plus words in Atkinson 700 0.9375rem. Built so far: to do = `due` alert-circle plus "2 forms to sign"; done = `done` tick plus "All forms signed". Waiting and closed must follow the same icon-plus-words pattern; their icon and colour are not yet drawn. Counts beside a person ("1 of 3 signed") are Barlow 600 1rem, `ink-2`, right-aligned.
+One vocabulary across the product: **to do, waiting, done, closed**. Each is an icon plus words in Atkinson 700 0.9375rem. Built so far: to do = `due` alert-circle plus "2 forms to sign"; done = `done` tick plus "All forms signed". Waiting and closed must follow the same icon-plus-words pattern; their icon and color are not yet drawn. Counts beside a person ("1 of 3 signed") are Barlow 600 1rem, `ink-2`, right-aligned.
 
 ### Details list
 Two-column definition list: Label-style terms in `ink-2`, values in Body row.
 
 ### Navigation
-- **Phone:** fixed bottom tab bar, 2px `ink` top rule, four 64px tabs (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labelled ("2 to sign").
+- **Phone:** fixed bottom tab bar, 2px `ink` top rule, four 64px tabs (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labeled ("2 to sign").
 - **Desktop (760px+):** tabs hide; links move into the club bar in Barlow 600 1.125rem, `club-on`, active marked by a 3px inset underline.
 
 ### Focus
 `:focus-visible` everywhere: `club-text` outline, 3px (4px in high contrast), 2px offset; `club-on` inside the club bar. High contrast also thickens link underlines to 2px.
 
-### Windows contrast themes (forced colours)
-Under `forced-colors: active` the system palette wins; the build only keeps every state readable without its own colours:
+### Windows contrast themes (forced colors)
+Under `forced-colors: active` the system palette wins; the build only keeps every state readable without its own colors:
 - The page grid is dropped; the club bar gets a 2px `CanvasText` bottom rule; the monogram gets a 2px `CanvasText` ring.
 - The current set fills with `Highlight`, its number, label and ticks in `HighlightText` (`forced-color-adjust: none`). Hash ticks on other sets are kept in `CanvasText` at full opacity.
 - Student dots are drawn on `Canvas` with `CanvasText` initial and ring; finished dots invert (`CanvasText` fill, `Canvas` initial). On the current set their outline is `HighlightText`.
@@ -405,20 +405,20 @@ Under `forced-colors: active` the system palette wins; the build only keeps ever
 Inputs and forms beyond radio choice groups, the entrance motion moment, the waiting and closed states, and the monogram fallback for a club without a logo (the build's monogram is a prototype).
 
 ### Copy patterns
-The voice is PRODUCT.md's warm, plain neighbour, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and when it will come back.
+The voice is PRODUCT.md's warm, plain neighbor, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and when it will come back.
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one colour; check every pairing reaches 4.5:1, and 7:1 in high contrast.
+- **Do** derive `club-on`, the four `club-text-*` tones and both `club-tint-*` washes from the club's one color; check every pairing reaches 4.5:1, and 7:1 in high contrast.
 - **Do** keep page gutters, box gaps and header heights on the 24px grid.
 - **Do** draw structure with 2px `ink` rules and rows with 1px `hair` rules.
 - **Do** set every amount in tabular figures, right-aligned in one column that sums to a 2px Total rule, with an "as of" time beside the owed figure.
 - **Do** give each invoice its own Pay; fill only the soonest-due one.
-- **Do** pair every status colour with a word, and an icon where there is room.
+- **Do** pair every status color with a word, and an icon where there is room.
 - **Do** keep tap targets at 44px or more (48px for the primary button, 56px for choice options, 64px for tabs) and the focus ring `club-text` 3px (4px in high contrast) with a 2px offset on paper (`club-on` inside the club bar).
 - **Do** reuse the season set ruler as the header of the staff forms matrix.
-- **Do** build every new colour from the mode tokens so all four modes and forced colours work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.
+- **Do** build every new color from the mode tokens so all four modes and forced colors work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.
 - **Do** set type in rem and let layouts reflow at 125% text.
 - **Do** make "Match my device" the first and default choice of every display setting, and store display choices on the device.
 
@@ -426,7 +426,7 @@ The voice is PRODUCT.md's warm, plain neighbour, kind about money. On screen tha
 - **Don't** use drop shadows, blur or offset shadows; inset rules only.
 - **Don't** round containers, buttons, badges or chips; circles are for people (and the radio mark) only.
 - **Don't** use the club fill beyond the club bar and the current set, or change it between modes.
-- **Don't** colour an amount red; past-due red goes on the date line only.
+- **Don't** color an amount red; past-due red goes on the date line only.
 - **Don't** set sentences in Barlow Condensed or numbers on the chart in Atkinson.
 - **Don't** put a small uppercase label above a heading as decoration; labels name content beside them.
 - **Don't** load fonts from Google in the app; self-host them.

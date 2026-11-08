@@ -94,7 +94,7 @@ not make these hard to add later, but none of them is designed here.
   hands-on test (§15).
 
 Library choices (ORM, sign-in library, UI kit, job queue) are made in the implementation plan,
-within these rules: mainstream and actively maintained; no paid licence; supports generic OIDC
+within these rules: mainstream and actively maintained; no paid license; supports generic OIDC
 providers; and nothing that requires a developer to run a build to change a setting.
 
 ## 4. Data model
@@ -366,7 +366,7 @@ A step is **done** for a family or student when every required item in it is met
 **current set** on a family's ruler is the club's current step by date or, with no dates, the first
 step not yet done by everyone in the family. Each student's marker shows whether they have finished
 the current step. Parents see each requirement's progress in words ("1 of 2 shifts", "4 of 6 hours",
-"Signed", "Paid"), never by colour alone.
+"Signed", "Paid"), never by color alone.
 
 ## 11. Volunteering
 
@@ -473,7 +473,7 @@ Short hands-on tests, done first in the implementation plan, because the design 
 |---|---|
 | Does an invoice query with `include=invoiceLink` return the pay link for invoices with online payment on? | §8.2. The old extension never asked for it |
 | Can a user created through Graph sign in with email one-time code only, sign-up off? | §5.2. Microsoft's docs don't say |
-| Documenso: Entra staff sign-in with no licence key; embedding on Safari/iOS; one-recipient documents from a two-role template; emails off; signed PDF validates with timestamp; audit content; real webhook payloads; memory use; upgrade and restore | §9. Settles plan size and whether DocuSeal is needed as a fallback |
+| Documenso: Entra staff sign-in with no license key; embedding on Safari/iOS; one-recipient documents from a two-role template; emails off; signed PDF validates with timestamp; audit content; real webhook payloads; memory use; upgrade and restore | §9. Settles plan size and whether DocuSeal is needed as a fallback |
 
 | Can the portal create an invoice with a chosen item on a sub-customer, and void it, under the same app permissions? | §11.5. The only invoice the portal writes |
 

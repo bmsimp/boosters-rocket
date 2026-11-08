@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Atkinson_Hyperlegible, Barlow_Condensed } from "next/font/google";
-import { getClubSettings, DEFAULT_COLOUR } from "@/lib/settings/club";
+import { getClubSettings, DEFAULT_COLOR } from "@/lib/settings/club";
 import { deriveClubTokens, clubCssVars, normalizeHex } from "@/lib/theme/contrast";
 import { DISPLAY_SCRIPT } from "./display-script";
 import "./booster.css";
@@ -15,21 +15,21 @@ export async function generateMetadata(): Promise<Metadata> {
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 export const dynamic = "force-dynamic";
 
-/** A bad stored colour must never take every page down: fall back to the default. */
-function safeVars(colour: string) {
+/** A bad stored color must never take every page down: fall back to the default. */
+function safeVars(color: string) {
   try {
-    return clubCssVars(deriveClubTokens(normalizeHex(colour) ?? DEFAULT_COLOUR));
+    return clubCssVars(deriveClubTokens(normalizeHex(color) ?? DEFAULT_COLOR));
   } catch {
-    return clubCssVars(deriveClubTokens(DEFAULT_COLOUR));
+    return clubCssVars(deriveClubTokens(DEFAULT_COLOR));
   }
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const club = await getClubSettings();
-  if (!club.storedColourValid) {
-    console.warn(`[club settings] The stored club color is not a valid hex value; using the default ${DEFAULT_COLOUR}. Save a valid color on the staff Club settings page to fix it.`);
+  if (!club.storedColorValid) {
+    console.warn(`[club settings] The stored club color is not a valid hex value; using the default ${DEFAULT_COLOR}. Save a valid color on the staff Club settings page to fix it.`);
   }
-  const vars = safeVars(club.colour); // values are hex only
+  const vars = safeVars(club.color); // values are hex only
   return (
     <html lang="en" className={`${read.variable} ${mark.variable}`} style={vars as React.CSSProperties} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: DISPLAY_SCRIPT }} /></head>

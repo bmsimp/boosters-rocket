@@ -7,12 +7,12 @@
     data-contrast standard | more         (default: prefers-contrast)
     data-text     standard | large | larger
     data-motion   reduce                  (default: prefers-reduced-motion)
-  Windows contrast themes (forced-colors) are honoured at the end of this file.
+  Windows contrast themes (forced-colors) are honored at the end of this file.
 
-  Club colour. The app derives every --club-* value from the one colour a club picks:
+  Club color. The app derives every --club-* value from the one color a club picks:
     --club          fill for the bar and the current set (same in every mode)
     --club-on       ink on that fill: white or near-black, whichever passes 4.5:1
-    --club-text-*   the club colour as text, outline and focus ring on paper, adjusted per mode:
+    --club-text-*   the club color as text, outline and focus ring on paper, adjusted per mode:
                     l (light, 4.5:1), d (dark, 4.5:1), lhc / dhc (high contrast, 7:1)
     --club-tint-*   a quiet wash for hover, per theme
 */
@@ -37,7 +37,7 @@
   --cell: 24px;             /* the chart grid; page gutters and gaps sit on it */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 48px;
 }
-/* Demo only: a light club colour, to prove the theme holds. Open with #gold. */
+/* Demo only: a light club color, to prove the theme holds. Open with #gold. */
 :root[data-club="gold"] {
   --club: #f2c200; --club-on: #14161a;
   --club-text-l: #7a5c00; --club-text-d: #f2c200; --club-text-lhc: #5c4500; --club-text-dhc: #ffd84d;
@@ -284,7 +284,7 @@ footer a { color: var(--club-text); }
   :root:not([data-contrast="standard"]) .btn[aria-disabled="true"] { background: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
 }
 
-/* Windows contrast themes: let the system palette win, keep every state readable without our colours. */
+/* Windows contrast themes: let the system palette win, keep every state readable without our colors. */
 @media (forced-colors: active) {
   body { background-image: none; }
   .bar { border-bottom: 2px solid CanvasText; }

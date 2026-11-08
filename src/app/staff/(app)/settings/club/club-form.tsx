@@ -11,7 +11,7 @@ export function ClubForm({ initial }: { initial: ClubSettings }) {
     <form action={action} className="stack">
       <label className="field"><span>Club name</span><input name="name" defaultValue={initial.name} required maxLength={60} /></label>
       <label className="field"><span>Short name (on the round badge, up to 4 letters)</span><input name="shortName" defaultValue={initial.shortName} required maxLength={4} /></label>
-      <label className="field"><span>Club colour</span><input name="colour" type="color" defaultValue={initial.colour} /></label>
+      <label className="field"><span>Club color</span><input name="color" type="color" defaultValue={initial.color} /></label>
       <label className="field"><span>Treasurer email (shown to parents for questions)</span><input name="treasurerEmail" type="email" defaultValue={initial.treasurerEmail ?? ""} /></label>
       {state && !state.ok && <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
       {state?.ok && <p role="status">Saved. Every page now uses these.</p>}
