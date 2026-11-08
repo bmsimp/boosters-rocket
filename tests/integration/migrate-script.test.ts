@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import postgres from "postgres";
 
-const ADMIN_URL = "postgres://booster:booster@localhost:5433/booster";
+const ADMIN_URL = "postgres://booster:booster@localhost:5433/postgres";
 const FRESH = "booster_migrate_script_test";
 const FRESH_URL = `postgres://booster:booster@localhost:5433/${FRESH}`;
 
