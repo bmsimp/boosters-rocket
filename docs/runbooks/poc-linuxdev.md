@@ -73,8 +73,10 @@ the app and the migration will fail to log in to the database. Fix it one of two
   docker compose -f docker-compose.poc.yml --env-file .env.poc down
   docker volume rm booster-rocket-pgdata
   ```
-  You will then need to re-run the seed in section 5 (the guardian rows are gone). Staff and parent
-  accounts are re-created at next sign-in.
+  The new `.env.poc` has fresh secrets only: the Microsoft values from sections 3 and 4
+  (`STAFF_ENTRA_*`, `PARENT_OIDC_*`) and `BOOTSTRAP_ADMIN_EMAIL` are blank. Re-enter all of them
+  *before* you deploy. After the deploy, re-run the seed in section 5 (the guardian rows are gone).
+  Staff and parent accounts are re-created at next sign-in.
 
 ## 3. Staff sign-in (the band's Entra tenant)
 
@@ -317,7 +319,14 @@ Run these in order, in a private browser window. Record each outcome in section 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
 (staff, parent or system), who, the action, and details. A refusal's reason is in the details as
-`reason`. The person always sees the same refusal page; the reason is only in the log.
+`reason`: each row has a **Details** line you can open, showing the saved before/after values
+(for example `{"reason":"no_guardian"}`). Times are shown in Central time. The person always sees the same
+refusal page; the reason is only in the log. If the page itself is unavailable, read the log from the
+database on linuxdev:
+```bash
+cd ~/booster-rocket
+docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "select at, door, actor_label, action, after from audit_log order by at desc limit 20;"
+```
 
 ## 9. Troubleshooting
 
@@ -326,7 +335,7 @@ shows only to people who hold the audit-read permission; Admin does). Each row s
 | Parent sees the refusal page; audit `signin.refused` (door parent), reason `missing_object_id` | The app never saved this parent's Object ID: the token could not be verified (look for a `parent.object_id_unverified` row just before it) | Read the `parent.object_id_unverified` reason below; fix that; sign in again |
 | `signin.refused`, reason `no_guardian` | No guardian row has this Object ID | Expected for parent two. For a real tester: copy the Object ID from the external tenant user and run the seed (section 5) |
 | `signin.refused`, reason `disabled` | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited' where email='<email>';"` |
-| Staff `signin.refused` (door staff, no reason shown) | The Microsoft account is not a known staff member and is not `BOOTSTRAP_ADMIN_EMAIL` | Sign in with the bootstrap email, or have an Admin add the person first (**Staff** menu) |
+| Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not `BOOTSTRAP_ADMIN_EMAIL` | Sign in with the bootstrap email, or have an Admin add the person first (**Staff** menu) |
 | `parent.object_id_unverified`, reason `subject_mismatch` | The ID token's subject differs from the account being signed in | Sign out everywhere, clear cookies, try again; if it repeats, report it (should not happen) |
 | `parent.object_id_unverified`, reason `invalid_token:...` (for example `invalid_token:ERR_JWT_CLAIM_VALIDATION_FAILED:iss` or `:aud`, or `ERR_JWT_EXPIRED`) | Wrong issuer or audience, or an expired token. `iss`: discovery URL is for another tenant; `aud`: `PARENT_OIDC_CLIENT_ID` is not the parent app's client ID | Re-check the three `PARENT_OIDC_*` values in `.env.poc`, then restart the app: `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d --force-recreate app` |
 | `parent.object_id_unverified`, reason `missing_oid` | The token verified but has no `oid` claim | Check the app registration is in the **external** tenant and sign-in uses its user flow; report the finding (this is the open risk in the spec) |
