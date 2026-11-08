@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# One-time setup for the Booster Rocket proof of concept on linuxdev. Safe to run again.
+set -euo pipefail
+
+BR_DIR="${BR_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
+cd "$BR_DIR"
+
+need() { command -v "$1" >/dev/null 2>&1 || { printf 'Missing: %s\n' "$1" >&2; exit 2; }; }
+need docker; need git; need openssl
+
+if ! docker network inspect booster-rocket-edge >/dev/null 2>&1; then
+  docker network create booster-rocket-edge >/dev/null
+  echo "Created network booster-rocket-edge."
+else
+  echo "Network booster-rocket-edge already exists."
+fi
+
+if [ ! -f .env.poc ]; then
+  umask 077
+  sed -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+      -e "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env.poc.example > .env.poc
+  chmod 600 .env.poc
+  echo "Created .env.poc with fresh secrets. Fill in the Microsoft values from the runbook."
+else
+  echo ".env.poc already exists; left as is."
+fi
+
+cat <<'EOT'
+
+One manual step: let cloudflared reach the app.
+In ~/n8n/docker-compose.yml add `booster-rocket-edge` under the cloudflared service's networks:
+      - booster-rocket-edge
+and under the top-level networks:
+  booster-rocket-edge:
+    external: true
+Then run:  docker compose -f ~/n8n/docker-compose.yml up -d cloudflared
+
+When .env.poc is complete, deploy with:  scripts/poc/deploy.sh
+EOT

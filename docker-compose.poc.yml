@@ -1,0 +1,56 @@
+name: booster-rocket
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: booster
+      POSTGRES_USER: booster
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      TZ: America/Chicago
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U booster -d booster"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    image: booster-rocket-app:current
+    container_name: booster-rocket-app
+    restart: unless-stopped
+    env_file: .env.poc
+    environment:
+      DATABASE_URL: postgresql://booster:${DB_PASSWORD}@db:5432/booster
+      TZ: America/Chicago
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal, edge]
+
+  migrate:
+    # Same image as app (a separate `build:` here would go stale; profile services aren't rebuilt by `compose build`).
+    image: booster-rocket-app:current
+    profiles: ["tools"]
+    env_file: .env.poc
+    environment:
+      DATABASE_URL: postgresql://booster:${DB_PASSWORD}@db:5432/booster
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal]
+    command: ["node", "tools/scripts/migrate.mjs"]
+    restart: "no"
+
+volumes:
+  pgdata:
+    name: booster-rocket-pgdata
+
+networks:
+  internal:
+    name: booster-rocket-internal
+  edge:
+    name: booster-rocket-edge
+    external: true

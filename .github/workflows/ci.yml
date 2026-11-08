@@ -19,6 +19,7 @@ jobs:
         with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/check-image-secrets.sh scripts/smoke-image.sh
       - run: pnpm typecheck
       - run: pnpm test
       - name: Build with fake secrets
