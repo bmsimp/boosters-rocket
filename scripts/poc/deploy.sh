@@ -65,7 +65,12 @@ git pull --ff-only || die 6 "git pull failed. Nothing was changed."
 # compose build has already moved :current to the new image, so remember what is actually running.
 running="$(docker inspect --format '{{.Image}}' booster-rocket-app 2>/dev/null || true)"
 if [ -n "$running" ]; then
-  docker image tag "$running" "$APP_IMAGE:previous"
+  pre_health="$(docker inspect --format '{{.State.Health.Status}}' booster-rocket-app 2>/dev/null || echo missing)"
+  if [ "$pre_health" = "healthy" ]; then
+    docker image tag "$running" "$APP_IMAGE:previous"
+  else
+    say "The running app isn't healthy, so the previous good image was kept for rollback."
+  fi
 fi
 recreate_app
 say "Deployed $(git rev-parse --short HEAD)."

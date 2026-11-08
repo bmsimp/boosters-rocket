@@ -41,7 +41,7 @@ In ~/n8n/docker-compose.yml add `booster-rocket-edge` under the cloudflared serv
 and under the top-level networks:
   booster-rocket-edge:
     external: true
-Then run:  docker compose -f ~/n8n/docker-compose.yml up -d cloudflared
+Then run:  docker compose -f ~/n8n/docker-compose.yml up -d --no-deps cloudflared
 
 When .env.poc is complete, deploy with:  scripts/poc/deploy.sh
 EOT

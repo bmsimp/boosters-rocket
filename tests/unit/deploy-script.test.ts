@@ -34,7 +34,8 @@ beforeEach(() => {
       *"run --rm migrate"*) exit \${MIGRATE_FAIL:-0};;
       *" build app"*) exit \${BUILD_FAIL:-0};;
       *"inspect --format {{.Image}}"*) [ -z "\${NO_RUNNING:-}" ] || exit 1; echo "sha256:running123";;
-      *"inspect --format {{.State.Health.Status}}"*) echo "\${HEALTH:-healthy}";;
+      *"inspect --format {{.State.Health.Status}}"*) if [ -n "\${PRE_HEALTH:-}" ] && [ ! -e "\${BR_DIR}/.recreated" ]; then echo "\${PRE_HEALTH}"; else echo "\${HEALTH:-healthy}"; fi;;
+      *"up -d --no-deps --force-recreate app"*) touch "\${BR_DIR}/.recreated"; exit 0;;
       *"image inspect booster-rocket-app:previous"*) exit \${NO_PREVIOUS:-0};;
       *"image inspect booster-rocket-app:current"*) exit \${NO_CURRENT:-0};;
       *) exit 0;;
@@ -114,6 +115,15 @@ describe("scripts/poc/deploy.sh", () => {
     expect(r.stderr).toContain("No previous image");
     expect(calls()).not.toContain("up -d");
     expect(calls()).not.toContain("image tag");
+  });
+
+  it("keeps the existing previous image when the running app is unhealthy, and still deploys", () => {
+    const r = run([], { PRE_HEALTH: "unhealthy" });
+    expect(r.status).toBe(0);
+    expect(calls()).not.toContain("booster-rocket-app:previous");
+    expect(calls()).toContain("up -d --no-deps --force-recreate app");
+    expect(r.stdout).toContain("previous good image was kept for rollback");
+    expect(r.stdout).toContain("Deployed abc1234");
   });
 
   it("does not tag a previous image when no container is running", () => {

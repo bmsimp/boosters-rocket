@@ -48,10 +48,15 @@ Do this over SSH as user `brian`.
 
    This goes in the n8n file, not a Booster Rocket file, because the weekly cron script that updates
    cloudflared recreates it from that file and would otherwise drop the connection.
+   The edit adds `booster-rocket-edge` to the `networks:` list cloudflared already has, and to the
+   top-level `networks:` as external.
+
+   **Never run `docker image prune -a` on this host**: it would delete the unused
+   `booster-rocket-app:previous` rollback image. Plain `docker image prune` (dangling images only) is fine.
 4. **Pick a quiet time, then recreate cloudflared.** Recreating it briefly drops *every* site on this
    tunnel (n8n, the CIPP tracker, and anything else), usually for a few seconds to a minute.
    ```bash
-   docker compose -f ~/n8n/docker-compose.yml up -d cloudflared
+   docker compose -f ~/n8n/docker-compose.yml up -d --no-deps cloudflared
    ```
 5. Confirm the tunnel reconnected (you should see several lines):
    ```bash
@@ -315,6 +320,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 6. Sign out at both doors -> both `signout` entries appear.
 - [ ] 7. The second External ID user (no guardian row) -> refusal page; audit shows `signin.refused` with reason `no_guardian`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
+  After a no-change redeploy, `previous` and `current` are the same image, so `--rollback` only exercises the mechanism; a real rollback test needs a real new commit.
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
@@ -325,7 +331,7 @@ refusal page; the reason is only in the log. If the page itself is unavailable, 
 database on linuxdev:
 ```bash
 cd ~/booster-rocket
-docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "select at, door, actor_label, action, after from audit_log order by at desc limit 20;"
+docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "select at, door, actor_label, action, before, after from audit_log order by at desc limit 20;"
 ```
 
 ## 9. Troubleshooting
@@ -334,10 +340,10 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 |---|---|---|
 | Parent sees the refusal page; audit `signin.refused` (door parent), reason `missing_object_id` | The app never saved this parent's Object ID: the token could not be verified (look for a `parent.object_id_unverified` row just before it) | Read the `parent.object_id_unverified` reason below; fix that; sign in again |
 | `signin.refused`, reason `no_guardian` | No guardian row has this Object ID | Expected for parent two. For a real tester: copy the Object ID from the external tenant user and run the seed (section 5) |
-| `signin.refused`, reason `disabled` | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited' where email='<email>';"` |
+| `signin.refused`, reason `disabled` | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited' where email='<email>';"` (this SQL fix bypasses the audit log, so it is acceptable only for test data) |
 | Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not `BOOTSTRAP_ADMIN_EMAIL` | Sign in with the bootstrap email, or have an Admin add the person first (**Staff** menu) |
 | `parent.object_id_unverified`, reason `subject_mismatch` | The ID token's subject differs from the account being signed in | Sign out everywhere, clear cookies, try again; if it repeats, report it (should not happen) |
-| `parent.object_id_unverified`, reason `invalid_token:...` (for example `invalid_token:ERR_JWT_CLAIM_VALIDATION_FAILED:iss` or `:aud`, or `ERR_JWT_EXPIRED`) | Wrong issuer or audience, or an expired token. `iss`: discovery URL is for another tenant; `aud`: `PARENT_OIDC_CLIENT_ID` is not the parent app's client ID | Re-check the three `PARENT_OIDC_*` values in `.env.poc`, then restart the app: `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d --force-recreate app` |
+| `parent.object_id_unverified`, reason `invalid_token:...` (for example `invalid_token:ERR_JWT_CLAIM_VALIDATION_FAILED:iss` or `:aud`, or `ERR_JWT_EXPIRED`) | Wrong issuer or audience, or an expired token. `iss`: discovery URL is for another tenant; `aud`: `PARENT_OIDC_CLIENT_ID` is not the parent app's client ID | Re-check the three `PARENT_OIDC_*` values in `.env.poc`, then restart the app: `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d --force-recreate app` (use this only after a successful deploy; after an exit-3 deploy, `:current` is the new unmigrated build) |
 | `parent.object_id_unverified`, reason `missing_oid` | The token verified but has no `oid` claim | Check the app registration is in the **external** tenant and sign-in uses its user flow; report the finding (this is the open risk in the spec) |
 | `parent.object_id_unverified`, reasons `no_id_token`, `discovery_failed`, `verifier_unavailable`, `user_missing` | No ID token returned; the discovery URL cannot be fetched from linuxdev; or the account row vanished | Open the discovery URL in a browser; check linuxdev has internet access; check admin consent (section 4 B5) |
 | `parent.object_id_conflict` in audit | The same account came back with a different Object ID | Test data: use a different external user; report it |
@@ -366,3 +372,25 @@ Fill one row per checklist step each time you run it.
 | | | 8 | | |
 
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
+
+Record results from the development checkout (on Windows), not by committing on linuxdev: a local commit there makes the next `git pull --ff-only` fail (exit 6) or trips the clean-tree check (exit 2).
+
+## 11. Removing the proof of concept
+
+Do these in order. Removing the network first would break cloudflared's next start (including the weekly
+update) and take the tunnel down for n8n and CIPP.
+
+1. Stop and remove the app:
+   ```bash
+   cd ~/booster-rocket
+   docker compose -f docker-compose.poc.yml --env-file .env.poc down
+   ```
+2. Revert the edit to `~/n8n/docker-compose.yml` (remove `booster-rocket-edge` from cloudflared's `networks:`
+   and from the top-level `networks:`), then recreate cloudflared:
+   ```bash
+   docker compose -f ~/n8n/docker-compose.yml up -d --no-deps cloudflared
+   docker logs cloudflared 2>&1 | grep "Registered tunnel connection"
+   ```
+3. Only now remove the network: `docker network rm booster-rocket-edge`
+4. Optional: delete the data with `docker volume rm booster-rocket-pgdata`, and the images with
+   `docker image rm booster-rocket-app:current booster-rocket-app:previous`.
