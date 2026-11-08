@@ -20,7 +20,8 @@ if [ ! -f .env.poc ]; then
   umask 077
   tmp="$(mktemp ./.env.poc.XXXXXX)"
   trap 'rm -f "$tmp"' EXIT
-  sed -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|"       -e "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env.poc.example > "$tmp"
+  sed -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+      -e "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env.poc.example > "$tmp"
   for key in BETTER_AUTH_SECRET DB_PASSWORD; do
     grep -Eq "^${key}=.+" "$tmp" || { echo "Could not generate ${key}; .env.poc was not created." >&2; exit 2; }
   done

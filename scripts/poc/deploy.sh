@@ -16,6 +16,11 @@ cd "$BR_DIR"
 say() { printf '%s\n' "$*"; }
 die() { local code="$1"; shift; printf '%s\n' "$*" >&2; exit "$code"; }
 
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$BR_DIR/.deploy.lock"
+  flock -n 9 || die 2 "Another deploy is running. Try again when it finishes."
+fi
+
 check_env_file() {
   [ -f .env.poc ] || die 2 ".env.poc is missing. Run scripts/poc/setup.sh first."
   if [ "$(uname -s)" = "Linux" ]; then

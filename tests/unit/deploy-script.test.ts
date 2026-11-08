@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, existsSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 
 const SCRIPT = path.resolve("scripts/poc/deploy.sh");
 let dir: string, bin: string, log: string;
@@ -19,6 +19,7 @@ function run(args: string[] = [], env: Record<string, string> = {}) {
     env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, BR_DIR: dir, BR_HEALTH_TIMEOUT: "2", ...env },
   });
 }
+const hasFlock = spawnSync("bash", ["-c", "command -v flock"]).status === 0;
 const calls = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
 
 beforeEach(() => {
@@ -120,5 +121,18 @@ describe("scripts/poc/deploy.sh", () => {
     expect(r.status).toBe(0);
     expect(calls()).not.toContain("booster-rocket-app:previous");
     expect(calls()).toContain("up -d --no-deps --force-recreate app");
+  });
+
+  it.skipIf(!hasFlock)("refuses when another deploy holds the lock", async () => {
+    const holder = spawn("bash", ["-c", 'exec 9>"$1/.deploy.lock"; flock 9; echo locked; sleep 5', "_", dir.replace(/\\/g, "/")]);
+    try {
+      await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
+      const r = run();
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("Another deploy is running");
+      expect(calls()).not.toContain("docker");
+    } finally {
+      holder.kill();
+    }
   });
 });
