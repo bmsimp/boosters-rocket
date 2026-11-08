@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth } from "better-auth/plugins";
 import { db } from "@/lib/db/client";
-import { recordSignin } from "./signin-audit";
+import { recordSignin, recordSignout } from "./signin-audit";
 import { captureParentObjectId, PARENT_PROVIDER_ID } from "./parent-object-id";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env, parentDoorEnabled } from "@/env";
@@ -23,7 +23,10 @@ export const parentAuth = betterAuth({
   // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
   advanced: { cookiePrefix: "br_parent", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
   databaseHooks: {
-    session: { create: { after: (session, ctx) => recordSignin("parent", session, ctx) } },
+    session: {
+      create: { after: (session, ctx) => recordSignin("parent", session, ctx) },
+      delete: { after: (session, ctx) => recordSignout("parent", session, ctx) },
+    },
     // Better Auth drops `input: false` fields from provider profiles, so the verified `oid` is captured here instead.
     account: {
       create: { after: async (account, ctx) => { await captureParentObjectId(account, undefined, ctx); } },

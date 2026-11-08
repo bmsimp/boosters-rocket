@@ -446,9 +446,14 @@ Each is enforced by an automated test that fails the build.
 
 ## 13. Audit log
 
-Every write records: who (person and door), what (action and permission), which record, before
-and after values, when, and the request IP. Sign-ins and refusals are recorded too. Admins can
-view and export it. It is append-only from the app's point of view.
+Every create, update and delete is recorded, and so is every sign-in, sign-out and refused
+sign-in. Staff reads of family data are recorded too: opening a family's details, balances,
+invoices or signed forms, and any export. Parents viewing their own family are not recorded. Each
+entry holds who (person and door), what (action and permission), which record, before and after
+values where something changed, when, and the request IP. Every plan treats a missing audit entry
+as a defect.
+
+Admins can view and export it. It is append-only from the app's point of view.
 
 ## 14. Operations
 
