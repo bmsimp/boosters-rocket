@@ -11,12 +11,14 @@ trust the screen and note it in the Results table.
 ## 1. What this is
 
 This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
-a Cloudflare tunnel and Cloudflare Access, so you can prove that staff sign-in (the band's Entra
+a Cloudflare tunnel (and, optionally, Cloudflare Access), so you can prove that staff sign-in (the band's Entra
 tenant or Google), parent sign-in (Entra External ID) and the audit log work for real. It holds **test data
 only**; no real families use it.
 
 Two sign-in doors exist. Staff use `/staff/sign-in`; parents use `/sign-in`. Cloudflare Access sits in
-front of both, so testers sign in twice (an emailed code, then the portal's own sign-in).
+front of both, so testers sign in twice (an emailed code, then the portal's own sign-in). (For this proof of
+concept the owner chose to skip Cloudflare Access rather than manage a list of tester emails; see section 6 B,
+which is now optional. Without it, testers sign in once, at the portal's own sign-in.)
 
 Sign-in is not configured in files. After the first deploy you open `/setup`, enter a one-time setup
 code that `deploy.sh` prints, and set up staff sign-in, parent sign-in and the first Admin on that page
@@ -97,9 +99,10 @@ the app and the migration will fail to log in to the database. Fix it one of two
 
 Do this after the first deploy (section 7). Open https://portaltest.rhinoautomator.com/setup, enter the
 setup code `deploy.sh` printed, and follow **Step 1** of the setup page. It walks you through Microsoft
-(or Google) and checks what you paste before it saves it. For Microsoft you can instead run the
-PowerShell script the page offers, `New-BoosterRocketStaffApp.ps1`, which creates the registration
-for you.
+(or Google) and checks what you paste before it saves it. Microsoft sign-in uses a certificate the app
+makes for itself, not a client secret (the band's tenant blocks client secrets). For Microsoft you can
+instead run the PowerShell script the page offers, `New-BoosterRocketStaffApp.ps1`, which creates the
+registration and adds the certificate for you.
 
 If the code has scrolled away or stopped working, get a new one on linuxdev:
 ```bash
@@ -125,22 +128,34 @@ applications (you are Global Administrator). Reference only; the page shows thes
    - **Application (client) ID**
    - **Directory (tenant) ID**. This must be the GUID (like `00aa00aa-bb11-cc22-dd33-44ee44ee44ee`),
      never the words `common`, `organizations` or `consumers`.
-7. Under **Manage** select **Certificates & secrets** > **Client secrets** > **New client secret**. Add a
-   description, choose an expiration of **24 months** (the script uses 24 months too), select **Add**. Copy the
-   secret **Value** now (not the Secret ID); it is never shown again.
-8. Paste the three values into Step 1 of the setup page, with the secret's expiry date (optional).
+7. On the setup page, in the Microsoft card, select **Download certificate (.cer)**. It saves
+   `booster-rocket-staff.cer`. In Entra, under **Manage** select **Certificates & secrets** >
+   **Certificates** > **Upload certificate**, choose that file and add it. There is no secret to create,
+   and no secret **Value** to copy.
+8. Enter the tenant ID and client ID in Step 1 of the setup page and select **Check and save**. There is
+   no expiry date to type for Microsoft.
 
 **The script and the manual steps use the same names.** `New-BoosterRocketStaffApp.ps1` looks for an app
 named `Booster Rocket (staff)` and reuses it, checking its settings, instead of creating a second one. If
 you already did the steps above under that name, running the script is safe: it fixes the settings and adds
-a fresh 24-month secret. (If two apps share the name it stops and asks you to delete the extra one.)
+the certificate. It creates and prints no secret. It prints the **Tenant ID**, the **Client ID** and the
+certificate's thumbprint and expiry; enter the tenant ID and client ID on the setup page. It keeps any
+certificates already on the app. If Microsoft does not return them, or one has expired, the script stops
+with a message to fix it by hand. (If two apps share the name it stops and asks you to delete the extra one.)
 
-The setup page stores the secret encrypted. After setup, Admins can change it under **Settings** >
-**Sign-in**, and the app warns Admins 30 days before a secret expires.
+**Before running a downloaded script on Windows**, unblock it, or Windows may refuse to run it:
+```powershell
+Unblock-File .\New-BoosterRocketStaffApp.ps1
+```
+
+After setup, Admins can change sign-in under **Settings** > **Sign-in**. **Replace certificate** downloads
+a new certificate. The old one keeps working until **Check and switch** succeeds; after that you can remove
+the old certificate in Entra. (Google still uses a client secret, entered as before.)
 
 Sources: Register an application in Microsoft Entra ID
 (https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app); Add a redirect URI
-(https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-redirect-uri); Add a client secret
+(https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-redirect-uri); Add credentials,
+including certificates
 (https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials).
 
 ## 4. Parent sign-in (Entra External ID)
@@ -165,9 +180,10 @@ Parents sign in through a separate *external tenant* so their accounts never mix
 
 **B to E. Everything else is Step 2 of the setup page.** The tenant itself must be created by hand (part
 A); after that, follow **Step 2** of the setup page, or run `New-BoosterRocketParentApp.ps1`, which
-registers the portal in the external tenant and also turns sign-up off (the same thing as part D).
+registers the portal in the external tenant, adds the certificate, and also turns sign-up off (the same
+thing as part D). On Windows, run `Unblock-File .\New-BoosterRocketParentApp.ps1` first.
 The page builds the discovery address itself from the tenant subdomain and ID, and checks it (and the
-client secret) with Microsoft before it saves anything. Parts B to E below are what those steps do,
+certificate) with Microsoft before it saves anything. Parts B to E below are what those steps do,
 for reference and for doing it by hand.
 
 **B. Register the portal in the external tenant** (still switched into the external tenant)
@@ -179,8 +195,9 @@ for reference and for doing it by hand.
    https://portaltest.rhinoautomator.com/api/auth/parent/callback/parent-oidc
    ```
 3. **Register.** Copy **Application (client) ID** (the client ID for Step 2).
-4. **Certificates & secrets** > **Client secrets** > **New client secret**, expiration **24 months** > **Add**;
-   copy the **Value** (the client secret for Step 2).
+4. On the setup page (Step 2), select **Download certificate (.cer)**; it saves
+   `booster-rocket-parents.cer`. In Entra, **Certificates & secrets** > **Certificates** > **Upload
+   certificate**, and add that file. No secret is needed.
 5. External tenants require an administrator to consent for everyone: under **Manage** select **API
    permissions**, **Grant admin consent for <tenant name>**, **Yes**, **Refresh**, and check **Granted for
    <tenant name>** shows under **Status**.
@@ -221,21 +238,24 @@ does this for you; the steps below are the manual fallback.
 **The script and the manual steps use the same names.** `New-BoosterRocketParentApp.ps1` looks for the app
 `Booster Rocket (parents)` and the user flow `Booster Rocket parents`, and reuses what it finds (checking
 the settings, and turning sign-up off) instead of creating duplicates. If you already did parts B and C by
-hand under these names, running the script is safe: it fixes the settings and adds a fresh 24-month secret.
-(If two apps share the name it stops and asks you to delete the extra one.)
+hand under these names, running the script is safe: it fixes the settings and adds the certificate, and it
+creates and prints no secret. It prints the **Tenant ID**, **Client ID**, **Tenant subdomain** and the
+certificate's thumbprint and expiry. It keeps existing certificates on the app; if Microsoft does not return
+them, or one has expired, it stops with a message to fix it by hand. (If two apps share the name it stops
+and asks you to delete the extra one.)
 
 **E. Enter the values in Step 2 of the setup page** (not in `.env.poc`). The page asks for:
 ```
 Tenant subdomain:         <tenant-name>   (the part before .onmicrosoft.com, from part A6)
 Directory (tenant) ID:    <tenant ID from part A6>
 Application (client) ID:  <application (client) ID from B3>
-Client secret:            <secret value from B4>
-Secret expiry date:       <optional: the date you chose in B4, for example 2028-11-08>
 ```
+Then select **Check and save**. There is no secret and no expiry date: the certificate from B4 stands in
+for them.
 The page builds the discovery address itself
 (`https://<tenant-name>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration`), so there is
-nothing to paste or test in a browser. It fetches that address and trial-signs-in with the secret before saving
-anything; a wrong subdomain or tenant ID is reported in plain words and nothing is saved.
+nothing to paste or test in a browser. It fetches that address and trial-signs-in with the certificate
+before saving anything; a wrong subdomain or tenant ID is reported in plain words and nothing is saved.
 
 **Then Step 3 of the setup page:** enter the email address of the first Admin (the one the Microsoft or
 Google account signs in with), sign in, and setup closes. That person is now an Admin.
@@ -279,7 +299,9 @@ location on the user page is the standard Entra user overview; those pages do no
 
 ## 6. Cloudflare
 
-Do both parts in the Cloudflare dashboard for the account that owns `rhinoautomator.com`.
+Part A is required. Part B (Cloudflare Access) is **optional**: the owner skipped it for this proof of
+concept rather than manage a list of tester emails. Without it, anyone who has the address can reach the
+portal's sign-in pages, which is acceptable only because the site holds test data. Do both parts in the Cloudflare dashboard for the account that owns `rhinoautomator.com`.
 
 **A. Route the hostname through the existing tunnel**
 
@@ -296,7 +318,7 @@ Sources: Create a tunnel / publish an application
 HTTP Host Header location and default (empty)
 (https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/cloudflared-parameters/origin-parameters/).
 
-**B. Put Cloudflare Access in front**
+**B. Put Cloudflare Access in front (optional; skipped for this proof of concept)**
 
 1. Add the One-time PIN login method once (skip if already there): **Zero Trust** > **Integrations** >
    **Identity providers** > **Add new identity provider** > **One-time PIN**.
@@ -352,7 +374,7 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
 6. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), then do section 5
    step 4 (the seed).
 7. **Need a code later?** `scripts/poc/setup-code.sh` prints a new one (the old code stops working) while
-   setup is open. **Nobody can sign in** (for example, a client secret expired)?
+   setup is open. **Nobody can sign in** (for example, a certificate or Google client secret expired)?
    `scripts/poc/reopen-setup.sh` reopens setup and prints a code. Stored sign-in values are kept and
    existing Admins stay Admins.
 
@@ -364,7 +386,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
 - [ ] 4. Parent: sign in at `/sign-in` as the seeded test parent -> parent home (not the refusal page).
-- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`. Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
+- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Replace certificate** retires the old one). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
 - [ ] 6. Sign out at both doors -> both `signout` entries appear.
 - [ ] 7. The second External ID user (no guardian row) -> refusal page; audit shows `signin.refused` with reason `no_guardian`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
@@ -400,8 +422,10 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | The staff app registration was created as multi-tenant | Wrong **Supported account types** choice | Entra > the app > **Authentication** > **Supported account types** > **Single tenant only** |
 | A stranger can create a parent account in External ID | Sign-up left on in the user flow | Redo section 4 D (or run `New-BoosterRocketParentApp.ps1`) and confirm `isSignUpAllowed` is `false` |
 | Setup code does not work | It is wrong, was replaced by a newer one, was slowed down by too many wrong tries, or is void | Run `scripts/poc/setup-code.sh` for a fresh code and use that one |
-| Microsoft rejected the client secret | The Secret ID was copied instead of the **Value**, or a brand-new secret has not spread yet | Copy the **Value** column, or wait up to 15 minutes and try again |
-| Nobody can sign in (for example, a client secret expired) | Sign-in values need replacing | Run `scripts/poc/reopen-setup.sh`, enter the code at `/setup`, and re-enter the values. Existing Admins stay Admins |
+| Microsoft doesn't have this certificate on the app yet (`AADSTS700027`) | The `.cer` was not uploaded to the app registration, or Microsoft has not picked it up yet | Upload the `.cer` under **Certificates & secrets** > **Certificates** (or run the script), wait a minute, and try again |
+| The server's clock looks wrong, so Microsoft refused the certificate (`AADSTS700024`) | The time on linuxdev is off | Fix the time on linuxdev, then try again |
+| The tenant blocks client secrets (`CredentialTypeNotAllowedAsPerAppPolicy`) | The tenant's "Block password addition" app policy refuses secrets | Nothing needs changing: this is why Microsoft sign-in uses certificates. Use the certificate steps in sections 3 and 4 (Google still uses a secret) |
+| Nobody can sign in (for example, a certificate or Google client secret expired) | Sign-in values need replacing | Run `scripts/poc/reopen-setup.sh`, enter the code at `/setup`, and re-enter the values. Existing Admins stay Admins |
 | Sign-in shows "not set up" after `.env.poc` was changed or replaced | `SETTINGS_ENCRYPTION_KEY` changed, so the stored secrets cannot be read | Put the old key back if you have a backup; otherwise run `scripts/poc/reopen-setup.sh` and re-enter the secrets |
 | Step 3 says it is a different account | You are signed in to Microsoft as someone other than the Admin email you entered | Sign out of Microsoft, then sign in as the Admin email |
 | Browser shows Cloudflare 502 | `cloudflared` cannot reach `booster-rocket-app:3000`: the edge network was not added to cloudflared, cloudflared was not recreated, or the app is unhealthy | `docker network inspect booster-rocket-edge` must list both `cloudflared` and `booster-rocket-app`; if not, redo section 2 steps 3-4. Then `docker ps` for `(healthy)` and `docker logs booster-rocket-app` |

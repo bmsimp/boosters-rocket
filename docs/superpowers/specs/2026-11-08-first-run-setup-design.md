@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-08
 **Status:** Draft for review
+**Superseded in part:** Microsoft sign-in uses app-generated certificates, not client secrets. See docs/superpowers/specs/2026-11-09-certificate-credentials-design.md.
 **Builds on:** `docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md` (v1 spec), Plan 1 (foundation) and
 the proof of concept (`docs/superpowers/specs/2026-11-08-poc-linuxdev-design.md`), all on `main`.
 
