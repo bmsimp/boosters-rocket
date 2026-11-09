@@ -33,6 +33,7 @@ if [ ! -f .env.poc ]; then
 else
   if ! grep -Eq '^SETTINGS_ENCRYPTION_KEY=.+' .env.poc; then
     sed -i.bak '/^SETTINGS_ENCRYPTION_KEY=/d' .env.poc && rm -f .env.poc.bak
+    [ -z "$(tail -c1 .env.poc)" ] || printf '\n' >> .env.poc
     printf 'SETTINGS_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)" >> .env.poc
     echo "Added SETTINGS_ENCRYPTION_KEY to .env.poc."
   fi

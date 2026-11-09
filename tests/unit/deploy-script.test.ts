@@ -98,6 +98,7 @@ describe("scripts/poc/deploy.sh", () => {
     const r = run([], { HEALTH: "unhealthy" });
     expect(r.status).toBe(4);
     expect(r.stderr).toContain("didn't become healthy");
+    expect(calls()).not.toContain("setup-code.mjs");
   });
 
   it("refuses when .env.poc is missing", () => {

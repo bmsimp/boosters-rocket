@@ -1,6 +1,9 @@
 # Booster Rocket proof of concept on linuxdev: runbook
 
-Follow this top to bottom. Each section is numbered steps. Anything in `monospace` is typed or
+Follow this top to bottom, with one exception: sign-in is set up on the site's `/setup` page, which only
+exists after the first deploy (section 7). Section 4 part A (creating the parent tenant in Azure) can be
+done before deploying. Section 3 and section 4 parts B to E happen on the setup page after the first
+deploy. Each section is numbered steps. Anything in `monospace` is typed or
 pasted exactly. Dashboard click paths were checked against Microsoft Learn and Cloudflare's
 documentation on 2026-11-08; the sources are listed under each section. If a screen no longer matches,
 trust the screen and note it in the Results table.
@@ -347,7 +350,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
 - [ ] 4. Parent: sign in at `/sign-in` as the seeded test parent -> parent home (not the refusal page).
-- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`.
+- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`. Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
 - [ ] 6. Sign out at both doors -> both `signout` entries appear.
 - [ ] 7. The second External ID user (no guardian row) -> refusal page; audit shows `signin.refused` with reason `no_guardian`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
