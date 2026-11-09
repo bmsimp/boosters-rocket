@@ -53,3 +53,13 @@ describe("setup PowerShell scripts", () => {
     expect(s).not.toMatch(/removeKey|\b(Invoke-MgGraphRequest|Send-Graph) DELETE/);
   });
 });
+
+describe("setup scripts find the existing app by listing, not by a name filter", () => {
+  it.each([["staff", staff], ["parent", parent]])("%s script lists apps client-side and follows paging", (_, s) => {
+    expect(s).toContain("function Get-AppsNamed");
+    expect(s).toContain("@odata.nextLink");
+    expect(s).toContain("$select=id,appId,displayName");
+    expect(s).toContain("-ceq $DisplayName");
+    expect(s).not.toContain("displayName eq");
+  });
+});

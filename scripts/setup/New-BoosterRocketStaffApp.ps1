@@ -43,14 +43,25 @@ $Scopes = [ordered]@{
   'User.Read' = 'e1fe6dd8-ba31-4d61-89e7-88639da4683d'
 }
 
+function Get-AppsNamed([string]$DisplayName) {
+  $uri = 'v1.0/applications?$select=id,appId,displayName&$top=999'
+  $all = @()
+  while ($uri) {
+    $page = Invoke-MgGraphRequest GET $uri
+    $all += @($page.value)
+    $uri = $page.'@odata.nextLink'
+  }
+  return @($all | Where-Object { $_.displayName -ceq $DisplayName })
+}
+
 Connect-MgGraph -TenantId $TenantId -Scopes 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All' -ContextScope Process -NoWelcome
 try {
   $tenant = (Get-MgContext).TenantId
   $access = @{ resourceAppId = $GraphAppId; resourceAccess = @($Scopes.Values | ForEach-Object { @{ id = $_; type = 'Scope' } }) }
   $body = @{ signInAudience = 'AzureADMyOrg'; web = @{ redirectUris = @($RedirectUri) }; requiredResourceAccess = @($access) }
 
-  $found = (Invoke-MgGraphRequest GET "v1.0/applications?`$filter=displayName eq '$DisplayName'").value
-  if ($found.Count -gt 1) { throw "More than one app is named '$DisplayName'. Delete the extras in the Entra admin center, then run this again." }
+  $found = @(Get-AppsNamed $DisplayName)
+  if ($found.Count -gt 1) { throw "More than one app is named '$DisplayName' (appId: $(($found | ForEach-Object { $_.appId }) -join ', ')). Delete the extras in the Entra admin center, then run this again." }
   if ($found.Count -eq 1) {
     $app = $found[0]
     Invoke-MgGraphRequest PATCH "v1.0/applications/$($app.id)" -Body ($body | ConvertTo-Json -Depth 6) -ContentType 'application/json' | Out-Null

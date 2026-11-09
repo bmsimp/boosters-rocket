@@ -46,6 +46,17 @@ function Send-Graph([string]$Method, [string]$Uri, $Body) {
   return Invoke-MgGraphRequest $Method $Uri -Body ($Body | ConvertTo-Json -Depth 10) -ContentType 'application/json'
 }
 
+function Get-AppsNamed([string]$DisplayName) {
+  $uri = 'v1.0/applications?$select=id,appId,displayName&$top=999'
+  $all = @()
+  while ($uri) {
+    $page = Send-Graph GET $uri $null
+    $all += @($page.value)
+    $uri = $page.'@odata.nextLink'
+  }
+  return @($all | Where-Object { $_.displayName -ceq $DisplayName })
+}
+
 Connect-MgGraph -TenantId $TenantId -Scopes 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'EventListener.ReadWrite.All', 'Domain.Read.All' -ContextScope Process -NoWelcome
 try {
   $tenant = (Get-MgContext).TenantId
@@ -55,8 +66,8 @@ try {
 
   $access = @{ resourceAppId = $GraphAppId; resourceAccess = @($Scopes.Values | ForEach-Object { @{ id = $_; type = 'Scope' } }) }
   $body = @{ signInAudience = 'AzureADMyOrg'; web = @{ redirectUris = @($RedirectUri) }; requiredResourceAccess = @($access) }
-  $found = (Send-Graph GET "v1.0/applications?`$filter=displayName eq '$DisplayName'" $null).value
-  if ($found.Count -gt 1) { throw "More than one app is named '$DisplayName'. Delete the extras, then run this again." }
+  $found = @(Get-AppsNamed $DisplayName)
+  if ($found.Count -gt 1) { throw "More than one app is named '$DisplayName' (appId: $(($found | ForEach-Object { $_.appId }) -join ', ')). Delete the extras, then run this again." }
   if ($found.Count -eq 1) {
     $app = $found[0]; Send-Graph PATCH "v1.0/applications/$($app.id)" $body | Out-Null
     Write-Host "Reusing the existing app '$DisplayName' and making sure its settings are right."
