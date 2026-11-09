@@ -9,6 +9,7 @@ const finishedState = { status: "finished", step: "admin", adminEmail: null, fin
 test.describe.configure({ mode: "serial" });
 test.afterAll(async () => {
   await sql`UPDATE setting SET value = ${sql.json(finishedState)} WHERE key = 'setup.state'`;
+  await sql`DELETE FROM provider_certificate`;
   await sql.end();
 });
 
@@ -40,10 +41,10 @@ test("the right code unlocks the staff step with the redirect URI to copy", asyn
 
 test("a saved client secret is never rendered into the setup page", async ({ page }) => {
   const marker = "e2e-marker-secret-do-not-render";
-  const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal(marker, "staff-microsoft");
-  const config = { tenantId: "0f8fad5b-d9cb-469f-a165-70867728950e", clientId: "11111111-2222-3333-4444-555555555555" };
+  const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal(marker, "staff-google");
+  const config = { clientId: "11111111-2222-3333-4444-555555555555.apps.googleusercontent.com" };
   await sql`INSERT INTO auth_provider (key, config, secret_ciphertext, secret_key_id)
-            VALUES ('staff-microsoft', ${sql.json(config)}, ${sealed.ciphertext}, ${sealed.keyId})
+            VALUES ('staff-google', ${sql.json(config)}, ${sealed.ciphertext}, ${sealed.keyId})
             ON CONFLICT (key) DO UPDATE SET config = EXCLUDED.config, secret_ciphertext = EXCLUDED.secret_ciphertext, secret_key_id = EXCLUDED.secret_key_id`;
   try {
     const code = reopen();
@@ -57,9 +58,30 @@ test("a saved client secret is never rendered into the setup page", async ({ pag
     expect(html).not.toContain(marker);
     expect(html).not.toContain(sealed.ciphertext);
   } finally {
-    await sql`DELETE FROM auth_provider WHERE key = 'staff-microsoft'`;
+    await sql`DELETE FROM auth_provider WHERE key = 'staff-google'`;
   }
 });
+test("Microsoft sign-in uses a certificate: no secret field, and the same certificate on every download", async ({ page, request }) => {
+  const code = reopen();
+  await page.goto("/setup");
+  await page.getByLabel("Setup code").fill(code);
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await expect(page.getByRole("heading", { name: "Step 1: Staff sign-in" })).toBeVisible();
+  const ms = page.getByRole("region", { name: "Staff sign-in with Microsoft" });
+  await expect(ms.getByLabel(/Client secret/)).toHaveCount(0);
+  await expect(ms.getByRole("link", { name: "Download certificate (.cer)" })).toBeVisible();
+  const cookies = await page.context().cookies();
+  const headers = { cookie: cookies.map((c) => `${c.name}=${c.value}`).join("; ") };
+  const a = await (await request.get("/setup/certificates/booster-rocket-staff.cer", { headers })).body();
+  const b = await (await request.get("/setup/certificates/booster-rocket-staff.cer", { headers })).body();
+  expect(a.length).toBeGreaterThan(500);
+  expect(Buffer.compare(a, b)).toBe(0);
+  await page.reload();
+  await expect(ms.getByText(/Thumbprint/)).toBeVisible();
+  const google = page.getByRole("region", { name: "Staff sign-in with Google" });
+  await expect(google.getByLabel(/Client secret/)).toBeVisible();
+});
+
 test("a failed staff sign-in shows its message even when Better Auth adds its own error param", async ({ page }) => {
   const code = reopen();
   await page.goto("/setup");

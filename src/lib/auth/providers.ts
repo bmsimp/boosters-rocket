@@ -127,6 +127,21 @@ export async function providerSummaries(box: SecretBox = secretBox()): Promise<P
   return out;
 }
 
+/**
+ * Certificates downloaded before their sign-in was first saved have no provider row, so providerSummaries has nothing for them.
+ * This is a display-only stand-in so the page can show the pending certificate's thumbprint. It is never "readable" or configured.
+ */
+export async function pendingOnlySummaries(have: ProviderKey[]): Promise<ProviderSummary[]> {
+  const out: ProviderSummary[] = [];
+  for (const key of PROVIDER_KEYS) {
+    if (!isCertificateProvider(key)) continue;
+    if (have.includes(key)) continue;
+    const { pending } = await certificateRows(key);
+    if (pending) out.push({ key, config: {}, credentialUpdatedAt: pending.createdAt, expiresAt: null, readable: false, certificate: null, pendingCertificate: toCertificateView(pending) });
+  }
+  return out;
+}
+
 // ---- parsing form input ----
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

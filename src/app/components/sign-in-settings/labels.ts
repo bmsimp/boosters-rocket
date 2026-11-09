@@ -10,7 +10,14 @@ export const FIELD_LABELS: Record<"tenantId" | "clientId" | "tenantSubdomain", s
   clientId: "Application (client) ID",
   tenantSubdomain: "Tenant subdomain",
 };
-export type SummaryView = { config: Record<string, string>; credentialUpdatedAt: string; expiresAt: string | null; readable: boolean };
+export type CertificateViewJson = { thumbprintSha1: string; notAfter: string };
+export type SummaryView = {
+  config: Record<string, string>; credentialUpdatedAt: string; expiresAt: string | null; readable: boolean;
+  certificate: CertificateViewJson | null; pendingCertificate: CertificateViewJson | null;
+};
+const certView = (c: ProviderSummary["certificate"]): CertificateViewJson | null =>
+  (c ? { thumbprintSha1: c.thumbprintSha1, notAfter: c.notAfter.toISOString() } : null);
 export const toSummaryView = (s: ProviderSummary): SummaryView => ({
   config: s.config, credentialUpdatedAt: s.credentialUpdatedAt.toISOString(), expiresAt: s.expiresAt?.toISOString() ?? null, readable: s.readable,
+  certificate: certView(s.certificate), pendingCertificate: certView(s.pendingCertificate),
 });

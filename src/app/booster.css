@@ -319,3 +319,5 @@ main.wrap.signin { display: block; padding-top: var(--s6); } /* beat the two-col
 .sign-out { display: grid; gap: var(--s2); justify-items: start; margin-top: var(--s3); }
 p.errors, .sign-out .errors { padding-left: 0; }
 .inline-alert { margin-top: var(--s2); }
+
+.cert-panel code { word-break: break-all; }

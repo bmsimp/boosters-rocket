@@ -17,8 +17,13 @@ export async function downloadAccess(): Promise<DownloadAccess | null> {
   return { actor: { door: "staff", id: id.staffUserId, label: id.email }, createdBy: id.staffUserId, permission: "Settings.SignIn.ReadWrite", ip };
 }
 
-/** The certificate to put on the app: pending if a replacement is under way, else active, else a new pending one. */
-export async function certificateForDownload(key: CertificateProviderKey, a: DownloadAccess): Promise<CertificateRow> {
+/**
+ * The certificate to put on the app: pending if a replacement is under way, else active, else a new pending one.
+ * With `replace` (staff with Settings.SignIn.ReadWrite only) an active certificate with nothing pending gets a new pending one.
+ */
+export async function certificateForDownload(key: CertificateProviderKey, a: DownloadAccess, opts: { replace?: boolean } = {}): Promise<CertificateRow> {
   const { pending, active } = await certificateRows(key);
-  return pending ?? active ?? getOrCreatePendingCertificate(key, { actor: a.actor, ip: a.ip, createdBy: a.createdBy, permission: a.permission });
+  const make = () => getOrCreatePendingCertificate(key, { actor: a.actor, ip: a.ip, createdBy: a.createdBy, permission: a.permission });
+  if (opts.replace && a.permission && active && !pending) return make();
+  return pending ?? active ?? make();
 }

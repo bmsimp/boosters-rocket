@@ -3,6 +3,7 @@ import { X509Certificate } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, providerCertificate } from "@/lib/db/schema";
+import { pendingOnlySummaries } from "@/lib/auth/providers";
 import { resetDb, seedCertificate } from "../helpers/db";
 
 const state: { setup: boolean; staff: { staffUserId: string; email: string } | null; perm: boolean } = { setup: false, staff: null, perm: false };
@@ -15,7 +16,9 @@ vi.mock("@/lib/permissions/effective", async (orig) => ({
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
 import { GET } from "@/app/setup/certificates/[name]/route";
-const call = (name: string) => GET(new Request("http://x"), { params: Promise.resolve({ name }) });
+const call = (name: string, query = "") => GET(new Request(`http://x/${name}${query}`), { params: Promise.resolve({ name }) });
+const hex = (b64: string) => Buffer.from(b64, "base64url").toString("hex").toUpperCase();
+const printOf = async (r: Response) => new X509Certificate(Buffer.from(await r.arrayBuffer())).fingerprint256.replaceAll(":", "");
 
 describe("certificate download", () => {
   beforeEach(async () => { await resetDb(); state.setup = false; state.staff = null; state.perm = false; });
@@ -88,5 +91,40 @@ describe("certificate download", () => {
     const der = Buffer.from(await (await call("booster-rocket-staff.cer")).arrayBuffer());
     expect(new X509Certificate(der).fingerprint256.replaceAll(":", "")).toBe(
       Buffer.from(pending.thumbprintS256, "base64url").toString("hex").toUpperCase());
+  });
+
+  it("?replace=1 makes a new pending certificate for staff with the permission, and the same one again", async () => {
+    state.staff = { staffUserId: crypto.randomUUID(), email: "admin@example.org" }; state.perm = true;
+    const active = await seedCertificate("staff-microsoft", "active");
+    const first = await printOf(await call("booster-rocket-staff.cer", "?replace=1"));
+    expect(first).not.toBe(hex(active.thumbprintS256));
+    const rows = await db.select().from(providerCertificate);
+    expect(rows.filter((r) => r.status === "pending")).toHaveLength(1);
+    expect(await printOf(await call("booster-rocket-staff.cer", "?replace=1"))).toBe(first);
+    expect(await printOf(await call("booster-rocket-staff.cer"))).toBe(first);
+    expect((await db.select().from(providerCertificate))).toHaveLength(2);
+  });
+
+  it("ignores ?replace=1 from the setup session and serves the active certificate", async () => {
+    state.setup = true;
+    const active = await seedCertificate("staff-microsoft", "active");
+    expect(await printOf(await call("booster-rocket-staff.cer", "?replace=1"))).toBe(hex(active.thumbprintS256));
+    expect(await db.select().from(providerCertificate)).toHaveLength(1);
+  });
+
+  it("is not found for ?replace=1 without the permission", async () => {
+    state.staff = { staffUserId: crypto.randomUUID(), email: "x@example.org" }; state.perm = false;
+    await seedCertificate("staff-microsoft", "active");
+    expect((await call("booster-rocket-staff.cer", "?replace=1")).status).toBe(404);
+    expect(await db.select().from(providerCertificate)).toHaveLength(1);
+  });
+
+  it("shows a pending certificate even before its sign-in has been saved", async () => {
+    const pending = await seedCertificate("staff-microsoft", "pending");
+    const out = await pendingOnlySummaries([]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ key: "staff-microsoft", readable: false, certificate: null });
+    expect(out[0]!.pendingCertificate!.thumbprintSha1).toBe(pending.thumbprintSha1);
+    expect(await pendingOnlySummaries(["staff-microsoft"])).toHaveLength(0);
   });
 });

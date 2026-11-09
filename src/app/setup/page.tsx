@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { env } from "@/env";
 import { getSetupState, type SetupStep } from "@/lib/setup/state";
 import { hasSetupSession } from "@/lib/setup/session";
-import { providerSummaries, type ProviderKey, type ProviderSummary } from "@/lib/auth/providers";
+import { providerSummaries, pendingOnlySummaries, type ProviderKey, type ProviderSummary } from "@/lib/auth/providers";
 import { UnlockForm } from "./unlock-form";
 import { StaffStep, ParentStep, AdminStep } from "./steps";
 
@@ -29,7 +29,8 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   const one = (k: string) => { const v = sp[k]; return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined; };
   const asked = one("step");
   const step: SetupStep = asked === "staff" || asked === "parent" || asked === "admin" ? asked : state.step;
-  const byKey = Object.fromEntries((await providerSummaries()).map((s) => [s.key, s])) as Partial<Record<ProviderKey, ProviderSummary>>;
+  const saved = await providerSummaries();
+  const byKey = Object.fromEntries([...saved, ...(await pendingOnlySummaries(saved.map((s) => s.key)))].map((s) => [s.key, s])) as Partial<Record<ProviderKey, ProviderSummary>>;
   const appUrl = env.APP_URL.replace(/\/+$/, "");
   return (
     <main className="wrap single">
