@@ -89,3 +89,33 @@ describe("checkFor", () => {
     expect(f).not.toHaveBeenCalled();
   });
 });
+
+describe("redirects never carry the secret", () => {
+  const redirectingFetch = () => vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.redirect === "error") throw new TypeError("fetch failed: unexpected redirect");
+    return json(200, {});
+  });
+
+  it("asks fetch to fail on a redirect for the token request, and reports it as unreachable", async () => {
+    const f = redirectingFetch();
+    const r = await checkMicrosoft({ tenantId: T, clientId: C }, "s", f);
+    expect((f.mock.calls[0] as unknown as [string, RequestInit])[1].redirect).toBe("error");
+    expect(!r.ok && r.message).toMatch(/Couldn't reach Microsoft/);
+  });
+
+  it("does the same for the parent discovery request, so the secret is never sent", async () => {
+    const f = redirectingFetch();
+    const r = await checkParent({ tenantSubdomain: "club", tenantId: T, clientId: C }, "s", f);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect((f.mock.calls[0] as unknown as [string, RequestInit])[1].redirect).toBe("error");
+    expect(!r.ok && r.message).toMatch(/Couldn't reach Microsoft/);
+  });
+
+  it("asks fetch to fail on a redirect for the parent token request too", async () => {
+    const f = vi.fn(async (url: string, init?: RequestInit) => url.includes("openid-configuration")
+      ? json(200, { issuer: `https://club.ciamlogin.com/${T}/v2.0`, token_endpoint: `https://club.ciamlogin.com/${T}/oauth2/v2.0/token` })
+      : json(200, init?.redirect === "error" ? {} : { leaked: true }));
+    expect(await checkParent({ tenantSubdomain: "club", tenantId: T, clientId: C }, "s", f)).toEqual({ ok: true });
+    expect(f.mock.calls.map((c) => (c as unknown as [string, RequestInit])[1].redirect)).toEqual(["error", "error"]);
+  });
+});

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { env } from "@/env";
-import { getSetupState, finishSetup } from "@/lib/setup/state";
+import { getSetupState, finishSetup, SETUP_STATE_KEY } from "@/lib/setup/state";
 import { hasSetupSession, SETUP_COOKIE } from "@/lib/setup/session";
 import { getStaffIdentity, hasStaffSession } from "@/lib/auth/identity";
 import { effectivePermissions } from "@/lib/permissions/effective";
 import { clientIpFrom } from "@/lib/request";
+import { writeAudit } from "@/lib/audit/log";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,15 @@ export async function GET(req: Request) {
   if (!state.adminEmail) return to("/setup?step=admin");
   const id = await getStaffIdentity();
   if (!id) return to(`/setup?step=admin&error=${(await hasStaffSession()) ? "not_matched" : "no_session"}`);
-  if (id.email !== state.adminEmail) return to("/setup?step=admin&error=other_email");
-  if (!(await effectivePermissions(id.staffUserId)).isAdmin) return to("/setup?step=admin&error=not_admin");
-  await finishSetup({ staffUserId: id.staffUserId, email: id.email, ip: clientIpFrom(req.headers) });
+  const ip = clientIpFrom(req.headers);
+  const refuse = async (reason: "other_email" | "not_admin") => {
+    await writeAudit({ actor: { door: "staff", id: id.staffUserId, label: id.email }, action: "setup.finish.refused", targetType: "setting",
+      targetId: SETUP_STATE_KEY, after: { reason }, ip });
+    return to(`/setup?step=admin&error=${reason}`);
+  };
+  if (id.email !== state.adminEmail) return refuse("other_email");
+  if (!(await effectivePermissions(id.staffUserId)).isAdmin) return refuse("not_admin");
+  await finishSetup({ staffUserId: id.staffUserId, email: id.email, ip });
   const res = to("/staff");
   res.cookies.delete(SETUP_COOKIE);
   return res;

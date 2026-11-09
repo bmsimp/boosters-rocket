@@ -113,7 +113,7 @@ applications (you are Global Administrator). Reference only; the page shows thes
 1. Sign in to https://entra.microsoft.com. If you have several tenants, use the **Settings** icon at the
    top and switch to the band's tenant.
 2. Browse to **Entra ID** > **App registrations** and select **New registration**.
-3. **Name:** `Booster Rocket staff (portaltest)`.
+3. **Name:** `Booster Rocket (staff)`. Use exactly this name: the script finds the app by it.
 4. **Supported account types:** choose **Single tenant only - <your tenant>**.
 5. **Redirect URI:** set the platform to **Web** and enter exactly:
    ```
@@ -126,9 +126,14 @@ applications (you are Global Administrator). Reference only; the page shows thes
    - **Directory (tenant) ID**. This must be the GUID (like `00aa00aa-bb11-cc22-dd33-44ee44ee44ee`),
      never the words `common`, `organizations` or `consumers`.
 7. Under **Manage** select **Certificates & secrets** > **Client secrets** > **New client secret**. Add a
-   description, choose an expiration (Microsoft recommends under 12 months), select **Add**. Copy the
+   description, choose an expiration of **24 months** (the script uses 24 months too), select **Add**. Copy the
    secret **Value** now (not the Secret ID); it is never shown again.
-8. Paste the three values into Step 1 of the setup page.
+8. Paste the three values into Step 1 of the setup page, with the secret's expiry date (optional).
+
+**The script and the manual steps use the same names.** `New-BoosterRocketStaffApp.ps1` looks for an app
+named `Booster Rocket (staff)` and reuses it, checking its settings, instead of creating a second one. If
+you already did the steps above under that name, running the script is safe: it fixes the settings and adds
+a fresh 24-month secret. (If two apps share the name it stops and asks you to delete the extra one.)
 
 The setup page stores the secret encrypted. After setup, Admins can change it under **Settings** >
 **Sign-in**, and the app warns Admins 30 days before a secret expires.
@@ -161,20 +166,21 @@ Parents sign in through a separate *external tenant* so their accounts never mix
 **B to E. Everything else is Step 2 of the setup page.** The tenant itself must be created by hand (part
 A); after that, follow **Step 2** of the setup page, or run `New-BoosterRocketParentApp.ps1`, which
 registers the portal in the external tenant and also turns sign-up off (the same thing as part D).
-The page checks the discovery URL before it saves anything. Parts B to E below are what those steps do,
+The page builds the discovery address itself from the tenant subdomain and ID, and checks it (and the
+client secret) with Microsoft before it saves anything. Parts B to E below are what those steps do,
 for reference and for doing it by hand.
 
 **B. Register the portal in the external tenant** (still switched into the external tenant)
 
-1. **Entra ID** > **App registrations** > **New registration**. **Name:** `Booster Rocket parents (portaltest)`.
-   **Supported account types:** **Single tenant only**.
+1. **Entra ID** > **App registrations** > **New registration**. **Name:** `Booster Rocket (parents)`.
+   **Supported account types:** **Single tenant only**. Use exactly this name: the script finds the app by it.
 2. **Redirect URI:** platform **Web**, exactly:
    ```
    https://portaltest.rhinoautomator.com/api/auth/parent/callback/parent-oidc
    ```
 3. **Register.** Copy **Application (client) ID** (the client ID for Step 2).
-4. **Certificates & secrets** > **Client secrets** > **New client secret** > **Add**; copy the **Value**
-   (the client secret for Step 2).
+4. **Certificates & secrets** > **Client secrets** > **New client secret**, expiration **24 months** > **Add**;
+   copy the **Value** (the client secret for Step 2).
 5. External tenants require an administrator to consent for everyone: under **Manage** select **API
    permissions**, **Grant admin consent for <tenant name>**, **Yes**, **Refresh**, and check **Granted for
    <tenant name>** shows under **Status**.
@@ -182,12 +188,12 @@ for reference and for doing it by hand.
 **C. Create the user flow (email one-time passcode)**
 
 1. **Entra ID** > **External Identities** > **User flows** > **New user flow**.
-2. **Name:** `SignUpSignIn`. Under **Identity providers** tick **Email Accounts** and choose **Email
+2. **Name:** `Booster Rocket parents`. Use exactly this name: the script finds the flow by it. Under **Identity providers** tick **Email Accounts** and choose **Email
    one-time passcode**. (If the option is greyed out or missing, first check **External Identities** >
    **All identity providers** > **Email one-time passcode** is enabled.) Pick any user attributes
    (the defaults are fine), **OK**, **Create**.
 3. Open the new flow, in the left menu under **Use** select **Applications**, **Add application**, pick
-   `Booster Rocket parents (portaltest)`, **Select**.
+   `Booster Rocket (parents)`, **Select**.
 
 **D. Turn sign-up off.** You cannot do this in the admin center; Microsoft documents it as a Microsoft
 Graph call. With sign-up on, a stranger could create a parent account. `New-BoosterRocketParentApp.ps1`
@@ -212,16 +218,24 @@ does this for you; the steps below are the manual fallback.
    ```
 4. Confirm by re-reading the flow: `isSignUpAllowed` must be `false`.
 
-**E. Enter the values in Step 2 of the setup page** (not in `.env.poc`). The discovery URL uses the
-tenant *name* (subdomain) and the tenant *ID*:
+**The script and the manual steps use the same names.** `New-BoosterRocketParentApp.ps1` looks for the app
+`Booster Rocket (parents)` and the user flow `Booster Rocket parents`, and reuses what it finds (checking
+the settings, and turning sign-up off) instead of creating duplicates. If you already did parts B and C by
+hand under these names, running the script is safe: it fixes the settings and adds a fresh 24-month secret.
+(If two apps share the name it stops and asks you to delete the extra one.)
+
+**E. Enter the values in Step 2 of the setup page** (not in `.env.poc`). The page asks for:
 ```
-Discovery URL: https://<tenant-name>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration
-Client ID:     <application (client) ID from B3>
-Client secret: <secret value from B4>
+Tenant subdomain:         <tenant-name>   (the part before .onmicrosoft.com, from part A6)
+Directory (tenant) ID:    <tenant ID from part A6>
+Application (client) ID:  <application (client) ID from B3>
+Client secret:            <secret value from B4>
+Secret expiry date:       <optional: the date you chose in B4, for example 2028-11-08>
 ```
-Check the URL in a browser first: it must show a block of JSON that includes `issuer`. The app takes the
-issuer from that document, so whichever of the Microsoft-documented host forms (tenant name or tenant ID
-as the first label of `ciamlogin.com`) returns the JSON works.
+The page builds the discovery address itself
+(`https://<tenant-name>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration`), so there is
+nothing to paste or test in a browser. It fetches that address and trial-signs-in with the secret before saving
+anything; a wrong subdomain or tenant ID is reported in plain words and nothing is saved.
 
 **Then Step 3 of the setup page:** enter the email address of the first Admin (the one the Microsoft or
 Google account signs in with), sign in, and setup closes. That person is now an Admin.

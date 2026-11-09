@@ -21,6 +21,8 @@ async function clientCredentials(tokenUrl: string, clientId: string, secret: str
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: secret, scope: "https://graph.microsoft.com/.default" }).toString(),
       signal: AbortSignal.timeout(TIMEOUT_MS),
+      // A redirect could forward the secret to another host; fetch throws instead, which reads as unreachable.
+      redirect: "error",
     });
   } catch {
     return { ok: false, message: UNREACHABLE };
@@ -52,7 +54,7 @@ export async function checkParent(c: ParentConfig, secret: string, f: FetchFn = 
   const INCOMPLETE = "Microsoft's sign-in details for that tenant look incomplete. Try again in a few minutes.";
   let body: unknown;
   try {
-    const res = await f(parentDiscoveryUrl(c), { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await f(parentDiscoveryUrl(c), { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
     if (res.status === 400 || res.status === 404) {
       return { ok: false, message: "Microsoft has no External ID tenant with that subdomain and tenant ID. Check both on the tenant's Overview page." };
     }

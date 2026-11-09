@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import { authProvider } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { secretBox, SecretBoxError, type SecretBox } from "@/lib/crypto/secret-box";
@@ -145,43 +145,53 @@ export async function saveProvider(draft: ProviderDraft, opts: {
   actor: Actor; ip: string | null; permission?: string; updatedBy: string | null; check: CheckFn; box?: SecretBox;
 }): Promise<SaveOutcome> {
   const box = opts.box ?? secretBox();
-  const [existing] = await db.select().from(authProvider).where(eq(authProvider.key, draft.key));
+  const existingRow = (tx: Tx | typeof db) => tx.select().from(authProvider).where(eq(authProvider.key, draft.key)).then((r) => r[0]);
+  // The check talks to Microsoft, so it runs outside the transaction (and its lock). The row it used is re-read, under the
+  // same lock removeProvider takes, when the save happens, so a concurrent save or removal can't be overwritten from stale data.
   let plain = draft.secret;
   if (plain === null) {
-    if (!existing) return { ok: false, errors: ["Enter the client secret."] };
-    plain = openRow(existing, box);
+    const current = await existingRow(db);
+    if (!current) return { ok: false, errors: ["Enter the client secret."] };
+    plain = openRow(current, box);
     if (plain === null) return { ok: false, errors: ["The saved secret can't be read any more. Enter the client secret again."] };
   }
   const checked = await opts.check({ ...draft, secret: plain } as CheckedDraft);
   if (!checked.ok) return { ok: false, errors: [checked.message] };
 
   const secretChanged = draft.secret !== null;
-  const sealed = secretChanged ? box.seal(plain, draft.key) : { ciphertext: existing!.secretCiphertext, keyId: existing!.secretKeyId };
-  const now = new Date();
-  const expiresAt = draft.secretExpiresAt ?? (secretChanged ? null : existing!.secretExpiresAt);
-  const values = {
-    key: draft.key, config: draft.config, secretCiphertext: sealed.ciphertext, secretKeyId: sealed.keyId,
-    secretExpiresAt: expiresAt, secretUpdatedAt: secretChanged ? now : existing!.secretUpdatedAt, updatedAt: now, updatedBy: opts.updatedBy,
-  };
-  await db.transaction(async (tx) => {
+  const r = await db.transaction(async (tx): Promise<SaveOutcome> => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.auth_provider'))`);
+    const existing = await existingRow(tx);
+    if (!secretChanged && !existing) return { ok: false, errors: ["Enter the client secret."] };
+    const sealed = secretChanged ? box.seal(plain, draft.key) : { ciphertext: existing!.secretCiphertext, keyId: existing!.secretKeyId };
+    const now = new Date();
+    const expiresAt = draft.secretExpiresAt ?? (secretChanged ? null : existing!.secretExpiresAt);
+    const values = {
+      key: draft.key, config: draft.config, secretCiphertext: sealed.ciphertext, secretKeyId: sealed.keyId,
+      secretExpiresAt: expiresAt, secretUpdatedAt: secretChanged ? now : existing!.secretUpdatedAt, updatedAt: now, updatedBy: opts.updatedBy,
+    };
     await tx.insert(authProvider).values(values).onConflictDoUpdate({ target: authProvider.key, set: values });
     await writeAudit({
       actor: opts.actor, action: "setup.provider.save", permission: opts.permission, targetType: "auth_provider", targetId: draft.key,
       before: existing ? { ...(existing.config as object), secretExpiresAt: existing.secretExpiresAt?.toISOString() ?? null } : null,
       after: { ...draft.config, secretExpiresAt: expiresAt?.toISOString() ?? null, secretChanged }, ip: opts.ip,
     }, tx);
+    return { ok: true };
   });
-  invalidateProviders();
-  return { ok: true };
+  if (r.ok) invalidateProviders();
+  return r;
 }
-
-export async function removeProvider(key: ProviderKey, opts: { actor: Actor; ip: string | null; permission?: string }): Promise<SaveOutcome> {
+export async function removeProvider(key: ProviderKey, opts: { actor: Actor; ip: string | null; permission?: string; box?: SecretBox }): Promise<SaveOutcome> {
+  const box = opts.box ?? secretBox();
   const r = await db.transaction(async (tx): Promise<SaveOutcome> => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.auth_provider'))`);
     const rows = await tx.select().from(authProvider);
     const existing = rows.find((x) => x.key === key);
     if (!existing) return { ok: true };
-    if (STAFF_KEYS.includes(key) && !rows.some((x) => x.key !== key && STAFF_KEYS.includes(x.key))) {
+    // Only a row this server can decrypt counts as another way to sign in; an unreadable one is "not set up" (see readProviders).
+    if (STAFF_KEYS.includes(key) && !rows.some((x) => x.key !== key && STAFF_KEYS.includes(x.key) && openRow(x, box) !== null)) {
+      await writeAudit({ actor: opts.actor, action: "setup.provider.remove.refused", permission: opts.permission, targetType: "auth_provider",
+        targetId: key, after: { reason: "last_staff_sign_in" }, ip: opts.ip }, tx);
       return { ok: false, errors: ["This would leave no way for staff to sign in."] };
     }
     await tx.delete(authProvider).where(eq(authProvider.key, key));

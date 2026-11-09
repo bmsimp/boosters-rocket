@@ -1,7 +1,7 @@
 "use server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { setupAction, setupUnlockAction } from "@/lib/setup/guard";
+import { setupAction, setupUnlockAction, SETUP_SESSION_ENDED } from "@/lib/setup/guard";
 import { verifySetupCode } from "@/lib/setup/code";
 import { startSetupSession } from "@/lib/setup/session";
 import { getSetupState, updateSetupState, saveAdminEmail, type SetupStep } from "@/lib/setup/state";
@@ -33,7 +33,7 @@ export const saveSetupProviderAction = setupAction(async (key: string, form: For
   const r = await saveProvider(parsed.draft, { actor: { door: "system", id: null, label: "setup" }, ip: await requestIp(), updatedBy: null, check: (d) => checkFor(d) });
   revalidatePath("/setup");
   return r;
-});
+}, { onExpired: () => ({ ok: false, errors: [SETUP_SESSION_ENDED] }) });
 
 export const goToStepAction = setupAction(async (step: SetupStep): Promise<void> => {
   if (step !== "staff" && step !== "parent" && step !== "admin") redirect("/setup");
@@ -50,4 +50,4 @@ export const saveAdminEmailAction = setupAction(async (_prev: { error: string } 
   if (!r.ok) return { error: r.error };
   revalidatePath("/setup");
   return null;
-});
+}, { onExpired: () => ({ error: SETUP_SESSION_ENDED }) });

@@ -2,10 +2,19 @@ import "server-only";
 import { AccessDenied, registerGuard } from "@/lib/guards";
 import { hasSetupSession } from "./session";
 
-/** A setup-page action: refused unless this browser unlocked setup with the current code. */
-export function setupAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>) {
+export const SETUP_SESSION_ENDED = "Your setup session ended. Reload the page and enter a new setup code.";
+
+/**
+ * A setup-page action: refused unless this browser unlocked setup with the current code.
+ * With `onExpired`, a form action that has no valid setup session returns that value (so the form can say what to do)
+ * instead of throwing AccessDenied. The refusal is the same either way: `fn` never runs.
+ */
+export function setupAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>, opts?: { onExpired?: () => R }) {
   const wrapped = async (...args: A): Promise<R> => {
-    if (!(await hasSetupSession())) throw new AccessDenied();
+    if (!(await hasSetupSession())) {
+      if (opts?.onExpired) return opts.onExpired();
+      throw new AccessDenied();
+    }
     return fn(...args);
   };
   registerGuard(wrapped, { door: "setup" });

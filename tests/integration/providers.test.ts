@@ -79,7 +79,19 @@ describe("stored providers", () => {
     await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" });
     expect(await removeProvider("staff-microsoft", { actor, ip: null })).toEqual({ ok: true });
     expect((await loadProviders()).staffMicrosoft).toBeNull();
-    expect((await db.select().from(auditLog)).map((a) => a.action)).toEqual(["setup.provider.remove"]);
+    expect((await db.select().from(auditLog)).map((a) => a.action)).toEqual(["setup.provider.remove.refused", "setup.provider.remove"]);
+  });
+
+  it("does not count an unreadable staff row as another way to sign in, and audits the refusal", async () => {
+    await seedProvider("staff-microsoft", { tenantId: T, clientId: C });
+    await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" });
+    await db.update(authProvider).set({ secretKeyId: "deadbeef" }).where(eq(authProvider.key, "staff-google"));
+    const perm = "Settings.SignIn.ReadWrite";
+    expect(await removeProvider("staff-microsoft", { actor, ip: null, permission: perm })).toEqual({ ok: false, errors: ["This would leave no way for staff to sign in."] });
+    expect(await db.select().from(authProvider)).toHaveLength(2);
+    const audit = await db.select().from(auditLog);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ action: "setup.provider.remove.refused", permission: perm, targetId: "staff-microsoft", door: "system", after: { reason: "last_staff_sign_in" } });
   });
 
   it("removes the parent provider freely", async () => {

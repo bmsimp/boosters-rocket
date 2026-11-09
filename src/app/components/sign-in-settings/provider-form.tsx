@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
+import { CalendarDate } from "@/app/components/calendar-date";
 import { PROVIDER_FIELDS, type ProviderKey, type SaveOutcome } from "@/lib/auth/provider-fields";
 import { FIELD_LABELS, type SummaryView } from "./labels";
 
@@ -26,7 +27,7 @@ export function ProviderForm({ providerKey, summary, action }: {
       {summary && (
         <p className="hint">
           {summary.readable
-            ? <>Secret saved <LocalTime iso={summary.secretUpdatedAt} />{summary.secretExpiresAt && <>, expires <LocalTime iso={summary.secretExpiresAt} /></>}.</>
+            ? <>Secret saved <LocalTime iso={summary.secretUpdatedAt} />{summary.secretExpiresAt && <>, expires <CalendarDate iso={summary.secretExpiresAt} /></>}.</>
             : "The saved secret can't be read with this server's encryption key. Enter it again."}
         </p>
       )}

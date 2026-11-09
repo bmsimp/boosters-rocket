@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import postgres from "postgres";
+import { createSecretBox } from "../../src/lib/crypto/secret-box";
 
 const sql = postgres(process.env.DATABASE_URL!);
 const finishedState = { status: "finished", step: "admin", adminEmail: null, finishedAt: "2026-11-08T00:00:00Z" };
@@ -37,6 +38,28 @@ test("the right code unlocks the staff step with the redirect URI to copy", asyn
   expect(await page.content()).not.toContain("ci-fake");
 });
 
+test("a saved client secret is never rendered into the setup page", async ({ page }) => {
+  const marker = "e2e-marker-secret-do-not-render";
+  const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal(marker, "staff-microsoft");
+  const config = { tenantId: "0f8fad5b-d9cb-469f-a165-70867728950e", clientId: "11111111-2222-3333-4444-555555555555" };
+  await sql`INSERT INTO auth_provider (key, config, secret_ciphertext, secret_key_id)
+            VALUES ('staff-microsoft', ${sql.json(config)}, ${sealed.ciphertext}, ${sealed.keyId})
+            ON CONFLICT (key) DO UPDATE SET config = EXCLUDED.config, secret_ciphertext = EXCLUDED.secret_ciphertext, secret_key_id = EXCLUDED.secret_key_id`;
+  try {
+    const code = reopen();
+    await page.goto("/setup");
+    await page.getByLabel("Setup code").fill(code);
+    await page.getByRole("button", { name: "Unlock" }).click();
+    await expect(page.getByRole("heading", { name: "Step 1: Staff sign-in" })).toBeVisible();
+    // The saved row is on the page (so this check can fail), but its secret is not.
+    await expect(page.getByText(/Secret saved/)).toBeVisible();
+    const html = await page.content();
+    expect(html).not.toContain(marker);
+    expect(html).not.toContain(sealed.ciphertext);
+  } finally {
+    await sql`DELETE FROM auth_provider WHERE key = 'staff-microsoft'`;
+  }
+});
 test("a failed staff sign-in shows its message even when Better Auth adds its own error param", async ({ page }) => {
   const code = reopen();
   await page.goto("/setup");

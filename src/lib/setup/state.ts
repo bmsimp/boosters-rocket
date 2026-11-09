@@ -19,7 +19,7 @@ export async function updateSetupState(patch: Partial<SetupState>, tx?: Tx): Pro
   const next: SetupState = { ...(await getSetupState(tx)), ...patch };
   await (tx ?? db).insert(setting).values({ key: SETUP_STATE_KEY, value: next })
     .onConflictDoUpdate({ target: setting.key, set: { value: next, updatedAt: new Date() } });
-  statusCache = null;
+  cacheState.cache = null;
   return next;
 }
 
@@ -51,19 +51,24 @@ export async function finishSetup(o: { staffUserId: string; email: string; ip: s
     await writeAudit({ actor: { door: "staff", id: o.staffUserId, label: o.email }, action: "setup.finish", targetType: "setting",
       targetId: SETUP_STATE_KEY, after: { adminEmail: o.email }, ip: o.ip }, tx);
   });
-  statusCache = null;
+  cacheState.cache = null;
 }
 
-let statusCache: { at: number; status: SetupState["status"] } | null = null;
+// Held on globalThis (like providers.ts): the proxy bundle loads its own copy of this module, and a finish or reopen
+// in another copy must clear the status it cached.
+const CACHE_KEY = Symbol.for("booster-rocket.setup-status");
+type CacheState = { cache: { at: number; status: SetupState["status"] } | null };
+const cacheState: CacheState = ((globalThis as Record<symbol, unknown>)[CACHE_KEY] ??= { cache: null }) as CacheState;
 const cacheMs = () => {
   const v = Number(process.env.SETUP_STATUS_CACHE_MS ?? "5000");
   return Number.isFinite(v) && v >= 0 ? v : 5000;
 };
 /** For the proxy: the setup status, cached for 5 seconds (SETUP_STATUS_CACHE_MS) so a reopen on the server lands quickly. */
 export async function setupStatusCached(now = Date.now()): Promise<SetupState["status"]> {
-  if (statusCache && now - statusCache.at < cacheMs()) return statusCache.status;
+  const c = cacheState.cache;
+  if (c && now - c.at < cacheMs()) return c.status;
   const { status } = await getSetupState();
-  statusCache = { at: now, status };
+  cacheState.cache = { at: now, status };
   return status;
 }
-export function clearSetupStatusCache(): void { statusCache = null; }
+export function clearSetupStatusCache(): void { cacheState.cache = null; }
