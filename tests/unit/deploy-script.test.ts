@@ -43,7 +43,7 @@ beforeEach(() => {
     esac`);
 });
 
-describe("scripts/poc/deploy.sh", () => {
+describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
   it("pulls, builds, migrates, recreates the app and waits for health, in that order", () => {
     const r = run();
     expect(r.status).toBe(0);

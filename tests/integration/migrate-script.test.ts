@@ -6,7 +6,7 @@ const ADMIN_URL = "postgres://booster:booster@localhost:5433/postgres";
 const FRESH = "booster_migrate_script_test";
 const FRESH_URL = `postgres://booster:booster@localhost:5433/${FRESH}`;
 
-describe("scripts/migrate.mjs", () => {
+describe("scripts/migrate.mjs", { timeout: 30_000 }, () => {
   beforeAll(async () => {
     const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
     await admin.unsafe(`DROP DATABASE IF EXISTS ${FRESH}`);

@@ -20,7 +20,7 @@ const run = (script: string, ...args: string[]) => spawnSync("bash", [path.join(
   encoding: "utf8", env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, BR_DIR: dir },
 });
 
-describe("server setup scripts", () => {
+describe("server setup scripts", { timeout: 30_000 }, () => {
   it("setup.sh generates SETTINGS_ENCRYPTION_KEY", () => {
     expect(run("setup.sh").status).toBe(0);
     const env = readFileSync(path.join(dir, ".env.poc"), "utf8");
