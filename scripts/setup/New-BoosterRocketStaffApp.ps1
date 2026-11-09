@@ -8,9 +8,10 @@
     2. sets its redirect URI,
     3. requests the sign-in scopes openid, profile, email, offline_access and User.Read,
     4. creates its service principal and grants admin consent for those scopes,
-    5. adds a new 24-month client secret,
+    5. adds Booster Rocket's certificate (made by your Booster Rocket
+       server; only its public half is in this script),
   and prints the values to paste into the Booster Rocket setup page. Nothing is written to disk.
-  Safe to run again: it reuses the app and adds a new secret, leaving older secrets alone.
+  Safe to run again: it reuses the app and adds the certificate if it is not already there, leaving other certificates alone.
 .EXAMPLE
   ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e
 #>
@@ -23,6 +24,9 @@ $ErrorActionPreference = 'Stop'
 
 if ($AppUrl -notmatch '^https?://') { throw 'Pass -AppUrl with your site address, for example -AppUrl https://portal.example.org' }
 $AppUrl = $AppUrl.TrimEnd('/')
+$CertificateBase64 = '__BOOSTER_ROCKET_CERTIFICATE__'
+if ($CertificateBase64 -notmatch '^[A-Za-z0-9+/]{200,}={0,2}$') { throw 'Download this script from the Booster Rocket setup page; it carries the certificate to add to the app.' }
+$Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($CertificateBase64))
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
   Write-Host 'This script needs the Microsoft Graph PowerShell module. Install it with:'
   Write-Host '  Install-Module Microsoft.Graph.Authentication -Scope CurrentUser'
@@ -69,17 +73,26 @@ try {
   }
   Write-Host 'Granted admin consent for the sign-in scopes, so staff will not see a consent prompt.'
 
-  $end = (Get-Date).ToUniversalTime().AddMonths(24).ToString('o')
-  $pw = Invoke-MgGraphRequest POST "v1.0/applications/$($app.id)/addPassword" -Body (@{ passwordCredential = @{ displayName = "Booster Rocket $(Get-Date -Format 'yyyy-MM-dd')"; endDateTime = $end } } | ConvertTo-Json -Depth 4) -ContentType 'application/json'
-  if ($found.Count -eq 1) { Write-Host 'Added a new client secret. Older secrets on this app were left alone; delete them in the Entra admin center once the new one works.' }
+  $existing = @((Invoke-MgGraphRequest GET "v1.0/applications/$($app.id)?`$select=keyCredentials").keyCredentials)
+  $hash = [Convert]::ToBase64String($Certificate.GetCertHash())
+  if ($existing | Where-Object { $_.customKeyIdentifier -eq $hash }) {
+    Write-Host 'The Booster Rocket certificate is already on the app.'
+  } else {
+    if ($existing | Where-Object { -not $_.key }) {
+      throw "Microsoft didn't return this app's existing certificates, so the script stopped rather than risk removing them. Upload the .cer from the setup page by hand: Certificates & secrets > Certificates > Upload certificate."
+    }
+    $keys = @($existing | ForEach-Object { @{ type = $_.type; usage = $_.usage; key = $_.key; displayName = $_.displayName } })
+    $keys += @{ type = 'AsymmetricX509Cert'; usage = 'Verify'; key = $CertificateBase64; displayName = "Booster Rocket $(Get-Date -Format 'yyyy-MM-dd')" }
+    Invoke-MgGraphRequest PATCH "v1.0/applications/$($app.id)" -Body (@{ keyCredentials = @($keys) } | ConvertTo-Json -Depth 5) -ContentType 'application/json' | Out-Null
+    Write-Host 'Added the Booster Rocket certificate to the app. Certificates already on it were kept.'
+  }
 
   Write-Host ''
-  Write-Host 'Paste these into the Booster Rocket setup page now. The secret is shown only this once.'
-  Write-Host "  Tenant ID:      $tenant"
-  Write-Host "  Client ID:      $($app.appId)"
-  Write-Host "  Client secret:  $($pw.secretText)"
-  Write-Host "  Secret expires: $(([datetime]$pw.endDateTime).ToUniversalTime().ToString('yyyy-MM-dd'))"
-  Write-Host 'A brand-new secret can take a few minutes to start working. If the setup page says the secret was rejected, wait and try again.'
+  Write-Host 'Enter these on the Booster Rocket setup page. There is no secret to copy.'
+  Write-Host "  Tenant ID:            $tenant"
+  Write-Host "  Client ID:            $($app.appId)"
+  Write-Host "  Certificate:          $($Certificate.Thumbprint) (expires $($Certificate.NotAfter.ToUniversalTime().ToString('yyyy-MM-dd')))"
+  Write-Host 'A new certificate can take a minute to start working. If the setup page says Microsoft does not have it yet, wait and try again.'
 } finally {
   Disconnect-MgGraph | Out-Null
 }

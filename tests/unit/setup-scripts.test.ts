@@ -34,4 +34,15 @@ describe("setup PowerShell scripts", () => {
     expect(parent).toContain("isSignUpAllowed = $false");
     expect(parent).toContain("EmailOtpSignup-OAUTH");
   });
+  it.each([["staff", staff], ["parent", parent]])("%s script uploads the certificate and never makes a secret", (_, s) => {
+    expect(s).not.toMatch(/addPassword|secretText|passwordCredential/);
+    expect(s.split("__BOOSTER_ROCKET_CERTIFICATE__")).toHaveLength(2);
+    expect(s).toContain("$CertificateBase64 = '__BOOSTER_ROCKET_CERTIFICATE__'");
+    expect(s).toContain("$select=keyCredentials");
+    expect(s).toContain("AsymmetricX509Cert");
+  });
+  it.each([["staff", staff], ["parent", parent]])("%s script sends existing keyCredentials back", (_, s) => {
+    expect(s).toMatch(/\$existing[\s\S]*keyCredentials = @\(/);
+    expect(s).toMatch(/didn't return this app's existing certificates/);
+  });
 });
