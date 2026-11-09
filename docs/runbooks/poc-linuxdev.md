@@ -15,10 +15,10 @@ a Cloudflare tunnel (and, optionally, Cloudflare Access), so you can prove that 
 tenant or Google), parent sign-in (Entra External ID) and the audit log work for real. It holds **test data
 only**; no real families use it.
 
-Two sign-in doors exist. Staff use `/staff/sign-in`; parents use `/sign-in`. Cloudflare Access sits in
-front of both, so testers sign in twice (an emailed code, then the portal's own sign-in). (For this proof of
-concept the owner chose to skip Cloudflare Access rather than manage a list of tester emails; see section 6 B,
-which is now optional. Without it, testers sign in once, at the portal's own sign-in.)
+Two sign-in doors exist. Staff use `/staff/sign-in`; parents use `/sign-in`. If Cloudflare
+Access is set up, it sits in front of both, so testers sign in twice (an emailed code, then the portal's own
+sign-in). For this proof of concept the owner chose to skip Access rather than manage a list of tester
+emails (see section 6 B, which is optional), so testers sign in once, at the portal's own sign-in.
 
 Sign-in is not configured in files. After the first deploy you open `/setup`, enter a one-time setup
 code that `deploy.sh` prints, and set up staff sign-in, parent sign-in and the first Admin on that page
@@ -150,7 +150,8 @@ Unblock-File .\New-BoosterRocketStaffApp.ps1
 
 After setup, Admins can change sign-in under **Settings** > **Sign-in**. **Replace certificate** downloads
 a new certificate. The old one keeps working until **Check and switch** succeeds; after that you can remove
-the old certificate in Entra. (Google still uses a client secret, entered as before.)
+the old certificate in Entra. The staff home warns Admins 30 days before a certificate expires; use
+Replace certificate under Settings → Sign-in. (Google still uses a client secret, entered as before.)
 
 Sources: Register an application in Microsoft Entra ID
 (https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app); Add a redirect URI
@@ -300,8 +301,10 @@ location on the user page is the standard Entra user overview; those pages do no
 ## 6. Cloudflare
 
 Part A is required. Part B (Cloudflare Access) is **optional**: the owner skipped it for this proof of
-concept rather than manage a list of tester emails. Without it, anyone who has the address can reach the
-portal's sign-in pages, which is acceptable only because the site holds test data. Do both parts in the Cloudflare dashboard for the account that owns `rhinoautomator.com`.
+concept rather than manage a list of tester emails.
+
+Without Access, anyone who has the address can reach the portal's sign-in pages, which is acceptable only
+because the site holds test data. Do whichever parts you need in the Cloudflare dashboard for the account that owns `rhinoautomator.com`.
 
 **A. Route the hostname through the existing tunnel**
 
@@ -382,7 +385,7 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
 
 Run these in order, in a private browser window. Record each outcome in section 10.
 
-- [ ] 1. Visit https://portaltest.rhinoautomator.com: Cloudflare Access asks for an email code; after it, the portal's sign-in page.
+- [ ] 1. Visit https://portaltest.rhinoautomator.com: the portal's sign-in page shows directly. (Only if Cloudflare Access is set up, section 6 B, it first asks for an email code.)
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
 - [ ] 4. Parent: sign in at `/sign-in` as the seeded test parent -> parent home (not the refusal page).
@@ -424,14 +427,14 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | Setup code does not work | It is wrong, was replaced by a newer one, was slowed down by too many wrong tries, or is void | Run `scripts/poc/setup-code.sh` for a fresh code and use that one |
 | Microsoft doesn't have this certificate on the app yet (`AADSTS700027`) | The `.cer` was not uploaded to the app registration, or Microsoft has not picked it up yet | Upload the `.cer` under **Certificates & secrets** > **Certificates** (or run the script), wait a minute, and try again |
 | The server's clock looks wrong, so Microsoft refused the certificate (`AADSTS700024`) | The time on linuxdev is off | Fix the time on linuxdev, then try again |
-| The tenant blocks client secrets (`CredentialTypeNotAllowedAsPerAppPolicy`) | The tenant's "Block password addition" app policy refuses secrets | Nothing needs changing: this is why Microsoft sign-in uses certificates. Use the certificate steps in sections 3 and 4 (Google still uses a secret) |
+| The tenant blocks client secrets (`CredentialTypeNotAllowedAsPerAppPolicy`) | The tenant's "Block password addition" app policy, which stops apps from getting client secrets, refused the request | Nothing needs changing: this is why Microsoft sign-in uses certificates. Use the certificate steps in sections 3 and 4 (Google still uses a secret) |
 | Nobody can sign in (for example, a certificate or Google client secret expired) | Sign-in values need replacing | Run `scripts/poc/reopen-setup.sh`, enter the code at `/setup`, and re-enter the values. Existing Admins stay Admins |
 | Sign-in shows "not set up" after `.env.poc` was changed or replaced | `SETTINGS_ENCRYPTION_KEY` changed, so the stored secrets cannot be read | Put the old key back if you have a backup; otherwise run `scripts/poc/reopen-setup.sh` and re-enter the secrets |
 | Step 3 says it is a different account | You are signed in to Microsoft as someone other than the Admin email you entered | Sign out of Microsoft, then sign in as the Admin email |
 | Browser shows Cloudflare 502 | `cloudflared` cannot reach `booster-rocket-app:3000`: the edge network was not added to cloudflared, cloudflared was not recreated, or the app is unhealthy | `docker network inspect booster-rocket-edge` must list both `cloudflared` and `booster-rocket-app`; if not, redo section 2 steps 3-4. Then `docker ps` for `(healthy)` and `docker logs booster-rocket-app` |
 | Form buttons or sign-in fail with a server action or origin/forbidden error | HTTP Host Header is set in the tunnel route, or `APP_URL` is wrong | Clear the HTTP Host Header (section 6 A5); make `APP_URL=https://portaltest.rhinoautomator.com` exactly, then recreate the app |
 | Deploy or migrate fails with a database password error after re-running setup | `.env.poc` was deleted and regenerated (new `DB_PASSWORD`) | See the note at the end of section 2 |
-| Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 6 B steps 1-3; check spam |
+| Only if Access is set up: Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 6 B steps 1-3; check spam |
 
 ## 10. Results
 
