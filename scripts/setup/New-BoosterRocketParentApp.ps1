@@ -42,10 +42,11 @@ function Send-Graph([string]$Method, [string]$Uri, $Body) {
   return Invoke-MgGraphRequest $Method $Uri -Body ($Body | ConvertTo-Json -Depth 10) -ContentType 'application/json'
 }
 
-Connect-MgGraph -TenantId $TenantId -Scopes 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'EventListener.ReadWrite.All' -NoWelcome
+Connect-MgGraph -TenantId $TenantId -Scopes 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'EventListener.ReadWrite.All', 'Domain.Read.All' -ContextScope Process -NoWelcome
 try {
   $tenant = (Get-MgContext).TenantId
   $initial = (Send-Graph GET 'v1.0/domains' $null).value | Where-Object { $_.isInitial } | Select-Object -First 1
+  if (-not $initial) { throw "Couldn't read this tenant's .onmicrosoft.com domain. Check you signed in to the External ID tenant." }
   $subdomain = $initial.id -replace '\.onmicrosoft\.com$', ''
 
   $access = @{ resourceAppId = $GraphAppId; resourceAccess = @($Scopes.Values | ForEach-Object { @{ id = $_; type = 'Scope' } }) }
@@ -104,7 +105,7 @@ try {
   Write-Host "  Tenant ID:        $tenant"
   Write-Host "  Client ID:        $($app.appId)"
   Write-Host "  Client secret:    $($pw.secretText)"
-  Write-Host "  Secret expires:   $(([datetime]$pw.endDateTime).ToString('yyyy-MM-dd'))"
+  Write-Host "  Secret expires:   $(([datetime]$pw.endDateTime).ToUniversalTime().ToString('yyyy-MM-dd'))"
 } finally {
   Disconnect-MgGraph | Out-Null
 }

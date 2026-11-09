@@ -21,6 +21,15 @@ describe("setup PowerShell scripts", () => {
     const replaced = s.replaceAll("__BOOSTER_ROCKET_APP_URL__", "https://portal.example.org");
     expect(replaced).not.toContain("__BOOSTER_ROCKET_APP_URL__");
   });
+  it("parent script requests Domain.Read.All for the tenant domain lookup", () => {
+    expect(parent).toContain("'Domain.Read.All'");
+  });
+  it.each([["staff", staff], ["parent", parent]])("%s script connects in process scope only", (_, s) => {
+    expect(s).toContain("-ContextScope Process");
+  });
+  it.each([["staff", staff], ["parent", parent]])("%s script disconnects in a finally block", (_, s) => {
+    expect(s).toMatch(/finally\s*\{[\s\S]*Disconnect-MgGraph/);
+  });
   it("turns sign-up off and uses email one-time passcode", () => {
     expect(parent).toContain("isSignUpAllowed = $false");
     expect(parent).toContain("EmailOtpSignup-OAUTH");

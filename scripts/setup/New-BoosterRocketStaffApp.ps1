@@ -39,7 +39,7 @@ $Scopes = [ordered]@{
   'User.Read' = 'e1fe6dd8-ba31-4d61-89e7-88639da4683d'
 }
 
-Connect-MgGraph -TenantId $TenantId -Scopes 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All' -NoWelcome
+Connect-MgGraph -TenantId $TenantId -Scopes 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All' -ContextScope Process -NoWelcome
 try {
   $tenant = (Get-MgContext).TenantId
   $access = @{ resourceAppId = $GraphAppId; resourceAccess = @($Scopes.Values | ForEach-Object { @{ id = $_; type = 'Scope' } }) }
@@ -78,7 +78,7 @@ try {
   Write-Host "  Tenant ID:      $tenant"
   Write-Host "  Client ID:      $($app.appId)"
   Write-Host "  Client secret:  $($pw.secretText)"
-  Write-Host "  Secret expires: $(([datetime]$pw.endDateTime).ToString('yyyy-MM-dd'))"
+  Write-Host "  Secret expires: $(([datetime]$pw.endDateTime).ToUniversalTime().ToString('yyyy-MM-dd'))"
   Write-Host 'A brand-new secret can take a few minutes to start working. If the setup page says the secret was rejected, wait and try again.'
 } finally {
   Disconnect-MgGraph | Out-Null
