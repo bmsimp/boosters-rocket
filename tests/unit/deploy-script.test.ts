@@ -31,6 +31,7 @@ beforeEach(() => {
   stub("git", `case "$1" in status) printf "%s" "\${GIT_DIRTY:-}";; rev-parse) echo abc1234;; *) exit 0;; esac`);
   stub("docker", `
     case "$*" in
+      *"setup-code.mjs"*) echo "\${SETUP_CODE_OUT:-}"; exit \${SETUP_CODE_FAIL:-0};;
       *"run --rm migrate"*) exit \${MIGRATE_FAIL:-0};;
       *" build app"*) exit \${BUILD_FAIL:-0};;
       *"inspect --format {{.Image}}"*) [ -z "\${NO_RUNNING:-}" ] || exit 1; echo "sha256:running123";;
@@ -52,6 +53,20 @@ describe("scripts/poc/deploy.sh", () => {
     let at = -1;
     for (const step of order) { const i = c.indexOf(step, at + 1); expect(i, `missing or out of order: ${step}\n${c}`).toBeGreaterThan(at); at = i; }
     expect(r.stdout).toContain("Deployed abc1234");
+  });
+
+  it("prints a setup code after a healthy deploy while setup is open", () => {
+    const r = run([], { SETUP_CODE_OUT: "Setup code: K7QM-2XPA-9RTE" });
+    expect(r.status).toBe(0);
+    const c = calls();
+    expect(c.indexOf("setup-code.mjs --if-open")).toBeGreaterThan(c.indexOf("up -d --no-deps --force-recreate app"));
+    expect(r.stdout).toContain("Setup code: K7QM-2XPA-9RTE");
+  });
+
+  it("still succeeds when the setup-code check fails, and says how to get a code", () => {
+    const r = run([], { SETUP_CODE_FAIL: "1" });
+    expect(r.status).toBe(0);
+    expect(r.stdout + r.stderr).toContain("scripts/poc/setup-code.sh");
   });
 
   it("refuses when the checkout has local changes, before touching anything", () => {

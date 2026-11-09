@@ -73,4 +73,7 @@ if [ -n "$running" ]; then
   fi
 fi
 recreate_app
+if ! "${COMPOSE[@]}" run --rm migrate node tools/scripts/setup-code.mjs --if-open; then
+  say "Couldn't check whether setup is finished. If it isn't, run scripts/poc/setup-code.sh for a setup code."
+fi
 say "Deployed $(git rev-parse --short HEAD)."

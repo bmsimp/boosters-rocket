@@ -21,15 +21,21 @@ if [ ! -f .env.poc ]; then
   tmp="$(mktemp ./.env.poc.XXXXXX)"
   trap 'rm -f "$tmp"' EXIT
   sed -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
-      -e "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" .env.poc.example > "$tmp"
-  for key in BETTER_AUTH_SECRET DB_PASSWORD; do
+      -e "s|^DB_PASSWORD=.*|DB_PASSWORD=$(openssl rand -hex 24)|" \
+      -e "s|^SETTINGS_ENCRYPTION_KEY=.*|SETTINGS_ENCRYPTION_KEY=$(openssl rand -base64 32)|" .env.poc.example > "$tmp"
+  for key in BETTER_AUTH_SECRET DB_PASSWORD SETTINGS_ENCRYPTION_KEY; do
     grep -Eq "^${key}=.+" "$tmp" || { echo "Could not generate ${key}; .env.poc was not created." >&2; exit 2; }
   done
   chmod 600 "$tmp"
   mv "$tmp" .env.poc
   trap - EXIT
-  echo "Created .env.poc with fresh secrets. Fill in the Microsoft values from the runbook."
+  echo "Created .env.poc with fresh secrets."
 else
+  if ! grep -Eq '^SETTINGS_ENCRYPTION_KEY=.+' .env.poc; then
+    sed -i.bak '/^SETTINGS_ENCRYPTION_KEY=/d' .env.poc && rm -f .env.poc.bak
+    printf 'SETTINGS_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)" >> .env.poc
+    echo "Added SETTINGS_ENCRYPTION_KEY to .env.poc."
+  fi
   echo ".env.poc already exists; left as is."
 fi
 
@@ -43,5 +49,7 @@ and under the top-level networks:
     external: true
 Then run:  docker compose -f ~/n8n/docker-compose.yml up -d --no-deps cloudflared
 
-When .env.poc is complete, deploy with:  scripts/poc/deploy.sh
+Then deploy with:  scripts/poc/deploy.sh
+It prints a setup code at the end. Open the site, enter the code, and follow the setup page.
+Back up .env.poc along with the database: SETTINGS_ENCRYPTION_KEY is needed to read the stored sign-in secrets.
 EOT

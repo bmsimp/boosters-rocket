@@ -14,6 +14,8 @@ uid="$(docker run --rm "$IMAGE" node -e "process.stdout.write(String(process.get
 [ "$uid" != "0" ] || fail "the image runs as root"
 docker run --rm "$IMAGE" sh -c "test -f /app/server.js && test -f /app/tools/scripts/migrate.mjs && test -f /app/tools/drizzle/meta/_journal.json" \
   || fail "expected files missing from the image"
+docker run --rm "$IMAGE" test -f tools/scripts/setup-code.mjs || fail "setup-code.mjs missing from the image"
+docker run --rm "$IMAGE" test -f scripts/setup/New-BoosterRocketStaffApp.ps1 || fail "setup scripts missing from the image"
 
 docker network create "$NET" >/dev/null
 docker run -d --name "$NET-db" --network "$NET" -e POSTGRES_USER=b -e POSTGRES_PASSWORD=b -e POSTGRES_DB=b postgres:16 >/dev/null

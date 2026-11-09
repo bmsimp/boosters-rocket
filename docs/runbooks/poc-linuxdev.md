@@ -9,11 +9,15 @@ trust the screen and note it in the Results table.
 
 This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
 a Cloudflare tunnel and Cloudflare Access, so you can prove that staff sign-in (the band's Entra
-tenant), parent sign-in (Entra External ID) and the audit log work for real. It holds **test data
+tenant or Google), parent sign-in (Entra External ID) and the audit log work for real. It holds **test data
 only**; no real families use it.
 
 Two sign-in doors exist. Staff use `/staff/sign-in`; parents use `/sign-in`. Cloudflare Access sits in
 front of both, so testers sign in twice (an emailed code, then the portal's own sign-in).
+
+Sign-in is not configured in files. After the first deploy you open `/setup`, enter a one-time setup
+code that `deploy.sh` prints, and set up staff sign-in, parent sign-in and the first Admin on that page
+(sections 3 and 4).
 
 ## 2. First-time setup on linuxdev
 
@@ -25,11 +29,15 @@ Do this over SSH as user `brian`.
    cd ~/booster-rocket
    ```
 2. Run the setup script. It creates the Docker network `booster-rocket-edge` and a private `.env.poc`
-   file with a freshly generated `BETTER_AUTH_SECRET` and `DB_PASSWORD`:
+   file with freshly generated `BETTER_AUTH_SECRET`, `DB_PASSWORD` and `SETTINGS_ENCRYPTION_KEY`:
    ```bash
    scripts/poc/setup.sh
    ```
-   It is safe to run again; it never overwrites an existing `.env.poc`.
+   It is safe to run again; it never overwrites an existing `.env.poc`. (If an older `.env.poc` has no
+   `SETTINGS_ENCRYPTION_KEY`, it adds one and leaves everything else alone.) `.env.poc` holds no
+   Microsoft or Google values; those are entered on the setup page and stored encrypted in the
+   database. **Back up `.env.poc` along with the database**: `SETTINGS_ENCRYPTION_KEY` is needed to read
+   the stored sign-in secrets.
 3. Let the tunnel container reach the app. Edit `~/n8n/docker-compose.yml`:
    - In the `cloudflared` service, add `booster-rocket-edge` to its `networks:` list, next to the
      networks already there (for example `cipp-tracker-net`):
@@ -71,21 +79,33 @@ Do this over SSH as user `brian`.
 `DB_PASSWORD`, but the existing Postgres volume `booster-rocket-pgdata` still expects the *old* one, so
 the app and the migration will fail to log in to the database. Fix it one of two ways:
 - *Keep the data:* put the old `DB_PASSWORD` back into the new `.env.poc` (if you have a backup of
-  the old file). Then re-enter the other values from sections 3 and 4.
+  the old file), including the old `SETTINGS_ENCRYPTION_KEY`. Without that key the stored sign-in
+  secrets cannot be read; see the troubleshooting table.
 - *Throw the data away (test data only):* stop the stack and delete the volume, then deploy again.
   ```bash
   cd ~/booster-rocket
   docker compose -f docker-compose.poc.yml --env-file .env.poc down
   docker volume rm booster-rocket-pgdata
   ```
-  The new `.env.poc` has fresh secrets only: the Microsoft values from sections 3 and 4
-  (`STAFF_ENTRA_*`, `PARENT_OIDC_*`) and `BOOTSTRAP_ADMIN_EMAIL` are blank. Re-enter all of them
-  *before* you deploy. After the deploy, re-run the seed in section 5 (the guardian rows are gone).
-  Staff and parent accounts are re-created at next sign-in.
+  Deploy again; the deploy prints a new setup code, and you go through the setup page (sections 3
+  and 4) again. After the deploy, re-run the seed in section 5 (the guardian rows are gone).
 
-## 3. Staff sign-in (the band's Entra tenant)
+## 3. Staff sign-in (the band's Entra tenant, or Google)
 
-Use an account in the band's Entra tenant that can register applications (you are Global Administrator).
+Do this after the first deploy (section 7). Open https://portaltest.rhinoautomator.com/setup, enter the
+setup code `deploy.sh` printed, and follow **Step 1** of the setup page. It walks you through Microsoft
+(or Google) and checks what you paste before it saves it. For Microsoft you can instead run the
+PowerShell script the page offers, `New-BoosterRocketStaffApp.ps1`, which creates the registration
+for you.
+
+If the code has scrolled away or stopped working, get a new one on linuxdev:
+```bash
+cd ~/booster-rocket
+scripts/poc/setup-code.sh
+```
+
+**What the setup page asks for (Microsoft).** Use an account in the band's Entra tenant that can register
+applications (you are Global Administrator). Reference only; the page shows these steps as you go.
 
 1. Sign in to https://entra.microsoft.com. If you have several tenants, use the **Settings** icon at the
    top and switch to the band's tenant.
@@ -99,22 +119,16 @@ Use an account in the band's Entra tenant that can register applications (you ar
    (If you skip it here: open the app, under **Manage** select **Authentication**, **Add Redirect URI**,
    choose **Web**, enter the URI above, **Configure**.)
 6. Select **Register**. On the **Overview** page copy:
-   - **Application (client) ID** -> `STAFF_ENTRA_CLIENT_ID`
-   - **Directory (tenant) ID** -> `STAFF_ENTRA_TENANT_ID`. This must be the GUID (like
-     `00aa00aa-bb11-cc22-dd33-44ee44ee44ee`), never the words `common`, `organizations` or `consumers`.
+   - **Application (client) ID**
+   - **Directory (tenant) ID**. This must be the GUID (like `00aa00aa-bb11-cc22-dd33-44ee44ee44ee`),
+     never the words `common`, `organizations` or `consumers`.
 7. Under **Manage** select **Certificates & secrets** > **Client secrets** > **New client secret**. Add a
    description, choose an expiration (Microsoft recommends under 12 months), select **Add**. Copy the
-   secret **Value** now (not the Secret ID); it is never shown again -> `STAFF_ENTRA_CLIENT_SECRET`.
-8. On linuxdev edit `~/booster-rocket/.env.poc` (for example `nano ~/booster-rocket/.env.poc`) and fill:
-   ```
-   STAFF_ENTRA_TENANT_ID=<directory (tenant) ID GUID>
-   STAFF_ENTRA_CLIENT_ID=<application (client) ID>
-   STAFF_ENTRA_CLIENT_SECRET=<secret value>
-   BOOTSTRAP_ADMIN_EMAIL=<your band email address>
-   ```
-   `BOOTSTRAP_ADMIN_EMAIL` is the address that becomes the first Admin when you first sign in. It must
-   be the same address the Microsoft account signs in with. Leave `APP_URL` as
-   `https://portaltest.rhinoautomator.com`.
+   secret **Value** now (not the Secret ID); it is never shown again.
+8. Paste the three values into Step 1 of the setup page.
+
+The setup page stores the secret encrypted. After setup, Admins can change it under **Settings** >
+**Sign-in**, and the app warns Admins 30 days before a secret expires.
 
 Sources: Register an application in Microsoft Entra ID
 (https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app); Add a redirect URI
@@ -141,6 +155,12 @@ Parents sign in through a separate *external tenant* so their accounts never mix
    **Tenant overview** copy the **Tenant ID** and the **Primary domain** (the part before `.onmicrosoft.com`
    is the tenant name used below).
 
+**B to E. Everything else is Step 2 of the setup page.** The tenant itself must be created by hand (part
+A); after that, follow **Step 2** of the setup page, or run `New-BoosterRocketParentApp.ps1`, which
+registers the portal in the external tenant and also turns sign-up off (the same thing as part D).
+The page checks the discovery URL before it saves anything. Parts B to E below are what those steps do,
+for reference and for doing it by hand.
+
 **B. Register the portal in the external tenant** (still switched into the external tenant)
 
 1. **Entra ID** > **App registrations** > **New registration**. **Name:** `Booster Rocket parents (portaltest)`.
@@ -149,9 +169,9 @@ Parents sign in through a separate *external tenant* so their accounts never mix
    ```
    https://portaltest.rhinoautomator.com/api/auth/parent/callback/parent-oidc
    ```
-3. **Register.** Copy **Application (client) ID** -> `PARENT_OIDC_CLIENT_ID`.
-4. **Certificates & secrets** > **Client secrets** > **New client secret** > **Add**; copy the **Value** ->
-   `PARENT_OIDC_CLIENT_SECRET`.
+3. **Register.** Copy **Application (client) ID** (the client ID for Step 2).
+4. **Certificates & secrets** > **Client secrets** > **New client secret** > **Add**; copy the **Value**
+   (the client secret for Step 2).
 5. External tenants require an administrator to consent for everyone: under **Manage** select **API
    permissions**, **Grant admin consent for <tenant name>**, **Yes**, **Refresh**, and check **Granted for
    <tenant name>** shows under **Status**.
@@ -167,7 +187,8 @@ Parents sign in through a separate *external tenant* so their accounts never mix
    `Booster Rocket parents (portaltest)`, **Select**.
 
 **D. Turn sign-up off.** You cannot do this in the admin center; Microsoft documents it as a Microsoft
-Graph call. With sign-up on, a stranger could create a parent account.
+Graph call. With sign-up on, a stranger could create a parent account. `New-BoosterRocketParentApp.ps1`
+does this for you; the steps below are the manual fallback.
 
 1. Copy the app's **Application (client) ID** from the user flow's **Applications** list (same value as in B3).
 2. Using any tool that can call Microsoft Graph as a signed-in admin of the *external* tenant (for example
@@ -188,16 +209,19 @@ Graph call. With sign-up on, a stranger could create a parent account.
    ```
 4. Confirm by re-reading the flow: `isSignUpAllowed` must be `false`.
 
-**E. Fill `.env.poc`** on linuxdev. The discovery URL uses the tenant *name* (subdomain) and the tenant
-*ID*:
+**E. Enter the values in Step 2 of the setup page** (not in `.env.poc`). The discovery URL uses the
+tenant *name* (subdomain) and the tenant *ID*:
 ```
-PARENT_OIDC_DISCOVERY_URL=https://<tenant-name>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration
-PARENT_OIDC_CLIENT_ID=<application (client) ID from B3>
-PARENT_OIDC_CLIENT_SECRET=<secret value from B4>
+Discovery URL: https://<tenant-name>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration
+Client ID:     <application (client) ID from B3>
+Client secret: <secret value from B4>
 ```
 Check the URL in a browser first: it must show a block of JSON that includes `issuer`. The app takes the
 issuer from that document, so whichever of the Microsoft-documented host forms (tenant name or tenant ID
 as the first label of `ciamlogin.com`) returns the JSON works.
+
+**Then Step 3 of the setup page:** enter the email address of the first Admin (the one the Microsoft or
+Google account signs in with), sign in, and setup closes. That person is now an Admin.
 
 Sources: Create an external tenant
 (https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-create-external-tenant-portal);
@@ -289,7 +313,9 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    migrations, recreates the app and waits up to 120 seconds for it to become healthy. The first build
    takes several minutes.
 2. **Success** is the last line `Deployed <short commit>.` and exit code 0 (`echo $?`). Also:
-   `docker ps --filter name=booster-rocket-app` shows `(healthy)`.
+   `docker ps --filter name=booster-rocket-app` shows `(healthy)`. While setup is still open, a line
+   `Setup code: XXXX-XXXX-XXXX` is printed just before it. Enter that code at `/setup`. Once setup is
+   finished, no code is printed.
 3. If it stops, the exit code says why:
 
    | Code | Meaning | What to do |
@@ -306,23 +332,28 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    ```
 5. **Logs:** `docker logs booster-rocket-app` (add `--tail 100` or `-f`). Database:
    `docker compose -f docker-compose.poc.yml --env-file .env.poc logs db`.
-6. After the first successful deploy, do section 5 step 4 (the seed).
+6. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), then do section 5
+   step 4 (the seed).
+7. **Need a code later?** `scripts/poc/setup-code.sh` prints a new one (the old code stops working) while
+   setup is open. **Nobody can sign in** (for example, a client secret expired)?
+   `scripts/poc/reopen-setup.sh` reopens setup and prints a code. Stored sign-in values are kept and
+   existing Admins stay Admins.
 
 ## 8. The test checklist
 
 Run these in order, in a private browser window. Record each outcome in section 10.
 
 - [ ] 1. Visit https://portaltest.rhinoautomator.com: Cloudflare Access asks for an email code; after it, the portal's sign-in page.
-- [ ] 2. Staff: sign in at `/staff/sign-in` with Microsoft -> staff home, as Admin.
+- [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
 - [ ] 4. Parent: sign in at `/sign-in` as the seeded test parent -> parent home (not the refusal page).
-- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`.
+- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`.
 - [ ] 6. Sign out at both doors -> both `signout` entries appear.
 - [ ] 7. The second External ID user (no guardian row) -> refusal page; audit shows `signin.refused` with reason `no_guardian`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
   After a no-change redeploy, `previous` and `current` are the same image, so `--rollback` only exercises the mechanism; a real rollback test needs a real new commit.
 
-**Reading the audit log:** sign in as staff at `/staff/sign-in` and choose **Audit** in the top menu (it
+**Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
 (staff, parent or system), who, the action, and details. A refusal's reason is in the details as
 `reason`: each row has a **Details** line you can open, showing the saved before/after values
@@ -341,16 +372,21 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | Parent sees the refusal page; audit `signin.refused` (door parent), reason `missing_object_id` | The app never saved this parent's Object ID: the token could not be verified (look for a `parent.object_id_unverified` row just before it) | Read the `parent.object_id_unverified` reason below; fix that; sign in again |
 | `signin.refused`, reason `no_guardian` | No guardian row has this Object ID | Expected for parent two. For a real tester: copy the Object ID from the external tenant user and run the seed (section 5) |
 | `signin.refused`, reason `disabled` | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited' where email='<email>';"` (this SQL fix bypasses the audit log, so it is acceptable only for test data) |
-| Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not `BOOTSTRAP_ADMIN_EMAIL` | Sign in with the bootstrap email, or have an Admin add the person first (**Staff** menu) |
+| Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not the first Admin email entered in Step 3 of setup | Sign in with that email, or have an Admin add the person first (**Staff** menu) |
 | `parent.object_id_unverified`, reason `subject_mismatch` | The ID token's subject differs from the account being signed in | Sign out everywhere, clear cookies, try again; if it repeats, report it (should not happen) |
-| `parent.object_id_unverified`, reason `invalid_token:...` (for example `invalid_token:ERR_JWT_CLAIM_VALIDATION_FAILED:iss` or `:aud`, or `ERR_JWT_EXPIRED`) | Wrong issuer or audience, or an expired token. `iss`: discovery URL is for another tenant; `aud`: `PARENT_OIDC_CLIENT_ID` is not the parent app's client ID | Re-check the three `PARENT_OIDC_*` values in `.env.poc`, then restart the app: `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d --force-recreate app` (use this only after a successful deploy; after an exit-3 deploy, `:current` is the new unmigrated build) |
+| `parent.object_id_unverified`, reason `invalid_token:...` (for example `invalid_token:ERR_JWT_CLAIM_VALIDATION_FAILED:iss` or `:aud`, or `ERR_JWT_EXPIRED`) | Wrong issuer or audience, or an expired token. `iss`: discovery URL is for another tenant; `aud`: the client ID entered is not the parent app's client ID | Re-check the parent sign-in values (**Settings** > **Sign-in**, or `scripts/poc/reopen-setup.sh` and Step 2 of the setup page) |
 | `parent.object_id_unverified`, reason `missing_oid` | The token verified but has no `oid` claim | Check the app registration is in the **external** tenant and sign-in uses its user flow; report the finding (this is the open risk in the spec) |
 | `parent.object_id_unverified`, reasons `no_id_token`, `discovery_failed`, `verifier_unavailable`, `user_missing` | No ID token returned; the discovery URL cannot be fetched from linuxdev; or the account row vanished | Open the discovery URL in a browser; check linuxdev has internet access; check admin consent (section 4 B5) |
 | `parent.object_id_conflict` in audit | The same account came back with a different Object ID | Test data: use a different external user; report it |
 | Microsoft error "AADSTS50011: The redirect URI ... does not match" | Redirect URI in the app registration differs from the one the portal sends | Staff: `https://portaltest.rhinoautomator.com/api/auth/staff/callback/microsoft`; parent: `https://portaltest.rhinoautomator.com/api/auth/parent/callback/parent-oidc`. Platform must be **Web**; no trailing slash |
-| App container restarts or will not start; log says "STAFF_ENTRA_TENANT_ID must be the club directory (tenant) GUID" | `.env.poc` has `common`, `organizations`, `consumers` or something that is not a GUID | Put the **Directory (tenant) ID** GUID from the band's tenant Overview page; also set the registration to **Single tenant only** |
+| The setup page refuses the Microsoft tenant ID | It is `common`, `organizations`, `consumers` or something that is not a GUID | Use the **Directory (tenant) ID** GUID from the band's tenant Overview page; also set the registration to **Single tenant only** |
 | The staff app registration was created as multi-tenant | Wrong **Supported account types** choice | Entra > the app > **Authentication** > **Supported account types** > **Single tenant only** |
-| A stranger can create a parent account in External ID | Sign-up left on in the user flow | Redo section 4 D and confirm `isSignUpAllowed` is `false` |
+| A stranger can create a parent account in External ID | Sign-up left on in the user flow | Redo section 4 D (or run `New-BoosterRocketParentApp.ps1`) and confirm `isSignUpAllowed` is `false` |
+| Setup code does not work | It is wrong, was replaced by a newer one, was slowed down by too many wrong tries, or is void | Run `scripts/poc/setup-code.sh` for a fresh code and use that one |
+| Microsoft rejected the client secret | The Secret ID was copied instead of the **Value**, or a brand-new secret has not spread yet | Copy the **Value** column, or wait up to 15 minutes and try again |
+| Nobody can sign in (for example, a client secret expired) | Sign-in values need replacing | Run `scripts/poc/reopen-setup.sh`, enter the code at `/setup`, and re-enter the values. Existing Admins stay Admins |
+| Sign-in shows "not set up" after `.env.poc` was changed or replaced | `SETTINGS_ENCRYPTION_KEY` changed, so the stored secrets cannot be read | Put the old key back if you have a backup; otherwise run `scripts/poc/reopen-setup.sh` and re-enter the secrets |
+| Step 3 says it is a different account | You are signed in to Microsoft as someone other than the Admin email you entered | Sign out of Microsoft, then sign in as the Admin email |
 | Browser shows Cloudflare 502 | `cloudflared` cannot reach `booster-rocket-app:3000`: the edge network was not added to cloudflared, cloudflared was not recreated, or the app is unhealthy | `docker network inspect booster-rocket-edge` must list both `cloudflared` and `booster-rocket-app`; if not, redo section 2 steps 3-4. Then `docker ps` for `(healthy)` and `docker logs booster-rocket-app` |
 | Form buttons or sign-in fail with a server action or origin/forbidden error | HTTP Host Header is set in the tunnel route, or `APP_URL` is wrong | Clear the HTTP Host Header (section 6 A5); make `APP_URL=https://portaltest.rhinoautomator.com` exactly, then recreate the app |
 | Deploy or migrate fails with a database password error after re-running setup | `.env.poc` was deleted and regenerated (new `DB_PASSWORD`) | See the note at the end of section 2 |
