@@ -41,29 +41,55 @@ export async function issueSetupCode(): Promise<string> {
   return formatCode(code);
 }
 
-// Wrong tries per client address, in memory. The total lives in the database, so a restart can't reset it.
+// Tries per client address, in memory. A slot is reserved synchronously (before any await) so a parallel burst can't slip past
+// the limit. The total lives in the database and is reserved atomically, so neither a restart nor a burst can reset it.
 const failures = new Map<string, number[]>();
 export function resetSetupCodeLimiter(): void { failures.clear(); }
 
-export async function verifySetupCode(input: string, ip: string | null, now = Date.now()): Promise<VerifyResult> {
+function prune(who: string, now: number): number[] {
+  const list = (failures.get(who) ?? []).filter((t) => now - t < PER_IP_WINDOW_MS);
+  if (list.length === 0) failures.delete(who);
+  else failures.set(who, list);
+  return list;
+}
+function releaseSlot(who: string, now: number): void {
+  const list = failures.get(who);
+  if (!list) return;
+  const at = list.lastIndexOf(now);
+  if (at >= 0) list.splice(at, 1);
+  if (list.length === 0) failures.delete(who);
+}
+
+export async function verifySetupCode(input: unknown, ip: string | null, now = Date.now()): Promise<VerifyResult> {
   const who = ip ?? "unknown";
-  const recent = (failures.get(who) ?? []).filter((t) => now - t < PER_IP_WINDOW_MS);
-  failures.set(who, recent);
   const refuse = async (reason: Exclude<VerifyResult, { ok: true }>["reason"]): Promise<VerifyResult> => {
     await writeAudit({ actor: SETUP_ACTOR, action: "setup.unlock.refused", targetType: "setting", targetId: SETUP_CODE_KEY, after: { reason }, ip });
     return { ok: false, reason };
   };
+  const recent = prune(who, now);
   if (recent.length >= PER_IP_LIMIT) return refuse("slowed");
-  const stored = await readStoredCode();
-  if (!stored) return refuse("no_code");
-  if (stored.failedTotal >= MAX_FAILED_TOTAL) return refuse("void");
+  recent.push(now);
+  failures.set(who, recent);
+
+  // Reserve one try in the total, atomically, before comparing anything.
+  const reserved = Array.from(await db.execute<{ value: StoredCode }>(sql`UPDATE setting
+    SET value = jsonb_set(value, '{failedTotal}', to_jsonb(COALESCE((value->>'failedTotal')::int, 0) + 1)), updated_at = now()
+    WHERE key = ${SETUP_CODE_KEY} AND COALESCE((value->>'failedTotal')::int, 0) < ${MAX_FAILED_TOTAL}
+    RETURNING value`) as ArrayLike<{ value: StoredCode }>);
+  const stored = reserved[0]?.value;
+  if (!stored) {
+    releaseSlot(who, now);
+    return refuse((await readStoredCode()) ? "void" : "no_code");
+  }
   const want = Buffer.from(stored.hash, "hex");
-  const got = Buffer.from(hashCode(normalizeCode(input), stored.salt), "hex");
-  if (want.length === got.length && timingSafeEqual(want, got)) {
+  const got = Buffer.from(hashCode(normalizeCode(typeof input === "string" ? input : ""), stored.salt), "hex");
+  if (typeof input === "string" && want.length === got.length && timingSafeEqual(want, got)) {
+    releaseSlot(who, now); // a success must not count as a failure
+    await db.execute(sql`UPDATE setting
+      SET value = jsonb_set(value, '{failedTotal}', to_jsonb((value->>'failedTotal')::int - 1)), updated_at = now()
+      WHERE key = ${SETUP_CODE_KEY} AND value->>'hash' = ${stored.hash} AND COALESCE((value->>'failedTotal')::int, 0) >= 1`);
     await writeAudit({ actor: SETUP_ACTOR, action: "setup.unlock", targetType: "setting", targetId: SETUP_CODE_KEY, ip });
     return { ok: true, codeHash: stored.hash };
   }
-  recent.push(now);
-  await db.execute(sql`UPDATE setting SET value = jsonb_set(value, '{failedTotal}', to_jsonb(COALESCE((value->>'failedTotal')::int, 0) + 1)), updated_at = now() WHERE key = ${SETUP_CODE_KEY}`);
-  return refuse(stored.failedTotal + 1 >= MAX_FAILED_TOTAL ? "void" : "wrong");
+  return refuse(stored.failedTotal >= MAX_FAILED_TOTAL ? "void" : "wrong");
 }

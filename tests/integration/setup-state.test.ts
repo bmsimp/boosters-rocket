@@ -79,6 +79,36 @@ describe("setup code verification", () => {
     expect(await verifySetupCode(code, "198.51.100.7")).toEqual({ ok: false, reason: "void" });
   });
 
+  it("a parallel burst from many addresses cannot get past the 20-try total", async () => {
+    const code = await issueSetupCode();
+    const results = await Promise.all(Array.from({ length: 30 }, (_, i) => verifySetupCode("AAAA-AAAA-AAAA", `203.0.113.${i + 1}`)));
+    const reasons = results.map((r) => (r.ok ? "ok" : r.reason));
+    expect(reasons.filter((r) => r === "wrong").length).toBeLessThanOrEqual(MAX_FAILED_TOTAL);
+    expect(reasons.filter((r) => r === "void").length).toBeGreaterThanOrEqual(10);
+    expect((await readStoredCode())!.failedTotal).toBe(MAX_FAILED_TOTAL);
+    resetSetupCodeLimiter();
+    expect(await verifySetupCode(code, "198.51.100.7")).toEqual({ ok: false, reason: "void" });
+  });
+
+  it("a parallel burst from one address gets at most 5 tries", async () => {
+    await issueSetupCode();
+    const results = await Promise.all(Array.from({ length: 10 }, () => verifySetupCode("AAAA-AAAA-AAAA", "203.0.113.5")));
+    const reasons = results.map((r) => (r.ok ? "ok" : r.reason));
+    expect(reasons.filter((r) => r === "wrong")).toHaveLength(5);
+    expect(reasons.filter((r) => r === "slowed")).toHaveLength(5);
+  });
+
+  it("a right code does not use up a try", async () => {
+    const code = await issueSetupCode();
+    expect((await verifySetupCode(code, "203.0.113.5")).ok).toBe(true);
+    expect((await readStoredCode())!.failedTotal).toBe(0);
+  });
+
+  it("refuses a non-string input as wrong without throwing", async () => {
+    await issueSetupCode();
+    expect(await verifySetupCode(null, "203.0.113.5")).toEqual({ ok: false, reason: "wrong" });
+  });
+
   it("says when no code has been issued", async () => {
     expect(await verifySetupCode("AAAA-AAAA-AAAA", null)).toEqual({ ok: false, reason: "no_code" });
   });
