@@ -59,6 +59,22 @@ describe("checkParent", () => {
     expect(!r.ok && r.message).toMatch(/no External ID tenant/);
   });
 
+  it("refuses a discovery body that is null or not an object", async () => {
+    const r = await checkParent(c, "s", async () => json(200, null));
+    expect(!r.ok && r.message).toMatch(/look incomplete/);
+  });
+
+  it.each([
+    ["an http:// endpoint", `http://fznparents.ciamlogin.com/${T}/oauth2/v2.0/token`],
+    ["an endpoint on another host", "https://evil.example.com/token"],
+  ])("never sends the secret to %s", async (_label, endpoint) => {
+    const f = vi.fn(async (url: string) => (url === discovery ? json(200, { ...doc, token_endpoint: endpoint }) : json(200, { access_token: "t" })));
+    const r = await checkParent(c, "s", f);
+    expect(!r.ok && r.message).toMatch(/point somewhere unexpected, so the secret wasn't sent/);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(f.mock.calls[0]![0]).toBe(discovery);
+  });
+
   it("passes the token error through", async () => {
     const f = async (url: string) => (url === discovery ? json(200, doc) : aad(7000215));
     const r = await checkParent(c, "s", f);

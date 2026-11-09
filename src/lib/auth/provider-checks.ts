@@ -39,23 +39,37 @@ export function checkMicrosoft(c: MicrosoftConfig, secret: string, f: FetchFn = 
   return clientCredentials(`https://login.microsoftonline.com/${encodeURIComponent(c.tenantId)}/oauth2/v2.0/token`, c.clientId, secret, f);
 }
 
+function isTrustedTokenEndpoint(endpoint: string): boolean {
+  try {
+    const u = new URL(endpoint);
+    return u.protocol === "https:" && u.hostname.endsWith(".ciamlogin.com");
+  } catch {
+    return false;
+  }
+}
+
 export async function checkParent(c: ParentConfig, secret: string, f: FetchFn = defaultFetch): Promise<CheckResult> {
-  let doc: { issuer?: unknown; token_endpoint?: unknown };
+  const INCOMPLETE = "Microsoft's sign-in details for that tenant look incomplete. Try again in a few minutes.";
+  let body: unknown;
   try {
     const res = await f(parentDiscoveryUrl(c), { signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (res.status === 400 || res.status === 404) {
       return { ok: false, message: "Microsoft has no External ID tenant with that subdomain and tenant ID. Check both on the tenant's Overview page." };
     }
     if (!res.ok) return { ok: false, message: UNREACHABLE };
-    doc = await res.json();
+    body = await res.json();
   } catch {
     return { ok: false, message: UNREACHABLE };
   }
+  if (typeof body !== "object" || body === null) return { ok: false, message: INCOMPLETE };
+  const doc = body as { issuer?: unknown; token_endpoint?: unknown };
   if (typeof doc.issuer !== "string" || !doc.issuer.toLowerCase().includes(c.tenantId)) {
     return { ok: false, message: "That address belongs to a different tenant. Check that the tenant ID and subdomain come from the same tenant." };
   }
-  if (typeof doc.token_endpoint !== "string") {
-    return { ok: false, message: "Microsoft's sign-in details for that tenant look incomplete. Try again in a few minutes." };
+  if (typeof doc.token_endpoint !== "string") return { ok: false, message: INCOMPLETE };
+  // The client secret goes only to a token endpoint on Microsoft's External ID host, over https.
+  if (!isTrustedTokenEndpoint(doc.token_endpoint)) {
+    return { ok: false, message: "Microsoft's sign-in details for that tenant point somewhere unexpected, so the secret wasn't sent. Check the tenant subdomain and tenant ID." };
   }
   return clientCredentials(doc.token_endpoint, c.clientId, secret, f);
 }
