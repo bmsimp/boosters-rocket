@@ -26,7 +26,8 @@ const serverActionModules = (): string[] =>
 const modules = serverActionModules();
 const staffModules = modules.filter((f) => f.startsWith("src/app/staff/"));
 const parentModules = modules.filter((f) => f.startsWith("src/app/(parent)/"));
-const otherModules = modules.filter((f) => !staffModules.includes(f) && !parentModules.includes(f));
+const setupModules = modules.filter((f) => f.startsWith("src/app/setup/"));
+const otherModules = modules.filter((f) => !staffModules.includes(f) && !parentModules.includes(f) && !setupModules.includes(f));
 
 const exportedFunctions = async (file: string) => {
   const mod = await import(path.join(root, file));
@@ -57,6 +58,15 @@ describe("every server action is guarded (spec §7, §12)", () => {
     if (file === "(none yet)") return;
     for (const [name, value] of await exportedFunctions(file)) {
       expect(guardOf(value)?.door, `${file} → ${name} is not wrapped in parentAction`).toBe("parent");
+    }
+  });
+
+  it.each(setupModules.length ? setupModules : ["(none yet)"])("%s exports only setup-guarded functions", async (file) => {
+    if (file === "(none yet)") return;
+    for (const [name, value] of await exportedFunctions(file)) {
+      const door = guardOf(value)?.door;
+      if (name === "unlockSetupAction") expect(door, `${file} → ${name}`).toBe("setup-unlock");
+      else expect(door, `${file} → ${name} is not wrapped in setupAction`).toBe("setup");
     }
   });
 

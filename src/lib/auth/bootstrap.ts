@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { role, roleAssignment, staffUser } from "@/lib/db/schema";
-import { env } from "@/env";
+import { getSetupState } from "@/lib/setup/state";
 import { writeAudit } from "@/lib/audit/log";
 
 /** Number of active staff who hold the built-in Admin role. Invited (not yet signed in) and disabled people do not count. */
@@ -14,14 +14,13 @@ export async function adminCount(tx?: Tx): Promise<number> {
   return Number(first?.n ?? 0);
 }
 
-/** Creates the first Admin if none exists and `email` matches BOOTSTRAP_ADMIN_EMAIL. Returns the staff user id. */
+/** Creates the first Admin while setup is open at the Admin step, if `email` is the Admin email setup recorded and no Admin exists. */
 export async function claimBootstrapAdmin(email: string): Promise<string | null> {
-  const wanted = env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
   const got = email.trim().toLowerCase();
-  if (!wanted || wanted !== got) return null;
-
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.bootstrap_admin'))`);
+    const setup = await getSetupState(tx);
+    if (setup.status !== "open" || setup.step !== "admin" || !setup.adminEmail || setup.adminEmail !== got) return null;
     if ((await adminCount(tx)) > 0) return null;
     const [adminRole] = await tx.select().from(role).where(eq(role.key, "admin"));
     if (!adminRole) throw new Error("Admin role missing");

@@ -14,8 +14,9 @@ export class AccessDenied extends Error {
 export type StaffCtx = StaffIdentity & { effective: Effective; ip: string | null };
 export type ParentCtx = ParentIdentity & { ip: string | null };
 
-type GuardInfo = { door: "staff" | "parent"; permission?: Permission };
+export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock"; permission?: Permission };
 const registry = new WeakMap<object, GuardInfo>();
+export function registerGuard(fn: object, info: GuardInfo): void { registry.set(fn, info); }
 export function guardOf(fn: unknown): GuardInfo | undefined {
   return typeof fn === "function" ? registry.get(fn) : undefined;
 }

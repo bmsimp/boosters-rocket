@@ -1,16 +1,29 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { claimBootstrapAdmin } from "@/lib/auth/bootstrap";
 import { db } from "@/lib/db/client";
 import { roleAssignment, auditLog } from "@/lib/db/schema";
+import { updateSetupState } from "@/lib/setup/state";
 import { resetDb, seedStaff } from "../helpers/db";
 
-vi.mock("@/env", async (orig) => {
-  const real = await orig<typeof import("@/env")>();
-  return { ...real, env: { ...real.env, BOOTSTRAP_ADMIN_EMAIL: "First.Admin@Club.org" } };
-});
-
 describe("claimBootstrapAdmin", () => {
-  beforeEach(resetDb);
+  beforeEach(async () => {
+    await resetDb();
+    await updateSetupState({ status: "open", step: "admin", adminEmail: "first.admin@club.org" });
+  });
+
+  it("matches the Admin email whatever its case", async () => {
+    expect(await claimBootstrapAdmin("  FIRST.Admin@Club.org ")).not.toBeNull();
+  });
+
+  it("does nothing once setup is finished", async () => {
+    await updateSetupState({ status: "finished" });
+    expect(await claimBootstrapAdmin("first.admin@club.org")).toBeNull();
+  });
+
+  it("does nothing before the Admin step", async () => {
+    await updateSetupState({ step: "parent" });
+    expect(await claimBootstrapAdmin("first.admin@club.org")).toBeNull();
+  });
 
   it("makes the matching first sign-in Admin and audits it", async () => {
     const id = await claimBootstrapAdmin("first.admin@club.org");
