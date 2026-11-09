@@ -69,10 +69,10 @@ Until setup is finished, every page except `/api/health`, `/api/auth/*` and `/se
    - a user flow with **email one-time passcode** sign-in and **sign-up turned off**;
    - adding the app to that user flow.
 
-   The admin pastes back the **External ID tenant ID**, **client ID**, **client secret** and expiry. The app builds
-   the discovery address itself
-   (`https://<tenant-id>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration`), so there is nothing to
-   mistype. The script option does every item above. A **Test parent sign-in** button opens the parent sign-in in
+   The admin pastes back the **tenant subdomain** (the first part of the tenant's `.onmicrosoft.com` domain),
+   **tenant ID**, **client ID**, **client secret** and expiry. The app builds the discovery address itself
+   (`https://<tenant-subdomain>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration`, the form
+   Microsoft documents), so there is no long URL to mistype. The script option does every item above. A **Test parent sign-in** button opens the parent sign-in in
    a new tab. Any result is fine, including a refusal page, because no guardians exist yet; the page shows
    whether Microsoft sent the user back.
 4. **Step 3: First Admin.** Enter an email, then **Sign in** with a staff provider saved in Step 1. When the
@@ -116,7 +116,7 @@ New table **`auth_provider`**:
 | Column | Notes |
 |---|---|
 | `key` | primary key: `staff-microsoft`, `staff-google`, `parent-oidc` |
-| `config` | jsonb, non-secret values only (tenant ID, client ID) |
+| `config` | jsonb, non-secret values only (tenant ID, tenant subdomain, client ID) |
 | `secret_ciphertext` | text: base64 of nonce + ciphertext + auth tag |
 | `secret_key_id` | text: first 8 hex characters of SHA-256 of the key that encrypted it |
 | `secret_expires_at` | timestamptz, nullable |
@@ -186,7 +186,9 @@ sign-in providers and the Admin. Everything below exists to keep a stranger who 
 - **Slow-down:** 5 wrong tries per 15 minutes per client address (`cf-connecting-ip`). After 20 wrong tries in
   total, the code is void and the page says to issue a new one on the server. The total sits in `setup.code`, so
   restarting the app does not reset it.
-- **Unlocking** sets an httpOnly, Secure, SameSite=Strict cookie `br_setup`. It is signed with `BETTER_AUTH_SECRET`,
+- **Unlocking** sets an httpOnly, Secure, SameSite=Lax cookie `br_setup`. It is Lax, not Strict, because Step 3
+  comes back from Microsoft through a cross-site redirect chain that drops Strict cookies. Lax still keeps the cookie
+  off cross-site POSTs. It is signed with `BETTER_AUTH_SECRET`,
   bound to the code's hash and valid for 2 hours. Issuing a new code or finishing setup invalidates it.
 - Every setup action is a server action or POST that checks the cookie. Next.js's built-in origin check on server
   actions covers cross-site requests.
@@ -233,16 +235,18 @@ The existing `admin.bootstrap`, `staff.bind` and `signin` entries still appear o
 - **Requirements:** PowerShell 7 and the `Microsoft.Graph.Authentication` module. If it's missing, the script
   prints the one install command and stops.
 - **Sign-in:**
-  - staff: `Connect-MgGraph -TenantId <tenant> -Scopes Application.ReadWrite.All`;
-  - parent: adds `EventListener.ReadWrite.All` and `DelegatedPermissionGrant.ReadWrite.All`.
+  - staff: `Connect-MgGraph -TenantId <tenant> -Scopes Application.ReadWrite.All, DelegatedPermissionGrant.ReadWrite.All`
+    (the second grants admin consent for the sign-in scopes, so staff never see a consent prompt);
+  - parent: adds `EventListener.ReadWrite.All`.
 
   Both use the interactive browser sign-in. Device code is never used.
 - **Staff script:**
   1. Find the app named `Booster Rocket (staff)` or create it, single tenant.
   2. Set the Web redirect URI.
-  3. Add a 24-month secret.
-  4. Create its service principal if missing.
-  5. Print the tenant ID, client ID, secret and expiry.
+  3. Request the delegated Graph scopes `openid profile email offline_access User.Read`.
+  4. Create its service principal if missing and grant admin consent for those scopes.
+  5. Add a 24-month secret.
+  6. Print the tenant ID, client ID, secret and expiry.
 - **Parent script:**
   1. The same app steps, with the parent name and redirect URI.
   2. Grant admin consent for `openid profile email offline_access`.
