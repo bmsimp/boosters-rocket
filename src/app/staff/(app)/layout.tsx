@@ -11,6 +11,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     ...(can(e, "Staff.Users.Read") ? [{ href: "/staff/people", label: "Staff" }] : []),
     ...(can(e, "Admin.Roles.ReadWrite") ? [{ href: "/staff/roles", label: "Roles" }] : []),
     ...(can(e, "Settings.Club.Read") ? [{ href: "/staff/settings/club", label: "Club" }] : []),
+    ...(can(e, "Settings.SignIn.ReadWrite") ? [{ href: "/staff/settings/sign-in", label: "Sign-in" }] : []),
     ...(can(e, "Audit.Log.Read") ? [{ href: "/staff/audit", label: "Audit" }] : []),
   ];
   return (
