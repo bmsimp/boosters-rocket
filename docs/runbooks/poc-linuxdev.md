@@ -148,10 +148,14 @@ with a message to fix it by hand. (If two apps share the name it stops and asks 
 Unblock-File .\New-BoosterRocketStaffApp.ps1
 ```
 
-After setup, Admins can change sign-in under **Settings** > **Sign-in**. **Replace certificate** downloads
-a new certificate. The old one keeps working until **Check and switch** succeeds; after that you can remove
-the old certificate in Entra. The staff home warns Admins 30 days before a certificate expires; use
-Replace certificate under Settings → Sign-in. (Google still uses a client secret, entered as before.)
+After setup, Admins can change sign-in under **Settings** > **Sign-in**. **Replace certificate** makes a
+new certificate; **Download certificate (.cer)** then downloads it, and you upload it in Entra. The old one
+keeps working until **Check and switch** succeeds; after that you can remove the old certificate in Entra
+(**Certificates & secrets** > **Certificates**). To drop a replacement you no longer want, select
+**Discard replacement** (if you already uploaded it, remove it in Entra too). **Replace certificate** also
+works on the setup page after `scripts/poc/reopen-setup.sh`, for example when the server can no longer read
+the old certificate's key. The staff home warns Admins 30 days before a certificate expires; use Replace
+certificate under Settings → Sign-in. (Google still uses a client secret, entered as before.)
 
 Sources: Register an application in Microsoft Entra ID
 (https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app); Add a redirect URI
@@ -389,7 +393,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
 - [ ] 4. Parent: sign in at `/sign-in` as the seeded test parent -> parent home (not the refusal page).
-- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Replace certificate** retires the old one). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
+- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Check and switch** after **Replace certificate** retires the old one, and `certificate.discard` after **Discard replacement**). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
 - [ ] 6. Sign out at both doors -> both `signout` entries appear.
 - [ ] 7. The second External ID user (no guardian row) -> refusal page; audit shows `signin.refused` with reason `no_guardian`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
@@ -428,8 +432,8 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | Microsoft doesn't have this certificate on the app yet (`AADSTS700027`) | The `.cer` was not uploaded to the app registration, or Microsoft has not picked it up yet | Upload the `.cer` under **Certificates & secrets** > **Certificates** (or run the script), wait a minute, and try again |
 | The server's clock looks wrong, so Microsoft refused the certificate (`AADSTS700024`) | The time on linuxdev is off | Fix the time on linuxdev, then try again |
 | The tenant blocks client secrets (`CredentialTypeNotAllowedAsPerAppPolicy`) | The tenant's "Block password addition" app policy, which stops apps from getting client secrets, refused the request | Nothing needs changing: this is why Microsoft sign-in uses certificates. Use the certificate steps in sections 3 and 4 (Google still uses a secret) |
-| Nobody can sign in (for example, a certificate or Google client secret expired) | Sign-in values need replacing | Run `scripts/poc/reopen-setup.sh`, enter the code at `/setup`, and re-enter the values. Existing Admins stay Admins |
-| Sign-in shows "not set up" after `.env.poc` was changed or replaced | `SETTINGS_ENCRYPTION_KEY` changed, so the stored secrets cannot be read | Put the old key back if you have a backup; otherwise run `scripts/poc/reopen-setup.sh` and re-enter the secrets |
+| Nobody can sign in (for example, a certificate or Google client secret expired) | Sign-in values need replacing | Run `scripts/poc/reopen-setup.sh`, enter the code at `/setup`, and re-enter the values (for Microsoft, select **Replace certificate**, upload the new `.cer` in Entra, then **Check and switch**). Existing Admins stay Admins |
+| Sign-in shows "not set up" after `.env.poc` was changed or replaced | `SETTINGS_ENCRYPTION_KEY` changed, so the stored secrets cannot be read | Put the old key back if you have a backup; otherwise run `scripts/poc/reopen-setup.sh` and re-enter the secrets (for Microsoft, select **Replace certificate** on the setup page, upload the new `.cer` in Entra, then **Check and switch**) |
 | Step 3 says it is a different account | You are signed in to Microsoft as someone other than the Admin email you entered | Sign out of Microsoft, then sign in as the Admin email |
 | Browser shows Cloudflare 502 | `cloudflared` cannot reach `booster-rocket-app:3000`: the edge network was not added to cloudflared, cloudflared was not recreated, or the app is unhealthy | `docker network inspect booster-rocket-edge` must list both `cloudflared` and `booster-rocket-app`; if not, redo section 2 steps 3-4. Then `docker ps` for `(healthy)` and `docker logs booster-rocket-app` |
 | Form buttons or sign-in fail with a server action or origin/forbidden error | HTTP Host Header is set in the tunnel route, or `APP_URL` is wrong | Clear the HTTP Host Header (section 6 A5); make `APP_URL=https://portaltest.rhinoautomator.com` exactly, then recreate the app |

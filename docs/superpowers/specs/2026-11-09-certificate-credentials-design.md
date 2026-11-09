@@ -26,9 +26,9 @@ copied or pasted for Microsoft at all.
 |---|---|
 | Microsoft credential | **Certificate only.** No client secret option for `staff-microsoft` or `parent-oidc`. |
 | Google credential | Client secret, unchanged. |
-| Who makes the key | The app, on the server: RSA 2048 key and a self-signed X.509 certificate, valid 2 years. |
+| Who makes the key | The app, on the server: RSA 2048 key and a self-signed X.509 certificate, valid 2 years (`notBefore` is backdated 5 minutes for clock skew; `notAfter` is exactly 730 days after creation). |
 | Private key storage | Encrypted with the existing secret box (AES-256-GCM, `SETTINGS_ENCRYPTION_KEY`), AAD bound to the certificate row. Never sent to the browser, logged, or audited. |
-| Client authentication | `private_key_jwt` (RFC 7523): a signed assertion per token request, header `alg PS256`, `typ JWT`, `x5t#S256` = base64url SHA-256 thumbprint of the certificate DER; claims `aud` = the token endpoint, `iss` = `sub` = client ID, `jti` random UUID, `nbf`/`iat` now, `exp` now + 5 minutes. (Per Microsoft's certificate-credentials reference.) |
+| Client authentication | `private_key_jwt` (RFC 7523): a signed assertion per token request, header `alg PS256`, `typ JWT`, `x5t#S256` = base64url SHA-256 thumbprint of the certificate DER, and `x5t` = base64url SHA-1 thumbprint (derived from the stored hex `thumbprint_sha1`); claims `aud` = the token endpoint, `iss` = `sub` = client ID, `jti` random UUID, `nbf`/`iat` now, `exp` now + 5 minutes. (Per Microsoft's certificate-credentials reference.) |
 | Library | `@peculiar/x509` (MIT) for certificate generation; `jose` (already a dependency) for signing. Better Auth already supports assertions: `clientAssertion` on the `microsoft` social provider, `tokenEndpointAuth: { method: "private_key_jwt", getClientAssertion }` on generic OAuth. |
 | Expiry | Taken from the certificate (`notAfter`), never typed in. The existing 30-day warning uses it. |
 | Spelling, times, audit | US English; times stored UTC; every create/change/delete audited. |
@@ -116,6 +116,10 @@ New messages:
   certificate. Check the server's time."
 - `AADSTS700016`, `AADSTS90002`, `AADSTS900023` keep their existing messages. `AADSTS7000215`/`7000222`
   (secret) messages are removed.
+- A refused Microsoft save is audited `setup.provider.save.refused` (target `auth_provider/<key>`, actor,
+  permission, IP) with `after: { reason, certificateThumbprintSha1 }`: `check_failed` when the check fails,
+  `certificate_changed` when the certificate it was checked with changed before the save took the lock.
+  Never key material.
 
 ### 4.4 Certificate lifecycle (`src/lib/auth/certificates.ts`)
 
@@ -126,10 +130,19 @@ New messages:
   pending row active and the previous active row retired (private key nulled). Audited
   `certificate.activate` and, for the old row, `certificate.retire`.
 - Removing a Microsoft provider retires its certificates (keys nulled), audited.
-- Certificate download routes: `/setup/certificates/<key>.cer` (setup session) and
-  `/staff/settings/sign-in/certificates/<key>.cer` (`Settings.SignIn.ReadWrite`) serve the pending
-  certificate if one exists, else the active one, as `application/pkix-cert` (DER). Public data, but still
-  gated like the scripts.
+- `startCertificateReplacement(providerKey, actor, ip)`: **Replace certificate**. Under the same lock, keeps a
+  pending row whose key this server can decrypt (pressing Replace twice changes nothing), retires a pending
+  row it can't decrypt (`certificate.retire`), and otherwise creates a new pending row even while one is
+  active (`certificate.create`).
+- `discardPendingCertificate(providerKey, actor, ip)`: **Discard replacement**. Retires the pending row and
+  nulls its key. Audited `certificate.discard`.
+- Replace and discard are POST server actions, never a side effect of a download. Both the setup page
+  (`setupAction`, so they also work after `reopen-setup.sh`, for example when the old key can't be
+  decrypted) and Settings → Sign-in (`staffAction("Settings.SignIn.ReadWrite")`) offer them.
+- Certificate download: one route, `/setup/certificates/<file>.cer`, for both a setup session and an Admin
+  with `Settings.SignIn.ReadWrite`. It serves the pending certificate if one exists, else the active one,
+  else creates a pending one, as `application/pkix-cert` (DER). Public data, but still gated like the
+  scripts.
 
 ### 4.5 PowerShell scripts
 
