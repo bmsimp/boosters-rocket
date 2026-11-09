@@ -10,7 +10,7 @@ export const FIELD_LABELS: Record<"tenantId" | "clientId" | "tenantSubdomain", s
   clientId: "Application (client) ID",
   tenantSubdomain: "Tenant subdomain",
 };
-export type SummaryView = { config: Record<string, string>; secretUpdatedAt: string; secretExpiresAt: string | null; readable: boolean };
+export type SummaryView = { config: Record<string, string>; credentialUpdatedAt: string; expiresAt: string | null; readable: boolean };
 export const toSummaryView = (s: ProviderSummary): SummaryView => ({
-  config: s.config, secretUpdatedAt: s.secretUpdatedAt.toISOString(), secretExpiresAt: s.secretExpiresAt?.toISOString() ?? null, readable: s.readable,
+  config: s.config, credentialUpdatedAt: s.credentialUpdatedAt.toISOString(), expiresAt: s.expiresAt?.toISOString() ?? null, readable: s.readable,
 });

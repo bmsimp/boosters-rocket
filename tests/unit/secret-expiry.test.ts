@@ -3,7 +3,7 @@ import { expiringSecrets } from "@/app/staff/(app)/secret-expiry-rule";
 
 const now = new Date("2026-11-08T00:00:00Z");
 const s = (key: "staff-microsoft" | "parent-oidc", expires: string | null, readable = true) =>
-  ({ key, config: {}, secretUpdatedAt: now, secretExpiresAt: expires ? new Date(expires) : null, readable });
+  ({ key, config: {}, credentialUpdatedAt: now, expiresAt: expires ? new Date(expires) : null, readable, certificate: null, pendingCertificate: null });
 
 describe("expiringSecrets", () => {
   it("warns from 30 days before expiry, and after", () => {

@@ -1,4 +1,5 @@
 import { parentDiscoveryUrl, type MicrosoftConfig, type ParentConfig, type CheckedDraft, type CheckResult } from "./providers";
+import { signEntraAssertion, CLIENT_ASSERTION_TYPE, type AssertionKey } from "./client-assertion";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultFetch: FetchFn = (url, init) => fetch(url, init);
@@ -6,22 +7,31 @@ const TIMEOUT_MS = 10_000;
 const UNREACHABLE = "Couldn't reach Microsoft to check these values. Check the server's internet connection and try again. Nothing was saved.";
 
 const AADSTS: Record<number, string> = {
-  7000215: "Microsoft rejected the client secret. Copy the secret's Value (not its Secret ID). If you just created it, wait a few minutes and try again — new secrets can take up to 15 minutes to start working.",
-  7000222: "That client secret has expired. Create a new one and paste it here.",
+  700027: "Microsoft doesn't have this certificate on the app yet. Upload it (or run the script), wait a minute, and try again.",
+  700024: "The server's clock looks wrong, so Microsoft refused the certificate. Check the server's time.",
   700016: "Microsoft doesn't know that Application (client) ID in this tenant. Check the client ID, and that the tenant ID is the tenant the app was registered in.",
   90002: "Microsoft can't find that tenant. Check the Directory (tenant) ID.",
   900023: "That tenant ID isn't valid. Copy the Directory (tenant) ID from the tenant's Overview page.",
 };
 
-async function clientCredentials(tokenUrl: string, clientId: string, secret: string, f: FetchFn): Promise<CheckResult> {
+type Credential = { secret: string } | { assertion: AssertionKey };
+
+async function clientCredentials(tokenUrl: string, clientId: string, credential: Credential, f: FetchFn): Promise<CheckResult> {
+  const form = new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, scope: "https://graph.microsoft.com/.default" });
+  if ("secret" in credential) form.set("client_secret", credential.secret);
+  else {
+    // The assertion's audience is this exact token endpoint, so it can't be replayed anywhere else.
+    form.set("client_assertion_type", CLIENT_ASSERTION_TYPE);
+    form.set("client_assertion", await signEntraAssertion({ ...credential.assertion, clientId, tokenEndpoint: tokenUrl }));
+  }
   let res: Response;
   try {
     res = await f(tokenUrl, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: secret, scope: "https://graph.microsoft.com/.default" }).toString(),
+      body: form.toString(),
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      // A redirect could forward the secret to another host; fetch throws instead, which reads as unreachable.
+      // A redirect could forward the credential to another host; fetch throws instead, which reads as unreachable.
       redirect: "error",
     });
   } catch {
@@ -37,8 +47,8 @@ async function clientCredentials(tokenUrl: string, clientId: string, secret: str
   return { ok: false, message: `Microsoft refused these values (${which}). Check each value against the app registration.` };
 }
 
-export function checkMicrosoft(c: MicrosoftConfig, secret: string, f: FetchFn = defaultFetch): Promise<CheckResult> {
-  return clientCredentials(`https://login.microsoftonline.com/${encodeURIComponent(c.tenantId)}/oauth2/v2.0/token`, c.clientId, secret, f);
+export function checkMicrosoft(c: MicrosoftConfig, assertion: AssertionKey, f: FetchFn = defaultFetch): Promise<CheckResult> {
+  return clientCredentials(`https://login.microsoftonline.com/${encodeURIComponent(c.tenantId)}/oauth2/v2.0/token`, c.clientId, { assertion }, f);
 }
 
 function isTrustedTokenEndpoint(endpoint: string): boolean {
@@ -50,7 +60,7 @@ function isTrustedTokenEndpoint(endpoint: string): boolean {
   }
 }
 
-export async function checkParent(c: ParentConfig, secret: string, f: FetchFn = defaultFetch): Promise<CheckResult> {
+export async function checkParent(c: ParentConfig, assertion: AssertionKey, f: FetchFn = defaultFetch): Promise<CheckResult> {
   const INCOMPLETE = "Microsoft's sign-in details for that tenant look incomplete. Try again in a few minutes.";
   let body: unknown;
   try {
@@ -69,11 +79,11 @@ export async function checkParent(c: ParentConfig, secret: string, f: FetchFn = 
     return { ok: false, message: "That address belongs to a different tenant. Check that the tenant ID and subdomain come from the same tenant." };
   }
   if (typeof doc.token_endpoint !== "string") return { ok: false, message: INCOMPLETE };
-  // The client secret goes only to a token endpoint on Microsoft's External ID host, over https.
+  // The assertion goes only to a token endpoint on Microsoft's External ID host, over https.
   if (!isTrustedTokenEndpoint(doc.token_endpoint)) {
-    return { ok: false, message: "Microsoft's sign-in details for that tenant point somewhere unexpected, so the secret wasn't sent. Check the tenant subdomain and tenant ID." };
+    return { ok: false, message: "Microsoft's sign-in details for that tenant point somewhere unexpected, so nothing was sent. Check the tenant subdomain and tenant ID." };
   }
-  return clientCredentials(doc.token_endpoint, c.clientId, secret, f);
+  return clientCredentials(doc.token_endpoint, c.clientId, { assertion }, f);
 }
 
 /** Google has no credential check that works without a user, so its format is checked when parsing; Step 3 proves it. */
@@ -83,8 +93,8 @@ export async function checkGoogle(): Promise<CheckResult> {
 
 export function checkFor(draft: CheckedDraft, f: FetchFn = defaultFetch): Promise<CheckResult> {
   switch (draft.key) {
-    case "staff-microsoft": return checkMicrosoft(draft.config, draft.secret, f);
-    case "parent-oidc": return checkParent(draft.config, draft.secret, f);
+    case "staff-microsoft": return checkMicrosoft(draft.config, draft.assertion, f);
+    case "parent-oidc": return checkParent(draft.config, draft.assertion, f);
     case "staff-google": return checkGoogle();
   }
 }

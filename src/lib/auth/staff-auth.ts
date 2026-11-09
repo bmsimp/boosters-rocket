@@ -5,6 +5,7 @@ import { recordSignin, recordSignout } from "./signin-audit";
 import { staffAuthUser, staffAuthSession, staffAuthAccount, staffAuthVerification } from "@/lib/db/schema";
 import { env } from "@/env";
 import { loadProviders, type LoadedProviders } from "./providers";
+import { createEntraAssertionGetter } from "./client-assertion";
 
 function buildStaffAuth(p: LoadedProviders) {
   return betterAuth({
@@ -27,8 +28,11 @@ function buildStaffAuth(p: LoadedProviders) {
     session: { expiresIn: 60 * 60 * 12, updateAge: 60 * 60 },
     socialProviders: {
       ...(p.staffMicrosoft ? { microsoft: {
-        clientId: p.staffMicrosoft.config.clientId, clientSecret: p.staffMicrosoft.secret,
+        clientId: p.staffMicrosoft.config.clientId,
         tenantId: p.staffMicrosoft.config.tenantId, // single-tenant: only the club's own directory
+        // Certificate credential (private_key_jwt); there is no client secret. Better Auth calls this for the code
+        // exchange and for refreshes, passing the real token endpoint, which becomes the assertion's audience.
+        clientAssertion: createEntraAssertionGetter({ ...p.staffMicrosoft.assertion, clientId: p.staffMicrosoft.config.clientId }),
       } } : {}),
       ...(p.staffGoogle ? { google: { clientId: p.staffGoogle.config.clientId, clientSecret: p.staffGoogle.secret } } : {}),
     },

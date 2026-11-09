@@ -5,6 +5,11 @@ import { authProvider } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { secretBox, SecretBoxError, type SecretBox } from "@/lib/crypto/secret-box";
 import { PROVIDER_KEYS, PROVIDER_FIELDS, isProviderKey, type ProviderKey, type SaveOutcome } from "./provider-fields";
+import type { AssertionKey } from "./client-assertion";
+import {
+  certificateRows, activatePendingCertificate, retireCertificates, openCertificateKey, isCertificateProvider, toCertificateView,
+  type CertificateView, type CertificateProviderKey,
+} from "./certificates";
 
 export { PROVIDER_KEYS, PROVIDER_FIELDS, isProviderKey, type ProviderKey, type SaveOutcome };
 const STAFF_KEYS: readonly ProviderKey[] = ["staff-microsoft", "staff-google"];
@@ -14,17 +19,28 @@ export type GoogleConfig = { clientId: string };
 export type ParentConfig = { tenantSubdomain: string; tenantId: string; clientId: string };
 export type ConfigFor = { "staff-microsoft": MicrosoftConfig; "staff-google": GoogleConfig; "parent-oidc": ParentConfig };
 
-export type LoadedProvider<K extends ProviderKey> = { key: K; config: ConfigFor[K]; secret: string; secretExpiresAt: Date | null };
+export type LoadedCertificateProvider<K extends CertificateProviderKey> = { key: K; config: ConfigFor[K]; assertion: AssertionKey; expiresAt: Date };
+export type LoadedSecretProvider<K extends ProviderKey> = { key: K; config: ConfigFor[K]; secret: string; expiresAt: Date | null };
 export type LoadedProviders = {
   version: number;
-  staffMicrosoft: LoadedProvider<"staff-microsoft"> | null;
-  staffGoogle: LoadedProvider<"staff-google"> | null;
-  parent: LoadedProvider<"parent-oidc"> | null;
+  staffMicrosoft: LoadedCertificateProvider<"staff-microsoft"> | null;
+  staffGoogle: LoadedSecretProvider<"staff-google"> | null;
+  parent: LoadedCertificateProvider<"parent-oidc"> | null;
 };
-export type ProviderSummary = { key: ProviderKey; config: Record<string, string>; secretUpdatedAt: Date; secretExpiresAt: Date | null; readable: boolean };
+/** What reaches the browser: certificate views only, never key material or the sealed secret. */
+export type ProviderSummary = {
+  key: ProviderKey; config: Record<string, string>; credentialUpdatedAt: Date; expiresAt: Date | null; readable: boolean;
+  certificate: CertificateView | null; pendingCertificate: CertificateView | null;
+};
 
-export type ProviderDraft = { [K in ProviderKey]: { key: K; config: ConfigFor[K]; secret: string | null; secretExpiresAt: Date | null } }[ProviderKey];
-export type CheckedDraft = ProviderDraft & { secret: string };
+export type ProviderDraft =
+  | { key: "staff-google"; config: GoogleConfig; secret: string | null; secretExpiresAt: Date | null }
+  | { key: "staff-microsoft"; config: MicrosoftConfig }
+  | { key: "parent-oidc"; config: ParentConfig };
+export type CheckedDraft =
+  | { key: "staff-google"; config: GoogleConfig; secret: string }
+  | { key: "staff-microsoft"; config: MicrosoftConfig; assertion: AssertionKey }
+  | { key: "parent-oidc"; config: ParentConfig; assertion: AssertionKey };
 export type CheckResult = { ok: true } | { ok: false; message: string };
 export type CheckFn = (draft: CheckedDraft) => Promise<CheckResult>;
 
@@ -60,28 +76,55 @@ function openRow(r: typeof authProvider.$inferSelect, box: SecretBox): string | 
   }
 }
 
+/** The active certificate's signing key for a Microsoft sign-in, or null if there is none or it can't be decrypted. */
+async function activeAssertion(key: CertificateProviderKey, box: SecretBox): Promise<{ assertion: AssertionKey; expiresAt: Date } | null> {
+  const { active } = await certificateRows(key);
+  const privateKeyPem = active ? openCertificateKey(active, box) : null;
+  if (!active || privateKeyPem === null) return null;
+  return { assertion: { privateKeyPem, thumbprintS256: active.thumbprintS256 }, expiresAt: active.notAfter };
+}
+
 async function readProviders(v: number, box: SecretBox): Promise<LoadedProviders> {
   const out: LoadedProviders = { version: v, staffMicrosoft: null, staffGoogle: null, parent: null };
   for (const r of await db.select().from(authProvider)) {
-    const secret = openRow(r, box);
-    if (secret === null) {
-      console.error(`[sign-in] The stored secret for ${r.key} can't be decrypted with SETTINGS_ENCRYPTION_KEY; treating it as not set up.`);
+    if (r.key === "staff-google") {
+      const secret = openRow(r, box);
+      if (secret === null) {
+        console.error(`[sign-in] The stored secret for ${r.key} can't be decrypted with SETTINGS_ENCRYPTION_KEY; treating it as not set up.`);
+        continue;
+      }
+      out.staffGoogle = { key: r.key, config: r.config as GoogleConfig, secret, expiresAt: r.secretExpiresAt };
       continue;
     }
-    const common = { secret, secretExpiresAt: r.secretExpiresAt };
-    if (r.key === "staff-microsoft") out.staffMicrosoft = { key: r.key, config: r.config as MicrosoftConfig, ...common };
-    else if (r.key === "staff-google") out.staffGoogle = { key: r.key, config: r.config as GoogleConfig, ...common };
-    else out.parent = { key: r.key, config: r.config as ParentConfig, ...common };
+    const credential = await activeAssertion(r.key, box);
+    if (credential === null) {
+      console.error(`[sign-in] The certificate for ${r.key} is missing or can't be decrypted; treating it as not set up.`);
+      continue;
+    }
+    if (r.key === "staff-microsoft") out.staffMicrosoft = { key: r.key, config: r.config as MicrosoftConfig, ...credential };
+    else out.parent = { key: r.key, config: r.config as ParentConfig, ...credential };
   }
   return out;
 }
 
-/** What the setup and Settings pages may show: never the secret. */
+/** What the setup and Settings pages may show: never the secret or a certificate's key. */
 export async function providerSummaries(box: SecretBox = secretBox()): Promise<ProviderSummary[]> {
-  return (await db.select().from(authProvider)).map((r) => ({
-    key: r.key, config: r.config as Record<string, string>,
-    secretUpdatedAt: r.secretUpdatedAt, secretExpiresAt: r.secretExpiresAt, readable: openRow(r, box) !== null,
-  }));
+  const out: ProviderSummary[] = [];
+  for (const r of await db.select().from(authProvider)) {
+    const base = { key: r.key, config: r.config as Record<string, string> };
+    if (!isCertificateProvider(r.key)) {
+      out.push({ ...base, credentialUpdatedAt: r.secretUpdatedAt, expiresAt: r.secretExpiresAt, readable: openRow(r, box) !== null,
+        certificate: null, pendingCertificate: null });
+      continue;
+    }
+    const { pending, active } = await certificateRows(r.key);
+    out.push({
+      ...base, credentialUpdatedAt: active?.activatedAt ?? r.updatedAt, expiresAt: active?.notAfter ?? null,
+      readable: active !== null && openCertificateKey(active, box) !== null,
+      certificate: active ? toCertificateView(active) : null, pendingCertificate: pending ? toCertificateView(pending) : null,
+    });
+  }
+  return out;
 }
 
 // ---- parsing form input ----
@@ -133,6 +176,11 @@ const SCHEMAS = {
 export function parseProviderForm(key: ProviderKey, fields: Record<string, string>):
   { ok: true; draft: ProviderDraft } | { ok: false; errors: string[] } {
   const config = SCHEMAS[key].safeParse(fields);
+  // Microsoft sign-ins use the app's certificate, so any secret or expiry sent with them is ignored.
+  if (isCertificateProvider(key)) {
+    if (!config.success) return { ok: false, errors: config.error.issues.map((i) => i.message) };
+    return { ok: true, draft: { key, config: config.data } as ProviderDraft };
+  }
   const s = secret.safeParse(fields.secret ?? "");
   const e = expiry.safeParse(fields.secretExpiresAt ?? "");
   const errors = [config, s, e].flatMap((r) => (r.success ? [] : r.error.issues.map((i) => i.message)));
@@ -147,6 +195,7 @@ export async function saveProvider(draft: ProviderDraft, opts: {
 }): Promise<SaveOutcome> {
   const box = opts.box ?? secretBox();
   const existingRow = (tx: Tx | typeof db) => tx.select().from(authProvider).where(eq(authProvider.key, draft.key)).then((r) => r[0]);
+  if (draft.key !== "staff-google") return saveCertificateProvider(draft, opts, box, existingRow);
   // The check talks to Microsoft, so it runs outside the transaction (and its lock). The row it used is re-read, under the
   // same lock removeProvider takes, when the save happens, so a concurrent save or removal can't be overwritten from stale data.
   let plain = draft.secret;
@@ -156,7 +205,7 @@ export async function saveProvider(draft: ProviderDraft, opts: {
     plain = openRow(current, box);
     if (plain === null) return { ok: false, errors: ["The saved secret can't be read any more. Enter the client secret again."] };
   }
-  const checked = await opts.check({ ...draft, secret: plain } as CheckedDraft);
+  const checked = await opts.check({ key: draft.key, config: draft.config, secret: plain });
   if (!checked.ok) return { ok: false, errors: [checked.message] };
 
   const secretChanged = draft.secret !== null;
@@ -182,6 +231,49 @@ export async function saveProvider(draft: ProviderDraft, opts: {
   if (r.ok) invalidateProviders();
   return r;
 }
+type SaveOpts = { actor: Actor; ip: string | null; permission?: string; updatedBy: string | null; check: CheckFn };
+
+/**
+ * Microsoft sign-ins: the check runs with the pending certificate if there is one (a first save, or a replacement being
+ * rolled out), otherwise with the active one, and the save activates a pending certificate it was checked with.
+ */
+async function saveCertificateProvider(
+  draft: Extract<ProviderDraft, { key: CertificateProviderKey }>, opts: SaveOpts, box: SecretBox,
+  existingRow: (tx: Tx | typeof db) => Promise<typeof authProvider.$inferSelect | undefined>,
+): Promise<SaveOutcome> {
+  const { pending, active } = await certificateRows(draft.key);
+  const candidate = pending ?? active;
+  if (!candidate) return { ok: false, errors: ["Download the certificate and add it to the app registration first."] };
+  const privateKeyPem = openCertificateKey(candidate, box);
+  if (!privateKeyPem) return { ok: false, errors: ["This server can't read the certificate's key any more. Create a new certificate and upload it."] };
+  const checked = await opts.check({ ...draft, assertion: { privateKeyPem, thumbprintS256: candidate.thumbprintS256 } } as CheckedDraft);
+  if (!checked.ok) return { ok: false, errors: [checked.message] };
+  const r = await db.transaction(async (tx): Promise<SaveOutcome> => {
+    // Provider lock first, then (inside activatePendingCertificate) the certificate lock: the order removeProvider uses too.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.auth_provider'))`);
+    const existing = await existingRow(tx);
+    // The check ran without the lock: refuse if a concurrent save or removal changed the certificate it was checked with.
+    const current = await certificateRows(draft.key, tx);
+    if ((candidate.status === "pending" ? current.pending : current.active)?.id !== candidate.id) {
+      return { ok: false, errors: ["The certificate changed while this was being checked. Try again."] };
+    }
+    const activated = candidate.status === "pending"
+      ? await activatePendingCertificate(tx, draft.key, { actor: opts.actor, ip: opts.ip, permission: opts.permission })
+      : null;
+    const now = new Date();
+    const values = { key: draft.key, config: draft.config, secretCiphertext: null, secretKeyId: null, secretExpiresAt: null,
+      secretUpdatedAt: now, updatedAt: now, updatedBy: opts.updatedBy };
+    await tx.insert(authProvider).values(values).onConflictDoUpdate({ target: authProvider.key, set: values });
+    await writeAudit({ actor: opts.actor, action: "setup.provider.save", permission: opts.permission, targetType: "auth_provider", targetId: draft.key,
+      before: existing ? existing.config : null,
+      after: { ...draft.config, certificateThumbprintSha1: candidate.thumbprintSha1, certificateNotAfter: candidate.notAfter.toISOString(), certificateChanged: activated !== null },
+      ip: opts.ip }, tx);
+    return { ok: true };
+  });
+  if (r.ok) invalidateProviders();
+  return r;
+}
+
 export async function removeProvider(key: ProviderKey, opts: { actor: Actor; ip: string | null; permission?: string; box?: SecretBox }): Promise<SaveOutcome> {
   const box = opts.box ?? secretBox();
   const r = await db.transaction(async (tx): Promise<SaveOutcome> => {
@@ -190,11 +282,20 @@ export async function removeProvider(key: ProviderKey, opts: { actor: Actor; ip:
     const existing = rows.find((x) => x.key === key);
     if (!existing) return { ok: true };
     // Only a row this server can decrypt counts as another way to sign in; an unreadable one is "not set up" (see readProviders).
-    if (STAFF_KEYS.includes(key) && !rows.some((x) => x.key !== key && STAFF_KEYS.includes(x.key) && openRow(x, box) !== null)) {
+    // For Microsoft that means its active certificate's key decrypts.
+    const readable = async (x: typeof authProvider.$inferSelect) => {
+      if (!isCertificateProvider(x.key)) return openRow(x, box) !== null;
+      const { active } = await certificateRows(x.key, tx);
+      return active !== null && openCertificateKey(active, box) !== null;
+    };
+    let another = false;
+    for (const x of rows) if (x.key !== key && STAFF_KEYS.includes(x.key) && (await readable(x))) another = true;
+    if (STAFF_KEYS.includes(key) && !another) {
       await writeAudit({ actor: opts.actor, action: "setup.provider.remove.refused", permission: opts.permission, targetType: "auth_provider",
         targetId: key, after: { reason: "last_staff_sign_in" }, ip: opts.ip }, tx);
       return { ok: false, errors: ["This would leave no way for staff to sign in."] };
     }
+    if (isCertificateProvider(key)) await retireCertificates(tx, key, { actor: opts.actor, ip: opts.ip, permission: opts.permission });
     await tx.delete(authProvider).where(eq(authProvider.key, key));
     await writeAudit({ actor: opts.actor, action: "setup.provider.remove", permission: opts.permission, targetType: "auth_provider",
       targetId: key, before: existing.config, ip: opts.ip }, tx);

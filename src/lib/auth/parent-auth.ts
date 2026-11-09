@@ -7,6 +7,7 @@ import { captureParentObjectId, PARENT_PROVIDER_ID } from "./parent-object-id";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env } from "@/env";
 import { loadProviders, parentDiscoveryUrl, type LoadedProviders } from "./providers";
+import { createEntraAssertionGetter } from "./client-assertion";
 
 export { PARENT_PROVIDER_ID };
 
@@ -43,7 +44,9 @@ function buildParentAuth(p: LoadedProviders) {
         providerId: PARENT_PROVIDER_ID,
         discoveryUrl: parentDiscoveryUrl(p.parent.config),
         clientId: p.parent.config.clientId,
-        clientSecret: p.parent.secret,
+        // Certificate credential (private_key_jwt); there is no client secret. The plugin signs with this for the code
+        // exchange and for refreshes, against the discovered token endpoint.
+        tokenEndpointAuth: { method: "private_key_jwt", getClientAssertion: createEntraAssertionGetter({ ...p.parent.assertion, clientId: p.parent.config.clientId }) },
         scopes: ["openid", "email", "profile"],
         pkce: true,
         // The oid claim must come from a signature-verified ID token, so refuse to run without one.

@@ -9,3 +9,7 @@ export const PROVIDER_FIELDS: Record<ProviderKey, readonly ("tenantId" | "client
   "staff-google": ["clientId"],
   "parent-oidc": ["tenantSubdomain", "tenantId", "clientId"],
 };
+
+/** The sign-ins that use an app-generated certificate instead of a client secret. */
+export const CERTIFICATE_PROVIDERS: readonly ProviderKey[] = ["staff-microsoft", "parent-oidc"];
+export const usesCertificate = (key: ProviderKey) => CERTIFICATE_PROVIDERS.includes(key);

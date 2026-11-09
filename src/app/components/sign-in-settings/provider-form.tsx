@@ -27,7 +27,7 @@ export function ProviderForm({ providerKey, summary, action }: {
       {summary && (
         <p className="hint">
           {summary.readable
-            ? <>Secret saved <LocalTime iso={summary.secretUpdatedAt} />{summary.secretExpiresAt && <>, expires <CalendarDate iso={summary.secretExpiresAt} /></>}.</>
+            ? <>Secret saved <LocalTime iso={summary.credentialUpdatedAt} />{summary.expiresAt && <>, expires <CalendarDate iso={summary.expiresAt} /></>}.</>
             : "The saved secret can't be read with this server's encryption key. Enter it again."}
         </p>
       )}
