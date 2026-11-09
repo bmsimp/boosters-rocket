@@ -25,7 +25,8 @@ DB="postgres://b:b@$NET-db:5432/b"
 docker run --rm --network "$NET" -e DATABASE_URL="$DB" "$IMAGE" node tools/scripts/migrate.mjs | grep -q migrated || fail "migrations didn't run"
 
 docker run -d --name "$NET-app" --network "$NET" -e DATABASE_URL="$DB" \
-  -e APP_URL=https://portaltest.rhinoautomator.com -e BETTER_AUTH_SECRET=smoke-secret-smoke-secret-smoke-secret-1 "$IMAGE" >/dev/null
+  -e APP_URL=https://portaltest.rhinoautomator.com -e BETTER_AUTH_SECRET=smoke-secret-smoke-secret-smoke-secret-1 \
+  -e SETTINGS_ENCRYPTION_KEY=c21va2Uta2V5LXNtb2tlLWtleS1zbW9rZS1rZXktMTI= "$IMAGE" >/dev/null
 
 status=starting
 for _ in $(seq 1 45); do

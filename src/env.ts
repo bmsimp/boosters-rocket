@@ -2,6 +2,11 @@ import { z } from "zod";
 
 const optional = z.string().trim().optional().transform((v) => (v ? v : undefined));
 
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const encryptionKey = z.string().trim().refine((v) => BASE64.test(v) && Buffer.from(v, "base64").length === 32, {
+  message: "SETTINGS_ENCRYPTION_KEY must be 32 random bytes, base64 (make one with: openssl rand -base64 32)",
+});
+
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // A multi-tenant alias (common/organizations/consumers) makes Better Auth skip the issuer check, so only a real directory GUID is accepted.
@@ -13,6 +18,8 @@ export const schema = z.object({
   DATABASE_URL: z.string().url(),
   APP_URL: z.string().url(),
   BETTER_AUTH_SECRET: z.string().min(32),
+  SETTINGS_ENCRYPTION_KEY: encryptionKey,
+  SETTINGS_ENCRYPTION_KEY_PREVIOUS: z.preprocess((v) => (v === "" ? undefined : v), encryptionKey.optional()),
   BOOTSTRAP_ADMIN_EMAIL: optional,
   STAFF_ENTRA_TENANT_ID: tenantId,
   STAFF_ENTRA_CLIENT_ID: optional,

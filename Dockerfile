@@ -17,7 +17,8 @@ ENV NEXT_OUTPUT=standalone \
     NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL=postgres://build:build@localhost:5432/build \
     APP_URL=https://build.invalid \
-    BETTER_AUTH_SECRET=build-placeholder-not-a-secret-0000000000
+    BETTER_AUTH_SECRET=build-placeholder-not-a-secret-0000000000 \
+    SETTINGS_ENCRYPTION_KEY=YnVpbGQtcGxhY2Vob2xkZXItbm90LWEtc2VjcmV0ISE=
 RUN pnpm build
 
 FROM base AS tools

@@ -27,6 +27,7 @@ jobs:
           DATABASE_URL: postgres://booster:booster@localhost:5433/booster_test
           APP_URL: http://localhost:3100
           BETTER_AUTH_SECRET: ci-fake-secret-ci-fake-secret-1234567890
+          SETTINGS_ENCRYPTION_KEY: Y2ktZmFrZS1rZXktY2ktZmFrZS1rZXktY2ktZmFrZSE=
           STAFF_GOOGLE_CLIENT_ID: ci-google-id
           STAFF_GOOGLE_CLIENT_SECRET: ci-fake-google-secret-abcdef
           PARENT_OIDC_DISCOVERY_URL: https://login.example.com/.well-known/openid-configuration
@@ -40,6 +41,7 @@ jobs:
           DATABASE_URL: postgres://booster:booster@localhost:5433/booster_test
           APP_URL: http://localhost:3100
           BETTER_AUTH_SECRET: ci-fake-secret-ci-fake-secret-1234567890
+          SETTINGS_ENCRYPTION_KEY: Y2ktZmFrZS1rZXktY2ktZmFrZS1rZXktY2ktZmFrZSE=
           STAFF_GOOGLE_CLIENT_ID: ci-google-id
           STAFF_GOOGLE_CLIENT_SECRET: ci-fake-google-secret-abcdef
           PARENT_OIDC_DISCOVERY_URL: https://login.example.com/.well-known/openid-configuration

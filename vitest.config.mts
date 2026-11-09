@@ -15,6 +15,7 @@ export default defineConfig({
     env: {
       DATABASE_URL: "postgres://booster:booster@localhost:5433/booster_test",
       BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-32",
+      SETTINGS_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
       APP_URL: "http://localhost:3000",
     },
     fileParallelism: false,
