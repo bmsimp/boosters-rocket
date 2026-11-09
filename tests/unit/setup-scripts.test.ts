@@ -50,6 +50,6 @@ describe("setup PowerShell scripts", () => {
     expect(s).toContain("-eq $CertificateBase64");
     expect(s).toContain("This app has an expired certificate (");
     expect(s).toContain("which Microsoft won't accept back. Remove it in the Entra admin center under Certificates & secrets > Certificates, then run this script again.");
-    expect(s).not.toMatch(/removeKey|b(Invoke-MgGraphRequest|Send-Graph) DELETE/);
+    expect(s).not.toMatch(/removeKey|\b(Invoke-MgGraphRequest|Send-Graph) DELETE/);
   });
 });
