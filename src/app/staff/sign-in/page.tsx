@@ -1,18 +1,20 @@
 import { getClubSettings } from "@/lib/settings/club";
-import { staffEntraEnabled, staffGoogleEnabled } from "@/env";
+import { loadProviders } from "@/lib/auth/providers";
 import { SignInButton } from "../../sign-in/sign-in-button";
 
 export const metadata = { title: "Staff sign in" };
 
 export default async function StaffSignIn() {
   const club = await getClubSettings();
+  const p = await loadProviders();
+  const ms = Boolean(p.staffMicrosoft), google = Boolean(p.staffGoogle);
   return (
     <main className="wrap signin">
       <h1 className="page-title">{club.name} staff</h1>
       <p className="lede">Sign in with the account the boosters added you with.</p>
-      {staffEntraEnabled && <SignInButton door="staff" provider="microsoft" label="Sign in with Microsoft" primary />}
-      {staffGoogleEnabled && <SignInButton door="staff" provider="google" label="Sign in with Google" primary={!staffEntraEnabled} />}
-      {!staffEntraEnabled && !staffGoogleEnabled && <p role="status">No staff sign-in is set up yet.</p>}
+      {ms && <SignInButton door="staff" provider="microsoft" label="Sign in with Microsoft" primary />}
+      {google && <SignInButton door="staff" provider="google" label="Sign in with Google" primary={!ms} />}
+      {!ms && !google && <p role="status">No staff sign-in is set up yet.</p>}
     </main>
   );
 }

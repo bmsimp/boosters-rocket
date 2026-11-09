@@ -4,7 +4,7 @@ import { db } from "@/lib/db/client";
 import { parentAuthUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { clientIpFrom } from "@/lib/request";
-import { env } from "@/env";
+import { loadProviders, providersVersion, parentDiscoveryUrl } from "./providers";
 
 export const PARENT_PROVIDER_ID = "parent-oidc";
 
@@ -34,9 +34,10 @@ class DiscoveryError extends Error {}
 
 /** Builds the verifier from the provider's discovery document: its issuer, its JWKS, our client id as audience. */
 async function discoverVerifier(): Promise<ParentIdTokenVerifier> {
-  const url = env.PARENT_OIDC_DISCOVERY_URL;
-  const audience = env.PARENT_OIDC_CLIENT_ID;
-  if (!url || !audience) throw new DiscoveryError("parent door not configured");
+  const parent = (await loadProviders()).parent;
+  if (!parent) throw new DiscoveryError("parent door not configured");
+  const url = parentDiscoveryUrl(parent.config);
+  const audience = parent.config.clientId;
   let doc: { issuer?: unknown; jwks_uri?: unknown; id_token_signing_alg_values_supported?: unknown };
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
@@ -57,11 +58,15 @@ async function discoverVerifier(): Promise<ParentIdTokenVerifier> {
   });
 }
 
-// Cached for the process (the remote JWKS caches and refreshes keys itself); a failed discovery is retried next time.
-let defaultVerifier: Promise<ParentIdTokenVerifier> | null = null;
+// Cached per provider version (the remote JWKS caches and refreshes keys itself); a failed discovery is retried next time.
+let defaultVerifier: { version: number; value: Promise<ParentIdTokenVerifier> } | null = null;
 function getDefaultVerifier(): Promise<ParentIdTokenVerifier> {
-  defaultVerifier ??= discoverVerifier().catch((e) => { defaultVerifier = null; throw e; });
-  return defaultVerifier;
+  const v = providersVersion();
+  if (!defaultVerifier || defaultVerifier.version !== v) {
+    const value = discoverVerifier().catch((e) => { if (defaultVerifier?.version === v) defaultVerifier = null; throw e; });
+    defaultVerifier = { version: v, value };
+  }
+  return defaultVerifier.value;
 }
 
 function invalidTokenReason(e: unknown): string {

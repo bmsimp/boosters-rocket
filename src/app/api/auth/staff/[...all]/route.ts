@@ -1,3 +1,5 @@
 import { toNextJsHandler } from "better-auth/next-js";
-import { staffAuth } from "@/lib/auth/staff-auth";
-export const { GET, POST } = toNextJsHandler(staffAuth);
+import { getStaffAuth } from "@/lib/auth/staff-auth";
+
+export async function GET(req: Request) { return toNextJsHandler(await getStaffAuth()).GET(req); }
+export async function POST(req: Request) { return toNextJsHandler(await getStaffAuth()).POST(req); }

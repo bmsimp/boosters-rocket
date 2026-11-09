@@ -1,13 +1,16 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { auditLog, staffAuthUser, parentAuthUser } from "@/lib/db/schema";
 import { recordSignin, recordSignout } from "@/lib/auth/signin-audit";
-import { staffAuth } from "@/lib/auth/staff-auth";
-import { parentAuth } from "@/lib/auth/parent-auth";
+import { getStaffAuth } from "@/lib/auth/staff-auth";
+import { getParentAuth } from "@/lib/auth/parent-auth";
 import { resetDb } from "../helpers/db";
 import { env } from "@/env";
 
+let staffAuth: Awaited<ReturnType<typeof getStaffAuth>>;
+let parentAuth: Awaited<ReturnType<typeof getParentAuth>>;
+beforeAll(async () => { staffAuth = await getStaffAuth(); parentAuth = await getParentAuth(); });
 type Door = typeof staffAuth | typeof parentAuth;
 
 /** Signs a real session in the door's database and POSTs to its /sign-out endpoint with the signed cookie. */
