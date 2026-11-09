@@ -9,7 +9,7 @@ export default async function RolesPage() {
   return (
     <main className="wrap single">
       <h1 className="page-title">Roles</h1>
-      <p className="lede">A role is a list of permissions to include and exclude. Exclude always wins. Admin always has everything.</p>
+      <p className="lede">A role is a list of permissions to include and exclude. Exclude always wins. Admin always has everything. Managing roles, adding staff, changing a person&apos;s roles, turning sign-in on or off, and the sign-in settings are Admin only, so a role can&apos;t include them.</p>
       {roles.map((r) => (
         <section className="box" key={r.id} aria-labelledby={`role-${r.id}`}>
           <h2 id={`role-${r.id}`}>{r.name}</h2>

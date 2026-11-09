@@ -6,12 +6,13 @@ import { eq } from "drizzle-orm";
 import { auditLog, staffUser, roleAssignment } from "@/lib/db/schema";
 
 const actor = { door: "staff" as const, id: "a1", label: "Admin" };
+/** The audit actor for a seeded staff member. */
+const as = (s: { id: string }) => ({ door: "staff" as const, id: s.id, label: "Actor" });
 const LAST_ADMIN = { ok: false, error: "There must always be at least one admin." };
 
-/** Sets a person's roles as `by` would (an admin unless stated). */
-async function setRoles(target: string, roleIds: string[], by?: { id: string; admin?: boolean }) {
-  const a = { door: "staff" as const, id: by?.id ?? "a1", label: "Actor" };
-  return setStaffRoles(target, roleIds, { actor: a, actorStaffUserId: a.id, actorIsAdmin: by?.admin ?? true, ip: null });
+/** Sets a person's roles as the staff member `by` (the person themself unless stated). */
+async function setRoles(target: string, roleIds: string[], by: string = target) {
+  return setStaffRoles(target, roleIds, { actor: { door: "staff" as const, id: by, label: "Actor" }, actorStaffUserId: by, ip: null });
 }
 const held = async (id: string) => (await db.select().from(roleAssignment).where(eq(roleAssignment.staffUserId, id))).map((r) => r.roleId);
 const audits = async () => (await db.select().from(auditLog)).map((a) => a.action);
@@ -55,13 +56,13 @@ describe("roles", () => {
 
   it("refuses to disable the last active admin", async () => {
     const a = await seedStaff({ email: "only@club.org", admin: true });
-    expect((await setStaffStatus(a.id, "disabled", actor, true, null)).ok).toBe(false);
+    expect((await setStaffStatus(a.id, "disabled", as(a), null)).ok).toBe(false);
   });
 
   it("refuses a status other than active or disabled and leaves the row unchanged", async () => {
     const a = await seedStaff({ email: "a@club.org", admin: true });
     await seedStaff({ email: "b@club.org", admin: true });
-    const r = await setStaffStatus(a.id, "invited" as "active", actor, true, null);
+    const r = await setStaffStatus(a.id, "invited" as "active", as(a), null);
     expect(r).toEqual({ ok: false, error: "That status isn't allowed." });
     const [row] = await db.select().from(staffUser).where(eq(staffUser.id, a.id));
     expect(row!.status).toBe("active");
@@ -70,60 +71,64 @@ describe("roles", () => {
   it("allows disabling one of two active admins", async () => {
     const a = await seedStaff({ email: "a@club.org", admin: true });
     await seedStaff({ email: "b@club.org", admin: true });
-    expect((await setStaffStatus(a.id, "disabled", actor, true, null)).ok).toBe(true);
+    expect((await setStaffStatus(a.id, "disabled", as(a), null)).ok).toBe(true);
   });
 
   it("allows removing Admin from a disabled admin while one active admin remains", async () => {
     await seedStaff({ email: "a@club.org", admin: true });
     const d = await seedStaff({ email: "d@club.org", admin: true, status: "disabled" });
-    expect((await setRoles(d.id, [])).ok).toBe(true);
+    expect((await setRoles(d.id, [], (await db.select().from(staffUser).where(eq(staffUser.email, "a@club.org")))[0]!.id)).ok).toBe(true);
   });
 
   it("does not count an invited admin as the other admin", async () => {
     const a = await seedStaff({ email: "only@club.org", admin: true });
     await seedStaff({ email: "invited@club.org", admin: true, status: "invited" });
-    expect(await setStaffStatus(a.id, "disabled", actor, true, null)).toEqual(LAST_ADMIN);
+    expect(await setStaffStatus(a.id, "disabled", as(a), null)).toEqual(LAST_ADMIN);
     expect(await setRoles(a.id, [])).toEqual(LAST_ADMIN);
   });
 
-  it("refuses a non-admin with Staff.Users.ReadWrite who tries to turn an admin off or back on", async () => {
+  it("refuses a non-admin who tries to turn sign-in off or on, audited, nothing changed", async () => {
     const a = await seedStaff({ email: "a@club.org", admin: true });
-    await seedStaff({ email: "b@club.org", admin: true });
-    const d = await seedStaff({ email: "d@club.org", admin: true, status: "disabled" });
-    const msg = { ok: false, error: "Only an admin can turn sign-in on or off for another admin." };
-    expect(await setStaffStatus(a.id, "disabled", actor, false, null)).toEqual(msg);
-    expect(await setStaffStatus(d.id, "active", actor, false, null)).toEqual(msg);
+    const p = await seedStaff({ email: "p@club.org" });
+    const d = await seedStaff({ email: "d@club.org", status: "disabled" });
+    const msg = { ok: false, error: "Only an admin can turn sign-in on or off." };
+    expect(await setStaffStatus(a.id, "disabled", as(p), null)).toEqual(msg);
+    expect(await setStaffStatus(d.id, "active", as(p), null)).toEqual(msg);
     const rows = await db.select().from(staffUser);
     expect(rows.find((r) => r.id === a.id)!.status).toBe("active");
     expect(rows.find((r) => r.id === d.id)!.status).toBe("disabled");
-    expect((await db.select().from(auditLog)).map((x) => x.action)).not.toContain("staff.status");
+    const audit = await db.select().from(auditLog);
+    expect(audit.map((x) => x.action)).toEqual(["staff.status.refused", "staff.status.refused"]);
+    expect(audit[0]).toMatchObject({ actorId: p.id, targetId: a.id, after: { reason: "not_admin" } });
   });
 
   it("lets an admin turn another admin off and back on", async () => {
     const a = await seedStaff({ email: "a@club.org", admin: true });
-    await seedStaff({ email: "b@club.org", admin: true });
-    expect((await setStaffStatus(a.id, "disabled", actor, true, null)).ok).toBe(true);
-    expect((await setStaffStatus(a.id, "active", actor, true, null)).ok).toBe(true);
+    const b = await seedStaff({ email: "b@club.org", admin: true });
+    expect((await setStaffStatus(a.id, "disabled", as(b), null)).ok).toBe(true);
+    expect((await setStaffStatus(a.id, "active", as(b), null)).ok).toBe(true);
   });
 
-  it("lets a non-admin with Staff.Users.ReadWrite change a person who is not an admin", async () => {
-    await seedStaff({ email: "a@club.org", admin: true });
+  it("lets an admin turn a non-admin off", async () => {
+    const a = await seedStaff({ email: "a@club.org", admin: true });
     const p = await seedStaff({ email: "p@club.org" });
-    expect((await setStaffStatus(p.id, "disabled", actor, false, null)).ok).toBe(true);
+    expect((await setStaffStatus(p.id, "disabled", as(a), null)).ok).toBe(true);
   });
 
   it("writes no audit rows when saving with no changes", async () => {
-    await seedStaff({ email: "a@club.org", admin: true });
+    const a = await seedStaff({ email: "a@club.org", admin: true });
     const p = await seedStaff({ email: "p@club.org" });
-    expect((await setRoles(p.id, [])).ok).toBe(true);
+    expect((await setRoles(p.id, [], a.id)).ok).toBe(true);
     expect(await db.select().from(auditLog)).toHaveLength(0);
   });
 });
 
 describe("staff invites", () => {
   beforeEach(resetDb);
-  const inv = (raw: { name: string; email: string }, roleIds: string[] = [], admin = true) =>
-    inviteStaff(raw, roleIds, { actor, actorIsAdmin: admin, ip: null });
+  let boss: { id: string };
+  beforeEach(async () => { boss = await seedStaff({ email: "boss@club.org", admin: true }); });
+  const inv = (raw: { name: string; email: string }, roleIds: string[] = [], by: { id: string } = boss) =>
+    inviteStaff(raw, roleIds, { actor: as(by), ip: null });
 
   it("normalizes email and refuses duplicates", async () => {
     expect((await inv({ name: "Pat", email: " Pat@Club.org" })).ok).toBe(true);
@@ -139,7 +144,7 @@ describe("staff invites", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect((await held(r.id)).sort()).toEqual([t, v].sort());
-    expect(await db.select().from(staffUser)).toHaveLength(1);
+    expect(await db.select().from(staffUser)).toHaveLength(2);
     expect(await audits()).toEqual(["staff.invite", "role.assign", "role.assign"]);
   });
 
@@ -148,17 +153,35 @@ describe("staff invites", () => {
     const before = (await db.select().from(auditLog)).length;
     const r = await inv({ name: "Pat", email: "pat@club.org" }, [t, crypto.randomUUID()]);
     expect(r.ok).toBe(false);
-    expect(await db.select().from(staffUser)).toHaveLength(0);
-    expect(await db.select().from(roleAssignment)).toHaveLength(0);
+    expect(await db.select().from(staffUser)).toHaveLength(1);
+    expect(await db.select().from(roleAssignment)).toHaveLength(1);
     expect((await db.select().from(auditLog)).length).toBe(before);
   });
 
-  it("refuses a non-admin who invites someone as Admin, audited, nothing created", async () => {
-    const r = await inv({ name: "Pat", email: "pat@club.org" }, [await adminRoleId()], false);
-    expect(r).toEqual({ ok: false, errors: ["Only an admin can give or remove the Admin role."] });
-    expect(await db.select().from(staffUser)).toHaveLength(0);
-    const [row] = await db.select().from(auditLog);
-    expect(row).toMatchObject({ action: "staff.invite.refused", permission: "Staff.Users.ReadWrite", actorId: "a1", after: { reason: "admin_role_requires_admin" } });
+  it("refuses a non-admin invite, with or without roles, audited, nothing created", async () => {
+    const p = await seedStaff({ email: "p@club.org" });
+    const t = await customRole("Treasurer");
+    await db.delete(auditLog);
+    for (const roleIds of [[], [t], [await adminRoleId()]]) {
+      const r = await inv({ name: "Pat", email: "pat@club.org" }, roleIds, p);
+      expect(r).toEqual({ ok: false, errors: ["Only an admin can add staff."] });
+    }
+    expect((await db.select().from(staffUser)).map((x) => x.email).sort()).toEqual(["boss@club.org", "p@club.org"]);
+    expect(await db.select().from(roleAssignment)).toHaveLength(1);
+    const rows = await db.select().from(auditLog);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({ action: "staff.invite.refused", permission: "Staff.Users.ReadWrite", actorId: p.id, after: { reason: "not_admin" } });
+  });
+
+  it("audits the refusal even when the email is taken or the role is unknown", async () => {
+    const p = await seedStaff({ email: "pat@club.org" });
+    await db.delete(auditLog);
+    await inv({ name: "Pat", email: "pat@club.org" }, [crypto.randomUUID()], p);
+    expect((await db.select().from(auditLog)).map((x) => x.action)).toEqual(["staff.invite.refused"]);
+  });
+
+  it("lets an admin invite without roles", async () => {
+    expect((await inv({ name: "Pat", email: "pat@club.org" })).ok).toBe(true);
   });
 
   it("lets an admin invite someone as Admin", async () => {
@@ -169,62 +192,48 @@ describe("staff invites", () => {
 describe("setStaffRoles", () => {
   beforeEach(resetDb);
 
-  it("lets a non-admin add and remove a custom role on someone else", async () => {
-    await seedStaff({ email: "boss@club.org", admin: true });
-    const me = await seedStaff({ email: "me@club.org" });
+  it("lets an admin add and remove roles on someone else, including another admin's", async () => {
+    const boss = await seedStaff({ email: "boss@club.org", admin: true });
+    const other = await seedStaff({ email: "o@club.org", admin: true });
     const p = await seedStaff({ email: "p@club.org" });
     const t = await customRole("Treasurer");
     const v = await customRole("Volunteer");
-    const by = { id: me.id, admin: false };
-    expect((await setRoles(p.id, [t, v], by)).ok).toBe(true);
+    expect((await setRoles(p.id, [t, v], boss.id)).ok).toBe(true);
     expect((await held(p.id)).sort()).toEqual([t, v].sort());
-    expect((await setRoles(p.id, [v], by)).ok).toBe(true);
+    expect((await setRoles(p.id, [v], boss.id)).ok).toBe(true);
     expect(await held(p.id)).toEqual([v]);
+    expect((await setRoles(other.id, [t], boss.id)).ok).toBe(true);
+    expect(await held(other.id)).toEqual([t]);
     expect(await audits()).toEqual(expect.arrayContaining(["role.assign", "role.unassign"]));
   });
 
   it("audits each change with the role and the person", async () => {
+    const boss = await seedStaff({ email: "boss@club.org", admin: true });
     const p = await seedStaff({ email: "p@club.org" });
     const t = await customRole("Treasurer");
-    await setRoles(p.id, [t]);
+    await setRoles(p.id, [t], boss.id);
     const [row] = (await db.select().from(auditLog)).filter((x) => x.action === "role.assign");
-    expect(row).toMatchObject({ permission: "Staff.Users.ReadWrite", targetType: "staff_user", targetId: p.id, after: { roleId: t } });
+    expect(row).toMatchObject({ permission: "Staff.Users.ReadWrite", actorId: boss.id, targetType: "staff_user", targetId: p.id, after: { roleId: t } });
   });
 
-  it("refuses a non-admin who gives or removes Admin, audited, nothing changed", async () => {
-    const adminId = await adminRoleId();
-    const me = await seedStaff({ email: "me@club.org" });
-    const other = await seedStaff({ email: "o@club.org" });
-    const boss = await seedStaff({ email: "boss@club.org", admin: true });
-    const by = { id: me.id, admin: false };
-    const msg = { ok: false, error: "Only an admin can give or remove the Admin role." };
-    expect(await setRoles(other.id, [adminId], by)).toEqual(msg);
-    expect(await setRoles(boss.id, [], by)).toEqual(msg);
-    expect(await held(other.id)).toEqual([]);
-    expect(await held(boss.id)).toEqual([adminId]);
-    const refused = (await db.select().from(auditLog)).filter((x) => x.action.endsWith(".refused"));
-    expect(refused.map((x) => x.action)).toEqual(["role.assign.refused", "role.unassign.refused"]);
-    expect(refused[0]).toMatchObject({ actorId: me.id, targetId: other.id, after: { reason: "admin_role_requires_admin" } });
-    expect(await audits()).not.toContain("role.assign");
-  });
-
-  it("refuses a non-admin who changes their own roles, audited", async () => {
-    const me = await seedStaff({ email: "me@club.org" });
+  it("refuses an actor who no longer holds Admin, audited, nothing changed", async () => {
+    await seedStaff({ email: "boss@club.org", admin: true });
+    const former = await seedStaff({ email: "former@club.org" });
+    const p = await seedStaff({ email: "p@club.org" });
     const t = await customRole("Treasurer");
-    const r = await setRoles(me.id, [t], { id: me.id, admin: false });
-    expect(r).toEqual({ ok: false, error: "Only an admin can change their own roles." });
-    expect(await held(me.id)).toEqual([]);
+    const r = await setRoles(p.id, [t], former.id);
+    expect(r).toEqual({ ok: false, error: "Only an admin can change roles." });
+    expect(await held(p.id)).toEqual([]);
     const [row] = (await db.select().from(auditLog)).filter((x) => x.action.endsWith(".refused"));
-    expect(row).toMatchObject({ action: "role.assign.refused", actorId: me.id, targetId: me.id, after: { reason: "own_roles" } });
+    expect(row).toMatchObject({ action: "role.assign.refused", actorId: former.id, targetId: p.id, after: { reason: "not_admin" } });
   });
 
   it("lets an admin change their own roles but not drop Admin as the last admin", async () => {
     const a = await seedStaff({ email: "a@club.org", admin: true });
     const t = await customRole("Treasurer");
     const adminId = await adminRoleId();
-    const by = { id: a.id, admin: true };
-    expect((await setRoles(a.id, [adminId, t], by)).ok).toBe(true);
-    expect(await setRoles(a.id, [t], by)).toEqual(LAST_ADMIN);
+    expect((await setRoles(a.id, [adminId, t])).ok).toBe(true);
+    expect(await setRoles(a.id, [t])).toEqual(LAST_ADMIN);
     expect((await held(a.id)).sort()).toEqual([adminId, t].sort());
     const refused = (await db.select().from(auditLog)).filter((x) => x.action === "role.unassign.refused");
     expect(refused).toHaveLength(1);
@@ -232,16 +241,18 @@ describe("setStaffRoles", () => {
   });
 
   it("writes nothing for a role that does not exist", async () => {
+    const boss = await seedStaff({ email: "boss@club.org", admin: true });
     const p = await seedStaff({ email: "p@club.org" });
     const t = await customRole("Treasurer");
     const n = (await db.select().from(auditLog)).length;
-    const r = await setRoles(p.id, [t, crypto.randomUUID()]);
+    const r = await setRoles(p.id, [t, crypto.randomUUID()], boss.id);
     expect(r.ok).toBe(false);
     expect(await held(p.id)).toEqual([]);
     expect((await db.select().from(auditLog)).length).toBe(n);
   });
 
   it("refuses a person who is not on the staff list", async () => {
-    expect((await setRoles(crypto.randomUUID(), [])).ok).toBe(false);
+    const boss = await seedStaff({ email: "boss@club.org", admin: true });
+    expect((await setRoles(crypto.randomUUID(), [], boss.id)).ok).toBe(false);
   });
 });

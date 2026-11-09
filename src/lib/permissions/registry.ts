@@ -4,19 +4,19 @@
  * Format: Area.Object.Level, Level = Read | ReadWrite.
  */
 export const PERMISSIONS = [
-  "Admin.Roles.ReadWrite",      // admin-only: create/change/assign roles
+  "Admin.Roles.ReadWrite",      // admin-only: create, change and delete roles
   "Staff.Users.Read",
-  "Staff.Users.ReadWrite",
+  "Staff.Users.ReadWrite",      // admin-only: invite staff, assign roles, turn sign-in on or off
   "Settings.Club.Read",
   "Settings.Club.ReadWrite",
   "Audit.Log.Read",
-  "Settings.SignIn.ReadWrite",  // admin-only: change how staff and parents sign in
+  "Settings.SignIn.ReadWrite",  // admin-only: change how staff and parents sign in (sign-in settings)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Never grantable through a custom role; only the built-in Admin holds them. */
-export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Settings.SignIn.ReadWrite"];
+export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite"];
 
 export const GRANTABLE: readonly Permission[] = PERMISSIONS.filter((p) => !ADMIN_ONLY.includes(p));
 

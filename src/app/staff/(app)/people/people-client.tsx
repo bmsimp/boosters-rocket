@@ -4,14 +4,14 @@ import { inviteStaffAction, setStaffStatusAction, setStaffRolesAction } from "./
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { RoleChecklist, type RoleOption } from "./role-checklist";
 
-export function InviteForm({ roles, actorIsAdmin }: { roles: RoleOption[]; actorIsAdmin: boolean }) {
+export function InviteForm({ roles }: { roles: RoleOption[] }) {
   const [state, action, pending] = useActionState(async (_: unknown, f: FormData) =>
     safely(() => inviteStaffAction(f), { ok: false as const, errors: [ACTION_FAILED] }), null);
   return (
     <form action={action} className="stack">
       <label className="field"><span>Name</span><input name="name" required autoComplete="off" /></label>
       <label className="field"><span>Email</span><input name="email" type="email" required autoComplete="off" /></label>
-      <RoleChecklist roles={roles} initial={[]} canGrantAdmin={actorIsAdmin} />
+      <RoleChecklist key={state?.ok ? `done-${state.id}` : "new"} roles={roles} initial={[]} />
       {state && !state.ok && <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
       {state?.ok && <p role="status">Added. They can sign in now.</p>}
       <button className="btn" disabled={pending}>Add to staff</button>
@@ -21,8 +21,8 @@ export function InviteForm({ roles, actorIsAdmin }: { roles: RoleOption[]; actor
 
 type Person = { id: string; name: string; email: string; status: string; roles: { id: string; name: string }[] };
 
-export function PersonRow({ person, roles, canEdit, actorIsAdmin, isSelf }:
-  { person: Person; roles: RoleOption[]; canEdit: boolean; actorIsAdmin: boolean; isSelf: boolean }) {
+export function PersonRow({ person, roles, canEdit }:
+  { person: Person; roles: RoleOption[]; canEdit: boolean }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -31,17 +31,14 @@ export function PersonRow({ person, roles, canEdit, actorIsAdmin, isSelf }:
     setError(r.ok ? null : r.error ?? ACTION_FAILED);
     setSaved(r.ok);
   });
-  const ownLocked = isSelf && !actorIsAdmin;
   const heldKey = person.roles.map((r) => r.id).sort().join(",");
   return (
     <li>
       <span><span className="what">{person.name}</span><span className="when">{person.email} · {person.status}</span></span>
       {canEdit
         ? <form className="row-actions" action={(f) => run(() => setStaffRolesAction(person.id, f))}>
-            <RoleChecklist key={heldKey} roles={roles} initial={person.roles.map((r) => r.id)} canGrantAdmin={actorIsAdmin} disabled={ownLocked} />
-            {ownLocked
-              ? <span className="when">Only an admin can change their own roles.</span>
-              : <button className="btn btn-line" disabled={pending}>Save</button>}
+            <RoleChecklist key={heldKey} roles={roles} initial={person.roles.map((r) => r.id)} />
+            <button className="btn btn-line" disabled={pending}>Save</button>
           </form>
         : <span>{person.roles.map((r) => r.name).join(", ") || "No roles"}</span>}
       {canEdit && <button className="btn btn-line" disabled={pending}

@@ -79,18 +79,24 @@ async function holdsAdminRole(tx: Tx, staffUserId: string): Promise<boolean> {
 }
 
 const STAFF_PERM = "Staff.Users.ReadWrite";
-const ADMIN_ROLE_REFUSAL = "Only an admin can give or remove the Admin role.";
-const OWN_ROLES_REFUSAL = "Only an admin can change their own roles.";
+const NOT_ADMIN = "Only an admin can change roles.";
+const NOT_ADMIN_INVITE = "Only an admin can add staff.";
 
-export type RoleOpts = { actor: Actor; actorStaffUserId: string; actorIsAdmin: boolean; ip: string | null };
+export type RoleOpts = { actor: Actor; actorStaffUserId: string; ip: string | null };
 
-/** Sets exactly which roles a person holds. Works out the changes, applies the rules (own roles, the Admin role,
- *  the last admin) and writes the changes and their audit rows in one transaction. A refusal is audited and committed. */
+/** Sets exactly which roles a person holds. Admin only: the actor's Admin role is re-checked under the lock.
+ *  Writes the changes and their audit rows in one transaction. A refusal is audited and committed. */
 export async function setStaffRoles(staffUserId: string, roleIds: string[], opts: RoleOpts):
   Promise<{ ok: true } | { ok: false; error: string }> {
   const wanted = [...new Set(roleIds)];
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.admins'))`);
+    const refuse = async (reason: string, error: string, unassign: boolean) => {
+      await writeAudit({ actor: opts.actor, action: unassign ? "role.unassign.refused" : "role.assign.refused", permission: STAFF_PERM,
+        targetType: "staff_user", targetId: staffUserId, after: { reason }, ip: opts.ip }, tx);
+      return { ok: false as const, error };
+    };
+    if (!(await holdsAdminRole(tx, opts.actorStaffUserId))) return refuse("not_admin", NOT_ADMIN, false);
     const [person] = await tx.select().from(staffUser).where(eq(staffUser.id, staffUserId));
     if (!person) return { ok: false as const, error: "That person is no longer on the staff list." };
     const known = wanted.length ? await tx.select().from(role).where(inArray(role.id, wanted)) : [];
@@ -101,14 +107,6 @@ export async function setStaffRoles(staffUserId: string, roleIds: string[], opts
     const remove = current.filter((c) => !wanted.includes(c.id));
     if (!add.length && !remove.length) return { ok: true as const };
 
-    const refuse = async (reason: string, error: string, unassign: boolean) => {
-      await writeAudit({ actor: opts.actor, action: unassign ? "role.unassign.refused" : "role.assign.refused", permission: STAFF_PERM,
-        targetType: "staff_user", targetId: staffUserId, after: { reason }, ip: opts.ip }, tx);
-      return { ok: false as const, error };
-    };
-    if (!opts.actorIsAdmin && opts.actorStaffUserId === staffUserId) return refuse("own_roles", OWN_ROLES_REFUSAL, !add.length);
-    const touchesAdmin = add.some((r) => r.key === "admin") || remove.some((c) => c.key === "admin");
-    if (!opts.actorIsAdmin && touchesAdmin) return refuse("admin_role_requires_admin", ADMIN_ROLE_REFUSAL, !add.some((r) => r.key === "admin"));
     if (remove.some((c) => c.key === "admin") && (await isCountedAdmin(tx, staffUserId)) && (await adminCount(tx)) <= 1) {
       return refuse("last_admin", LAST_ADMIN, true);
     }
@@ -138,7 +136,8 @@ const inviteInput = z.object({
   email: z.string().trim().toLowerCase().email("That email doesn't look right."),
 });
 
-export type InviteOpts = { actor: Actor; actorIsAdmin: boolean; ip: string | null };
+/** `actor.id` is the signed-in staff member; their Admin role is re-checked under the lock. */
+export type InviteOpts = { actor: Actor; ip: string | null };
 
 export async function inviteStaff(raw: { name: string; email: string }, roleIds: string[], opts: InviteOpts):
   Promise<{ ok: true; id: string } | { ok: false; errors: string[] }> {
@@ -146,15 +145,16 @@ export async function inviteStaff(raw: { name: string; email: string }, roleIds:
   if (!p.success) return { ok: false, errors: p.error.issues.map((i) => i.message) };
   const wanted = [...new Set(roleIds)];
   return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.admins'))`);
+    if (!opts.actor.id || !(await holdsAdminRole(tx, opts.actor.id))) {
+      await writeAudit({ actor: opts.actor, action: "staff.invite.refused", permission: STAFF_PERM, targetType: "staff_user",
+        after: { reason: "not_admin", email: p.data.email }, ip: opts.ip }, tx);
+      return { ok: false as const, errors: [NOT_ADMIN_INVITE] };
+    }
     const known = wanted.length ? await tx.select().from(role).where(inArray(role.id, wanted)) : [];
     if (known.length !== wanted.length) return { ok: false as const, errors: ["One of those roles no longer exists."] };
     const [exists] = await tx.select().from(staffUser).where(eq(staffUser.email, p.data.email));
     if (exists) return { ok: false as const, errors: ["Someone with that email is already on the staff list."] };
-    if (!opts.actorIsAdmin && known.some((r) => r.key === "admin")) {
-      await writeAudit({ actor: opts.actor, action: "staff.invite.refused", permission: STAFF_PERM, targetType: "staff_user",
-        after: { reason: "admin_role_requires_admin", email: p.data.email }, ip: opts.ip }, tx);
-      return { ok: false as const, errors: [ADMIN_ROLE_REFUSAL] };
-    }
     const [s] = await tx.insert(staffUser).values({ ...p.data, status: "invited" }).returning();
     await writeAudit({ actor: opts.actor, action: "staff.invite", permission: STAFF_PERM, targetType: "staff_user", targetId: s!.id, after: p.data, ip: opts.ip }, tx);
     for (const r of known) {
@@ -167,18 +167,21 @@ export async function inviteStaff(raw: { name: string; email: string }, roleIds:
 
 const statusInput = z.enum(["active", "disabled"]);
 
-const ADMIN_ONLY = "Only an admin can turn sign-in on or off for another admin.";
+const NOT_ADMIN_STATUS = "Only an admin can turn sign-in on or off.";
 
-/** `actorIsAdmin` is the signed-in actor's own Admin standing: only admins may change an admin's status. */
-export async function setStaffStatus(id: string, rawStatus: "active" | "disabled", actor: Actor, actorIsAdmin: boolean, ip: string | null) {
+/** Admin only: `actor.id` is the signed-in staff member, and their Admin role is re-checked under the lock. */
+export async function setStaffStatus(id: string, rawStatus: "active" | "disabled", actor: Actor, ip: string | null) {
   const parsed = statusInput.safeParse(rawStatus);
   if (!parsed.success) return { ok: false, error: "That status isn't allowed." };
   const status = parsed.data;
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.admins'))`);
+    if (!actor.id || !(await holdsAdminRole(tx, actor.id))) {
+      await writeAudit({ actor, action: "staff.status.refused", permission: STAFF_PERM, targetType: "staff_user", targetId: id, after: { reason: "not_admin" }, ip }, tx);
+      return { ok: false, error: NOT_ADMIN_STATUS };
+    }
     const [s] = await tx.select().from(staffUser).where(eq(staffUser.id, id));
     if (!s) return { ok: false, error: "That person is no longer on the staff list." };
-    if (!actorIsAdmin && (await holdsAdminRole(tx, id))) return { ok: false, error: ADMIN_ONLY };
     if (status !== "active" && (await isCountedAdmin(tx, id)) && (await adminCount(tx)) <= 1) return { ok: false, error: LAST_ADMIN };
     await tx.update(staffUser).set({ status, updatedAt: new Date() }).where(eq(staffUser.id, id));
     await writeAudit({ actor, action: "staff.status", permission: "Staff.Users.ReadWrite", targetType: "staff_user", targetId: id,

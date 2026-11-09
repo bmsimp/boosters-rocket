@@ -26,9 +26,23 @@ describe("effectivePermissions", () => {
     ]);
     await db.insert(roleAssignment).values([{ roleId: r1!.id, staffUserId: s.id }, { roleId: r2!.id, staffUserId: s.id }]);
     const e = await effectivePermissions(s.id);
-    expect(can(e, "Staff.Users.ReadWrite")).toBe(true);
+    expect(can(e, "Staff.Users.Read")).toBe(true);
+    expect(can(e, "Staff.Users.ReadWrite")).toBe(false);
     expect(can(e, "Audit.Log.Read")).toBe(true);
     expect(can(e, "Admin.Roles.ReadWrite")).toBe(false);
+  });
+
+  it("never grants Staff.Users.ReadWrite through Staff.* or an exact pattern, but Staff.Users.Read works", async () => {
+    for (const pattern of ["Staff.*", "Staff.Users.ReadWrite", "*", "Staff.Users.Read*"]) {
+      await resetDb();
+      const s = await seedStaff({ email: "v@club.org" });
+      const [r] = await db.insert(role).values({ key: "people", name: "People" }).returning();
+      await db.insert(roleRule).values({ roleId: r!.id, kind: "include", pattern });
+      await db.insert(roleAssignment).values({ roleId: r!.id, staffUserId: s.id });
+      const e = await effectivePermissions(s.id);
+      expect(can(e, "Staff.Users.ReadWrite")).toBe(false);
+      if (pattern !== "Staff.Users.ReadWrite") expect(can(e, "Staff.Users.Read")).toBe(true);
+    }
   });
 
   it("gives a staff user with no roles nothing", async () => {
