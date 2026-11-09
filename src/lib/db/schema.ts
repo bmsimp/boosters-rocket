@@ -10,6 +10,18 @@ export const setting = pgTable("setting", {
   updatedAt: updated(),
 });
 
+/** Sign-in provider settings entered on the setup page. The secret is sealed (src/lib/crypto/secret-box.ts). */
+export const authProvider = pgTable("auth_provider", {
+  key: text("key", { enum: ["staff-microsoft", "staff-google", "parent-oidc"] }).primaryKey(),
+  config: jsonb("config").notNull(),               // non-secret values only
+  secretCiphertext: text("secret_ciphertext").notNull(),
+  secretKeyId: text("secret_key_id").notNull(),
+  secretExpiresAt: timestamp("secret_expires_at", { withTimezone: true }),
+  secretUpdatedAt: timestamp("secret_updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: updated(),
+  updatedBy: uuid("updated_by"),                    // staff_user.id; null when saved from the setup page
+});
+
 /** People who sign in through the staff door. */
 export const staffUser = pgTable("staff_user", {
   id: uuid("id").primaryKey().defaultRandom(),
