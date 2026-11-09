@@ -20,6 +20,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/check-image-secrets.sh scripts/smoke-image.sh
+      - name: PowerShell lint
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $issues = Invoke-ScriptAnalyzer -Path scripts/setup -Recurse -Severity Error
+          $issues | Format-Table -AutoSize
+          if ($issues) { exit 1 }
       - run: pnpm typecheck
       - run: pnpm test
       - name: Build with fake secrets
