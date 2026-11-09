@@ -37,6 +37,7 @@ beforeEach(() => {
       *"inspect --format {{.Image}}"*) [ -z "\${NO_RUNNING:-}" ] || exit 1; echo "sha256:running123";;
       *"inspect --format {{.State.Health.Status}}"*) if [ -n "\${PRE_HEALTH:-}" ] && [ ! -e "\${BR_DIR}/.recreated" ]; then echo "\${PRE_HEALTH}"; else echo "\${HEALTH:-healthy}"; fi;;
       *"up -d --no-deps --force-recreate app"*) touch "\${BR_DIR}/.recreated"; exit 0;;
+      *"image tag booster-rocket-app:rollback-candidate"*) exit \${TAG_PROMOTE_FAIL:-0};;
       *"image inspect booster-rocket-app:previous"*) exit \${NO_PREVIOUS:-0};;
       *"image inspect booster-rocket-app:current"*) exit \${NO_CURRENT:-0};;
       *) exit 0;;
@@ -48,8 +49,9 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
     const r = run();
     expect(r.status).toBe(0);
     const c = calls();
-    const order = ["git pull --ff-only", "compose -f docker-compose.poc.yml --env-file .env.poc build app",
-      "run --rm migrate", "docker image tag sha256:running123 booster-rocket-app:previous", "up -d --no-deps --force-recreate app", "inspect --format {{.State.Health.Status}}"];
+    const order = ["git pull --ff-only", "image tag booster-rocket-app:current booster-rocket-app:rollback-candidate",
+      "compose -f docker-compose.poc.yml --env-file .env.poc build app",
+      "run --rm migrate", "image tag booster-rocket-app:rollback-candidate booster-rocket-app:previous", "up -d --no-deps --force-recreate app", "inspect --format {{.State.Health.Status}}"];
     let at = -1;
     for (const step of order) { const i = c.indexOf(step, at + 1); expect(i, `missing or out of order: ${step}\n${c}`).toBeGreaterThan(at); at = i; }
     expect(r.stdout).toContain("Deployed abc1234");
@@ -91,7 +93,7 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
     expect(r.stderr).toContain("build failed");
     expect(calls()).not.toContain("run --rm migrate");
     expect(calls()).not.toContain("up -d");
-    expect(calls()).not.toContain("image tag");
+    expect(calls()).not.toContain("booster-rocket-app:previous");
   });
 
   it("fails loudly when the app never becomes healthy", () => {
@@ -140,6 +142,27 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
     expect(calls()).toContain("up -d --no-deps --force-recreate app");
     expect(r.stdout).toContain("previous good image was kept for rollback");
     expect(r.stdout).toContain("Deployed abc1234");
+  });
+
+  it("keeps deploying when the rollback copy cannot be kept", () => {
+    const r = run([], { TAG_PROMOTE_FAIL: "1" });
+    expect(r.status).toBe(0);
+    expect(calls()).toContain("up -d --no-deps --force-recreate app");
+    expect(r.stdout).toContain("Couldn't keep a rollback copy of the running version; the deploy continues.");
+    expect(r.stdout).toContain("Deployed abc1234");
+  });
+
+  it("makes no candidate tag on a first deploy, and nothing fails", () => {
+    const r = run([], { NO_CURRENT: "1", NO_RUNNING: "1" });
+    expect(r.status).toBe(0);
+    expect(calls()).not.toContain("rollback-candidate booster-rocket-app:previous");
+    expect(calls()).not.toContain("booster-rocket-app:current booster-rocket-app:rollback-candidate");
+    expect(calls()).toContain("up -d --no-deps --force-recreate app");
+  });
+
+  it("removes the candidate tag when the deploy ends", () => {
+    run();
+    expect(calls()).toContain("image rm booster-rocket-app:rollback-candidate");
   });
 
   it("does not tag a previous image when no container is running", () => {

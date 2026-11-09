@@ -60,14 +60,22 @@ fi
 check_env_file
 
 git pull --ff-only || die 6 "git pull failed. Nothing was changed."
+# compose build moves :current to the new image, and on Docker 29 (containerd image store) the old image is
+# then gone, so give the running version a name of its own before building.
+candidate=""
+if docker image inspect "$APP_IMAGE:current" >/dev/null 2>&1   && docker image tag "$APP_IMAGE:current" "$APP_IMAGE:rollback-candidate" >/dev/null 2>&1; then
+  candidate="yes"
+  trap 'docker image rm "$APP_IMAGE:rollback-candidate" >/dev/null 2>&1 || true' EXIT
+fi
 "${COMPOSE[@]}" build app || die 7 "The build failed. The running app was not touched."
 "${COMPOSE[@]}" run --rm migrate || die 3 "Migrations failed. The running app was not touched."
-# compose build has already moved :current to the new image, so remember what is actually running.
 running="$(docker inspect --format '{{.Image}}' booster-rocket-app 2>/dev/null || true)"
 if [ -n "$running" ]; then
   pre_health="$(docker inspect --format '{{.State.Health.Status}}' booster-rocket-app 2>/dev/null || echo missing)"
   if [ "$pre_health" = "healthy" ]; then
-    docker image tag "$running" "$APP_IMAGE:previous"
+    if [ -z "$candidate" ] || ! docker image tag "$APP_IMAGE:rollback-candidate" "$APP_IMAGE:previous"; then
+      say "Couldn't keep a rollback copy of the running version; the deploy continues."
+    fi
   else
     say "The running app isn't healthy, so the previous good image was kept for rollback."
   fi
