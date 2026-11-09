@@ -321,3 +321,10 @@ p.errors, .sign-out .errors { padding-left: 0; }
 .inline-alert { margin-top: var(--s2); }
 
 .cert-panel code { word-break: break-all; }
+
+/* Roles dropdown: a <details> of checkboxes. */
+.role-picker { position: relative; display: inline-block; }
+.role-picker summary { cursor: pointer; padding: var(--s1) var(--s3); border: 1px solid var(--hair); background: #fff; }
+.role-picker summary[aria-disabled] { cursor: not-allowed; color: var(--ink-2); }
+.role-picker-list { display: grid; gap: var(--s1); padding: var(--s2) var(--s3); border: 1px solid var(--hair); border-top: 0; background: #fff; }
+.role-picker-item { display: flex; align-items: center; gap: var(--s2); }

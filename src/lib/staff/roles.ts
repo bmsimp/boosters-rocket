@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, type Tx } from "@/lib/db/client";
 import { role, roleRule, roleAssignment, staffUser } from "@/lib/db/schema";
@@ -63,14 +63,6 @@ export async function deleteRole(id: string, actor: Actor, ip: string | null) {
   return { ok: true };
 }
 
-export async function assignRole(roleId: string, staffUserId: string, actor: Actor, ip: string | null) {
-  await db.transaction(async (tx) => {
-    await tx.insert(roleAssignment).values({ roleId, staffUserId }).onConflictDoNothing();
-    await writeAudit({ actor, action: "role.assign", permission: PERM, targetType: "staff_user", targetId: staffUserId, after: { roleId }, ip }, tx);
-  });
-  return { ok: true };
-}
-
 /** True when this person holds the Admin role and is counted by adminCount (status active). */
 async function isCountedAdmin(tx: Tx, staffUserId: string): Promise<boolean> {
   const rows = await tx.execute(sql`SELECT 1 FROM role_assignment ra JOIN role r ON r.id = ra.role_id
@@ -86,26 +78,59 @@ async function holdsAdminRole(tx: Tx, staffUserId: string): Promise<boolean> {
   return Array.from(rows as ArrayLike<unknown>).length > 0;
 }
 
-export async function unassignRole(roleId: string, staffUserId: string, actor: Actor, ip: string | null) {
+const STAFF_PERM = "Staff.Users.ReadWrite";
+const ADMIN_ROLE_REFUSAL = "Only an admin can give or remove the Admin role.";
+const OWN_ROLES_REFUSAL = "Only an admin can change their own roles.";
+
+export type RoleOpts = { actor: Actor; actorStaffUserId: string; actorIsAdmin: boolean; ip: string | null };
+
+/** Sets exactly which roles a person holds. Works out the changes, applies the rules (own roles, the Admin role,
+ *  the last admin) and writes the changes and their audit rows in one transaction. A refusal is audited and committed. */
+export async function setStaffRoles(staffUserId: string, roleIds: string[], opts: RoleOpts):
+  Promise<{ ok: true } | { ok: false; error: string }> {
+  const wanted = [...new Set(roleIds)];
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.admins'))`);
-    const [r] = await tx.select().from(role).where(eq(role.id, roleId));
-    if (r?.key === "admin" && (await isCountedAdmin(tx, staffUserId)) && (await adminCount(tx)) <= 1) return { ok: false, error: LAST_ADMIN };
-    const deleted = await tx.delete(roleAssignment)
-      .where(and(eq(roleAssignment.roleId, roleId), eq(roleAssignment.staffUserId, staffUserId))).returning();
-    if (deleted.length) {
-      await writeAudit({ actor, action: "role.unassign", permission: PERM, targetType: "staff_user", targetId: staffUserId, before: { roleId }, ip }, tx);
+    const [person] = await tx.select().from(staffUser).where(eq(staffUser.id, staffUserId));
+    if (!person) return { ok: false as const, error: "That person is no longer on the staff list." };
+    const known = wanted.length ? await tx.select().from(role).where(inArray(role.id, wanted)) : [];
+    if (known.length !== wanted.length) return { ok: false as const, error: "One of those roles no longer exists." };
+    const current = await tx.select({ id: roleAssignment.roleId, key: role.key }).from(roleAssignment)
+      .innerJoin(role, eq(role.id, roleAssignment.roleId)).where(eq(roleAssignment.staffUserId, staffUserId));
+    const add = known.filter((r) => !current.some((c) => c.id === r.id));
+    const remove = current.filter((c) => !wanted.includes(c.id));
+    if (!add.length && !remove.length) return { ok: true as const };
+
+    const refuse = async (reason: string, error: string, unassign: boolean) => {
+      await writeAudit({ actor: opts.actor, action: unassign ? "role.unassign.refused" : "role.assign.refused", permission: STAFF_PERM,
+        targetType: "staff_user", targetId: staffUserId, after: { reason }, ip: opts.ip }, tx);
+      return { ok: false as const, error };
+    };
+    if (!opts.actorIsAdmin && opts.actorStaffUserId === staffUserId) return refuse("own_roles", OWN_ROLES_REFUSAL, !add.length);
+    const touchesAdmin = add.some((r) => r.key === "admin") || remove.some((c) => c.key === "admin");
+    if (!opts.actorIsAdmin && touchesAdmin) return refuse("admin_role_requires_admin", ADMIN_ROLE_REFUSAL, !add.some((r) => r.key === "admin"));
+    if (remove.some((c) => c.key === "admin") && (await isCountedAdmin(tx, staffUserId)) && (await adminCount(tx)) <= 1) {
+      return refuse("last_admin", LAST_ADMIN, true);
     }
-    return { ok: true };
+
+    for (const r of add) {
+      await tx.insert(roleAssignment).values({ roleId: r.id, staffUserId });
+      await writeAudit({ actor: opts.actor, action: "role.assign", permission: STAFF_PERM, targetType: "staff_user", targetId: staffUserId, after: { roleId: r.id }, ip: opts.ip }, tx);
+    }
+    for (const c of remove) {
+      await tx.delete(roleAssignment).where(and(eq(roleAssignment.roleId, c.id), eq(roleAssignment.staffUserId, staffUserId)));
+      await writeAudit({ actor: opts.actor, action: "role.unassign", permission: STAFF_PERM, targetType: "staff_user", targetId: staffUserId, before: { roleId: c.id }, ip: opts.ip }, tx);
+    }
+    return { ok: true as const };
   });
 }
 
 export async function listStaff() {
   const people = await db.select().from(staffUser).orderBy(staffUser.name);
-  const links = await db.select({ staffUserId: roleAssignment.staffUserId, name: role.name })
+  const links = await db.select({ staffUserId: roleAssignment.staffUserId, roleId: role.id, name: role.name })
     .from(roleAssignment).innerJoin(role, eq(role.id, roleAssignment.roleId));
   return people.map((p) => ({ id: p.id, name: p.name, email: p.email, status: p.status,
-    roles: links.filter((l) => l.staffUserId === p.id).map((l) => l.name) }));
+    roles: links.filter((l) => l.staffUserId === p.id).map((l) => ({ id: l.roleId, name: l.name })) }));
 }
 
 const inviteInput = z.object({
@@ -113,15 +138,31 @@ const inviteInput = z.object({
   email: z.string().trim().toLowerCase().email("That email doesn't look right."),
 });
 
-export async function inviteStaff(raw: { name: string; email: string }, actor: Actor, ip: string | null):
+export type InviteOpts = { actor: Actor; actorIsAdmin: boolean; ip: string | null };
+
+export async function inviteStaff(raw: { name: string; email: string }, roleIds: string[], opts: InviteOpts):
   Promise<{ ok: true; id: string } | { ok: false; errors: string[] }> {
   const p = inviteInput.safeParse(raw);
   if (!p.success) return { ok: false, errors: p.error.issues.map((i) => i.message) };
-  const [exists] = await db.select().from(staffUser).where(eq(staffUser.email, p.data.email));
-  if (exists) return { ok: false, errors: ["Someone with that email is already on the staff list."] };
-  const [s] = await db.insert(staffUser).values({ ...p.data, status: "invited" }).returning();
-  await writeAudit({ actor, action: "staff.invite", permission: "Staff.Users.ReadWrite", targetType: "staff_user", targetId: s!.id, after: p.data, ip });
-  return { ok: true, id: s!.id };
+  const wanted = [...new Set(roleIds)];
+  return db.transaction(async (tx) => {
+    const known = wanted.length ? await tx.select().from(role).where(inArray(role.id, wanted)) : [];
+    if (known.length !== wanted.length) return { ok: false as const, errors: ["One of those roles no longer exists."] };
+    const [exists] = await tx.select().from(staffUser).where(eq(staffUser.email, p.data.email));
+    if (exists) return { ok: false as const, errors: ["Someone with that email is already on the staff list."] };
+    if (!opts.actorIsAdmin && known.some((r) => r.key === "admin")) {
+      await writeAudit({ actor: opts.actor, action: "staff.invite.refused", permission: STAFF_PERM, targetType: "staff_user",
+        after: { reason: "admin_role_requires_admin", email: p.data.email }, ip: opts.ip }, tx);
+      return { ok: false as const, errors: [ADMIN_ROLE_REFUSAL] };
+    }
+    const [s] = await tx.insert(staffUser).values({ ...p.data, status: "invited" }).returning();
+    await writeAudit({ actor: opts.actor, action: "staff.invite", permission: STAFF_PERM, targetType: "staff_user", targetId: s!.id, after: p.data, ip: opts.ip }, tx);
+    for (const r of known) {
+      await tx.insert(roleAssignment).values({ roleId: r.id, staffUserId: s!.id });
+      await writeAudit({ actor: opts.actor, action: "role.assign", permission: STAFF_PERM, targetType: "staff_user", targetId: s!.id, after: { roleId: r.id }, ip: opts.ip }, tx);
+    }
+    return { ok: true as const, id: s!.id };
+  });
 }
 
 const statusInput = z.enum(["active", "disabled"]);
