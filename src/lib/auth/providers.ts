@@ -34,16 +34,19 @@ export function parentDiscoveryUrl(c: ParentConfig): string {
 
 // ---- loading (cached; a save in this process bumps the version) ----
 
-let version = 1;
-let cache: { version: number; value: Promise<LoadedProviders> } | null = null;
-export const providersVersion = () => version;
-export function invalidateProviders(): void { version += 1; cache = null; }
+// Held on globalThis: Next.js may load this module separately per server bundle and on dev HMR,
+// and a save in one copy must invalidate what sign-in reads in another.
+const STATE_KEY = Symbol.for("booster-rocket.providers");
+type ProvidersState = { version: number; cache: { version: number; value: Promise<LoadedProviders> } | null };
+const state: ProvidersState = ((globalThis as Record<symbol, unknown>)[STATE_KEY] ??= { version: 1, cache: null }) as ProvidersState;
+export const providersVersion = () => state.version;
+export function invalidateProviders(): void { state.version += 1; state.cache = null; }
 
-export function loadProviders(box: SecretBox = secretBox()): Promise<LoadedProviders> {
-  if (cache && cache.version === version) return cache.value;
-  const v = version;
-  const value = readProviders(v, box).catch((e) => { if (cache?.version === v) cache = null; throw e; });
-  cache = { version: v, value };
+export function loadProviders(box?: SecretBox): Promise<LoadedProviders> {
+  if (state.cache && state.cache.version === state.version) return state.cache.value;
+  const v = state.version;
+  const value = readProviders(v, box ?? secretBox()).catch((e) => { if (state.cache?.version === v) state.cache = null; throw e; });
+  state.cache = { version: v, value };
   return value;
 }
 
