@@ -302,6 +302,14 @@ main.wrap.single > .box { margin-top: var(--cell); max-width: 760px; }
   border-radius: 0; min-height: 44px; padding: var(--s2) var(--s3); }
 .field input[type="color"] { width: 88px; padding: 2px; }
 .field input:focus-visible, .field textarea:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+.copy-row { display: flex; gap: var(--s2); }
+.copy-row input { flex: 1; min-width: 0; }
+.copy-row .btn { flex: none; }
+.steps-list { display: grid; gap: var(--s3); padding-left: 1.4em; max-width: 68ch; }
+.steps-list li { padding-left: var(--s1); }
+.hint { color: var(--ink-2); font-size: 0.9375rem; }
+.setup-progress { display: flex; gap: var(--s3); flex-wrap: wrap; margin-top: var(--s3); list-style: none; padding: 0; }
+.setup-progress [aria-current="step"] { font-weight: 700; text-decoration: underline; }
 .errors { color: var(--late); font-weight: 700; padding-left: 1.2em; }
 .row-actions { display: flex; flex-wrap: wrap; gap: var(--s2); grid-column: 1 / -1; }
 .signin { max-width: 440px; margin: 0 auto; padding-top: var(--s6); }

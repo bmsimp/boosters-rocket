@@ -1,6 +1,6 @@
 import { getClubSettings } from "@/lib/settings/club";
 import { loadProviders } from "@/lib/auth/providers";
-import { PARENT_PROVIDER_ID } from "@/lib/auth/parent-auth";
+import { PARENT_PROVIDER_ID } from "@/lib/auth/parent-provider-id";
 import { SignInButton } from "./sign-in-button";
 
 export const metadata = { title: "Sign in" };

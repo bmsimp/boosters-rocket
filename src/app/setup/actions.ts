@@ -1,0 +1,52 @@
+"use server";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { setupAction, setupUnlockAction } from "@/lib/setup/guard";
+import { verifySetupCode } from "@/lib/setup/code";
+import { startSetupSession } from "@/lib/setup/session";
+import { getSetupState, updateSetupState, saveAdminEmail, type SetupStep } from "@/lib/setup/state";
+import { isProviderKey, parseProviderForm, saveProvider, providerSummaries, type SaveOutcome } from "@/lib/auth/providers";
+import { checkFor } from "@/lib/auth/provider-checks";
+import { requestIp } from "@/lib/request";
+
+const UNLOCK_MESSAGES = {
+  wrong: "That code isn't right. Check it against what the server printed.",
+  slowed: "Too many wrong codes from here. Wait 15 minutes and try again.",
+  void: "This code stopped working after too many wrong tries. On the server, run scripts/poc/setup-code.sh for a new one.",
+  no_code: "No setup code has been issued yet. On the server, run scripts/poc/setup-code.sh.",
+} as const;
+
+export const unlockSetupAction = setupUnlockAction(async (_prev: { error: string } | null, form: FormData): Promise<{ error: string } | null> => {
+  if ((await getSetupState()).status !== "open") return { error: "Setup is already finished." };
+  const r = await verifySetupCode(String(form.get("code") ?? ""), await requestIp());
+  if (!r.ok) return { error: UNLOCK_MESSAGES[r.reason] };
+  await startSetupSession(r.codeHash);
+  redirect("/setup");
+});
+
+const FIELD_NAMES = ["tenantId", "clientId", "tenantSubdomain", "secret", "secretExpiresAt"] as const;
+
+export const saveSetupProviderAction = setupAction(async (key: string, form: FormData): Promise<SaveOutcome> => {
+  if (!isProviderKey(key)) return { ok: false, errors: ["Unknown sign-in."] };
+  const parsed = parseProviderForm(key, Object.fromEntries(FIELD_NAMES.map((n) => [n, String(form.get(n) ?? "")])));
+  if (!parsed.ok) return parsed;
+  const r = await saveProvider(parsed.draft, { actor: { door: "system", id: null, label: "setup" }, ip: await requestIp(), updatedBy: null, check: (d) => checkFor(d) });
+  revalidatePath("/setup");
+  return r;
+});
+
+export const goToStepAction = setupAction(async (step: SetupStep): Promise<void> => {
+  if (step !== "staff") {
+    const staffReady = (await providerSummaries()).some((s) => s.readable && s.key !== "parent-oidc");
+    if (!staffReady) redirect("/setup?step=staff&error=staff_first");
+  }
+  await updateSetupState({ step });
+  redirect(`/setup?step=${step}`);
+});
+
+export const saveAdminEmailAction = setupAction(async (_prev: { error: string } | null, form: FormData): Promise<{ error: string } | null> => {
+  const r = await saveAdminEmail(String(form.get("email") ?? ""), await requestIp());
+  if (!r.ok) return { error: r.error };
+  revalidatePath("/setup");
+  return null;
+});

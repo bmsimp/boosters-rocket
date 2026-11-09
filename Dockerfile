@@ -31,7 +31,7 @@ RUN printf '{"name":"booster-rocket-tools","private":true,"type":"module"}' > pa
       "drizzle-orm@$(node -p "require('/tmp/drizzle-orm.json').version")" \
       "postgres@$(node -p "require('/tmp/postgres.json').version")"
 COPY drizzle ./drizzle
-COPY scripts/migrate.mjs scripts/seed-poc-guardian.mjs ./scripts/
+COPY scripts/migrate.mjs scripts/seed-poc-guardian.mjs scripts/setup-code.mjs ./scripts/
 
 FROM node:26-slim AS run
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 TZ=America/Chicago
@@ -40,6 +40,7 @@ COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 COPY --from=tools /tools ./tools
+COPY scripts/setup ./scripts/setup
 RUN mkdir -p /app/.next/cache && chown -R node:node /app/.next/cache
 USER node
 EXPOSE 3000

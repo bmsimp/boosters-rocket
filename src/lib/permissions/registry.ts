@@ -10,12 +10,13 @@ export const PERMISSIONS = [
   "Settings.Club.Read",
   "Settings.Club.ReadWrite",
   "Audit.Log.Read",
+  "Settings.SignIn.ReadWrite",  // admin-only: change how staff and parents sign in
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Never grantable through a custom role; only the built-in Admin holds them. */
-export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite"];
+export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Settings.SignIn.ReadWrite"];
 
 export const GRANTABLE: readonly Permission[] = PERMISSIONS.filter((p) => !ADMIN_ONLY.includes(p));
 

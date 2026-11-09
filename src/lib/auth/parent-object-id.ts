@@ -6,7 +6,8 @@ import { writeAudit } from "@/lib/audit/log";
 import { clientIpFrom } from "@/lib/request";
 import { loadProviders, providersVersion, parentDiscoveryUrl } from "./providers";
 
-export const PARENT_PROVIDER_ID = "parent-oidc";
+import { PARENT_PROVIDER_ID } from "./parent-provider-id";
+export { PARENT_PROVIDER_ID };
 
 /** Verifies an ID token's signature and claims; resolves to its payload or throws. */
 export type ParentIdTokenVerifier = (idToken: string) => Promise<JWTPayload>;
