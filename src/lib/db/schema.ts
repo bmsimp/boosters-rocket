@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial } from "drizzle-orm/pg-core";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -14,13 +15,33 @@ export const setting = pgTable("setting", {
 export const authProvider = pgTable("auth_provider", {
   key: text("key", { enum: ["staff-microsoft", "staff-google", "parent-oidc"] }).primaryKey(),
   config: jsonb("config").notNull(),               // non-secret values only
-  secretCiphertext: text("secret_ciphertext").notNull(),
-  secretKeyId: text("secret_key_id").notNull(),
+  secretCiphertext: text("secret_ciphertext"),   // null for Microsoft providers, which use a certificate
+  secretKeyId: text("secret_key_id"),   // null for Microsoft providers, which use a certificate
   secretExpiresAt: timestamp("secret_expires_at", { withTimezone: true }),
   secretUpdatedAt: timestamp("secret_updated_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: updated(),
   updatedBy: uuid("updated_by"),                    // staff_user.id; null when saved from the setup page
 });
+
+/** App-generated certificates for Microsoft sign-in (staff Entra, parent External ID). The private key is sealed. */
+export const providerCertificate = pgTable("provider_certificate", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  providerKey: text("provider_key", { enum: ["staff-microsoft", "parent-oidc"] }).notNull(),
+  status: text("status", { enum: ["pending", "active", "retired"] }).notNull(),
+  certificatePem: text("certificate_pem").notNull(),
+  thumbprintS256: text("thumbprint_s256").notNull(),
+  thumbprintSha1: text("thumbprint_sha1").notNull(),
+  notAfter: timestamp("not_after", { withTimezone: true }).notNull(),
+  privateKeyCiphertext: text("private_key_ciphertext"),
+  privateKeyKeyId: text("private_key_key_id"),
+  createdAt: created(),
+  createdBy: uuid("created_by"),
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("provider_certificate_one_pending").on(t.providerKey).where(sql`status = 'pending'`),
+  uniqueIndex("provider_certificate_one_active").on(t.providerKey).where(sql`status = 'active'`),
+]);
 
 /** People who sign in through the staff door. */
 export const staffUser = pgTable("staff_user", {

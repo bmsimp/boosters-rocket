@@ -1,12 +1,14 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { role, staffUser, roleAssignment, guardian, authProvider } from "@/lib/db/schema";
+import { role, staffUser, roleAssignment, guardian, authProvider, providerCertificate } from "@/lib/db/schema";
+import { generateCertificate } from "@/lib/auth/certificate-crypto";
+import { isCertificateProvider, type CertificateProviderKey } from "@/lib/auth/certificates";
 import { secretBox } from "@/lib/crypto/secret-box";
 import { invalidateProviders, type ProviderKey } from "@/lib/auth/providers";
 import { eq } from "drizzle-orm";
 
 const TABLES = [
-  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "setting", "auth_provider",
+  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "setting", "auth_provider", "provider_certificate",
   "staff_auth_session", "staff_auth_account", "staff_auth_verification", "staff_auth_user",
   "parent_auth_session", "parent_auth_account", "parent_auth_verification", "parent_auth_user",
 ];
@@ -42,7 +44,24 @@ export async function seedGuardian(opts: { name: string; familyQboId: string; ob
   return g!;
 }
 
+export async function seedCertificate(key: CertificateProviderKey, status: "pending" | "active") {
+  const g = await generateCertificate(`seed ${key}`);
+  const id = crypto.randomUUID();
+  const sealed = secretBox().seal(g.privateKeyPem, `certificate:${id}`);
+  const [row] = await db.insert(providerCertificate).values({
+    id, providerKey: key, status, certificatePem: g.certificatePem, thumbprintS256: g.thumbprintS256, thumbprintSha1: g.thumbprintSha1,
+    notAfter: g.notAfter, privateKeyCiphertext: sealed.ciphertext, privateKeyKeyId: sealed.keyId, activatedAt: status === "active" ? new Date() : null,
+  }).returning();
+  invalidateProviders();
+  return row!;
+}
+
 export async function seedProvider(key: ProviderKey, config: Record<string, string>, secret = "seeded-secret", expiresAt: Date | null = null) {
+  if (isCertificateProvider(key)) {
+    await db.insert(authProvider).values({ key, config, secretCiphertext: null, secretKeyId: null, secretExpiresAt: expiresAt });
+    await seedCertificate(key, "active");
+    return;
+  }
   const sealed = secretBox().seal(secret, key);
   await db.insert(authProvider).values({ key, config, secretCiphertext: sealed.ciphertext, secretKeyId: sealed.keyId, secretExpiresAt: expiresAt });
   invalidateProviders();

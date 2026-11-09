@@ -51,6 +51,7 @@ export function loadProviders(box?: SecretBox): Promise<LoadedProviders> {
 }
 
 function openRow(r: typeof authProvider.$inferSelect, box: SecretBox): string | null {
+  if (r.secretCiphertext === null || r.secretKeyId === null) return null;
   try {
     return box.open({ ciphertext: r.secretCiphertext, keyId: r.secretKeyId }, r.key);
   } catch (e) {
