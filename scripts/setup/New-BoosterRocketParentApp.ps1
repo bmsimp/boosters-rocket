@@ -101,13 +101,18 @@ try {
 
   $existing = @((Send-Graph GET "v1.0/applications/$($app.id)?`$select=keyCredentials" $null).keyCredentials)
   $hash = [Convert]::ToBase64String($Certificate.GetCertHash())
-  if ($existing | Where-Object { $_.customKeyIdentifier -eq $hash }) {
+  if ($existing | Where-Object { $_.customKeyIdentifier -eq $hash -or $_.key -eq $CertificateBase64 }) {
     Write-Host 'The Booster Rocket certificate is already on the app.'
   } else {
     if ($existing | Where-Object { -not $_.key }) {
       throw "Microsoft didn't return this app's existing certificates, so the script stopped rather than risk removing them. Upload the .cer from the setup page by hand: Certificates & secrets > Certificates > Upload certificate."
     }
-    $keys = @($existing | ForEach-Object { @{ type = $_.type; usage = $_.usage; key = $_.key; displayName = $_.displayName } })
+    $expired = $existing | Where-Object { $_.endDateTime -and [datetime]$_.endDateTime -lt (Get-Date) } | Select-Object -First 1
+    if ($expired) {
+      $who = if ($expired.displayName) { $expired.displayName } else { $expired.keyId }
+      throw "This app has an expired certificate ($who), which Microsoft won't accept back. Remove it in the Entra admin center under Certificates & secrets > Certificates, then run this script again."
+    }
+    $keys = @($existing | ForEach-Object { $k = @{}; foreach ($name in 'type', 'usage', 'key', 'displayName', 'keyId', 'customKeyIdentifier', 'startDateTime', 'endDateTime') { if ($null -ne $_.$name) { $k[$name] = $_.$name } }; $k })
     $keys += @{ type = 'AsymmetricX509Cert'; usage = 'Verify'; key = $CertificateBase64; displayName = "Booster Rocket $(Get-Date -Format 'yyyy-MM-dd')" }
     Send-Graph PATCH "v1.0/applications/$($app.id)" @{ keyCredentials = @($keys) } | Out-Null
     Write-Host 'Added the Booster Rocket certificate to the app. Certificates already on it were kept.'

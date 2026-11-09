@@ -42,7 +42,14 @@ describe("setup PowerShell scripts", () => {
     expect(s).toContain("AsymmetricX509Cert");
   });
   it.each([["staff", staff], ["parent", parent]])("%s script sends existing keyCredentials back", (_, s) => {
-    expect(s).toMatch(/\$existing[\s\S]*keyCredentials = @\(/);
+    expect(s).toMatch(/\$keys = @\(\$existing \| ForEach-Object \{ \$k = @\{[\s\S]*?\}[\s\S]*?\$keys \+= @\{ type = 'AsymmetricX509Cert'[\s\S]*?keyCredentials = @\(\$keys\)/);
     expect(s).toMatch(/didn't return this app's existing certificates/);
+  });
+  it.each([["staff", staff], ["parent", parent]])("%s script keeps existing certificates exactly and spots this one by key too", (_, s) => {
+    for (const f of ["keyId", "customKeyIdentifier", "startDateTime", "endDateTime"]) expect(s).toMatch(new RegExp(`'${f}'`));
+    expect(s).toContain("-eq $CertificateBase64");
+    expect(s).toContain("This app has an expired certificate (");
+    expect(s).toContain("which Microsoft won't accept back. Remove it in the Entra admin center under Certificates & secrets > Certificates, then run this script again.");
+    expect(s).not.toMatch(/removeKey|b(Invoke-MgGraphRequest|Send-Graph) DELETE/);
   });
 });
