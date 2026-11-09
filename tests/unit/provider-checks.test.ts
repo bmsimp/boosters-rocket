@@ -8,8 +8,11 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const aad = (code: number) => json(400, { error: "invalid_client", error_codes: [code] });
 const payloadOf = (jwt: string) => JSON.parse(Buffer.from(jwt.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
 
-let key: { privateKeyPem: string; thumbprintS256: string };
-beforeAll(async () => { const g = await generateCertificate("t"); key = { privateKeyPem: g.privateKeyPem, thumbprintS256: g.thumbprintS256 }; });
+let key: { privateKeyPem: string; thumbprintS256: string; thumbprintSha1Base64Url: string };
+beforeAll(async () => {
+  const g = await generateCertificate("t");
+  key = { privateKeyPem: g.privateKeyPem, thumbprintS256: g.thumbprintS256, thumbprintSha1Base64Url: Buffer.from(g.thumbprintSha1, "hex").toString("base64url") };
+});
 
 describe("checkMicrosoft", () => {
   it("sends the token request to the tenant's endpoint", async () => {

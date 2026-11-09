@@ -112,12 +112,19 @@ describe("stored providers: Microsoft (certificate)", () => {
     expect(JSON.stringify(save)).not.toContain("PRIVATE KEY");
   });
 
-  it("keeps the certificate pending when Microsoft rejects it", async () => {
-    await getOrCreatePendingCertificate("staff-microsoft", { actor, ip: null, createdBy: null });
-    const r = await saveProvider(msDraft(), { actor, ip: null, updatedBy: null, check: async () => ({ ok: false, message: "nope" }) });
+  it("keeps the certificate pending when Microsoft rejects it, and audits the refusal without key material", async () => {
+    const pending = await getOrCreatePendingCertificate("staff-microsoft", { actor, ip: null, createdBy: null });
+    const perm = "Settings.SignIn.ReadWrite";
+    const r = await saveProvider(msDraft(), { actor, ip: "203.0.113.7", permission: perm, updatedBy: null, check: async () => ({ ok: false, message: "nope" }) });
     expect(r).toEqual({ ok: false, errors: ["nope"] });
     expect((await certificateRows("staff-microsoft")).pending).not.toBeNull();
     expect(await db.select().from(authProvider)).toHaveLength(0);
+    const refused = (await db.select().from(auditLog)).filter((a) => a.action === "setup.provider.save.refused");
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ door: "system", actorLabel: "setup", permission: perm, targetType: "auth_provider", targetId: "staff-microsoft",
+      after: { reason: "check_failed", certificateThumbprintSha1: pending.thumbprintSha1 }, ip: "203.0.113.7" });
+    expect(JSON.stringify(refused)).not.toContain("PRIVATE KEY");
+    expect(JSON.stringify(refused)).not.toContain(pending.privateKeyCiphertext!);
   });
 
   it("refuses the save if the certificate changed while it was being checked", async () => {
@@ -128,6 +135,11 @@ describe("stored providers: Microsoft (certificate)", () => {
     } });
     expect(r).toEqual({ ok: false, errors: ["The certificate changed while this was being checked. Try again."] });
     expect(await db.select().from(authProvider)).toHaveLength(0);
+    const refused = (await db.select().from(auditLog)).filter((a) => a.action === "setup.provider.save.refused");
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ door: "system", targetType: "auth_provider", targetId: "staff-microsoft",
+      after: { reason: "certificate_changed", certificateThumbprintSha1: pending.thumbprintSha1 } });
+    expect(JSON.stringify(refused)).not.toContain("PRIVATE KEY");
   });
 
   it("asks for the certificate before a first Microsoft save", async () => {
@@ -139,7 +151,7 @@ describe("stored providers: Microsoft (certificate)", () => {
     await getOrCreatePendingCertificate("staff-microsoft", { actor, ip: null, createdBy: null });
     await db.update(providerCertificate).set({ privateKeyKeyId: "deadbeef" });
     const r = await saveProvider(msDraft(), { actor, ip: null, updatedBy: null, check: pass });
-    expect(r).toEqual({ ok: false, errors: ["This server can't read the certificate's key any more. Create a new certificate and upload it."] });
+    expect(r).toEqual({ ok: false, errors: ["This server can't read the certificate's key any more. Select Replace certificate, then add the new certificate to the app registration."] });
   });
 
   it("a pending replacement doesn't change what sign-in uses", async () => {
@@ -148,6 +160,14 @@ describe("stored providers: Microsoft (certificate)", () => {
     await getOrCreatePendingCertificate("staff-microsoft", { actor, ip: null, createdBy: null });
     invalidateProviders();
     expect((await loadProviders()).staffMicrosoft!.assertion.thumbprintS256).toBe(before);
+  });
+
+  it("signs the check with x5t taken from the stored SHA-1 thumbprint", async () => {
+    const pending = await getOrCreatePendingCertificate("staff-microsoft", { actor, ip: null, createdBy: null });
+    let x5t = "";
+    await saveProvider(msDraft(), { actor, ip: null, updatedBy: null, check: async (d) => { if ("assertion" in d) x5t = d.assertion.thumbprintSha1Base64Url; return { ok: true }; } });
+    expect(Buffer.from(x5t, "base64url").toString("hex").toUpperCase()).toBe(pending.thumbprintSha1);
+    expect((await loadProviders()).staffMicrosoft!.assertion.thumbprintSha1Base64Url).toBe(x5t);
   });
 
   it("re-saving only the IDs checks with the active certificate", async () => {
@@ -162,7 +182,7 @@ describe("stored providers: Microsoft (certificate)", () => {
     await seedProvider("staff-microsoft", { tenantId: T, clientId: C });
     const old = (await certificateRows("staff-microsoft")).active!;
     const pending = await getOrCreatePendingCertificate("staff-microsoft", { actor, ip: null, createdBy: null });
-    expect(await saveProvider(msDraft(), { actor, ip: null, updatedBy: null, check: pass })).toEqual({ ok: true });
+    expect(await saveProvider(msDraft(), { actor, ip: null, updatedBy: null, check: pass })).toEqual({ ok: true, replaced: true });
     expect((await certificateRows("staff-microsoft")).active!.id).toBe(pending.id);
     const [retired] = await db.select().from(providerCertificate).where(eq(providerCertificate.id, old.id));
     expect(retired).toMatchObject({ status: "retired", privateKeyCiphertext: null });

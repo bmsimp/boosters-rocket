@@ -93,29 +93,10 @@ describe("certificate download", () => {
       Buffer.from(pending.thumbprintS256, "base64url").toString("hex").toUpperCase());
   });
 
-  it("?replace=1 makes a new pending certificate for staff with the permission, and the same one again", async () => {
+  it("never starts a replacement: with an active certificate it serves that one, even with ?replace=1", async () => {
     state.staff = { staffUserId: crypto.randomUUID(), email: "admin@example.org" }; state.perm = true;
     const active = await seedCertificate("staff-microsoft", "active");
-    const first = await printOf(await call("booster-rocket-staff.cer", "?replace=1"));
-    expect(first).not.toBe(hex(active.thumbprintS256));
-    const rows = await db.select().from(providerCertificate);
-    expect(rows.filter((r) => r.status === "pending")).toHaveLength(1);
-    expect(await printOf(await call("booster-rocket-staff.cer", "?replace=1"))).toBe(first);
-    expect(await printOf(await call("booster-rocket-staff.cer"))).toBe(first);
-    expect((await db.select().from(providerCertificate))).toHaveLength(2);
-  });
-
-  it("ignores ?replace=1 from the setup session and serves the active certificate", async () => {
-    state.setup = true;
-    const active = await seedCertificate("staff-microsoft", "active");
     expect(await printOf(await call("booster-rocket-staff.cer", "?replace=1"))).toBe(hex(active.thumbprintS256));
-    expect(await db.select().from(providerCertificate)).toHaveLength(1);
-  });
-
-  it("is not found for ?replace=1 without the permission", async () => {
-    state.staff = { staffUserId: crypto.randomUUID(), email: "x@example.org" }; state.perm = false;
-    await seedCertificate("staff-microsoft", "active");
-    expect((await call("booster-rocket-staff.cer", "?replace=1")).status).toBe(404);
     expect(await db.select().from(providerCertificate)).toHaveLength(1);
   });
 

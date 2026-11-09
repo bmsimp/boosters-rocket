@@ -1,10 +1,11 @@
 import { requireStaffPage } from "@/lib/guards";
 import { env } from "@/env";
 import { providerSummaries, pendingOnlySummaries, PROVIDER_KEYS } from "@/lib/auth/providers";
+import { usesCertificate } from "@/lib/auth/provider-fields";
 import { ProviderForm } from "@/app/components/sign-in-settings/provider-form";
 import { PROVIDER_LABELS, toSummaryView } from "@/app/components/sign-in-settings/labels";
 import { MicrosoftStaffSteps, GoogleStaffSteps, ParentSteps, ScriptOption } from "@/app/setup/instructions";
-import { saveSignInProviderAction, removeSignInProviderAction } from "./actions";
+import { saveSignInProviderAction, removeSignInProviderAction, startCertificateReplacementAction, discardCertificateReplacementAction } from "./actions";
 import { RemoveButton } from "./remove-button";
 
 export const metadata = { title: "Sign-in settings" };
@@ -26,7 +27,8 @@ export default async function SignInSettingsPage() {
           <section key={key} className="box" aria-labelledby={`${key}-h`}><h2 id={`${key}-h`}>{PROVIDER_LABELS[key]}</h2>
             <details><summary>How to set this up or change the app</summary>{steps[key]}</details>
             {key in scripts && <ScriptOption script={scripts[key as keyof typeof scripts]} example={`./${scripts[key as keyof typeof scripts]} -TenantId <tenant>`} />}
-            <ProviderForm settings providerKey={key} summary={s ? toSummaryView(s) : null} action={saveSignInProviderAction.bind(null, key)} />
+            <ProviderForm providerKey={key} summary={s ? toSummaryView(s) : null} action={saveSignInProviderAction.bind(null, key)}
+              certificateActions={usesCertificate(key) ? { replace: startCertificateReplacementAction.bind(null, key), discard: discardCertificateReplacementAction.bind(null, key) } : undefined} />
             {saved.some((x) => x.key === key) && <RemoveButton label={PROVIDER_LABELS[key]} action={removeSignInProviderAction.bind(null, key)} />}
           </section>
         );

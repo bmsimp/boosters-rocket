@@ -1,13 +1,17 @@
 import { PROVIDER_LABELS, toSummaryView } from "@/app/components/sign-in-settings/labels";
 import { ProviderForm } from "@/app/components/sign-in-settings/provider-form";
 import type { ProviderKey, ProviderSummary } from "@/lib/auth/providers";
-import { saveSetupProviderAction, goToStepAction, saveAdminEmailAction } from "./actions";
+import {
+  saveSetupProviderAction, goToStepAction, saveAdminEmailAction, startCertificateReplacementSetupAction, discardCertificateReplacementSetupAction,
+} from "./actions";
 import { MicrosoftStaffSteps, GoogleStaffSteps, ParentSteps, ScriptOption } from "./instructions";
 import { SetupStaffSignIn, SetupParentTest, SetupStaffSignOut } from "./setup-buttons";
 import { AdminEmailForm } from "./admin-email-form";
 
 type ByKey = Partial<Record<ProviderKey, ProviderSummary>>;
 const view = (s?: ProviderSummary) => (s ? toSummaryView(s) : null);
+const certificateActions = (key: "staff-microsoft" | "parent-oidc") =>
+  ({ replace: startCertificateReplacementSetupAction.bind(null, key), discard: discardCertificateReplacementSetupAction.bind(null, key) });
 
 export function StaffStep({ appUrl, byKey, error }: { appUrl: string; byKey: ByKey; error?: string }) {
   const ready = Boolean(byKey["staff-microsoft"]?.readable || byKey["staff-google"]?.readable);
@@ -19,7 +23,8 @@ export function StaffStep({ appUrl, byKey, error }: { appUrl: string; byKey: ByK
       <section className="box" aria-labelledby="ms-h"><h2 id="ms-h">{PROVIDER_LABELS["staff-microsoft"]}</h2>
         <MicrosoftStaffSteps appUrl={appUrl} />
         <ScriptOption script="New-BoosterRocketStaffApp.ps1" example="./New-BoosterRocketStaffApp.ps1 -TenantId <your tenant ID or domain>" />
-        <ProviderForm providerKey="staff-microsoft" summary={view(byKey["staff-microsoft"])} action={saveSetupProviderAction.bind(null, "staff-microsoft")} />
+        <ProviderForm providerKey="staff-microsoft" summary={view(byKey["staff-microsoft"])} action={saveSetupProviderAction.bind(null, "staff-microsoft")}
+          certificateActions={certificateActions("staff-microsoft")} />
       </section>
       <section className="box" aria-labelledby="g-h"><h2 id="g-h">{PROVIDER_LABELS["staff-google"]}</h2>
         <GoogleStaffSteps appUrl={appUrl} />
@@ -39,7 +44,8 @@ export function ParentStep({ appUrl, byKey, tested }: { appUrl: string; byKey: B
       <section className="box" aria-labelledby="p-h"><h2 id="p-h">{PROVIDER_LABELS["parent-oidc"]}</h2>
         <ParentSteps appUrl={appUrl} />
         <ScriptOption script="New-BoosterRocketParentApp.ps1" example="./New-BoosterRocketParentApp.ps1 -TenantId <subdomain>.onmicrosoft.com" />
-        <ProviderForm providerKey="parent-oidc" summary={view(byKey["parent-oidc"])} action={saveSetupProviderAction.bind(null, "parent-oidc")} />
+        <ProviderForm providerKey="parent-oidc" summary={view(byKey["parent-oidc"])} action={saveSetupProviderAction.bind(null, "parent-oidc")}
+          certificateActions={certificateActions("parent-oidc")} />
         {saved && <div className="box-foot"><SetupParentTest />
           {tested === "ok" && <p role="status">Microsoft sent you back, so parent sign-in works. (There are no families yet, so the portal itself would still refuse that sign-in.)</p>}
           {tested === "failed" && <p role="alert" className="errors">The parent sign-in didn&apos;t complete. Check the redirect URI and that the app is added to the user flow.</p>}

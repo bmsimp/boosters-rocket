@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { X509Certificate, createHash, createPrivateKey, createPublicKey } from "node:crypto";
-import { generateCertificate, certificateDer, thumbprintsOf, CERTIFICATE_DAYS } from "@/lib/auth/certificate-crypto";
+import { generateCertificate, certificateDer, thumbprintsOf, CERTIFICATE_DAYS, CLOCK_SKEW_MS } from "@/lib/auth/certificate-crypto";
 
 describe("generateCertificate", () => {
   it("makes a 2-year self-signed RSA 2048 certificate with matching thumbprints", async () => {
@@ -20,6 +20,15 @@ describe("generateCertificate", () => {
     const pub = createPublicKey(createPrivateKey(g.privateKeyPem)).export({ type: "spki", format: "der" });
     expect(Buffer.compare(pub, x.publicKey.export({ type: "spki", format: "der" }))).toBe(0);
     expect(g.privateKeyPem).toMatch(/^-----BEGIN PRIVATE KEY-----/);
+  });
+
+  it("backdates notBefore 5 minutes for clock skew, and keeps notAfter exactly CERTIFICATE_DAYS from now", async () => {
+    const now = new Date("2026-11-09T12:00:00Z");
+    const g = await generateCertificate("skew", now);
+    const x = new X509Certificate(g.certificatePem);
+    expect(CLOCK_SKEW_MS).toBe(5 * 60_000);
+    expect(new Date(x.validFrom).toISOString()).toBe("2026-11-09T11:55:00.000Z");
+    expect(new Date(x.validTo).toISOString()).toBe(g.notAfter.toISOString());
   });
 
   it("makes a different key every time", async () => {

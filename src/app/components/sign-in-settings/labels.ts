@@ -13,11 +13,11 @@ export const FIELD_LABELS: Record<"tenantId" | "clientId" | "tenantSubdomain", s
 export type CertificateViewJson = { thumbprintSha1: string; notAfter: string };
 export type SummaryView = {
   config: Record<string, string>; credentialUpdatedAt: string; expiresAt: string | null; readable: boolean;
-  certificate: CertificateViewJson | null; pendingCertificate: CertificateViewJson | null;
+  certificate: CertificateViewJson | null; pendingCertificate: CertificateViewJson | null; pendingReadable: boolean;
 };
 const certView = (c: ProviderSummary["certificate"]): CertificateViewJson | null =>
   (c ? { thumbprintSha1: c.thumbprintSha1, notAfter: c.notAfter.toISOString() } : null);
 export const toSummaryView = (s: ProviderSummary): SummaryView => ({
   config: s.config, credentialUpdatedAt: s.credentialUpdatedAt.toISOString(), expiresAt: s.expiresAt?.toISOString() ?? null, readable: s.readable,
-  certificate: certView(s.certificate), pendingCertificate: certView(s.pendingCertificate),
+  certificate: certView(s.certificate), pendingCertificate: certView(s.pendingCertificate), pendingReadable: s.pendingReadable,
 });

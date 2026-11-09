@@ -2,17 +2,18 @@ import { createPrivateKey, randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
 
 export const CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
-export type AssertionKey = { privateKeyPem: string; thumbprintS256: string };
+/** thumbprintS256 and thumbprintSha1Base64Url are base64url digests of the certificate's DER (x5t#S256 and x5t). */
+export type AssertionKey = { privateKeyPem: string; thumbprintS256: string; thumbprintSha1Base64Url: string };
 /** Structurally Better Auth's ClientAssertionGetter (which this app can't import directly under pnpm's strict layout). */
 export type AssertionGetter = (ctx: { clientId: string; tokenEndpoint: string; grantType: string }) => Promise<string>;
 
 const LIFETIME_SECONDS = 300;
 
-/** Microsoft's certificate credential assertion (private_key_jwt): PS256, x5t#S256 header, 5-minute life. */
+/** Microsoft's certificate credential assertion (private_key_jwt): PS256, x5t#S256 and x5t headers, 5-minute life. */
 export async function signEntraAssertion(o: AssertionKey & { clientId: string; tokenEndpoint: string; now?: number }): Promise<string> {
   const now = Math.floor((o.now ?? Date.now()) / 1000);
   return new SignJWT({})
-    .setProtectedHeader({ alg: "PS256", typ: "JWT", "x5t#S256": o.thumbprintS256 })
+    .setProtectedHeader({ alg: "PS256", typ: "JWT", "x5t#S256": o.thumbprintS256, x5t: o.thumbprintSha1Base64Url })
     .setIssuer(o.clientId)
     .setSubject(o.clientId)
     .setAudience(o.tokenEndpoint)

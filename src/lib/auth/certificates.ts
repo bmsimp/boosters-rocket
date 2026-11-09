@@ -4,7 +4,7 @@ import { providerCertificate } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { secretBox, SecretBoxError, type SecretBox } from "@/lib/crypto/secret-box";
 import { env } from "@/env";
-import { generateCertificate } from "./certificate-crypto";
+import { generateCertificate, type GeneratedCertificate } from "./certificate-crypto";
 import type { ProviderKey } from "./provider-fields";
 
 export type CertificateProviderKey = "staff-microsoft" | "parent-oidc";
@@ -31,28 +31,63 @@ export async function certificateRows(key: CertificateProviderKey, tx?: Tx) {
   return { pending: rows.find((r) => r.status === "pending") ?? null, active: rows.find((r) => r.status === "active") ?? null };
 }
 
+type CertificateOpts = { actor: Actor; ip: string | null; createdBy: string | null; permission?: string };
+
+const newCertificate = (key: CertificateProviderKey) => generateCertificate(`Booster Rocket ${audience(key)} (${new URL(env.APP_URL).hostname})`);
+
+async function insertPending(tx: Tx, key: CertificateProviderKey, g: GeneratedCertificate, opts: CertificateOpts): Promise<CertificateRow> {
+  const id = crypto.randomUUID();
+  const sealed = secretBox().seal(g.privateKeyPem, aad(id));
+  const [row] = await tx.insert(providerCertificate).values({
+    id, providerKey: key, status: "pending", certificatePem: g.certificatePem, thumbprintS256: g.thumbprintS256,
+    thumbprintSha1: g.thumbprintSha1, notAfter: g.notAfter, privateKeyCiphertext: sealed.ciphertext, privateKeyKeyId: sealed.keyId,
+    createdBy: opts.createdBy,
+  }).returning();
+  await writeAudit({ actor: opts.actor, action: "certificate.create", permission: opts.permission, targetType: "provider_certificate", targetId: id,
+    after: { providerKey: key, thumbprintSha1: g.thumbprintSha1, notAfter: g.notAfter.toISOString() }, ip: opts.ip }, tx);
+  return row!;
+}
+
 /** The pending certificate for this sign-in, made (once) if there isn't one. Safe to call repeatedly and concurrently. */
-export async function getOrCreatePendingCertificate(key: CertificateProviderKey, opts: {
-  actor: Actor; ip: string | null; createdBy: string | null; permission?: string;
-}): Promise<CertificateRow> {
+export async function getOrCreatePendingCertificate(key: CertificateProviderKey, opts: CertificateOpts): Promise<CertificateRow> {
   const existing = (await certificateRows(key)).pending;
   if (existing) return existing;
   // Key generation is slow, so it happens before taking the lock; a concurrent winner's row is returned instead.
-  const g = await generateCertificate(`Booster Rocket ${audience(key)} (${new URL(env.APP_URL).hostname})`);
+  const g = await newCertificate(key);
   return db.transaction(async (tx) => {
     await tx.execute(LOCK);
     const raced = (await certificateRows(key, tx)).pending;
     if (raced) return raced;
-    const id = crypto.randomUUID();
-    const sealed = secretBox().seal(g.privateKeyPem, aad(id));
-    const [row] = await tx.insert(providerCertificate).values({
-      id, providerKey: key, status: "pending", certificatePem: g.certificatePem, thumbprintS256: g.thumbprintS256,
-      thumbprintSha1: g.thumbprintSha1, notAfter: g.notAfter, privateKeyCiphertext: sealed.ciphertext, privateKeyKeyId: sealed.keyId,
-      createdBy: opts.createdBy,
-    }).returning();
-    await writeAudit({ actor: opts.actor, action: "certificate.create", permission: opts.permission, targetType: "provider_certificate", targetId: id,
-      after: { providerKey: key, thumbprintSha1: g.thumbprintSha1, notAfter: g.notAfter.toISOString() }, ip: opts.ip }, tx);
-    return row!;
+    return insertPending(tx, key, g, opts);
+  });
+}
+
+/**
+ * **Replace certificate**: a pending certificate to roll out, even when one is active. A pending certificate this server
+ * can read is kept (pressing Replace again changes nothing); one it can't read is retired and a new one made in its place.
+ */
+export async function startCertificateReplacement(key: CertificateProviderKey, opts: CertificateOpts): Promise<CertificateRow> {
+  const readable = (r: CertificateRow | null): r is CertificateRow => r !== null && openCertificateKey(r) !== null;
+  const existing = (await certificateRows(key)).pending;
+  if (readable(existing)) return existing;
+  const g = await newCertificate(key);
+  return db.transaction(async (tx) => {
+    await tx.execute(LOCK);
+    const { pending } = await certificateRows(key, tx);
+    if (readable(pending)) return pending;
+    if (pending) await retire(tx, pending, opts);
+    return insertPending(tx, key, g, opts);
+  });
+}
+
+/** **Discard replacement**: the pending certificate is retired and its key deleted. Null if nothing was pending. */
+export async function discardPendingCertificate(key: CertificateProviderKey, opts: { actor: Actor; ip: string | null; permission?: string }): Promise<CertificateRow | null> {
+  return db.transaction(async (tx) => {
+    await tx.execute(LOCK);
+    const { pending } = await certificateRows(key, tx);
+    if (!pending) return null;
+    await retire(tx, pending, opts, "certificate.discard");
+    return pending;
   });
 }
 
@@ -67,10 +102,10 @@ export function openCertificateKey(row: CertificateRow, box: SecretBox = secretB
   }
 }
 
-async function retire(tx: Tx, row: CertificateRow, opts: { actor: Actor; ip: string | null; permission?: string }) {
+async function retire(tx: Tx, row: CertificateRow, opts: { actor: Actor; ip: string | null; permission?: string }, action = "certificate.retire") {
   await tx.update(providerCertificate).set({ status: "retired", retiredAt: new Date(), privateKeyCiphertext: null, privateKeyKeyId: null })
     .where(eq(providerCertificate.id, row.id));
-  await writeAudit({ actor: opts.actor, action: "certificate.retire", permission: opts.permission, targetType: "provider_certificate", targetId: row.id,
+  await writeAudit({ actor: opts.actor, action, permission: opts.permission, targetType: "provider_certificate", targetId: row.id,
     before: { status: row.status }, after: { providerKey: row.providerKey, thumbprintSha1: row.thumbprintSha1 }, ip: opts.ip }, tx);
 }
 

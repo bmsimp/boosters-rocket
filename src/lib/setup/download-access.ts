@@ -19,11 +19,9 @@ export async function downloadAccess(): Promise<DownloadAccess | null> {
 
 /**
  * The certificate to put on the app: pending if a replacement is under way, else active, else a new pending one.
- * With `replace` (staff with Settings.SignIn.ReadWrite only) an active certificate with nothing pending gets a new pending one.
+ * Starting a replacement is a POST action (Replace certificate), never a side effect of a download.
  */
-export async function certificateForDownload(key: CertificateProviderKey, a: DownloadAccess, opts: { replace?: boolean } = {}): Promise<CertificateRow> {
+export async function certificateForDownload(key: CertificateProviderKey, a: DownloadAccess): Promise<CertificateRow> {
   const { pending, active } = await certificateRows(key);
-  const make = () => getOrCreatePendingCertificate(key, { actor: a.actor, ip: a.ip, createdBy: a.createdBy, permission: a.permission });
-  if (opts.replace && a.permission && active && !pending) return make();
-  return pending ?? active ?? make();
+  return pending ?? active ?? getOrCreatePendingCertificate(key, { actor: a.actor, ip: a.ip, createdBy: a.createdBy, permission: a.permission });
 }

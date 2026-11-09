@@ -8,7 +8,7 @@ import { PROVIDER_KEYS, PROVIDER_FIELDS, isProviderKey, type ProviderKey, type S
 import type { AssertionKey } from "./client-assertion";
 import {
   certificateRows, activatePendingCertificate, retireCertificates, openCertificateKey, isCertificateProvider, toCertificateView,
-  type CertificateView, type CertificateProviderKey,
+  type CertificateView, type CertificateProviderKey, type CertificateRow,
 } from "./certificates";
 
 export { PROVIDER_KEYS, PROVIDER_FIELDS, isProviderKey, type ProviderKey, type SaveOutcome };
@@ -31,6 +31,8 @@ export type LoadedProviders = {
 export type ProviderSummary = {
   key: ProviderKey; config: Record<string, string>; credentialUpdatedAt: Date; expiresAt: Date | null; readable: boolean;
   certificate: CertificateView | null; pendingCertificate: CertificateView | null;
+  /** Whether this server can decrypt the pending certificate's key (false when nothing is pending). */
+  pendingReadable: boolean;
 };
 
 export type ProviderDraft =
@@ -76,12 +78,16 @@ function openRow(r: typeof authProvider.$inferSelect, box: SecretBox): string | 
   }
 }
 
+/** The assertion key for a certificate: x5t comes from the stored SHA-1 thumbprint (hex, as Entra shows it). */
+const assertionKey = (row: CertificateRow, privateKeyPem: string): AssertionKey =>
+  ({ privateKeyPem, thumbprintS256: row.thumbprintS256, thumbprintSha1Base64Url: Buffer.from(row.thumbprintSha1, "hex").toString("base64url") });
+
 /** The active certificate's signing key for a Microsoft sign-in, or null if there is none or it can't be decrypted. */
 async function activeAssertion(key: CertificateProviderKey, box: SecretBox): Promise<{ assertion: AssertionKey; expiresAt: Date } | null> {
   const { active } = await certificateRows(key);
   const privateKeyPem = active ? openCertificateKey(active, box) : null;
   if (!active || privateKeyPem === null) return null;
-  return { assertion: { privateKeyPem, thumbprintS256: active.thumbprintS256 }, expiresAt: active.notAfter };
+  return { assertion: assertionKey(active, privateKeyPem), expiresAt: active.notAfter };
 }
 
 async function readProviders(v: number, box: SecretBox): Promise<LoadedProviders> {
@@ -114,7 +120,7 @@ export async function providerSummaries(box: SecretBox = secretBox()): Promise<P
     const base = { key: r.key, config: r.config as Record<string, string> };
     if (!isCertificateProvider(r.key)) {
       out.push({ ...base, credentialUpdatedAt: r.secretUpdatedAt, expiresAt: r.secretExpiresAt, readable: openRow(r, box) !== null,
-        certificate: null, pendingCertificate: null });
+        certificate: null, pendingCertificate: null, pendingReadable: false });
       continue;
     }
     const { pending, active } = await certificateRows(r.key);
@@ -122,6 +128,7 @@ export async function providerSummaries(box: SecretBox = secretBox()): Promise<P
       ...base, credentialUpdatedAt: active?.activatedAt ?? r.updatedAt, expiresAt: active?.notAfter ?? null,
       readable: active !== null && openCertificateKey(active, box) !== null,
       certificate: active ? toCertificateView(active) : null, pendingCertificate: pending ? toCertificateView(pending) : null,
+      pendingReadable: pending !== null && openCertificateKey(pending, box) !== null,
     });
   }
   return out;
@@ -131,13 +138,14 @@ export async function providerSummaries(box: SecretBox = secretBox()): Promise<P
  * Certificates downloaded before their sign-in was first saved have no provider row, so providerSummaries has nothing for them.
  * This is a display-only stand-in so the page can show the pending certificate's thumbprint. It is never "readable" or configured.
  */
-export async function pendingOnlySummaries(have: ProviderKey[]): Promise<ProviderSummary[]> {
+export async function pendingOnlySummaries(have: ProviderKey[], box: SecretBox = secretBox()): Promise<ProviderSummary[]> {
   const out: ProviderSummary[] = [];
   for (const key of PROVIDER_KEYS) {
     if (!isCertificateProvider(key)) continue;
     if (have.includes(key)) continue;
     const { pending } = await certificateRows(key);
-    if (pending) out.push({ key, config: {}, credentialUpdatedAt: pending.createdAt, expiresAt: null, readable: false, certificate: null, pendingCertificate: toCertificateView(pending) });
+    if (pending) out.push({ key, config: {}, credentialUpdatedAt: pending.createdAt, expiresAt: null, readable: false, certificate: null,
+      pendingCertificate: toCertificateView(pending), pendingReadable: openCertificateKey(pending, box) !== null });
   }
   return out;
 }
@@ -260,9 +268,16 @@ async function saveCertificateProvider(
   const candidate = pending ?? active;
   if (!candidate) return { ok: false, errors: ["Download the certificate and add it to the app registration first."] };
   const privateKeyPem = openCertificateKey(candidate, box);
-  if (!privateKeyPem) return { ok: false, errors: ["This server can't read the certificate's key any more. Create a new certificate and upload it."] };
-  const checked = await opts.check({ ...draft, assertion: { privateKeyPem, thumbprintS256: candidate.thumbprintS256 } } as CheckedDraft);
-  if (!checked.ok) return { ok: false, errors: [checked.message] };
+  if (!privateKeyPem) return { ok: false, errors: ["This server can't read the certificate's key any more. Select Replace certificate, then add the new certificate to the app registration."] };
+  // A refusal is audited with the certificate it was about (its thumbprint only, never key material).
+  const refused = (reason: "check_failed" | "certificate_changed", tx?: Tx) => writeAudit({
+    actor: opts.actor, action: "setup.provider.save.refused", permission: opts.permission, targetType: "auth_provider", targetId: draft.key,
+    after: { reason, certificateThumbprintSha1: candidate.thumbprintSha1 }, ip: opts.ip }, tx);
+  const checked = await opts.check({ ...draft, assertion: assertionKey(candidate, privateKeyPem) } as CheckedDraft);
+  if (!checked.ok) {
+    await refused("check_failed");
+    return { ok: false, errors: [checked.message] };
+  }
   const r = await db.transaction(async (tx): Promise<SaveOutcome> => {
     // Provider lock first, then (inside activatePendingCertificate) the certificate lock: the order removeProvider uses too.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('booster.auth_provider'))`);
@@ -270,8 +285,10 @@ async function saveCertificateProvider(
     // The check ran without the lock: refuse if a concurrent save or removal changed the certificate it was checked with.
     const current = await certificateRows(draft.key, tx);
     if ((candidate.status === "pending" ? current.pending : current.active)?.id !== candidate.id) {
+      await refused("certificate_changed", tx);
       return { ok: false, errors: ["The certificate changed while this was being checked. Try again."] };
     }
+    const replaced = candidate.status === "pending" && current.active !== null;
     const activated = candidate.status === "pending"
       ? await activatePendingCertificate(tx, draft.key, { actor: opts.actor, ip: opts.ip, permission: opts.permission })
       : null;
@@ -283,7 +300,7 @@ async function saveCertificateProvider(
       before: existing ? existing.config : null,
       after: { ...draft.config, certificateThumbprintSha1: candidate.thumbprintSha1, certificateNotAfter: candidate.notAfter.toISOString(), certificateChanged: activated !== null },
       ip: opts.ip }, tx);
-    return { ok: true };
+    return replaced ? { ok: true, replaced: true } : { ok: true };
   });
   if (r.ok) invalidateProviders();
   return r;
