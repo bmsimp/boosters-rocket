@@ -446,14 +446,21 @@ Fill one row per checklist step each time you run it.
 
 | Date | Commit | Step | Pass/Fail | Notes |
 |---|---|---|---|---|
-| | | 1 | | |
-| | | 2 | | |
-| | | 3 | | |
-| | | 4 | | |
-| | | 5 | | |
-| | | 6 | | |
-| | | 7 | | |
-| | | 8 | | |
+| 2026-11-09 | 994f231 | 1 | Pass | Cloudflare Access skipped by choice; the setup page showed directly. |
+| 2026-11-09 | 994f231 | 2 | Pass | Staff Microsoft sign-in with a certificate (the band tenant blocks client secrets: `CredentialTypeNotAllowedAsPerAppPolicy`). The staff script created the app, granted consent and added the certificate; a re-run reused the app and found the certificate already there. Signed in as webmaster@fznband.org and was made Admin. |
+| 2026-11-09 | 994f231 | 3 | Pass | Name "FZN Band Boosters", color #005102. Short name still the default "BR"; set it under Club. |
+| | | 4 | Not run | Waiting on the External ID tenant (section 4 A). |
+| 2026-11-09 | 994f231 | 5 | Partial | Present: `setup.code.issue`, `setup.unlock`, `certificate.create` (staff, plus a pending parent certificate made by downloading the parent script), `certificate.activate`, `setup.provider.save`, `setup.admin_email.save`, staff `signin`, `admin.bootstrap`, `setup.finish`, `settings.club.save`, `signout`. No `staff.bind`: the first Admin is created already bound, so it only appears for invited staff. Parent rows wait on step 4. |
+| 2026-11-09 | 994f231 | 6 | Partial | Staff sign-out recorded. Parent sign-out waits on step 4. |
+| | | 7 | Not run | Waiting on the External ID tenant. |
+| 2026-11-09 | 994f231 | 8 | Pass | Redeploy kept `previous` and stayed healthy; `--rollback` returned to it and stayed healthy (both images were the same commit, so this tested the mechanism). |
+
+Findings from the 2026-11-09 run, all fixed on `main`:
+
+- **The band tenant blocks client secrets,** so Microsoft sign-in now uses app-generated certificates (no secret anywhere).
+- **Deploys on Docker 29:** the first redeploy failed while tagging the rollback copy, because the old image's record was gone once `current` moved to the new build. Fixed in `e58b69a`: the copy is now kept before the build, and a tagging failure can't stop a deploy. Because `deploy.sh` updates itself during its own `git pull`, the first deploy after a script change still runs the old copy.
+- **The scripts created a new app on every run,** because Microsoft's filter-by-name lookup returned nothing. Fixed in `994f231`: the scripts now list the apps and match the name themselves. Delete any duplicate apps by hand.
+- **Windows blocks downloaded scripts:** run `Unblock-File` first. Browsers also save a second download as `name (1).ps1`, so delete the old file before downloading again.
 
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
 
