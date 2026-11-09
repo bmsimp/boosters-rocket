@@ -36,6 +36,7 @@ export const saveSetupProviderAction = setupAction(async (key: string, form: For
 });
 
 export const goToStepAction = setupAction(async (step: SetupStep): Promise<void> => {
+  if (step !== "staff" && step !== "parent" && step !== "admin") redirect("/setup");
   if (step !== "staff") {
     const staffReady = (await providerSummaries()).some((s) => s.readable && s.key !== "parent-oidc");
     if (!staffReady) redirect("/setup?step=staff&error=staff_first");

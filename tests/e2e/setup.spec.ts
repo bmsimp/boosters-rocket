@@ -37,6 +37,20 @@ test("the right code unlocks the staff step with the redirect URI to copy", asyn
   expect(await page.content()).not.toContain("ci-fake");
 });
 
+test("a failed staff sign-in shows its message even when Better Auth adds its own error param", async ({ page }) => {
+  const code = reopen();
+  await page.goto("/setup");
+  await page.getByLabel("Setup code").fill(code);
+  await page.getByRole("button", { name: "Unlock" }).click();
+  await expect(page.getByRole("heading", { name: "Step 1: Staff sign-in" })).toBeVisible();
+  await page.goto("/setup?step=admin");
+  await page.getByLabel("Admin email").fill("admin@example.com");
+  await page.getByRole("button", { name: "Save email" }).click();
+  await page.goto("/setup?step=admin&signin=failed&error=access_denied");
+  await expect(page.locator("p[role=alert]")).toContainText("didn't complete");
+  await expect(page.getByRole("button", { name: "Sign out and try again" })).toBeVisible();
+});
+
 test("the health check and sign-in API stay reachable while setup is open", async ({ request }) => {
   reopen();
   expect((await request.get("/api/health")).status()).toBe(200);

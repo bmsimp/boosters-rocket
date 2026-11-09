@@ -26,7 +26,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
     );
   }
   const sp = await searchParams;
-  const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : undefined);
+  const one = (k: string) => { const v = sp[k]; return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined; };
   const asked = one("step");
   const step: SetupStep = asked === "staff" || asked === "parent" || asked === "admin" ? asked : state.step;
   const byKey = Object.fromEntries((await providerSummaries()).map((s) => [s.key, s])) as Partial<Record<ProviderKey, ProviderSummary>>;
@@ -37,7 +37,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
       <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}>{s.label}</li>)}</ol>
       {step === "staff" && <StaffStep appUrl={appUrl} byKey={byKey} error={one("error")} />}
       {step === "parent" && <ParentStep appUrl={appUrl} byKey={byKey} tested={one("tested")} />}
-      {step === "admin" && <AdminStep adminEmail={state.adminEmail} byKey={byKey} error={one("error")} />}
+      {step === "admin" && <AdminStep adminEmail={state.adminEmail} byKey={byKey} error={one("error")} signinFailed={one("signin") === "failed"} />}
     </main>
   );
 }

@@ -54,14 +54,16 @@ export function ParentStep({ appUrl, byKey, tested }: { appUrl: string; byKey: B
 }
 
 const ADMIN_ERRORS: Record<string, string> = {
-  signin_failed: "The sign-in didn't complete. Check the staff sign-in values in Step 1, then try again.",
   no_session: "The sign-in didn't complete. Try again.",
   not_matched: "That sign-in worked, but it wasn't the Admin email entered above. Sign out, then sign in with that account.",
   other_email: "You signed in with a different account from the Admin email entered above. Sign out, then sign in with that account.",
   not_admin: "That account is a staff member but not an Admin. Sign in as an Admin.",
 };
 
-export function AdminStep({ adminEmail, byKey, error }: { adminEmail: string | null; byKey: ByKey; error?: string }) {
+const SIGNIN_FAILED = "The sign-in didn't complete. Check the staff sign-in values in Step 1, then try again.";
+
+export function AdminStep({ adminEmail, byKey, error, signinFailed }: { adminEmail: string | null; byKey: ByKey; error?: string; signinFailed?: boolean }) {
+  const message = signinFailed ? SIGNIN_FAILED : error ? ADMIN_ERRORS[error] : undefined;
   return (
     <>
       <h2 className="page-title">Step 3: First Admin</h2>
@@ -72,7 +74,7 @@ export function AdminStep({ adminEmail, byKey, error }: { adminEmail: string | n
           {byKey["staff-microsoft"]?.readable && <SetupStaffSignIn provider="microsoft" label="Sign in with Microsoft" />}
           {byKey["staff-google"]?.readable && <SetupStaffSignIn provider="google" label="Sign in with Google" />}
         </div>}
-        {error && ADMIN_ERRORS[error] && <><p role="alert" className="errors">{ADMIN_ERRORS[error]}</p><SetupStaffSignOut /></>}
+        {message && <><p role="alert" className="errors">{message}</p><SetupStaffSignOut /></>}
       </section>
       <form action={goToStepAction.bind(null, "parent")}><button className="btn btn-line">Back to parent sign-in</button></form>
     </>

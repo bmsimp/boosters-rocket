@@ -11,7 +11,7 @@ export function SetupStaffSignIn({ provider, label }: { provider: "microsoft" | 
   const go = async () => {
     setFailed(false);
     try {
-      const r = await staffAuthClient.signIn.social({ provider, callbackURL: "/setup/finish", errorCallbackURL: "/setup?step=admin&error=signin_failed" });
+      const r = await staffAuthClient.signIn.social({ provider, callbackURL: "/setup/finish", errorCallbackURL: "/setup?step=admin&signin=failed" });
       if (r?.error) setFailed(true);
     } catch { setFailed(true); }
   };

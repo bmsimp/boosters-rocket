@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { env } from "@/env";
 import { setupStatusCached } from "@/lib/setup/state";
 
 /** While setup is open, every page goes to /setup. API routes (health, sign-in callbacks) are not matched. */
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (pathname === "/setup" || pathname.startsWith("/setup/")) return NextResponse.next();
-  if ((await setupStatusCached()) === "open") return NextResponse.redirect(new URL("/setup", req.url));
+  if ((await setupStatusCached()) === "open") return NextResponse.redirect(new URL("/setup", env.APP_URL));
   return NextResponse.next();
 }
 
