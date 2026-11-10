@@ -152,7 +152,7 @@ describe("the parent door", () => {
     expect(o.emailAndPassword?.enabled).toBe(false);
     // In front of the database limits, an in-memory cap per IP on the two code routes (on when NODE_ENV is production).
     expect(o.rateLimit?.customRules).toEqual({ "/portal-code/send": { window: 60, max: 20 }, "/portal-code/verify": { window: 60, max: 20 } });
-    expect(o.rateLimit?.enabled).toBeUndefined();
+    expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });
 
   it("over the check limit, says so", async () => {
