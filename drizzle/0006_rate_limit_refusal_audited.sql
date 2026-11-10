@@ -1,0 +1,1 @@
+ALTER TABLE "rate_limit_event" ADD COLUMN "refusal_audited" boolean DEFAULT false NOT NULL;

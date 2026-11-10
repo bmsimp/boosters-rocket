@@ -8,7 +8,7 @@ import { env } from "@/env";
 import { mailWorking } from "@/lib/mail/settings";
 import { sendMail, currentBrand } from "@/lib/mail/send";
 import { signinCodeMessage } from "@/lib/mail/messages";
-import { takeRateLimit } from "./rate-limit";
+import { takeRateLimit, type RateLimitTake } from "./rate-limit";
 import { enabledGuardianRows, parentActor } from "./sessions";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
@@ -30,6 +30,11 @@ async function refuse(reason: Refusal, label: string, who: { id: string; email: 
     targetId: who?.id, after: { reason, ...extra }, ip });
 }
 
+/** A full window is audited once (rate-limit.ts): later refusals in the same window are refused the same way, unrecorded. */
+async function refuseOverLimit(take: Exclude<RateLimitTake, "taken">, label: string, ip: string | null, extra: { limit: string }) {
+  if (take === "first_refusal") await refuse("rate_limited", label, null, ip, extra);
+}
+
 /**
  * Spec §1. Decides, stores the code and returns; the email goes out in `delivery`. The caller answers the parent with
  * the same sentence whatever happened here and must not await `delivery`.
@@ -37,10 +42,13 @@ async function refuse(reason: Refusal, label: string, who: { id: string; email: 
 export async function requestSigninCode(rawEmail: string, ip: string | null, now = new Date()): Promise<{ delivery: Promise<void> }> {
   const email = normalizeEmail(rawEmail);
   const label = email ?? rawEmail.trim().toLowerCase().slice(0, 254);
+  // The IP limit comes first, so no refusal below it (mail not working included) can be repeated without limit.
+  const byIp = await takeRateLimit("code_send_ip", subjectIp(ip), now);
+  if (byIp !== "taken") { await refuseOverLimit(byIp, label, ip, { limit: "ip" }); return DONE; }
   if (!(await mailWorking())) { await refuse("mail_failed", label, null, ip, { detail: "mail_not_working" }); return DONE; }
-  if (!(await takeRateLimit("code_send_ip", subjectIp(ip), now))) { await refuse("rate_limited", label, null, ip, { limit: "ip" }); return DONE; }
   if (!email) { await refuse("unknown_email", label, null, ip); return DONE; }
-  if (!(await takeRateLimit("code_send_email", email, now))) { await refuse("rate_limited", email, null, ip, { limit: "email" }); return DONE; }
+  const byEmail = await takeRateLimit("code_send_email", email, now);
+  if (byEmail !== "taken") { await refuseOverLimit(byEmail, email, ip, { limit: "email" }); return DONE; }
   const [p] = await db.select().from(parent).where(eq(parent.email, email));
   if (!p) { await refuse("unknown_email", email, null, ip); return DONE; }
   if (p.blocked) { await refuse("blocked", email, p, ip); return DONE; }
@@ -79,8 +87,9 @@ const REJECTED: VerifyResult = { ok: false, reason: "rejected" };
 export async function verifySigninCode(rawEmail: string, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
   const email = normalizeEmail(rawEmail);
   const label = email ?? rawEmail.trim().toLowerCase().slice(0, 254);
-  if (!(await takeRateLimit("code_check_ip", subjectIp(ip), now))) {
-    await refuse("rate_limited", label, null, ip, { limit: "check_ip" });
+  const byIp = await takeRateLimit("code_check_ip", subjectIp(ip), now);
+  if (byIp !== "taken") {
+    await refuseOverLimit(byIp, label, ip, { limit: "check_ip" });
     return { ok: false, reason: "rate_limited" };
   }
   const expired = (who: { id: string; email: string } | null, reason: "no_code" | "expired" | "too_many_tries") =>

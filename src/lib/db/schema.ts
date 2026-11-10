@@ -106,6 +106,8 @@ export const rateLimitEvent = pgTable("rate_limit_event", {
   kind: text("kind").notNull(),
   subject: text("subject").notNull(), // a normalized email or an IP address
   at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  // Set on the oldest event of a full window when its first refusal is audited; it goes when that event ages out.
+  refusalAudited: boolean("refusal_audited").notNull().default(false),
 }, (t) => [index("rate_limit_event_ix").on(t.kind, t.subject, t.at)]);
 
 /** A parent's own email change waiting for the confirm link (spec §2 Email changes). The token is stored hashed. */

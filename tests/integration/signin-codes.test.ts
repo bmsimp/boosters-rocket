@@ -127,6 +127,32 @@ describe("requesting a code", () => {
     expect((await audits("signin.code_refused"))[0]).toMatchObject({ after: { reason: "mail_failed", detail: "mail_not_working" } });
   });
 
+  it("while mail isn't working, stops writing audit rows once the IP limit is reached", async () => {
+    await resetDb();
+    await ana();
+    for (let i = 0; i < 15; i++) await send(`n${i}@example.com`, at(i));
+    const refused = await audits("signin.code_refused");
+    expect(refused.filter((a) => (a.after as { detail?: string }).detail === "mail_not_working")).toHaveLength(10);
+    expect(refused.filter((a) => (a.after as { reason: string }).reason === "rate_limited")).toHaveLength(1);
+    expect(refused).toHaveLength(11);
+    expect(mail.outbox).toHaveLength(0);
+  }, 30_000);
+
+  it("audits a full email window once, and again in the next one", async () => {
+    await ana();
+    for (let i = 0; i < 8; i++) await send("ana@example.com", at(i * 61_000), `198.51.100.${i}`); // 3 sent, 5 past the limit
+    expect(mail.outbox).toHaveLength(3);
+    const limited = async () => (await audits("signin.code_refused")).filter((a) => (a.after as { reason: string }).reason === "rate_limited");
+    expect(await limited()).toHaveLength(1);
+    expect((await limited())[0]).toMatchObject({ actorLabel: "ana@example.com", after: { limit: "email" } });
+    // The first code's slot frees 15 minutes after it was sent: one more goes out, and the next refusal is a new window.
+    await send("ana@example.com", at(15 * 60_000 + 1), "198.51.100.50");
+    expect(mail.outbox).toHaveLength(4);
+    await send("ana@example.com", at(15 * 60_000 + 2), "198.51.100.51");
+    await send("ana@example.com", at(15 * 60_000 + 3), "198.51.100.52");
+    expect(await limited()).toHaveLength(2);
+  }, 30_000);
+
   it("never puts the code in a log line or the audit log", async () => {
     await ana();
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}));
@@ -202,6 +228,19 @@ describe("checking a code", () => {
     expect(await verifySigninCode("n@example.com", "123456", IP, at(31))).toEqual({ ok: false, reason: "rate_limited" });
     expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ after: { reason: "rate_limited", limit: "check_ip" } });
   });
+
+  it("audits a full check window once, and again in the next one", async () => {
+    for (let i = 0; i < 30; i++) await verifySigninCode(`n${i}@example.com`, "123456", IP, at(i));
+    for (let i = 0; i < 5; i++) expect(await verifySigninCode("n@example.com", "123456", IP, at(100 + i))).toEqual({ ok: false, reason: "rate_limited" });
+    const limited = async () => (await audits("signin.code_refused")).filter((a) => (a.after as { reason: string }).reason === "rate_limited");
+    expect(await limited()).toHaveLength(1);
+    expect((await limited())[0]).toMatchObject({ ip: IP, after: { limit: "check_ip" } });
+    expect(await verifySigninCode("n@example.com", "123456", "198.51.100.9", at(200))).toEqual({ ok: false, reason: "rejected" }); // another IP has its own limit
+    // 15 minutes after the first check its slot frees; the check after that fills the window again and is audited again.
+    expect(await verifySigninCode("n@example.com", "123456", IP, at(15 * 60_000))).toEqual({ ok: false, reason: "rejected" });
+    for (let i = 0; i < 5; i++) expect(await verifySigninCode("n@example.com", "123456", IP, at(15 * 60_000))).toEqual({ ok: false, reason: "rate_limited" });
+    expect(await limited()).toHaveLength(2);
+  }, 30_000);
 
   it("counts a code with letters or the wrong length as a wrong try", async () => {
     await ana();

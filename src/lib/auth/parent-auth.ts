@@ -32,6 +32,10 @@ function buildParentAuth() {
     }),
     emailAndPassword: { enabled: false },
     disabledPaths: PARENT_DISABLED_PATHS,
+    // A cheap in-memory cap per IP and path in front of the database limits (signin-codes.ts), so a flood is turned
+    // away before it reaches Postgres. Better Auth turns its limiter on only when NODE_ENV is production; that default
+    // is kept, so the integration tests don't meet it.
+    rateLimit: { customRules: { "/portal-code/send": { window: 60, max: 20 }, "/portal-code/verify": { window: 60, max: 20 } } },
     account: { accountLinking: { enabled: false } },
     // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
     advanced: { cookiePrefix: "br_parent", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
