@@ -1,10 +1,10 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { env } from "@/env";
-import { getSetupState, isSetupStep, type SetupStep } from "@/lib/setup/state";
+import { getSetupState, isSetupStep, MAIL_FIRST_URL, type SetupStep } from "@/lib/setup/state";
 import { hasSetupSession } from "@/lib/setup/session";
 import { providerSummaries, pendingOnlySummaries, type ProviderKey, type ProviderSummary } from "@/lib/auth/providers";
 import { UnlockForm } from "./unlock-form";
-import { mailSummary } from "@/lib/mail/settings";
+import { mailSummary, mailWorking } from "@/lib/mail/settings";
 import { StaffStep, MailStep, AdminStep } from "./steps";
 
 export const metadata = { title: "Set up Booster Rocket" };
@@ -30,6 +30,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   const one = (k: string) => { const v = sp[k]; return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined; };
   const asked = one("step");
   const step: SetupStep = isSetupStep(asked) ? asked : state.step;
+  if (step === "admin" && !(await mailWorking())) redirect(MAIL_FIRST_URL);
   const saved = await providerSummaries();
   const byKey = Object.fromEntries([...saved, ...(await pendingOnlySummaries(saved.map((s) => s.key)))].map((s) => [s.key, s])) as Partial<Record<ProviderKey, ProviderSummary>>;
   const appUrl = env.APP_URL.replace(/\/+$/, "");

@@ -4,7 +4,16 @@ import { db } from "@/lib/db/client";
 import { auditLog, roleAssignment, setting } from "@/lib/db/schema";
 import { getSetupState, updateSetupState, SETUP_CODE_KEY } from "@/lib/setup/state";
 import { issueSetupCode } from "@/lib/setup/code";
+import { saveMailSettings, patchMailStatus, getStoredMailConfig } from "@/lib/mail/settings";
+import { mailConfigHash } from "@/lib/mail/config-hash";
 import { resetDb, seedStaff } from "../helpers/db";
+
+/** Mail settings saved and a test send recorded, as the setup step leaves them. */
+async function mailWorks() {
+  await saveMailSettings({ method: "smtp", host: "smtp.example.org", port: 587, security: "starttls", username: "u", from: "c@example.org", password: "p" },
+    { actor: { door: "system", id: null, label: "test" }, ip: null });
+  await patchMailStatus({ verifiedHash: mailConfigHash((await getStoredMailConfig())!), verifiedAt: new Date().toISOString() });
+}
 
 const mocks = vi.hoisted(() => ({ hasSetupSession: vi.fn(), getStaffIdentity: vi.fn(), hasStaffSession: vi.fn() }));
 vi.mock("@/lib/setup/session", () => ({ hasSetupSession: mocks.hasSetupSession, SETUP_COOKIE: "br_setup" }));
@@ -28,6 +37,7 @@ describe("setup finish route", () => {
     mocks.hasSetupSession.mockResolvedValue(true);
     mocks.hasStaffSession.mockResolvedValue(false);
     mocks.getStaffIdentity.mockResolvedValue(null);
+    await mailWorks();
     await issueSetupCode();
     await updateSetupState({ status: "open", step: "admin", adminEmail: "admin@club.org" });
     await db.delete(auditLog); // issuing the code audited itself; each test looks only at what the route writes
@@ -42,6 +52,18 @@ describe("setup finish route", () => {
     expect(await codeRows()).toHaveLength(0);
     expect(await actions()).toEqual(["setup.finish"]);
     expect(res.headers.get("set-cookie")).toMatch(/br_setup=;/);
+  });
+
+  it("won't finish until mail works, sends the Admin back to the mail step, then finishes once it does", async () => {
+    await db.delete(setting).where(eq(setting.key, "mail.status"));
+    const admin = await seedStaff({ email: "admin@club.org", admin: true });
+    signedInAs(admin);
+    expect(location(await call())).toBe("/setup?step=mail&error=mail_first");
+    expect((await getSetupState()).status).toBe("open");
+    expect(await actions()).toEqual([]);
+    await mailWorks();
+    expect(location(await call())).toBe("/staff");
+    expect((await getSetupState()).status).toBe("finished");
   });
 
   it("sends a browser with no setup session to /setup", async () => {

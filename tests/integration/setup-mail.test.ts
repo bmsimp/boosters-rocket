@@ -7,6 +7,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); } }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async () => { state.sent++; } }));
 
+import SetupPage from "@/app/setup/page";
 import { saveSetupMailAction, sendSetupTestMailAction, goToStepAction } from "@/app/setup/actions";
 import { getSetupState } from "@/lib/setup/state";
 import { mailWorking } from "@/lib/mail/settings";
@@ -44,5 +45,13 @@ describe("the Outgoing mail setup step", () => {
     state.setup = false;
     expect(await saveSetupMailAction(form(smtp))).toEqual({ ok: false, errors: [SETUP_SESSION_ENDED] });
     expect(await sendSetupTestMailAction(form({ to: "a@example.org" }))).toEqual({ ok: false, error: SETUP_SESSION_ENDED });
+  });
+
+  it("won't show the first Admin step by URL until mail works", async () => {
+    const page = (step?: string) => redirectOf(SetupPage({ searchParams: Promise.resolve(step ? { step } : {}) }));
+    expect(await page("admin")).toBe("/setup?step=mail&error=mail_first");
+    await saveSetupMailAction(form(smtp));
+    await sendSetupTestMailAction(form({ to: "admin@example.org" }));
+    expect(await page("admin")).toBeUndefined();
   });
 });

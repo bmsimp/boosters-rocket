@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { env } from "@/env";
-import { getSetupState, finishSetup, SETUP_STATE_KEY } from "@/lib/setup/state";
+import { getSetupState, finishSetup, SETUP_STATE_KEY, MAIL_FIRST_URL } from "@/lib/setup/state";
 import { hasSetupSession, SETUP_COOKIE } from "@/lib/setup/session";
 import { getStaffIdentity, hasStaffSession } from "@/lib/auth/identity";
 import { effectivePermissions } from "@/lib/permissions/effective";
 import { clientIpFrom } from "@/lib/request";
+import { mailWorking } from "@/lib/mail/settings";
 import { writeAudit } from "@/lib/audit/log";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ export async function GET(req: Request) {
   const state = await getSetupState();
   if (state.status !== "open") return to("/staff");
   if (!(await hasSetupSession())) return to("/setup");
+  if (!(await mailWorking())) return to(MAIL_FIRST_URL);
   if (!state.adminEmail) return to("/setup?step=admin");
   const id = await getStaffIdentity();
   if (!id) return to(`/setup?step=admin&error=${(await hasStaffSession()) ? "not_matched" : "no_session"}`);

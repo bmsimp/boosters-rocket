@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { setupAction, setupUnlockAction, SETUP_SESSION_ENDED } from "@/lib/setup/guard";
 import { verifySetupCode } from "@/lib/setup/code";
 import { startSetupSession } from "@/lib/setup/session";
-import { getSetupState, updateSetupState, saveAdminEmail, isSetupStep, type SetupStep } from "@/lib/setup/state";
+import { getSetupState, updateSetupState, MAIL_FIRST_URL, saveAdminEmail, isSetupStep, type SetupStep } from "@/lib/setup/state";
 import { isProviderKey, parseProviderForm, saveProvider, providerSummaries, type SaveOutcome } from "@/lib/auth/providers";
 import { checkFor } from "@/lib/auth/provider-checks";
 import { isCertificateProvider, startCertificateReplacement, discardPendingCertificate } from "@/lib/auth/certificates";
@@ -78,7 +78,7 @@ export const goToStepAction = setupAction(async (step: SetupStep): Promise<void>
     const staffReady = (await providerSummaries()).some((s) => s.readable);
     if (!staffReady) redirect("/setup?step=staff&error=staff_first");
   }
-  if (step === "admin" && !(await mailWorking())) redirect("/setup?step=mail&error=mail_first");
+  if (step === "admin" && !(await mailWorking())) redirect(MAIL_FIRST_URL);
   await updateSetupState({ step });
   redirect(`/setup?step=${step}`);
 });

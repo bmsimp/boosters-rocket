@@ -5,6 +5,8 @@ import { setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 
 export const SETUP_STEPS = ["staff", "mail", "admin"] as const;
+/** Where to send someone who tries to reach the First Admin step before mail has been tested. */
+export const MAIL_FIRST_URL = "/setup?step=mail&error=mail_first";
 export type SetupStep = (typeof SETUP_STEPS)[number];
 export const isSetupStep = (s: unknown): s is SetupStep => (SETUP_STEPS as readonly unknown[]).includes(s);
 export type SetupState = { status: "open" | "finished"; step: SetupStep; adminEmail: string | null; finishedAt: string | null };
