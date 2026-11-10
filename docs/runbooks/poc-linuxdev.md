@@ -176,7 +176,8 @@ Record what actually happens in section 10.
 1. Do section 3 first: this uses the staff app.
 2. On a Windows PC with PowerShell 7, install the Exchange Online module once:
    `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
-3. On the setup page, Step 2 (Outgoing mail), open **Microsoft 365: let the app send as one mailbox**, download
+3. On the setup page, Step 2 (Outgoing mail), follow the numbered steps under **Microsoft 365: let the app send as
+   one mailbox** (the page fills in the band's tenant ID for you): download
    `New-BoosterRocketStaffApp.ps1` again (it carries the current certificate), run `Unblock-File` on it, then run
    `./New-BoosterRocketStaffApp.ps1 -TenantId <band tenant ID> -SetUpMail -Mailbox webmaster@fznband.org`, signed in
    as an Exchange administrator. It reuses the staff app and adds the mail permission. (The same steps by hand are
@@ -225,7 +226,7 @@ happen on the setup page. Do this instead:
      signed out. Each person gets a new sign-in account for the email code;
    - the parents tenant's sign-in settings and certificate are removed from the portal.
 3. Sign in at `/staff/sign-in` and choose **Mail** in the staff menu (Admins only). It has the same card as Step 2 of
-   the setup page: **Microsoft 365: let the app send as one mailbox**, with the script download, then **Save** and
+   the setup page: the numbered steps under **Microsoft 365: let the app send as one mailbox**, with the script download, then **Save** and
    **Send test email**. Do steps 2 to 6 above there instead of on the setup page (step 6's first Admin part is
    setup only; skip it).
 4. Until a test email has gone out, `/sign-in` says "Parent sign-in isn't available yet." and the staff home shows

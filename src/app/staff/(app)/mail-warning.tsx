@@ -10,8 +10,8 @@ export async function MailWarning({ canFix }: { canFix: boolean }) {
       <p>{a.kind === "failing"
         ? <>The last email failed{a.since && <> (<LocalTime iso={a.since} />)</>}: {a.lastError} Parents can&apos;t get sign-in codes until a send works again.</>
         : a.kind === "not_tested"
-          ? "The mail settings changed and haven't been tested since, so parents can't sign in. Send a test email."
-          : "Outgoing mail isn't set up, so parents can't sign in."}</p>
+          ? "The mail settings changed and haven't been tested since, so parents can't sign in. Open mail settings and send a test email."
+          : "Outgoing mail isn't set up, so parents can't sign in. Mail settings lists the steps."}</p>
       <p className="box-foot">{canFix ? <a className="btn btn-line" href="/staff/settings/mail">Open mail settings</a> : "An Admin can fix this under Settings, Mail."}</p>
     </section>
   );

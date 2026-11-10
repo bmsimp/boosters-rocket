@@ -41,7 +41,27 @@ and the page. Move an item to **Done** when it ships.
   buttons, so admins wonder if they must upload it by hand. Show a clear "Done: Microsoft accepted this
   certificate" state, and tuck download/replace under a "Manage certificate" option.
 
+### Mail (`/staff/settings/mail`, setup Step 2)
+- **The page still needs a design pass** (2026-11-10). The numbered Microsoft 365 steps (see Done) sit above the
+  settings form in one long box, the copy fields are plain, and nothing shows which step you are on or whether the
+  script has been run. The staff home warning and this page should read as one guided task.
+
+### Settings as a whole (staff menu: Club, Sign-in, Mail)
+- **Settings are separate pages with separate menu entries** (2026-11-10). The owner expects one **Settings** page
+  with sections for staff sign-in and outgoing mail (and club details), not three top-level entries. Sections
+  still have to follow permissions: Sign-in and Mail are Admin-only, Club has its own permission, so a person sees
+  only the sections they hold. The owner's summary after the first proof-of-concept run with mail: the UI needs a
+  lot of love.
+- **The staff script says "on the setup page" after setup is finished** (2026-11-10). Its last lines tell the Admin
+  to enter values and use Send test email "on the setup page", but on a finished site that page is gone and the
+  place is Mail. Say "in the portal" or name both.
+
 ## Done
+- **The Mail page's instructions didn't look like instructions** (2026-11-10, Mail and setup Step 2). The owner
+  followed "Outgoing mail needs attention" > **Open mail settings** and found a form; the step that has to come
+  first (run the script so Microsoft 365 lets the portal send) was inside a collapsed section under the form, with
+  the script inside a second collapsed section and `<tenant>` left to look up. The steps are now numbered and open
+  above the form until mail works, with the club's tenant ID and the saved mailbox already in the command.
 - **Staff menu unreachable on phones** (2026-11-09, all staff pages). Below tablet width the top menu was hidden
   and nothing replaced it (parents have bottom tabs; staff had nothing). Staff pages now get a Menu button that opens
   the same links, closes on a choice or Escape, and is announced as expandable.

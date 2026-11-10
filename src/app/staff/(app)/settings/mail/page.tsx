@@ -1,7 +1,7 @@
 import { requireStaffPage } from "@/lib/guards";
 import { mailSummary } from "@/lib/mail/settings";
 import { MailSettingsCard } from "@/app/components/mail-settings/mail-card";
-import { MailHelp } from "@/app/components/mail-settings/mail-steps";
+import { MicrosoftMailSetup, SmtpHelp } from "@/app/components/mail-settings/mail-steps";
 import { MailWarning } from "../../mail-warning";
 import { saveMailSettingsAction, sendTestMailAction } from "./actions";
 
@@ -16,8 +16,9 @@ export default async function MailSettingsPage() {
       <p className="lede">How the portal sends sign-in codes and welcome emails. Only Admins can change this, because whoever controls outgoing mail can read parents&apos; sign-in codes.</p>
       <MailWarning canFix />
       <section className="box" aria-labelledby="mail-h"><h2 id="mail-h">Outgoing mail</h2>
+        <MicrosoftMailSetup summary={summary} />
         <MailSettingsCard summary={summary} save={saveMailSettingsAction} test={sendTestMailAction} />
-        <MailHelp tenant="<tenant>" />
+        <SmtpHelp />
       </section>
     </main>
   );

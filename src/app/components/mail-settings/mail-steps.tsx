@@ -1,5 +1,6 @@
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
-import { ScriptOption } from "@/app/setup/instructions";
+import { loadProviders } from "@/lib/auth/providers";
+import type { MailSummary } from "@/lib/mail/settings";
 
 const ext = { target: "_blank", rel: "noreferrer" } as const;
 const RBAC = "https://learn.microsoft.com/exchange/permissions-exo/application-rbac";
@@ -30,15 +31,40 @@ export function SmtpNotes() {
   );
 }
 
-/** The two help blocks under the mail card. `tenant` is the placeholder shown in the script's example command. */
-export function MailHelp({ tenant }: { tenant: string }) {
-  return (
+const SCRIPT = "New-BoosterRocketStaffApp.ps1";
+
+/**
+ * What an Admin does so Microsoft 365 lets the portal send as one mailbox: numbered steps, in the open until
+ * mail works, with the club's own tenant ID (and the saved mailbox, once there is one) already in the command.
+ * Renders nothing when staff don't sign in with Microsoft, because that method isn't offered then.
+ */
+export async function MicrosoftMailSetup({ summary }: { summary: MailSummary }) {
+  const tenant = (await loadProviders()).staffMicrosoft?.config.tenantId;
+  if (!tenant) return null;
+  const mailbox = summary.config?.method === "graph" ? summary.config.mailbox : null;
+  const steps = (
     <>
-      <details><summary>Microsoft 365: let the app send as one mailbox</summary>
-        <ScriptOption script="New-BoosterRocketStaffApp.ps1" example={`./New-BoosterRocketStaffApp.ps1 -TenantId ${tenant} -SetUpMail -Mailbox webmaster@yourclub.org`} />
-        <GraphMailSteps />
-      </details>
-      <details><summary>SMTP: before you start</summary><SmtpNotes /></details>
+      <p>Microsoft 365 won&apos;t send for the portal until an administrator allows it. Do these steps in order. You need a Windows PC with PowerShell 7 and an account that is an Exchange administrator for the club.</p>
+      <ol className="steps-list">
+        <li><b>Download the script.</b> If an older copy is in your Downloads folder, delete it first.
+          <p><a className="btn btn-line" href={`/setup/scripts/${SCRIPT}`} download>Download {SCRIPT}</a></p></li>
+        <li><b>Open PowerShell 7 in the folder it downloaded to and run these three commands,</b> one at a time. The first is only needed once on each PC.
+          <CopyField label="1. Install what the script needs" value="Install-Module Microsoft.Graph.Authentication, ExchangeOnlineManagement -Scope CurrentUser" />
+          <CopyField label="2. Let Windows run the downloaded file" value={"Unblock-File .\\" + SCRIPT} />
+          <CopyField label="3. Run it" value={`./${SCRIPT} -TenantId ${tenant} -SetUpMail -Mailbox ${mailbox ?? "<mailbox>"}`} />
+          {!mailbox && <p className="hint">Replace <code>&lt;mailbox&gt;</code> with the address the portal should send from, for example <code>webmaster@yourclub.org</code>. It must be a real mailbox in the club&apos;s Microsoft 365.</p>}</li>
+        <li><b>Sign in when the Microsoft page opens</b> (it opens twice), as the Exchange administrator. The script is finished when it prints &quot;The app can now send as …, and only as …&quot;. If it stops with a message instead, do what the message says and run it again.</li>
+        <li><b>Wait.</b> Microsoft takes from 30 minutes to 2 hours to apply the change. A test email sent sooner can fail with <code>ErrorAccessDenied</code>; that only means it is too soon.</li>
+        <li><b>Come back to this page.</b> Under <b>Send with</b> below, choose <b>Microsoft 365</b>, enter the same mailbox and select <b>Save</b>. Then select <b>Send test email</b>. When the test email arrives, parents can sign in.</li>
+      </ol>
+      <details><summary>Do the script&apos;s part by hand instead</summary><GraphMailSteps /></details>
     </>
   );
+  if (summary.working) return <details><summary>Microsoft 365: let the app send as one mailbox (already done; open to do it again)</summary>{steps}</details>;
+  return <section className="stack" aria-labelledby="m365-mail-h"><h3 id="m365-mail-h">Microsoft 365: let the app send as one mailbox</h3>{steps}</section>;
+}
+
+/** What to have ready for SMTP; sits under the mail card. */
+export function SmtpHelp() {
+  return <details><summary>SMTP: before you start</summary><SmtpNotes /></details>;
 }

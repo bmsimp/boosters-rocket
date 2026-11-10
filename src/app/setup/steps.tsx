@@ -3,7 +3,7 @@ import { ProviderForm } from "@/app/components/sign-in-settings/provider-form";
 import type { ProviderKey, ProviderSummary } from "@/lib/auth/providers";
 import type { MailSummary } from "@/lib/mail/settings";
 import { MailSettingsCard } from "@/app/components/mail-settings/mail-card";
-import { MailHelp } from "@/app/components/mail-settings/mail-steps";
+import { MicrosoftMailSetup, SmtpHelp } from "@/app/components/mail-settings/mail-steps";
 import {
   saveSetupProviderAction, goToStepAction, saveAdminEmailAction, startCertificateReplacementSetupAction, discardCertificateReplacementSetupAction,
   saveSetupMailAction, sendSetupTestMailAction,
@@ -46,8 +46,9 @@ export function MailStep({ summary, error }: { summary: MailSummary; error?: str
       <p className="lede">Parents sign in with a code the portal emails them, so the portal has to be able to send mail first. Use Microsoft 365 if the club has it; otherwise use your mail provider&apos;s SMTP settings.</p>
       {error === "mail_first" && <p role="alert" className="errors">Save the mail settings and send a test email before going on.</p>}
       <section className="box" aria-labelledby="mail-h"><h2 id="mail-h">Outgoing mail</h2>
+        <MicrosoftMailSetup summary={summary} />
         <MailSettingsCard summary={summary} save={saveSetupMailAction} test={sendSetupTestMailAction} />
-        <MailHelp tenant="<your tenant ID>" />
+        <SmtpHelp />
       </section>
       <div className="stack">
         <form action={goToStepAction.bind(null, "admin")}><button className="btn" disabled={!summary.working}>Next: first Admin</button></form>
