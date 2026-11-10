@@ -23,6 +23,11 @@ and the page. Move an item to **Done** when it ships.
   patterns such as `Settings.*`. A volunteer shouldn't need to know the permission names. Offer a checklist of
   permissions in plain words (for example "See the audit log", "Change club settings"), grouped by area.
 
+### Before sign-in (`/sign-in`, `/staff/sign-in`)
+- **Reported as not mobile-friendly** (2026-11-09). In a phone-size test (390 and 360 pixels wide) both pages fit
+  with no sideways scroll, so the problem isn't known yet. Waiting on a screenshot from the owner's phone. The pages also
+  have no club bar, so they look unlike the rest of the portal.
+
 ### Setup and Settings → Sign-in
 - **The page may not update right after downloading a certificate** (2026-11-09). The certificate panel
   refreshes on a 1.5-second timer after the download starts, so on a slow server the thumbprint can lag until
