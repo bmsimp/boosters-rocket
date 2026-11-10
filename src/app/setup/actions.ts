@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { setupAction, setupUnlockAction, SETUP_SESSION_ENDED } from "@/lib/setup/guard";
 import { verifySetupCode } from "@/lib/setup/code";
 import { startSetupSession } from "@/lib/setup/session";
-import { getSetupState, updateSetupState, saveAdminEmail, type SetupStep } from "@/lib/setup/state";
+import { getSetupState, updateSetupState, saveAdminEmail, isSetupStep, type SetupStep } from "@/lib/setup/state";
 import { isProviderKey, parseProviderForm, saveProvider, providerSummaries, type SaveOutcome } from "@/lib/auth/providers";
 import { checkFor } from "@/lib/auth/provider-checks";
 import { isCertificateProvider, startCertificateReplacement, discardPendingCertificate } from "@/lib/auth/certificates";
@@ -27,7 +27,7 @@ export const unlockSetupAction = setupUnlockAction(async (_prev: { error: string
 
 const SETUP_ACTOR = { door: "system", id: null, label: "setup" } as const;
 const sessionEnded = () => ({ ok: false as const, errors: [SETUP_SESSION_ENDED] });
-const FIELD_NAMES = ["tenantId", "clientId", "tenantSubdomain", "secret", "secretExpiresAt"] as const;
+const FIELD_NAMES = ["tenantId", "clientId", "secret", "secretExpiresAt"] as const;
 
 export const saveSetupProviderAction = setupAction(async (key: string, form: FormData): Promise<SaveOutcome> => {
   if (!isProviderKey(key)) return { ok: false, errors: ["Unknown sign-in."] };
@@ -55,9 +55,9 @@ export const discardCertificateReplacementSetupAction = setupAction(async (key: 
 }, { onExpired: sessionEnded });
 
 export const goToStepAction = setupAction(async (step: SetupStep): Promise<void> => {
-  if (step !== "staff" && step !== "parent" && step !== "admin") redirect("/setup");
+  if (!isSetupStep(step)) redirect("/setup");
   if (step !== "staff") {
-    const staffReady = (await providerSummaries()).some((s) => s.readable && s.key !== "parent-oidc");
+    const staffReady = (await providerSummaries()).some((s) => s.readable);
     if (!staffReady) redirect("/setup?step=staff&error=staff_first");
   }
   await updateSetupState({ step });

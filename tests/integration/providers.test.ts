@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { authProvider, auditLog, providerCertificate } from "@/lib/db/schema";
 import { createSecretBox } from "@/lib/crypto/secret-box";
@@ -215,11 +215,13 @@ describe("stored providers: Microsoft (certificate)", () => {
     expect(s).not.toHaveProperty("certificate.privateKeyCiphertext");
   });
 
-  it("loads the parent provider with its certificate", async () => {
-    await seedProvider("parent-oidc", { tenantSubdomain: "p", tenantId: T, clientId: C });
-    const p = (await loadProviders()).parent!;
-    expect(p.config).toEqual({ tenantSubdomain: "p", tenantId: T, clientId: C });
-    expect(p.assertion.privateKeyPem).toContain("PRIVATE KEY");
+  it("ignores a leftover parent-oidc row from before the parent door was removed", async () => {
+    await db.execute(sql`INSERT INTO auth_provider (key, config) VALUES ('parent-oidc', '{"tenantSubdomain":"x","tenantId":"t","clientId":"c"}')`);
+    invalidateProviders();
+    const p = await loadProviders();
+    expect(p.staffMicrosoft).toBeNull();
+    expect(Object.keys(p).sort()).toEqual(["staffGoogle", "staffMicrosoft", "version"]);
+    expect((await providerSummaries()).map((s) => s.key)).toEqual([]);
   });
 });
 
@@ -259,11 +261,5 @@ describe("removing providers", () => {
     const audit = await db.select().from(auditLog);
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ action: "setup.provider.remove.refused", permission: perm, targetId: "staff-microsoft", door: "system", after: { reason: "last_staff_sign_in" } });
-  });
-
-  it("removes the parent provider freely, retiring its certificate", async () => {
-    await seedProvider("parent-oidc", { tenantSubdomain: "p", tenantId: T, clientId: C });
-    expect(await removeProvider("parent-oidc", { actor, ip: null })).toEqual({ ok: true });
-    expect((await certificateRows("parent-oidc")).active).toBeNull();
   });
 });

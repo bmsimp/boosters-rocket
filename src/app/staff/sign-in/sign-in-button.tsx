@@ -1,17 +1,15 @@
 "use client";
 import { useState } from "react";
-import { staffAuthClient, parentAuthClient } from "@/lib/auth/client";
+import { staffAuthClient } from "@/lib/auth/client";
 
 const FAILED = "We couldn't start sign-in just then. Please try again in a moment.";
 
-export function SignInButton({ door, provider, label, primary }: { door: "staff" | "parent"; provider: string; label: string; primary?: boolean }) {
+export function SignInButton({ provider, label, primary }: { provider: "microsoft" | "google"; label: string; primary?: boolean }) {
   const [failed, setFailed] = useState(false);
   const go = async () => {
     setFailed(false);
     try {
-      const r = door === "parent"
-        ? await parentAuthClient.signIn.social({ provider, callbackURL: "/", errorCallbackURL: "/refused" })
-        : await staffAuthClient.signIn.social({ provider: provider as "microsoft" | "google", callbackURL: "/staff", errorCallbackURL: "/refused" });
+      const r = await staffAuthClient.signIn.social({ provider, callbackURL: "/staff", errorCallbackURL: "/refused" });
       if (r?.error) setFailed(true);
     } catch {
       setFailed(true);

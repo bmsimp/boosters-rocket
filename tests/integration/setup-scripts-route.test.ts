@@ -22,6 +22,10 @@ describe("setup script download", () => {
     expect(text).toContain("[string]$AppUrl = 'http://localhost:3000'");
     expect(text).not.toContain("__BOOSTER_ROCKET_APP_URL__");
   });
+  it("no longer serves the parent script", async () => {
+    state.setup = true;
+    expect((await call("New-BoosterRocketParentApp.ps1")).status).toBe(404);
+  });
   it("serves nothing else", async () => {
     state.setup = true;
     expect((await call("..%2Fpackage.json")).status).toBe(404);

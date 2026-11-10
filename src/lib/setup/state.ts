@@ -4,7 +4,9 @@ import { db, type Tx } from "@/lib/db/client";
 import { setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 
-export type SetupStep = "staff" | "parent" | "admin";
+export const SETUP_STEPS = ["staff", "admin"] as const;
+export type SetupStep = (typeof SETUP_STEPS)[number];
+export const isSetupStep = (s: unknown): s is SetupStep => (SETUP_STEPS as readonly unknown[]).includes(s);
 export type SetupState = { status: "open" | "finished"; step: SetupStep; adminEmail: string | null; finishedAt: string | null };
 export const SETUP_STATE_KEY = "setup.state";
 export const SETUP_CODE_KEY = "setup.code";
@@ -12,7 +14,9 @@ const DEFAULT_STATE: SetupState = { status: "open", step: "staff", adminEmail: n
 
 export async function getSetupState(tx?: Tx): Promise<SetupState> {
   const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, SETUP_STATE_KEY));
-  return { ...DEFAULT_STATE, ...((row?.value as Partial<SetupState> | undefined) ?? {}) };
+  const merged = { ...DEFAULT_STATE, ...((row?.value as Partial<SetupState> | undefined) ?? {}) };
+  // A step this version doesn't have (for example the removed "parent" step) reads as the first step.
+  return { ...merged, step: isSetupStep(merged.step) ? merged.step : "staff" };
 }
 
 export async function updateSetupState(patch: Partial<SetupState>, tx?: Tx): Promise<SetupState> {

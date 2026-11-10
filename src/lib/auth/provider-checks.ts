@@ -1,4 +1,4 @@
-import { parentDiscoveryUrl, type MicrosoftConfig, type ParentConfig, type CheckedDraft, type CheckResult } from "./providers";
+import { type MicrosoftConfig, type CheckedDraft, type CheckResult } from "./providers";
 import { signEntraAssertion, CLIENT_ASSERTION_TYPE, type AssertionKey } from "./client-assertion";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -51,41 +51,6 @@ export function checkMicrosoft(c: MicrosoftConfig, assertion: AssertionKey, f: F
   return clientCredentials(`https://login.microsoftonline.com/${encodeURIComponent(c.tenantId)}/oauth2/v2.0/token`, c.clientId, { assertion }, f);
 }
 
-function isTrustedTokenEndpoint(endpoint: string): boolean {
-  try {
-    const u = new URL(endpoint);
-    return u.protocol === "https:" && u.hostname.endsWith(".ciamlogin.com");
-  } catch {
-    return false;
-  }
-}
-
-export async function checkParent(c: ParentConfig, assertion: AssertionKey, f: FetchFn = defaultFetch): Promise<CheckResult> {
-  const INCOMPLETE = "Microsoft's sign-in details for that tenant look incomplete. Try again in a few minutes.";
-  let body: unknown;
-  try {
-    const res = await f(parentDiscoveryUrl(c), { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-    if (res.status === 400 || res.status === 404) {
-      return { ok: false, message: "Microsoft has no External ID tenant with that subdomain and tenant ID. Check both on the tenant's Overview page." };
-    }
-    if (!res.ok) return { ok: false, message: UNREACHABLE };
-    body = await res.json();
-  } catch {
-    return { ok: false, message: UNREACHABLE };
-  }
-  if (typeof body !== "object" || body === null) return { ok: false, message: INCOMPLETE };
-  const doc = body as { issuer?: unknown; token_endpoint?: unknown };
-  if (typeof doc.issuer !== "string" || !doc.issuer.toLowerCase().includes(c.tenantId)) {
-    return { ok: false, message: "That address belongs to a different tenant. Check that the tenant ID and subdomain come from the same tenant." };
-  }
-  if (typeof doc.token_endpoint !== "string") return { ok: false, message: INCOMPLETE };
-  // The assertion goes only to a token endpoint on Microsoft's External ID host, over https.
-  if (!isTrustedTokenEndpoint(doc.token_endpoint)) {
-    return { ok: false, message: "Microsoft's sign-in details for that tenant point somewhere unexpected, so nothing was sent. Check the tenant subdomain and tenant ID." };
-  }
-  return clientCredentials(doc.token_endpoint, c.clientId, { assertion }, f);
-}
-
 /** Google has no credential check that works without a user, so its format is checked when parsing; Step 3 proves it. */
 export async function checkGoogle(): Promise<CheckResult> {
   return { ok: true };
@@ -94,7 +59,6 @@ export async function checkGoogle(): Promise<CheckResult> {
 export function checkFor(draft: CheckedDraft, f: FetchFn = defaultFetch): Promise<CheckResult> {
   switch (draft.key) {
     case "staff-microsoft": return checkMicrosoft(draft.config, draft.assertion, f);
-    case "parent-oidc": return checkParent(draft.config, draft.assertion, f);
     case "staff-google": return checkGoogle();
   }
 }

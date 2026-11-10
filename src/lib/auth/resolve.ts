@@ -1,6 +1,6 @@
 import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { staffUser, staffAuthUser, staffAuthAccount, guardian, parentAuthUser } from "@/lib/db/schema";
+import { staffUser, staffAuthUser, staffAuthAccount } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 
 export type StaffIdentity = { door: "staff"; staffUserId: string; name: string; email: string };
@@ -48,24 +48,4 @@ export async function resolveStaff(authUserId: string): Promise<StaffIdentity | 
 
 function toStaff(s: typeof staffUser.$inferSelect): StaffIdentity {
   return { door: "staff", staffUserId: s.id, name: s.name, email: s.email };
-}
-
-export async function resolveGuardian(authUserId: string): Promise<ParentIdentity | null> {
-  const [au] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, authUserId));
-  if (!au) return null;
-  const [g] = au.objectId ? await db.select().from(guardian).where(eq(guardian.identityObjectId, au.objectId)) : [];
-  if (!g || g.status === "disabled") {
-    // The reason is for the audit trail only; the person always sees the same refusal (spec §5.1).
-    // missing_object_id means no verified `oid` was captured; parent.object_id_unverified in the audit log says why.
-    const reason = !au.objectId ? "missing_object_id" : !g ? "no_guardian" : "disabled";
-    await writeAudit({ actor: { door: "parent", id: null, label: au.email }, action: "signin.refused", targetType: "parent_auth_user", targetId: authUserId,
-      after: { reason } });
-    return null;
-  }
-  if (g.status === "invited") {
-    await db.update(guardian).set({ status: "active", updatedAt: new Date() }).where(eq(guardian.id, g.id));
-    await writeAudit({ actor: { door: "parent", id: g.id, label: g.name }, action: "guardian.activate", targetType: "guardian", targetId: g.id,
-      before: { status: "invited" }, after: { status: "active" } });
-  }
-  return { door: "parent", guardianId: g.id, familyQboId: g.familyQboId, name: g.name };
 }

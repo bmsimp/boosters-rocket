@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseProviderForm, cleanSecret, parentDiscoveryUrl } from "@/lib/auth/providers";
+import { parseProviderForm, cleanSecret } from "@/lib/auth/providers";
 
 const T = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const C = "11111111-2222-3333-4444-555555555555";
@@ -52,18 +52,8 @@ describe("parseProviderForm", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("accepts a parent provider and trims a pasted domain down to the subdomain", () => {
-    const r = parseProviderForm("parent-oidc", { tenantSubdomain: "FznParents.onmicrosoft.com", tenantId: T, clientId: C });
-    expect(r).toEqual({ ok: true, draft: { key: "parent-oidc", config: { tenantSubdomain: "fznparents", tenantId: T, clientId: C } } });
-  });
-
   it("refuses a bad Google expiry date", () => {
     const r = parseProviderForm("staff-google", { clientId: G, secret: "s", secretExpiresAt: "next year" });
     expect(r.ok).toBe(false);
-  });
-
-  it("builds the documented discovery URL", () => {
-    expect(parentDiscoveryUrl({ tenantSubdomain: "fznparents", tenantId: T, clientId: C }))
-      .toBe(`https://fznparents.ciamlogin.com/${T}/v2.0/.well-known/openid-configuration`);
   });
 });

@@ -5,7 +5,7 @@ import { isProviderKey, parseProviderForm, saveProvider, removeProvider, type Sa
 import { checkFor } from "@/lib/auth/provider-checks";
 import { isCertificateProvider, startCertificateReplacement, discardPendingCertificate } from "@/lib/auth/certificates";
 
-const FIELD_NAMES = ["tenantId", "clientId", "tenantSubdomain", "secret", "secretExpiresAt"] as const;
+const FIELD_NAMES = ["tenantId", "clientId", "secret", "secretExpiresAt"] as const;
 const P = "Settings.SignIn.ReadWrite" as const;
 
 export const saveSignInProviderAction = staffAction(P, async (ctx, key: string, form: FormData): Promise<SaveOutcome> => {

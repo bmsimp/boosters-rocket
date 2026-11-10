@@ -13,7 +13,7 @@ export const setting = pgTable("setting", {
 
 /** Sign-in provider settings entered on the setup page. The secret is sealed (src/lib/crypto/secret-box.ts). */
 export const authProvider = pgTable("auth_provider", {
-  key: text("key", { enum: ["staff-microsoft", "staff-google", "parent-oidc"] }).primaryKey(),
+  key: text("key", { enum: ["staff-microsoft", "staff-google"] }).primaryKey(),
   config: jsonb("config").notNull(),               // non-secret values only
   secretCiphertext: text("secret_ciphertext"),   // null for Microsoft providers, which use a certificate
   secretKeyId: text("secret_key_id"),   // null for Microsoft providers, which use a certificate
@@ -23,10 +23,10 @@ export const authProvider = pgTable("auth_provider", {
   updatedBy: uuid("updated_by"),                    // staff_user.id; null when saved from the setup page
 });
 
-/** App-generated certificates for Microsoft sign-in (staff Entra, parent External ID). The private key is sealed. */
+/** App-generated certificates for Microsoft staff sign-in. The private key is sealed. */
 export const providerCertificate = pgTable("provider_certificate", {
   id: uuid("id").primaryKey().defaultRandom(),
-  providerKey: text("provider_key", { enum: ["staff-microsoft", "parent-oidc"] }).notNull(),
+  providerKey: text("provider_key", { enum: ["staff-microsoft"] }).notNull(),
   status: text("status", { enum: ["pending", "active", "retired"] }).notNull(),
   certificatePem: text("certificate_pem").notNull(),
   thumbprintS256: text("thumbprint_s256").notNull(),

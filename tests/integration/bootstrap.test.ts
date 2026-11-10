@@ -21,7 +21,7 @@ describe("claimBootstrapAdmin", () => {
   });
 
   it("does nothing before the Admin step", async () => {
-    await updateSetupState({ step: "parent" });
+    await updateSetupState({ step: "staff" });
     expect(await claimBootstrapAdmin("first.admin@club.org")).toBeNull();
   });
 

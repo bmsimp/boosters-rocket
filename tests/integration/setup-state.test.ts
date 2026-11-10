@@ -15,6 +15,12 @@ describe("setup state", () => {
     expect(await getSetupState()).toEqual({ status: "open", step: "staff", adminEmail: null, finishedAt: null });
   });
 
+  it("reads an old or unknown step as the staff step", async () => {
+    await db.insert(setting).values({ key: "setup.state", value: { status: "open", step: "parent", adminEmail: null, finishedAt: null } })
+      .onConflictDoUpdate({ target: setting.key, set: { value: { status: "open", step: "parent", adminEmail: null, finishedAt: null } } });
+    expect((await getSetupState()).step).toBe("staff");
+  });
+
   it("saves the Admin email lower-cased and audits it", async () => {
     expect(await saveAdminEmail("  First.Admin@Club.ORG ", null)).toEqual({ ok: true });
     expect((await getSetupState()).adminEmail).toBe("first.admin@club.org");

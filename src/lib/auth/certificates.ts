@@ -7,15 +7,15 @@ import { env } from "@/env";
 import { generateCertificate, type GeneratedCertificate } from "./certificate-crypto";
 import type { ProviderKey } from "./provider-fields";
 
-export type CertificateProviderKey = "staff-microsoft" | "parent-oidc";
-export const isCertificateProvider = (key: ProviderKey): key is CertificateProviderKey => key === "staff-microsoft" || key === "parent-oidc";
+export type CertificateProviderKey = "staff-microsoft";
+export const isCertificateProvider = (key: ProviderKey): key is CertificateProviderKey => key === "staff-microsoft";
 export type CertificateRow = typeof providerCertificate.$inferSelect;
 export type CertificateView = { id: string; thumbprintSha1: string; thumbprintS256: string; notAfter: Date; createdAt: Date };
 export const toCertificateView = (r: CertificateRow): CertificateView =>
   ({ id: r.id, thumbprintSha1: r.thumbprintSha1, thumbprintS256: r.thumbprintS256, notAfter: r.notAfter, createdAt: r.createdAt });
 
-const FILES: Record<CertificateProviderKey, "booster-rocket-staff.cer" | "booster-rocket-parents.cer"> = {
-  "staff-microsoft": "booster-rocket-staff.cer", "parent-oidc": "booster-rocket-parents.cer",
+const FILES: Record<CertificateProviderKey, "booster-rocket-staff.cer"> = {
+  "staff-microsoft": "booster-rocket-staff.cer",
 };
 export const certificateFileName = (key: CertificateProviderKey) => FILES[key];
 export function certificateKeyForFile(name: string): CertificateProviderKey | null {
@@ -24,7 +24,6 @@ export function certificateKeyForFile(name: string): CertificateProviderKey | nu
 
 const LOCK = sql`SELECT pg_advisory_xact_lock(hashtext('booster.provider_certificate'))`;
 const aad = (id: string) => `certificate:${id}`;
-const audience = (key: CertificateProviderKey) => (key === "staff-microsoft" ? "staff" : "parents");
 
 export async function certificateRows(key: CertificateProviderKey, tx?: Tx) {
   const rows = await (tx ?? db).select().from(providerCertificate).where(eq(providerCertificate.providerKey, key));
@@ -33,7 +32,8 @@ export async function certificateRows(key: CertificateProviderKey, tx?: Tx) {
 
 type CertificateOpts = { actor: Actor; ip: string | null; createdBy: string | null; permission?: string };
 
-const newCertificate = (key: CertificateProviderKey) => generateCertificate(`Booster Rocket ${audience(key)} (${new URL(env.APP_URL).hostname})`);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for callers; staff Microsoft is the only certificate provider now
+const newCertificate = (key: CertificateProviderKey) => generateCertificate(`Booster Rocket staff (${new URL(env.APP_URL).hostname})`);
 
 async function insertPending(tx: Tx, key: CertificateProviderKey, g: GeneratedCertificate, opts: CertificateOpts): Promise<CertificateRow> {
   const id = crypto.randomUUID();

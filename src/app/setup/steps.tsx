@@ -4,13 +4,13 @@ import type { ProviderKey, ProviderSummary } from "@/lib/auth/providers";
 import {
   saveSetupProviderAction, goToStepAction, saveAdminEmailAction, startCertificateReplacementSetupAction, discardCertificateReplacementSetupAction,
 } from "./actions";
-import { MicrosoftStaffSteps, GoogleStaffSteps, ParentSteps, ScriptOption } from "./instructions";
-import { SetupStaffSignIn, SetupParentTest, SetupStaffSignOut } from "./setup-buttons";
+import { MicrosoftStaffSteps, GoogleStaffSteps, ScriptOption } from "./instructions";
+import { SetupStaffSignIn, SetupStaffSignOut } from "./setup-buttons";
 import { AdminEmailForm } from "./admin-email-form";
 
 type ByKey = Partial<Record<ProviderKey, ProviderSummary>>;
 const view = (s?: ProviderSummary) => (s ? toSummaryView(s) : null);
-const certificateActions = (key: "staff-microsoft" | "parent-oidc") =>
+const certificateActions = (key: "staff-microsoft") =>
   ({ replace: startCertificateReplacementSetupAction.bind(null, key), discard: discardCertificateReplacementSetupAction.bind(null, key) });
 
 export function StaffStep({ appUrl, byKey, error }: { appUrl: string; byKey: ByKey; error?: string }) {
@@ -30,31 +30,7 @@ export function StaffStep({ appUrl, byKey, error }: { appUrl: string; byKey: ByK
         <GoogleStaffSteps appUrl={appUrl} />
         <ProviderForm providerKey="staff-google" summary={view(byKey["staff-google"])} action={saveSetupProviderAction.bind(null, "staff-google")} />
       </section>
-      <form action={goToStepAction.bind(null, "parent")}><button className="btn" disabled={!ready}>Next: parent sign-in</button></form>
-    </>
-  );
-}
-
-export function ParentStep({ appUrl, byKey, tested }: { appUrl: string; byKey: ByKey; tested?: string }) {
-  const saved = Boolean(byKey["parent-oidc"]?.readable);
-  return (
-    <>
-      <h2 className="page-title">Step 2: Parent sign-in</h2>
-      <p className="lede">Parents sign in with a code sent to their email, through Microsoft Entra External ID. You can skip this and do it later under Settings.</p>
-      <section className="box" aria-labelledby="p-h"><h2 id="p-h">{PROVIDER_LABELS["parent-oidc"]}</h2>
-        <ParentSteps appUrl={appUrl} />
-        <ScriptOption script="New-BoosterRocketParentApp.ps1" example="./New-BoosterRocketParentApp.ps1 -TenantId <subdomain>.onmicrosoft.com" />
-        <ProviderForm providerKey="parent-oidc" summary={view(byKey["parent-oidc"])} action={saveSetupProviderAction.bind(null, "parent-oidc")}
-          certificateActions={certificateActions("parent-oidc")} />
-        {saved && <div className="box-foot"><SetupParentTest />
-          {tested === "ok" && <p role="status">Microsoft sent you back, so parent sign-in works. (There are no families yet, so the portal itself would still refuse that sign-in.)</p>}
-          {tested === "failed" && <p role="alert" className="errors">The parent sign-in didn&apos;t complete. Check the redirect URI and that the app is added to the user flow.</p>}
-        </div>}
-      </section>
-      <div className="stack">
-        <form action={goToStepAction.bind(null, "admin")}><button className="btn">{saved ? "Next: first Admin" : "Do this later"}</button></form>
-        <form action={goToStepAction.bind(null, "staff")}><button className="btn btn-line">Back to staff sign-in</button></form>
-      </div>
+      <form action={goToStepAction.bind(null, "admin")}><button className="btn" disabled={!ready}>Next: first Admin</button></form>
     </>
   );
 }
@@ -72,7 +48,7 @@ export function AdminStep({ adminEmail, byKey, error, signinFailed }: { adminEma
   const message = signinFailed ? SIGNIN_FAILED : error ? ADMIN_ERRORS[error] : undefined;
   return (
     <>
-      <h2 className="page-title">Step 3: First Admin</h2>
+      <h2 className="page-title">Step 2: First Admin</h2>
       <p className="lede">Enter the email of the person who will be Admin, then sign in as them. When that works, setup closes and you&apos;re taken to the staff home.</p>
       <section className="box" aria-labelledby="a-h"><h2 id="a-h">Admin</h2>
         <AdminEmailForm initial={adminEmail ?? ""} action={saveAdminEmailAction} />
@@ -82,7 +58,7 @@ export function AdminStep({ adminEmail, byKey, error, signinFailed }: { adminEma
         </div>}
         {message && <><p role="alert" className="errors">{message}</p><SetupStaffSignOut /></>}
       </section>
-      <form action={goToStepAction.bind(null, "parent")}><button className="btn btn-line">Back to parent sign-in</button></form>
+      <form action={goToStepAction.bind(null, "staff")}><button className="btn btn-line">Back to staff sign-in</button></form>
     </>
   );
 }

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
-import { staffAuthUser, staffAuthAccount, parentAuthUser, staffUser, auditLog, guardian } from "@/lib/db/schema";
-import { resolveStaff, resolveGuardian } from "@/lib/auth/resolve";
-import { resetDb, seedStaff, seedGuardian } from "../helpers/db";
+import { staffAuthUser, staffAuthAccount, staffUser, auditLog } from "@/lib/db/schema";
+import { resolveStaff } from "@/lib/auth/resolve";
+import { resetDb, seedStaff } from "../helpers/db";
 import { eq } from "drizzle-orm";
 
 async function staffAuthRow(id: string, email: string, provider: "microsoft" | "google", verified = true) {
@@ -56,51 +56,5 @@ describe("resolveStaff", () => {
     await staffAuthRow("u9", "stranger@example.com", "google");
     await resolveStaff("u9");
     expect((await db.select().from(auditLog)).map((a) => a.action)).toContain("signin.refused");
-  });
-});
-
-describe("resolveGuardian", () => {
-  beforeEach(resetDb);
-
-  it("resolves by the External ID object id and activates an invited guardian", async () => {
-    const g = await seedGuardian({ name: "Ana Ramirez", familyQboId: "123", objectId: "oid-1", status: "invited" });
-    await db.insert(parentAuthUser).values({ id: "p1", name: "Ana", email: "ana@example.com", emailVerified: true, objectId: "oid-1" });
-    expect(await resolveGuardian("p1")).toMatchObject({ door: "parent", guardianId: g.id, familyQboId: "123" });
-    const [act] = (await db.select().from(auditLog)).filter((a) => a.action === "guardian.activate");
-    expect(act).toMatchObject({ door: "parent", actorId: g.id, targetId: g.id, before: { status: "invited" }, after: { status: "active" } });
-  });
-
-  it("refuses a parent auth user with no matching guardian, or a disabled one", async () => {
-    await db.insert(parentAuthUser).values({ id: "p2", name: "X", email: "x@example.com", emailVerified: true, objectId: "oid-unknown" });
-    expect(await resolveGuardian("p2")).toBeNull();
-    await seedGuardian({ name: "Leo Dad", familyQboId: "9", objectId: "oid-3", status: "disabled" });
-    await db.insert(parentAuthUser).values({ id: "p3", name: "L", email: "l@example.com", emailVerified: true, objectId: "oid-3" });
-    expect(await resolveGuardian("p3")).toBeNull();
-  });
-
-  it("records why a parent was refused, without changing what the parent sees", async () => {
-    await seedGuardian({ name: "Leo Dad", familyQboId: "9", objectId: "oid-3", status: "disabled" });
-    await db.insert(parentAuthUser).values([
-      { id: "r1", name: "A", email: "a@example.com", emailVerified: true, objectId: null },
-      { id: "r2", name: "B", email: "b@example.com", emailVerified: true, objectId: "oid-nobody" },
-      { id: "r3", name: "C", email: "c@example.com", emailVerified: true, objectId: "oid-3" },
-    ]);
-    for (const id of ["r1", "r2", "r3"]) expect(await resolveGuardian(id)).toBeNull();
-    const rows = (await db.select().from(auditLog)).filter((a) => a.action === "signin.refused");
-    expect(Object.fromEntries(rows.map((r) => [r.targetId, r.after]))).toEqual({
-      r1: { reason: "missing_object_id" }, r2: { reason: "no_guardian" }, r3: { reason: "disabled" },
-    });
-  });
-
-  it("never resolves a parent identity from an email match alone", async () => {
-    await seedGuardian({ name: "Ana Ramirez", familyQboId: "123", objectId: "oid-1" });
-    await db.insert(parentAuthUser).values({ id: "p4", name: "Ana", email: "ana.ramirez@example.com", emailVerified: true, objectId: null });
-    expect(await resolveGuardian("p4")).toBeNull();
-  });
-
-  it("refuses a parent whose objectId differs even when the email matches a guardian", async () => {
-    await db.insert(guardian).values({ name: "Ana", email: "ana@example.com", familyQboId: "123", identityObjectId: "oid-1", status: "active" });
-    await db.insert(parentAuthUser).values({ id: "p5", name: "Ana", email: "ana@example.com", emailVerified: true, objectId: "oid-2" });
-    expect(await resolveGuardian("p5")).toBeNull();
   });
 });

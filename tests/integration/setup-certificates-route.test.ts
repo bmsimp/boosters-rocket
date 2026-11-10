@@ -41,8 +41,8 @@ describe("certificate download", () => {
 
   it("serves the active certificate when nothing is pending", async () => {
     state.setup = true;
-    const active = await seedCertificate("parent-oidc", "active");
-    const der = Buffer.from(await (await call("booster-rocket-parents.cer")).arrayBuffer());
+    const active = await seedCertificate("staff-microsoft", "active");
+    const der = Buffer.from(await (await call("booster-rocket-staff.cer")).arrayBuffer());
     expect(new X509Certificate(der).fingerprint256.replaceAll(":", "")).toBe(
       Buffer.from(active.thumbprintS256, "base64url").toString("hex").toUpperCase());
   });

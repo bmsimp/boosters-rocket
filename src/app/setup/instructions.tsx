@@ -28,20 +28,6 @@ export function GoogleStaffSteps({ appUrl }: { appUrl: string }) {
   );
 }
 
-export function ParentSteps({ appUrl }: { appUrl: string }) {
-  return (
-    <ol className="steps-list">
-      <li>You need an Entra External ID tenant for parents. If you don&apos;t have one, <a href="https://learn.microsoft.com/entra/external-id/customers/how-to-create-external-tenant-portal" {...ext}>create it in the Azure portal</a> first. Then, in the Entra admin center, use <b>Settings</b> (the gear) &gt; <b>Directories + subscriptions</b> to switch to it.</li>
-      <li>On the tenant&apos;s <b>Overview</b>, copy the <b>Tenant ID</b>, and the first part of its <b>Primary domain</b> (for <code>fznparents.onmicrosoft.com</code> that is <code>fznparents</code>) as the tenant subdomain.</li>
-      <li>Open <a href={ENTRA_APPS} {...ext}>App registrations</a> &gt; <b>New registration</b>.<CopyField label="Name" value="Booster Rocket (parents)" /> Choose <b>Accounts in this organizational directory only</b>, and under <b>Redirect URI</b> choose <b>Web</b>:<CopyField label="Redirect URI" value={`${appUrl}/api/auth/parent/callback/parent-oidc`} /> Select <b>Register</b> and copy the <b>Application (client) ID</b>.</li>
-      <li><b>API permissions</b> &gt; <b>Add a permission</b> &gt; <b>Microsoft Graph</b> &gt; <b>Delegated permissions</b>: tick <b>openid</b>, <b>profile</b>, <b>email</b> and <b>offline_access</b>, add them, then <b>Grant admin consent</b>.</li>
-      <li>Open <b>Certificates &amp; secrets</b> &gt; <b>Certificates</b> &gt; <b>Upload certificate</b>, choose the <code>booster-rocket-parents.cer</code> file you downloaded below (Download certificate), and select <b>Add</b>. Booster Rocket made this certificate; its private key never leaves your server.</li>
-      <li><b>External Identities</b> &gt; <b>User flows</b> &gt; <b>New user flow</b>.<CopyField label="User flow name" value="Booster Rocket parents" /> Under <b>Identity providers</b> choose <b>Email one-time passcode</b>, then <b>Create</b>. Open the flow, choose <b>Applications</b> &gt; <b>Add application</b>, and pick <b>Booster Rocket (parents)</b>.</li>
-      <li>Turn sign-up off, so strangers can&apos;t make accounts. The admin center has no switch for this, so use the PowerShell script above, or <a href="https://learn.microsoft.com/entra/external-id/customers/how-to-disable-sign-up-user-flow" {...ext}>Microsoft&apos;s instructions</a> with Graph Explorer, signed in to the External ID tenant.</li>
-    </ol>
-  );
-}
-
 export function ScriptOption({ script, example }: { script: string; example: string }) {
   return (
     <details className="box">

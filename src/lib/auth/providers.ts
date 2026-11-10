@@ -16,8 +16,7 @@ const STAFF_KEYS: readonly ProviderKey[] = ["staff-microsoft", "staff-google"];
 
 export type MicrosoftConfig = { tenantId: string; clientId: string };
 export type GoogleConfig = { clientId: string };
-export type ParentConfig = { tenantSubdomain: string; tenantId: string; clientId: string };
-export type ConfigFor = { "staff-microsoft": MicrosoftConfig; "staff-google": GoogleConfig; "parent-oidc": ParentConfig };
+export type ConfigFor = { "staff-microsoft": MicrosoftConfig; "staff-google": GoogleConfig };
 
 export type LoadedCertificateProvider<K extends CertificateProviderKey> = { key: K; config: ConfigFor[K]; assertion: AssertionKey; expiresAt: Date };
 export type LoadedSecretProvider<K extends ProviderKey> = { key: K; config: ConfigFor[K]; secret: string; expiresAt: Date | null };
@@ -25,7 +24,6 @@ export type LoadedProviders = {
   version: number;
   staffMicrosoft: LoadedCertificateProvider<"staff-microsoft"> | null;
   staffGoogle: LoadedSecretProvider<"staff-google"> | null;
-  parent: LoadedCertificateProvider<"parent-oidc"> | null;
 };
 /** What reaches the browser: certificate views only, never key material or the sealed secret. */
 export type ProviderSummary = {
@@ -37,18 +35,12 @@ export type ProviderSummary = {
 
 export type ProviderDraft =
   | { key: "staff-google"; config: GoogleConfig; secret: string | null; secretExpiresAt: Date | null }
-  | { key: "staff-microsoft"; config: MicrosoftConfig }
-  | { key: "parent-oidc"; config: ParentConfig };
+  | { key: "staff-microsoft"; config: MicrosoftConfig };
 export type CheckedDraft =
   | { key: "staff-google"; config: GoogleConfig; secret: string }
-  | { key: "staff-microsoft"; config: MicrosoftConfig; assertion: AssertionKey }
-  | { key: "parent-oidc"; config: ParentConfig; assertion: AssertionKey };
+  | { key: "staff-microsoft"; config: MicrosoftConfig; assertion: AssertionKey };
 export type CheckResult = { ok: true } | { ok: false; message: string };
 export type CheckFn = (draft: CheckedDraft) => Promise<CheckResult>;
-
-export function parentDiscoveryUrl(c: ParentConfig): string {
-  return `https://${c.tenantSubdomain}.ciamlogin.com/${c.tenantId}/v2.0/.well-known/openid-configuration`;
-}
 
 // ---- loading (cached; a save in this process bumps the version) ----
 
@@ -91,7 +83,7 @@ async function activeAssertion(key: CertificateProviderKey, box: SecretBox): Pro
 }
 
 async function readProviders(v: number, box: SecretBox): Promise<LoadedProviders> {
-  const out: LoadedProviders = { version: v, staffMicrosoft: null, staffGoogle: null, parent: null };
+  const out: LoadedProviders = { version: v, staffMicrosoft: null, staffGoogle: null };
   for (const r of await db.select().from(authProvider)) {
     if (r.key === "staff-google") {
       const secret = openRow(r, box);
@@ -102,13 +94,14 @@ async function readProviders(v: number, box: SecretBox): Promise<LoadedProviders
       out.staffGoogle = { key: r.key, config: r.config as GoogleConfig, secret, expiresAt: r.secretExpiresAt };
       continue;
     }
+    // A parent-oidc row left from before the External ID door was removed (Task 2's migration deletes it).
+    if ((r.key as string) !== "staff-microsoft") continue;
     const credential = await activeAssertion(r.key, box);
     if (credential === null) {
       console.error(`[sign-in] The certificate for ${r.key} is missing or can't be decrypted; treating it as not set up.`);
       continue;
     }
-    if (r.key === "staff-microsoft") out.staffMicrosoft = { key: r.key, config: r.config as MicrosoftConfig, ...credential };
-    else out.parent = { key: r.key, config: r.config as ParentConfig, ...credential };
+    out.staffMicrosoft = { key: r.key, config: r.config as MicrosoftConfig, ...credential };
   }
   return out;
 }
@@ -117,6 +110,7 @@ async function readProviders(v: number, box: SecretBox): Promise<LoadedProviders
 export async function providerSummaries(box: SecretBox = secretBox()): Promise<ProviderSummary[]> {
   const out: ProviderSummary[] = [];
   for (const r of await db.select().from(authProvider)) {
+    if (!isProviderKey(r.key)) continue;
     const base = { key: r.key, config: r.config as Record<string, string> };
     if (!isCertificateProvider(r.key)) {
       out.push({ ...base, credentialUpdatedAt: r.secretUpdatedAt, expiresAt: r.secretExpiresAt, readable: openRow(r, box) !== null,
@@ -171,10 +165,6 @@ const clientGuid = z.string().trim()
   .transform((v) => v.toLowerCase());
 const googleClientId = z.string().trim()
   .refine((v) => /^[\w.-]+\.apps\.googleusercontent\.com$/.test(v), "Google client ID ends in .apps.googleusercontent.com. Copy it from the OAuth client's page.");
-const tenantSubdomain = z.string().trim().toLowerCase()
-  .transform((v) => v.replace(/^https?:\/\//, "").split("/")[0]!.replace(/\.(onmicrosoft|ciamlogin)\.com$/, ""))
-  .refine((v) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(v), "Tenant subdomain is the first part of the tenant's .onmicrosoft.com domain, for example fznparents.");
-
 export function cleanSecret(raw: string): string {
   let s = raw.trim();
   const quoted = s.length >= 2 && ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")));
@@ -193,7 +183,6 @@ const expiry = z.string().trim().transform((v, ctx) => {
 const SCHEMAS = {
   "staff-microsoft": z.object({ tenantId, clientId: clientGuid }),
   "staff-google": z.object({ clientId: googleClientId }),
-  "parent-oidc": z.object({ tenantSubdomain, tenantId, clientId: clientGuid }),
 } as const;
 
 export function parseProviderForm(key: ProviderKey, fields: Record<string, string>):

@@ -16,7 +16,7 @@ export function ProviderForm({ providerKey, summary, action, certificateActions 
     async (_: SaveOutcome | null, f: FormData) => safely(() => action(f), { ok: false as const, errors: [ACTION_FAILED] }), null);
   const google = providerKey === "staff-google";
   const cert = usesCertificate(providerKey);
-  const fileName = providerKey === "parent-oidc" ? "booster-rocket-parents.cer" : "booster-rocket-staff.cer";
+  const fileName = "booster-rocket-staff.cer";
   const switching = Boolean(summary?.pendingCertificate && summary?.certificate);
   return (
     <div className="stack">

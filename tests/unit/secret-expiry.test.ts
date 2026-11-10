@@ -3,7 +3,7 @@ import { expiringSecrets, certificateNextStep } from "@/app/staff/(app)/secret-e
 
 const now = new Date("2026-11-08T00:00:00Z");
 const view = { id: "x", thumbprintSha1: "AB", thumbprintS256: "cd", notAfter: now, createdAt: now };
-const s = (key: "staff-microsoft" | "parent-oidc", expires: string | null, readable = true, pending: "none" | "readable" | "unreadable" = "none") =>
+const s = (key: "staff-microsoft", expires: string | null, readable = true, pending: "none" | "readable" | "unreadable" = "none") =>
   ({ key, config: {}, credentialUpdatedAt: now, expiresAt: expires ? new Date(expires) : null, readable, certificate: null,
     pendingCertificate: pending === "none" ? null : view, pendingReadable: pending === "readable" });
 
@@ -14,8 +14,8 @@ describe("expiringSecrets", () => {
     expect(expiringSecrets([s("staff-microsoft", "2026-11-01T00:00:00Z")], now)).toHaveLength(1);
   });
   it("ignores secrets with no expiry date, and always warns about unreadable ones", () => {
-    expect(expiringSecrets([s("parent-oidc", null)], now)).toHaveLength(0);
-    expect(expiringSecrets([s("parent-oidc", null, false)], now)).toEqual([{ key: "parent-oidc", expiresAt: null, unreadable: true, pendingCertificate: false }]);
+    expect(expiringSecrets([s("staff-microsoft", null)], now)).toHaveLength(0);
+    expect(expiringSecrets([s("staff-microsoft", null, false)], now)).toEqual([{ key: "staff-microsoft", expiresAt: null, unreadable: true, pendingCertificate: false }]);
   });
   it("says whether a usable replacement certificate is already pending", () => {
     const soon = "2026-11-20T00:00:00Z";

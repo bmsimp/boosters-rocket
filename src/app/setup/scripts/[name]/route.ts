@@ -8,7 +8,6 @@ import { downloadAccess, certificateForDownload } from "@/lib/setup/download-acc
 export const dynamic = "force-dynamic";
 const SCRIPTS = new Map<string, CertificateProviderKey>([
   ["New-BoosterRocketStaffApp.ps1", "staff-microsoft"],
-  ["New-BoosterRocketParentApp.ps1", "parent-oidc"],
 ]);
 
 export async function GET(_req: Request, { params }: { params: Promise<{ name: string }> }) {

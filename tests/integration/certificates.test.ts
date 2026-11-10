@@ -28,8 +28,8 @@ describe("provider certificates", () => {
   });
 
   it("returns the same pending certificate on a second call", async () => {
-    const a = await getOrCreatePendingCertificate("parent-oidc", opts);
-    const b = await getOrCreatePendingCertificate("parent-oidc", opts);
+    const a = await getOrCreatePendingCertificate("staff-microsoft", opts);
+    const b = await getOrCreatePendingCertificate("staff-microsoft", opts);
     expect(b.id).toBe(a.id);
     expect(await db.select().from(providerCertificate)).toHaveLength(1);
   });
@@ -60,10 +60,10 @@ describe("provider certificates", () => {
   });
 
   it("retireCertificates retires pending and active and nulls their keys", async () => {
-    await getOrCreatePendingCertificate("parent-oidc", opts);
-    await db.transaction((tx) => activatePendingCertificate(tx, "parent-oidc", { actor, ip: null }));
-    await getOrCreatePendingCertificate("parent-oidc", opts);
-    await db.transaction((tx) => retireCertificates(tx, "parent-oidc", { actor, ip: null }));
+    await getOrCreatePendingCertificate("staff-microsoft", opts);
+    await db.transaction((tx) => activatePendingCertificate(tx, "staff-microsoft", { actor, ip: null }));
+    await getOrCreatePendingCertificate("staff-microsoft", opts);
+    await db.transaction((tx) => retireCertificates(tx, "staff-microsoft", { actor, ip: null }));
     const rows = await db.select().from(providerCertificate);
     expect(rows.every((r) => r.status === "retired" && r.privateKeyCiphertext === null)).toBe(true);
   });
@@ -95,7 +95,7 @@ describe("provider certificates", () => {
   });
 
   it("startCertificateReplacement makes one with nothing there, and only one under concurrent calls", async () => {
-    const rows = await Promise.all(Array.from({ length: 4 }, () => startCertificateReplacement("parent-oidc", opts)));
+    const rows = await Promise.all(Array.from({ length: 4 }, () => startCertificateReplacement("staff-microsoft", opts)));
     expect(new Set(rows.map((r) => r.id)).size).toBe(1);
     expect(await db.select().from(providerCertificate)).toHaveLength(1);
   });
@@ -117,9 +117,9 @@ describe("provider certificates", () => {
   });
 
   it("startCertificateReplacement replaces an active certificate whose key can't be decrypted", async () => {
-    const active = await seedCertificate("parent-oidc", "active");
+    const active = await seedCertificate("staff-microsoft", "active");
     await db.update(providerCertificate).set({ privateKeyKeyId: "deadbeef" });
-    const pending = await startCertificateReplacement("parent-oidc", opts);
+    const pending = await startCertificateReplacement("staff-microsoft", opts);
     expect(pending.id).not.toBe(active.id);
     expect(openCertificateKey(pending)).not.toBeNull();
   });
@@ -149,8 +149,8 @@ describe("provider certificates", () => {
 
   it("maps file names both ways and refuses anything else", () => {
     expect(certificateFileName("staff-microsoft")).toBe("booster-rocket-staff.cer");
-    expect(certificateFileName("parent-oidc")).toBe("booster-rocket-parents.cer");
-    expect(certificateKeyForFile("booster-rocket-parents.cer")).toBe("parent-oidc");
+    expect(certificateKeyForFile("booster-rocket-staff.cer")).toBe("staff-microsoft");
+    expect(certificateKeyForFile("booster-rocket-parents.cer")).toBeNull();
     expect(certificateKeyForFile("../x.cer")).toBeNull();
   });
 });
