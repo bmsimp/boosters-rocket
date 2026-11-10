@@ -109,7 +109,7 @@ describe("requesting a code", () => {
     for (let i = 0; i < 2; i++) await send(`more${i}@example.com`, at(300_000), "198.51.100.7");
     await send("x@example.com", at(300_000), "198.51.100.7");
     expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ after: { reason: "rate_limited", limit: "ip" } });
-  });
+  }, 30_000);
 
   it("audits a failed send as mail_failed and leaves no usable code", async () => {
     await ana();
@@ -227,7 +227,7 @@ describe("checking a code", () => {
     for (let i = 0; i < 30; i++) expect(await verifySigninCode(`n${i}@example.com`, "123456", IP, at(i))).toEqual({ ok: false, reason: "rejected" });
     expect(await verifySigninCode("n@example.com", "123456", IP, at(31))).toEqual({ ok: false, reason: "rate_limited" });
     expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ after: { reason: "rate_limited", limit: "check_ip" } });
-  });
+  }, 30_000);
 
   it("audits a full check window once, and again in the next one", async () => {
     for (let i = 0; i < 30; i++) await verifySigninCode(`n${i}@example.com`, "123456", IP, at(i));

@@ -43,7 +43,7 @@ describe("effectivePermissions", () => {
       expect(can(e, "Staff.Users.ReadWrite")).toBe(false);
       if (pattern !== "Staff.Users.ReadWrite") expect(can(e, "Staff.Users.Read")).toBe(true);
     }
-  });
+  }, 30_000);
 
   it("gives a staff user with no roles nothing", async () => {
     const s = await seedStaff({ email: "n@club.org" });

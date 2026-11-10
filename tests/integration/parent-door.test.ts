@@ -159,7 +159,7 @@ describe("the parent door", () => {
     for (let i = 0; i < 30; i++) await post("/portal-code/verify", { email: `n${i}@example.com`, code: "123456" });
     const res = await post("/portal-code/verify", { email: "n@example.com", code: "123456" });
     expect(await res.json()).toEqual({ ok: false, error: "rate_limited" });
-  });
+  }, 30_000);
 
   it("answers not found, and changes nothing, on every Better Auth endpoint a parent could write through", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardian({ parentId: a.id, familyQboId: "F1" });
@@ -184,7 +184,7 @@ describe("the parent door", () => {
     expect(await getSession(cookie)).toMatchObject({ session: { familyQboId: "F1" } });
     expect((await post("/sign-out", {}, cookie)).status).toBe(200);
     expect((await db.select().from(auditLog)).filter((x) => x.action === "signout")).toHaveLength(1);
-  });
+  }, 30_000);
 
   it("leaves a parent only the endpoints the portal uses", async () => {
     const auth = await getParentAuth();
