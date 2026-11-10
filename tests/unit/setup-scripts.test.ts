@@ -56,33 +56,73 @@ describe("setup scripts find the existing app by listing, not by a name filter",
 });
 
 describe("staff script: the optional mail part", () => {
+  const connect = staff.indexOf("Connect-ExchangeOnline -ShowBanner:$false");
   const mailPart = staff.slice(staff.indexOf("if ($SetUpMail)"));
+  const at = (needle: string) => {
+    const i = staff.indexOf(needle);
+    expect(i, needle).toBeGreaterThan(-1);
+    return i;
+  };
 
-  it("is opt-in and needs the mailbox", () => {
+  it("is opt-in and needs a mailbox that is an email address", () => {
     expect(staff).toContain("[switch]$SetUpMail");
     expect(staff).toContain("[string]$Mailbox");
     expect(staff).toMatch(/if \(\$SetUpMail -and -not \$Mailbox\) \{ throw/);
     expect(staff.indexOf("if ($SetUpMail)")).toBeGreaterThan(0);
+    expect(staff).toMatch(/\$Mailbox -notmatch '[^']+'\) \{ throw/);
+    expect(at("$Mailbox -notmatch")).toBeLessThan(connect);
   });
-  it("refuses while the app holds unscoped Graph Mail.Send, and says how to remove it", () => {
+  it("refuses while the app holds unscoped Graph Mail.Send, before connecting to Exchange or creating anything there", () => {
     expect(mailPart).toContain("b633e1c5-b582-4048-a93e-9f11b44c7e96");
-    expect(mailPart).toContain("appRoleAssignments");
     expect(mailPart).toContain("would let it send as anyone");
-    expect(mailPart.indexOf("b633e1c5")).toBeLessThan(mailPart.indexOf("Connect-ExchangeOnline"));
+    const refusal = at("/appRoleAssignments");
+    expect(refusal).toBeLessThan(connect);
+    expect(at("would let it send as anyone")).toBeLessThan(connect);
+    expect(refusal).toBeLessThan(at("New-ServicePrincipal"));
   });
   it("connects to Exchange Online interactively, never with a device code, and disconnects", () => {
     expect(mailPart).toContain("Connect-ExchangeOnline -ShowBanner:$false");
-    expect(mailPart).not.toMatch(/-Device\b|UseDeviceAuthentication/i);
+    expect(mailPart).not.toMatch(/-Device|UseDeviceAuthentication/i);
     expect(mailPart).toMatch(/finally\s*\{[\s\S]*Disconnect-ExchangeOnline -Confirm:\$false/);
   });
-  it("scopes Application Mail.Send to the one mailbox", () => {
+  it("checks the Exchange tenant is the one being set up, between connecting and the first Exchange lookup or change", () => {
+    const check = at("(Get-ConnectionInformation");
+    expect(check).toBeGreaterThan(connect);
+    expect(staff.slice(check, check + 400)).toContain("$tenant");
+    expect(check).toBeLessThan(at("Get-EXOMailbox"));
+    expect(check).toBeLessThan(at("New-ServicePrincipal"));
+    expect(check).toBeLessThan(at("New-ManagementScope"));
+  });
+  it("scopes Application Mail.Send to the one looked-up mailbox, with one quote-safe filter", () => {
     expect(mailPart).toContain("New-ServicePrincipal -AppId $app.appId -ObjectId $sp.id");
-    expect(mailPart).toContain("-RecipientRestrictionFilter \"PrimarySmtpAddress -eq '$Mailbox'\"");
-    expect(mailPart).toContain("New-ManagementRoleAssignment -App $sp.id -Role 'Application Mail.Send' -CustomResourceScope $ScopeName");
-    expect(mailPart).toContain("Test-ServicePrincipalAuthorization -Identity $sp.id -Resource $Mailbox");
+    expect(mailPart).toContain("$mb = Get-EXOMailbox -Identity $Mailbox");
+    expect(mailPart).toContain("Replace(\"'\", \"''\")");
+    expect(mailPart).toContain("PrimarySmtpAddress -eq '$");
+    expect(mailPart.split("PrimarySmtpAddress -eq").length - 1).toBe(1);
+    expect(mailPart).toContain("New-ManagementScope -Name $ScopeName -RecipientRestrictionFilter $filter");
+    expect(mailPart).toContain("Set-ManagementScope -Identity $ScopeName -RecipientRestrictionFilter $filter");
+    expect(mailPart).toContain("Test-ServicePrincipalAuthorization -Identity $sp.id -Resource $mailAddress");
     expect(mailPart).not.toMatch(/Add-MailboxPermission|New-ApplicationAccessPolicy|Mail\.Send'\s*=\s*'Role'/);
   });
+  it("scopes the role assignment on both the create and the rescope path, and refuses when more than one exists", () => {
+    expect(mailPart).toContain("New-ManagementRoleAssignment -App $sp.id -Role 'Application Mail.Send' -CustomResourceScope $ScopeName");
+    expect(mailPart).toMatch(/Set-ManagementRoleAssignment -Identity \S+ -CustomResourceScope \$ScopeName/);
+    expect(mailPart).toMatch(/\.Count -gt 1\) \{\s*throw/);
+  });
   it("checks the mailbox exists before changing anything in Exchange", () => {
-    expect(mailPart.indexOf("Get-EXOMailbox -Identity $Mailbox")).toBeLessThan(mailPart.indexOf("New-ServicePrincipal"));
+    expect(at("Get-EXOMailbox -Identity $Mailbox")).toBeLessThan(at("New-ServicePrincipal"));
+    expect(mailPart).toMatch(/if \(-not \$mb\) \{\s*throw/);
+  });
+  it("proves every sending permission the app holds is limited to the scope, before claiming success", () => {
+    const all = at("@(Test-ServicePrincipalAuthorization -Identity $sp.id)");
+    expect(all).toBeLessThan(at("The app can now send as"));
+    expect(all).toBeGreaterThan(at("CustomResourceScope $ScopeName"));
+    const block = staff.slice(all, at("The app can now send as"));
+    expect(block).toContain("Mail.Send");
+    expect(block).toContain("AllowedResourceScope");
+    expect(block).toContain("$ScopeName");
+    expect(block).toContain("Remove");
+    expect(block).toMatch(/throw/);
+    expect(at("-Resource $mailAddress")).toBeLessThan(at("The app can now send as"));
   });
 });

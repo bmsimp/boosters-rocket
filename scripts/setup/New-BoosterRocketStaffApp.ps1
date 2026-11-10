@@ -43,6 +43,7 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
 if ($SetUpMail -and -not $Mailbox) { throw 'Pass -Mailbox with the address the portal sends as, for example -Mailbox webmaster@yourclub.org' }
 if ($SetUpMail) {
   $Mailbox = $Mailbox.Trim().ToLowerInvariant()
+  if ($Mailbox -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { throw "'$Mailbox' is not an email address. Pass the mailbox's address, for example -Mailbox webmaster@yourclub.org" }
   if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
     Write-Host 'Setting up mail needs the Exchange Online PowerShell module. Install it with:'
     Write-Host '  Install-Module ExchangeOnlineManagement -Scope CurrentUser'
@@ -130,29 +131,48 @@ try {
     }
     Connect-ExchangeOnline -ShowBanner:$false
     try {
-      if (-not (Get-EXOMailbox -Identity $Mailbox -ErrorAction SilentlyContinue)) {
+      $signedInTenant = (Get-ConnectionInformation | Select-Object -Last 1).TenantID
+      if ("$signedInTenant" -ne "$tenant") {
+        throw "You signed in to Exchange Online in tenant $signedInTenant, but this script is setting up tenant $tenant. Run it again and sign in with an administrator of tenant $tenant."
+      }
+      $mb = Get-EXOMailbox -Identity $Mailbox -ErrorAction SilentlyContinue | Select-Object -First 1
+      if (-not $mb) {
         throw "Exchange Online has no mailbox $Mailbox. Use the address of an existing mailbox in this tenant."
       }
+      $mailAddress = "$($mb.PrimarySmtpAddress)"
+      $quoted = $mailAddress.Replace("'", "''")
+      $filter = "PrimarySmtpAddress -eq '$quoted'"
       if (-not (Get-ServicePrincipal -Identity $sp.id -ErrorAction SilentlyContinue)) {
         New-ServicePrincipal -AppId $app.appId -ObjectId $sp.id -DisplayName $DisplayName | Out-Null
         Write-Host "Pointed Exchange Online at the app '$DisplayName'."
       }
-      $filter = "PrimarySmtpAddress -eq '$Mailbox'"
       if (Get-ManagementScope -Identity $ScopeName -ErrorAction SilentlyContinue) {
         Set-ManagementScope -Identity $ScopeName -RecipientRestrictionFilter $filter
       } else {
-        New-ManagementScope -Name $ScopeName -RecipientRestrictionFilter "PrimarySmtpAddress -eq '$Mailbox'" | Out-Null
+        New-ManagementScope -Name $ScopeName -RecipientRestrictionFilter $filter | Out-Null
       }
-      $assignment = Get-ManagementRoleAssignment -Role 'Application Mail.Send' -ErrorAction SilentlyContinue |
-        Where-Object { $_.RoleAssigneeName -eq $sp.id -or $_.RoleAssignee -eq $sp.id } | Select-Object -First 1
-      if ($assignment) {
-        Set-ManagementRoleAssignment -Identity $assignment.Identity -CustomResourceScope $ScopeName
+      $assignments = @(Get-ManagementRoleAssignment -Role 'Application Mail.Send' -ErrorAction SilentlyContinue |
+        Where-Object { $_.RoleAssigneeName -eq $sp.id })
+      if ($assignments.Count -gt 1) {
+        throw "The app has more than one 'Application Mail.Send' role assignment in Exchange Online ($(($assignments | ForEach-Object { $_.Name }) -join ', ')). Remove the extras in Exchange Online, then run this script again."
+      }
+      if ($assignments.Count -eq 1) {
+        Set-ManagementRoleAssignment -Identity $assignments[0].Identity -CustomResourceScope $ScopeName
       } else {
         New-ManagementRoleAssignment -App $sp.id -Role 'Application Mail.Send' -CustomResourceScope $ScopeName | Out-Null
       }
-      $check = Test-ServicePrincipalAuthorization -Identity $sp.id -Resource $Mailbox | Where-Object { $_.RoleName -eq 'Application Mail.Send' }
-      if ($check -and $check.InScope) { Write-Host "The app can now send as $Mailbox, and only as $Mailbox." }
-      else { Write-Host "The role assignment is in place, but Exchange doesn't report $Mailbox in scope yet. Check the mailbox address." }
+      # Other roles can also let the app send; the portal never removes them, so insist they are absent or limited to the scope.
+      $sending = @(@(Test-ServicePrincipalAuthorization -Identity $sp.id) | Where-Object { "$($_.GrantedPermissions)" -like '*Mail.Send*' })
+      $outside = @($sending | Where-Object { $_.AllowedResourceScope -ne $ScopeName })
+      if ($sending.Count -eq 0 -or $outside.Count -gt 0) {
+        $what = if ($sending.Count -eq 0) { 'Exchange does not report any sending permission for the app' } else { ($outside | ForEach-Object { "$($_.RoleName) on $(if ($_.AllowedResourceScope) { $_.AllowedResourceScope } else { 'the whole organization' })" }) -join '; ' }
+        throw "The app could send as more than $mailAddress or as no one: $what. Remove the extra role assignments for the app in Exchange Online (Get-ManagementRoleAssignment -RoleAssignee $($sp.id)), then run this script again."
+      }
+      $check = Test-ServicePrincipalAuthorization -Identity $sp.id -Resource $mailAddress | Where-Object { $_.GrantedPermissions -like '*Mail.Send*' }
+      if (-not $check -or @($check | Where-Object { -not $_.InScope }).Count -gt 0) {
+        throw "The role assignment is in place, but Exchange doesn't report $mailAddress in scope. Check the mailbox address, then run this script again."
+      }
+      Write-Host "The app can now send as $mailAddress, and only as $mailAddress."
       Write-Host 'Microsoft can take from 30 minutes to 2 hours to apply this. Then use Send test email on the setup page.'
     } finally {
       Disconnect-ExchangeOnline -Confirm:$false | Out-Null
@@ -164,7 +184,7 @@ try {
   Write-Host "  Tenant ID:            $tenant"
   Write-Host "  Client ID:            $($app.appId)"
   Write-Host "  Certificate:          $($Certificate.Thumbprint) (expires $($Certificate.NotAfter.ToUniversalTime().ToString('yyyy-MM-dd')))"
-  if ($SetUpMail) { Write-Host "  Mail:                 Microsoft 365, sending as $Mailbox" }
+  if ($SetUpMail) { Write-Host "  Mail:                 Microsoft 365, sending as $mailAddress" }
   Write-Host 'A new certificate can take a minute to start working. If the setup page says Microsoft does not have it yet, wait and try again.'
 } finally {
   Disconnect-MgGraph | Out-Null
