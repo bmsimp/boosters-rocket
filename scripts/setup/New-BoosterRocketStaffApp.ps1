@@ -135,7 +135,8 @@ try {
       if ("$signedInTenant" -ne "$tenant") {
         throw "You signed in to Exchange Online in tenant $signedInTenant, but this script is setting up tenant $tenant. Run it again and sign in with an administrator of tenant $tenant."
       }
-      $mb = Get-EXOMailbox -Identity $Mailbox -ErrorAction SilentlyContinue | Select-Object -First 1
+      # Not '| Select-Object -First 1': stopping this cmdlet's pipeline early ended the whole script without a word (first tenant run, 2026-11-10).
+      $mb = @(Get-EXOMailbox -Identity $Mailbox -ErrorAction SilentlyContinue)[0]
       if (-not $mb) {
         throw "Exchange Online has no mailbox $Mailbox. Use the address of an existing mailbox in this tenant."
       }

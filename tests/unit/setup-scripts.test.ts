@@ -95,7 +95,9 @@ describe("staff script: the optional mail part", () => {
   });
   it("scopes Application Mail.Send to the one looked-up mailbox, with one quote-safe filter", () => {
     expect(mailPart).toContain("New-ServicePrincipal -AppId $app.appId -ObjectId $sp.id");
-    expect(mailPart).toContain("$mb = Get-EXOMailbox -Identity $Mailbox");
+    expect(mailPart).toContain("$mb = @(Get-EXOMailbox -Identity $Mailbox");
+    // A cmdlet piped into Select-Object -First has its pipeline stopped early; with Get-EXOMailbox that ended the script silently.
+    expect(staff).not.toMatch(/Get-EXOMailbox.*\|\s*Select-Object -First/);
     expect(mailPart).toContain("Replace(\"'\", \"''\")");
     expect(mailPart).toContain("PrimarySmtpAddress -eq '$");
     expect(mailPart.split("PrimarySmtpAddress -eq").length - 1).toBe(1);
