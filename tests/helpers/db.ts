@@ -1,11 +1,13 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { role, staffUser, roleAssignment, guardian, parent, parentAuthUser, parentAuthSession, authProvider, providerCertificate, type GuardianStatus, type DisabledReason } from "@/lib/db/schema";
+import { role, staffUser, roleAssignment, guardian, parent, parentAuthUser, parentAuthSession, authProvider, providerCertificate, setting, type GuardianStatus, type DisabledReason } from "@/lib/db/schema";
 import { generateCertificate } from "@/lib/auth/certificate-crypto";
 import { isCertificateProvider, type CertificateProviderKey } from "@/lib/auth/certificates";
 import { secretBox } from "@/lib/crypto/secret-box";
 import { invalidateProviders, type ProviderKey } from "@/lib/auth/providers";
 import { eq } from "drizzle-orm";
+import { mailConfigHash } from "@/lib/mail/config-hash";
+import type { StoredMailConfig } from "@/lib/mail/types";
 
 const TABLES = [
   "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "signin_code", "rate_limit_event", "parent_email_change", "setting", "auth_provider", "provider_certificate",
@@ -87,4 +89,10 @@ export async function seedProvider(key: ProviderKey, config: Record<string, stri
   const sealed = secretBox().seal(secret, key);
   await db.insert(authProvider).values({ key, config, secretCiphertext: sealed.ciphertext, secretKeyId: sealed.keyId, secretExpiresAt: expiresAt });
   invalidateProviders();
+}
+
+/** Mail settings that count as working (a test send recorded for exactly these settings). */
+export async function seedWorkingMail(config: StoredMailConfig = { method: "graph", mailbox: "webmaster@example.org" }) {
+  const status = { verifiedHash: mailConfigHash(config), verifiedAt: new Date().toISOString(), lastSuccessAt: null, lastFailureAt: null, lastError: null };
+  await db.insert(setting).values([{ key: "mail", value: config }, { key: "mail.status", value: status }]);
 }
