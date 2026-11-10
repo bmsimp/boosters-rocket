@@ -12,13 +12,21 @@
        server; only its public half is in this script),
   and prints the values to paste into the Booster Rocket setup page. Nothing is written to disk.
   Safe to run again: it reuses the app and adds the certificate if it is not already there, leaving other certificates alone.
+  With -SetUpMail -Mailbox <address>, it also lets the app send mail as that one mailbox (Exchange Online RBAC for
+  Applications: a management scope holding only the mailbox, and the "Application Mail.Send" role on that scope). It
+  refuses while the app holds Microsoft Graph's unscoped Mail.Send application permission. This part needs an Exchange
+  administrator and the ExchangeOnlineManagement module.
 .EXAMPLE
   ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e
+.EXAMPLE
+  ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e -SetUpMail -Mailbox webmaster@fznband.org
 #>
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)][string]$TenantId,
-  [string]$AppUrl = '__BOOSTER_ROCKET_APP_URL__'
+  [string]$AppUrl = '__BOOSTER_ROCKET_APP_URL__',
+  [switch]$SetUpMail,
+  [string]$Mailbox
 )
 $ErrorActionPreference = 'Stop'
 
@@ -32,6 +40,17 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
   Write-Host '  Install-Module Microsoft.Graph.Authentication -Scope CurrentUser'
   exit 2
 }
+if ($SetUpMail -and -not $Mailbox) { throw 'Pass -Mailbox with the address the portal sends as, for example -Mailbox webmaster@yourclub.org' }
+if ($SetUpMail) {
+  $Mailbox = $Mailbox.Trim().ToLowerInvariant()
+  if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+    Write-Host 'Setting up mail needs the Exchange Online PowerShell module. Install it with:'
+    Write-Host '  Install-Module ExchangeOnlineManagement -Scope CurrentUser'
+    exit 2
+  }
+}
+$MailSendAppRoleId = 'b633e1c5-b582-4048-a93e-9f11b44c7e96' # Microsoft Graph application permission Mail.Send
+$ScopeName = 'Booster Rocket mail sender'
 
 $DisplayName = 'Booster Rocket (staff)'
 $RedirectUri = "$AppUrl/api/auth/staff/callback/microsoft"
@@ -103,11 +122,49 @@ try {
     Write-Host 'Added the Booster Rocket certificate to the app. Certificates already on it were kept.'
   }
 
+  if ($SetUpMail) {
+    # An unscoped Graph Mail.Send grant would let the app send as anyone; RBAC for Applications only adds to it.
+    $grants = @((Invoke-MgGraphRequest GET "v1.0/servicePrincipals/$($sp.id)/appRoleAssignments").value)
+    if ($grants | Where-Object { $_.resourceId -eq $graphSp.id -and $_.appRoleId -eq $MailSendAppRoleId }) {
+      throw "The app '$DisplayName' holds Microsoft Graph's Mail.Send application permission, which would let it send as anyone. Remove it first: Entra admin center > Enterprise applications > $DisplayName > Permissions, select Mail.Send and Revoke permission (and remove Mail.Send from App registrations > $DisplayName > API permissions). Then run this script again."
+    }
+    Connect-ExchangeOnline -ShowBanner:$false
+    try {
+      if (-not (Get-EXOMailbox -Identity $Mailbox -ErrorAction SilentlyContinue)) {
+        throw "Exchange Online has no mailbox $Mailbox. Use the address of an existing mailbox in this tenant."
+      }
+      if (-not (Get-ServicePrincipal -Identity $sp.id -ErrorAction SilentlyContinue)) {
+        New-ServicePrincipal -AppId $app.appId -ObjectId $sp.id -DisplayName $DisplayName | Out-Null
+        Write-Host "Pointed Exchange Online at the app '$DisplayName'."
+      }
+      $filter = "PrimarySmtpAddress -eq '$Mailbox'"
+      if (Get-ManagementScope -Identity $ScopeName -ErrorAction SilentlyContinue) {
+        Set-ManagementScope -Identity $ScopeName -RecipientRestrictionFilter $filter
+      } else {
+        New-ManagementScope -Name $ScopeName -RecipientRestrictionFilter "PrimarySmtpAddress -eq '$Mailbox'" | Out-Null
+      }
+      $assignment = Get-ManagementRoleAssignment -Role 'Application Mail.Send' -ErrorAction SilentlyContinue |
+        Where-Object { $_.RoleAssigneeName -eq $sp.id -or $_.RoleAssignee -eq $sp.id } | Select-Object -First 1
+      if ($assignment) {
+        Set-ManagementRoleAssignment -Identity $assignment.Identity -CustomResourceScope $ScopeName
+      } else {
+        New-ManagementRoleAssignment -App $sp.id -Role 'Application Mail.Send' -CustomResourceScope $ScopeName | Out-Null
+      }
+      $check = Test-ServicePrincipalAuthorization -Identity $sp.id -Resource $Mailbox | Where-Object { $_.RoleName -eq 'Application Mail.Send' }
+      if ($check -and $check.InScope) { Write-Host "The app can now send as $Mailbox, and only as $Mailbox." }
+      else { Write-Host "The role assignment is in place, but Exchange doesn't report $Mailbox in scope yet. Check the mailbox address." }
+      Write-Host 'Microsoft can take from 30 minutes to 2 hours to apply this. Then use Send test email on the setup page.'
+    } finally {
+      Disconnect-ExchangeOnline -Confirm:$false | Out-Null
+    }
+  }
+
   Write-Host ''
   Write-Host 'Enter these on the Booster Rocket setup page. There is no secret to copy.'
   Write-Host "  Tenant ID:            $tenant"
   Write-Host "  Client ID:            $($app.appId)"
   Write-Host "  Certificate:          $($Certificate.Thumbprint) (expires $($Certificate.NotAfter.ToUniversalTime().ToString('yyyy-MM-dd')))"
+  if ($SetUpMail) { Write-Host "  Mail:                 Microsoft 365, sending as $Mailbox" }
   Write-Host 'A new certificate can take a minute to start working. If the setup page says Microsoft does not have it yet, wait and try again.'
 } finally {
   Disconnect-MgGraph | Out-Null

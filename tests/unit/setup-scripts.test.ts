@@ -54,3 +54,35 @@ describe("setup scripts find the existing app by listing, not by a name filter",
     expect(s).not.toContain("displayName eq");
   });
 });
+
+describe("staff script: the optional mail part", () => {
+  const mailPart = staff.slice(staff.indexOf("if ($SetUpMail)"));
+
+  it("is opt-in and needs the mailbox", () => {
+    expect(staff).toContain("[switch]$SetUpMail");
+    expect(staff).toContain("[string]$Mailbox");
+    expect(staff).toMatch(/if \(\$SetUpMail -and -not \$Mailbox\) \{ throw/);
+    expect(staff.indexOf("if ($SetUpMail)")).toBeGreaterThan(0);
+  });
+  it("refuses while the app holds unscoped Graph Mail.Send, and says how to remove it", () => {
+    expect(mailPart).toContain("b633e1c5-b582-4048-a93e-9f11b44c7e96");
+    expect(mailPart).toContain("appRoleAssignments");
+    expect(mailPart).toContain("would let it send as anyone");
+    expect(mailPart.indexOf("b633e1c5")).toBeLessThan(mailPart.indexOf("Connect-ExchangeOnline"));
+  });
+  it("connects to Exchange Online interactively, never with a device code, and disconnects", () => {
+    expect(mailPart).toContain("Connect-ExchangeOnline -ShowBanner:$false");
+    expect(mailPart).not.toMatch(/-Device\b|UseDeviceAuthentication/i);
+    expect(mailPart).toMatch(/finally\s*\{[\s\S]*Disconnect-ExchangeOnline -Confirm:\$false/);
+  });
+  it("scopes Application Mail.Send to the one mailbox", () => {
+    expect(mailPart).toContain("New-ServicePrincipal -AppId $app.appId -ObjectId $sp.id");
+    expect(mailPart).toContain("-RecipientRestrictionFilter \"PrimarySmtpAddress -eq '$Mailbox'\"");
+    expect(mailPart).toContain("New-ManagementRoleAssignment -App $sp.id -Role 'Application Mail.Send' -CustomResourceScope $ScopeName");
+    expect(mailPart).toContain("Test-ServicePrincipalAuthorization -Identity $sp.id -Resource $Mailbox");
+    expect(mailPart).not.toMatch(/Add-MailboxPermission|New-ApplicationAccessPolicy|Mail\.Send'\s*=\s*'Role'/);
+  });
+  it("checks the mailbox exists before changing anything in Exchange", () => {
+    expect(mailPart.indexOf("Get-EXOMailbox -Identity $Mailbox")).toBeLessThan(mailPart.indexOf("New-ServicePrincipal"));
+  });
+});
