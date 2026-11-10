@@ -1,8 +1,12 @@
 import { PROVIDER_LABELS, toSummaryView } from "@/app/components/sign-in-settings/labels";
 import { ProviderForm } from "@/app/components/sign-in-settings/provider-form";
 import type { ProviderKey, ProviderSummary } from "@/lib/auth/providers";
+import type { MailSummary } from "@/lib/mail/settings";
+import { MailSettingsCard } from "@/app/components/mail-settings/mail-card";
+import { MailHelp } from "@/app/components/mail-settings/mail-steps";
 import {
   saveSetupProviderAction, goToStepAction, saveAdminEmailAction, startCertificateReplacementSetupAction, discardCertificateReplacementSetupAction,
+  saveSetupMailAction, sendSetupTestMailAction,
 } from "./actions";
 import { MicrosoftStaffSteps, GoogleStaffSteps, ScriptOption } from "./instructions";
 import { SetupStaffSignIn, SetupStaffSignOut } from "./setup-buttons";
@@ -30,7 +34,25 @@ export function StaffStep({ appUrl, byKey, error }: { appUrl: string; byKey: ByK
         <GoogleStaffSteps appUrl={appUrl} />
         <ProviderForm providerKey="staff-google" summary={view(byKey["staff-google"])} action={saveSetupProviderAction.bind(null, "staff-google")} />
       </section>
-      <form action={goToStepAction.bind(null, "admin")}><button className="btn" disabled={!ready}>Next: first Admin</button></form>
+      <form action={goToStepAction.bind(null, "mail")}><button className="btn" disabled={!ready}>Next: outgoing mail</button></form>
+    </>
+  );
+}
+
+export function MailStep({ summary, error }: { summary: MailSummary; error?: string }) {
+  return (
+    <>
+      <h2 className="page-title">Step 2: Outgoing mail</h2>
+      <p className="lede">Parents sign in with a code the portal emails them, so the portal has to be able to send mail first. Use Microsoft 365 if the club has it; otherwise use your mail provider&apos;s SMTP settings.</p>
+      {error === "mail_first" && <p role="alert" className="errors">Save the mail settings and send a test email before going on.</p>}
+      <section className="box" aria-labelledby="mail-h"><h2 id="mail-h">Outgoing mail</h2>
+        <MailSettingsCard summary={summary} save={saveSetupMailAction} test={sendSetupTestMailAction} />
+        <MailHelp tenant="<your tenant ID>" />
+      </section>
+      <div className="stack">
+        <form action={goToStepAction.bind(null, "admin")}><button className="btn" disabled={!summary.working}>Next: first Admin</button></form>
+        <form action={goToStepAction.bind(null, "staff")}><button className="btn btn-line">Back to staff sign-in</button></form>
+      </div>
     </>
   );
 }
@@ -48,7 +70,7 @@ export function AdminStep({ adminEmail, byKey, error, signinFailed }: { adminEma
   const message = signinFailed ? SIGNIN_FAILED : error ? ADMIN_ERRORS[error] : undefined;
   return (
     <>
-      <h2 className="page-title">Step 2: First Admin</h2>
+      <h2 className="page-title">Step 3: First Admin</h2>
       <p className="lede">Enter the email of the person who will be Admin, then sign in as them. When that works, setup closes and you&apos;re taken to the staff home.</p>
       <section className="box" aria-labelledby="a-h"><h2 id="a-h">Admin</h2>
         <AdminEmailForm initial={adminEmail ?? ""} action={saveAdminEmailAction} />
@@ -58,7 +80,7 @@ export function AdminStep({ adminEmail, byKey, error, signinFailed }: { adminEma
         </div>}
         {message && <><p role="alert" className="errors">{message}</p><SetupStaffSignOut /></>}
       </section>
-      <form action={goToStepAction.bind(null, "staff")}><button className="btn btn-line">Back to staff sign-in</button></form>
+      <form action={goToStepAction.bind(null, "mail")}><button className="btn btn-line">Back to outgoing mail</button></form>
     </>
   );
 }

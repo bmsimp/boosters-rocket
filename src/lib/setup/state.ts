@@ -4,7 +4,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 
-export const SETUP_STEPS = ["staff", "admin"] as const;
+export const SETUP_STEPS = ["staff", "mail", "admin"] as const;
 export type SetupStep = (typeof SETUP_STEPS)[number];
 export const isSetupStep = (s: unknown): s is SetupStep => (SETUP_STEPS as readonly unknown[]).includes(s);
 export type SetupState = { status: "open" | "finished"; step: SetupStep; adminEmail: string | null; finishedAt: string | null };

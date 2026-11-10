@@ -1,17 +1,20 @@
 import { requireStaffPage } from "@/lib/guards";
 import { env } from "@/env";
+import { can } from "@/lib/permissions/effective";
 import { providerSummaries, pendingOnlySummaries, PROVIDER_KEYS } from "@/lib/auth/providers";
 import { usesCertificate } from "@/lib/auth/provider-fields";
 import { ProviderForm } from "@/app/components/sign-in-settings/provider-form";
 import { PROVIDER_LABELS, toSummaryView } from "@/app/components/sign-in-settings/labels";
 import { MicrosoftStaffSteps, GoogleStaffSteps, ScriptOption } from "@/app/setup/instructions";
 import { saveSignInProviderAction, removeSignInProviderAction, startCertificateReplacementAction, discardCertificateReplacementAction } from "./actions";
+import { MailWarning } from "../../mail-warning";
+import { seesMailWarning } from "../../mail-warning-rule";
 import { RemoveButton } from "./remove-button";
 
 export const metadata = { title: "Sign-in settings" };
 
 export default async function SignInSettingsPage() {
-  await requireStaffPage("Settings.SignIn.ReadWrite");
+  const ctx = await requireStaffPage("Settings.SignIn.ReadWrite");
   const saved = await providerSummaries();
   const summaries = [...saved, ...(await pendingOnlySummaries(saved.map((x) => x.key)))];
   const appUrl = env.APP_URL.replace(/\/+$/, "");
@@ -20,6 +23,7 @@ export default async function SignInSettingsPage() {
   return (
     <main className="wrap single">
       <h1 className="page-title">Sign-in</h1>
+      {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
       <p className="lede">How staff sign in. Microsoft sign-in uses a certificate Booster Rocket made; Google uses a client secret, which is never shown again once saved.</p>
       {PROVIDER_KEYS.map((key) => {
         const s = summaries.find((x) => x.key === key);

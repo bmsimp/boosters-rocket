@@ -21,6 +21,13 @@ describe("setup state", () => {
     expect((await getSetupState()).step).toBe("staff");
   });
 
+  it("has the mail step between staff sign-in and the first Admin", async () => {
+    const { SETUP_STEPS } = await import("@/lib/setup/state");
+    expect(SETUP_STEPS).toEqual(["staff", "mail", "admin"]);
+    await updateSetupState({ step: "mail" });
+    expect((await getSetupState()).step).toBe("mail");
+  });
+
   it("saves the Admin email lower-cased and audits it", async () => {
     expect(await saveAdminEmail("  First.Admin@Club.ORG ", null)).toEqual({ ok: true });
     expect((await getSetupState()).adminEmail).toBe("first.admin@club.org");

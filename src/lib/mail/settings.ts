@@ -130,3 +130,8 @@ export async function mailAttention(): Promise<MailAttention | null> {
   if (s.lastFailureAt && (!s.lastSuccessAt || s.lastFailureAt > s.lastSuccessAt)) return { kind: "failing", lastError: s.lastError, since: s.lastFailureAt };
   return null;
 }
+
+const MAIL_FIELDS = ["method", "mailbox", "host", "port", "security", "username", "from", "password"] as const;
+/** The mail form's fields as strings, for parseMailForm. */
+export const mailFormFields = (form: FormData): Record<string, string> =>
+  Object.fromEntries(MAIL_FIELDS.map((n) => [n, String(form.get(n) ?? "")]));

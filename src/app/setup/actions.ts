@@ -9,6 +9,8 @@ import { isProviderKey, parseProviderForm, saveProvider, providerSummaries, type
 import { checkFor } from "@/lib/auth/provider-checks";
 import { isCertificateProvider, startCertificateReplacement, discardPendingCertificate } from "@/lib/auth/certificates";
 import { requestIp } from "@/lib/request";
+import { parseMailForm, saveMailSettings, mailWorking, mailFormFields } from "@/lib/mail/settings";
+import { sendTestMail, type SendOutcome } from "@/lib/mail/send";
 
 const UNLOCK_MESSAGES = {
   wrong: "That code isn't right. Check it against what the server printed.",
@@ -54,12 +56,29 @@ export const discardCertificateReplacementSetupAction = setupAction(async (key: 
   return { ok: true };
 }, { onExpired: sessionEnded });
 
+type MailSaveResult = { ok: true } | { ok: false; errors: string[] };
+
+export const saveSetupMailAction = setupAction(async (form: FormData): Promise<MailSaveResult> => {
+  const parsed = parseMailForm(mailFormFields(form));
+  if (!parsed.ok) return parsed;
+  const r = await saveMailSettings(parsed.draft, { actor: SETUP_ACTOR, ip: await requestIp() });
+  revalidatePath("/setup");
+  return r;
+}, { onExpired: sessionEnded });
+
+export const sendSetupTestMailAction = setupAction(async (form: FormData): Promise<SendOutcome> => {
+  const r = await sendTestMail(String(form.get("to") ?? ""), { actor: SETUP_ACTOR, ip: await requestIp() });
+  revalidatePath("/setup");
+  return r;
+}, { onExpired: () => ({ ok: false as const, error: SETUP_SESSION_ENDED }) });
+
 export const goToStepAction = setupAction(async (step: SetupStep): Promise<void> => {
   if (!isSetupStep(step)) redirect("/setup");
   if (step !== "staff") {
     const staffReady = (await providerSummaries()).some((s) => s.readable);
     if (!staffReady) redirect("/setup?step=staff&error=staff_first");
   }
+  if (step === "admin" && !(await mailWorking())) redirect("/setup?step=mail&error=mail_first");
   await updateSetupState({ step });
   redirect(`/setup?step=${step}`);
 });

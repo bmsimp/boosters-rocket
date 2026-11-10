@@ -1,13 +1,17 @@
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { getClubSettings } from "@/lib/settings/club";
+import { MailWarning } from "../../mail-warning";
+import { seesMailWarning } from "../../mail-warning-rule";
 import { ClubForm } from "./club-form";
 
 export default async function ClubSettingsPage() {
-  await requireStaffPage("Settings.Club.Read");
+  const ctx = await requireStaffPage("Settings.Club.Read");
   const club = await getClubSettings();
   return (
     <main className="wrap single">
       <h1 className="page-title">Club</h1>
+      {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
       {!club.storedColorValid && (
         <p role="status" className="box">The saved club color wasn&apos;t valid, so the portal is using the default purple. Pick a color and save to fix it.</p>
       )}

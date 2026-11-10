@@ -32,7 +32,7 @@ export function ScriptOption({ script, example }: { script: string; example: str
   return (
     <details className="box">
       <summary>Use the PowerShell script instead</summary>
-      <p>The script signs you in with the normal Microsoft sign-in page in your browser, does the steps for you, adds Booster Rocket&apos;s certificate to the app, and prints the values to enter below. It needs PowerShell 7 and the Microsoft Graph module (<code>Install-Module Microsoft.Graph.Authentication</code>).</p>
+      <p>The script signs you in with the normal Microsoft sign-in page in your browser, does the steps for you, adds Booster Rocket&apos;s certificate to the app, and prints the values to enter below. It needs PowerShell 7 and the Microsoft Graph module (<code>Install-Module Microsoft.Graph.Authentication</code>). With <code>-SetUpMail</code> it also needs the Exchange Online module (<code>Install-Module ExchangeOnlineManagement</code>).</p>
       <p><a className="btn btn-line" href={`/setup/scripts/${script}`} download>Download {script}</a></p>
       <p>On Windows, unblock the downloaded file first:</p>
       <CopyField label="Unblock" value={`Unblock-File .\\${script}`} />
