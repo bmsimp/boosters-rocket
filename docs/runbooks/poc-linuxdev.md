@@ -1,9 +1,10 @@
 # Booster Rocket proof of concept on linuxdev: runbook
 
 Follow this top to bottom, with one exception: the `/setup` page only exists after the first deploy (section 7).
-Sign-in and outgoing mail are set up on the setup page after the first deploy (sections 3 and 4). Each section is numbered steps. Anything in `monospace` is typed or
+Sign-in and outgoing mail are set up on the setup page after the first deploy (sections 3 and 4); a site that already finished setup uses "Upgrading a site that already finished setup" in section 4 instead. Each section is numbered steps. Anything in `monospace` is typed or
 pasted exactly. Dashboard click paths were checked against Microsoft Learn and Cloudflare's
-documentation on 2026-11-08; the sources are listed under each section. If a screen no longer matches,
+documentation on 2026-11-08; the sources are listed under each section. The outgoing-mail steps (section 4)
+were added after that and nobody has walked through them yet. If a screen no longer matches,
 trust the screen and note it in the Results table.
 
 ## 1. What this is
@@ -185,9 +186,14 @@ Record what actually happens in section 10.
      with `-TenantId` (run it again and sign in as an administrator of the band's tenant);
    - creates a management scope named `Booster Rocket mail sender` that holds only that mailbox (matched by its
      primary address), and gives the app the `Application Mail.Send` role on that scope;
+   - stops with "The app has more than one 'Application Mail.Send' role assignment in Exchange Online" and names them.
+     Remove the extras in Exchange Online, then run it again;
    - checks that every Exchange Online assignment that lets the app send mail is limited to that scope. If it finds
      others, it stops and names them. It never removes anything itself: remove the extras in Exchange Online (the
      message gives the command that lists them), then run it again;
+   - stops with "The app could send as more than webmaster@fznband.org or as no one: Exchange does not report any
+     sending permission for the app" if, after it made the assignment, Exchange Online reports no permission for the
+     app to send at all. Check the app's assignments with the command the message gives, then run it again;
    - stops with "the role assignment is in place, but Exchange doesn't report the mailbox in scope" if the mailbox
      isn't in scope yet. Check the address and run it again.
 4. If the script stops because the app holds Microsoft Graph's **Mail.Send** application permission in Entra, do what
@@ -198,6 +204,45 @@ Record what actually happens in section 10.
 6. On the setup page choose **Microsoft 365**, enter `webmaster@fznband.org`, **Save**, then **Send test email** to
    an address you can read. When it arrives, **Next: first Admin** turns on. Until a test email has gone out, the
    first Admin step (`/setup?step=admin`) and finishing setup are blocked too.
+
+### Upgrading a site that already finished setup
+
+Setup on linuxdev finished on 2026-11-09, so `/setup` answers "not found" there and steps 3 and 6 above can't
+happen on the setup page. Do this instead:
+
+1. **Before you deploy, back up the database.** The deploy changes the parent tables, and the backup is your only way
+   back (step 5). On linuxdev:
+   ```bash
+   cd ~/booster-rocket
+   docker compose -f docker-compose.poc.yml --env-file .env.poc exec -T db pg_dump -U booster -d booster > ~/booster-rocket-before-parent-codes.sql
+   ```
+   The file goes in your home folder, not the checkout (a file in the checkout makes `deploy.sh` refuse, exit 2).
+   Keep a copy of `.env.poc` with it (section 2).
+2. Deploy (section 7). The migration runs as part of the deploy:
+   - every guardian row already in the database becomes a person with that family. Rows with the same email
+     (trimmed and lowercased) become one person, named from the oldest row. A disabled row stays disabled, as removed;
+   - every earlier parent sign-in account is deleted, and its sessions with it, so anyone signed in as a parent is
+     signed out. Each person gets a new sign-in account for the email code;
+   - the parents tenant's sign-in settings and certificate are removed from the portal.
+3. Sign in at `/staff/sign-in` and choose **Mail** in the staff menu (Admins only). It has the same card as Step 2 of
+   the setup page: **Microsoft 365: let the app send as one mailbox**, with the script download, then **Save** and
+   **Send test email**. Do steps 2 to 6 above there instead of on the setup page (step 6's first Admin part is
+   setup only; skip it).
+4. Until a test email has gone out, `/sign-in` says "Parent sign-in isn't available yet." and the staff home shows
+   a warning.
+5. **Rolling back.** `scripts/poc/deploy.sh --rollback` (section 7) doesn't undo the migration, and the previous image's
+   code doesn't match the new parent tables, so expect errors on it wherever parents are involved. To go back, put the backup from
+   step 1 in place first, then roll back:
+   ```bash
+   cd ~/booster-rocket
+   docker stop booster-rocket-app
+   docker compose -f docker-compose.poc.yml --env-file .env.poc exec db dropdb -U booster booster
+   docker compose -f docker-compose.poc.yml --env-file .env.poc exec db createdb -U booster booster
+   docker compose -f docker-compose.poc.yml --env-file .env.poc exec -T db psql -U booster -d booster < ~/booster-rocket-before-parent-codes.sql
+   scripts/poc/deploy.sh --rollback
+   ```
+   This throws away everything done since the backup, including the audit log rows. These restore steps haven't been
+   tried on linuxdev yet.
 
 The old parents tenant (`fznbandparents`) and its app aren't used any more. Delete them whenever you like; the
 portal never deletes anything in a tenant, and nothing here does it for you.
@@ -217,6 +262,21 @@ Sources: Role Based Access Control for Applications in Exchange Online
    the same email and family prints "That person is already a guardian in that family." The same email with
    `--family POC-FAMILY-2` adds a second family to the same person.
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
+
+On this version, parents are added only with this seed script: the staff pages for people come with the roster work.
+The script sends no welcome email; tell the parent to go to `/sign-in` and ask for a code. It has no way to remove a
+parent. To stop one signing in, block them (below).
+
+**Blocking a parent in an emergency.** There is no staff page for people yet. On linuxdev:
+```bash
+cd ~/booster-rocket
+docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update parent set blocked = true where email = '<address>';"
+```
+Use the address trimmed and lowercased, as the portal stores it. From then on they get no more codes (the audit
+shows `signin.code_refused`, reason `blocked`), a code they already have is refused when they enter it, and the next time they
+open a portal page all their sessions end (`signin.refused`, reason `blocked`). Their family rows are left as they
+were, so `update parent set blocked = false where email = '<address>';` gives back the same access. The SQL change
+itself isn't in the audit log.
 
 ## 6. Cloudflare
 
@@ -316,7 +376,7 @@ Run these in order, in a private browser window. Record each outcome in section 
   After a no-change redeploy, `previous` and `current` are the same image, so `--rollback` only exercises the mechanism; a real rollback test needs a real new commit.
 - [ ] 9. Confirm the app can't send as any other mailbox, two ways.
   - Configuration check. In PowerShell 7 run `Connect-ExchangeOnline -ShowBanner:$false` and sign in as an Exchange administrator. Then run `Test-ServicePrincipalAuthorization -Identity <staff app Object ID> -Resource <mailbox>`. The Object ID is the one under **Enterprise applications** > `Booster Rocket (staff)` in Entra, not the one on the app registration (they are different). With `webmaster@fznband.org` as the mailbox, Application Mail.Send shows `InScope` `True`; with any other mailbox, `False`.
-  - Real send. Under **Settings** > **Mail** (Admins only), change **Send as this mailbox** to a different existing mailbox in the tenant, select **Save**, then **Send test email** to an address you can read. It must fail, and the error shown includes `ErrorAccessDenied`. (If it succeeds, the app can send as that mailbox: stop and fix the Exchange Online assignments before going on.) Then change **Send as this mailbox** back to `webmaster@fznband.org`, **Save**, and **Send test email** again; it must succeed. You must do this last part: changing the settings makes mail count as not working, so parent sign-in says "Parent sign-in isn't available yet.", until a test email succeeds. Microsoft caches app permissions for 30 minutes to 2 hours, so a permission change made just before this test may not show yet.
+  - Real send. Choose **Mail** in the staff menu (Admins only), change **Send as this mailbox** to a different existing mailbox in the tenant, select **Save**, then **Send test email** to an address you can read. It must fail, and the error shown includes `ErrorAccessDenied`. (If it succeeds, the app can send as that mailbox: stop and fix the Exchange Online assignments before going on.) Then change **Send as this mailbox** back to `webmaster@fznband.org`, **Save**, and **Send test email** again; it must succeed. You must do this last part: changing the settings makes mail count as not working, so parent sign-in says "Parent sign-in isn't available yet.", until a test email succeeds. Microsoft caches app permissions for 30 minutes to 2 hours, so a permission change made just before this test may not show yet.
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
@@ -337,9 +397,12 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited', disabled_reason=null where parent_id=(select id from parent where email='<email>');"` (this SQL fix bypasses the audit log, so it is acceptable only for test data) |
 | A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Seed them (section 5); addresses are matched trimmed and lowercased |
 | `signin.code_refused`, reason `no_enabled_guardian` | All of the person's guardian rows are disabled | Test data: re-enable the row (see the row above) |
-| `signin.code_refused`, reason `rate_limited` | 3 codes to one address, or 10 requests from one IP, in 15 minutes, or a resend within 60 seconds | Wait 15 minutes |
-| `signin.code_refused`, reason `mail_failed`, and a `mail.failed` row | Microsoft 365 or SMTP refused the message; the `mail.failed` row has the provider's error | For `ErrorAccessDenied`, rerun section 4 step 3 and wait up to 2 hours; staff see the same error on the staff home page |
-| `/sign-in` says "Parent sign-in isn't available yet." | Mail settings aren't saved, or haven't had a successful test since they changed | **Settings** > **Mail** (Admins only): **Send test email** |
+| `signin.code_refused`, reason `rate_limited` | Details `limit` says which limit: `resend`, a new code asked for within 60 seconds of the last one; `email`, 3 codes to one address; `ip`, 10 code requests from one IP; `check_ip`, 30 code checks from one IP (the parent sees "Too many tries. Wait a few minutes and request a new code."). The last three count 15 minutes back. For `email`, `ip` and `check_ip`, a full window is recorded once: the first refused request writes the row, and later ones in the same window write nothing | `resend`: wait 60 seconds. The others: wait up to 15 minutes, until the oldest request in the window is 15 minutes old |
+| The sign-in page says "We couldn't reach the portal just then. Please try again in a moment." and there's no audit row | More than 20 code requests, or 20 code checks, from one IP in a minute: the portal turns them away before they are counted or recorded | Wait a minute |
+| `signin.code_refused`, reason `mail_failed`, with `detail: "mail_not_working"`, and no `mail.failed` row | Mail isn't set up, or its settings haven't had a successful test email since they were saved, so nothing was sent | **Mail** in the staff menu (Admins only): **Send test email** |
+| `signin.code_refused`, reason `mail_failed` with no `detail`, and a `mail.failed` row | Microsoft 365 or SMTP refused the message; the `mail.failed` row has the provider's error | For `ErrorAccessDenied`, rerun section 4 step 3 and wait up to 2 hours; staff see the same error on the staff home page |
+| `/sign-in` says "Parent sign-in isn't available yet." | Mail settings aren't saved, or haven't had a successful test since they changed | **Mail** in the staff menu (Admins only): **Send test email** |
+| Parent `signin.refused`, reason `family_not_enabled` | The parent was in, or chose, a family that isn't one of their enabled families. Usually the family's row was disabled while they were signed in: they are sent back to choose a family, and Details names the one they lost. With no family in Details, the chooser was sent something that isn't a family ID | Nothing, if the row was removed on purpose. Otherwise check their guardian rows (test data: re-enable as in the first row) |
 | "Too many tries. Wait a few minutes and request a new code." | 30 code checks from one IP in 15 minutes | Wait 15 minutes |
 | Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not the first Admin email entered in Step 3 of setup | Sign in with that email, or have an Admin add the person first (**Staff** menu) |
 | Microsoft error "AADSTS50011: The redirect URI ... does not match" | Redirect URI in the app registration differs from the one the portal sends | `https://portaltest.rhinoautomator.com/api/auth/staff/callback/microsoft`. Platform must be **Web**; no trailing slash |
