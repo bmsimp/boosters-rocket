@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { db } from "@/lib/db/client";
-import { auditLog, staffAuthUser, parentAuthUser } from "@/lib/db/schema";
+import { auditLog, staffAuthUser } from "@/lib/db/schema";
 import { recordSignin, recordSignout } from "@/lib/auth/signin-audit";
 import { getStaffAuth } from "@/lib/auth/staff-auth";
 import { getParentAuth } from "@/lib/auth/parent-auth";
-import { resetDb } from "../helpers/db";
+import { resetDb, seedParent } from "../helpers/db";
 import { env } from "@/env";
 
 let staffAuth: Awaited<ReturnType<typeof getStaffAuth>>;
@@ -39,10 +39,10 @@ describe("sign-in audit", () => {
   });
 
   it("records a parent sign-in, falling back to the session's IP when there are no headers", async () => {
-    await db.insert(parentAuthUser).values({ id: "p1", name: "Ana", email: "ana@example.com", emailVerified: true });
-    await recordSignin("parent", { userId: "p1", ipAddress: "198.51.100.4" }, null);
+    const p = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await recordSignin("parent", { userId: p.authUserId, ipAddress: "198.51.100.4" }, null);
     const [row] = await db.select().from(auditLog);
-    expect(row).toMatchObject({ door: "parent", action: "signin", actorLabel: "ana@example.com", targetType: "parent_auth_user", targetId: "p1", ip: "198.51.100.4" });
+    expect(row).toMatchObject({ door: "parent", action: "signin", actorLabel: "ana@example.com", targetType: "parent_auth_user", targetId: p.authUserId, ip: "198.51.100.4" });
   });
 
   it("is wired to session creation on both doors, trusting only cf-connecting-ip for the IP", () => {
@@ -74,10 +74,10 @@ describe("sign-in audit", () => {
   });
 
   it("records a sign-out through the real parent /sign-out endpoint", async () => {
-    await db.insert(parentAuthUser).values({ id: "p1", name: "Ana", email: "ana@example.com", emailVerified: true });
-    await signOutThroughBetterAuth(parentAuth, "p1", "198.51.100.8");
+    const p = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await signOutThroughBetterAuth(parentAuth, p.authUserId, "198.51.100.8");
     const rows = (await db.select().from(auditLog)).filter((r) => r.action === "signout");
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ door: "parent", actorLabel: "ana@example.com", targetId: "p1", ip: "198.51.100.8" });
+    expect(rows[0]).toMatchObject({ door: "parent", actorLabel: "ana@example.com", targetId: p.authUserId, ip: "198.51.100.8" });
   });
 });

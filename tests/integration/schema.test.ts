@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { role } from "@/lib/db/schema";
-import { resetDb, seedStaff } from "../helpers/db";
+import { resetDb, seedStaff, seedParent } from "../helpers/db";
 
 describe("schema", () => {
   beforeEach(resetDb);
@@ -14,5 +14,10 @@ describe("schema", () => {
   it("rejects two staff users with the same email", async () => {
     await seedStaff({ email: "pat@club.org" });
     await expect(seedStaff({ email: " PAT@club.org " })).rejects.toThrow();
+  });
+
+  it("rejects two people with the same email", async () => {
+    await seedParent({ name: "Ana", email: "ana@example.com" });
+    await expect(seedParent({ name: "Ana Again", email: " ANA@example.com " })).rejects.toThrow();
   });
 });

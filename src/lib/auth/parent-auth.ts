@@ -16,6 +16,8 @@ function buildParentAuth() {
       provider: "pg",
       schema: { user: parentAuthUser, session: parentAuthSession, account: parentAuthAccount, verification: parentAuthVerification },
     }),
+    // Every sign-in user belongs to a person record; it is set when the person is made, never by a request.
+    user: { additionalFields: { parentId: { type: "string", required: true, input: false } } },
     emailAndPassword: { enabled: false },
     account: { accountLinking: { enabled: false } },
     // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
@@ -26,7 +28,7 @@ function buildParentAuth() {
         delete: { after: (session, ctx) => recordSignout("parent", session, ctx) },
       },
     },
-    session: { expiresIn: 60 * 60 * 24 * 14, updateAge: 60 * 60 * 24 },
+    session: { expiresIn: 60 * 60 * 24 * 14, updateAge: 60 * 60 * 24, additionalFields: { familyQboId: { type: "string", required: false, input: false } } },
   });
 }
 

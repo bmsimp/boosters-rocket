@@ -29,6 +29,20 @@
       "when": 1794247385524,
       "tag": "0003_magenta_tarot",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794336407338,
+      "tag": "0004_parents_additive",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794336416631,
+      "tag": "0005_parents_finish",
+      "breakpoints": true
     }
   ]
 }

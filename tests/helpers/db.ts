@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { role, staffUser, roleAssignment, guardian, authProvider, providerCertificate } from "@/lib/db/schema";
+import { role, staffUser, roleAssignment, guardian, parent, parentAuthUser, parentAuthSession, authProvider, providerCertificate, type GuardianStatus, type DisabledReason } from "@/lib/db/schema";
 import { generateCertificate } from "@/lib/auth/certificate-crypto";
 import { isCertificateProvider, type CertificateProviderKey } from "@/lib/auth/certificates";
 import { secretBox } from "@/lib/crypto/secret-box";
@@ -8,7 +8,7 @@ import { invalidateProviders, type ProviderKey } from "@/lib/auth/providers";
 import { eq } from "drizzle-orm";
 
 const TABLES = [
-  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "setting", "auth_provider", "provider_certificate",
+  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "signin_code", "rate_limit_event", "parent_email_change", "setting", "auth_provider", "provider_certificate",
   "staff_auth_session", "staff_auth_account", "staff_auth_verification", "staff_auth_user",
   "parent_auth_session", "parent_auth_account", "parent_auth_verification", "parent_auth_user",
 ];
@@ -36,12 +36,34 @@ export async function seedStaff(opts: { email: string; name?: string; status?: "
   return s!;
 }
 
-export async function seedGuardian(opts: { name: string; familyQboId: string; objectId?: string; status?: "invited" | "active" | "disabled" }) {
+export type ParentRow = typeof parent.$inferSelect;
+export type GuardianRow = typeof guardian.$inferSelect;
+
+export async function seedParent(o: { name: string; email?: string; phone?: string | null; blocked?: boolean }): Promise<ParentRow & { authUserId: string }> {
+  const email = (o.email ?? `${o.name.toLowerCase().replace(/\s+/g, ".")}@example.com`).trim().toLowerCase();
+  const [p] = await db.insert(parent).values({ name: o.name, email, phone: o.phone ?? null, blocked: o.blocked ?? false }).returning();
+  const [u] = await db.insert(parentAuthUser).values({ id: crypto.randomUUID(), name: o.name, email, emailVerified: true, parentId: p!.id }).returning();
+  return { ...p!, authUserId: u!.id };
+}
+
+export async function seedGuardian(o: {
+  parentId: string; familyQboId: string; status?: GuardianStatus; isPrimary?: boolean;
+  disabledReason?: DisabledReason | null; statusBeforeDisable?: "invited" | "active" | null;
+}): Promise<GuardianRow> {
   const [g] = await db.insert(guardian).values({
-    name: opts.name, email: `${opts.name.toLowerCase().replace(/\s+/g, ".")}@example.com`,
-    familyQboId: opts.familyQboId, identityObjectId: opts.objectId ?? null, status: opts.status ?? "active",
+    parentId: o.parentId, familyQboId: o.familyQboId, status: o.status ?? "active", isPrimary: o.isPrimary ?? false,
+    disabledReason: o.disabledReason ?? null, statusBeforeDisable: o.statusBeforeDisable ?? null,
   }).returning();
   return g!;
+}
+
+/** A live parent session row, as Better Auth would store it. */
+export async function seedParentSession(authUserId: string, o: { familyQboId?: string | null; expiresAt?: Date } = {}) {
+  const id = crypto.randomUUID();
+  const token = crypto.randomUUID();
+  await db.insert(parentAuthSession).values({ id, token, userId: authUserId, familyQboId: o.familyQboId ?? null,
+    expiresAt: o.expiresAt ?? new Date(Date.now() + 7 * 86_400_000) });
+  return { id, token };
 }
 
 export async function seedCertificate(key: CertificateProviderKey, status: "pending" | "active") {

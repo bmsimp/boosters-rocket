@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, integer } from "drizzle-orm/pg-core";
+import type { PgColumnBuilderBase } from "drizzle-orm/pg-core";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updated = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
@@ -57,21 +58,68 @@ export const staffUser = pgTable("staff_user", {
   uniqueIndex("staff_user_auth_uq").on(t.authUserId),
 ]);
 
-/** People who sign in through the parent door for a family. Provisioning arrives in Plan 3. */
+export type GuardianStatus = "invited" | "active" | "disabled";
+export type DisabledReason = "no_active_students" | "removed";
+
+/** One record per parent, whatever families they're in (spec §2). Everything refers to the id, never to the email. */
+export const parent = pgTable("parent", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  email: text("email").notNull(), // stored trimmed + lower-cased
+  phone: text("phone"),
+  blocked: boolean("blocked").notNull().default(false),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [uniqueIndex("parent_email_uq").on(t.email)]);
+
+/** "This person is a guardian in this family." Name, email and phone live on the person (`parent`). */
 export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
   familyQboId: text("family_qbo_id").notNull(),
-  name: text("name").notNull(),
-  email: text("email").notNull(),
-  phone: text("phone"),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
-  identityObjectId: text("identity_object_id"), // External ID user object id (oid claim)
   status: text("status", { enum: ["invited", "active", "disabled"] }).notNull().default("invited"),
+  disabledReason: text("disabled_reason", { enum: ["no_active_students", "removed"] }),
+  statusBeforeDisable: text("status_before_disable", { enum: ["invited", "active"] }),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
-  uniqueIndex("guardian_object_uq").on(t.identityObjectId),
+  uniqueIndex("guardian_family_parent_uq").on(t.familyQboId, t.parentId),
   index("guardian_family_ix").on(t.familyQboId),
+  index("guardian_parent_ix").on(t.parentId),
+]);
+
+/** Sign-in codes (spec §1). Only the hash is stored; only the latest unused code per person exists. */
+export const signinCode = pgTable("signin_code", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  tries: integer("tries").notNull().default(0),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: created(),
+}, (t) => [uniqueIndex("signin_code_one_live").on(t.parentId).where(sql`used_at IS NULL`)]);
+
+/** One row per counted event; rate-limit.ts counts rows in a sliding window (spec §1 Rate limits). */
+export const rateLimitEvent = pgTable("rate_limit_event", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  kind: text("kind").notNull(),
+  subject: text("subject").notNull(), // a normalized email or an IP address
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("rate_limit_event_ix").on(t.kind, t.subject, t.at)]);
+
+/** A parent's own email change waiting for the confirm link (spec §2 Email changes). The token is stored hashed. */
+export const parentEmailChange = pgTable("parent_email_change", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  newEmail: text("new_email").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: created(),
+}, (t) => [
+  uniqueIndex("parent_email_change_token_uq").on(t.tokenHash),
+  uniqueIndex("parent_email_change_one_live").on(t.parentId).where(sql`used_at IS NULL`),
 ]);
 
 /** Roles. The built-in Admin role has key 'admin' and builtin=true. */
@@ -102,7 +150,7 @@ export const auditLog = pgTable("audit_log", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   door: text("door", { enum: ["staff", "parent", "system"] }).notNull(),
-  actorId: text("actor_id"),        // staff_user.id, guardian.id, or null for system
+  actorId: text("actor_id"),        // staff_user.id, parent.id, or null for system
   actorLabel: text("actor_label"),  // name/email at the time
   action: text("action").notNull(), // e.g. "role.assign", "signin.refused"
   permission: text("permission"),
@@ -114,10 +162,10 @@ export const auditLog = pgTable("audit_log", {
 }, (t) => [index("audit_at_ix").on(t.at)]);
 
 /* ---- Better Auth tables, one set per door (Better Auth core schema) ---- */
-function authTables<X extends Record<string, ReturnType<typeof text>> = Record<never, never>>(
-  prefix: "staff_auth" | "parent_auth",
-  extraUser: X = {} as X,
-) {
+function authTables<
+  U extends Record<string, PgColumnBuilderBase> = Record<never, never>,
+  S extends Record<string, PgColumnBuilderBase> = Record<never, never>,
+>(prefix: "staff_auth" | "parent_auth", extraUser: U = {} as U, extraSession: S = {} as S) {
   const user = pgTable(`${prefix}_user`, {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
@@ -136,6 +184,7 @@ function authTables<X extends Record<string, ReturnType<typeof text>> = Record<n
     updatedAt: updated(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
+    ...extraSession,
     userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   });
   const account = pgTable(`${prefix}_account`, {
@@ -170,7 +219,9 @@ export const staffAuthSession = staffAuth.session;
 export const staffAuthAccount = staffAuth.account;
 export const staffAuthVerification = staffAuth.verification;
 
-const parentAuth = authTables("parent_auth", { objectId: text("object_id") });
+const parentAuth = authTables("parent_auth",
+  { parentId: uuid("parent_id").notNull().unique().references(() => parent.id, { onDelete: "cascade" }) },
+  { familyQboId: text("family_qbo_id") });
 export const parentAuthUser = parentAuth.user;
 export const parentAuthSession = parentAuth.session;
 export const parentAuthAccount = parentAuth.account;
