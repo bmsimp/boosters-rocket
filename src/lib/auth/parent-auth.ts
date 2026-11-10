@@ -1,11 +1,12 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/lib/db/client";
-import { recordSignin, recordSignout } from "./signin-audit";
+import { recordSignout } from "./signin-audit";
+import { parentCodePlugin } from "./parent-code-plugin";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env } from "@/env";
 
-// The External ID door is gone; the portal's own email-code door replaces it (Task 6 of the email-code plan).
+// The portal's own email-code door (spec §1); the External ID door is gone.
 function buildParentAuth() {
   return betterAuth({
     appName: "Booster Rocket",
@@ -16,19 +17,24 @@ function buildParentAuth() {
       provider: "pg",
       schema: { user: parentAuthUser, session: parentAuthSession, account: parentAuthAccount, verification: parentAuthVerification },
     }),
-    // Every sign-in user belongs to a person record; it is set when the person is made, never by a request.
-    user: { additionalFields: { parentId: { type: "string", required: true, input: false } } },
     emailAndPassword: { enabled: false },
     account: { accountLinking: { enabled: false } },
     // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
     advanced: { cookiePrefix: "br_parent", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
     databaseHooks: {
-      session: {
-        create: { after: (session, ctx) => recordSignin("parent", session, ctx) },
-        delete: { after: (session, ctx) => recordSignout("parent", session, ctx) },
-      },
+      // The portal writes the parent `signin` row itself, with the family entered (family-choice.ts).
+      session: { delete: { after: (session, ctx) => recordSignout("parent", session, ctx) } },
     },
-    session: { expiresIn: 60 * 60 * 24 * 14, updateAge: 60 * 60 * 24, additionalFields: { familyQboId: { type: "string", required: false, input: false } } },
+    // Spec §1: 7 days from sign-in, never extended; no cookie cache, so ended sessions stop at the next request.
+    session: {
+      expiresIn: 60 * 60 * 24 * 7,
+      disableSessionRefresh: true,
+      additionalFields: { familyQboId: { type: "string", required: false, input: false } },
+    },
+    // Every sign-in user belongs to a person record, set when the person is made. input: false: a parent can't change the
+    // person link through /update-user.
+    user: { additionalFields: { parentId: { type: "string", required: true, input: false } } },
+    plugins: [parentCodePlugin()],
   });
 }
 

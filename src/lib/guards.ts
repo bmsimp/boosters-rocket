@@ -1,6 +1,6 @@
 import "server-only";
 import { redirect } from "next/navigation";
-import { getStaffIdentity, getParentIdentity, hasStaffSession, hasParentSession } from "@/lib/auth/identity";
+import { getStaffIdentity, getParentIdentity, getParentState, hasStaffSession, hasParentSession } from "@/lib/auth/identity";
 import type { StaffIdentity, ParentIdentity } from "@/lib/auth/resolve";
 import { effectivePermissions, can, type Effective } from "@/lib/permissions/effective";
 import type { Permission } from "@/lib/permissions/registry";
@@ -64,8 +64,24 @@ export async function requireStaffPage(permission?: Permission): Promise<StaffCt
   redirect((await hasStaffSession()) ? "/refused" : "/staff/sign-in");
 }
 
+export type ParentSessionCtx = { parentId: string; sessionId: string; ip: string | null };
+
+/** For the family chooser: a signed-in parent, whether or not a family is chosen yet. */
+export function parentSessionAction<A extends unknown[], R>(fn: (ctx: ParentSessionCtx, ...args: A) => Promise<R>) {
+  const wrapped = async (...args: A): Promise<R> => {
+    const s = await getParentState();
+    if (s.status === "none") throw new AccessDenied();
+    const parentId = s.status === "ok" ? s.identity.parentId : s.parentId;
+    const sessionId = s.status === "ok" ? s.identity.sessionId : s.sessionId;
+    return fn({ parentId, sessionId, ip: await requestIp() }, ...args);
+  };
+  registry.set(wrapped, { door: "parent" });
+  return wrapped;
+}
+
 export async function requireParentPage(): Promise<ParentCtx> {
-  const ctx = await parentCtx();
-  if (ctx) return ctx;
+  const s = await getParentState();
+  if (s.status === "ok") return { ...s.identity, ip: await requestIp() };
+  if (s.status === "choose") redirect("/choose-family");
   redirect((await hasParentSession()) ? "/refused" : "/sign-in");
 }

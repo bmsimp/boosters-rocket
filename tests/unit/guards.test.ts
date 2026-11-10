@@ -4,6 +4,7 @@ const ident = vi.hoisted(() => ({ staff: null as unknown, parent: null as unknow
 vi.mock("@/lib/auth/identity", () => ({
   getStaffIdentity: async () => ident.staff,
   getParentIdentity: async () => ident.parent,
+  getParentState: async () => (ident.parent ? { status: "ok", identity: ident.parent } : { status: "none" }),
   hasStaffSession: async () => Boolean(ident.staff),
   hasParentSession: async () => Boolean(ident.parent),
 }));
@@ -14,10 +15,10 @@ vi.mock("@/lib/permissions/effective", () => ({
 vi.mock("@/lib/request", () => ({ requestIp: async () => "203.0.113.1" }));
 vi.mock("@/lib/audit/log", () => ({ writeAudit: vi.fn(async () => undefined) }));
 
-import { staffAction, parentAction, guardOf, AccessDenied } from "@/lib/guards";
+import { staffAction, parentAction, parentSessionAction, guardOf, AccessDenied } from "@/lib/guards";
 
 const STAFF = { door: "staff", staffUserId: "s1", name: "Pat", email: "pat@club.org" };
-const PARENT = { door: "parent", guardianId: "g1", familyQboId: "123", name: "Ana" };
+const PARENT = { door: "parent", parentId: "p1", sessionId: "s1", guardianId: "g1", familyQboId: "123", name: "Ana", email: "ana@example.com", families: [{ guardianId: "g1", familyQboId: "123" }] };
 
 beforeEach(() => { ident.staff = null; ident.parent = null; ident.perms = new Set(); ident.admin = false; });
 
@@ -50,6 +51,18 @@ describe("parentAction", () => {
   });
   it("refuses a staff session, even an admin's", async () => {
     ident.staff = STAFF; ident.admin = true;
+    await expect(act()).rejects.toBeInstanceOf(AccessDenied);
+  });
+});
+
+describe("parentSessionAction", () => {
+  const act = parentSessionAction(async (ctx) => ctx.parentId);
+  it("runs for a signed-in parent and is registered for the parent door", async () => {
+    ident.parent = PARENT;
+    await expect(act()).resolves.toBe("p1");
+    expect(guardOf(act)).toEqual({ door: "parent" });
+  });
+  it("refuses without a parent session", async () => {
     await expect(act()).rejects.toBeInstanceOf(AccessDenied);
   });
 });

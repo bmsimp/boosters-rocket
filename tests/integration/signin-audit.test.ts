@@ -38,15 +38,8 @@ describe("sign-in audit", () => {
     expect(row).toMatchObject({ door: "staff", action: "signin", actorLabel: "sam@club.org", targetType: "staff_auth_user", targetId: "s1", ip: "203.0.113.7" });
   });
 
-  it("records a parent sign-in, falling back to the session's IP when there are no headers", async () => {
-    const p = await seedParent({ name: "Ana", email: "ana@example.com" });
-    await recordSignin("parent", { userId: p.authUserId, ipAddress: "198.51.100.4" }, null);
-    const [row] = await db.select().from(auditLog);
-    expect(row).toMatchObject({ door: "parent", action: "signin", actorLabel: "ana@example.com", targetType: "parent_auth_user", targetId: p.authUserId, ip: "198.51.100.4" });
-  });
-
-  it("is wired to session creation on both doors, trusting only cf-connecting-ip for the IP", () => {
-    for (const a of [staffAuth, parentAuth]) {
+  it("is wired to staff session creation, trusting only cf-connecting-ip for the IP", () => {
+    for (const a of [staffAuth]) {
       expect(typeof a.options.databaseHooks?.session?.create?.after).toBe("function");
       expect(a.options.advanced?.ipAddress?.ipAddressHeaders).toEqual(["cf-connecting-ip"]);
     }
@@ -78,6 +71,6 @@ describe("sign-in audit", () => {
     await signOutThroughBetterAuth(parentAuth, p.authUserId, "198.51.100.8");
     const rows = (await db.select().from(auditLog)).filter((r) => r.action === "signout");
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ door: "parent", actorLabel: "ana@example.com", targetId: p.authUserId, ip: "198.51.100.8" });
+    expect(rows[0]).toMatchObject({ door: "parent", actorId: p.id, actorLabel: "ana@example.com", targetType: "parent", targetId: p.id, ip: "198.51.100.8" });
   });
 });

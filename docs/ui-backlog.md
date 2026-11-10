@@ -28,6 +28,10 @@ and the page. Move an item to **Done** when it ships.
   with no sideways scroll, so the problem isn't known yet. Waiting on a screenshot from the owner's phone. The pages also
   have no club bar, so they look unlike the rest of the portal.
 
+### Parent family chooser (`/choose-family`, parent pages)
+- **Family names** (2026-11-10). The chooser and Switch family show `Family account <QBO id>` until the roster plan
+  brings family names; the switch line is unstyled.
+
 ### Setup and Settings → Sign-in
 - **The page may not update right after downloading a certificate** (2026-11-09). The certificate panel
   refreshes on a 1.5-second timer after the download starts, so on a slow server the thumbprint can lag until
