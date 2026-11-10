@@ -4,7 +4,8 @@ Follow this top to bottom, with one exception: the `/setup` page only exists aft
 Sign-in and outgoing mail are set up on the setup page after the first deploy (sections 3 and 4); a site that already finished setup uses "Upgrading a site that already finished setup" in section 4 instead. Each section is numbered steps. Anything in `monospace` is typed or
 pasted exactly. Dashboard click paths were checked against Microsoft Learn and Cloudflare's
 documentation on 2026-11-08; the sources are listed under each section. The outgoing-mail steps (section 4)
-were added after that and nobody has walked through them yet. If a screen no longer matches,
+were added after that and were first walked through on 2026-11-10, on a site that had already finished setup
+(section 10). If a screen no longer matches,
 trust the screen and note it in the Results table.
 
 ## 1. What this is
@@ -170,8 +171,8 @@ sends as one mailbox, `webmaster@fznband.org`, through Microsoft Graph with the 
 Online only lets the app send as that mailbox. (The portal can send through SMTP instead; this section covers
 Microsoft 365.)
 
-The script's mail part has not yet been run against a real tenant; the first run is part of this proof of concept.
-Record what actually happens in section 10.
+The script's mail part first ran against the band's tenant on 2026-11-10 (section 10 has what happened). It has
+not been run on the setup page of a new site, only from **Mail** on a site that had finished setup.
 
 1. Do section 3 first: this uses the staff app.
 2. On a Windows PC with PowerShell 7, install the Exchange Online module once:
@@ -430,11 +431,16 @@ Fill one row per checklist step each time you run it.
 | 2026-11-09 | 994f231 | 1 | Pass | Cloudflare Access skipped by choice; the setup page showed directly. |
 | 2026-11-09 | 994f231 | 2 | Pass | Staff Microsoft sign-in with a certificate (the band tenant blocks client secrets: `CredentialTypeNotAllowedAsPerAppPolicy`). The staff script created the app, granted consent and added the certificate; a re-run reused the app and found the certificate already there. Signed in as webmaster@fznband.org and was made Admin. |
 | 2026-11-09 | 994f231 | 3 | Pass | Name "FZN Band Boosters", color #005102. Short name still the default "BR"; set it under Club. |
-| | | 4 | Not run | Not run: waiting on outgoing mail (section 4). |
+| 2026-11-09 | 994f231 | 4 | Not run | Waiting on outgoing mail (section 4). |
 | 2026-11-09 | 994f231 | 5 | Partial | Present: `setup.code.issue`, `setup.unlock`, `certificate.create` (staff, plus a pending parent certificate made by downloading the parent script), `certificate.activate`, `setup.provider.save`, `setup.admin_email.save`, staff `signin`, `admin.bootstrap`, `setup.finish`, `settings.club.save`, `signout`. No `staff.bind`: the first Admin is created already bound, so it only appears for invited staff. Parent rows wait on step 4. |
 | 2026-11-09 | 994f231 | 6 | Partial | Staff sign-out recorded. Parent sign-out waits on step 4. |
-| | | 7 | Not run | Not run: waiting on outgoing mail (section 4). |
+| 2026-11-09 | 994f231 | 7 | Not run | Waiting on outgoing mail (section 4). |
 | 2026-11-09 | 994f231 | 8 | Pass | Redeploy kept `previous` and stayed healthy; `--rollback` returned to it and stayed healthy (both images were the same commit, so this tested the mechanism). |
+| 2026-11-10 | 03b74bf | 4 | Pass | Upgraded the finished site (section 4, "Upgrading"): backup taken, deployed, mail set up from **Mail**. A seeded parent with one family asked for a code, got it from `webmaster@fznband.org`, entered it and reached the parent home. The two-family chooser was not tried. |
+| 2026-11-10 | 03b74bf | 5 | Pass | For the parent and mail rows: `settings.mail.save`, `settings.mail.test`, `signin.code_sent`, `guardian.activate`, parent `signin` (family `POC-FAMILY-1`). No sign-in row holds a code. |
+| 2026-11-10 | 03b74bf | 6 | Pass | Parent `signout` recorded. |
+| 2026-11-10 | 03b74bf | 7 | Pass | An address with no person got the same message and no email; the audit shows `signin.code_refused`, reason `unknown_email`. |
+| 2026-11-10 | 03b74bf | 9 | Pass (one part not run) | Real send: with **Send as this mailbox** set to another mailbox in the tenant, the test email failed with `ErrorAccessDenied`; set back to `webmaster@fznband.org`, it succeeded. Configuration check: `InScope` was `True` for `webmaster@fznband.org`; the check against another mailbox (expect `False`) was not run. |
 
 Findings from the 2026-11-09 run, all fixed on `main`:
 
@@ -444,6 +450,24 @@ Findings from the 2026-11-09 run, all fixed on `main`:
 - **Windows blocks downloaded scripts:** run `Unblock-File` first. Browsers also save a second download as `name (1).ps1`, so delete the old file before downloading again.
 
 2026-11-10: an account an admin creates in External ID always has a password, so External ID can't give parents email-code-only sign-in with sign-up off. Parents now get codes from the portal itself (spec 2026-11-10).
+
+Findings from the 2026-11-10 run:
+
+- **The script's mail part ended without a word on its first run,** right after printing the mailbox's details and
+  before it created anything in Exchange Online. The mailbox lookup was piped into `Select-Object -First 1`. Fixed
+  in `0acf4fc`; the second run finished with "The app can now send as webmaster@fznband.org, and only as
+  webmaster@fznband.org". A finished run always ends with the Tenant ID block; if that block is missing, the script
+  did not finish.
+- **Microsoft took about an hour to apply the permission.** Test emails failed with `ErrorAccessDenied` from 16:03
+  to 16:22 (Central) and the next one, at 17:20, succeeded. Every failed test is a call from the app, and Microsoft
+  keeps an active app's cached permissions for up to 2 hours, so retrying every few minutes can lengthen the wait.
+  Wait 30 minutes after the last attempt before trying again. `Test-ServicePrincipalAuthorization` shows the real
+  state at once, because it skips that cache.
+- **The Mail page's instructions didn't look like instructions:** the script steps were inside a collapsed section
+  under the form. They are numbered steps above the form now (`03b74bf`); `docs/ui-backlog.md` has what is left.
+- **The upgrade worked as written:** the one old guardian row became a person with a new sign-in account, and
+  `/sign-in` said "Parent sign-in isn't available yet." until the first successful test email. The backup was
+  taken but the restore steps were not tried.
 
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
 

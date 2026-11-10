@@ -52,6 +52,10 @@ and the page. Move an item to **Done** when it ships.
   still have to follow permissions: Sign-in and Mail are Admin-only, Club has its own permission, so a person sees
   only the sections they hold. The owner's summary after the first proof-of-concept run with mail: the UI needs a
   lot of love.
+- **Settings should be a static page with a wizard for setup or edit** (2026-11-10, parked by the owner). After the
+  numbered steps went in, the owner said Mail "reads a bit better" but that it needs to become a page that shows
+  the current settings plainly, with a step-by-step wizard opened to set a section up or change it. Applies to
+  Sign-in and Mail alike, and fits the single Settings page above.
 - **The staff script says "on the setup page" after setup is finished** (2026-11-10). Its last lines tell the Admin
   to enter values and use Send test email "on the setup page", but on a finished site that page is gone and the
   place is Mail. Say "in the portal" or name both.
