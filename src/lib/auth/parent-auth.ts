@@ -6,6 +6,19 @@ import { parentCodePlugin } from "./parent-code-plugin";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env } from "@/env";
 
+/**
+ * Every Better Auth route a parent doesn't need. Several write (/update-user, the revoke routes, /unlink-account) and
+ * none of them is audited, so they answer 404 (Better Auth matches these exactly, before routing). Left reachable:
+ * /get-session, /sign-out, /portal-code/send, /portal-code/verify, /ok, /error, and two routes with a path parameter
+ * that can't be listed and can't act here (/callback/:id has no provider; /reset-password/:token has no password).
+ */
+export const PARENT_DISABLED_PATHS = [
+  "/sign-in/social", "/sign-up/email", "/sign-in/email", "/reset-password", "/request-password-reset", "/verify-password",
+  "/verify-email", "/send-verification-email", "/change-email", "/change-password", "/update-session", "/update-user",
+  "/delete-user", "/delete-user/callback", "/list-sessions", "/revoke-session", "/revoke-sessions", "/revoke-other-sessions",
+  "/link-social", "/list-accounts", "/unlink-account", "/refresh-token", "/get-access-token", "/account-info",
+];
+
 // The portal's own email-code door (spec §1); the External ID door is gone.
 function buildParentAuth() {
   return betterAuth({
@@ -18,6 +31,7 @@ function buildParentAuth() {
       schema: { user: parentAuthUser, session: parentAuthSession, account: parentAuthAccount, verification: parentAuthVerification },
     }),
     emailAndPassword: { enabled: false },
+    disabledPaths: PARENT_DISABLED_PATHS,
     account: { accountLinking: { enabled: false } },
     // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
     advanced: { cookiePrefix: "br_parent", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },

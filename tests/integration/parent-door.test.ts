@@ -6,7 +6,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parentAuthSession } from "@/lib/db/schema";
+import { auditLog, guardian, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { resolveParentSession } from "@/lib/auth/resolve";
 import { chooseFamily } from "@/lib/parents/family-choice";
@@ -156,6 +156,42 @@ describe("the parent door", () => {
     for (let i = 0; i < 30; i++) await post("/portal-code/verify", { email: `n${i}@example.com`, code: "123456" });
     const res = await post("/portal-code/verify", { email: "n@example.com", code: "123456" });
     expect(await res.json()).toEqual({ ok: false, error: "rate_limited" });
+  });
+
+  it("answers not found, and changes nothing, on every Better Auth endpoint a parent could write through", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardian({ parentId: a.id, familyQboId: "F1" });
+    const { cookie } = await signIn("ana@example.com");
+    const auth = await getParentAuth();
+    const call = (path: string, method: "GET" | "POST", body: unknown = {}) => auth.handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
+      method, ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
+      headers: { "content-type": "application/json", origin: env.APP_URL, "cf-connecting-ip": IP, cookie },
+    }));
+    const writes: [string, "GET" | "POST", unknown][] = [
+      ["/update-user", "POST", { name: "Mallory", image: "https://evil.example/x.png" }],
+      ["/update-session", "POST", { familyQboId: "F9" }],
+      ["/revoke-sessions", "POST", {}], ["/revoke-other-sessions", "POST", {}], ["/revoke-session", "POST", { token: "x" }],
+      ["/change-email", "POST", { newEmail: "mallory@example.com" }], ["/change-password", "POST", { currentPassword: "a", newPassword: "b" }],
+      ["/delete-user", "POST", {}], ["/link-social", "POST", { provider: "microsoft" }], ["/unlink-account", "POST", { providerId: "x" }],
+      ["/list-sessions", "GET", null], ["/list-accounts", "GET", null], ["/account-info", "GET", null],
+    ];
+    for (const [path, method, body] of writes) expect([path, (await call(path, method, body)).status]).toEqual([path, 404]);
+    const [u] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, a.authUserId));
+    expect(u).toMatchObject({ name: "Ana", image: null, email: "ana@example.com" });
+    expect(await db.select().from(parentAuthSession).where(eq(parentAuthSession.userId, a.authUserId))).toHaveLength(1);
+    expect(await getSession(cookie)).toMatchObject({ session: { familyQboId: "F1" } });
+    expect((await post("/sign-out", {}, cookie)).status).toBe(200);
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signout")).toHaveLength(1);
+  });
+
+  it("leaves a parent only the endpoints the portal uses", async () => {
+    const auth = await getParentAuth();
+    const reachable = ["/get-session", "/sign-out", "/portal-code/send", "/portal-code/verify", "/ok", "/error"];
+    // Path-parameter routes can't be listed in disabledPaths (it matches exact paths). Neither can do anything here:
+    // there are no social providers to call back to, and there's no password to reset.
+    const parameterized = ["/callback/:id", "/reset-password/:token"];
+    const paths = Object.values(auth.api).map((e) => (e as { path?: string }).path).filter((p): p is string => !!p);
+    const disabled = new Set(auth.options.disabledPaths ?? []);
+    expect(paths.filter((p) => !disabled.has(p)).sort()).toEqual([...reachable, ...parameterized].sort());
   });
 
   it("records a sign-out through /sign-out against the person", async () => {
