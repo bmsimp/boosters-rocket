@@ -29,5 +29,8 @@ and the page. Move an item to **Done** when it ships.
   the next page load.
 
 ## Done
+- **Staff menu unreachable on phones** (2026-11-09, all staff pages). Below tablet width the top menu was hidden
+  and nothing replaced it (parents have bottom tabs; staff had nothing). Staff pages now get a Menu button that opens
+  the same links, closes on a choice or Escape, and is announced as expandable.
 - **The roles dropdown was unreadable in dark mode** (2026-11-09, Staff page). Its background was hard-coded
   white, so the dark-mode light text vanished. It now uses the theme colors and has a keyboard focus outline.

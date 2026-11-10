@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,11 +10,38 @@ export function isCurrent(path: string, href: string) {
   return path === href || (!EXACT.has(href) && path.startsWith(`${href}/`));
 }
 
-export function TopNav({ nav }: { nav: { href: string; label: string }[] }) {
+type NavItem = { href: string; label: string };
+
+export function TopNav({ nav, mobileMenu = false }: { nav: NavItem[]; mobileMenu?: boolean }) {
   const path = usePathname();
   return (
-    <nav className="top-nav" aria-label="Main">
-      {nav.map((n) => <Link key={n.href} href={n.href} aria-current={isCurrent(path, n.href) ? "page" : undefined}>{n.label}</Link>)}
-    </nav>
+    <>
+      <nav className="top-nav" aria-label="Main">
+        {nav.map((n) => <Link key={n.href} href={n.href} aria-current={isCurrent(path, n.href) ? "page" : undefined}>{n.label}</Link>)}
+      </nav>
+      {mobileMenu && <MobileMenu nav={nav} path={path} />}
+    </>
+  );
+}
+
+/**
+ * On narrow screens the top menu is hidden. Parent pages use the bottom tabs; staff pages use this Menu button,
+ * which opens the same links. It closes when a link is chosen or Escape is pressed.
+ */
+function MobileMenu({ nav, path }: { nav: NavItem[]; path: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="menu-mobile" onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
+      <button type="button" className="menu-button" aria-expanded={open} aria-controls="mobile-menu" onClick={() => setOpen((o) => !o)}>
+        {open ? "Close" : "Menu"}
+      </button>
+      {open && (
+        <nav id="mobile-menu" className="menu-panel" aria-label="Main">
+          {nav.map((n) => (
+            <Link key={n.href} href={n.href} aria-current={isCurrent(path, n.href) ? "page" : undefined} onClick={() => setOpen(false)}>{n.label}</Link>
+          ))}
+        </nav>
+      )}
+    </div>
   );
 }

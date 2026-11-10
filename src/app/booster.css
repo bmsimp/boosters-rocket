@@ -104,10 +104,21 @@ button { font: inherit; cursor: pointer; }
 .bar .wrap { height: 56px; display: flex; align-items: center; gap: var(--s3); }
 .monogram { width: 34px; height: 34px; border-radius: 50%; background: var(--club-on); color: var(--club);
   display: grid; place-items: center; font: 700 0.875rem var(--mark); flex: none; }
-.club { font: 700 1.3125rem/1 var(--mark); letter-spacing: .01em; }
+.club { font: 700 1.3125rem/1 var(--mark); letter-spacing: .01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-nav { display: none; margin-left: auto; gap: var(--s1); }
 .top-nav a { color: var(--club-on); text-decoration: none; font: 600 1.125rem var(--mark); padding: 0 12px; min-height: 44px; display: inline-flex; align-items: center; }
 .top-nav a[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--club-on); }
+/* Staff pages on narrow screens: a Menu button opens the same links as the top menu (parents use the bottom tabs). */
+.bar { position: relative; }
+.menu-mobile { margin-left: auto; }
+.menu-mobile + .account { margin-left: var(--s2); }
+.menu-button { min-height: 44px; padding: 0 14px; border: 2px solid var(--club-on); background: transparent; color: var(--club-on);
+  font: 600 1.0625rem var(--mark); cursor: pointer; }
+.menu-panel { position: absolute; left: 0; right: 0; top: 56px; z-index: 20; display: grid; background: var(--club);
+  border-bottom: 2px solid var(--club-on); padding: var(--s1) 0; }
+.menu-panel a { color: var(--club-on); text-decoration: none; font: 600 1.125rem var(--mark); min-height: 48px;
+  display: flex; align-items: center; padding: 0 var(--cell); }
+.menu-panel a[aria-current="page"] { box-shadow: inset 4px 0 0 var(--club-on); }
 .account { margin-left: auto; width: 44px; height: 44px; border-radius: 50%; border: 2px solid currentColor;
   display: grid; place-items: center; text-decoration: none; flex: none;
   background: transparent; color: var(--club-on); font: 700 0.875rem var(--mark); }
@@ -245,6 +256,7 @@ footer a { color: var(--club-text); }
   .season .wrap { min-height: 142px; } /* bar 56 + band 142 + rule 2 = 200, so boxes start on the grid */
   .tabs { display: none; }
   .top-nav { display: flex; }
+  .menu-mobile { display: none; }
   .account { margin-left: var(--s3); }
   main.wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "money students" "paid details"; align-items: start; padding-top: 40px; } /* tops at 240, on a grid row */
   .money { grid-area: money; } .students-box { grid-area: students; } .details-box { grid-area: details; } .paid-box { grid-area: paid; }
@@ -277,6 +289,8 @@ footer a { color: var(--club-text); }
   .sets li::after { forced-color-adjust: none; background-image: linear-gradient(90deg, CanvasText 2px, transparent 2px); opacity: 1; }
   .sets [aria-current="step"]::after { background-image: linear-gradient(90deg, HighlightText 2px, transparent 2px); }
   .top-nav a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
+  .menu-button, .menu-panel { border-color: CanvasText; }
+  .menu-panel a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 3px; }
   .monogram { border: 2px solid CanvasText; }
   .sets [aria-current="step"] .on-set i { outline-color: HighlightText; }
   .on-set i { forced-color-adjust: none; background: Canvas; color: CanvasText; box-shadow: inset 0 0 0 2px CanvasText; }
