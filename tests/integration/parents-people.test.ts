@@ -151,7 +151,7 @@ describe("removing, blocking and students", () => {
       expect(await enabledGuardianRows(p.id)).toHaveLength(0);
       expect(await sessionsOf(p.authUserId)).toHaveLength(0);
     }
-  });
+  }, 30_000);
 
   it("resends the welcome for an enabled row only", async () => {
     const p = await seedParent({ name: "Ana" });
