@@ -24,14 +24,18 @@ export async function completeParentSignin(parentId: string, ip: string | null):
   return { familyQboId: rows[0]!.familyQboId };
 }
 
-/** The chooser and **Switch family**. Refuses (and audits) a family that isn't one of the person's enabled rows. */
-export async function chooseFamily(o: { sessionId: string; parentId: string; familyQboId: string; ip: string | null }): Promise<boolean> {
+/**
+ * The chooser and **Switch family**. Refuses (and audits) a family that isn't one of the person's enabled rows.
+ * `familyQboId: null` is an argument the caller couldn't use as an ID: refused the same way, and not recorded.
+ */
+export async function chooseFamily(o: { sessionId: string; parentId: string; familyQboId: string | null; ip: string | null }): Promise<boolean> {
   const [p] = await db.select().from(parent).where(eq(parent.id, o.parentId));
   if (!p) return false;
   const actor = parentActor(p);
-  const row = (await enabledGuardianRows(o.parentId)).find((r) => r.familyQboId === o.familyQboId);
-  if (!row || p.blocked) {
-    await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "family_not_enabled", familyQboId: o.familyQboId }, ip: o.ip });
+  const row = o.familyQboId === null ? undefined : (await enabledGuardianRows(o.parentId)).find((r) => r.familyQboId === o.familyQboId);
+  if (!row || p.blocked || o.familyQboId === null) {
+    const after = o.familyQboId === null ? { reason: "family_not_enabled" } : { reason: "family_not_enabled", familyQboId: o.familyQboId };
+    await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after, ip: o.ip });
     return false;
   }
   const [s] = await db.select({ familyQboId: parentAuthSession.familyQboId }).from(parentAuthSession).where(eq(parentAuthSession.id, o.sessionId));
