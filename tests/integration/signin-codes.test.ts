@@ -14,8 +14,9 @@ vi.mock("@/lib/mail/senders", async () => {
   };
 });
 
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, signinCode } from "@/lib/db/schema";
 import { requestSigninCode, verifySigninCode, hashSigninCode, CODE_TTL_MS } from "@/lib/parents/signin-codes";
 import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
 
@@ -175,6 +176,17 @@ describe("checking a code", () => {
     expect(await verifySigninCode("ana@example.com", code, IP, at(6000))).toEqual({ ok: false, reason: "rejected" });
     expect((await audits("signin.code_wrong")).map((a) => (a.after as { try: number }).try)).toEqual([1, 2, 3, 4, 5]);
     expect((await audits("signin.code_expired"))[0]).toMatchObject({ after: { reason: "too_many_tries" } });
+  });
+
+  it("refuses a right code once the person's last guardian row was disabled after it was sent", async () => {
+    const p = await ana();
+    const [g] = await db.select().from(guardian).where(eq(guardian.parentId, p.id));
+    await send("ana@example.com");
+    const { removeGuardian } = await import("@/lib/parents/people");
+    expect(await removeGuardian(g!.id, { actor: { door: "staff", id: null, label: "board" }, ip: null })).toMatchObject({ ok: true });
+    expect(await db.select().from(signinCode)).toHaveLength(1); // removing a row leaves the code live; the final check is what refuses it
+    expect(await verifySigninCode("ana@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: false, reason: "rejected" });
+    expect((await audits("signin.refused"))[0]).toMatchObject({ targetType: "parent", targetId: p.id, after: { reason: "no_enabled_guardian" } });
   });
 
   it("refuses a right code for a person blocked after it was sent", async () => {
