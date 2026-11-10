@@ -1,9 +1,7 @@
 # Booster Rocket proof of concept on linuxdev: runbook
 
-Follow this top to bottom, with one exception: sign-in is set up on the site's `/setup` page, which only
-exists after the first deploy (section 7). Section 4 part A (creating the parent tenant in Azure) can be
-done before deploying. Section 3 and section 4 parts B to E happen on the setup page after the first
-deploy. Each section is numbered steps. Anything in `monospace` is typed or
+Follow this top to bottom, with one exception: the `/setup` page only exists after the first deploy (section 7).
+Sign-in and outgoing mail are set up on the setup page after the first deploy (sections 3 and 4). Each section is numbered steps. Anything in `monospace` is typed or
 pasted exactly. Dashboard click paths were checked against Microsoft Learn and Cloudflare's
 documentation on 2026-11-08; the sources are listed under each section. If a screen no longer matches,
 trust the screen and note it in the Results table.
@@ -12,7 +10,8 @@ trust the screen and note it in the Results table.
 
 This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
 a Cloudflare tunnel (and, optionally, Cloudflare Access), so you can prove that staff sign-in (the band's Entra
-tenant or Google), parent sign-in (Entra External ID) and the audit log work for real. It holds **test data
+tenant or Google), parent sign-in (a 6-digit code the portal emails from
+`webmaster@fznband.org`) and the audit log work for real. It holds **test data
 only**; no real families use it.
 
 Two sign-in doors exist. Staff use `/staff/sign-in`; parents use `/sign-in`. If Cloudflare
@@ -21,7 +20,7 @@ sign-in). For this proof of concept the owner chose to skip Access rather than m
 emails (see section 6 B, which is optional), so testers sign in once, at the portal's own sign-in.
 
 Sign-in is not configured in files. After the first deploy you open `/setup`, enter a one-time setup
-code that `deploy.sh` prints, and set up staff sign-in, parent sign-in and the first Admin on that page
+code that `deploy.sh` prints, and set up staff sign-in, outgoing mail and the first Admin on that page
 (sections 3 and 4).
 
 ## 2. First-time setup on linuxdev
@@ -163,144 +162,61 @@ Sources: Register an application in Microsoft Entra ID
 including certificates
 (https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials).
 
-## 4. Parent sign-in (Entra External ID)
+## 4. Outgoing mail (Microsoft 365, sending as webmaster@fznband.org)
 
-Parents sign in through a separate *external tenant* so their accounts never mix with staff.
+Parents sign in with a code the portal emails them, so mail must work before any parent can sign in. The portal
+sends as one mailbox, `webmaster@fznband.org`, through Microsoft Graph with the staff app's certificate. Exchange
+Online only lets the app send as that mailbox. (The portal can send through SMTP instead; this section covers
+Microsoft 365.)
 
-**A. Create the external tenant** (needs the Tenant Creator role on the band's Azure subscription)
+The script's mail part has not yet been run against a real tenant; the first run is part of this proof of concept.
+Record what actually happens in section 10.
 
-1. In https://entra.microsoft.com (signed in to the band's tenant) browse to **Entra ID** > **Overview** >
-   **Manage tenants** and select **Create**.
-2. Select **External**, then **Continue**. Choose **Use Azure Subscription** (not the 30-day trial,
-   unless you only want a throwaway).
-3. **Basics** tab: enter a **Tenant Name** (for example `Band Parents Test`) and a **Domain Name**
-   (for example `bandparentstest`).
-4. **Country/Region:** **United States**. This cannot be changed later.
-5. Select **Next: Add a subscription**; choose the band's subscription and a resource group (use
-   **Create new** if there is none). Select **Next: Review + Create**, then **Create**. It can take up to
-   30 minutes (watch the **Notifications** bell).
-6. Switch to the new tenant with the **Settings** icon > **Directories + subscriptions** > **Switch**. Under
-   **Tenant overview** copy the **Tenant ID** and the **Primary domain** (the part before `.onmicrosoft.com`
-   is the tenant name used below).
+1. Do section 3 first: this uses the staff app.
+2. On a Windows PC with PowerShell 7, install the Exchange Online module once:
+   `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
+3. On the setup page, Step 2 (Outgoing mail), open **Microsoft 365: let the app send as one mailbox**, download
+   `New-BoosterRocketStaffApp.ps1` again (it carries the current certificate), run `Unblock-File` on it, then run
+   `./New-BoosterRocketStaffApp.ps1 -TenantId <band tenant ID> -SetUpMail -Mailbox webmaster@fznband.org`, signed in
+   as an Exchange administrator. It reuses the staff app and adds the mail permission. (The same steps by hand are
+   under that heading on the setup page.) The script:
+   - needs `-Mailbox` to be an email address, and stops if Exchange Online has no such mailbox;
+   - asks you to sign in to Exchange Online, and stops if you sign in to a different tenant from the one you gave
+     with `-TenantId` (run it again and sign in as an administrator of the band's tenant);
+   - creates a management scope named `Booster Rocket mail sender` that holds only that mailbox (matched by its
+     primary address), and gives the app the `Application Mail.Send` role on that scope;
+   - checks that every Exchange Online assignment that lets the app send mail is limited to that scope. If it finds
+     others, it stops and names them. It never removes anything itself: remove the extras in Exchange Online (the
+     message gives the command that lists them), then run it again;
+   - stops with "the role assignment is in place, but Exchange doesn't report the mailbox in scope" if the mailbox
+     isn't in scope yet. Check the address and run it again.
+4. If the script stops because the app holds Microsoft Graph's **Mail.Send** application permission in Entra, do what
+   it says (Enterprise applications > the app > Permissions, **Revoke permission**, and remove **Mail.Send** from
+   the app registration's API permissions), then run it again. That permission would let the app send as anyone.
+5. When it ends with "The app can now send as webmaster@fznband.org, and only as webmaster@fznband.org", wait 30
+   minutes to 2 hours: Microsoft caches app permissions for that long.
+6. On the setup page choose **Microsoft 365**, enter `webmaster@fznband.org`, **Save**, then **Send test email** to
+   an address you can read. When it arrives, **Next: first Admin** turns on. Until a test email has gone out, the
+   first Admin step (`/setup?step=admin`) and finishing setup are blocked too.
 
-**B to E. Everything else is Step 2 of the setup page.** The tenant itself must be created by hand (part
-A); after that, follow **Step 2** of the setup page, or run `New-BoosterRocketParentApp.ps1`, which
-registers the portal in the external tenant, adds the certificate, and also turns sign-up off (the same
-thing as part D). On Windows, run `Unblock-File .\New-BoosterRocketParentApp.ps1` first.
-The page builds the discovery address itself from the tenant subdomain and ID, and checks it (and the
-certificate) with Microsoft before it saves anything. Parts B to E below are what those steps do,
-for reference and for doing it by hand.
+The old parents tenant (`fznbandparents`) and its app aren't used any more. Delete them whenever you like; the
+portal never deletes anything in a tenant, and nothing here does it for you.
 
-**B. Register the portal in the external tenant** (still switched into the external tenant)
-
-1. **Entra ID** > **App registrations** > **New registration**. **Name:** `Booster Rocket (parents)`.
-   **Supported account types:** **Single tenant only**. Use exactly this name: the script finds the app by it.
-2. **Redirect URI:** platform **Web**, exactly:
-   ```
-   https://portaltest.rhinoautomator.com/api/auth/parent/callback/parent-oidc
-   ```
-3. **Register.** Copy **Application (client) ID** (the client ID for Step 2).
-4. On the setup page (Step 2), select **Download certificate (.cer)**; it saves
-   `booster-rocket-parents.cer`. In Entra, **Certificates & secrets** > **Certificates** > **Upload
-   certificate**, and add that file. No secret is needed.
-5. External tenants require an administrator to consent for everyone: under **Manage** select **API
-   permissions**, **Grant admin consent for <tenant name>**, **Yes**, **Refresh**, and check **Granted for
-   <tenant name>** shows under **Status**.
-
-**C. Create the user flow (email one-time passcode)**
-
-1. **Entra ID** > **External Identities** > **User flows** > **New user flow**.
-2. **Name:** `Booster Rocket parents`. Use exactly this name: the script finds the flow by it. Under **Identity providers** tick **Email Accounts** and choose **Email
-   one-time passcode**. (If the option is greyed out or missing, first check **External Identities** >
-   **All identity providers** > **Email one-time passcode** is enabled.) Pick any user attributes
-   (the defaults are fine), **OK**, **Create**.
-3. Open the new flow, in the left menu under **Use** select **Applications**, **Add application**, pick
-   `Booster Rocket (parents)`, **Select**.
-
-**D. Turn sign-up off.** You cannot do this in the admin center; Microsoft documents it as a Microsoft
-Graph call. With sign-up on, a stranger could create a parent account. `New-BoosterRocketParentApp.ps1`
-does this for you; the steps below are the manual fallback.
-
-1. Copy the app's **Application (client) ID** from the user flow's **Applications** list (same value as in B3).
-2. Using any tool that can call Microsoft Graph as a signed-in admin of the *external* tenant (for example
-   Graph Explorer at https://developer.microsoft.com/graph/graph-explorer; consent to
-   `EventListener.ReadWrite.All` when asked), find the flow's ID by listing the flow for that application:
-   see "List the user flow associated with a specific application ID" at
-   https://learn.microsoft.com/en-us/graph/api/identitycontainer-list-authenticationeventsflows#example-4-list-user-flow-associated-with-specific-application-id
-3. Send `PATCH https://graph.microsoft.com/beta/identity/authenticationEventsFlows/{user-flow-id}` with
-   this body (this is the exact request Microsoft documents):
-   ```json
-   {
-     "@odata.type": "#microsoft.graph.externalUsersSelfServiceSignUpEventsFlow",
-     "onInteractiveAuthFlowStart": {
-       "@odata.type": "#microsoft.graph.onInteractiveAuthFlowStartExternalUsersSelfServiceSignUp",
-       "isSignUpAllowed": false
-     }
-   }
-   ```
-4. Confirm by re-reading the flow: `isSignUpAllowed` must be `false`.
-
-**The script and the manual steps use the same names.** `New-BoosterRocketParentApp.ps1` looks for the app
-`Booster Rocket (parents)` and the user flow `Booster Rocket parents`, and reuses what it finds (checking
-the settings, and turning sign-up off) instead of creating duplicates. If you already did parts B and C by
-hand under these names, running the script is safe: it fixes the settings and adds the certificate, and it
-creates and prints no secret. It prints the **Tenant ID**, **Client ID**, **Tenant subdomain** and the
-certificate's thumbprint and expiry. It keeps existing certificates on the app; if Microsoft does not return
-them, or one has expired, it stops with a message to fix it by hand. (If two apps share the name it stops
-and asks you to delete the extra one.)
-
-**E. Enter the values in Step 2 of the setup page** (not in `.env.poc`). The page asks for:
-```
-Tenant subdomain:         <tenant-name>   (the part before .onmicrosoft.com, from part A6)
-Directory (tenant) ID:    <tenant ID from part A6>
-Application (client) ID:  <application (client) ID from B3>
-```
-Then select **Check and save**. There is no secret and no expiry date: the certificate from B4 stands in
-for them.
-The page builds the discovery address itself
-(`https://<tenant-name>.ciamlogin.com/<tenant-id>/v2.0/.well-known/openid-configuration`), so there is
-nothing to paste or test in a browser. It fetches that address and trial-signs-in with the certificate
-before saving anything; a wrong subdomain or tenant ID is reported in plain words and nothing is saved.
-
-**Then Step 3 of the setup page:** enter the email address of the first Admin (the one the Microsoft or
-Google account signs in with), sign in, and setup closes. That person is now an Admin.
-
-Sources: Create an external tenant
-(https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-create-external-tenant-portal);
-Register an application, incl. admin consent for external tenants
-(https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app); Create a sign-up and
-sign-in user flow
-(https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-user-flow-sign-up-sign-in-customers);
-Add your application to the user flow
-(https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-user-flow-add-application); Disable
-sign-up in a user flow
-(https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-disable-sign-up-user-flow); Update
-authenticationEventsFlow
-(https://learn.microsoft.com/en-us/graph/api/authenticationeventsflow-update); discovery document
-format (https://learn.microsoft.com/en-us/entra/identity-platform/security-tokens#token-endpoints-and-issuers).
+Sources: Role Based Access Control for Applications in Exchange Online
+(https://learn.microsoft.com/exchange/permissions-exo/application-rbac); user: sendMail
+(https://learn.microsoft.com/graph/api/user-sendmail).
 
 ## 5. Test parents
 
-1. Switch to the external tenant. **Entra ID** > **Users** > **New user** > **Create new external user**.
-2. Under **Identities** set **Sign-in method** to **Email** and **Value** to the parent's real email
-   address (you must be able to read its inbox to get the sign-in code). Enter a **Display name**. Select
-   **Review + create**. Create **two** users: parent one and parent two.
-3. Open parent one (**Entra ID** > **Users**, select them) and copy the **Object ID** from the user's
-   overview page. Parent two gets no guardian row on purpose (checklist step 7).
-4. **Wait until the first deploy in section 7 has succeeded** (the image and database tables the seed
-   needs do not exist before that). Then, on linuxdev:
+1. **Wait until the first deploy in section 7 has succeeded.** Then, on linuxdev, seed parent one:
    ```bash
    cd ~/booster-rocket
-   docker compose -f docker-compose.poc.yml --env-file .env.poc run --rm migrate node tools/scripts/seed-poc-guardian.mjs --name "<name>" --email "<email>" --object-id "<object id>" --family POC-FAMILY-1
+   docker compose -f docker-compose.poc.yml --env-file .env.poc run --rm migrate node tools/scripts/seed-poc-guardian.mjs --name "<name>" --email "<email you can read>" --family POC-FAMILY-1
    ```
-   Success prints `seeded guardian <id>`. It refuses unless `APP_URL` contains `portaltest`. Running it
-   twice with the same Object ID prints "A guardian with that object id already exists."
-
-Sources: Manage user accounts for consumers and business customers
-(https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-manage-customer-accounts); How to
-create, invite, and delete users
-(https://learn.microsoft.com/en-us/entra/fundamentals/how-to-create-delete-users). (The Object ID
-location on the user page is the standard Entra user overview; those pages do not spell it out.)
+   Success prints `seeded guardian <id>`. It refuses unless `APP_URL` contains `portaltest`. Running it again with
+   the same email and family prints "That person is already a guardian in that family." The same email with
+   `--family POC-FAMILY-2` adds a second family to the same person.
+2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
 
 ## 6. Cloudflare
 
@@ -379,7 +295,7 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
 5. **Logs:** `docker logs booster-rocket-app` (add `--tail 100` or `-f`). Database:
    `docker compose -f docker-compose.poc.yml --env-file .env.poc logs db`.
 6. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), then do section 5
-   step 4 (the seed).
+   step 1 (the seed).
 7. **Need a code later?** `scripts/poc/setup-code.sh` prints a new one (the old code stops working) while
    setup is open. **Nobody can sign in** (for example, a certificate or Google client secret expired)?
    `scripts/poc/reopen-setup.sh` reopens setup and prints a code. Stored sign-in values are kept and
@@ -392,19 +308,20 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 1. Visit https://portaltest.rhinoautomator.com: the portal's sign-in page shows directly. (Only if Cloudflare Access is set up, section 6 B, it first asks for an email code.)
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
-- [ ] 4. Parent: sign in at `/sign-in` as the seeded test parent -> parent home (not the refusal page).
-- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, parent `signin`, `parent.object_id_set`, `guardian.activate`, `settings.club.save`, and from setup `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Check and switch** after **Replace certificate** retires the old one, and `certificate.discard` after **Discard replacement**). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
+- [ ] 4. Parent: at `/sign-in`, enter the seeded parent's email, get the code from `webmaster@fznband.org`, enter it -> parent home (with two families, the family chooser first).
+- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, `signin.code_sent`, parent `signin`, `guardian.activate`, `settings.club.save`, and from setup `settings.mail.save`, `settings.mail.test`, `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Check and switch** after **Replace certificate** retires the old one, and `certificate.discard` after **Discard replacement**). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
 - [ ] 6. Sign out at both doors -> both `signout` entries appear.
-- [ ] 7. The second External ID user (no guardian row) -> refusal page; audit shows `signin.refused` with reason `no_guardian`.
+- [ ] 7. Parent two's address -> the same "If this email belongs to a family…" message, no email arrives, and the audit shows `signin.code_refused` with reason `unknown_email`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
   After a no-change redeploy, `previous` and `current` are the same image, so `--rollback` only exercises the mechanism; a real rollback test needs a real new commit.
+- [ ] 9. From PowerShell, confirm the app can't send as any other mailbox: `Test-ServicePrincipalAuthorization -Identity <staff app Object ID> -Resource <another mailbox>` shows `InScope` `False` for Application Mail.Send.
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
 (staff, parent or system), who, the action, and details. A refusal's reason is in the details as
 `reason`: each row has a **Details** line you can open, showing the saved before/after values
-(for example `{"reason":"no_guardian"}`). Times show in your own device's time zone; the database stores them in UTC (hover a time to see the exact UTC instant; `psql` output follows the server's zone, Central). The person always sees the same
-refusal page; the reason is only in the log. If the page itself is unavailable, read the log from the
+(for example `{"reason":"unknown_email"}`). Times show in your own device's time zone; the database stores them in UTC (hover a time to see the exact UTC instant; `psql` output follows the server's zone, Central). The person always sees the same
+message; the reason is only in the log. If the page itself is unavailable, read the log from the
 database on linuxdev:
 ```bash
 cd ~/booster-rocket
@@ -415,23 +332,21 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Parent sees the refusal page; audit `signin.refused` (door parent), reason `missing_object_id` | The app never saved this parent's Object ID: the token could not be verified (look for a `parent.object_id_unverified` row just before it) | Read the `parent.object_id_unverified` reason below; fix that; sign in again |
-| `signin.refused`, reason `no_guardian` | No guardian row has this Object ID | Expected for parent two. For a real tester: copy the Object ID from the external tenant user and run the seed (section 5) |
-| `signin.refused`, reason `disabled` | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited' where email='<email>';"` (this SQL fix bypasses the audit log, so it is acceptable only for test data) |
+| `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited', disabled_reason=null where parent_id=(select id from parent where email='<email>');"` (this SQL fix bypasses the audit log, so it is acceptable only for test data) |
+| A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Seed them (section 5); addresses are matched trimmed and lowercased |
+| `signin.code_refused`, reason `no_enabled_guardian` | All of the person's guardian rows are disabled | Test data: re-enable the row (see the row above) |
+| `signin.code_refused`, reason `rate_limited` | 3 codes to one address, or 10 requests from one IP, in 15 minutes, or a resend within 60 seconds | Wait 15 minutes |
+| `signin.code_refused`, reason `mail_failed`, and a `mail.failed` row | Microsoft 365 or SMTP refused the message; the `mail.failed` row has the provider's error | For `ErrorAccessDenied`, rerun section 4 step 3 and wait up to 2 hours; staff see the same error on the staff home page |
+| `/sign-in` says "Parent sign-in isn't available yet." | Mail settings aren't saved, or haven't had a successful test since they changed | **Settings** > **Mail** (Admins only): **Send test email** |
+| "Too many tries. Wait a few minutes and request a new code." | 30 code checks from one IP in 15 minutes | Wait 15 minutes |
 | Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not the first Admin email entered in Step 3 of setup | Sign in with that email, or have an Admin add the person first (**Staff** menu) |
-| `parent.object_id_unverified`, reason `subject_mismatch` | The ID token's subject differs from the account being signed in | Sign out everywhere, clear cookies, try again; if it repeats, report it (should not happen) |
-| `parent.object_id_unverified`, reason `invalid_token:...` (for example `invalid_token:ERR_JWT_CLAIM_VALIDATION_FAILED:iss` or `:aud`, or `ERR_JWT_EXPIRED`) | Wrong issuer or audience, or an expired token. `iss`: discovery URL is for another tenant; `aud`: the client ID entered is not the parent app's client ID | Re-check the parent sign-in values (**Settings** > **Sign-in**, or `scripts/poc/reopen-setup.sh` and Step 2 of the setup page) |
-| `parent.object_id_unverified`, reason `missing_oid` | The token verified but has no `oid` claim | Check the app registration is in the **external** tenant and sign-in uses its user flow; report the finding (this is the open risk in the spec) |
-| `parent.object_id_unverified`, reasons `no_id_token`, `discovery_failed`, `verifier_unavailable`, `user_missing` | No ID token returned; the discovery URL cannot be fetched from linuxdev; or the account row vanished | Open the discovery URL in a browser; check linuxdev has internet access; check admin consent (section 4 B5) |
-| `parent.object_id_conflict` in audit | The same account came back with a different Object ID | Test data: use a different external user; report it |
-| Microsoft error "AADSTS50011: The redirect URI ... does not match" | Redirect URI in the app registration differs from the one the portal sends | Staff: `https://portaltest.rhinoautomator.com/api/auth/staff/callback/microsoft`; parent: `https://portaltest.rhinoautomator.com/api/auth/parent/callback/parent-oidc`. Platform must be **Web**; no trailing slash |
+| Microsoft error "AADSTS50011: The redirect URI ... does not match" | Redirect URI in the app registration differs from the one the portal sends | `https://portaltest.rhinoautomator.com/api/auth/staff/callback/microsoft`. Platform must be **Web**; no trailing slash |
 | The setup page refuses the Microsoft tenant ID | It is `common`, `organizations`, `consumers` or something that is not a GUID | Use the **Directory (tenant) ID** GUID from the band's tenant Overview page; also set the registration to **Single tenant only** |
 | The staff app registration was created as multi-tenant | Wrong **Supported account types** choice | Entra > the app > **Authentication** > **Supported account types** > **Single tenant only** |
-| A stranger can create a parent account in External ID | Sign-up left on in the user flow | Redo section 4 D (or run `New-BoosterRocketParentApp.ps1`) and confirm `isSignUpAllowed` is `false` |
 | Setup code does not work | It is wrong, was replaced by a newer one, was slowed down by too many wrong tries, or is void | Run `scripts/poc/setup-code.sh` for a fresh code and use that one |
 | Microsoft doesn't have this certificate on the app yet (`AADSTS700027`) | The `.cer` was not uploaded to the app registration, or Microsoft has not picked it up yet | Upload the `.cer` under **Certificates & secrets** > **Certificates** (or run the script), wait a minute, and try again |
 | The server's clock looks wrong, so Microsoft refused the certificate (`AADSTS700024`) | The time on linuxdev is off | Fix the time on linuxdev, then try again |
-| The tenant blocks client secrets (`CredentialTypeNotAllowedAsPerAppPolicy`) | The tenant's "Block password addition" app policy, which stops apps from getting client secrets, refused the request | Nothing needs changing: this is why Microsoft sign-in uses certificates. Use the certificate steps in sections 3 and 4 (Google still uses a secret) |
+| The tenant blocks client secrets (`CredentialTypeNotAllowedAsPerAppPolicy`) | The tenant's "Block password addition" app policy, which stops apps from getting client secrets, refused the request | Nothing needs changing: this is why Microsoft sign-in uses certificates. Use the certificate steps in section 3 (Google still uses a secret) |
 | Nobody can sign in (for example, a certificate or Google client secret expired) | Sign-in values need replacing | Run `scripts/poc/reopen-setup.sh`, enter the code at `/setup`, and re-enter the values (for Microsoft, select **Replace certificate**, upload the new `.cer` in Entra, then **Check and switch**). Existing Admins stay Admins |
 | Sign-in shows "not set up" after `.env.poc` was changed or replaced | `SETTINGS_ENCRYPTION_KEY` changed, so the stored secrets cannot be read | Put the old key back if you have a backup; otherwise run `scripts/poc/reopen-setup.sh` and re-enter the secrets (for Microsoft, select **Replace certificate** on the setup page, upload the new `.cer` in Entra, then **Check and switch**) |
 | Step 3 says it is a different account | You are signed in to Microsoft as someone other than the Admin email you entered | Sign out of Microsoft, then sign in as the Admin email |
@@ -449,10 +364,10 @@ Fill one row per checklist step each time you run it.
 | 2026-11-09 | 994f231 | 1 | Pass | Cloudflare Access skipped by choice; the setup page showed directly. |
 | 2026-11-09 | 994f231 | 2 | Pass | Staff Microsoft sign-in with a certificate (the band tenant blocks client secrets: `CredentialTypeNotAllowedAsPerAppPolicy`). The staff script created the app, granted consent and added the certificate; a re-run reused the app and found the certificate already there. Signed in as webmaster@fznband.org and was made Admin. |
 | 2026-11-09 | 994f231 | 3 | Pass | Name "FZN Band Boosters", color #005102. Short name still the default "BR"; set it under Club. |
-| | | 4 | Not run | Waiting on the External ID tenant (section 4 A). |
+| | | 4 | Not run | Not run: waiting on outgoing mail (section 4). |
 | 2026-11-09 | 994f231 | 5 | Partial | Present: `setup.code.issue`, `setup.unlock`, `certificate.create` (staff, plus a pending parent certificate made by downloading the parent script), `certificate.activate`, `setup.provider.save`, `setup.admin_email.save`, staff `signin`, `admin.bootstrap`, `setup.finish`, `settings.club.save`, `signout`. No `staff.bind`: the first Admin is created already bound, so it only appears for invited staff. Parent rows wait on step 4. |
 | 2026-11-09 | 994f231 | 6 | Partial | Staff sign-out recorded. Parent sign-out waits on step 4. |
-| | | 7 | Not run | Waiting on the External ID tenant. |
+| | | 7 | Not run | Not run: waiting on outgoing mail (section 4). |
 | 2026-11-09 | 994f231 | 8 | Pass | Redeploy kept `previous` and stayed healthy; `--rollback` returned to it and stayed healthy (both images were the same commit, so this tested the mechanism). |
 
 Findings from the 2026-11-09 run, all fixed on `main`:
@@ -461,6 +376,8 @@ Findings from the 2026-11-09 run, all fixed on `main`:
 - **Deploys on Docker 29:** the first redeploy failed while tagging the rollback copy, because the old image's record was gone once `current` moved to the new build. Fixed in `e58b69a`: the copy is now kept before the build, and a tagging failure can't stop a deploy. Because `deploy.sh` updates itself during its own `git pull`, the first deploy after a script change still runs the old copy.
 - **The scripts created a new app on every run,** because Microsoft's filter-by-name lookup returned nothing. Fixed in `994f231`: the scripts now list the apps and match the name themselves. Delete any duplicate apps by hand.
 - **Windows blocks downloaded scripts:** run `Unblock-File` first. Browsers also save a second download as `name (1).ps1`, so delete the old file before downloading again.
+
+2026-11-10: an account an admin creates in External ID always has a password, so External ID can't give parents email-code-only sign-in with sign-up off. Parents now get codes from the portal itself (spec 2026-11-10).
 
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
 

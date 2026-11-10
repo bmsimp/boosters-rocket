@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-06
 **Status:** Draft for review
+**Revised in part:** parent sign-in, people and outgoing mail. See docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md (it lists the sections it changes).
 **First deployment:** FZN Band Boosters (`portal.fznband.org`)
 
 ---
