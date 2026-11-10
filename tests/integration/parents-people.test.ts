@@ -140,6 +140,19 @@ describe("removing, blocking and students", () => {
     expect(outbox).toHaveLength(0); // coming back for a student sends no welcome
   });
 
+  it("two disables racing over a person's last two rows still end their sessions", async () => {
+    for (let i = 0; i < 10; i++) { // a race can pass by luck once; repeat so a missing lock shows up
+      await resetDb();
+      const p = await seedParent({ name: "Ana" });
+      const g1 = await seedGuardian({ parentId: p.id, familyQboId: "F1", status: "active" });
+      await seedGuardian({ parentId: p.id, familyQboId: "F2", status: "active" });
+      await seedParentSession(p.authUserId);
+      await Promise.all([removeGuardian(g1.id, o), onFamilyStudentsChanged("F2", false, o)]);
+      expect(await enabledGuardianRows(p.id)).toHaveLength(0);
+      expect(await sessionsOf(p.authUserId)).toHaveLength(0);
+    }
+  });
+
   it("resends the welcome for an enabled row only", async () => {
     const p = await seedParent({ name: "Ana" });
     const g = await seedGuardian({ parentId: p.id, familyQboId: "F1", status: "invited" });

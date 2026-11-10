@@ -100,6 +100,8 @@ export async function removeGuardian(guardianId: string, o: StaffOp): Promise<{ 
   return db.transaction(async (tx) => {
     const [row] = await tx.select().from(guardian).where(eq(guardian.id, guardianId)).for("update");
     if (!row) return { ok: false as const, reason: "not_found" as const };
+    // Serialize per person, so two disables racing over their last rows can't each count one row left.
+    await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, row.parentId)).for("update");
     if (row.status === "disabled" && row.disabledReason === "removed") return { ok: true as const, sessionsEnded: 0 };
     const statusBeforeDisable = row.status === "disabled" ? row.statusBeforeDisable : row.status;
     await tx.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable, updatedAt: new Date() }).where(eq(guardian.id, row.id));
@@ -117,6 +119,7 @@ export async function blockPerson(parentId: string, o: StaffOp): Promise<{ ok: t
     if (!p) return { ok: false as const, reason: "not_found" as const };
     await tx.update(parent).set({ blocked: true, updatedAt: new Date() }).where(eq(parent.id, p.id));
     await deleteUnusedSigninCodes(p.id, tx);
+    await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, p.id), isNull(parentEmailChange.usedAt)));
     const sessionsEnded = await endParentSessions(p.id, tx);
     await writeAudit({ actor: o.actor, action: "parent.block", permission: o.permission, targetType: "parent", targetId: p.id,
       before: { blocked: p.blocked }, after: { blocked: true, sessionsEnded }, ip: o.ip }, tx);
@@ -143,6 +146,10 @@ export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok:
 export async function onFamilyStudentsChanged(familyQboId: string, hasActiveStudents: boolean, o: StaffOp): Promise<{ changed: number }> {
   return db.transaction(async (tx) => {
     const rows = await tx.select().from(guardian).where(eq(guardian.familyQboId, familyQboId)).for("update");
+    // Lock each person once, in a fixed order, so racing calls over shared people can't deadlock or miscount.
+    for (const id of [...new Set(rows.map((r) => r.parentId))].sort()) {
+      await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, id)).for("update");
+    }
     let changed = 0;
     for (const row of rows) {
       if (!hasActiveStudents && row.status !== "disabled") {

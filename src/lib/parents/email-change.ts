@@ -59,7 +59,7 @@ export async function confirmParentEmailChange(token: string, o: { ip: string | 
     if (!row || row.expiresAt.getTime() <= Date.now()) return { ok: false as const, reason: "invalid" as const };
     await lockEmail(tx, row.newEmail);
     const [p] = await tx.select().from(parent).where(eq(parent.id, row.parentId)).for("update");
-    if (!p) return { ok: false as const, reason: "invalid" as const };
+    if (!p || p.blocked) return { ok: false as const, reason: "invalid" as const };
     const actor = parentActor(p);
     await tx.update(parentEmailChange).set({ usedAt: new Date() }).where(eq(parentEmailChange.id, row.id));
     const [other] = await tx.select({ id: parent.id }).from(parent).where(and(eq(parent.email, row.newEmail), ne(parent.id, p.id)));
