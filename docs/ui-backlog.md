@@ -32,6 +32,10 @@ and the page. Move an item to **Done** when it ships.
 - **The page may not update right after downloading a certificate** (2026-11-09). The certificate panel
   refreshes on a 1.5-second timer after the download starts, so on a slow server the thumbprint can lag until
   the next page load.
+- **The certificate panel looks like there's still work to do after setup** (2026-11-10). Once a certificate is in
+  use and Microsoft accepted it, the card still shows **Download certificate** and **Replace certificate** as big
+  buttons, so admins wonder if they must upload it by hand. Show a clear "Done: Microsoft accepted this
+  certificate" state, and tuck download/replace under a "Manage certificate" option.
 
 ## Done
 - **Staff menu unreachable on phones** (2026-11-09, all staff pages). Below tablet width the top menu was hidden
