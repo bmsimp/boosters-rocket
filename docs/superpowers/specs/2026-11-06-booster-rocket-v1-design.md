@@ -99,6 +99,9 @@ providers; and nothing that requires a developer to run a build to change a sett
 
 ## 4. Data model
 
+> **Revised 2026-11-10:** parent sign-in, parent accounts and outgoing mail are redesigned in
+> `2026-11-10-parent-email-code-sign-in-design.md`. Where the two disagree, that spec wins.
+
 QuickBooks owns families and students. The portal owns only what QuickBooks cannot hold.
 
 ### Owned by QuickBooks
@@ -137,6 +140,9 @@ Matching between a signed-in user and a portal person is always by the identity 
 subject id, recorded when the account is created, never by email alone.
 
 ## 5. Sign-in
+
+> **Revised 2026-11-10:** parent sign-in, parent accounts and outgoing mail are redesigned in
+> `2026-11-10-parent-email-code-sign-in-design.md`. Where the two disagree, that spec wins.
 
 ### 5.1 Two doors
 
