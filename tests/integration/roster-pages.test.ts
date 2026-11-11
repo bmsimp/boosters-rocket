@@ -177,8 +177,15 @@ describe("the roster pages", () => {
     await ready();
     await db.update(jobRun).set({ startedAt: new Date(Date.now() - 6 * 60_000) });
     expect(await refreshRosterAction()).toEqual({ ok: true, message: "Read 9 customers from QuickBooks." });
-    expect(await refreshRosterAction()).toEqual({ ok: false, error: "The roster was refreshed less than 5 minutes ago. Try again shortly." });
+    expect(await refreshRosterAction()).toEqual({ ok: false, error: "A refresh ran less than 5 minutes ago. Try again shortly." });
     expect((await audits("roster.refresh")).at(-1)).toMatchObject({ actorId: reader.id, ip: "203.0.113.40" });
+  });
+
+  it("Refresh now right after a failed read says a refresh ran, not that the roster was refreshed", async () => {
+    await seedConnected(stub);
+    stub.failQueryFrom = 1;
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed" });
+    expect(await refreshRosterAction()).toEqual({ ok: false, error: "A refresh ran less than 5 minutes ago. Try again shortly." });
   });
 
   it("Needs attention names a sign-in to an unknown QuickBooks ID without showing the parent's email", async () => {

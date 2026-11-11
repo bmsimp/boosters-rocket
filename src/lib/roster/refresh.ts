@@ -50,6 +50,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
   const realmId = c.realmId; // the company this run reads; the cache is saved only if it is still the connected one
   if (o.manual) {
     const [last] = await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.startedAt)).limit(1);
+    // Any run counts, a failed one too: the limit protects QuickBooks from repeated reads.
     if (last && Date.now() - last.startedAt.getTime() < MANUAL_GAP_MS) return { ok: false, reason: "too_soon" };
   }
   return db.transaction(async (tx): Promise<RefreshResult> => {

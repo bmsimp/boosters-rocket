@@ -11,7 +11,7 @@ export const refreshRosterAction = staffAction(P, async (ctx): Promise<{ ok: tru
   if (r.ok) return { ok: true, message: `Read ${r.customers} customers from QuickBooks.` };
   return { ok: false, error:
     r.reason === "running" ? "A refresh is already under way. Try again in a minute."
-    : r.reason === "too_soon" ? "The roster was refreshed less than 5 minutes ago. Try again shortly."
+    : r.reason === "too_soon" ? "A refresh ran less than 5 minutes ago. Try again shortly."
     : r.reason === "not_connected" ? "QuickBooks isn't connected. An Admin can connect it under QuickBooks."
     : `The refresh didn't work: ${r.error ?? "no reason was recorded"}` };
 });
