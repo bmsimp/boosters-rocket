@@ -64,7 +64,10 @@ export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true }
     if (!c && !d.clientSecret) return { ok: false as const, errors: ["Enter the Client secret from your Intuit app's Keys and credentials page."] };
     const sealed = d.clientSecret ? secretBox().seal(d.clientSecret, QBO_AAD.secret) : null;
     const secret = sealed ? { clientSecretCiphertext: sealed.ciphertext, clientSecretKeyId: sealed.keyId } : {};
-    if (c) await tx.update(qboConnection).set({ clientId: d.clientId, environment: d.environment, ...secret, updatedAt: new Date() });
+    // A connect started under the old keys must not finish under the new ones.
+    const keysChanged = c !== undefined && (c.clientId !== d.clientId || c.environment !== d.environment);
+    const dropState = keysChanged ? { stateHash: null, stateStaffUserId: null, stateExpiresAt: null } : {};
+    if (c) await tx.update(qboConnection).set({ clientId: d.clientId, environment: d.environment, ...secret, ...dropState, updatedAt: new Date() });
     else await tx.insert(qboConnection).values({ clientId: d.clientId, environment: d.environment, clientSecretCiphertext: sealed!.ciphertext, clientSecretKeyId: sealed!.keyId });
     await writeAudit({ actor: o.actor, action: "settings.quickbooks.save", permission: o.permission, ...TARGET, ip: o.ip,
       before: c ? { clientId: c.clientId, environment: c.environment } : null,
@@ -100,7 +103,7 @@ export async function completeConnect(
       && c.stateStaffUserId === o.staffUserId && c.stateExpiresAt !== null && c.stateExpiresAt.getTime() > Date.now();
     if (!good) return { ok: false, reason: "state" };
     await tx.update(qboConnection).set({ stateHash: null, stateStaffUserId: null, stateExpiresAt: null, updatedAt: new Date() });
-    if (p.error || !p.code || !p.realmId) return { ok: false, reason: "denied" };
+    if (p.error || !p.code || !p.realmId || !/^\d{1,32}$/.test(p.realmId)) return { ok: false, reason: "denied" };
     if (c.realmId && c.realmId !== p.realmId) return { ok: false, reason: "other_company" };
     try {
       return { ok: true, clientId: c.clientId, environment: c.environment, clientSecret: secretBox().open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) };
@@ -121,11 +124,14 @@ export async function completeConnect(
   // 3. Store the connection, unless another company got connected while Intuit was answering.
   const stored = await db.transaction(async (tx) => {
     const [c] = await tx.select().from(qboConnection).for("update");
-    if (!c || (c.realmId && c.realmId !== p.realmId)) return false;
+    if (!c) return "other_company" as const;
+    // The tokens belong to the app and environment the code was exchanged under; the keys may have changed since.
+    if (c.clientId !== claim.clientId || c.environment !== claim.environment) return "state" as const;
+    if (c.realmId && c.realmId !== p.realmId) return "other_company" as const;
     await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, ...sealTokens(tokens) });
-    return true;
+    return "stored" as const;
   });
-  if (!stored) return refuse("other_company");
+  if (stored !== "stored") return refuse(stored);
   // 4. The company's name, for people. The connection stands even if this read fails.
   let companyName: string | null = null;
   try {

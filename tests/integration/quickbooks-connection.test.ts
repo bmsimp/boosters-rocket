@@ -104,6 +104,48 @@ describe("connecting QuickBooks", () => {
     expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "state" } });
   });
 
+  it.each([
+    ["the environment", { clientId: "ABclientid1234567890", clientSecret: null, environment: "production" as const }],
+    ["the Client ID", { clientId: "ABotherclient1234567", clientSecret: "another-secret-value-123", environment: "sandbox" as const }],
+  ])("a connect started before %s changed can no longer finish", async (_name, change) => {
+    await app();
+    const s = await start();
+    expect(await saveQboApp(change, op)).toEqual({ ok: true });
+    expect(await finish(s)).toEqual({ ok: false, reason: "state" });
+    expect(stub.tokenCalls()).toHaveLength(0);
+    expect((await row()).realmId).toBeNull();
+  });
+
+  it("a secret-only change leaves a connect in progress alone", async () => {
+    await app();
+    const s = await start();
+    expect(await saveQboApp({ clientId: "ABclientid1234567890", clientSecret: "a-new-secret-value-123", environment: "sandbox" }, op)).toEqual({ ok: true });
+    expect(await finish(s)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ["environment", { environment: "production" as const }],
+    ["Client ID", { clientId: "ABotherclient1234567" }],
+  ])("stores no tokens when the %s changes while Intuit is answering", async (_name, change) => {
+    await app();
+    const s = await start();
+    stub.tokenDelayMs = 400;
+    const pending = finish(s);
+    for (let i = 0; i < 200 && stub.tokenCalls().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(stub.tokenCalls()).toHaveLength(1);
+    await db.update(qboConnection).set(change);
+    expect(await pending).toEqual({ ok: false, reason: "state" });
+    expect(await row()).toMatchObject({ realmId: null, accessTokenCiphertext: null, refreshTokenCiphertext: null });
+    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "state" } });
+  });
+
+  it.each(["..", "123/456", "12a", "1".repeat(40)])("refuses the company ID %j as denied, exchanging and storing nothing", async (realmId) => {
+    await app();
+    expect(await finish(await start(), { realmId })).toEqual({ ok: false, reason: "denied" });
+    expect(stub.tokenCalls()).toHaveLength(0);
+    expect((await row()).realmId).toBeNull();
+  });
+
   it("a state works once", async () => {
     await app();
     const s = await start();
