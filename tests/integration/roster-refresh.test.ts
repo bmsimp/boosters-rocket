@@ -44,6 +44,15 @@ describe("the roster refresh", () => {
     expect(stub.apiCalls().find((x) => x.query.get("query")!.includes("from Customer "))!.query.get("query")).toContain("Active in (true, false)");
   });
 
+  it("sends exactly the query strings tried against the sandbox (spec §8), the types in one unpaged request", async () => {
+    stub.types = Array.from({ length: 150 }, (_, i) => ({ Id: String(i + 1), Name: `Type ${i + 1}`, Active: true }));
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true, types: 150 });
+    expect(stub.apiCalls().map((x) => x.query.get("query"))).toEqual([
+      "select * from CustomerType",
+      "select * from Customer where Active in (true, false) startposition 1 maxresults 1000",
+    ]);
+  });
+
   it("records the run and audits it with the counts", async () => {
     await refreshRoster(worker);
     expect(await lastRun()).toMatchObject({ outcome: "ok", startedBy: "worker", detail: "9 customers, 5 customer types" });

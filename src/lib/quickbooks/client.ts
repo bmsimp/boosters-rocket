@@ -102,14 +102,26 @@ export async function qboGet(path: string, params: Record<string, string> = {}):
   }
 }
 
-/** Every row of an entity, a page at a time. `where` is fixed text from this codebase, never anything a person typed. */
-export async function qboQueryAll(entity: "Customer" | "CustomerType", where = ""): Promise<Record<string, unknown>[]> {
+const rowsOf = (body: unknown, entity: string): Record<string, unknown>[] => {
+  const rows = (body as { QueryResponse?: Record<string, unknown> }).QueryResponse?.[entity]; // a null body throws, and is recorded as unexpected
+  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+};
+
+/** Every customer, a page at a time. `where` is fixed text from this codebase, never anything a person typed. */
+export async function qboQueryAll(entity: "Customer", where = ""): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
   for (let start = 1; ; start += QBO_PAGE) {
-    const body = (await qboGet("query", { query: `select * from ${entity}${where ? ` where ${where}` : ""} startposition ${start} maxresults ${QBO_PAGE}` })) as { QueryResponse?: Record<string, unknown> };
-    const rows = body.QueryResponse?.[entity];
-    const page = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
+    // With where = "Active in (true, false)" this is the string verified against the sandbox on 2026-11-11 (spec §8),
+    // starting at 1. Don't change it (an orderby, say) without trying the new string there first.
+    const page = rowsOf(await qboGet("query", { query: `select * from ${entity}${where ? ` where ${where}` : ""} startposition ${start} maxresults ${QBO_PAGE}` }), entity);
     out.push(...page);
     if (page.length < QBO_PAGE) return out;
   }
+}
+
+/** Every customer type, in one request with no paging clause. */
+export async function qboCustomerTypes(): Promise<Record<string, unknown>[]> {
+  // The string verified against the sandbox on 2026-11-11 (spec §8). Don't change it (a paging clause, say) without
+  // trying the new string there first.
+  return rowsOf(await qboGet("query", { query: "select * from CustomerType" }), "CustomerType");
 }

@@ -56,7 +56,9 @@ export async function startQboStub(): Promise<QboStub> {
         const start = Number(/startposition (\d+)/i.exec(q)?.[1] ?? 1), max = Number(/maxresults (\d+)/i.exec(q)?.[1] ?? 100);
         const all = entity === "CustomerType" ? stub.types
           : /active in \(true, ?false\)/i.test(q) ? stub.customers : stub.customers.filter((c) => c.Active !== false);
-        const page = all.slice(start - 1, start - 1 + max);
+        // The portal sends the type query with no paging clause, as it was tried against the sandbox: answer with every type.
+        const unpagedTypes = entity === "CustomerType" && !/startposition|maxresults/i.test(q);
+        const page = unpagedTypes ? all : all.slice(start - 1, start - 1 + max);
         return json(200, { QueryResponse: page.length ? { [entity]: page, startPosition: start, maxResults: page.length } : {} });
       }
       return json(404, {});

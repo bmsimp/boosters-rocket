@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { jobRun, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
-import { qboQueryAll } from "@/lib/quickbooks/client";
+import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { ROSTER_JOB, setRosterSource } from "./source";
@@ -59,7 +59,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     };
     let types: Raw[], customers: Raw[];
     try {
-      types = await qboQueryAll("CustomerType");
+      types = await qboCustomerTypes();
       customers = await qboQueryAll("Customer", "Active in (true, false)");
     } catch (e) {
       // Only a QboError's own fixed sentence and code are kept; anything else gets a fixed sentence.

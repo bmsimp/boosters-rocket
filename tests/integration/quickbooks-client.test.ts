@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { db } from "@/lib/db/client";
 import { auditLog, qboConnection } from "@/lib/db/schema";
-import { accessToken, qboGet, qboQueryAll } from "@/lib/quickbooks/client";
+import { accessToken, qboGet, qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { resetDb } from "../helpers/db";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
@@ -99,7 +99,7 @@ describe("the QuickBooks client", () => {
   it("sends nothing but GET to the QuickBooks API", async () => {
     await seedConnected(stub, { accessExpiresInMs: -1000 });
     await qboGet("companyinfo/9130000000000001");
-    await qboQueryAll("CustomerType");
+    await qboCustomerTypes();
     expect(stub.apiCalls().length).toBeGreaterThan(0);
     expect(stub.apiCalls().every((c) => c.method === "GET")).toBe(true);
   });
