@@ -1,7 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("@/env", () => ({ env: { BETTER_AUTH_SECRET: "worker-test-secret-worker-test-secret-123456" } }));
+
+import { workerToken } from "@/lib/jobs/worker-token";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createHmac } from "node:crypto";
 import { spawnSync, spawn } from "node:child_process";
 import path from "node:path";
 
@@ -28,7 +31,7 @@ describe("scripts/worker.mjs", { timeout: 30_000 }, () => {
     await withApp(200, { ok: true, ran: [{ job: "roster.refresh", ok: true }] }, async (url, seen) => {
       const r = await once(`${url}/`);
       expect(r.code).toBe(0);
-      expect(seen).toEqual([{ method: "POST", url: "/api/internal/worker", authorization: `Bearer ${createHmac("sha256", SECRET).update("booster-rocket-worker:v1").digest("hex")}` }]);
+      expect(seen).toEqual([{ method: "POST", url: "/api/internal/worker", authorization: `Bearer ${workerToken()}` }]);
       expect(r.out).toContain("ran roster.refresh: ok");
       expect(r.out).not.toContain(SECRET);
     });
@@ -45,5 +48,57 @@ describe("scripts/worker.mjs", { timeout: 30_000 }, () => {
     const r = spawnSync(process.execPath, [SCRIPT, "--once"], { encoding: "utf8", env: { ...process.env, BETTER_AUTH_SECRET: "" } });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("BETTER_AUTH_SECRET is required.");
+  });
+
+  // Running mode: wait for the first wake to reach the app, then stop the script and check how it ends.
+  async function loopThenStop(stopWith: (child: ReturnType<typeof spawn>) => void) {
+    let result: { code: number | null; out: string } | undefined;
+    await withApp(200, { ok: true, ran: [] }, async (url, seen) => {
+      const child = spawn(process.execPath, [SCRIPT], { env: { ...process.env, BETTER_AUTH_SECRET: SECRET, WORKER_APP_URL: url }, stdio: ["pipe", "pipe", "pipe"] });
+      let out = ""; child.stdout!.on("data", (d) => (out += d)); child.stderr!.on("data", (d) => (out += d));
+      const closed = new Promise<number | null>((r) => child.on("close", (c) => r(c)));
+      for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+      expect(seen).toHaveLength(1);
+      await new Promise((r) => setTimeout(r, 200)); // let the wake finish
+      stopWith(child);
+      const code = await Promise.race([closed, new Promise<"hung">((r) => setTimeout(() => r("hung"), 10_000))]);
+      if (code === "hung") child.kill("SIGKILL");
+      expect(code).not.toBe("hung");
+      result = { code: code as number | null, out };
+    });
+    return result!;
+  }
+  it.skipIf(process.platform === "win32")("exits 0 and says it stopped when sent SIGTERM", async () => {
+    const r = await loopThenStop((c) => c.kill("SIGTERM"));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("worker stopped");
+    expect(r.out).not.toContain("unsettled top-level await");
+  });
+  it("exits 0 and says it stopped when its stdin closes", async () => {
+    const r = await loopThenStop((c) => c.stdin!.end());
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("worker stopped");
+    expect(r.out).not.toContain("unsettled top-level await");
+  });
+  it("does not stop at once when it starts with stdin already closed", async () => {
+    await withApp(200, { ok: true, ran: [] }, async (url, seen) => {
+      const child = spawn(process.execPath, [SCRIPT], { env: { ...process.env, BETTER_AUTH_SECRET: SECRET, WORKER_APP_URL: url }, stdio: ["ignore", "pipe", "pipe"] });
+      let out = ""; child.stdout!.on("data", (d) => (out += d)); child.stderr!.on("data", (d) => (out += d));
+      let exited = false; child.on("close", () => (exited = true));
+      for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(seen).toHaveLength(1);
+      expect(exited).toBe(false);
+      expect(out).not.toContain("worker stopped");
+      child.kill("SIGKILL");
+    });
+  });
+  it("--once still exits on its own with a stdin that stays open", async () => {
+    await withApp(200, { ok: true, ran: [] }, async (url) => {
+      const child = spawn(process.execPath, [SCRIPT, "--once"], { env: { ...process.env, BETTER_AUTH_SECRET: SECRET, WORKER_APP_URL: url }, stdio: ["pipe", "pipe", "pipe"] });
+      const code = await Promise.race([new Promise<number | null>((r) => child.on("close", (c) => r(c))), new Promise<"hung">((r) => setTimeout(() => r("hung"), 10_000))]);
+      if (code === "hung") child.kill("SIGKILL");
+      expect(code).toBe(0);
+    });
   });
 });

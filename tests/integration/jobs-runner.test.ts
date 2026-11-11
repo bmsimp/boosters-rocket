@@ -70,7 +70,10 @@ describe("scheduled jobs", () => {
   it("the worker endpoint runs the jobs for the right token and is not found for anything else", async () => {
     await seedConnected(stub);
     const call = (authorization?: string) => POST(new Request("http://app:3000/api/internal/worker", { method: "POST", headers: authorization ? { authorization } : {} }));
-    for (const bad of [undefined, "Bearer nope", `Bearer ${workerToken()}x`, workerToken()]) {
+    const real = workerToken();
+    const lastChanged = real.slice(0, -1) + (real.endsWith("0") ? "1" : "0");
+    // The right-length cases matter: they get past the length check and have to be turned away by the comparison itself.
+    for (const bad of [undefined, "Bearer nope", `Bearer ${real}x`, real, `Bearer ${"0".repeat(64)}`, `Bearer ${lastChanged}`, `bearer ${real}`]) {
       const res = await call(bad);
       expect(res.status).toBe(404);
     }
@@ -78,6 +81,20 @@ describe("scheduled jobs", () => {
     const res = await call(`Bearer ${workerToken()}`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, ran: [{ job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
+  });
+
+  it("an unexpected error in the token job is recorded as a fixed failure and the roster job still runs", async () => {
+    await seedConnected(stub);
+    const client = await import("@/lib/quickbooks/client");
+    const spy = vi.spyOn(client, "accessToken").mockRejectedValueOnce(new Error("secret-detail-from-intuit"));
+    const res = await POST(new Request("http://app:3000/api/internal/worker", { method: "POST", headers: { authorization: `Bearer ${workerToken()}` } }));
+    spy.mockRestore();
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain("secret-detail");
+    expect(JSON.parse(text)).toEqual({ ok: true, ran: [{ job: TOKEN_JOB, ok: false }, { job: ROSTER_JOB, ok: true }] });
+    expect((await runs(TOKEN_JOB))[0]).toMatchObject({ outcome: "failed", detail: "The connection couldn't be refreshed. (unexpected)" });
+    expect(JSON.stringify(await runs(TOKEN_JOB))).not.toContain("secret-detail");
   });
 
   it("a GET is not found, with or without the token, and runs no job", async () => {

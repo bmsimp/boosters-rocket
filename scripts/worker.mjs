@@ -14,10 +14,12 @@ const token = createHmac("sha256", secret).update("booster-rocket-worker:v1").di
 const EVERY_MS = 60_000;
 const stamp = () => new Date().toISOString();
 let failing = false;
+let stopping = false;
+const aborter = new AbortController();
 
 async function wake() {
   try {
-    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10 * 60_000) });
+    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.any([AbortSignal.timeout(10 * 60_000), aborter.signal]) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
     for (const r of Array.isArray(body.ran) ? body.ran : []) console.log(`${stamp()} ran ${r.job}: ${r.ok ? "ok" : "failed"}`);
@@ -25,6 +27,7 @@ async function wake() {
     failing = false;
     return true;
   } catch (e) {
+    if (stopping) return false; // a wake cut short by a stop is not an outage
     if (!failing) console.error(`${stamp()} couldn't reach the app: ${e instanceof Error ? e.message : "unknown error"}`); // once per outage, not once a minute
     failing = true;
     return false;
@@ -33,15 +36,22 @@ async function wake() {
 
 if (process.argv[2] === "--once") process.exit((await wake()) ? 0 : 1);
 
-let stopping = false;
-let timer = null;
-const stop = () => { stopping = true; if (timer) clearTimeout(timer); };
+let wakeSleep = null;
+const stop = () => { stopping = true; aborter.abort(); if (wakeSleep) wakeSleep(); };
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
+// A container runtime closes stdin when it tears the container down, and Windows can't deliver signals to a handler.
+// A worker started with no stdin attached sees it end at once, so an end before the first wake has finished is ignored.
+let firstWakeDone = false;
+process.stdin.on("end", () => { if (firstWakeDone) stop(); });
+process.stdin.on("error", () => {});
+process.stdin.resume();
 console.log(`${stamp()} worker started; waking every ${EVERY_MS / 1000} seconds`);
 while (!stopping) {
   await wake();
+  firstWakeDone = true;
   if (stopping) break;
-  await new Promise((r) => { timer = setTimeout(r, EVERY_MS); });
+  await new Promise((r) => { const t = setTimeout(r, EVERY_MS); wakeSleep = () => { clearTimeout(t); r(); }; });
+  wakeSleep = null;
 }
 console.log(`${stamp()} worker stopped`);

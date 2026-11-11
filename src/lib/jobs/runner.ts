@@ -32,8 +32,9 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
       await db.update(jobRun).set({ finishedAt: now, outcome: "ok" }).where(eq(jobRun.id, run!.id));
       ran.push({ job: TOKEN_JOB, ok: true });
     } catch (e) {
-      if (!(e instanceof QboError)) throw e;
-      await db.update(jobRun).set({ finishedAt: now, outcome: "failed", detail: `${e.message} (${e.code})` }).where(eq(jobRun.id, run!.id));
+      // A QboError's message is a fixed sentence and its code a short code; anything else is recorded without its text.
+      const detail = e instanceof QboError ? `${e.message} (${e.code})` : "The connection couldn't be refreshed. (unexpected)";
+      await db.update(jobRun).set({ finishedAt: now, outcome: "failed", detail }).where(eq(jobRun.id, run!.id));
       ran.push({ job: TOKEN_JOB, ok: false });
     }
   }

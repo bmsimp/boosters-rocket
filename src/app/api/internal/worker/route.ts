@@ -7,7 +7,7 @@ const notFound = () => new Response("Not found", { status: 404 });
 
 /**
  * The worker container calls this every minute (scripts/worker.mjs). It runs whichever scheduled jobs are due.
- * Anything without the worker's token gets the same "Not found" as a path that doesn't exist.
+ * The token is what protects this endpoint. A POST without it gets a bare 404 that says nothing about why.
  */
 export async function POST(req: Request): Promise<Response> {
   if (!isWorkerRequest(req.headers.get("authorization"))) return notFound();
@@ -15,7 +15,7 @@ export async function POST(req: Request): Promise<Response> {
   return Response.json({ ok: true, ran }, { headers: { "cache-control": "no-store" } });
 }
 
-/** Only POST does anything; every other method is "Not found" too, rather than Next's 405. */
+/** A GET gets the same bare 404, with or without the token; only a POST runs anything. */
 export async function GET(): Promise<Response> {
   return notFound();
 }
