@@ -21,6 +21,10 @@ type Raw = Record<string, unknown>;
 const text = (v: unknown, max: number): string | null => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 const ref = (v: unknown): string | null => text((v as { value?: unknown } | null | undefined)?.value, 64);
 const isActive = (v: unknown) => v === true || v === "true";
+/** QuickBooks sends an array of objects; anything else in it (a null, a string) is skipped rather than read. */
+const isRow = (v: unknown): v is Raw => typeof v === "object" && v !== null && !Array.isArray(v);
+type TypeRowIn = { qboId: string; name: string; active: boolean; refreshedAt: Date };
+type CustomerRowIn = NonNullable<ReturnType<typeof customerRow>>;
 
 function customerRow(c: Raw, named: Set<string>, now: Date) {
   const qboId = text(c.Id, 64);
@@ -65,16 +69,26 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       // Only a QboError's own fixed sentence and code are kept; anything else gets a fixed sentence.
       return e instanceof QboError ? fail(`${e.message} (${e.code})`, e.code) : fail("The roster couldn't be read. (unexpected)", "unexpected");
     }
-    const now = new Date();
-    const named = new Set(shapeTypeIds(await getShape(tx)));
-    const typeRows = types.map((t) => ({ qboId: text(t.Id, 64), name: text(t.Name, 200) ?? "(no name)", active: isActive(t.Active), refreshedAt: now }))
-      .filter((t): t is typeof t & { qboId: string } => t.qboId !== null);
-    const customerRows = customers.map((x) => customerRow(x, named, now)).filter((r) => r !== null);
-    // Each page re-reads the connection, so a disconnect and a connect to another company mid-read would mix companies.
-    const still = await getConnection(tx);
-    if (!still?.realmId || !still.refreshTokenCiphertext || still.realmId !== realmId) {
-      return fail("The QuickBooks company changed during the read. (company_changed)", "company_changed");
+    // From here to the save, anything that throws ends in a recorded failed run, not a rolled-back one the worker would
+    // retry every minute. A savepoint, so even a database error here leaves the transaction able to record it.
+    let prepared: { typeRows: TypeRowIn[]; customerRows: CustomerRowIn[] } | "company_changed";
+    try {
+      prepared = await tx.transaction(async (sp) => {
+        const now = new Date();
+        const named = new Set(shapeTypeIds(await getShape(sp)));
+        const typeRows = types.filter(isRow).map((t) => ({ qboId: text(t.Id, 64), name: text(t.Name, 200) ?? "(no name)", active: isActive(t.Active), refreshedAt: now }))
+          .filter((t): t is TypeRowIn => t.qboId !== null);
+        const customerRows = customers.filter(isRow).map((x) => customerRow(x, named, now)).filter((r) => r !== null);
+        // Each page re-reads the connection, so a disconnect and a connect to another company mid-read would mix companies.
+        const still = await getConnection(sp);
+        if (!still?.realmId || !still.refreshTokenCiphertext || still.realmId !== realmId) return "company_changed" as const;
+        return { typeRows, customerRows };
+      });
+    } catch {
+      return fail("The roster couldn't be read. (unexpected)", "unexpected");
     }
+    if (prepared === "company_changed") return fail("The QuickBooks company changed during the read. (company_changed)", "company_changed");
+    const { typeRows, customerRows } = prepared;
     try {
       // A savepoint: a failure here undoes only the cache changes, so the failed run can still be recorded.
       await tx.transaction(async (sp) => {

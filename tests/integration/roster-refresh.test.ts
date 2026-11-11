@@ -123,6 +123,23 @@ describe("the roster refresh", () => {
     await expectFailedRun(await refreshRoster(worker), "The roster couldn't be read. (unexpected)", "unexpected");
   });
 
+  it("skips rows QuickBooks sends that aren't objects, and keeps the real ones", async () => {
+    stub.customers = [null, ...stub.customers.slice(0, 3), "not a customer", 42, [], ...stub.customers.slice(3)] as unknown as Record<string, unknown>[];
+    stub.types = [...stub.types, null, "not a type"] as unknown as Record<string, unknown>[];
+    expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 9, types: 5 });
+    expect(Object.keys(await customers()).sort()).toEqual(OLD_IDS);
+  });
+
+  it("anything unexpected between the read and the save is a recorded failure that keeps the old cache", async () => {
+    await refreshRoster(worker);
+    stub.customers = [{ Id: "900", DisplayName: "New Customer", Active: true, SyncToken: "0" }];
+    const shapeModule = await import("@/lib/roster/shape");
+    const spy = vi.spyOn(shapeModule, "getShape").mockRejectedValueOnce(new TypeError("Cannot read properties of null"));
+    const r = await refreshRoster(worker);
+    spy.mockRestore();
+    await expectFailedRun(r, "The roster couldn't be read. (unexpected)", "unexpected");
+  });
+
   it("drops contact details at once when the shape changes, even if the refresh after it fails", async () => {
     await saveShape(FZN_SHAPE, staffOp);
     await refreshRoster(worker);
