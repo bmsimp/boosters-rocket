@@ -142,6 +142,10 @@ refreshed_at
   replaces the cache in one transaction. A customer QuickBooks no longer returns is removed from the cache.
 - Only one refresh runs at a time. A second request while one is running reports that one is under way.
 - A failed refresh leaves the previous cache in place, records the failure, and raises the staff warning (§5).
+- **The cache records which company it came from** (the `roster.source` setting, written with every cache swap). While
+  QuickBooks is connected, a cache from another company, or one that doesn't say which, is shown as not read yet, with
+  none of that company's run history. A refresh notes the company when it starts and fails, keeping the old cache, if
+  the connected company changed before it saves.
 - Names and every other QuickBooks field are free text that anyone with QuickBooks access can edit. They are
   always rendered as text, never as HTML.
 
@@ -185,11 +189,15 @@ any step already completed.
 - The portal asks Intuit for the accounting scope only. Intuit has no read-only form of it, so the portal is
   trusted not to write: in this piece no code path sends a create, update or delete to QuickBooks, and a test
   holds that (§7).
-- The request to Intuit carries a single-use `state` value tied to the Admin's session, and the return is
-  refused if it doesn't match, has been used, or is more than 10 minutes old.
+- The request to Intuit carries a single-use `state` value tied to the Admin who started the connect, and the return
+  is refused if it doesn't match, was started by someone else, has been used, or is more than 10 minutes old.
 - The redirect address is `<portal URL>/api/quickbooks/callback`.
 - Connecting to a different company than the one already connected is refused with a clear message: the
   Admin must disconnect first. This stops a wrong click from silently replacing the club's roster.
+- **Connecting a different company after a disconnect starts clean.** Before the first read, the portal clears the
+  cache, the membership shape (customer type IDs belong to one company) and the roster's run history, and records
+  `roster.cleared`. Reconnecting the same company clears nothing. Portal sign-ins keep the QuickBooks IDs they carry;
+  what happens to them when the company changes is decided with the next piece.
 - **Disconnect** asks Intuit to revoke the tokens, then deletes them from the portal. The client ID and
   secret are kept. The cache is kept but every roster page says it is no longer current, with the date.
 - All QuickBooks calls happen on the server. The browser never receives a token or the client secret, and no
@@ -208,7 +216,10 @@ design describes; this piece gives it its first two jobs.
 
 - The worker wakes every minute, runs whichever jobs are due, and records each run in `job_run`. "Due" is
   measured from the last successful run, so there is no time-of-day or time zone in it.
-- A job that fails is tried again on the next wake, at most once every 15 minutes, until it succeeds.
+- A job that fails is tried again on the next wake, at most once every 15 minutes, until it succeeds. The exception
+  is a connection that needs an Admin: while the recorded error says Intuit no longer accepts the connection
+  (`invalid_grant`) or the saved keys can't be read (`unreadable`), the worker runs neither job and records nothing.
+  The staff warning stays up, **Refresh now** still tries, and connecting again clears the error.
 - **Every token refresh saves the refresh token Intuit returns**, because the old one stops working. The
   refresh takes a lock on the connection row first, so the worker and a staff request can't both spend the
   same refresh token.
@@ -248,7 +259,7 @@ Both:
 
 - Inactive customers are marked, not hidden.
 - Every roster page has a "How fresh this is" section: when the roster was last read, the latest failure if there
-  was one, and a **Refresh now** button. When QuickBooks is disconnected, every roster page also shows a dated
+  was one, and a **Refresh now** button (not offered while QuickBooks is disconnected). When QuickBooks is disconnected, every roster page also shows a dated
   notice that the roster is no longer current, with who can reconnect it.
 - Before QuickBooks is connected or a shape is chosen, the pages say so and point Admins to the settings view.
 - Opening a family's page (or a member's details) is recorded in the audit log as a staff read of family data.
@@ -300,9 +311,10 @@ Audited, with the actor, the target and the request IP:
 | `quickbooks.connect_refused` | A return from Intuit was refused (bad or stale `state`, a different company, Intuit said no) |
 | `quickbooks.disconnect` | The connection was removed |
 | `settings.membership.save` | The shape was saved. Records the shape before and after, with type names |
-| `quickbooks.token_refresh.failed` | A token refresh failed. Records Intuit's error code |
+| `quickbooks.token_refresh.failed` | A token refresh failed. Records Intuit's error code. Always recorded as the worker, whoever's request needed the refresh, and only when the error differs from the one already recorded |
 | `roster.refresh` | A refresh finished: who or what started it (a person, or the worker), and the counts |
 | `roster.refresh.failed` | A refresh failed. Records the error code |
+| `roster.cleared` | Connecting a different company cleared the old company's cache, shape and roster run history. Records the Admin who connected, the reason and the company IDs |
 | `roster.family.read` | A staff member opened a family's page, or a member's details |
 
 A successful scheduled token refresh is recorded in `job_run`, not in the audit log, so one row a day doesn't
