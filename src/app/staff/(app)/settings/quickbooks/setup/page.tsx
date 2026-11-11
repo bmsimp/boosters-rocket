@@ -1,0 +1,77 @@
+import { redirect } from "next/navigation";
+import { requireStaffPage } from "@/lib/guards";
+import { connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
+import { loadRosterPage } from "@/lib/roster/queries";
+import { CopyField } from "@/app/components/sign-in-settings/copy-field";
+import { AppKeysForm, ShapeForm } from "../forms";
+import { saveQboAppAction, beginConnectAction, previewShapeAction, saveShapeAction } from "../actions";
+
+export const metadata = { title: "Set up QuickBooks" };
+export const dynamic = "force-dynamic";
+
+type Step = "app" | "connect" | "shape";
+const STEPS: { step: Step; label: string }[] = [{ step: "app", label: "1. Intuit app" }, { step: "connect", label: "2. Sign in to Intuit" }, { step: "shape", label: "3. Membership shape" }];
+const SETUP = "/staff/settings/quickbooks/setup";
+const REFUSED: Record<string, string> = {
+  keys: "Save the Intuit app's keys first.",
+  not_configured: "Save the Intuit app's keys first.",
+  state: "That return from Intuit didn't match a sign-in started here, or it was more than 10 minutes old. Start again.",
+  denied: "Intuit didn't give the portal access. Start again and choose Connect when Intuit asks.",
+  other_company: "That is a different QuickBooks company from the one already connected. Disconnect first if you mean to switch companies.",
+  intuit: "Intuit refused the request. Check the Client ID, the Client secret and the choice of sandbox or production in step 1, and that the redirect address is on the Intuit app.",
+};
+
+export default async function QuickBooksSetupPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  await requireStaffPage("Settings.QuickBooks.ReadWrite");
+  const sp = await searchParams;
+  const one = (k: string) => { const v = sp[k]; return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined; };
+  const [conn, page] = await Promise.all([connectionView(), loadRosterPage()]);
+  // A step opens only when the one before it is done (spec §3). With no step asked for: the first one not done yet.
+  const reachable: Step = !conn.configured ? "app" : !conn.connected ? "connect" : "shape";
+  const order: Step[] = ["app", "connect", "shape"];
+  const asked = order.find((s) => s === one("step"));
+  if (asked && order.indexOf(asked) > order.indexOf(reachable)) redirect(`${SETUP}?step=${reachable}`);
+  const step: Step = asked ?? reachable;
+  const key = one("error") ?? "";
+  const error = Object.hasOwn(REFUSED, key) ? REFUSED[key] : undefined;
+  return (
+    <main className="wrap single">
+      <h1 className="page-title">Set up QuickBooks</h1>
+      <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}>{s.label}</li>)}</ol>
+      {error && <p role="alert" className="errors">{error}</p>}
+
+      {step === "app" && (
+        <section className="box" aria-labelledby="qbo-app-h"><h2 id="qbo-app-h">Step 1: Your Intuit app</h2>
+          <p>The portal reaches QuickBooks through an app the club registers with Intuit. This step tells the portal which app that is. Nothing is sent to Intuit yet.</p>
+          <ol className="steps-list">
+            <li>Sign in at <a href="https://developer.intuit.com" target="_blank" rel="noreferrer">developer.intuit.com</a> and open the club&apos;s app (or create one for QuickBooks Online, with the Accounting scope).</li>
+            <li>On the app&apos;s <b>Keys and credentials</b> page, add this redirect address exactly, under the keys you are going to use (Development for sandbox, Production for the real books):
+              <CopyField label="Redirect address" value={qboRedirectUri()} /></li>
+            <li>Copy the <b>Client ID</b> and <b>Client secret</b> from that same page into the form below, and choose sandbox or production to match.</li>
+          </ol>
+          <AppKeysForm view={conn} save={saveQboAppAction} />
+          <p className="box-foot"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
+        </section>
+      )}
+
+      {step === "connect" && (
+        <section className="box" aria-labelledby="qbo-connect-h"><h2 id="qbo-connect-h">Step 2: Sign in to Intuit</h2>
+          <p>This sends you to Intuit to choose the club&apos;s QuickBooks company and approve access, then brings you back here. Sign in as someone who is an admin of that company. The portal only reads from QuickBooks; it changes nothing there.</p>
+          {conn.connected && <p className="hint">QuickBooks is connected to <b>{conn.companyName ?? "a company"}</b>. Signing in again renews the connection to the same company.</p>}
+          <form action={beginConnectAction}><button className="btn">Sign in to Intuit</button></form>
+          <p className="box-foot"><a href={`${SETUP}?step=app`}>Back to step 1</a>{conn.connected && <> · <a href={`${SETUP}?step=shape`}>Skip to step 3</a></>}</p>
+        </section>
+      )}
+
+      {step === "shape" && (
+        <section className="box" aria-labelledby="qbo-shape-h"><h2 id="qbo-shape-h">Step 3: The shape of your membership</h2>
+          <p>Tell the portal which QuickBooks customer types are the club&apos;s members. Customers of any other type, such as schools or vendors, stay out of the portal. You can change this later.</p>
+          {page.types.length === 0
+            ? <p role="status">The portal hasn&apos;t read any customer types from QuickBooks yet. Open <a href="/staff/roster">Roster</a> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types, create them there first (Sales, Customers, Customer types).</p>
+            : <ShapeForm types={page.types} shape={page.shape} preview={previewShapeAction} save={saveShapeAction} />}
+          <p className="box-foot"><a href={`${SETUP}?step=connect`}>Back to step 2</a> · <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
+        </section>
+      )}
+    </main>
+  );
+}

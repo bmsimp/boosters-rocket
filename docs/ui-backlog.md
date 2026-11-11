@@ -52,6 +52,9 @@ and the page. Move an item to **Done** when it ships.
   still have to follow permissions: Sign-in and Mail are Admin-only, Club has its own permission, so a person sees
   only the sections they hold. The owner's summary after the first proof-of-concept run with mail: the UI needs a
   lot of love.
+- **QuickBooks is the first settings page in the new pattern** (2026-11-11). A plain view of what is set, with the steps
+  on their own page. It has no styling of its own yet: the view is a list of labels and values, and the steps reuse the
+  setup page's progress list. When Sign-in and Mail move to the same pattern, give all three one look.
 - **Settings should be a static page with a wizard for setup or edit** (2026-11-10, parked by the owner). After the
   numbered steps went in, the owner said Mail "reads a bit better" but that it needs to become a page that shows
   the current settings plainly, with a step-by-step wizard opened to set a section up or change it. Applies to
