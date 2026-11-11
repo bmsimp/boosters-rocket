@@ -50,6 +50,13 @@
       "when": 1794344712762,
       "tag": "0006_rate_limit_refusal_audited",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794390705044,
+      "tag": "0007_quickbooks",
+      "breakpoints": true
     }
   ]
 }

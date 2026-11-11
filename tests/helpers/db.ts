@@ -10,7 +10,7 @@ import { mailConfigHash } from "@/lib/mail/config-hash";
 import type { StoredMailConfig } from "@/lib/mail/types";
 
 const TABLES = [
-  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "signin_code", "rate_limit_event", "parent_email_change", "setting", "auth_provider", "provider_certificate",
+  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "signin_code", "rate_limit_event", "parent_email_change", "qbo_connection", "qbo_customer", "qbo_customer_type", "job_run", "setting", "auth_provider", "provider_certificate",
   "staff_auth_session", "staff_auth_account", "staff_auth_verification", "staff_auth_user",
   "parent_auth_session", "parent_auth_account", "parent_auth_verification", "parent_auth_user",
 ];

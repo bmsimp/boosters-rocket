@@ -124,6 +124,75 @@ export const parentEmailChange = pgTable("parent_email_change", {
   uniqueIndex("parent_email_change_one_live").on(t.parentId).where(sql`used_at IS NULL`),
 ]);
 
+export type QboEnvironment = "sandbox" | "production";
+
+/**
+ * The club's QuickBooks connection (spec §2, §3): the Intuit app's keys and, once connected, the company and its tokens.
+ * One row at most (`id` is always "singleton"). The secret and both tokens are sealed (src/lib/crypto/secret-box.ts).
+ */
+export const qboConnection = pgTable("qbo_connection", {
+  id: text("id").primaryKey().default("singleton"),
+  environment: text("environment", { enum: ["sandbox", "production"] }).notNull(),
+  clientId: text("client_id").notNull(),
+  clientSecretCiphertext: text("client_secret_ciphertext").notNull(),
+  clientSecretKeyId: text("client_secret_key_id").notNull(),
+  // A connect in progress: the state sent to Intuit (SHA-256), who started it, and when it stops being accepted.
+  stateHash: text("state_hash"),
+  stateStaffUserId: uuid("state_staff_user_id"),
+  stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
+  // Set while connected; all null again after a disconnect.
+  realmId: text("realm_id"),
+  companyName: text("company_name"),
+  accessTokenCiphertext: text("access_token_ciphertext"),
+  accessTokenKeyId: text("access_token_key_id"),
+  accessExpiresAt: timestamp("access_expires_at", { withTimezone: true }),
+  refreshTokenCiphertext: text("refresh_token_ciphertext"),
+  refreshTokenKeyId: text("refresh_token_key_id"),
+  refreshExpiresAt: timestamp("refresh_expires_at", { withTimezone: true }),
+  connectedAt: timestamp("connected_at", { withTimezone: true }),
+  connectedBy: uuid("connected_by"),                 // staff_user.id
+  lastTokenRefreshAt: timestamp("last_token_refresh_at", { withTimezone: true }),
+  lastError: text("last_error"),                     // a fixed sentence and a short code, never a response body
+  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+  updatedAt: updated(),
+});
+
+/** A reference copy of QuickBooks' customer types (spec §2). Replaced on every refresh. */
+export const qboCustomerType = pgTable("qbo_customer_type", {
+  qboId: text("qbo_id").primaryKey(),
+  name: text("name").notNull(),
+  active: boolean("active").notNull(),
+  refreshedAt: timestamp("refreshed_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A reference copy of QuickBooks' customers (spec §2). Never a source of truth. Email and phone are kept only for
+ * customers whose type the membership shape names.
+ */
+export const qboCustomer = pgTable("qbo_customer", {
+  qboId: text("qbo_id").primaryKey(),
+  displayName: text("display_name").notNull(),
+  active: boolean("active").notNull(),
+  parentQboId: text("parent_qbo_id"),
+  typeQboId: text("type_qbo_id"),
+  email: text("email"),
+  phone: text("phone"),
+  syncToken: text("sync_token").notNull(),
+  qboUpdatedAt: timestamp("qbo_updated_at", { withTimezone: true }),
+  refreshedAt: timestamp("refreshed_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("qbo_customer_parent_ix").on(t.parentQboId), index("qbo_customer_type_ix").on(t.typeQboId)]);
+
+/** One row per run of a scheduled or hand-started job (spec §4). `outcome` is null while it runs. */
+export const jobRun = pgTable("job_run", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  job: text("job").notNull(),                        // "quickbooks.token_refresh" | "roster.refresh"
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  outcome: text("outcome", { enum: ["ok", "failed"] }),
+  detail: text("detail"),                            // counts, or a fixed sentence and a code
+  startedBy: text("started_by").notNull(),           // "worker" or a staff_user.id
+}, (t) => [index("job_run_job_ix").on(t.job, t.startedAt)]);
+
 /** Roles. The built-in Admin role has key 'admin' and builtin=true. */
 export const role = pgTable("role", {
   id: uuid("id").primaryKey().defaultRandom(),

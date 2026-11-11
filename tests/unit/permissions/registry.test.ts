@@ -15,3 +15,17 @@ describe("Settings.Mail.ReadWrite", () => {
       .toContain("“Settings.Mail.ReadWrite” only matches Admin permissions, which can't be given to a role.");
   });
 });
+
+describe("QuickBooks and roster permissions", () => {
+  it("Settings.QuickBooks.ReadWrite exists, and only the built-in Admin can hold it", () => {
+    expect(PERMISSIONS).toContain("Settings.QuickBooks.ReadWrite");
+    expect(ADMIN_ONLY).toContain("Settings.QuickBooks.ReadWrite");
+    expect(expandRules({ include: ["*"], exclude: [] }).has("Settings.QuickBooks.ReadWrite")).toBe(false);
+    expect(validateRules({ include: ["Settings.QuickBooks.ReadWrite"], exclude: [] }))
+      .toContain("“Settings.QuickBooks.ReadWrite” only matches Admin permissions, which can't be given to a role.");
+  });
+  it("Roster.Read can be given to a custom role", () => {
+    expect(GRANTABLE).toContain("Roster.Read");
+    expect(expandRules({ include: ["Roster.*"], exclude: [] }).has("Roster.Read")).toBe(true);
+  });
+});
