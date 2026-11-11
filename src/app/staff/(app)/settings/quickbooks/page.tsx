@@ -4,7 +4,7 @@ import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { lastWake } from "@/lib/jobs/runner";
 import { LocalTime } from "@/app/components/local-time";
-import { DisconnectButton } from "./forms";
+import { Disconnect } from "./forms";
 import { disconnectAction } from "./actions";
 import { rosterCounts } from "./roster-counts";
 
@@ -42,7 +42,7 @@ export default async function QuickBooksSettingsPage() {
 
       <section className="box" aria-labelledby="qbo-roster-h"><h2 id="qbo-roster-h">Roster</h2>
         <dl className="details">
-          <dt>Last read from QuickBooks</dt><dd>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}</dd>
+          <dt>Last read from QuickBooks</dt><dd>{page.lastOkAt ? <LocalTime iso={page.lastOkAt} /> : "Not yet"}{page.lastRun && !page.lastRun.ok ? <> (the latest try failed: {page.lastRun.detail})</> : null}{!conn.connected && page.lastOkAt ? ". QuickBooks is disconnected, so the roster is no longer current." : null}</dd>
           <dt>What it found</dt><dd>{rosterCounts(page.roster) || "Nothing to show until a shape is chosen."}</dd>
           <dt>Worker</dt><dd>{wake ? <>Last checked in <LocalTime iso={wake} /></> : "Hasn't checked in yet."}</dd>
         </dl>
@@ -51,9 +51,7 @@ export default async function QuickBooksSettingsPage() {
       <section className="box" aria-labelledby="qbo-change-h"><h2 id="qbo-change-h">{conn.configured ? "Change" : "Set up"}</h2>
         <p>{conn.configured ? "Open the steps to change the Intuit app's keys, renew the connection or choose the shape again." : "Three steps: the Intuit app's keys, signing in to Intuit, and the shape of your membership."}</p>
         <p><a className="btn" href="/staff/settings/quickbooks/setup">{conn.configured ? "Change" : "Set up"}</a></p>
-        {conn.connected && <details><summary>Disconnect</summary>
-          <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>
-          <DisconnectButton disconnect={disconnectAction} /></details>}
+        <Disconnect connected={conn.connected} disconnect={disconnectAction} />
       </section>
     </main>
   );

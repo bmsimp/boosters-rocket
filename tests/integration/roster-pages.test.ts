@@ -13,7 +13,8 @@ vi.mock("@/lib/auth/identity", () => ({
   getParentIdentity: async () => null, getParentState: async () => ({ status: "none" }), hasParentSession: async () => false,
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "cf-connecting-ip": "203.0.113.40" }), cookies: async () => ({ get: () => undefined }) }));
-vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+const revalidated = vi.hoisted(() => ({ count: 0 }));
+vi.mock("next/cache", () => ({ revalidatePath: () => { revalidated.count += 1; } }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
@@ -176,8 +177,12 @@ describe("the roster pages", () => {
   it("Refresh now reads QuickBooks again, at most once every 5 minutes", async () => {
     await ready();
     await db.update(jobRun).set({ startedAt: new Date(Date.now() - 6 * 60_000) });
+    revalidated.count = 0;
     expect(await refreshRosterAction()).toEqual({ ok: true, message: "Read 9 customers from QuickBooks." });
+    expect(revalidated.count).toBe(1);
     expect(await refreshRosterAction()).toEqual({ ok: false, error: "A refresh ran less than 5 minutes ago. Try again shortly." });
+    // A refusal renders nothing again, so a family's page doesn't record a second read for one visit.
+    expect(revalidated.count).toBe(1);
     expect((await audits("roster.refresh")).at(-1)).toMatchObject({ actorId: reader.id, ip: "203.0.113.40" });
   });
 

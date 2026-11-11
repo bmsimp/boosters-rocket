@@ -143,14 +143,20 @@ export function ShapeForm({ types, shape, preview, save }: {
 }
 
 type Disconnected = { ok: true } | { ok: false; error: string };
-/** On the view, tucked inside a closed section so it isn't pressed by accident. */
-export function DisconnectButton({ disconnect }: { disconnect: () => Promise<Disconnected> }) {
+/**
+ * On the view, tucked inside a closed section so it isn't pressed by accident. It stays mounted when the page comes
+ * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected.
+ */
+export function Disconnect({ connected, disconnect }: { connected: boolean; disconnect: () => Promise<Disconnected> }) {
   const [state, run, pending] = useActionState(async () => safely(() => disconnect(), { ok: false as const, error: ACTION_FAILED }), null);
+  if (!connected) return state?.ok ? <p role="status">Disconnected. The roster stays as it was last read, and is marked as no longer current.</p> : null;
   return (
-    <form action={run} className="stack">
-      {state && !state.ok && <p role="alert" className="errors">{state.error}</p>}
-      {state?.ok && <p role="status">Disconnected.</p>}
-      <button className="btn btn-line" disabled={pending}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</button>
-    </form>
+    <details><summary>Disconnect</summary>
+      <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>
+      <form action={run} className="stack">
+        {state && !state.ok && <p role="alert" className="errors">{state.error}</p>}
+        <button className="btn btn-line" disabled={pending}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</button>
+      </form>
+    </details>
   );
 }

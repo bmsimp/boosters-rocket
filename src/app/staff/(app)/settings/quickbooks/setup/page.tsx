@@ -47,9 +47,9 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
           <p>The portal reaches QuickBooks through an app the club registers with Intuit. This step tells the portal which app that is. Nothing is sent to Intuit yet.</p>
           <ol className="steps-list">
             <li>Sign in at <a href="https://developer.intuit.com" target="_blank" rel="noreferrer">developer.intuit.com</a> and open the club&apos;s app (or create one for QuickBooks Online, with the Accounting scope).</li>
-            <li>On the app&apos;s <b>Keys and credentials</b> page, add this redirect address exactly, under the keys you are going to use (Development for sandbox, Production for the real books):
+            <li>In the app&apos;s <b>Settings</b>, open <b>Redirect URIs</b> and add this address exactly, on the tab for the keys you are going to use (Development for sandbox, Production for the real books):
               <CopyField label="Redirect address" value={qboRedirectUri()} /></li>
-            <li>Copy the <b>Client ID</b> and <b>Client secret</b> from that same page into the form below, and choose sandbox or production to match.</li>
+            <li>Copy the <b>Client ID</b> and <b>Client secret</b> from the app&apos;s <b>Keys and credentials</b> page into the form below, and choose sandbox or production to match.</li>
           </ol>
           <AppKeysForm configured={conn.configured} clientId={conn.clientId} environment={conn.environment} save={saveQboAppAction} />
           <p className="box-foot"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>

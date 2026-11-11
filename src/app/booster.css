@@ -309,6 +309,7 @@ footer a { color: var(--club-text); }
 .lede { color: var(--ink-2); margin-top: var(--s1); max-width: 60ch; }
 main.wrap.single { display: block; padding-top: var(--s4); }
 main.wrap.single > .box { margin-top: var(--cell); max-width: 760px; }
+main.wrap.single > p[role="status"] { margin-top: var(--cell); max-width: 760px; } /* a notice outside a box keeps to the column */
 .stack { display: grid; gap: var(--s4); margin-top: var(--s3); max-width: 520px; }
 .field { display: grid; gap: var(--s1); }
 .field > span { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }

@@ -46,6 +46,13 @@ and the page. Move an item to **Done** when it ships.
   settings form in one long box, the copy fields are plain, and nothing shows which step you are on or whether the
   script has been run. The staff home warning and this page should read as one guided task.
 
+### Roster and QuickBooks (`/staff/roster`, `/staff/settings/quickbooks`)
+- **Notices are bare paragraphs** (2026-11-11). "QuickBooks is disconnected, so this roster is no longer current",
+  "Disconnected." and the Refresh now messages are plain text with no notice styling, so they are easy to miss. On a
+  family's page the disconnected notice sits between the heading and the first box with nothing to set it apart.
+- **Step 3 with no customer types is a dead end** (2026-11-11). A QuickBooks company with no customer types shows an
+  empty choice. Say that the types are made in QuickBooks, and where.
+
 ### Settings as a whole (staff menu: Club, Sign-in, Mail)
 - **Settings are separate pages with separate menu entries** (2026-11-10). The owner expects one **Settings** page
   with sections for staff sign-in and outgoing mail (and club details), not three top-level entries. Sections

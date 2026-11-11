@@ -259,11 +259,12 @@ Sources: Role Based Access Control for Applications in Exchange Online
 
 The portal reads the club's families from QuickBooks. For this proof of concept it connects to an Intuit sandbox
 company, a test company that holds no real books. The portal never writes to QuickBooks. A worker container keeps the
-connection alive. These steps have not been walked through yet. Do them after the first deploy (section 8) and after
+connection alive. These steps were walked through on 2026-11-11 (section 11). Do them after the first deploy (section 8) and after
 section 3, because they use the staff app. Deploy this version (the one with the worker) first, before step 1.
 
-1. In the Intuit developer app, under **Keys and credentials** > **Development**, add the redirect address
-   `https://portaltest.rhinoautomator.com/api/quickbooks/callback` exactly.
+1. In the Intuit developer app, under **Settings** > **Redirect URIs** > **Development**, add the redirect address
+   `https://portaltest.rhinoautomator.com/api/quickbooks/callback` exactly. (The keys are on a different page,
+   **Keys and credentials**.)
 2. In the sandbox company, make sure the customer types exist (**Sales** > **Customers** > **Customer types**): the
    band's are `Family`, `Parent`, `Student`, `School` and `Vendor`, with students and parents as sub-customers of a family.
 3. Sign in at `/staff/sign-in` and choose **QuickBooks** in the staff menu (Admins only), then **Set up**.
@@ -286,7 +287,8 @@ Any portal sign-ins attached to the old company's customer IDs still point at th
 
 The worker is verified to keep running with no input attached and to stop cleanly on `docker stop` (exit code 0,
 `worker stopped` in its log). That was checked on linuxdev on 2026-11-11 with the script alone in a `node:26-slim`
-container; it has not yet been run as the compose service there.
+container. As the compose service there it ran with no restarts through the 2026-11-11 walkthrough and renewed the
+connection (`ran quickbooks.token_refresh: ok`).
 
 Moving to the band's real books later means the app's **Production** keys, **Production** in step 1, and Intuit's app
 assessment first.
@@ -501,6 +503,13 @@ Fill one row per checklist step each time you run it.
 | 2026-11-10 | 03b74bf | 6 | Pass | Parent `signout` recorded. |
 | 2026-11-10 | 03b74bf | 7 | Pass | An address with no person got the same message and no email; the audit shows `signin.code_refused`, reason `unknown_email`. |
 | 2026-11-10 | 03b74bf | 9 | Pass (one part not run) | Real send: with **Send as this mailbox** set to another mailbox in the tenant, the test email failed with `ErrorAccessDenied`; set back to `webmaster@fznband.org`, it succeeded. Configuration check: `InScope` was `True` for `webmaster@fznband.org`; the check against another mailbox (expect `False`) was not run. |
+| 2026-11-11 | f0f6bb0 | 10 | Pass | Connected to "Sandbox Company US 9954" with the Development keys. The audit log has `settings.quickbooks.save` and `quickbooks.connect` with the company name. |
+| 2026-11-11 | f0f6bb0 | 11 | Pass | Layered shape (Family, Student, Parent). The roster read 34 customers and 5 types and shows 1 family, 1 student, 1 parent, with 31 customers outside the portal; no School or Vendor customer is listed. Contact details are kept for 3 of the 34 customers, the ones the shape names. |
+| 2026-11-11 | f0f6bb0 | 12 | Pass | The family page shows the parent's email and phone, and the audit log has `roster.family.read` for it. **Refresh now** worked, and a second press inside 5 minutes was refused with the right message. |
+| 2026-11-11 | f0f6bb0 | 13 | Not run | Needs a day. The worker did renew the connection during the walkthrough (`ran quickbooks.token_refresh: ok`). |
+| 2026-11-11 | f0f6bb0 | 14 | Pass | `quickbooks.disconnect` with `revoked: true`; the roster pages said the roster was no longer current and hid **Refresh now**; after reconnecting to the same company the notice was gone and nothing was cleared. |
+| 2026-11-11 | f0f6bb0 | 15 | Pass | Both directions. Connecting "Sandbox Company US a680" wrote `roster.cleared` (reason `different_company`), removed the shape and read 29 customers and no types; **Roster** and the QuickBooks page said what the checklist expects. Switching back to "9954" cleared it again, and the shape was chosen again. |
+| 2026-11-11 | f0f6bb0 | 16, 17 | Not run | Need a sandbox token from Intuit's OAuth Playground. |
 
 Findings from the 2026-11-09 run, all fixed on `main`:
 
@@ -528,6 +537,21 @@ Findings from the 2026-11-10 run:
 - **The upgrade worked as written:** the one old guardian row became a person with a new sign-in account, and
   `/sign-in` said "Parent sign-in isn't available yet." until the first successful test email. The backup was
   taken but the restore steps were not tried.
+
+Findings from the 2026-11-11 run (QuickBooks):
+
+- **The redirect address isn't on Intuit's Keys and credentials page.** It is under the app's **Settings** >
+  **Redirect URIs**. Section 5 and step 1 in the portal said the wrong page; both now name the right one.
+- **A refused Refresh now on a family's page wrote a second `roster.family.read` row,** because the page was
+  rendered again although nothing had changed. A refusal no longer renders the page again.
+- **Disconnecting showed no confirmation,** because the button that would say so left the page with the connection.
+  The QuickBooks page now says "Disconnected." and its Roster box says the roster is no longer current.
+- **The disconnected notice on a family's page ran wider than the column.** It keeps to the column now.
+- **A second sandbox company has no customer types,** so step 3 has nothing to choose from there. That is the
+  sandbox's data, not a fault, but it means a company-switch test can only check the clearing.
+- **Open question for the owner:** portal sign-ins are attached to QuickBooks customer IDs, and switching companies
+  leaves them pointing at the old company's numbers. The "Parents from QuickBooks" plan has to decide what happens
+  to them.
 
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
 
