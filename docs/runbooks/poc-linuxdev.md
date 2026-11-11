@@ -260,7 +260,7 @@ Sources: Role Based Access Control for Applications in Exchange Online
 The portal reads the club's families from QuickBooks. For this proof of concept it connects to an Intuit sandbox
 company, a test company that holds no real books. The portal never writes to QuickBooks. A worker container keeps the
 connection alive. These steps have not been walked through yet. Do them after the first deploy (section 8) and after
-section 3, because they use the staff app.
+section 3, because they use the staff app. Deploy this version (the one with the worker) first, before step 1.
 
 1. In the Intuit developer app, under **Keys and credentials** > **Development**, add the redirect address
    `https://portaltest.rhinoautomator.com/api/quickbooks/callback` exactly.
@@ -274,7 +274,15 @@ section 3, because they use the staff app.
 7. Choose **Roster** in the staff menu: the families are listed, and **Needs attention** shows what to tidy up.
 8. The worker: `docker ps --filter name=booster-rocket-worker` shows it running, and
    `docker logs booster-rocket-worker` shows `worker started` and a line each time it runs a job. The QuickBooks page
-   shows when it last checked in.
+   shows when it last checked in. On the first deploy that includes the worker, `docker ps --filter name=booster-rocket-worker`
+   may show nothing: `deploy.sh` updates itself during its own `git pull`, so that run is still the old copy, which
+   recreates only the app. Run `scripts/poc/deploy.sh` once more (or
+   `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker`); every deploy after that starts it.
+
+**Switching companies.** Disconnecting and then connecting a different QuickBooks company (for example, moving from the
+sandbox to the band's real books) clears the roster and the membership shape, which must be chosen again in step 3.
+Any portal sign-ins attached to the old company's customer IDs still point at those numbers, which mean something else
+(or nothing) in the new company, so remove test sign-ins before switching.
 
 The worker is verified to keep running with no input attached and to stop cleanly on `docker stop` (exit code 0,
 `worker stopped` in its log). That was checked on linuxdev on 2026-11-11 with the script alone in a `node:26-slim`
@@ -367,6 +375,10 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    migrations, recreates the app and waits up to 120 seconds for it to become healthy, then starts the worker. The first build
    takes several minutes. A worker that won't start doesn't fail the deploy: it prints "The worker didn't start. The
    site is up; check: docker logs booster-rocket-worker".
+   On the first deploy that includes the worker, `docker ps --filter name=booster-rocket-worker` may show nothing:
+   `deploy.sh` updates itself during its own `git pull`, so that run is still the old copy, which recreates only the
+   app. Run `scripts/poc/deploy.sh` once more (or
+   `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker`); every deploy after that starts it.
 2. **Success** is the last line `Deployed <short commit>.` and exit code 0 (`echo $?`). Also:
    `docker ps --filter name=booster-rocket-app` shows `(healthy)`. While setup is still open, a line
    `Setup code: XXXX-XXXX-XXXX` is printed just before it. Enter that code at `/setup`. Once setup is
@@ -385,6 +397,9 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    ```bash
    scripts/poc/deploy.sh --rollback
    ```
+   Rolling back to a version from before the worker existed leaves a worker container that restarts in a loop (that
+   image has no worker script). The site is unaffected; stop the worker with
+   `docker compose -f docker-compose.poc.yml --env-file .env.poc stop worker`.
 5. **Logs:** `docker logs booster-rocket-app` (add `--tail 100` or `-f`). Database:
    `docker compose -f docker-compose.poc.yml --env-file .env.poc logs db`.
 6. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), then do section 6
@@ -415,6 +430,9 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 12. Open a family -> its parents' email and phone show, and the audit log has `roster.family.read` for it.
 - [ ] 13. The next day -> the QuickBooks page shows the worker checked in within the last few minutes and **Last renewed** is less than a day old; `docker logs booster-rocket-worker` shows `ran quickbooks.token_refresh: ok` and `ran roster.refresh: ok`.
 - [ ] 14. **Disconnect**, then set up again -> the roster says it is no longer current while disconnected, and is current again after reconnecting. The audit log has `quickbooks.disconnect` and a second `quickbooks.connect`.
+- [ ] 15. **Disconnect**, then connect a second sandbox company -> the old company's families are gone: **Roster** says "The membership shape hasn't been chosen yet." and the QuickBooks page shows the shape as "Not chosen yet." until it is chosen again in step 3. The audit log has `roster.cleared`.
+- [ ] 16. Customer query order: in the sandbox's API explorer, or with a query in the style of the plan's check script (`q("...")`), run `select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000` and confirm it is accepted (HTTP 200, customers in `Id` order). The portal doesn't send it yet; it is needed before a club with more than 1000 customers.
+- [ ] 17. Inactive customer types: make one customer type inactive in the sandbox, run `select * from CustomerType`, and note whether the inactive type still appears in the list (record it in section 11).
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
