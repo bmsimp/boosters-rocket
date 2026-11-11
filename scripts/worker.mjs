@@ -40,16 +40,9 @@ let wakeSleep = null;
 const stop = () => { stopping = true; aborter.abort(); if (wakeSleep) wakeSleep(); };
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
-// A container runtime closes stdin when it tears the container down, and Windows can't deliver signals to a handler.
-// A worker started with no stdin attached sees it end at once, so an end before the first wake has finished is ignored.
-let firstWakeDone = false;
-process.stdin.on("end", () => { if (firstWakeDone) stop(); });
-process.stdin.on("error", () => {});
-process.stdin.resume();
 console.log(`${stamp()} worker started; waking every ${EVERY_MS / 1000} seconds`);
 while (!stopping) {
   await wake();
-  firstWakeDone = true;
   if (stopping) break;
   await new Promise((r) => { const t = setTimeout(r, EVERY_MS); wakeSleep = () => { clearTimeout(t); r(); }; });
   wakeSleep = null;

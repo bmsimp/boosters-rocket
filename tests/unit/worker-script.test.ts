@@ -74,31 +74,16 @@ describe("scripts/worker.mjs", { timeout: 30_000 }, () => {
     expect(r.out).toContain("worker stopped");
     expect(r.out).not.toContain("unsettled top-level await");
   });
-  it("exits 0 and says it stopped when its stdin closes", async () => {
-    const r = await loopThenStop((c) => c.stdin!.end());
-    expect(r.code).toBe(0);
-    expect(r.out).toContain("worker stopped");
-    expect(r.out).not.toContain("unsettled top-level await");
-  });
-  it("does not stop at once when it starts with stdin already closed", async () => {
+  it("keeps running after its first wake when it has no stdin, as in a container", async () => {
     await withApp(200, { ok: true, ran: [] }, async (url, seen) => {
       const child = spawn(process.execPath, [SCRIPT], { env: { ...process.env, BETTER_AUTH_SECRET: SECRET, WORKER_APP_URL: url }, stdio: ["ignore", "pipe", "pipe"] });
       let out = ""; child.stdout!.on("data", (d) => (out += d)); child.stderr!.on("data", (d) => (out += d));
-      let exited = false; child.on("close", () => (exited = true));
       for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
       await new Promise((r) => setTimeout(r, 1500));
       expect(seen).toHaveLength(1);
-      expect(exited).toBe(false);
+      expect(child.exitCode).toBeNull();
       expect(out).not.toContain("worker stopped");
       child.kill("SIGKILL");
-    });
-  });
-  it("--once still exits on its own with a stdin that stays open", async () => {
-    await withApp(200, { ok: true, ran: [] }, async (url) => {
-      const child = spawn(process.execPath, [SCRIPT, "--once"], { env: { ...process.env, BETTER_AUTH_SECRET: SECRET, WORKER_APP_URL: url }, stdio: ["pipe", "pipe", "pipe"] });
-      const code = await Promise.race([new Promise<number | null>((r) => child.on("close", (c) => r(c))), new Promise<"hung">((r) => setTimeout(() => r("hung"), 10_000))]);
-      if (code === "hung") child.kill("SIGKILL");
-      expect(code).toBe(0);
     });
   });
 });
