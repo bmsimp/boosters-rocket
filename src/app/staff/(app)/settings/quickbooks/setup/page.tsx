@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
@@ -68,10 +69,10 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
           <p>Tell the portal which QuickBooks customer types are the club&apos;s members. Customers of any other type, such as schools or vendors, stay out of the portal. When you save, the portal reads the roster again with the new shape. You can change this later.</p>
           {page.types.length === 0
             ? <p role="status">{page.lastRun && !page.lastRun.ok
-              ? <>The portal couldn&apos;t read QuickBooks just now{page.lastRun.detail ? `: ${page.lastRun.detail}` : "."} Open <a href="/staff/roster">Roster</a> and select <b>Refresh now</b> to try again, then come back.</>
+              ? <>The portal couldn&apos;t read QuickBooks just now{page.lastRun.detail ? `: ${page.lastRun.detail}` : "."} Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b> to try again, then come back.</>
               : page.lastRun
                 ? <>QuickBooks has no customer types yet. Create them there first (Sales, Customers, Customer types), then select Refresh now on the Roster page.</>
-                : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <a href="/staff/roster">Roster</a> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types, create them there first (Sales, Customers, Customer types).</>}</p>
+                : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types, create them there first (Sales, Customers, Customer types).</>}</p>
             : <ShapeForm types={page.types} shape={page.shape} preview={previewShapeAction} save={saveShapeAction} />}
           <p className="box-foot"><a href={`${SETUP}?step=connect`}>Back to step 2</a> · <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>

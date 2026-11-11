@@ -1,0 +1,183 @@
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+
+const stubBase = vi.hoisted(() => ({ url: "" }));
+vi.mock("@/lib/quickbooks/endpoints", async (original) => {
+  const m = await original<typeof import("@/lib/quickbooks/endpoints")>();
+  return { ...m, qboEndpoints: () => ({ authorize: `${stubBase.url}/authorize`, token: `${stubBase.url}/token`, revoke: `${stubBase.url}/revoke`,
+    api: { sandbox: stubBase.url, production: stubBase.url } }) };
+});
+
+const who = vi.hoisted(() => ({ staff: null as null | { door: "staff"; staffUserId: string; name: string; email: string } }));
+vi.mock("@/lib/auth/identity", () => ({
+  getStaffIdentity: async () => who.staff, hasStaffSession: async () => Boolean(who.staff),
+  getParentIdentity: async () => null, getParentState: async () => ({ status: "none" }), hasParentSession: async () => false,
+}));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "cf-connecting-ip": "203.0.113.40" }), cookies: async () => ({ get: () => undefined }) }));
+vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
+  notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
+}));
+
+import { renderToStaticMarkup } from "react-dom/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { auditLog, qboCustomerType, role, roleRule, roleAssignment, jobRun } from "@/lib/db/schema";
+import RosterPage from "@/app/staff/(app)/roster/page";
+import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
+import { refreshRosterAction } from "@/app/staff/(app)/roster/actions";
+import { AccessDenied } from "@/lib/guards";
+import { disconnect } from "@/lib/quickbooks/connection";
+import { refreshRoster } from "@/lib/roster/refresh";
+import { saveShape } from "@/lib/roster/shape";
+import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
+import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
+
+let stub: QboStub;
+beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
+afterAll(() => stub.close());
+
+const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
+const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
+const list = async (q?: string) => renderToStaticMarkup(await RosterPage({ searchParams: Promise.resolve(q ? { q } : {}) }));
+const entry = async (id: string) => renderToStaticMarkup(await RosterEntryPage({ params: Promise.resolve({ id }) }));
+const thrown = async (p: Promise<unknown>) => (await p.catch((e: { url?: string; notFound?: boolean }) => e)) as { url?: string; notFound?: boolean };
+
+describe("the roster pages", () => {
+  let reader: Awaited<ReturnType<typeof seedStaff>>;
+  beforeEach(async () => {
+    await resetDb(); stub.reset(); Object.assign(stub, fznCompany());
+    reader = await seedStaff({ email: "registrar@club.org", name: "Reg Istrar" });
+    const [r] = await db.insert(role).values({ key: "roster", name: "Roster" }).returning();
+    await db.insert(roleRule).values({ roleId: r!.id, kind: "include", pattern: "Roster.*" });
+    await db.insert(roleAssignment).values({ roleId: r!.id, staffUserId: reader.id });
+    who.staff = { door: "staff", staffUserId: reader.id, name: reader.name, email: reader.email };
+  });
+  const ready = async () => {
+    await seedConnected(stub);
+    await saveShape(FZN_SHAPE, { actor: worker.actor, ip: null });
+    await refreshRoster(worker);
+  };
+
+  it("refuses staff without Roster.Read", async () => {
+    const other = await seedStaff({ email: "volunteer@club.org" });
+    who.staff = { door: "staff", staffUserId: other.id, name: other.name, email: other.email };
+    expect((await thrown(RosterPage({ searchParams: Promise.resolve({}) }))).url).toBe("/refused");
+    expect((await thrown(RosterEntryPage({ params: Promise.resolve({ id: "10" }) }))).url).toBe("/refused");
+    await expect(refreshRosterAction()).rejects.toBeInstanceOf(AccessDenied);
+    expect(await audits("roster.family.read")).toEqual([]);
+  });
+
+  it("says what is missing before there is a roster", async () => {
+    expect(await list()).toContain("QuickBooks isn&#x27;t connected yet.");
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    expect(await list()).toContain("The membership shape hasn&#x27;t been chosen yet.");
+    await saveShape(FZN_SHAPE, { actor: worker.actor, ip: null });
+    await db.delete(qboCustomerType).where(eq(qboCustomerType.qboId, "2"));
+    const html = await list();
+    expect(html).toContain("The membership shape names a customer type QuickBooks no longer has");
+    expect(html).not.toContain("Rivera Family");
+  });
+
+  it("lists families with their counts, marks inactive ones, and leaves out customers outside the shape", async () => {
+    await ready();
+    const html = await list();
+    expect(html.indexOf("Chen Family")).toBeLessThan(html.indexOf("Rivera Family"));
+    expect(html).toContain('href="/staff/roster/10"');
+    expect(html).toMatch(/Rivera Family<\/a><span class="when">1 student, 1 parent<\/span>/);
+    expect(html).toMatch(/Old Family<\/a><span class="when">0 students, 0 parents · Inactive in QuickBooks<\/span>/);
+    expect(html).not.toContain("Lincoln High");
+    expect(html).not.toContain("ana@example.com"); // contact details are on the family's own page
+    expect(html).toContain("3 families, 1 student, 2 parents; 2 customers outside the portal");
+  });
+
+  it("finds families by name, treating what was typed as plain text", async () => {
+    await ready();
+    const html = await list("RIVER");
+    expect(html).toContain("Rivera Family");
+    expect(html).not.toMatch(/Chen Family<\/a><span class="when">\d+ student/); // a list row; Needs attention is not filtered and still names Chen Family
+    expect(html).toMatch(/Rivera Family<\/a><span class="when">1 student, 1 parent<\/span>/);
+    expect(await list("%")).toContain("No family matches");
+  });
+
+  it("shows Needs attention with plain words, linking only to things that have a page", async () => {
+    await ready();
+    const html = await list();
+    expect(html).toContain("No student is listed under this family in QuickBooks.");
+    expect(html).toContain("This student or parent isn&#x27;t directly under a family in QuickBooks.");
+    expect(html).not.toContain('href="/staff/roster/50"'); // a stray student has no page
+  });
+
+  it("renders hostile names as text", async () => {
+    stub.customers.push(
+      { Id: "90", DisplayName: "<img src=x onerror=alert(1)>", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } },
+      { Id: "91", DisplayName: 'Smith & "Sons"', Active: true, SyncToken: "0", CustomerTypeRef: { value: "2" }, ParentRef: { value: "90" } },
+    );
+    await ready();
+    const html = await list();
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("Smith &amp; &quot;Sons&quot;"); // in Needs attention: a parent with no email
+    const page = await entry("90");
+    expect(page).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(page).not.toContain("<img src=x");
+    expect(page).toContain("Smith &amp; &quot;Sons&quot;");
+  });
+
+  it("a family's page shows its students, its parents and the portal sign-ins, and the visit is audited", async () => {
+    await ready();
+    const ana = await seedParent({ name: "Ana R.", email: "ana.portal@example.com" });
+    await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
+    const html = await entry("10");
+    expect(html).toContain("Rivera Family");
+    expect(html).toContain("Leo Rivera");
+    expect(html).toContain("ana@example.com");
+    expect(html).toContain("555-0101");
+    expect(html).toContain("ana.portal@example.com");
+    expect(html).toContain("Invited");
+    expect((await audits("roster.family.read"))).toHaveLength(1);
+    expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
+      targetType: "qbo_customer", targetId: "10", ip: "203.0.113.40" });
+  });
+
+  it("is not found, and writes no audit row, for anything that isn't a family", async () => {
+    await ready();
+    for (const id of ["30", "11", "nope", "10%27"]) expect((await thrown(RosterEntryPage({ params: Promise.resolve({ id }) }))).notFound).toBe(true);
+    expect(await audits("roster.family.read")).toEqual([]);
+  });
+
+  it("flat: lists members and opens one", async () => {
+    await seedConnected(stub);
+    await saveShape({ kind: "flat", memberTypeIds: ["2"] }, { actor: worker.actor, ip: null });
+    await refreshRoster(worker);
+    const html = await list();
+    expect(html).toContain("Ana Rivera");
+    expect(html).toContain("Find a member");
+    expect(html).not.toContain("Rivera Family");
+    expect(await entry("11")).toContain("ana@example.com");
+  });
+
+  it("says the roster is no longer current after a disconnect, with the date, on every roster page", async () => {
+    await ready();
+    const before = await entry("10");
+    expect(before).toContain("Last read from QuickBooks");
+    expect(before).toContain("Refresh now");
+    expect(await list()).toContain("Refresh now");
+    await disconnect({ actor: worker.actor, ip: null });
+    for (const html of [await list(), await entry("10")]) {
+      expect(html).toContain("QuickBooks is disconnected, so this roster is no longer current. It was last read ");
+      expect(html).toContain("Last read from QuickBooks");
+      expect(html).not.toContain("Refresh now");
+    }
+    expect(await list()).toContain("Rivera Family");
+  });
+
+  it("Refresh now reads QuickBooks again, at most once every 5 minutes", async () => {
+    await ready();
+    await db.update(jobRun).set({ startedAt: new Date(Date.now() - 6 * 60_000) });
+    expect(await refreshRosterAction()).toEqual({ ok: true, message: "Read 9 customers from QuickBooks." });
+    expect(await refreshRosterAction()).toEqual({ ok: false, error: "The roster was refreshed less than 5 minutes ago. Try again shortly." });
+    expect((await audits("roster.refresh")).at(-1)).toMatchObject({ actorId: reader.id, ip: "203.0.113.40" });
+  });
+});

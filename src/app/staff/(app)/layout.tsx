@@ -8,6 +8,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   const e = ctx.effective;
   const nav = [
     { href: "/staff", label: "Home" },
+    ...(can(e, "Roster.Read") ? [{ href: "/staff/roster", label: "Roster" }] : []),
     ...(can(e, "Staff.Users.Read") ? [{ href: "/staff/people", label: "Staff" }] : []),
     ...(can(e, "Admin.Roles.ReadWrite") ? [{ href: "/staff/roles", label: "Roles" }] : []),
     ...(can(e, "Settings.Club.Read") ? [{ href: "/staff/settings/club", label: "Club" }] : []),
