@@ -13,6 +13,7 @@ export type QboStub = {
   refreshTokens: Set<string>;   // refresh tokens the token endpoint accepts, once each (Intuit rotates them)
   failToken: string | null;     // answer token requests with this OAuth error
   failQueryFrom: number | null; // answer query number N and later with HTTP 500 (1 is the first query)
+  nullQueryBody: boolean;       // answer every query with the JSON body null
   tokenDelayMs: number; refreshExpiresIn: number;
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
 };
@@ -21,7 +22,7 @@ export type QboStub = {
 export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
-    failToken: null, failQueryFrom: null, tokenDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
+    failToken: null, failQueryFrom: null, nullQueryBody: false, tokenDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -48,6 +49,7 @@ export async function startQboStub(): Promise<QboStub> {
       if (url.pathname.endsWith("/query")) {
         queries++;
         if (stub.failQueryFrom !== null && queries >= stub.failQueryFrom) return json(500, { Fault: { Error: [{ Message: "a message the portal must never store" }] } });
+        if (stub.nullQueryBody) return json(200, null);
         const q = url.searchParams.get("query") ?? "";
         const entity = /from (\w+)/i.exec(q)?.[1] ?? "";
         const start = Number(/startposition (\d+)/i.exec(q)?.[1] ?? 1), max = Number(/maxresults (\d+)/i.exec(q)?.[1] ?? 100);
@@ -65,7 +67,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.reset = () => {
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
-    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.tokenDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
+    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.tokenDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));
   return stub;

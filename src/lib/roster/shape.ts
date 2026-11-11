@@ -1,11 +1,13 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql, isNull, notInArray, or } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { setting, qboCustomerType } from "@/lib/db/schema";
+import { setting, qboCustomerType, qboCustomer } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { QboOp } from "@/lib/quickbooks/connection";
 
 export const SHAPE_KEY = "membership.shape";
+/** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */
+export const ROSTER_LOCK = 7461001;
 
 /** How the club's membership is laid out in QuickBooks, by customer type ID (spec §1). */
 export type MembershipShape =
@@ -74,12 +76,20 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
   return `Layered: ${parts.join(", ")}.${blank}`;
 }
 
-/** Saves the shape. The caller starts a refresh afterward, so contact details follow the new shape (spec §1 Rules). */
+/**
+ * Saves the shape and, in the same transaction, drops email and phone from every customer the new shape doesn't name
+ * (spec §1 Rules). It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
+ * a refresh afterward to bring the rest of the cache up to date.
+ */
 export async function saveShape(shape: MembershipShape, o: QboOp): Promise<void> {
   await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
     const before = await getShape(tx);
     const types = await tx.select().from(qboCustomerType);
     await tx.insert(setting).values({ key: SHAPE_KEY, value: shape }).onConflictDoUpdate({ target: setting.key, set: { value: shape, updatedAt: new Date() } });
+    const named = shapeTypeIds(shape);
+    await tx.update(qboCustomer).set({ email: null, phone: null })
+      .where(named.length ? or(isNull(qboCustomer.typeQboId), notInArray(qboCustomer.typeQboId, named)) : undefined);
     await writeAudit({ actor: o.actor, action: "settings.membership.save", permission: o.permission, targetType: "setting", targetId: SHAPE_KEY, ip: o.ip,
       before: before ? { shape: before, words: describeShape(before, types) } : null, after: { shape, words: describeShape(shape, types) } }, tx);
   });

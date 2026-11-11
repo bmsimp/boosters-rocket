@@ -5,11 +5,11 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { qboQueryAll } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
-import { getShape, shapeTypeIds } from "./shape";
+import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
+
+export { ROSTER_LOCK };
 
 export const ROSTER_JOB = "roster.refresh";
-/** Postgres advisory lock held for the length of a refresh, so two never run at once (spec §2 Refreshing). */
-export const ROSTER_LOCK = 7461001;
 const MANUAL_GAP_MS = 5 * 60_000;
 const CHUNK = 500;
 
@@ -51,26 +51,35 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${ROSTER_LOCK}) as locked`)) as unknown as { locked: boolean }[];
     if (!lock?.locked) return { ok: false, reason: "running" };
     const [run] = await tx.insert(jobRun).values({ job: ROSTER_JOB, startedBy: o.startedBy }).returning();
+    const fail = async (detail: string, code: string): Promise<RefreshResult> => {
+      await tx.update(jobRun).set({ finishedAt: new Date(), outcome: "failed", detail }).where(eq(jobRun.id, run!.id));
+      await writeAudit({ actor: o.actor, action: "roster.refresh.failed", targetType: "job_run", targetId: String(run!.id), after: { code }, ip: o.ip }, tx);
+      return { ok: false, reason: "failed", error: detail };
+    };
     let types: Raw[], customers: Raw[];
     try {
       types = await qboQueryAll("CustomerType");
       customers = await qboQueryAll("Customer", "Active in (true, false)");
     } catch (e) {
-      if (!(e instanceof QboError)) throw e;
-      const detail = `${e.message} (${e.code})`;
-      await tx.update(jobRun).set({ finishedAt: new Date(), outcome: "failed", detail }).where(eq(jobRun.id, run!.id));
-      await writeAudit({ actor: o.actor, action: "roster.refresh.failed", targetType: "job_run", targetId: String(run!.id), after: { code: e.code }, ip: o.ip }, tx);
-      return { ok: false, reason: "failed", error: detail };
+      // Only a QboError's own fixed sentence and code are kept; anything else gets a fixed sentence.
+      return e instanceof QboError ? fail(`${e.message} (${e.code})`, e.code) : fail("The roster couldn't be read. (unexpected)", "unexpected");
     }
     const now = new Date();
     const named = new Set(shapeTypeIds(await getShape(tx)));
     const typeRows = types.map((t) => ({ qboId: text(t.Id, 64), name: text(t.Name, 200) ?? "(no name)", active: isActive(t.Active), refreshedAt: now }))
       .filter((t): t is typeof t & { qboId: string } => t.qboId !== null);
     const customerRows = customers.map((x) => customerRow(x, named, now)).filter((r) => r !== null);
-    await tx.delete(qboCustomerType);
-    await tx.delete(qboCustomer);
-    for (let i = 0; i < typeRows.length; i += CHUNK) await tx.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
-    for (let i = 0; i < customerRows.length; i += CHUNK) await tx.insert(qboCustomer).values(customerRows.slice(i, i + CHUNK)).onConflictDoNothing();
+    try {
+      // A savepoint: a failure here undoes only the cache changes, so the failed run can still be recorded.
+      await tx.transaction(async (sp) => {
+        await sp.delete(qboCustomerType);
+        await sp.delete(qboCustomer);
+        for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
+        for (let i = 0; i < customerRows.length; i += CHUNK) await sp.insert(qboCustomer).values(customerRows.slice(i, i + CHUNK)).onConflictDoNothing();
+      });
+    } catch {
+      return fail("The roster couldn't be saved. (save_failed)", "save_failed");
+    }
     await tx.update(jobRun).set({ finishedAt: new Date(), outcome: "ok", detail: `${customerRows.length} customers, ${typeRows.length} customer types` }).where(eq(jobRun.id, run!.id));
     await writeAudit({ actor: o.actor, action: "roster.refresh", targetType: "job_run", targetId: String(run!.id), after: { customers: customerRows.length, types: typeRows.length }, ip: o.ip }, tx);
     return { ok: true, customers: customerRows.length, types: typeRows.length };

@@ -66,6 +66,7 @@ describe("the roster refresh", () => {
   it("drops contact details when a shape change stops naming a type", async () => {
     await saveShape(FZN_SHAPE, staffOp);
     await refreshRoster(worker);
+    expect((await customers())["11"]).toMatchObject({ email: "ana@example.com" });
     await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
     await refreshRoster(worker);
     expect((await customers())["11"]).toMatchObject({ email: null, phone: null });
@@ -89,6 +90,49 @@ describe("the roster refresh", () => {
     expect(await lastRun()).toMatchObject({ outcome: "failed", detail: "QuickBooks refused the request. (http_500)" });
     expect((await audits("roster.refresh.failed"))[0]).toMatchObject({ after: { code: "http_500" } });
     expect(JSON.stringify(await db.select().from(auditLog))).not.toContain("a message the portal must never store");
+  });
+
+  const OLD_IDS = ["10", "11", "12", "20", "21", "30", "40", "50", "60"];
+  const expectFailedRun = async (r: unknown, detail: string, code: string) => {
+    expect(r).toEqual({ ok: false, reason: "failed", error: detail });
+    expect(Object.keys(await customers()).sort()).toEqual(OLD_IDS);
+    expect(await lastRun()).toMatchObject({ outcome: "failed", detail });
+    expect((await audits("roster.refresh.failed"))[0]).toMatchObject({ after: { code } });
+    const everything = JSON.stringify([await db.select().from(auditLog), await db.select().from(jobRun)]);
+    expect(everything).not.toMatch(/invalid byte sequence|null value|Cannot read|TypeError|0x00/i);
+  };
+
+  it("a failure while saving the cache is recorded and keeps the old cache", { timeout: 30_000 }, async () => {
+    await refreshRoster(worker);
+    stub.customers = [{ Id: "900", DisplayName: "Bad\u0000Name", Active: true, SyncToken: "0" }];
+    await expectFailedRun(await refreshRoster(worker), "The roster couldn't be saved. (save_failed)", "save_failed");
+  });
+
+  it("a failure that isn't a QuickBooks error is recorded and keeps the old cache", async () => {
+    await refreshRoster(worker);
+    stub.nullQueryBody = true;
+    await expectFailedRun(await refreshRoster(worker), "The roster couldn't be read. (unexpected)", "unexpected");
+  });
+
+  it("drops contact details at once when the shape changes, even if the refresh after it fails", async () => {
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    expect((await customers())["11"]).toMatchObject({ email: "ana@example.com", phone: "555-0101" });
+    stub.failQueryFrom = 1;
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
+    expect((await customers())["11"]).toMatchObject({ email: null, phone: null });
+  });
+
+  it("a shape save waits for a running refresh", async () => {
+    let save: Promise<void> | undefined;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      save = saveShape(FZN_SHAPE, staffOp);
+      await new Promise((r) => setTimeout(r, 400));
+      expect(await getShape()).toBeNull();
+    });
+    await save;
+    expect(await getShape()).toEqual(FZN_SHAPE);
   });
 
   it("won't run twice at once", async () => {
