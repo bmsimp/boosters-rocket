@@ -56,6 +56,9 @@ async function main() {
           ('30', 'Lincoln High', true, null, '4', null, null, '0')`;
   await sql`INSERT INTO setting (key, value) VALUES ('membership.shape', ${sql.json({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+  // The cache says which company it came from, as a real refresh records it; without this the pages treat it as unread.
+  await sql`INSERT INTO setting (key, value) VALUES ('roster.source', ${sql.json({ realmId: "9130000000000001" })})
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '5 customers, 4 customer types', 'worker')`;
   await sql.end();
