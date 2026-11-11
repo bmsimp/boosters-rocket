@@ -66,6 +66,9 @@ not make these hard to add later, but none of them is designed here.
 
 ## 3. Architecture
 
+> **Revised 2026-11-10:** the QuickBooks connection, the worker, the membership shape and the customer cache are
+> designed in `2026-11-10-quickbooks-connection-and-roster-design.md`. Where the two disagree, that spec wins.
+
 ```
                  ┌──────────────── one club's deployment ────────────────┐
  parent browser ─┤  portal (Next.js)  ── Postgres (portal db)            │
@@ -106,6 +109,9 @@ providers; and nothing that requires a developer to run a build to change a sett
 QuickBooks owns families and students. The portal owns only what QuickBooks cannot hold.
 
 ### Owned by QuickBooks
+
+> **Revised 2026-11-10:** the QuickBooks connection, the worker, the membership shape and the customer cache are
+> designed in `2026-11-10-quickbooks-connection-and-roster-design.md`. Where the two disagree, that spec wins.
 
 | Concept | QuickBooks entity | Notes |
 |---|---|---|
@@ -229,6 +235,9 @@ screen.
 
 ## 7. Permissions
 
+> **Revised 2026-11-10:** the QuickBooks connection, the worker, the membership shape and the customer cache are
+> designed in `2026-11-10-quickbooks-connection-and-roster-design.md`. Where the two disagree, that spec wins.
+
 Modelled on CIPP's custom roles.
 
 - **Permissions** are strings declared in code, one per protected action, in the form
@@ -253,6 +262,9 @@ Modelled on CIPP's custom roles.
 ## 8. Money: balances, invoices, payment
 
 ### 8.1 Connection
+
+> **Revised 2026-11-10:** the QuickBooks connection, the worker, the membership shape and the customer cache are
+> designed in `2026-11-10-quickbooks-connection-and-roster-design.md`. Where the two disagree, that spec wins.
 
 An admin connects QuickBooks once with OAuth 2.0. Tokens are encrypted at rest. Every refresh
 saves the new refresh token. The portal shows the connection's health and warns admins well
@@ -285,6 +297,9 @@ not current.
   They are rendered as text, never as HTML.
 
 ### 8.4 Scheduled jobs
+
+> **Revised 2026-11-10:** the QuickBooks connection, the worker, the membership shape and the customer cache are
+> designed in `2026-11-10-quickbooks-connection-and-roster-design.md`. Where the two disagree, that spec wins.
 
 | Job | When |
 |---|---|
@@ -463,6 +478,9 @@ as a defect.
 Admins can view and export it. It is append-only from the app's point of view.
 
 ## 14. Operations
+
+> **Revised 2026-11-10:** the QuickBooks connection, the worker, the membership shape and the customer cache are
+> designed in `2026-11-10-quickbooks-connection-and-roster-design.md`. Where the two disagree, that spec wins.
 
 - **Updates:** a club's host pulls the `stable` image tag. FZN uses App Service continuous
   deployment from the registry. Security updates to dependencies are automated in the repo, and

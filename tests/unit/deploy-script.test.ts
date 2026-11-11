@@ -40,6 +40,7 @@ beforeEach(() => {
       *"image tag booster-rocket-app:rollback-candidate"*) exit \${TAG_PROMOTE_FAIL:-0};;
       *"image inspect booster-rocket-app:previous"*) exit \${NO_PREVIOUS:-0};;
       *"image inspect booster-rocket-app:current"*) exit \${NO_CURRENT:-0};;
+      *"up -d --no-deps --force-recreate worker"*) exit \${WORKER_FAIL:-0};;
       *) exit 0;;
     esac`);
 });
@@ -51,10 +52,33 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
     const c = calls();
     const order = ["git pull --ff-only", "image tag booster-rocket-app:current booster-rocket-app:rollback-candidate",
       "compose -f docker-compose.poc.yml --env-file .env.poc build app",
-      "run --rm migrate", "image tag booster-rocket-app:rollback-candidate booster-rocket-app:previous", "up -d --no-deps --force-recreate app", "inspect --format {{.State.Health.Status}}"];
+      "run --rm migrate", "image tag booster-rocket-app:rollback-candidate booster-rocket-app:previous", "up -d --no-deps --force-recreate app", "inspect --format {{.State.Health.Status}}", "up -d --no-deps --force-recreate worker"];
     let at = -1;
     for (const step of order) { const i = c.indexOf(step, at + 1); expect(i, `missing or out of order: ${step}\n${c}`).toBeGreaterThan(at); at = i; }
     expect(r.stdout).toContain("Deployed abc1234");
+  });
+
+  it("starts the worker after the app is healthy, and a worker that won't start doesn't fail the deploy", () => {
+    const ok = run();
+    expect(ok.status).toBe(0);
+    expect(calls().indexOf("--force-recreate worker")).toBeGreaterThan(calls().indexOf("--force-recreate app"));
+    rmSync(log, { force: true });
+    const r = run([], { WORKER_FAIL: "1" });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("The worker didn't start. The site is up; check: docker logs booster-rocket-worker");
+    expect(r.stdout).toContain("Deployed abc1234.");
+  });
+
+  it("recreates the worker on a rollback too", () => {
+    const r = run(["--rollback"]);
+    expect(r.status).toBe(0);
+    expect(calls()).toContain("--force-recreate worker");
+  });
+
+  it("doesn't start the worker when the app never becomes healthy", () => {
+    const r = run([], { HEALTH: "unhealthy" });
+    expect(r.status).toBe(4);
+    expect(calls()).not.toContain("--force-recreate worker");
   });
 
   it("prints a setup code after a healthy deploy while setup is open", () => {

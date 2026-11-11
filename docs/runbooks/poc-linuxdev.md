@@ -1,11 +1,11 @@
 # Booster Rocket proof of concept on linuxdev: runbook
 
-Follow this top to bottom, with one exception: the `/setup` page only exists after the first deploy (section 7).
+Follow this top to bottom, with one exception: the `/setup` page only exists after the first deploy (section 8).
 Sign-in and outgoing mail are set up on the setup page after the first deploy (sections 3 and 4); a site that already finished setup uses "Upgrading a site that already finished setup" in section 4 instead. Each section is numbered steps. Anything in `monospace` is typed or
 pasted exactly. Dashboard click paths were checked against Microsoft Learn and Cloudflare's
 documentation on 2026-11-08; the sources are listed under each section. The outgoing-mail steps (section 4)
 were added after that and were first walked through on 2026-11-10, on a site that had already finished setup
-(section 10). If a screen no longer matches,
+(section 11). If a screen no longer matches,
 trust the screen and note it in the Results table.
 
 ## 1. What this is
@@ -13,13 +13,15 @@ trust the screen and note it in the Results table.
 This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
 a Cloudflare tunnel (and, optionally, Cloudflare Access), so you can prove that staff sign-in (the band's Entra
 tenant or Google), parent sign-in (a 6-digit code the portal emails from
-`webmaster@fznband.org`) and the audit log work for real. It holds **test data
+`webmaster@fznband.org`) and the audit log work for real. It also proves that the portal can connect to a
+QuickBooks company (Intuit's sandbox, for this proof of concept), keep that connection alive with a worker, and show
+staff the club's families as QuickBooks lists them. It holds **test data
 only**; no real families use it.
 
 Two sign-in doors exist. Staff use `/staff/sign-in`; parents use `/sign-in`. If Cloudflare
 Access is set up, it sits in front of both, so testers sign in twice (an emailed code, then the portal's own
 sign-in). For this proof of concept the owner chose to skip Access rather than manage a list of tester
-emails (see section 6 B, which is optional), so testers sign in once, at the portal's own sign-in.
+emails (see section 7 B, which is optional), so testers sign in once, at the portal's own sign-in.
 
 Sign-in is not configured in files. After the first deploy you open `/setup`, enter a one-time setup
 code that `deploy.sh` prints, and set up staff sign-in, outgoing mail and the first Admin on that page
@@ -94,11 +96,11 @@ the app and the migration will fail to log in to the database. Fix it one of two
   docker volume rm booster-rocket-pgdata
   ```
   Deploy again; the deploy prints a new setup code, and you go through the setup page (sections 3
-  and 4) again. After the deploy, re-run the seed in section 5 (the guardian rows are gone).
+  and 4) again. After the deploy, re-run the seed in section 6 (the guardian rows are gone).
 
 ## 3. Staff sign-in (the band's Entra tenant, or Google)
 
-Do this after the first deploy (section 7). Open https://portaltest.rhinoautomator.com/setup, enter the
+Do this after the first deploy (section 8). Open https://portaltest.rhinoautomator.com/setup, enter the
 setup code `deploy.sh` printed, and follow **Step 1** of the setup page. It walks you through Microsoft
 (or Google) and checks what you paste before it saves it. Microsoft sign-in uses a certificate the app
 makes for itself, not a client secret (the band's tenant blocks client secrets). For Microsoft you can
@@ -171,7 +173,7 @@ sends as one mailbox, `webmaster@fznband.org`, through Microsoft Graph with the 
 Online only lets the app send as that mailbox. (The portal can send through SMTP instead; this section covers
 Microsoft 365.)
 
-The script's mail part first ran against the band's tenant on 2026-11-10 (section 10 has what happened). It has
+The script's mail part first ran against the band's tenant on 2026-11-10 (section 11 has what happened). It has
 not been run on the setup page of a new site, only from **Mail** on a site that had finished setup.
 
 1. Do section 3 first: this uses the staff app.
@@ -220,7 +222,7 @@ happen on the setup page. Do this instead:
    ```
    The file goes in your home folder, not the checkout (a file in the checkout makes `deploy.sh` refuse, exit 2).
    Keep a copy of `.env.poc` with it (section 2).
-2. Deploy (section 7). The migration runs as part of the deploy:
+2. Deploy (section 8). The migration runs as part of the deploy:
    - every guardian row already in the database becomes a person with that family. Rows with the same email
      (trimmed and lowercased) become one person, named from the oldest row. A disabled row stays disabled, as removed;
    - every earlier parent sign-in account is deleted, and its sessions with it, so anyone signed in as a parent is
@@ -232,7 +234,7 @@ happen on the setup page. Do this instead:
    setup only; skip it).
 4. Until a test email has gone out, `/sign-in` says "Parent sign-in isn't available yet." and the staff home shows
    a warning.
-5. **Rolling back.** `scripts/poc/deploy.sh --rollback` (section 7) doesn't undo the migration, and the previous image's
+5. **Rolling back.** `scripts/poc/deploy.sh --rollback` (section 8) doesn't undo the migration, and the previous image's
    code doesn't match the new parent tables, so expect errors on it wherever parents are involved. To go back, put the backup from
    step 1 in place first, then roll back:
    ```bash
@@ -253,9 +255,37 @@ Sources: Role Based Access Control for Applications in Exchange Online
 (https://learn.microsoft.com/exchange/permissions-exo/application-rbac); user: sendMail
 (https://learn.microsoft.com/graph/api/user-sendmail).
 
-## 5. Test parents
+## 5. QuickBooks (an Intuit sandbox company)
 
-1. **Wait until the first deploy in section 7 has succeeded.** Then, on linuxdev, seed parent one:
+The portal reads the club's families from QuickBooks. For this proof of concept it connects to an Intuit sandbox
+company, a test company that holds no real books. The portal never writes to QuickBooks. A worker container keeps the
+connection alive. These steps have not been walked through yet. Do them after the first deploy (section 8) and after
+section 3, because they use the staff app.
+
+1. In the Intuit developer app, under **Keys and credentials** > **Development**, add the redirect address
+   `https://portaltest.rhinoautomator.com/api/quickbooks/callback` exactly.
+2. In the sandbox company, make sure the customer types exist (**Sales** > **Customers** > **Customer types**): the
+   band's are `Family`, `Parent`, `Student`, `School` and `Vendor`, with students and parents as sub-customers of a family.
+3. Sign in at `/staff/sign-in` and choose **QuickBooks** in the staff menu (Admins only), then **Set up**.
+4. Step 1: enter the Development **Client ID** and **Client secret**, choose **Sandbox**, **Save**.
+5. Step 2: **Sign in to Intuit**, choose the sandbox company, **Connect**. You come back to step 3.
+6. Step 3: choose **Layered**, `Family` for the family, `Student` for the student, `Parent` for the parent,
+   **Preview**, check the counts and names, then **Save this shape**.
+7. Choose **Roster** in the staff menu: the families are listed, and **Needs attention** shows what to tidy up.
+8. The worker: `docker ps --filter name=booster-rocket-worker` shows it running, and
+   `docker logs booster-rocket-worker` shows `worker started` and a line each time it runs a job. The QuickBooks page
+   shows when it last checked in.
+
+The worker is verified to keep running with no input attached and to stop cleanly on `docker stop` (exit code 0,
+`worker stopped` in its log). That was checked on linuxdev on 2026-11-11 with the script alone in a `node:26-slim`
+container; it has not yet been run as the compose service there.
+
+Moving to the band's real books later means the app's **Production** keys, **Production** in step 1, and Intuit's app
+assessment first.
+
+## 6. Test parents
+
+1. **Wait until the first deploy in section 8 has succeeded.** Then, on linuxdev, seed parent one:
    ```bash
    cd ~/booster-rocket
    docker compose -f docker-compose.poc.yml --env-file .env.poc run --rm migrate node tools/scripts/seed-poc-guardian.mjs --name "<name>" --email "<email you can read>" --family POC-FAMILY-1
@@ -280,7 +310,7 @@ open a portal page all their sessions end (`signin.refused`, reason `blocked`). 
 were, so `update parent set blocked = false where email = '<address>';` gives back the same access. The SQL change
 itself isn't in the audit log.
 
-## 6. Cloudflare
+## 7. Cloudflare
 
 Part A is required. Part B (Cloudflare Access) is **optional**: the owner skipped it for this proof of
 concept rather than manage a list of tester emails.
@@ -326,7 +356,7 @@ Policies
 (https://developers.cloudflare.com/cloudflare-one/access-controls/policies/policy-management/); One-time
 PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/).
 
-## 7. Deploy
+## 8. Deploy
 
 1. On linuxdev:
    ```bash
@@ -334,8 +364,9 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    scripts/poc/deploy.sh
    ```
    It refuses if the checkout has local changes, pulls `main`, builds the image, runs the database
-   migrations, recreates the app and waits up to 120 seconds for it to become healthy. The first build
-   takes several minutes.
+   migrations, recreates the app and waits up to 120 seconds for it to become healthy, then starts the worker. The first build
+   takes several minutes. A worker that won't start doesn't fail the deploy: it prints "The worker didn't start. The
+   site is up; check: docker logs booster-rocket-worker".
 2. **Success** is the last line `Deployed <short commit>.` and exit code 0 (`echo $?`). Also:
    `docker ps --filter name=booster-rocket-app` shows `(healthy)`. While setup is still open, a line
    `Setup code: XXXX-XXXX-XXXX` is printed just before it. Enter that code at `/setup`. Once setup is
@@ -356,18 +387,18 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    ```
 5. **Logs:** `docker logs booster-rocket-app` (add `--tail 100` or `-f`). Database:
    `docker compose -f docker-compose.poc.yml --env-file .env.poc logs db`.
-6. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), then do section 5
+6. After the first successful deploy, finish setup at `/setup` (sections 3 and 4), then do section 6
    step 1 (the seed).
 7. **Need a code later?** `scripts/poc/setup-code.sh` prints a new one (the old code stops working) while
    setup is open. **Nobody can sign in** (for example, a certificate or Google client secret expired)?
    `scripts/poc/reopen-setup.sh` reopens setup and prints a code. Stored sign-in values are kept and
    existing Admins stay Admins.
 
-## 8. The test checklist
+## 9. The test checklist
 
-Run these in order, in a private browser window. Record each outcome in section 10.
+Run these in order, in a private browser window. Record each outcome in section 11.
 
-- [ ] 1. Visit https://portaltest.rhinoautomator.com: the portal's sign-in page shows directly. (Only if Cloudflare Access is set up, section 6 B, it first asks for an email code.)
+- [ ] 1. Visit https://portaltest.rhinoautomator.com: the portal's sign-in page shows directly. (Only if Cloudflare Access is set up, section 7 B, it first asks for an email code.)
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
 - [ ] 4. Parent: at `/sign-in`, enter the seeded parent's email, get the code from `webmaster@fznband.org`, enter it -> parent home (with two families, the family chooser first).
@@ -379,6 +410,11 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 9. Confirm the app can't send as any other mailbox, two ways.
   - Configuration check. In PowerShell 7 run `Connect-ExchangeOnline -ShowBanner:$false` and sign in as an Exchange administrator. Then run `Test-ServicePrincipalAuthorization -Identity <staff app Object ID> -Resource <mailbox>`. The Object ID is the one under **Enterprise applications** > `Booster Rocket (staff)` in Entra, not the one on the app registration (they are different). With `webmaster@fznband.org` as the mailbox, Application Mail.Send shows `InScope` `True`; with any other mailbox, `False`.
   - Real send. Choose **Mail** in the staff menu (Admins only), change **Send as this mailbox** to a different existing mailbox in the tenant, select **Save**, then **Send test email** to an address you can read. It must fail, and the error shown includes `ErrorAccessDenied`. (If it succeeds, the app can send as that mailbox: stop and fix the Exchange Online assignments before going on.) Then change **Send as this mailbox** back to `webmaster@fznband.org`, **Save**, and **Send test email** again; it must succeed. You must do this last part: changing the settings makes mail count as not working, so parent sign-in says "Parent sign-in isn't available yet.", until a test email succeeds. Microsoft caches app permissions for 30 minutes to 2 hours, so a permission change made just before this test may not show yet.
+- [ ] 10. Connect the sandbox company (section 5) -> the QuickBooks page says Connected to the company's name.
+- [ ] 11. Choose the layered shape -> **Roster** lists the sandbox's families with their students and parents; a School or Vendor customer is not listed.
+- [ ] 12. Open a family -> its parents' email and phone show, and the audit log has `roster.family.read` for it.
+- [ ] 13. The next day -> the QuickBooks page shows the worker checked in within the last few minutes and **Last renewed** is less than a day old; `docker logs booster-rocket-worker` shows `ran quickbooks.token_refresh: ok` and `ran roster.refresh: ok`.
+- [ ] 14. **Disconnect**, then set up again -> the roster says it is no longer current while disconnected, and is current again after reconnecting. The audit log has `quickbooks.disconnect` and a second `quickbooks.connect`.
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
@@ -392,12 +428,12 @@ cd ~/booster-rocket
 docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "select at, door, actor_label, action, before, after from audit_log order by at desc limit 20;"
 ```
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited', disabled_reason=null where parent_id=(select id from parent where email='<email>');"` (this SQL fix bypasses the audit log, so it is acceptable only for test data) |
-| A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Seed them (section 5); addresses are matched trimmed and lowercased |
+| A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Seed them (section 6); addresses are matched trimmed and lowercased |
 | `signin.code_refused`, reason `no_enabled_guardian` | All of the person's guardian rows are disabled | Test data: re-enable the row (see the row above) |
 | `signin.code_refused`, reason `rate_limited` | Details `limit` says which limit: `resend`, a new code asked for within 60 seconds of the last one; `email`, 3 codes to one address; `ip`, 10 code requests from one IP; `check_ip`, 30 code checks from one IP (the parent sees "Too many tries. Wait a few minutes and request a new code."). The last three count 15 minutes back. For `email`, `ip` and `check_ip`, a full window is recorded once: the first refused request writes the row, and later ones in the same window write nothing | `resend`: wait 60 seconds. The others: wait up to 15 minutes, until the oldest request in the window is 15 minutes old |
 | The sign-in page says "We couldn't reach the portal just then. Please try again in a moment." and there's no audit row | More than 20 code requests, or 20 code checks, from one IP in a minute: the portal turns them away before they are counted or recorded | Wait a minute |
@@ -418,11 +454,17 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | Sign-in shows "not set up" after `.env.poc` was changed or replaced | `SETTINGS_ENCRYPTION_KEY` changed, so the stored secrets cannot be read | Put the old key back if you have a backup; otherwise run `scripts/poc/reopen-setup.sh` and re-enter the secrets (for Microsoft, select **Replace certificate** on the setup page, upload the new `.cer` in Entra, then **Check and switch**) |
 | Step 3 says it is a different account | You are signed in to Microsoft as someone other than the Admin email you entered | Sign out of Microsoft, then sign in as the Admin email |
 | Browser shows Cloudflare 502 | `cloudflared` cannot reach `booster-rocket-app:3000`: the edge network was not added to cloudflared, cloudflared was not recreated, or the app is unhealthy | `docker network inspect booster-rocket-edge` must list both `cloudflared` and `booster-rocket-app`; if not, redo section 2 steps 3-4. Then `docker ps` for `(healthy)` and `docker logs booster-rocket-app` |
-| Form buttons or sign-in fail with a server action or origin/forbidden error | HTTP Host Header is set in the tunnel route, or `APP_URL` is wrong | Clear the HTTP Host Header (section 6 A5); make `APP_URL=https://portaltest.rhinoautomator.com` exactly, then recreate the app |
+| Form buttons or sign-in fail with a server action or origin/forbidden error | HTTP Host Header is set in the tunnel route, or `APP_URL` is wrong | Clear the HTTP Host Header (section 7 A5); make `APP_URL=https://portaltest.rhinoautomator.com` exactly, then recreate the app |
 | Deploy or migrate fails with a database password error after re-running setup | `.env.poc` was deleted and regenerated (new `DB_PASSWORD`) | See the note at the end of section 2 |
-| Only if Access is set up: Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 6 B steps 1-3; check spam |
+| Step 2 of the QuickBooks steps comes back with "That return from Intuit didn't match a sign-in started here, or it was more than 10 minutes old. Start again." | More than 10 minutes passed, or the button was pressed in two tabs | Start step 2 again |
+| Step 2 comes back with "Intuit refused the request. Check the Client ID, the Client secret and the choice of sandbox or production in step 1, and that the redirect address is on the Intuit app." | The Client ID, secret or sandbox/production choice is wrong, or the redirect address isn't on the Intuit app under the same keys | Fix step 1, and check the redirect address on the Intuit app (section 5 step 1) |
+| Step 2 comes back with "That is a different QuickBooks company from the one already connected. Disconnect first if you mean to switch companies." | A company is already connected | **Disconnect** on the QuickBooks page first, then set up again |
+| The staff home says "QuickBooks needs attention" with "The roster hasn't been refreshed from QuickBooks in more than 2 days." | The worker isn't running | `docker ps`, then `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker` |
+| The staff home says "The QuickBooks connection couldn't be refreshed: Intuit no longer accepts this connection. Connect QuickBooks again." | The connection lapsed or was revoked at Intuit | Go through step 2 of the QuickBooks steps again |
+| `docker logs booster-rocket-worker` says "couldn't reach the app: HTTP 404" | The worker and the app have different `BETTER_AUTH_SECRET` values | Both read `.env.poc`: recreate both |
+| Only if Access is set up: Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 7 B steps 1-3; check spam |
 
-## 10. Results
+## 11. Results
 
 Fill one row per checklist step each time you run it.
 
@@ -473,12 +515,12 @@ Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy
 
 Record results from the development checkout (on Windows), not by committing on linuxdev: a local commit there makes the next `git pull --ff-only` fail (exit 6) or trips the clean-tree check (exit 2).
 
-## 11. Removing the proof of concept
+## 12. Removing the proof of concept
 
 Do these in order. Removing the network first would break cloudflared's next start (including the weekly
 update) and take the tunnel down for n8n and CIPP.
 
-1. Stop and remove the app:
+1. Stop and remove the app (the same command removes the worker):
    ```bash
    cd ~/booster-rocket
    docker compose -f docker-compose.poc.yml --env-file .env.poc down

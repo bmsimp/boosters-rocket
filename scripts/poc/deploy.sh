@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploys (or rolls back) the Booster Rocket proof of concept on linuxdev.
-#   scripts/poc/deploy.sh             pull main, build, migrate, recreate app, wait healthy
+#   scripts/poc/deploy.sh             pull main, build, migrate, recreate app and worker, wait healthy
 #   scripts/poc/deploy.sh --rollback  return to the previous image
 # Exit codes: 0 ok, 2 refused (or another deploy running), 3 migrations failed (app untouched), 4 app unhealthy,
 # 5 nothing to roll back to, 6 git pull failed, 7 build failed (app untouched).
@@ -46,12 +46,20 @@ recreate_app() {
   wait_healthy
 }
 
+recreate_worker() {
+  # The worker only keeps QuickBooks fresh; the site runs without it, so a worker that won't start never fails a deploy.
+  if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate worker; then
+    say "The worker didn't start. The site is up; check: docker logs booster-rocket-worker"
+  fi
+}
+
 if [ "${1:-}" = "--rollback" ]; then
   check_env_file
   docker image inspect "$APP_IMAGE:previous" >/dev/null 2>&1 || die 5 "No previous image to roll back to. Nothing was changed."
   say "Note: database migrations are not reversed by a rollback."
   docker image tag "$APP_IMAGE:previous" "$APP_IMAGE:current"
   recreate_app
+  recreate_worker
   say "Rolled back to the previous image."
   exit 0
 fi
@@ -81,6 +89,7 @@ if [ -n "$running" ]; then
   fi
 fi
 recreate_app
+recreate_worker
 if ! "${COMPOSE[@]}" run --rm migrate node tools/scripts/setup-code.mjs --if-open; then
   say "Couldn't check whether setup is finished. If it isn't, run scripts/poc/setup-code.sh for a setup code."
 fi

@@ -32,6 +32,23 @@ services:
       db: { condition: service_healthy }
     networks: [internal, edge]
 
+  worker:
+    # The same image as app, started in worker mode. It has no job logic of its own: every minute it asks the app to
+    # run whichever scheduled jobs are due (scripts/worker.mjs). No port, and not on the tunnel's network. It reads
+    # nothing from stdin, so nothing here attaches an input.
+    image: booster-rocket-app:current
+    container_name: booster-rocket-worker
+    restart: unless-stopped
+    env_file: .env.poc
+    environment:
+      TZ: America/Chicago
+    depends_on:
+      app: { condition: service_healthy }
+    networks: [internal]
+    command: ["node", "tools/scripts/worker.mjs"]
+    healthcheck:
+      disable: true
+
   migrate:
     # Same image as app (a separate `build:` here would go stale; profile services aren't rebuilt by `compose build`).
     image: booster-rocket-app:current

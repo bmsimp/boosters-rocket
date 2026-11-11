@@ -1,6 +1,6 @@
 # QuickBooks connection and roster — design
 
-**Status:** approved in conversation on 2026-11-10; this write-up is waiting for the owner's review.
+**Status:** approved by the owner on 2026-11-11; implemented by plan 2026-11-11-quickbooks-connection-and-roster.md.
 **Revises:** the v1 design (`2026-11-06-booster-rocket-v1-design.md`), sections 3, 4, 7, 8.1, 8.4 and 14, as
 listed in "Changes to the v1 design" below. It delivers the first half of the roadmap's Plan 2. The second
 half (what a parent sees: balances, open invoices, Pay links) is a separate piece.
@@ -192,8 +192,9 @@ any step already completed.
   Admin must disconnect first. This stops a wrong click from silently replacing the club's roster.
 - **Disconnect** asks Intuit to revoke the tokens, then deletes them from the portal. The client ID and
   secret are kept. The cache is kept but every roster page says it is no longer current, with the date.
-- All QuickBooks calls happen on the server. The browser never receives a token, the client secret or the
-  company ID.
+- All QuickBooks calls happen on the server. The browser never receives a token or the client secret, and no
+  settings or roster page shows the company's ID. The ID is recorded in the audit log when a company is connected
+  or disconnected (§6).
 
 ## 4. Staying connected: the worker
 
@@ -217,7 +218,8 @@ design describes; this piece gives it its first two jobs.
   limited to one run every five minutes.
 - If the worker isn't running, nothing else breaks: on-demand token refresh and **Refresh now** still work,
   and the staff warning says the roster is getting old.
-- The worker has no HTTP port. Its health is the age of its last recorded wake, shown on the settings view.
+- The worker has no HTTP port and no job logic: every minute it asks the app, over the deployment's private network,
+  to run whichever jobs are due. Its health is the age of its last recorded wake, shown on the settings view.
 
 ## 5. What staff see
 
@@ -234,16 +236,20 @@ A **Roster** entry in the staff menu, for anyone who holds `Roster.Read`.
   - its parents, as QuickBooks lists them: name, email, phone, active or not;
   - **the portal sign-ins attached to this family** (the `guardian` rows carrying its QuickBooks ID): name,
     email and status, so staff can see who can sign in beside who QuickBooks lists.
+- **Needs attention** names a person by name only. A portal sign-in whose QuickBooks ID isn't a family is listed by
+  the person's name, with no email address.
 
 **Flat shape:**
 
-- **Members:** each member's name, email, phone, whether they are active, and the portal sign-ins attached
-  to that customer ID.
+- **Members:** each member's name and whether they are active. A member's own page shows their email and phone
+  and the portal sign-ins attached to that customer ID.
 
 Both:
 
 - Inactive customers are marked, not hidden.
-- Every page shows when the roster was last refreshed, and a **Refresh now** button.
+- Every roster page has a "How fresh this is" section: when the roster was last read, the latest failure if there
+  was one, and a **Refresh now** button. When QuickBooks is disconnected, every roster page also shows a dated
+  notice that the roster is no longer current, with who can reconnect it.
 - Before QuickBooks is connected or a shape is chosen, the pages say so and point Admins to the settings view.
 - Opening a family's page (or a member's details) is recorded in the audit log as a staff read of family data.
 
@@ -328,8 +334,10 @@ arguments, as the mail tests do):
   token and revoke endpoints, uses a method other than GET.
 - No token, secret or response body reaches a log line or an audit row.
 
-**End-to-end:** an Admin goes through the three steps against the stub, sees the preview counts, saves the
-shape, and opens a family's page.
+**End-to-end:** an Admin opens the settings view on a site that is already connected, walks the three steps without
+leaving for Intuit, previews a shape, and opens a family's page. The return from Intuit, saving the shape and
+refreshing are covered by integration tests through the real route handler and actions, because the app has no
+switch that points it at a stub.
 
 **Proof of concept** on linuxdev, against the owner's Intuit sandbox company with the development keys:
 
