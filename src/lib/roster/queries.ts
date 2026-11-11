@@ -1,11 +1,11 @@
 import { eq, desc, and } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboCustomer, qboCustomerType, jobRun, guardian, parent } from "@/lib/db/schema";
-import { connectionView } from "@/lib/quickbooks/connection";
+import { connectionView, getConnection } from "@/lib/quickbooks/connection";
 import { getShape, missingTypes, describeShape, type MembershipShape, type TypeRow } from "./shape";
 import { buildRoster, type Cust, type Family, type Roster } from "./model";
 import { needsAttention, type AttentionItem, type SignIn } from "./attention";
-import { ROSTER_JOB } from "./refresh";
+import { ROSTER_JOB, getRosterSource } from "./source";
 
 export type RosterPage = {
   connected: boolean; shape: MembershipShape | null; shapeWords: string | null; brokenTypes: string[]; roster: Roster | null;
@@ -24,13 +24,22 @@ const types = async (): Promise<TypeRow[]> => (await db.select().from(qboCustome
 const signIns = async (): Promise<SignIn[]> => db.select({ guardianId: guardian.id, familyQboId: guardian.familyQboId, name: parent.name, email: parent.email, status: guardian.status })
   .from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id));
 
-/** Everything the roster pages and the settings view show. A broken shape gives no roster rather than a wrong one (spec §1 Rules). */
+/**
+ * Everything the roster pages and the settings view show. A broken shape gives no roster rather than a wrong one (spec §1
+ * Rules). While connected, a cache read from another company (or one that doesn't say which) is treated as not read
+ * yet: none of it, nor that company's run history, is shown under the connected company's name. Disconnected, the last
+ * roster is still shown, marked no longer current.
+ */
 export async function loadRosterPage(): Promise<RosterPage> {
-  const [conn, shape, typeRows, people, [last], [lastOk]] = await Promise.all([
-    connectionView(), getShape(), types(), signIns(),
+  const [conn, c, from, anyCustomer, shape, typeRows, people, [last], [lastOk]] = await Promise.all([
+    connectionView(), getConnection(), getRosterSource(), db.select({ qboId: qboCustomer.qboId }).from(qboCustomer).limit(1), getShape(), types(), signIns(),
     db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1),
     db.select().from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
   ]);
+  const hasCache = typeRows.length > 0 || anyCustomer.length > 0;
+  if (conn.connected && (from !== null ? from !== c?.realmId : hasCache)) {
+    return { connected: true, shape: null, shapeWords: null, brokenTypes: [], roster: null, attention: [], signIns: people, types: [], lastRun: null, lastOkAt: null };
+  }
   const brokenTypes = shape && lastOk ? missingTypes(shape, typeRows) : [];
   const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
   return {

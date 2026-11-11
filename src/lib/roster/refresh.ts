@@ -6,10 +6,10 @@ import { getConnection } from "@/lib/quickbooks/connection";
 import { qboQueryAll } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
+import { ROSTER_JOB, setRosterSource } from "./source";
 
-export { ROSTER_LOCK };
+export { ROSTER_LOCK, ROSTER_JOB };
 
-export const ROSTER_JOB = "roster.refresh";
 const MANUAL_GAP_MS = 5 * 60_000;
 const CHUNK = 500;
 
@@ -43,6 +43,7 @@ function customerRow(c: Raw, named: Set<string>, now: Date) {
 export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: string | null; manual?: boolean }): Promise<RefreshResult> {
   const c = await getConnection();
   if (!c?.realmId || !c.refreshTokenCiphertext) return { ok: false, reason: "not_connected" };
+  const realmId = c.realmId; // the company this run reads; the cache is saved only if it is still the connected one
   if (o.manual) {
     const [last] = await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.startedAt)).limit(1);
     if (last && Date.now() - last.startedAt.getTime() < MANUAL_GAP_MS) return { ok: false, reason: "too_soon" };
@@ -69,6 +70,11 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     const typeRows = types.map((t) => ({ qboId: text(t.Id, 64), name: text(t.Name, 200) ?? "(no name)", active: isActive(t.Active), refreshedAt: now }))
       .filter((t): t is typeof t & { qboId: string } => t.qboId !== null);
     const customerRows = customers.map((x) => customerRow(x, named, now)).filter((r) => r !== null);
+    // Each page re-reads the connection, so a disconnect and a connect to another company mid-read would mix companies.
+    const still = await getConnection(tx);
+    if (!still?.realmId || !still.refreshTokenCiphertext || still.realmId !== realmId) {
+      return fail("The QuickBooks company changed during the read. (company_changed)", "company_changed");
+    }
     try {
       // A savepoint: a failure here undoes only the cache changes, so the failed run can still be recorded.
       await tx.transaction(async (sp) => {
@@ -76,6 +82,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         await sp.delete(qboCustomer);
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
         for (let i = 0; i < customerRows.length; i += CHUNK) await sp.insert(qboCustomer).values(customerRows.slice(i, i + CHUNK)).onConflictDoNothing();
+        await setRosterSource(sp, realmId);
       });
     } catch {
       return fail("The roster couldn't be saved. (save_failed)", "save_failed");

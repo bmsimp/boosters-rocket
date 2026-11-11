@@ -6,6 +6,7 @@ import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { qboEndpoints, QboError, QBO_SCOPE } from "./endpoints";
 import { QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
+import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
 export type QboAppDraft = { clientId: string; clientSecret: string | null; environment: QboEnvironment };
@@ -132,6 +133,9 @@ export async function completeConnect(
     return "stored" as const;
   });
   if (stored !== "stored") return refuse(stored);
+  // 3b. A different company from the one the cache was read from: clear what belonged to that one before anything reads
+  // the new one. Run after the row lock above is released, never inside it (see clearRosterOfOtherCompany).
+  await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
   // 4. The company's name, for people. The connection stands even if this read fails.
   let companyName: string | null = null;
   try {
