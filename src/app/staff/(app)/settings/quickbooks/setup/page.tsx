@@ -67,6 +67,8 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
 
       {step === "shape" && (
         <section className="box" aria-labelledby="qbo-shape-h"><h2 id="qbo-shape-h">Step 3: The shape of your membership</h2>
+          {/* The company's name is free text from QuickBooks: a text child, never markup. */}
+          <p>{`Connected to ${conn.companyName ?? "a QuickBooks company"}.`} If that isn&apos;t the club&apos;s company, go back to QuickBooks settings and disconnect.</p>
           <p>Tell the portal which QuickBooks customer types are the club&apos;s members. Customers of any other type, such as schools or vendors, stay out of the portal. When you save, the portal reads the roster again with the new shape. You can change this later.</p>
           {page.types.length === 0
             ? <p role="status">{page.lastRun && !page.lastRun.ok

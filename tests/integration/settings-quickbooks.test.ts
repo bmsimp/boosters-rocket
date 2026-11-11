@@ -206,6 +206,19 @@ describe("QuickBooks settings", () => {
     expect(emptyHtml).not.toContain("couldn&#x27;t read QuickBooks");
   });
 
+  it("step 3 names the connected company first, as text, and says what to do if it is the wrong one", async () => {
+    await seedConnected(stub);
+    const html = await setupHtml("shape");
+    const lead = "Connected to Stub Boosters. If that isn&#x27;t the club&#x27;s company, go back to QuickBooks settings and disconnect.";
+    expect(html).toContain(lead);
+    expect(html.indexOf(lead)).toBeLessThan(html.indexOf("Tell the portal which QuickBooks customer types"));
+    expect(html.indexOf(lead)).toBeGreaterThan(html.indexOf("Step 3: The shape of your membership"));
+    await db.update(qboConnection).set({ companyName: null });
+    expect(await setupHtml("shape")).toContain("Connected to a QuickBooks company. If that isn&#x27;t");
+    await db.update(qboConnection).set({ companyName: "<b>Evil</b> Books" });
+    expect(await setupHtml("shape")).toContain("Connected to &lt;b&gt;Evil&lt;/b&gt; Books.");
+  });
+
   it("step 3 says what Save does", async () => {
     await seedConnected(stub);
     expect(await setupHtml("shape")).toContain("When you save, the portal reads the roster again with the new shape.");
