@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, integer, check } from "drizzle-orm/pg-core";
 import type { PgColumnBuilderBase } from "drizzle-orm/pg-core";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -128,7 +128,7 @@ export type QboEnvironment = "sandbox" | "production";
 
 /**
  * The club's QuickBooks connection (spec §2, §3): the Intuit app's keys and, once connected, the company and its tokens.
- * One row at most (`id` is always "singleton"). The secret and both tokens are sealed (src/lib/crypto/secret-box.ts).
+ * One row at most: the `qbo_connection_singleton` check allows no `id` but "singleton", and the primary key stops a second. The secret and both tokens are sealed (src/lib/crypto/secret-box.ts).
  */
 export const qboConnection = pgTable("qbo_connection", {
   id: text("id").primaryKey().default("singleton"),
@@ -155,7 +155,7 @@ export const qboConnection = pgTable("qbo_connection", {
   lastError: text("last_error"),                     // a fixed sentence and a short code, never a response body
   lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
   updatedAt: updated(),
-});
+}, (t) => [check("qbo_connection_singleton", sql`${t.id} = 'singleton'`)]);
 
 /** A reference copy of QuickBooks' customer types (spec §2). Replaced on every refresh. */
 export const qboCustomerType = pgTable("qbo_customer_type", {

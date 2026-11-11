@@ -57,6 +57,13 @@
       "when": 1794390705044,
       "tag": "0007_quickbooks",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794391045712,
+      "tag": "0008_qbo_connection_singleton",
+      "breakpoints": true
     }
   ]
 }

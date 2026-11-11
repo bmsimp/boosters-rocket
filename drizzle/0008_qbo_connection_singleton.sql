@@ -1,0 +1,1 @@
+ALTER TABLE "qbo_connection" ADD CONSTRAINT "qbo_connection_singleton" CHECK ("qbo_connection"."id" = 'singleton');
