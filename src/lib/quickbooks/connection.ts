@@ -14,6 +14,8 @@ export type ConnectRefusal = "state" | "denied" | "other_company" | "intuit" | "
 export type QboConnectionView = {
   configured: boolean; clientId: string | null; environment: QboEnvironment | null; connected: boolean; companyName: string | null;
   connectedAt: string | null; lastTokenRefreshAt: string | null; refreshExpiresAt: string | null; lastError: string | null; lastErrorAt: string | null;
+  /** The recorded error can only be fixed by an Admin connecting again, so the worker stops trying (spec §4). */
+  needsAdmin: boolean;
 };
 
 const STATE_TTL_MS = 10 * 60_000;
@@ -35,13 +37,21 @@ export async function getConnection(tx?: Tx) {
 /** The address Intuit returns the Admin to. It must be listed, exactly, on the Intuit app. */
 export function qboRedirectUri(): string { return `${env.APP_URL.replace(/\/+$/, "")}/api/quickbooks/callback`; }
 
+/**
+ * Whether a recorded connection error (`<sentence> (<code>)`) is one only an Admin can fix by connecting again:
+ * Intuit no longer accepts the refresh token, or this server can't read the saved keys. Retrying either changes nothing.
+ */
+export function errorNeedsAdmin(lastError: string | null | undefined): boolean {
+  return /\((invalid_grant|unreadable)\)$/.test(lastError ?? "");
+}
+
 /** What the settings pages may show: never the secret, a token or the company's ID. */
 export async function connectionView(): Promise<QboConnectionView> {
   const c = await getConnection();
   return {
     configured: c !== null, clientId: c?.clientId ?? null, environment: c?.environment ?? null, connected: Boolean(c?.realmId && c.refreshTokenCiphertext),
     companyName: c?.companyName ?? null, connectedAt: iso(c?.connectedAt), lastTokenRefreshAt: iso(c?.lastTokenRefreshAt),
-    refreshExpiresAt: iso(c?.refreshExpiresAt), lastError: c?.lastError ?? null, lastErrorAt: iso(c?.lastErrorAt),
+    refreshExpiresAt: iso(c?.refreshExpiresAt), lastError: c?.lastError ?? null, lastErrorAt: iso(c?.lastErrorAt), needsAdmin: errorNeedsAdmin(c?.lastError),
   };
 }
 

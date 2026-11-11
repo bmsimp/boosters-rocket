@@ -24,7 +24,9 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   const wake = { at: new Date().toISOString() };
   await db.insert(setting).values({ key: WAKE_KEY, value: wake }).onConflictDoUpdate({ target: setting.key, set: { value: wake, updatedAt: new Date() } });
   const ran: { job: string; ok: boolean }[] = [];
-  if (!(await connectionView()).connected) return { ran };
+  const conn = await connectionView();
+  // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record.
+  if (!conn.connected || conn.needsAdmin) return { ran };
   if (await due(TOKEN_JOB, now)) {
     const [run] = await db.insert(jobRun).values({ job: TOKEN_JOB, startedBy: "worker", startedAt: now }).returning();
     try {

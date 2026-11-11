@@ -74,9 +74,11 @@ export async function accessToken(o: { force?: boolean } = {}): Promise<Access> 
         : e instanceof SecretBoxError ? new QboError("The saved QuickBooks keys can't be read with this server's encryption key. Connect QuickBooks again.", "unreadable")
         : null;
       if (!error) throw e;
-      // Returned, not thrown, so this record of the failure is committed.
-      await tx.update(qboConnection).set({ lastError: `${error.message} (${error.code})`, lastErrorAt: new Date(), updatedAt: new Date() });
-      await writeAudit({ actor: WORKER_ACTOR, action: "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
+      // Returned, not thrown, so this record of the failure is committed. Audited only when the error changes, so a
+      // failure repeated on every try doesn't bury the log; the time of the latest try is always kept.
+      const lastError = `${error.message} (${error.code})`;
+      await tx.update(qboConnection).set({ lastError, lastErrorAt: new Date(), updatedAt: new Date() });
+      if (lastError !== c.lastError) await writeAudit({ actor: WORKER_ACTOR, action: "quickbooks.token_refresh.failed", targetType: "qbo_connection", targetId: "singleton", after: { code: error.code } }, tx);
       return { ok: false, error };
     }
   });

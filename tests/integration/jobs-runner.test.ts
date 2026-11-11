@@ -11,12 +11,15 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { jobRun, qboConnection, qboCustomer } from "@/lib/db/schema";
+import { auditLog, jobRun, qboConnection, qboCustomer } from "@/lib/db/schema";
+import { beginConnect, completeConnect } from "@/lib/quickbooks/connection";
+import { quickbooksProblems } from "@/lib/quickbooks/health";
+import { refreshRoster } from "@/lib/roster/refresh";
 import { runDueJobs, lastWake, TOKEN_JOB } from "@/lib/jobs/runner";
 import { workerToken } from "@/lib/jobs/worker-token";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
 import { POST, GET } from "@/app/api/internal/worker/route";
-import { resetDb } from "../helpers/db";
+import { resetDb, seedStaff } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helpers/qbo-stub";
 
 let stub: QboStub;
@@ -25,6 +28,8 @@ afterAll(() => stub.close());
 
 const runs = async (job: string) => (await db.select().from(jobRun).where(eq(jobRun.job, job))).sort((a, b) => a.id - b.id);
 const hours = (n: number) => new Date(Date.now() + n * 3_600_000);
+const minutes = (n: number) => new Date(Date.now() + n * 60_000);
+const tokenFailures = async () => (await db.select().from(auditLog)).filter((r) => r.action === "quickbooks.token_refresh.failed");
 
 describe("scheduled jobs", () => {
   beforeEach(async () => { await resetDb(); stub.reset(); Object.assign(stub, fznCompany()); });
@@ -106,5 +111,41 @@ describe("scheduled jobs", () => {
     }
     expect(await db.select().from(jobRun)).toHaveLength(0);
     expect(await lastWake()).toBeNull();
+  });
+
+  it("leaves a connection Intuit no longer accepts alone until an Admin reconnects, auditing it once", { timeout: 30_000 }, async () => {
+    const admin = await seedStaff({ email: "admin@example.org", admin: true });
+    await seedConnected(stub, { accessExpiresInMs: -1000 });
+    stub.failToken = "invalid_grant";
+    expect(await runDueJobs(minutes(0))).toEqual({ ran: [{ job: TOKEN_JOB, ok: false }, { job: ROSTER_JOB, ok: false }] });
+    const runsAfterFirst = (await db.select().from(jobRun)).length;
+    expect(await runDueJobs(minutes(16))).toEqual({ ran: [] });
+    expect(await runDueJobs(minutes(32))).toEqual({ ran: [] });
+    expect(await db.select().from(jobRun)).toHaveLength(runsAfterFirst);
+    expect(await tokenFailures()).toHaveLength(1);
+    expect((await quickbooksProblems()).map((p) => p.kind)).toContain("token_failed");
+    // A hand-started refresh still tries, and still records its failure.
+    await db.update(jobRun).set({ startedAt: minutes(-6) }).where(eq(jobRun.job, ROSTER_JOB));
+    const byHand = { startedBy: admin.id, actor: { door: "staff" as const, id: admin.id, label: admin.email }, ip: null, manual: true };
+    expect(await refreshRoster(byHand)).toMatchObject({ ok: false, reason: "failed" });
+    expect(await runs(ROSTER_JOB)).toHaveLength(2);
+    // Reconnecting clears the recorded error, and the next wake runs both jobs.
+    stub.failToken = null;
+    const r = await beginConnect(admin.id);
+    stub.codes.add("code-1");
+    expect(await completeConnect({ code: "code-1", state: r.ok ? new URL(r.url).searchParams.get("state") : null, realmId: "9130000000000001", error: null },
+      { staffUserId: admin.id, actor: byHand.actor, ip: null })).toEqual({ ok: true });
+    expect(await runDueJobs(minutes(48))).toEqual({ ran: [{ job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
+  });
+
+  it("still retries a passing failure every 15 minutes, auditing it once while it is unchanged", { timeout: 30_000 }, async () => {
+    await seedConnected(stub);
+    stub.failToken = "server_error";
+    expect(await runDueJobs(minutes(0))).toEqual({ ran: [{ job: TOKEN_JOB, ok: false }, { job: ROSTER_JOB, ok: true }] });
+    expect(await runDueJobs(minutes(16))).toEqual({ ran: [{ job: TOKEN_JOB, ok: false }] });
+    expect(await runDueJobs(minutes(32))).toEqual({ ran: [{ job: TOKEN_JOB, ok: false }] });
+    expect(await runs(TOKEN_JOB)).toHaveLength(3);
+    expect(await tokenFailures()).toHaveLength(1);
+    expect((await db.select().from(qboConnection))[0]!.lastErrorAt!.getTime()).toBeGreaterThan(Date.now() - 5000);
   });
 });
