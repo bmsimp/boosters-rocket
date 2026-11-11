@@ -13,7 +13,7 @@ import { qboCustomerType } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
-import { loadRosterPage, previewShape, rosterEntry } from "@/lib/roster/queries";
+import { loadRosterPage, previewShape, rosterEntry, entryFrom } from "@/lib/roster/queries";
 import { resetDb, seedParent, seedGuardian } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 
@@ -48,7 +48,7 @@ describe("what the roster pages load", () => {
     expect(page.roster.families.map((f) => f.customer.displayName)).toEqual(["Chen Family", "Old Family", "Rivera Family"]);
     expect(page.roster.outside).toBe(2);
     expect(page.attention.map((a) => `${a.rule}:${a.qboId ?? a.name}`).sort()).toEqual([
-      "family_no_student:20", "no_email:21", "not_under_family:50", "signin_unknown:Ana Rivera (ana@example.com)",
+      "family_no_student:20", "no_email:21", "not_under_family:50", "signin_unknown:Ana Rivera",
     ]);
     expect(page.signIns.map((s) => [s.familyQboId, s.status]).sort()).toEqual([["10", "invited"], ["POC-FAMILY-1", "active"]]);
     expect(page.lastRun).toMatchObject({ ok: true, detail: "9 customers, 5 customer types" });
@@ -147,5 +147,21 @@ describe("what the roster pages load", () => {
     await saveShape({ kind: "flat", memberTypeIds: ["2"] }, staffOp);
     await refreshRoster(worker);
     expect(await rosterEntry("11")).toMatchObject({ kind: "member", member: { displayName: "Ana Rivera", email: "ana@example.com" } });
+  });
+
+  it("entryFrom: finds a family, a member, and nothing else, from a page already loaded", async () => {
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
+    const page = await loadRosterPage();
+    expect(entryFrom(page, "10")).toMatchObject({ kind: "family", family: { customer: { displayName: "Rivera Family" } }, signIns: [{ email: "ana@example.com" }] });
+    for (const id of ["11", "30", "nope"]) expect(entryFrom(page, id)).toBeNull();
+    expect(entryFrom({ ...page, roster: null }, "10")).toBeNull();
+    await saveShape({ kind: "flat", memberTypeIds: ["2"] }, staffOp);
+    await refreshRoster(worker);
+    const flat = await loadRosterPage();
+    expect(entryFrom(flat, "11")).toMatchObject({ kind: "member", member: { displayName: "Ana Rivera" }, signIns: [] });
+    expect(entryFrom(flat, "10")).toBeNull();
   });
 });

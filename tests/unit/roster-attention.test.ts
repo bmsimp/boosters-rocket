@@ -55,8 +55,8 @@ describe("Needs attention", () => {
     expect(rules([c("40", "Old Family", "1", null, { active: false }), c("41", "Old Stray", "3", null, { active: false })])).toEqual([]);
   });
   it("a portal sign-in whose QuickBooks ID isn't a family or a member", () => {
-    expect(rules(tidy, layered, [signIn("POC-FAMILY-1"), signIn("11")])).toEqual(["signin_unknown:P (p@example.com)", "signin_unknown:P (p@example.com)"]);
-    expect(rules([c("12", "Leo", "3", null, { email: "l@example.com" })], { kind: "flat", memberTypeIds: ["3"] }, [signIn("12"), signIn("99")])).toEqual(["signin_unknown:P (p@example.com)"]);
+    expect(rules(tidy, layered, [signIn("POC-FAMILY-1"), signIn("11")])).toEqual(["signin_unknown:P", "signin_unknown:P"]);
+    expect(rules([c("12", "Leo", "3", null, { email: "l@example.com" })], { kind: "flat", memberTypeIds: ["3"] }, [signIn("12"), signIn("99")])).toEqual(["signin_unknown:P"]);
   });
   it("an inactive family that still has a sign-in that isn't disabled", () => {
     const company = [c("40", "Old Family", "1", null, { active: false })];
@@ -69,7 +69,7 @@ describe("Needs attention", () => {
     expect(rules(company, layered, [signIn("40", "active", "a@example.com"), signIn("40", "invited", "b@example.com")])).toEqual(["inactive_with_signin:40"]);
   });
   it("a disabled sign-in on an unknown QuickBooks ID is still listed", () => {
-    expect(rules(tidy, layered, [signIn("POC-FAMILY-1", "disabled")])).toEqual(["signin_unknown:P (p@example.com)"]);
+    expect(rules(tidy, layered, [signIn("POC-FAMILY-1", "disabled")])).toEqual(["signin_unknown:P"]);
   });
   it("a family whose only student is inactive has no student", () => {
     const company = [c("10", "Rivera Family", "1"), c("11", "Ana Rivera", "2", "10", { email: "ana@example.com" }), c("12", "Leo Rivera", "3", "10", { active: false })];

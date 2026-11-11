@@ -1,8 +1,10 @@
+// Link, not <a>, for /staff/roster below: the no-html-link-for-pages lint rule treats it as the dynamic /staff/roster/[id] route.
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
-import { rosterEntry, loadRosterPage } from "@/lib/roster/queries";
+import { loadRosterPage, entryFrom } from "@/lib/roster/queries";
 import { DisconnectedNotice, Freshness } from "../freshness";
 import type { Cust } from "@/lib/roster/model";
 import type { SignIn } from "@/lib/roster/attention";
@@ -38,7 +40,9 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const { id } = await params;
   let qboId: string;
   try { qboId = decodeURIComponent(id); } catch { notFound(); }
-  const [entry, page] = await Promise.all([rosterEntry(qboId), loadRosterPage()]);
+  const page = await loadRosterPage(); // one load, so the entry and the freshness notes describe the same snapshot
+  const entry = entryFrom(page, qboId);
+  const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
   if (!entry) notFound();
   // A staff read of family data (spec §5): recorded before anything is shown.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "roster.family.read", permission: "Roster.Read",
@@ -48,7 +52,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
     <main className="wrap single">
       <h1 className="page-title">{customer.displayName}</h1>
       <p className="lede">{entry.kind === "family" ? "A family" : "A member"} as QuickBooks lists it{customer.active ? "" : ". It is inactive in QuickBooks"}. <Link href="/staff/roster">Back to the roster</Link></p>
-      <DisconnectedNotice page={page} />
+      <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>
           <People id="entry-students-h" title="Students" people={entry.family.students} contact={false} empty="QuickBooks lists no students under this family." />
@@ -58,7 +62,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         <People id="entry-member-h" title="In QuickBooks" people={[entry.member]} contact empty="" />
       )}
       <SignIns signIns={entry.signIns} />
-      <Freshness page={page} />
+      <Freshness page={page} admin={admin} />
     </main>
   );
 }

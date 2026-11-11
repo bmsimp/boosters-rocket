@@ -180,4 +180,72 @@ describe("the roster pages", () => {
     expect(await refreshRosterAction()).toEqual({ ok: false, error: "The roster was refreshed less than 5 minutes ago. Try again shortly." });
     expect((await audits("roster.refresh")).at(-1)).toMatchObject({ actorId: reader.id, ip: "203.0.113.40" });
   });
+
+  it("Needs attention names a sign-in to an unknown QuickBooks ID without showing the parent's email", async () => {
+    await ready();
+    const lost = await seedParent({ name: "Lost Person", email: "lost.person@example.com" });
+    await seedGuardian({ parentId: lost.id, familyQboId: "NO-SUCH-ID" });
+    const html = await list();
+    expect(html).toContain("Lost Person");
+    expect(html).toContain("NO-SUCH-ID");
+    expect(html).not.toContain("lost.person@example.com");
+    expect(html).not.toContain("Lost Person (");
+    expect(await audits("roster.family.read")).toEqual([]);
+  });
+
+  it("says the roster hasn't been read yet when a shape is set but nothing has been read, and still offers Refresh now", async () => {
+    await seedConnected(stub);
+    await saveShape(FZN_SHAPE, { actor: worker.actor, ip: null });
+    const html = await list();
+    expect(html).toContain("The roster hasn&#x27;t been read from QuickBooks yet.");
+    expect(html).not.toContain("No family matches");
+    expect(html).toContain("Refresh now");
+  });
+
+  it("says QuickBooks lists no customers of the type when the roster is read and empty, but keeps No family matches for a search", async () => {
+    stub.customers = stub.customers.filter((c: { CustomerTypeRef?: { value: string } }) => c.CustomerTypeRef?.value !== "1");
+    await ready();
+    const html = await list();
+    expect(html).toContain("QuickBooks lists no customers of the family type.");
+    expect(html).not.toContain("No family matches");
+    await saveShape({ kind: "flat", memberTypeIds: ["5"] }, { actor: worker.actor, ip: null });
+    await refreshRoster(worker);
+    expect(await list()).toContain("QuickBooks lists no customers of the member types.");
+  });
+
+  it("keeps No family matches for a search that finds nothing", async () => {
+    await ready();
+    expect(await list("zzz")).toContain("No family matches &quot;zzz&quot;.");
+  });
+
+  it("only promises the daily read while connected", async () => {
+    await ready();
+    for (const html of [await list(), await entry("10")]) expect(html).toContain("The worker reads it again every day.");
+    await disconnect({ actor: worker.actor, ip: null });
+    for (const html of [await list(), await entry("10")]) expect(html).not.toContain("The worker reads it again every day.");
+  });
+
+  it("after a disconnect, tells an Admin where to reconnect and anyone else who can, on both pages", async () => {
+    await ready();
+    await disconnect({ actor: worker.actor, ip: null });
+    for (const html of [await list(), await entry("10")]) {
+      expect(html).toContain("An Admin can reconnect it under QuickBooks.");
+      expect(html).not.toContain("Open QuickBooks settings");
+    }
+    const admin = await seedStaff({ email: "admin@club.org", name: "Admin Person", admin: true });
+    who.staff = { door: "staff", staffUserId: admin.id, name: admin.name, email: admin.email };
+    for (const html of [await list(), await entry("10")]) {
+      expect(html).toContain('<a href="/staff/settings/quickbooks">Open QuickBooks settings</a>');
+      expect(html).not.toContain("An Admin can reconnect it");
+    }
+  });
+
+  it("after a failed refresh, points at the fix after the failure sentence", async () => {
+    await ready();
+    stub.failQueryFrom = 1;
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed" });
+    const html = await list();
+    expect(html).toContain("The latest try failed:");
+    expect(html).toMatch(/The latest try failed:.*An Admin can/);
+  });
 });

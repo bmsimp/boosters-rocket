@@ -41,7 +41,7 @@ export function needsAttention(roster: Roster, shape: MembershipShape, signIns: 
   for (const s of signIns) {
     const customer = known.get(s.familyQboId);
     if (!customer) {
-      out.push({ rule: "signin_unknown", qboId: null, name: `${s.name} (${s.email})`,
+      out.push({ rule: "signin_unknown", qboId: null, name: s.name,
         detail: `This portal sign-in is attached to QuickBooks ID ${s.familyQboId}, which isn't a ${roster.kind === "flat" ? "member" : "family"} in QuickBooks.` });
     } else if (!customer.active && s.status !== "disabled" && !out.some((o) => o.rule === "inactive_with_signin" && o.qboId === customer.qboId)) {
       out.push(item("inactive_with_signin", customer, "This is inactive in QuickBooks, but someone can still sign in to the portal for it."));

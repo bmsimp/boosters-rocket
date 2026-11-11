@@ -18,7 +18,8 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
   const settings = admin ? <> <a href="/staff/settings/quickbooks">Open QuickBooks settings</a></> : " An Admin can do that under QuickBooks.";
   const matches = (name: string) => !q || name.toLowerCase().includes(q); // a plain substring: nothing typed is a pattern
-  const roster = page.roster;
+  const roster = page.lastOkAt ? page.roster : null; // a shape with no successful read has nothing real to list
+  const unread = Boolean(page.roster && !page.lastOkAt);
   const rows = !roster ? [] : roster.kind === "flat"
     ? roster.members.filter((m) => matches(m.displayName)).map((m) => ({ id: m.qboId, name: m.displayName, note: m.active ? "" : "Inactive in QuickBooks" }))
     : roster.families.filter((f) => matches(f.customer.displayName)).map((f) => ({ id: f.customer.qboId, name: f.customer.displayName,
@@ -33,7 +34,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
       {!roster && (
         <section className="box" role="status" aria-labelledby="roster-none-h"><h2 id="roster-none-h">Nothing to show yet</h2>
           <p>{page.brokenTypes.length ? <>The membership shape names a customer type QuickBooks no longer has, so the roster can&apos;t be shown until the shape is chosen again.{settings}</>
-            : page.shape ? <>The roster hasn&apos;t been read from QuickBooks yet.</>
+            : unread ? <>The roster hasn&apos;t been read from QuickBooks yet.</>
             : page.connected ? <>The membership shape hasn&apos;t been chosen yet.{settings}</>
             : <>QuickBooks isn&apos;t connected yet.{settings}</>}</p>
         </section>
@@ -41,14 +42,14 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
 
       {roster && (
         <section className="box" aria-labelledby="roster-list-h"><h2 id="roster-list-h">{roster.kind === "flat" ? "Members" : "Families"}</h2>
-          <DisconnectedNotice page={page} />
+          <DisconnectedNotice page={page} admin={admin} />
           <p>{rosterCounts(roster)}</p>
           <form method="get" role="search" className="stack">
             <label className="field"><span>Find a {noun}</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
             <button className="btn btn-line">Find</button>
           </form>
           {rows.length === 0
-            ? <p role="status">No {noun} matches{typed ? <> &quot;{typed}&quot;</> : ""}.</p>
+            ? <p role="status">{typed ? <>No {noun} matches &quot;{typed}&quot;.</> : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</p>
             : <ul className="lines">{rows.map((r) => (
                 <li key={r.id}><div><a className="what" href={`/staff/roster/${encodeURIComponent(r.id)}`}>{r.name}</a>{r.note && <span className="when">{r.note}</span>}</div></li>))}</ul>}
         </section>
@@ -64,7 +65,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
         </section>
       )}
 
-      <Freshness page={page} />
+      <Freshness page={page} admin={admin} />
     </main>
   );
 }

@@ -51,9 +51,10 @@ export async function previewShape(shape: MembershipShape): Promise<ShapePreview
     samples: { families: first(r.families.map((f) => f.customer)), students: first(students), parents: first(parents), members: [] } };
 }
 
-/** One family (layered) or one member (flat) with the portal sign-ins attached to its QuickBooks ID; null for anything else. */
-export async function rosterEntry(qboId: string): Promise<{ kind: "family"; family: Family; signIns: SignIn[] } | { kind: "member"; member: Cust; signIns: SignIn[] } | null> {
-  const page = await loadRosterPage();
+export type RosterEntry = { kind: "family"; family: Family; signIns: SignIn[] } | { kind: "member"; member: Cust; signIns: SignIn[] };
+
+/** One family (layered) or one member (flat) found in a page already loaded, with the portal sign-ins attached to its QuickBooks ID; null for anything else. */
+export function entryFrom(page: RosterPage, qboId: string): RosterEntry | null {
   if (!page.roster) return null;
   const mine = page.signIns.filter((s) => s.familyQboId === qboId);
   if (page.roster.kind === "flat") {
@@ -62,4 +63,8 @@ export async function rosterEntry(qboId: string): Promise<{ kind: "family"; fami
   }
   const family = page.roster.families.find((f) => f.customer.qboId === qboId);
   return family ? { kind: "family", family, signIns: mine } : null;
+}
+
+export async function rosterEntry(qboId: string): Promise<RosterEntry | null> {
+  return entryFrom(await loadRosterPage(), qboId);
 }

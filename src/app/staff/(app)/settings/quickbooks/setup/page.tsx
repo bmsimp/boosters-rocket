@@ -1,3 +1,4 @@
+// Link, not <a>, for /staff/roster below: the no-html-link-for-pages lint rule treats it as the dynamic /staff/roster/[id] route.
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
