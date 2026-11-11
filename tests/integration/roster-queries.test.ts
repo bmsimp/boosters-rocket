@@ -65,6 +65,36 @@ describe("what the roster pages load", () => {
     expect(page.attention).toEqual([]);
   });
 
+  it("after a failed refresh: the last run shows the failure, the last good time and the old roster stay", async () => {
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    const before = await loadRosterPage();
+    stub.failQueryFrom = 3; // queries 1 and 2 were the good refresh
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed" });
+    const page = await loadRosterPage();
+    expect(page.lastRun).toMatchObject({ ok: false, detail: "QuickBooks refused the request. (http_500)" });
+    expect(page.lastOkAt).not.toBeNull();
+    expect(page.lastOkAt).toBe(before.lastOkAt);
+    expect(page.roster).toEqual(before.roster);
+    expect(page.roster).not.toBeNull();
+  });
+
+  it("a refresh that returns no customer types leaves every named type missing", async () => {
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    stub.types = [];
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    const page = await loadRosterPage();
+    expect([...page.brokenTypes].sort()).toEqual(["1", "2", "3"]);
+    expect(page.roster).toBeNull();
+  });
+
+  it("a shape before any successful refresh is not called broken", async () => {
+    await saveShape(FZN_SHAPE, staffOp);
+    const page = await loadRosterPage();
+    expect(page.brokenTypes).toEqual([]);
+  });
+
   it("previews a shape with counts and the first names in each role", async () => {
     await refreshRoster(worker);
     expect(await previewShape(FZN_SHAPE)).toEqual({ families: 3, students: 1, parents: 2, members: 0, outside: 2,
@@ -84,6 +114,33 @@ describe("what the roster pages load", () => {
     expect(await rosterEntry("30")).toBeNull(); // Lincoln High: a School
     expect(await rosterEntry("11")).toBeNull(); // a parent is not a page of its own
     expect(await rosterEntry("nope")).toBeNull();
+  });
+
+  it("a family's page lists only its own sign-ins", async () => {
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    const raul = await seedParent({ name: "Raul Rivera", email: "raul@example.com" });
+    const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com" });
+    const lost = await seedParent({ name: "Lost Person", email: "lost@example.com" });
+    await seedGuardian({ parentId: ana.id, familyQboId: "10" });
+    await seedGuardian({ parentId: raul.id, familyQboId: "10" });
+    await seedGuardian({ parentId: mei.id, familyQboId: "20" });
+    await seedGuardian({ parentId: lost.id, familyQboId: "POC-FAMILY-1" });
+    const emails = async (id: string) => {
+      const e = await rosterEntry(id);
+      if (e?.kind !== "family") throw new Error("expected a family");
+      return e.signIns.map((s) => s.email).sort();
+    };
+    expect(await emails("10")).toEqual(["ana@example.com", "raul@example.com"]);
+    expect(await emails("20")).toEqual(["mei@example.com"]);
+  });
+
+  it("flat: a customer outside the member types has no page", async () => {
+    await saveShape({ kind: "flat", memberTypeIds: ["2"] }, staffOp);
+    await refreshRoster(worker);
+    expect(await rosterEntry("12")).toBeNull(); // Leo Rivera: a Student
+    expect(await rosterEntry("30")).toBeNull();
   });
 
   it("flat: finds a member", async () => {

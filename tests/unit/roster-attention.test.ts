@@ -64,6 +64,34 @@ describe("Needs attention", () => {
     expect(rules(company, layered, [signIn("40", "invited")])).toEqual(["inactive_with_signin:40"]);
     expect(rules(company, layered, [signIn("40", "disabled")])).toEqual([]);
   });
+  it("an inactive family with two live sign-ins is listed once", () => {
+    const company = [c("40", "Old Family", "1", null, { active: false })];
+    expect(rules(company, layered, [signIn("40", "active", "a@example.com"), signIn("40", "invited", "b@example.com")])).toEqual(["inactive_with_signin:40"]);
+  });
+  it("a disabled sign-in on an unknown QuickBooks ID is still listed", () => {
+    expect(rules(tidy, layered, [signIn("POC-FAMILY-1", "disabled")])).toEqual(["signin_unknown:P (p@example.com)"]);
+  });
+  it("a family whose only student is inactive has no student", () => {
+    const company = [c("10", "Rivera Family", "1"), c("11", "Ana Rivera", "2", "10", { email: "ana@example.com" }), c("12", "Leo Rivera", "3", "10", { active: false })];
+    expect(rules(company)).toEqual(["family_no_student:10"]);
+  });
+  it("an inactive parent or flat member with no email is not listed", () => {
+    expect(rules([...tidy, c("15", "Old Parent", "2", "10", { active: false })])).toEqual([]);
+    expect(rules([c("12", "Leo", "3", null, { active: false })], { kind: "flat", memberTypeIds: ["3"] })).toEqual([]);
+  });
+  it("an inactive parent sharing an email with an active parent is not a duplicate", () => {
+    expect(rules([...tidy, c("15", "Ana Old", "2", "10", { email: "ana@example.com", active: false })])).toEqual([]);
+  });
+  it("an inactive family that is a sub-customer is not listed as a sub-customer", () => {
+    expect(rules([...tidy, c("80", "Old Nested", "1", "10", { active: false })])).toEqual([]);
+  });
+  it("flat: an inactive member with a live sign-in is listed, and an unknown sign-in says member", () => {
+    const flat: Parameters<typeof buildRoster>[0] = { kind: "flat", memberTypeIds: ["3"] };
+    expect(rules([c("12", "Leo", "3", null, { active: false })], flat, [signIn("12", "active")])).toEqual(["inactive_with_signin:12"]);
+    const [item] = needsAttention(buildRoster(flat, []), flat, [signIn("99")]);
+    expect(item!.detail).toContain("isn't a member in QuickBooks");
+    expect(item!.detail).not.toContain("family");
+  });
   it("says each problem in plain words", () => {
     const [item] = needsAttention(buildRoster(layered, [c("10", "Rivera Family", "1"), c("12", "Leo Rivera", "3", "10")]), layered, []);
     expect(item).toEqual({ rule: "family_no_parent", qboId: "10", name: "Rivera Family", detail: "No parent is listed under this family in QuickBooks." });

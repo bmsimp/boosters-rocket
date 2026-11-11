@@ -31,7 +31,7 @@ export async function loadRosterPage(): Promise<RosterPage> {
     db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1),
     db.select().from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
   ]);
-  const brokenTypes = shape && typeRows.length ? missingTypes(shape, typeRows) : [];
+  const brokenTypes = shape && lastOk ? missingTypes(shape, typeRows) : [];
   const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
   return {
     connected: conn.connected, shape, shapeWords: shape ? describeShape(shape, typeRows) : null, brokenTypes, roster,
