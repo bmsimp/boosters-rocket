@@ -85,3 +85,29 @@ export async function seedConnected(stub: QboStub, o: { realmId?: string; access
     connectedAt: new Date(now), connectedBy: o.connectedBy ?? null, lastTokenRefreshAt: new Date(now),
   });
 }
+
+export const FZN_SHAPE = { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" } as const;
+
+/** A small company shaped like FZN's: Family at the top, Parent and Student under it, School and Vendor beside them. */
+export function fznCompany() {
+  const type = (Id: string, Name: string) => ({ Id, Name, Active: true });
+  const c = (Id: string, DisplayName: string, typeId: string | null, extra: Record<string, unknown> = {}) => ({
+    Id, DisplayName, Active: true, SyncToken: "0", MetaData: { LastUpdatedTime: "2026-11-01T12:00:00-06:00" },
+    ...(typeId ? { CustomerTypeRef: { value: typeId } } : {}), ...extra,
+  });
+  const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
+  return {
+    types: [type("1", "Family"), type("2", "Parent"), type("3", "Student"), type("4", "School"), type("5", "Vendor")],
+    customers: [
+      c("10", "Rivera Family", "1"),
+      c("11", "Ana Rivera", "2", { ...under("10"), PrimaryEmailAddr: { Address: " Ana@Example.com " }, PrimaryPhone: { FreeFormNumber: "555-0101" } }),
+      c("12", "Leo Rivera", "3", under("10")),
+      c("20", "Chen Family", "1"),
+      c("21", "Mei Chen", "2", under("20")),
+      c("30", "Lincoln High", "4", { PrimaryEmailAddr: { Address: "office@lincoln.example" }, PrimaryPhone: { FreeFormNumber: "555-0199" } }),
+      c("40", "Old Family", "1", { Active: false }),
+      c("50", "Stray Student", "3"),
+      c("60", "No Type At All", null),
+    ],
+  };
+}
