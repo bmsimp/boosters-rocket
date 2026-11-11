@@ -37,7 +37,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
   return (
     <main className="wrap single">
       <h1 className="page-title">Set up QuickBooks</h1>
-      <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}>{s.label}</li>)}</ol>
+      <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}>{order.indexOf(s.step) <= order.indexOf(reachable) ? <a href={`${SETUP}?step=${s.step}`}>{s.label}</a> : s.label}</li>)}</ol>
       {error && <p role="alert" className="errors">{error}</p>}
 
       {step === "app" && (
@@ -49,7 +49,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
               <CopyField label="Redirect address" value={qboRedirectUri()} /></li>
             <li>Copy the <b>Client ID</b> and <b>Client secret</b> from that same page into the form below, and choose sandbox or production to match.</li>
           </ol>
-          <AppKeysForm view={conn} save={saveQboAppAction} />
+          <AppKeysForm configured={conn.configured} clientId={conn.clientId} environment={conn.environment} save={saveQboAppAction} />
           <p className="box-foot"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>
       )}
@@ -65,9 +65,13 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
 
       {step === "shape" && (
         <section className="box" aria-labelledby="qbo-shape-h"><h2 id="qbo-shape-h">Step 3: The shape of your membership</h2>
-          <p>Tell the portal which QuickBooks customer types are the club&apos;s members. Customers of any other type, such as schools or vendors, stay out of the portal. You can change this later.</p>
+          <p>Tell the portal which QuickBooks customer types are the club&apos;s members. Customers of any other type, such as schools or vendors, stay out of the portal. When you save, the portal reads the roster again with the new shape. You can change this later.</p>
           {page.types.length === 0
-            ? <p role="status">The portal hasn&apos;t read any customer types from QuickBooks yet. Open <a href="/staff/roster">Roster</a> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types, create them there first (Sales, Customers, Customer types).</p>
+            ? <p role="status">{page.lastRun && !page.lastRun.ok
+              ? <>The portal couldn&apos;t read QuickBooks just now{page.lastRun.detail ? `: ${page.lastRun.detail}` : "."} Open <a href="/staff/roster">Roster</a> and select <b>Refresh now</b> to try again, then come back.</>
+              : page.lastRun
+                ? <>QuickBooks has no customer types yet. Create them there first (Sales, Customers, Customer types), then select Refresh now on the Roster page.</>
+                : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <a href="/staff/roster">Roster</a> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types, create them there first (Sales, Customers, Customer types).</>}</p>
             : <ShapeForm types={page.types} shape={page.shape} preview={previewShapeAction} save={saveShapeAction} />}
           <p className="box-foot"><a href={`${SETUP}?step=connect`}>Back to step 2</a> · <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>

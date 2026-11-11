@@ -7,9 +7,9 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-const who = vi.hoisted(() => ({ staff: null as null | { door: "staff"; staffUserId: string; name: string; email: string } }));
+const who = vi.hoisted(() => ({ staff: null as null | { door: "staff"; staffUserId: string; name: string; email: string }, sessionOnly: false }));
 vi.mock("@/lib/auth/identity", () => ({
-  getStaffIdentity: async () => who.staff, hasStaffSession: async () => Boolean(who.staff),
+  getStaffIdentity: async () => who.staff, hasStaffSession: async () => who.sessionOnly || Boolean(who.staff),
   getParentIdentity: async () => null, getParentState: async () => ({ status: "none" }), hasParentSession: async () => false,
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "cf-connecting-ip": "203.0.113.40" }), cookies: async () => ({ get: () => undefined }) }));
@@ -21,7 +21,7 @@ vi.mock("next/navigation", () => ({
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { ShapeForm } from "@/app/staff/(app)/settings/quickbooks/forms";
+import { ShapeForm, shapeFormData } from "@/app/staff/(app)/settings/quickbooks/forms";
 import { db } from "@/lib/db/client";
 import { auditLog, qboConnection, qboCustomer, role, roleRule, roleAssignment } from "@/lib/db/schema";
 import { saveQboAppAction, beginConnectAction, disconnectAction, previewShapeAction, saveShapeAction } from "@/app/staff/(app)/settings/quickbooks/actions";
@@ -48,6 +48,7 @@ const setupHtml = async (step?: string, error?: string) => renderToStaticMarkup(
 describe("QuickBooks settings", () => {
   let admin: Awaited<ReturnType<typeof seedStaff>>;
   beforeEach(async () => {
+    who.sessionOnly = false;
     await resetDb(); stub.reset(); Object.assign(stub, fznCompany());
     admin = await seedStaff({ email: "admin@club.org", name: "Admin Person", admin: true });
     who.staff = { door: "staff", staffUserId: admin.id, name: admin.name, email: admin.email };
@@ -111,11 +112,24 @@ describe("QuickBooks settings", () => {
     await saveQboAppAction(form(keys));
     const state = await startConnect();
     stub.codes.add("code-1");
+    const back = (q: Record<string, string>) => callback(new Request(`http://localhost:3100/api/quickbooks/callback?${new URLSearchParams(q)}`, { headers: { "cf-connecting-ip": "203.0.113.41" } }));
+    const q = { code: "code-1", state, realmId: "9130000000000001" };
     who.staff = null;
-    expect(new URL((await callback(callbackUrl({ code: "code-1", state, realmId: "9130000000000001" }))).headers.get("location")!).pathname).toBe("/staff/sign-in");
+    expect(new URL((await back(q)).headers.get("location")!).pathname).toBe("/staff/sign-in");
+    expect(await audits("access.refused")).toHaveLength(0);
     await asEverythingRole();
-    expect(new URL((await callback(callbackUrl({ code: "code-1", state, realmId: "9130000000000001" }))).headers.get("location")!).pathname).toBe("/refused");
+    expect(new URL((await back(q)).headers.get("location")!).pathname).toBe("/refused");
+    expect(await audits("access.refused")).toMatchObject([{ actorId: who.staff!.staffUserId, permission: "Settings.QuickBooks.ReadWrite", ip: "203.0.113.41" }]);
     expect((await db.select().from(qboConnection))[0]!.realmId).toBeNull();
+    expect(stub.tokenCalls()).toHaveLength(0);
+  });
+
+  it("the return from Intuit sends someone with a live session who can't be resolved to the refusal page, not sign-in", async () => {
+    await saveQboAppAction(form(keys));
+    const state = await startConnect();
+    who.staff = null; who.sessionOnly = true;
+    const res = await callback(callbackUrl({ code: "code-1", state, realmId: "9130000000000001" }));
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/refused");
     expect(stub.tokenCalls()).toHaveLength(0);
   });
 
@@ -177,6 +191,37 @@ describe("QuickBooks settings", () => {
     for (const name of ["Family", "Parent", "Student", "School", "Vendor"]) expect(html).toContain(`>${name}</option>`);
   });
 
+  it("step 3 says why there are no types: never read, read failed, or QuickBooks has none", async () => {
+    await seedConnected(stub);
+    expect(await setupHtml("shape")).toContain("hasn&#x27;t read any customer types");
+    stub.failQueryFrom = 1;
+    await refreshRoster(worker);
+    const failedHtml = await setupHtml("shape");
+    expect(failedHtml).toContain("The portal couldn&#x27;t read QuickBooks just now: ");
+    expect(failedHtml).not.toContain("hasn&#x27;t read any customer types");
+    stub.failQueryFrom = null; stub.types = [];
+    await refreshRoster(worker);
+    const emptyHtml = await setupHtml("shape");
+    expect(emptyHtml).toContain("QuickBooks has no customer types yet. Create them there first (Sales, Customers, Customer types), then select Refresh now on the Roster page.");
+    expect(emptyHtml).not.toContain("couldn&#x27;t read QuickBooks");
+  });
+
+  it("step 3 says what Save does", async () => {
+    await seedConnected(stub);
+    expect(await setupHtml("shape")).toContain("When you save, the portal reads the roster again with the new shape.");
+  });
+
+  it("the progress list links each step that can be reached, and only those", async () => {
+    const progress = async (step?: string) => [...(await setupHtml(step)).match(/<ol class="setup-progress">(.*?)<\/ol>/)![1]!.matchAll(/<li([^>]*)>(.*?)<\/li>/g)]
+      .map((m) => ({ current: m[1]!.includes('aria-current="step"'), href: m[2]!.match(/href="([^"]*)"/)?.[1] ?? null }));
+    const link = (n: string) => `/staff/settings/quickbooks/setup?step=${n}`;
+    expect(await progress()).toEqual([{ current: true, href: link("app") }, { current: false, href: null }, { current: false, href: null }]);
+    await saveQboAppAction(form(keys));
+    expect(await progress("app")).toEqual([{ current: true, href: link("app") }, { current: false, href: link("connect") }, { current: false, href: null }]);
+    await db.delete(qboConnection); await seedConnected(stub);
+    expect(await progress("connect")).toEqual([{ current: false, href: link("app") }, { current: true, href: link("connect") }, { current: false, href: link("shape") }]);
+  });
+
   it("the view shows what is set and holds no token, secret or company ID", async () => {
     expect(renderToStaticMarkup(await QuickBooksSettingsPage())).toContain("QuickBooks isn&#x27;t set up yet.");
     await seedConnected(stub);
@@ -191,6 +236,22 @@ describe("QuickBooks settings", () => {
     expect(html).not.toMatch(/<input(?![^>]*type="hidden")/);
   });
 
+  it("what the shape form sends is what preview counted and what save stores", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    const cases = [
+      [{ kind: "layered", family: "1", student: "3", parent: "2", members: ["4"] }, { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" }],
+      [{ kind: "layered", family: "1", student: "", parent: "", members: [] }, { kind: "layered", familyTypeId: "1", studentTypeId: null, parentTypeId: null }],
+      [{ kind: "flat", family: "1", student: "3", parent: "2", members: ["3", "2"] }, { kind: "flat", memberTypeIds: ["3", "2"] }],
+    ] as const;
+    for (const [choice, stored] of cases) {
+      const data = () => shapeFormData({ ...choice, members: [...choice.members] });
+      expect((await previewShapeAction(data())).ok).toBe(true);
+      expect(await saveShapeAction(data())).toMatchObject({ ok: true });
+      expect(await getShape()).toEqual(stored);
+    }
+  });
+
   it("disconnects from the view", async () => {
     await seedConnected(stub);
     expect(await disconnectAction()).toEqual({ ok: true });
@@ -199,19 +260,19 @@ describe("QuickBooks settings", () => {
   });
 });
 
-describe("ShapeForm shows the saved shape", () => {
+describe("ShapeForm starts from the saved shape", () => {
   const types = [{ qboId: "1", name: "Family", active: true }, { qboId: "2", name: "Parent", active: true }, { qboId: "3", name: "Student", active: true }];
   const render = (shape: Parameters<typeof ShapeForm>[0]["shape"]) => renderToStaticMarkup(createElement(ShapeForm, { types, shape,
     preview: async () => ({ ok: false as const, errors: [] }), save: async () => ({ ok: false as const, errors: [] }) }));
   const chosen = (html: string, name: string) => [...html.matchAll(new RegExp(`<select name="${name}"[^>]*>(.*?)</select>`, "g"))][0]![1]!
     .match(/<option value="([^"]*)"[^>]*selected/)?.[1];
 
-  it("a saved layered shape fills each select from that shape", () => {
+  it("starts a saved layered shape with each select on that shape's type", () => {
     const html = render({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" });
     expect([chosen(html, "family"), chosen(html, "student"), chosen(html, "parent")]).toEqual(["1", "3", "2"]);
   });
 
-  it("a saved flat shape checks exactly its member types", () => {
+  it("starts a saved flat shape with exactly its member types checked", () => {
     const html = render({ kind: "flat", memberTypeIds: ["3", "2"] });
     const boxes = (html.match(/<input type="checkbox" name="members"[^>]*>/g) ?? []).map((t) => [t.match(/value="(\d)"/)![1], t.includes("checked")]);
     expect(boxes).toEqual([["1", false], ["2", true], ["3", true]]);
