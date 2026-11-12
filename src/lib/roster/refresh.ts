@@ -7,6 +7,7 @@ import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { ROSTER_JOB, setRosterSource } from "./source";
+import { reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
 
 export { ROSTER_LOCK, ROSTER_JOB };
 
@@ -93,16 +94,20 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     if (prepared === "company_changed") return fail("The QuickBooks company changed during the read. (company_changed)", "company_changed");
     const { typeRows, customerRows } = prepared;
     try {
-      // A savepoint: a failure here undoes only the cache changes, so the failed run can still be recorded.
+      // A savepoint: a failure here undoes the cache changes and the parent-access changes together, so the roster and
+      // who can sign in never disagree (parents spec §2), and the failed run can still be recorded.
       await tx.transaction(async (sp) => {
         await sp.delete(qboCustomerType);
         await sp.delete(qboCustomer);
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
         for (let i = 0; i < customerRows.length; i += CHUNK) await sp.insert(qboCustomer).values(customerRows.slice(i, i + CHUNK)).onConflictDoNothing();
         await setRosterSource(sp, realmId);
+        try { await reconcileAccess(sp, { cause: `roster.refresh#${run!.id}` }); } catch { throw new ReconcileFailed(); }
       });
-    } catch {
-      return fail("The roster couldn't be saved. (save_failed)", "save_failed");
+    } catch (e) {
+      return e instanceof ReconcileFailed
+        ? fail("The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)", "reconcile_failed")
+        : fail("The roster couldn't be saved. (save_failed)", "save_failed");
     }
     await tx.update(jobRun).set({ finishedAt: new Date(), outcome: "ok", detail: `${customerRows.length} customers, ${typeRows.length} customer types` }).where(eq(jobRun.id, run!.id));
     await writeAudit({ actor: o.actor, action: "roster.refresh", targetType: "job_run", targetId: String(run!.id), after: { customers: customerRows.length, types: typeRows.length }, ip: o.ip }, tx);

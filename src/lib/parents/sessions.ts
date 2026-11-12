@@ -17,6 +17,13 @@ export async function endParentSessions(parentId: string, tx?: Tx): Promise<numb
   return Array.from(rows as ArrayLike<{ id: string }>).length;
 }
 
+/** Ends the person's sessions that are in one family (spec §2 Closing a link). Sessions in their other families carry on. */
+export async function endFamilySessions(parentId: string, familyQboId: string, tx?: Tx): Promise<number> {
+  const rows = await (tx ?? db).execute<{ id: string }>(sql`DELETE FROM parent_auth_session
+    WHERE family_qbo_id = ${familyQboId} AND user_id IN (SELECT id FROM parent_auth_user WHERE parent_id = ${parentId}) RETURNING id`);
+  return Array.from(rows as ArrayLike<{ id: string }>).length;
+}
+
 export async function enabledGuardianRows(parentId: string, tx?: Tx): Promise<GuardianRow[]> {
   return (tx ?? db).select().from(guardian)
     .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"))).orderBy(guardian.familyQboId);
