@@ -158,7 +158,7 @@ keeps working until **Check and switch** succeeds; after that you can remove the
 **Discard replacement** (if you already uploaded it, remove it in Entra too). **Replace certificate** also
 works on the setup page after `scripts/poc/reopen-setup.sh`, for example when the server can no longer read
 the old certificate's key. The staff home warns Admins 30 days before a certificate expires; use Replace
-certificate under Settings → Sign-in. (Google still uses a client secret, entered as before.)
+certificate under **Sign-in** in the staff menu. (Google still uses a client secret, entered as before.)
 
 Sources: Register an application in Microsoft Entra ID
 (https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app); Add a redirect URI
@@ -224,7 +224,9 @@ happen on the setup page. Do this instead:
    Keep a copy of `.env.poc` with it (section 2).
 2. Deploy (section 8). The migration runs as part of the deploy:
    - every guardian row already in the database becomes a person with that family. Rows with the same email
-     (trimmed and lowercased) become one person, named from the oldest row. A disabled row stays disabled, as removed;
+     (trimmed and lowercased) become one person, named from the oldest row. A disabled row stays disabled, as removed.
+     Where one person then has more than one row for the same family, only one is kept and the others are deleted:
+     an enabled row before a disabled one, then the primary one, then the oldest;
    - every earlier parent sign-in account is deleted, and its sessions with it, so anyone signed in as a parent is
      signed out. Each person gets a new sign-in account for the email code;
    - the parents tenant's sign-in settings and certificate are removed from the portal.

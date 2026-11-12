@@ -145,8 +145,10 @@ refreshed_at
 - A failed refresh leaves the previous cache in place, records the failure, and raises the staff warning (§5).
 - **The cache records which company it came from** (the `roster.source` setting, written with every cache swap). While
   QuickBooks is connected, a cache from another company, or one that doesn't say which, is shown as not read yet, with
-  none of that company's run history. A refresh notes the company when it starts and fails, keeping the old cache, if
-  the connected company changed before it saves.
+  none of that company's run history. The membership shape and the customer types are hidden with it, because their
+  type IDs belong to that company: the roster page and the settings view say the shape hasn't been chosen yet. A
+  refresh notes the company when it starts and fails, keeping the old cache, if the connected company changed before
+  it saves.
 - Names and every other QuickBooks field are free text that anyone with QuickBooks access can edit. They are
   always rendered as text, never as HTML.
 
