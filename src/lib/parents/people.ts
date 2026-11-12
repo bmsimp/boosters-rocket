@@ -9,17 +9,19 @@ import { endParentSessions, deleteUnusedSigninCodes, lockEmail } from "./session
 
 export type StaffOp = { actor: Actor; ip: string | null; permission?: string };
 
-/** No codes, every session ends. Guardian rows keep their status, so unblocking restores the same access. */
-export async function blockPerson(parentId: string, o: StaffOp): Promise<{ ok: true; sessionsEnded: number } | { ok: false; reason: "not_found" }> {
+/** No codes, every session ends. Family links keep their status, so unblocking restores the same access. The reason is for staff only. */
+export async function blockPerson(parentId: string, rawReason: string, o: StaffOp): Promise<{ ok: true; sessionsEnded: number } | { ok: false; reason: "not_found" | "invalid" }> {
+  const reason = rawReason.trim();
+  if (!reason || reason.length > 500) return { ok: false, reason: "invalid" };
   return db.transaction(async (tx) => {
     const [p] = await tx.select().from(parent).where(eq(parent.id, parentId)).for("update");
     if (!p) return { ok: false as const, reason: "not_found" as const };
-    await tx.update(parent).set({ blocked: true, updatedAt: new Date() }).where(eq(parent.id, p.id));
+    await tx.update(parent).set({ blocked: true, blockedAt: new Date(), blockedBy: o.actor.id, blockedReason: reason, welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.id, p.id));
     await deleteUnusedSigninCodes(p.id, tx);
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, p.id), isNull(parentEmailChange.usedAt)));
     const sessionsEnded = await endParentSessions(p.id, tx);
     await writeAudit({ actor: o.actor, action: "parent.block", permission: o.permission, targetType: "parent", targetId: p.id,
-      before: { blocked: p.blocked }, after: { blocked: true, sessionsEnded }, ip: o.ip }, tx);
+      before: { blocked: p.blocked }, after: { blocked: true, reason, sessionsEnded }, ip: o.ip }, tx);
     return { ok: true as const, sessionsEnded };
   });
 }
@@ -28,9 +30,9 @@ export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok:
   return db.transaction(async (tx) => {
     const [p] = await tx.select().from(parent).where(eq(parent.id, parentId)).for("update");
     if (!p) return { ok: false as const, reason: "not_found" as const };
-    await tx.update(parent).set({ blocked: false, updatedAt: new Date() }).where(eq(parent.id, p.id));
+    await tx.update(parent).set({ blocked: false, blockedAt: null, blockedBy: null, blockedReason: null, updatedAt: new Date() }).where(eq(parent.id, p.id));
     await writeAudit({ actor: o.actor, action: "parent.unblock", permission: o.permission, targetType: "parent", targetId: p.id,
-      before: { blocked: p.blocked }, after: { blocked: false }, ip: o.ip }, tx);
+      before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: false }, ip: o.ip }, tx);
     return { ok: true as const };
   });
 }

@@ -141,7 +141,7 @@ describe("the parent door", () => {
     const b = await seedParent({ name: "Ben", email: "ben@example.com" }); await seedGuardian({ parentId: b.id, familyQboId: "F2" });
     outbox.length = 0;
     const two = await signIn("ben@example.com");
-    await blockPerson(b.id, staff);
+    await blockPerson(b.id, "reason", staff);
     expect(await getSession(two.cookie)).toBeNull();
   });
 

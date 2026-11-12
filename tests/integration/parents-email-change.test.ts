@@ -79,7 +79,7 @@ describe("a blocked person and email changes", () => {
     const p = await seedParent({ name: "Ana", email: "ana@example.com" });
     await requestParentEmailChange(p.id, "ana.new@example.com", { ip: null });
     expect(await db.select().from(parentEmailChange)).toHaveLength(1);
-    await blockPerson(p.id, o);
+    await blockPerson(p.id, "reason", o);
     expect(await db.select().from(parentEmailChange)).toHaveLength(0);
   });
 

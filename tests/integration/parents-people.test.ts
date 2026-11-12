@@ -12,6 +12,8 @@ import { enabledGuardianRows } from "@/lib/parents/sessions";
 import { resetDb, seedParent, seedGuardian, seedParentSession, seedWorkingMail } from "../helpers/db";
 
 const o = { actor: { door: "staff" as const, id: null, label: "board@club.org" }, ip: "203.0.113.5" };
+const staff = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000002", label: "reg@club.org" }, ip: "203.0.113.9", permission: "Parents.ReadWrite" };
+const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const actions = async () => (await db.select().from(auditLog)).map((a) => a.action);
 const sessionsOf = async (authUserId: string) => db.select().from(parentAuthSession).where(eq(parentAuthSession.userId, authUserId));
 
@@ -23,13 +25,31 @@ describe("blocking and unblocking", () => {
     await seedGuardian({ parentId: p.id, familyQboId: "F1", status: "active" });
     await seedParentSession(p.authUserId);
     await db.insert(signinCode).values({ parentId: p.id, codeHash: "x", expiresAt: new Date(Date.now() + 60_000) });
-    expect(await blockPerson(p.id, o)).toEqual({ ok: true, sessionsEnded: 1 });
+    expect(await blockPerson(p.id, "Custody order on file.", o)).toEqual({ ok: true, sessionsEnded: 1 });
     expect(await sessionsOf(p.authUserId)).toHaveLength(0);
     expect(await db.select().from(signinCode)).toHaveLength(0);
     expect(await db.select().from(guardian)).toMatchObject([{ status: "active" }]);
     expect(await unblockPerson(p.id, o)).toEqual({ ok: true });
     expect((await db.select().from(parent))[0]!.blocked).toBe(false);
     expect(await actions()).toEqual(["parent.block", "parent.unblock"]);
+  });
+
+  it("blocking records who, when and why; unblocking clears them; the reason is audited", async () => {
+    const p = await seedParent({ name: "Ana Rivera" });
+    expect(await blockPerson(p.id, "  ", staff)).toEqual({ ok: false, reason: "invalid" });
+    expect(await blockPerson(p.id, "Custody order on file.", staff)).toMatchObject({ ok: true });
+    const [row] = await db.select().from(parent);
+    expect(row).toMatchObject({ blocked: true, blockedReason: "Custody order on file.", blockedBy: staff.actor.id });
+    expect(row!.blockedAt).toBeInstanceOf(Date);
+    expect((await audits("parent.block"))[0]!.after).toMatchObject({ blocked: true, reason: "Custody order on file." });
+    await unblockPerson(p.id, staff);
+    expect((await db.select().from(parent))[0]).toMatchObject({ blocked: false, blockedReason: null, blockedBy: null, blockedAt: null });
+  });
+
+  it("a blocked person owed a welcome is no longer owed one", async () => {
+    const p = await seedParent({ name: "Ana Rivera", welcomeOwed: true });
+    await blockPerson(p.id, "reason", staff);
+    expect((await db.select().from(parent))[0]!.welcomeOwed).toBe(false);
   });
 });
 

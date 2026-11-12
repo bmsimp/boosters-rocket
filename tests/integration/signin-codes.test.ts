@@ -241,7 +241,7 @@ describe("checking a code", () => {
     const p = await ana();
     await send("ana@example.com");
     const { blockPerson } = await import("@/lib/parents/people");
-    await blockPerson(p.id, { actor: { door: "staff", id: null, label: "board" }, ip: null });
+    await blockPerson(p.id, "reason", { actor: { door: "staff", id: null, label: "board" }, ip: null });
     expect(await verifySigninCode("ana@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: false, reason: "rejected" });
   });
 
