@@ -10,6 +10,7 @@ import { sendMail, currentBrand } from "@/lib/mail/send";
 import { signinCodeMessage } from "@/lib/mail/messages";
 import { takeRateLimit, type RateLimitTake } from "./rate-limit";
 import { enabledGuardianRows, parentActor } from "./sessions";
+import { getParentSettings, parentDoorClosed } from "./settings";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
 export const CODE_MAX_TRIES = 5;
@@ -20,7 +21,7 @@ export const generateSigninCode = () => String(randomInt(0, 1_000_000)).padStart
 export const hashSigninCode = (parentId: string, code: string) =>
   createHmac("sha256", env.BETTER_AUTH_SECRET).update(`signin-code:${parentId}:${code}`).digest("hex");
 
-type Refusal = "unknown_email" | "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed";
+type Refusal = "unknown_email" | "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off";
 const anon = (label: string): Actor => ({ door: "parent", id: null, label });
 const subjectIp = (ip: string | null) => ip ?? "unknown";
 const DONE: { delivery: Promise<void> } = { delivery: Promise.resolve() };
@@ -46,6 +47,7 @@ export async function requestSigninCode(rawEmail: string, ip: string | null, now
   const byIp = await takeRateLimit("code_send_ip", subjectIp(ip), now);
   if (byIp !== "taken") { await refuseOverLimit(byIp, label, ip, { limit: "ip" }); return DONE; }
   if (!(await mailWorking())) { await refuse("mail_failed", label, null, ip, { detail: "mail_not_working" }); return DONE; }
+  if (parentDoorClosed(await getParentSettings())) { await refuse("signins_off", label, null, ip); return DONE; }
   if (!email) { await refuse("unknown_email", label, null, ip); return DONE; }
   const byEmail = await takeRateLimit("code_send_email", email, now);
   if (byEmail !== "taken") { await refuseOverLimit(byEmail, email, ip, { limit: "email" }); return DONE; }
@@ -119,7 +121,8 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
   }
   // The code was right; the person must still be allowed in now (they may have been blocked or removed since it was sent).
   const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));
-  const reason = !fresh || fresh.blocked ? "blocked" : (await enabledGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
+  const reason = parentDoorClosed(await getParentSettings()) ? "signins_off"
+    : !fresh || fresh.blocked ? "blocked" : (await enabledGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
   if (reason) {
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason }, ip });
     return REJECTED;

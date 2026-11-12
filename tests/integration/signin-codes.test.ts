@@ -20,6 +20,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, guardian, setting, signinCode } from "@/lib/db/schema";
 import { requestSigninCode, verifySigninCode, hashSigninCode, CODE_TTL_MS } from "@/lib/parents/signin-codes";
 import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { seedParentSettings } from "../helpers/roster-cache";
 
 const T0 = new Date("2026-11-10T12:00:00Z");
 const at = (ms: number) => new Date(T0.getTime() + ms);
@@ -271,5 +272,43 @@ describe("checking a code", () => {
     const [row] = await db.select().from(signinCode);
     expect(row!.tries).toBe(1);
     expect(await verifySigninCode("ana@example.com", ` ${codeOf(mail.outbox[0]!).slice(0, 3)} ${codeOf(mail.outbox[0]!).slice(3)} `, IP, at(2000))).toMatchObject({ ok: true });
+  });
+});
+
+describe("when an Admin has switched parent sign-ins off", () => {
+  beforeEach(async () => { await resetDb(); mail.outbox.length = 0; mail.attempted.length = 0; mail.gate = null; mail.fail = false; await seedWorkingMail(); });
+
+  it("refuses a code, and audits why, once sign-ins have been switched off", async () => {
+    await ana();
+    await seedParentSettings({ signin: false, everEnabled: true });
+    await send("ana@example.com");
+    expect(mail.outbox).toHaveLength(0);
+    expect(await db.select().from(signinCode)).toEqual([]);
+    expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ actorLabel: "ana@example.com", after: { reason: "signins_off" } });
+  });
+
+  it("still sends codes before parent sign-ins have ever been switched on", async () => {
+    await ana();
+    await seedParentSettings({ signin: false, everEnabled: false });
+    await send("ana@example.com");
+    expect(mail.outbox).toHaveLength(1);
+    expect(await db.select().from(signinCode)).toHaveLength(1);
+  });
+
+  it("still sends codes while sign-ins are on", async () => {
+    await ana();
+    await seedParentSettings({ signin: true, everEnabled: true });
+    await send("ana@example.com");
+    expect(mail.outbox).toHaveLength(1);
+  });
+
+  it("refuses a correct code entered after sign-ins were switched off", async () => {
+    const p = await ana();
+    await seedParentSettings({ signin: true, everEnabled: true });
+    await send("ana@example.com");
+    const code = codeOf(mail.outbox[0]!);
+    await seedParentSettings({ signin: false, everEnabled: true });
+    expect(await verifySigninCode("ana@example.com", code, IP, at(1000))).toEqual({ ok: false, reason: "rejected" });
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ targetType: "parent", targetId: p.id, after: { reason: "signins_off" } });
   });
 });
