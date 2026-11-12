@@ -79,16 +79,25 @@ export async function accessPreview(): Promise<AccessPreview> {
   };
 }
 
-/** One settings change: lock, write, do the work the change needs, and audit it with what happened (spec §7). */
-async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx, next: ParentSettings) => Promise<Record<string, unknown>>): Promise<void> {
-  await db.transaction(async (tx) => {
+/**
+ * One settings change: lock, write, do the work the change needs, and audit it with what happened (spec §7). A patch
+ * that changes nothing (a stale press) does nothing and records nothing. `refuse`, checked under the lock, can stop
+ * the change with its reasons before anything is written.
+ */
+async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx, next: ParentSettings, before: ParentSettings) => Promise<Record<string, unknown>>,
+  refuse?: (before: ParentSettings) => string[] | null): Promise<SwitchResult> {
+  return db.transaction(async (tx): Promise<SwitchResult> => {
     await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
     const before = await getParentSettings(tx);
     const next = { ...before, ...patch };
+    if ((Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
+    const errors = refuse?.(before);
+    if (errors) return { ok: false, errors };
     await putParentSettings(tx, next);
-    const did = await work(tx, next);
+    const did = await work(tx, next, before);
     await writeAudit({ actor: o.actor, action: "settings.parents.save", permission: o.permission, targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
       before, after: { ...next, ...did } }, tx);
+    return { ok: true };
   });
 }
 
@@ -111,27 +120,29 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
   if (!on) {
     // Never on: there is nothing to close, and nothing to record.
     if (!(await getParentSettings()).everEnabled) return { ok: true };
-    await change({ signin: false }, o, async (tx) => {
+    // Welcome emails go off with sign-ins: switching sign-ins on again must never start emailing families by itself.
+    return change({ signin: false, welcome: false }, o, async (tx, _next, before) => {
       const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
       const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
-      return { sessionsEnded: ended.length, codesDeleted: codes.length };
+      const owed = await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true)).returning({ id: parent.id });
+      return { sessionsEnded: ended.length, codesDeleted: codes.length, ...(before.welcome ? { welcomeSwitchedOff: true, owedCleared: owed.length } : {}) };
     });
-    return { ok: true };
   }
+  if ((await getParentSettings()).signin) return { ok: true }; // already on: a stale press changes nothing
   const errors = await missingForSignins();
   if (errors.length) return { ok: false, errors };
   try {
-    await change({ signin: true, everEnabled: true }, o, async (tx) => {
+    const r = await change({ signin: true, everEnabled: true }, o, async (tx) => {
       const r = await reconcileAccess(tx, { cause: "settings.signin" });
       // The roster stopped being usable after the check above: save nothing.
       if (!r.ran) throw new RolledBack();
       return { granted: r.granted, ended: r.ended };
     });
+    return r;
   } catch (e) {
     if (!(e instanceof RolledBack)) throw e;
     return { ok: false, errors: ["The roster changed while this was being switched on. Check the preview and try again."] };
   }
-  return { ok: true };
 }
 
 export async function setRequireStudents(on: boolean, o: StaffOp): Promise<SwitchResult> {
@@ -139,16 +150,14 @@ export async function setRequireStudents(on: boolean, o: StaffOp): Promise<Switc
   if (on && !(loaded?.shape.kind === "layered" && loaded.shape.studentTypeId !== null)) {
     return { ok: false, errors: ["The membership shape doesn't say which customers are students, so this can't be used."] };
   }
-  await change({ requireActiveStudents: on }, o, async (tx) => {
+  return change({ requireActiveStudents: on }, o, async (tx) => {
     const r = await reconcileAccess(tx, { cause: "settings.students" });
     return { granted: r.granted, ended: r.ended };
   });
-  return { ok: true };
 }
 
 export async function setReviewEmails(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  await change({ reviewEmails: on }, o, async () => ({}));
-  return { ok: true };
+  return change({ reviewEmails: on }, o, async () => ({}));
 }
 
 /** How many people have an open link and are not blocked, whether or not the parent door is open. */
@@ -158,9 +167,12 @@ export async function peopleWithAccess(): Promise<number> {
   return rows.length;
 }
 
-/** Welcome emails, behind their own switch (spec §3 step 3). On: everyone with access who was never welcomed is owed one. */
+/**
+ * Welcome emails, behind their own switch (spec §3 step 3). On: everyone with access who was never welcomed is owed one.
+ * Refused while sign-ins are off; off always works.
+ */
 export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  await change({ welcome: on }, o, async (tx) => {
+  return change({ welcome: on }, o, async (tx) => {
     if (!on) {
       await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true));
       return {};
@@ -169,6 +181,5 @@ export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult>
       WHERE welcomed_at IS NULL AND blocked = false AND welcome_owed = false
         AND EXISTS (SELECT 1 FROM guardian g WHERE g.parent_id = parent.id AND g.status <> 'disabled') RETURNING id`);
     return { owed: Array.from(rows as ArrayLike<{ id: string }>).length };
-  });
-  return { ok: true };
+  }, (before) => (on && !before.signin ? ["Switch parent sign-ins on first."] : null));
 }

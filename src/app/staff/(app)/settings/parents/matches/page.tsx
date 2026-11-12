@@ -25,7 +25,7 @@ export default async function MatchesPage() {
       {strong > 0 && (
         <section className="box" aria-labelledby="mm-strong-h"><h2 id="mm-strong-h">Strong matches ({strong})</h2>
           <p>The name matches and every address that could sign in before is under the suggested family.</p>
-          <SwitchButton label="Accept all strong matches" pendingLabel="Accepting…" act={acceptStrongMatchesAction} />
+          <SwitchButton label="Accept the strong matches" pendingLabel="Accepting…" act={acceptStrongMatchesAction} />
         </section>
       )}
 

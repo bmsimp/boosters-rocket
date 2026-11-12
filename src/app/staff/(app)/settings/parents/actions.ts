@@ -4,6 +4,7 @@ import { staffAction, type StaffCtx } from "@/lib/guards";
 import { setSignins, setWelcome, setRequireStudents, setReviewEmails } from "@/lib/parents/switches";
 import { decideMatch, acceptStrongMatches } from "@/lib/parents/matches";
 import { deletePreviousCompany } from "@/lib/parents/company-change";
+import { getParentSettings } from "@/lib/parents/settings";
 
 const P = "Settings.Parents.ReadWrite" as const;
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -22,7 +23,10 @@ const familyId = (v: unknown): v is string => typeof v === "string" && v.length 
 
 export const setSigninsAction = staffAction(P, async (ctx, on: boolean): Promise<Done> => {
   if (typeof on !== "boolean") return NOT_FROM_PAGE;
-  return done(await setSignins(on, op(ctx)), on ? "Parent sign-ins are on." : "Parent sign-ins are off. Every parent has been signed out.");
+  // Read first only for the words: switching off what wasn't on changes nothing, and must not say everyone was signed out.
+  const wasOn = (await getParentSettings()).signin;
+  return done(await setSignins(on, op(ctx)), on ? "Parent sign-ins are on."
+    : wasOn ? "Parent sign-ins are off. Every parent has been signed out, and welcome emails are off." : "Parent sign-ins weren't on.");
 });
 export const setWelcomeAction = staffAction(P, async (ctx, on: boolean): Promise<Done> => {
   if (typeof on !== "boolean") return NOT_FROM_PAGE;

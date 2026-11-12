@@ -15,7 +15,8 @@ import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { ROSTER_JOB } from "@/lib/roster/source";
 import { getParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
 import { runReconcile } from "@/lib/parents/reconcile";
-import { accessPreview, missingForSignins, peopleWithAccess, setRequireStudents, setReviewEmails, setSignins } from "@/lib/parents/switches";
+import { accessPreview, missingForSignins, peopleWithAccess, setRequireStudents, setReviewEmails, setSignins, setWelcome } from "@/lib/parents/switches";
+import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { fam, par, seedCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
@@ -171,6 +172,49 @@ describe("the parent switches", () => {
     await seedCache([]);                                                   // would close the link if the reconcile still ran
     expect((await runReconcile({ cause: "test" })).ran).toBe(false);
     expect((await db.select().from(guardian))[0]!.status).toBe("invited");
+  });
+
+  it("switching off switches welcome emails off too, so switching on again emails nobody by surprise", async () => {
+    await ready(); await setSignins(true, admin);
+    expect(await setWelcome(true, admin)).toEqual({ ok: true });
+    expect((await db.select().from(parent)).filter((p) => p.welcomeOwed)).toHaveLength(1);
+    expect(await setSignins(false, admin)).toEqual({ ok: true });
+    expect(await getParentSettings()).toMatchObject({ signin: false, welcome: false });
+    expect((await db.select().from(parent)).filter((p) => p.welcomeOwed)).toEqual([]);
+    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: false, welcome: false, welcomeSwitchedOff: true, owedCleared: 1 });
+    expect(await setSignins(true, admin)).toEqual({ ok: true });
+    expect((await db.select().from(parent)).filter((p) => p.welcomeOwed)).toEqual([]);
+    expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
+  });
+
+  it("refuses to switch welcome emails on while sign-ins are off, and saves nothing", async () => {
+    await ready();
+    expect(await setWelcome(true, admin)).toEqual({ ok: false, errors: ["Switch parent sign-ins on first."] });
+    await setSignins(true, admin); await setSignins(false, admin);
+    const rows = (await audits("settings.parents.save")).length;
+    expect(await setWelcome(true, admin)).toEqual({ ok: false, errors: ["Switch parent sign-ins on first."] });
+    expect((await getParentSettings()).welcome).toBe(false);
+    expect(await audits("settings.parents.save")).toHaveLength(rows);
+    expect(await setWelcome(false, admin)).toEqual({ ok: true });            // off always works
+  });
+
+  it("a press that changes nothing does no work and records nothing", async () => {
+    await ready([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo", "10")]);
+    await setSignins(true, admin);
+    const spy = vi.spyOn(reconcileModule, "reconcileAccess");
+    try {
+      expect(await setSignins(true, admin)).toEqual({ ok: true });
+      expect(spy).not.toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+    expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
+    expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
+    expect(await setReviewEmails(false, admin)).toEqual({ ok: true });
+    expect(await setReviewEmails(false, admin)).toEqual({ ok: true });
+    const rows = await audits("settings.parents.save");
+    expect(rows.filter((r) => (r.after as { signin?: boolean }).signin === true && !(r.before as { signin?: boolean }).signin)).toHaveLength(1);
+    expect(rows.filter((r) => (r.after as Record<string, unknown>).requireActiveStudents === true && !(r.before as Record<string, unknown>).requireActiveStudents)).toHaveLength(1);
+    expect(rows.filter((r) => (r.after as Record<string, unknown>).reviewEmails === false && (r.before as Record<string, unknown>).reviewEmails)).toHaveLength(1);
+    expect(rows).toHaveLength(3);
   });
 
   it("offers the active-students setting only when the shape names a student type, and shows what it would close", async () => {

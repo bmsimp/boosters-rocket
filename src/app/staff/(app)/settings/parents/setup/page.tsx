@@ -48,9 +48,9 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
                 <><h3>Sign-ins that would end</h3><p role="status">{ENDING_BUSY}</p></>
               ) : (
                 <><h3>Sign-ins that would end ({p.ending.length})</h3>
-                  {p.ending.length === 0 ? <p>None.</p> : <ul>{p.ending.map((e) => <li key={`${e.email}|${e.familyQboId}`}>{e.name} ({e.email})</li>)}</ul>}</>
+                  {p.ending.length === 0 ? <p>None.</p> : <ul>{p.ending.map((e) => <li key={`${e.email}|${e.familyQboId}`}>{e.name} ({e.email})</li>)}</ul>}
+                  <p className="hint">These were made by hand and QuickBooks doesn&apos;t list them, so they stop working when sign-ins are switched on.</p></>
               )}
-              <p className="hint">These were made by hand and QuickBooks doesn&apos;t list them, so they stop working when sign-ins are switched on.</p>
             </>
           )}
           <p className="box-foot"><a className="btn" href={`${SETUP}?step=signins`}>Next: parent sign-ins</a> <a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
@@ -64,7 +64,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
             <>
               <p>Parent sign-ins are on. {n(p.people, "person", "people")} can sign in, to {n(p.families, "family", "families")}.</p>
               <details><summary>Switch parent sign-ins off</summary>
-                <p>Every parent is signed out at once and nobody can sign in until this is switched on again. Nothing is deleted.</p>
+                <p>Every parent is signed out at once and nobody can sign in until this is switched on again. Welcome emails are switched off too. Nothing is deleted.</p>
                 <SwitchButton quiet label="Switch parent sign-ins off" pendingLabel="Switching off…" act={setSigninsAction.bind(null, false)} />
               </details>
             </>
@@ -84,7 +84,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
       {step === "welcome" && sample && (
         <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Step 3: Welcome emails</h2>
           <p role="status">{p.settings.welcome
-            ? `Welcome emails are on. Each new person is emailed once, when they first get access.${p.settings.signin ? "" : " None go out while parent sign-ins are off."}`
+            ? "Welcome emails are on. Each new person is emailed once, when they first get access."
             : "Welcome emails are off. Nobody is emailed."}</p>
           {!p.settings.welcome && <p><b>{n(p.welcomeNow, "person", "people")} would be emailed now.</b> After that, each new person is emailed once. They go out a few each minute.</p>}
           <h3>The email</h3>

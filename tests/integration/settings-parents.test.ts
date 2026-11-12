@@ -127,10 +127,12 @@ describe("the Parent sign-ins settings", () => {
       busy = await setup("preview");
     });
     expect(busy).toContain(busyText);
+    expect(busy).not.toContain("These were made by hand");                    // the busy sentence stands alone
     expect(busy).not.toContain("seeded@example.com");
     const free = await setup("preview");
     expect(free).not.toContain(busyText);
     expect(free).toContain("Hand Seeded (seeded@example.com)");
+    expect(free).toContain("These were made by hand");
   });
 
   it("switching sign-ins on, then welcomes, through the actions", async () => {
@@ -142,7 +144,7 @@ describe("the Parent sign-ins settings", () => {
     expect(welcome).toContain("1 person would be emailed now.");
     expect(welcome).toContain("You can now sign in to");
     expect(await setWelcomeAction(true)).toEqual({ ok: true, message: "Welcome emails are on. They go out a few each minute." });
-    expect(await setSigninsAction(false)).toEqual({ ok: true, message: "Parent sign-ins are off. Every parent has been signed out." });
+    expect(await setSigninsAction(false)).toEqual({ ok: true, message: "Parent sign-ins are off. Every parent has been signed out, and welcome emails are off." });
     expect(await view()).toContain("Switched off");
   });
 
@@ -173,6 +175,22 @@ describe("the Parent sign-ins settings", () => {
     const stale = await setup("signins");
     expect(stale).toContain("Parent sign-ins are off. Nobody can sign in.");
     expect(stale).toContain("Refresh the roster first");
+  });
+
+  it("switching sign-ins off switches welcomes off, so step 2's 'no email is sent' is true; and says so when they weren't on", async () => {
+    await ready();
+    expect(await setSigninsAction(false)).toEqual({ ok: true, message: "Parent sign-ins weren't on." });
+    expect(await setWelcomeAction(true)).toEqual({ ok: false, errors: ["Switch parent sign-ins on first."] });
+    await setSigninsAction(true);
+    expect(await setup("signins")).toContain("Every parent is signed out at once and nobody can sign in until this is switched on again. Welcome emails are switched off too. Nothing is deleted.");
+    await setWelcomeAction(true);
+    await setSigninsAction(false);
+    const off = await setup("signins");
+    expect(off).toContain("No email is sent: welcome emails are step 3.");
+    expect((await getParentSettings()).welcome).toBe(false);
+    const welcome = await setup("welcome");
+    expect(welcome).toContain("Switch parent sign-ins on first (step 2).");
+    expect(welcome).not.toContain("Switch welcome emails on");
   });
 
   it("refuses to switch on with the reasons, and changes nothing", async () => {
@@ -229,7 +247,8 @@ describe("the Parent sign-ins settings", () => {
     const html = renderToStaticMarkup(await MatchesPage());
     expect(html).toContain("Rivera Family");
     expect(html).toContain("name matches, 1 of 1 addresses match");
-    expect(html).toContain("Accept all strong matches");
+    expect(html).toContain(">Accept the strong matches</button>");
+    expect(html).toContain("Strong matches (2)");
     expect(html).not.toMatch(/1111|2222|9130000000000001/);                                  // company IDs are on no page
     const before = await view();
     expect(before).toContain('href="/staff/settings/parents/matches"');
