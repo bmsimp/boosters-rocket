@@ -231,8 +231,7 @@ describe("checking a code", () => {
     const p = await ana();
     const [g] = await db.select().from(guardian).where(eq(guardian.parentId, p.id));
     await send("ana@example.com");
-    const { removeGuardian } = await import("@/lib/parents/people");
-    expect(await removeGuardian(g!.id, { actor: { door: "staff", id: null, label: "board" }, ip: null })).toMatchObject({ ok: true });
+    await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.id, g!.id));
     expect(await db.select().from(signinCode)).toHaveLength(1); // removing a row leaves the code live; the final check is what refuses it
     expect(await verifySigninCode("ana@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: false, reason: "rejected" });
     expect((await audits("signin.refused"))[0]).toMatchObject({ targetType: "parent", targetId: p.id, after: { reason: "no_enabled_guardian" } });

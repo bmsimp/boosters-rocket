@@ -25,10 +25,11 @@ export function signinCodeMessage(b: Brand, to: string, code: string): MailMessa
   return { to, subject: `Your ${b.clubName} sign-in code: ${code}`, text: text(lines), html: html(b, lines, code) };
 }
 
-export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; familyLabel: string | null }): MailMessage {
+/** The welcome (parents spec §3). It holds no family details: the address alone decides what the person sees after signing in. */
+export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null }): MailMessage {
   const lines = [
-    ...(o.familyLabel ? [`You've been added as a guardian for ${o.familyLabel}.`] : []),
-    `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address. We'll email you a code each time.`,
+    `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address. We'll email you a code each time, so there is no password.`,
+    ...(o.contact ? [`Questions? Write to ${o.contact}.`] : []),
   ];
   return { to, subject: `You can now sign in to ${b.clubName}`, text: text(lines), html: html(b, lines) };
 }

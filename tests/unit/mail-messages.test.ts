@@ -21,14 +21,18 @@ describe("mail messages", () => {
     expect(m.html).not.toContain("<Band>");
     expect(m.html).toContain("#5b2a86");
   });
-  it("welcomes a new person with the portal address and no code", () => {
-    const m = welcomeMessage(b, "ana@example.com", { appUrl: "https://portal.example.org", familyLabel: null });
-    expect(m.text).toContain("You can now sign in to FZN <Band> Boosters at https://portal.example.org with this email address. We'll email you a code each time.");
-    expect(m.text).not.toMatch(/\b\d{6}\b/);
+  it("the welcome names the club and the address, says how to sign in, and gives the contact when there is one", () => {
+    const m = welcomeMessage({ clubName: "FZN Band Boosters", color: "#005102" }, "ana@example.com", { appUrl: "https://portal.example.org", contact: "webmaster@fznband.org" });
+    expect(m.to).toBe("ana@example.com");
+    expect(m.subject).toBe("You can now sign in to FZN Band Boosters");
+    expect(m.text).toContain("https://portal.example.org");
+    expect(m.text).toContain("with this email address");
+    expect(m.text).toContain("Questions? Write to webmaster@fznband.org.");
+    expect(welcomeMessage({ clubName: "C", color: "#005102" }, "a@example.com", { appUrl: "https://p.example", contact: null }).text).not.toContain("Questions?");
   });
-  it("names the family when an existing person is added to another one", () => {
-    expect(welcomeMessage(b, "a@example.com", { appUrl: "https://p.example.org", familyLabel: "the Smith family" }).text)
-      .toContain("You've been added as a guardian for the Smith family.");
+  it("the welcome holds no family details", () => {
+    const m = welcomeMessage({ clubName: "C", color: "#005102" }, "a@example.com", { appUrl: "https://p.example", contact: null });
+    expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|guardian/i); // the inline CSS property is not wording
   });
   it("puts the confirm link only in the confirm message, and none in the notice", () => {
     expect(emailChangeConfirmMessage(b, "new@example.com", { link: "https://p.example.org/email-change/confirm?token=abc" }).text)

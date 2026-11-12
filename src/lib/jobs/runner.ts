@@ -5,6 +5,7 @@ import { accessToken, WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
+import { sendOwedWelcomes } from "@/lib/parents/welcome";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -24,6 +25,9 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   const wake = { at: new Date().toISOString() };
   await db.insert(setting).values({ key: WAKE_KEY, value: wake }).onConflictDoUpdate({ target: setting.key, set: { value: wake, updatedAt: new Date() } });
   const ran: { job: string; ok: boolean }[] = [];
+  // Welcomes need the mail settings but not QuickBooks, so they go before the connection check.
+  const welcomes = await sendOwedWelcomes(now);
+  if (welcomes.sent + welcomes.failed > 0) ran.push({ job: "parents.welcome", ok: welcomes.failed === 0 });
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record.
   if (!conn.connected || conn.needsAdmin) return { ran };

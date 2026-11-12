@@ -10,13 +10,19 @@ import { auditLog, guardian, parentAuthSession, parentAuthUser } from "@/lib/db/
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { resolveParentSession } from "@/lib/auth/resolve";
 import { chooseFamily } from "@/lib/parents/family-choice";
-import { removeGuardian, blockPerson } from "@/lib/parents/people";
+import { blockPerson } from "@/lib/parents/people";
+import { endParentSessions, enabledGuardianRows } from "@/lib/parents/sessions";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
 import { seedParentSettings } from "../helpers/roster-cache";
 
 const IP = "203.0.113.30";
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
+/** What the reconcile does when a family is no longer in the roster: the row is disabled, and the sessions end if it was the last. */
+async function dropRow(guardianId: string) {
+  const [row] = await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.id, guardianId)).returning();
+  if ((await enabledGuardianRows(row!.parentId)).length === 0) await endParentSessions(row!.parentId);
+}
 async function post(path: string, body: unknown, cookie?: string) {
   const auth = await getParentAuth();
   return auth.handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
@@ -120,7 +126,7 @@ describe("the parent door", () => {
     const { cookie } = await signIn("ana@example.com");
     const s = await stateOf(cookie);
     await chooseFamily({ sessionId: s.status === "choose" ? s.sessionId : "", parentId: a.id, familyQboId: "F1", ip: IP });
-    await removeGuardian(g1.id, staff);
+    await dropRow(g1.id);
     expect(await stateOf(cookie)).toMatchObject({ status: "choose", families: [{ familyQboId: "F2" }] });
     expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBeNull();
     expect((await db.select().from(auditLog)).find((x) => x.action === "signin.refused")!.after).toEqual({ reason: "family_not_enabled", familyQboId: "F1" });
@@ -130,7 +136,7 @@ describe("the parent door", () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = await seedGuardian({ parentId: a.id, familyQboId: "F1" });
     const one = await signIn("ana@example.com");
-    await removeGuardian(g.id, staff);
+    await dropRow(g.id);
     expect(await getSession(one.cookie)).toBeNull();
     const b = await seedParent({ name: "Ben", email: "ben@example.com" }); await seedGuardian({ parentId: b.id, familyQboId: "F2" });
     outbox.length = 0;

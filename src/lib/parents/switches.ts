@@ -157,3 +157,18 @@ export async function peopleWithAccess(): Promise<number> {
     .where(and(ne(guardian.status, "disabled"), eq(parent.blocked, false)));
   return rows.length;
 }
+
+/** Welcome emails, behind their own switch (spec §3 step 3). On: everyone with access who was never welcomed is owed one. */
+export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult> {
+  await change({ welcome: on }, o, async (tx) => {
+    if (!on) {
+      await tx.update(parent).set({ welcomeOwed: false }).where(eq(parent.welcomeOwed, true));
+      return {};
+    }
+    const rows = await tx.execute<{ id: string }>(sql`UPDATE parent SET welcome_owed = true, updated_at = now()
+      WHERE welcomed_at IS NULL AND blocked = false AND welcome_owed = false
+        AND EXISTS (SELECT 1 FROM guardian g WHERE g.parent_id = parent.id AND g.status <> 'disabled') RETURNING id`);
+    return { owed: Array.from(rows as ArrayLike<{ id: string }>).length };
+  });
+  return { ok: true };
+}

@@ -2,12 +2,13 @@ import type { AddressInfo } from "node:net";
 import smtp from "smtp-server";
 
 export type Captured = { from: string; to: string[]; user: string | null; raw: string };
-export type MailSink = { port: number; messages: Captured[]; /** Every login tried, whether or not it worked. */ logins: { user: string; ok: boolean }[]; close(): Promise<void> };
+export type MailSink = { port: number; messages: Captured[]; /** Every login tried, whether or not it worked. */ logins: { user: string; ok: boolean }[]; /** When set, the server answers 550 to RCPT TO for this address. */ rejectRecipient: string | null; close(): Promise<void> };
 
 /** A local SMTP server that requires TLS and a login, and keeps every message it gets. */
 export async function startMailSink(o: { secure: boolean; key: string; cert: string; port?: number; user?: string; pass?: string; hideSTARTTLS?: boolean }): Promise<MailSink> {
   const messages: Captured[] = [];
   const logins: { user: string; ok: boolean }[] = [];
+  const refuse = { address: null as string | null };
   const user = o.user ?? "sender", pass = o.pass ?? "sink-password";
   const server = new smtp.SMTPServer({
     secure: o.secure, key: o.key, cert: o.cert, hideSTARTTLS: o.hideSTARTTLS ?? false,
@@ -17,6 +18,10 @@ export async function startMailSink(o: { secure: boolean; key: string; cert: str
       logins.push({ user: String(auth.username), ok: auth.username === user && auth.password === pass });
       if (auth.username === user && auth.password === pass) cb(null, { user: auth.username });
       else cb(Object.assign(new Error("Invalid username or password"), { responseCode: 535 }));
+    },
+    onRcptTo(address, _session, cb) {
+      if (refuse.address !== null && address.address.toLowerCase() === refuse.address.toLowerCase()) cb(Object.assign(new Error("Mailbox unavailable"), { responseCode: 550 }));
+      else cb();
     },
     onData(stream, session, cb) {
       const chunks: Buffer[] = [];
@@ -34,5 +39,8 @@ export async function startMailSink(o: { secure: boolean; key: string; cert: str
   });
   await new Promise<void>((resolve) => server.listen(o.port ?? 0, "127.0.0.1", resolve));
   const port = (server.server.address() as AddressInfo).port;
-  return { port, messages, logins, close: () => new Promise<void>((r) => server.close(() => r())) };
+  return {
+    port, messages, logins, close: () => new Promise<void>((r) => server.close(() => r())),
+    get rejectRecipient() { return refuse.address; }, set rejectRecipient(v: string | null) { refuse.address = v; },
+  };
 }
