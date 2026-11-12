@@ -162,7 +162,7 @@ export async function peopleWithAccess(): Promise<number> {
 export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult> {
   await change({ welcome: on }, o, async (tx) => {
     if (!on) {
-      await tx.update(parent).set({ welcomeOwed: false }).where(eq(parent.welcomeOwed, true));
+      await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true));
       return {};
     }
     const rows = await tx.execute<{ id: string }>(sql`UPDATE parent SET welcome_owed = true, updated_at = now()

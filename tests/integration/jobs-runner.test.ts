@@ -16,6 +16,7 @@ import { beginConnect, completeConnect } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { runDueJobs, lastWake, TOKEN_JOB } from "@/lib/jobs/runner";
+import * as welcomeModule from "@/lib/parents/welcome";
 import { workerToken } from "@/lib/jobs/worker-token";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
 import { POST, GET } from "@/app/api/internal/worker/route";
@@ -100,6 +101,17 @@ describe("scheduled jobs", () => {
     const res = await call(`Bearer ${workerToken()}`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, ran: [{ job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
+  });
+
+  it("a welcome step that throws is recorded as failed and the other jobs still run", async () => {
+    await seedConnected(stub);
+    const spy = vi.spyOn(welcomeModule, "sendOwedWelcomes").mockRejectedValueOnce(new Error("secret-detail-from-the-mail-settings"));
+    const logs = (["log", "info", "warn", "error"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}));
+    try {
+      const r = await runDueJobs();
+      expect(r).toEqual({ ran: [{ job: "parents.welcome", ok: false }, { job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
+      expect(JSON.stringify(logs.map((l) => l.mock.calls))).not.toContain("secret-detail");
+    } finally { spy.mockRestore(); logs.forEach((l) => l.mockRestore()); }
   });
 
   it("an unexpected error in the token job is recorded as a fixed failure and the roster job still runs", async () => {

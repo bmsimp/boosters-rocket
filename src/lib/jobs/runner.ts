@@ -26,8 +26,13 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   await db.insert(setting).values({ key: WAKE_KEY, value: wake }).onConflictDoUpdate({ target: setting.key, set: { value: wake, updatedAt: new Date() } });
   const ran: { job: string; ok: boolean }[] = [];
   // Welcomes need the mail settings but not QuickBooks, so they go before the connection check.
-  const welcomes = await sendOwedWelcomes(now);
-  if (welcomes.sent + welcomes.failed > 0) ran.push({ job: "parents.welcome", ok: welcomes.failed === 0 });
+  // A throw here (settings, mail config, database) must not stop the token and roster jobs; nothing of it is kept.
+  try {
+    const welcomes = await sendOwedWelcomes(now);
+    if (welcomes.sent + welcomes.failed > 0) ran.push({ job: "parents.welcome", ok: welcomes.failed === 0 });
+  } catch {
+    ran.push({ job: "parents.welcome", ok: false });
+  }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record.
   if (!conn.connected || conn.needsAdmin) return { ran };
