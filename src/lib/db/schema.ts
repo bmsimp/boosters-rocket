@@ -133,7 +133,7 @@ export const parentEmailChange = pgTable("parent_email_change", {
 ]);
 
 /**
- * One row per email address that is, or was, under more than one family (spec ง1 Held addresses). The three sets hold
+ * One row per email address that is, or was, under more than one family (spec ยง1 Held addresses). The three sets hold
  * family QuickBooks IDs: approved by staff as the same person, rejected as not the same person, and already announced
  * to staff by email. The IDs belong to the connected company; a company change deletes every row.
  */
@@ -149,7 +149,7 @@ export const heldAddress = pgTable("held_address", {
   updatedAt: updated(),
 });
 
-/** "This family in the previous QuickBooks company is this family in the connected one" (spec ง6). Kept for good. */
+/** "This family in the previous QuickBooks company is this family in the connected one" (spec ยง6). Kept for good. */
 export const familyMatch = pgTable("family_match", {
   id: uuid("id").primaryKey().defaultRandom(),
   oldRealmId: text("old_realm_id").notNull(),

@@ -9,9 +9,9 @@ describe("the parents-from-QuickBooks schema", () => {
   beforeEach(resetDb);
 
   it("gives a person welcome and block fields with safe defaults", async () => {
-    const p = await seedParent({ name: "Ana Rivera" });
+    const [p] = await db.insert(parent).values({ name: "Ana Rivera", email: "ana@example.com" }).returning();
     const [row] = await db.select().from(parent);
-    expect(row).toMatchObject({ id: p.id, blocked: false, blockedAt: null, blockedBy: null, blockedReason: null, welcomedAt: null, welcomeOwed: false, welcomeTriedAt: null });
+    expect(row).toMatchObject({ id: p!.id, blocked: false, blockedAt: null, blockedBy: null, blockedReason: null, welcomedAt: null, welcomeOwed: false, welcomeTriedAt: null });
   });
 
   it("lets a family link remember its QuickBooks customer and why it closed", async () => {
