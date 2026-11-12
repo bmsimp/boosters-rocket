@@ -13,6 +13,7 @@ import { chooseFamily } from "@/lib/parents/family-choice";
 import { removeGuardian, blockPerson } from "@/lib/parents/people";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { seedParentSettings } from "../helpers/roster-cache";
 
 const IP = "203.0.113.30";
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
@@ -82,6 +83,18 @@ describe("the parent door", () => {
     const rows = await db.select().from(auditLog);
     expect(rows.filter((x) => x.action === "guardian.activate")).toHaveLength(1);
     expect(rows.find((x) => x.action === "signin")).toMatchObject({ door: "parent", actorId: a.id, targetType: "parent", targetId: a.id, after: { familyQboId: "F1" }, ip: IP });
+  });
+
+  it("signs a parent out on their next request when an Admin switched sign-ins off after they got in", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardian({ parentId: a.id, familyQboId: "F1" });
+    const { cookie } = await signIn("ana@example.com");
+    expect(await stateOf(cookie)).toMatchObject({ status: "ok" });
+    await seedParentSettings({ signin: false, everEnabled: true });
+    expect(await stateOf(cookie)).toEqual({ status: "none" });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.refused").at(-1)).toMatchObject({
+      door: "parent", actorId: a.id, targetType: "parent", targetId: a.id, after: { reason: "signins_off" } });
   });
 
   it("with two families, asks first; choosing audits the sign-in, choosing again audits a switch", async () => {

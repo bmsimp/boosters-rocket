@@ -8,13 +8,16 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 });
 
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, jobRun, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
+import { sql } from "drizzle-orm";
+import { auditLog, guardian, heldAddress, jobRun, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
+import * as reconcileModule from "@/lib/parents/reconcile";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { ROSTER_JOB } from "@/lib/roster/source";
 import { getParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
 import { runReconcile } from "@/lib/parents/reconcile";
-import { accessPreview, peopleWithAccess, setRequireStudents, setReviewEmails, setSignins } from "@/lib/parents/switches";
+import { accessPreview, missingForSignins, peopleWithAccess, setRequireStudents, setReviewEmails, setSignins } from "@/lib/parents/switches";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
-import { fam, par, seedCache, seedShape, stu } from "../helpers/roster-cache";
+import { fam, par, seedCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
 
 let stub: QboStub;
@@ -25,6 +28,10 @@ const admin = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-00
 const freshRun = () => db.insert(jobRun).values({ job: ROSTER_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "ok" });
 const RIVERA = [fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo Rivera", "10")];
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
+
+const snapshot = async () => [await db.select().from(guardian).orderBy(guardian.id), await db.select().from(parent).orderBy(parent.id),
+  await db.select().from(parentAuthUser).orderBy(parentAuthUser.id), await db.select().from(heldAddress).orderBy(heldAddress.email),
+  await db.select().from(auditLog).orderBy(auditLog.id), await db.select().from(setting).orderBy(setting.key)];
 
 describe("the parent switches", () => {
   beforeEach(async () => { await resetDb(); stub.reset(); });
@@ -41,6 +48,46 @@ describe("the parent switches", () => {
     expect(await audits("settings.parents.save")).toEqual([]);
   });
 
+  it("names the real cause: no shape chosen, or a shape the roster can't be used with", async () => {
+    await seedConnected(stub); await freshRun(); await seedWorkingMail();
+    expect(await missingForSignins()).toEqual(["Choose the membership shape first."]);
+    await seedShape();                                                      // chosen, but nothing has been read yet
+    expect(await missingForSignins()).toEqual(["The roster can't be used yet: refresh it, and check the membership shape under QuickBooks."]);
+    await seedCache(RIVERA);
+    expect(await missingForSignins()).toEqual([]);
+  });
+
+  it("rolls back and saves nothing when the roster stops being usable while switching on", async () => {
+    await ready();
+    // reconcileAccess is spied to report ran: false, as it would if the roster became unusable after the readiness check.
+    const spy = vi.spyOn(reconcileModule, "reconcileAccess").mockResolvedValueOnce({ ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 });
+    try {
+      expect(await setSignins(true, admin)).toEqual({ ok: false, errors: ["The roster changed while this was being switched on. Check the preview and try again."] });
+    } finally { spy.mockRestore(); }
+    expect(await getParentSettings()).toMatchObject({ signin: false, everEnabled: false });
+    expect(await audits("settings.parents.save")).toEqual([]);
+  });
+
+  it("switching off when sign-ins were never on does nothing", async () => {
+    await ready();
+    const u = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
+    await seedGuardian({ parentId: u.id, familyQboId: "POC-FAMILY-1" });
+    await seedParentSession(u.authUserId, { familyQboId: "POC-FAMILY-1" });
+    expect(await setSignins(false, admin)).toEqual({ ok: true });
+    expect(await db.select().from(parentAuthSession)).toHaveLength(1);
+    expect(await audits("settings.parents.save")).toEqual([]);
+  });
+
+  it("switching off deletes every unused sign-in code and counts them", async () => {
+    await ready(); await setSignins(true, admin);
+    const [p] = await db.select().from(parent);
+    await db.insert(signinCode).values({ parentId: p!.id, codeHash: "ab".repeat(32), expiresAt: new Date(Date.now() + 600_000) });
+    await db.insert(signinCode).values({ parentId: p!.id, codeHash: "cd".repeat(32), expiresAt: new Date(Date.now() + 600_000), usedAt: new Date() });
+    await setSignins(false, admin);
+    expect(await db.select().from(signinCode)).toHaveLength(1);              // only the used one remains
+    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: false, codesDeleted: 1 });
+  });
+
   it("previews who would get access, what needs fixing and which sign-ins would end, before anything is on", async () => {
     await ready([...RIVERA, par("13", "No Mail", "10", null), par("14", "Two Mail", "10", "a@example.com, b@example.com"),
       fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com"), fam("30", "Empty Family")]);
@@ -55,6 +102,50 @@ describe("the parent switches", () => {
     expect(p.held.map((h) => h.email)).toEqual(["ana@example.com"]);
     expect(await db.select().from(guardian)).toHaveLength(1);              // the preview changed nothing
     expect(await db.select().from(auditLog)).toEqual([]);
+  });
+
+  it("lists no ending sign-in for a customer whose address changed, because the reconcile handles that in place", async () => {
+    await ready();
+    await setSignins(true, admin);
+    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com"), stu("12", "Leo Rivera", "10")]);
+    expect((await accessPreview()).ending).toEqual([]);
+  });
+
+  it("lists the sign-ins the reconcile would close, by the owner's name before the run", async () => {
+    await ready();
+    await setSignins(true, admin);
+    await seedCache([fam("10", "Rivera Family"), stu("12", "Leo Rivera", "10")]);   // the parent left QuickBooks
+    expect((await accessPreview()).ending).toEqual([{ name: "Ana Rivera", email: "ana@example.com", familyQboId: "10" }]);
+    expect((await db.select().from(guardian))[0]!.status).toBe("invited");
+  });
+
+  it("changes nothing in the database, whether sign-ins have never been on or are on", async () => {
+    const world = [...RIVERA, par("14", "Two Mail", "10", "a@example.com, b@example.com"), fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")];
+    await ready(world);
+    const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
+    await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
+    let before = await snapshot();
+    expect((await accessPreview()).ending).toHaveLength(1);
+    expect(await snapshot()).toEqual(before);
+    await seedParentSettings({ welcome: true });
+    await setSignins(true, admin);
+    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com"), par("14", "Two Mail", "10", "c@example.com"), fam("30", "New Family"), par("31", "New Parent", "30", "new@example.com")]);
+    before = await snapshot();
+    await accessPreview();
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("never waits for a running refresh: it says the ending list is not known yet", async () => {
+    await ready();
+    const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
+    await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
+    let busy!: Awaited<ReturnType<typeof accessPreview>>;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      busy = await accessPreview();
+    });
+    expect(busy).toMatchObject({ ending: [], endingUnknown: true });
+    expect(await accessPreview()).toMatchObject({ endingUnknown: false, ending: [{ email: "seeded@example.com" }] });
   });
 
   it("switching on runs the reconcile and is audited with the counts", async () => {

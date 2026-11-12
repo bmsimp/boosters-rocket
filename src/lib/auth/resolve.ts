@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { staffUser, staffAuthUser, staffAuthAccount, parentAuthUser, parent, parentAuthSession } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { enabledGuardianRows, endParentSessions, parentActor } from "@/lib/parents/sessions";
+import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 
 export type StaffIdentity = { door: "staff"; staffUserId: string; name: string; email: string };
 export type ParentFamily = { guardianId: string; familyQboId: string };
@@ -67,6 +68,12 @@ export async function resolveParentSession(s: { id: string; userId: string; fami
   if (!row) return { status: "none" };
   const p = row.p;
   const actor = parentActor(p);
+  // A code that passed just before an Admin switched sign-ins off can still have made a session: it ends here.
+  if (parentDoorClosed(await getParentSettings())) {
+    await endParentSessions(p.id);
+    await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "signins_off" }, ip });
+    return { status: "none" };
+  }
   const rows = p.blocked ? [] : await enabledGuardianRows(p.id);
   if (rows.length === 0) {
     await endParentSessions(p.id);

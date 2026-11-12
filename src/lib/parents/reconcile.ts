@@ -13,6 +13,8 @@ export const RECONCILE_ACTOR: Actor = { door: "system", id: null, label: "reconc
 /** Thrown by the roster refresh when the reconcile inside it fails, so the refresh can say which part failed. */
 export class ReconcileFailed extends Error {}
 export type ReconcileResult = { ran: boolean; granted: number; ended: number; emailChanged: number; welcomeOwed: number };
+/** Collects the links a run closes (owner as before the run), for the clean-up preview's dry run. */
+export type EndedReport = { ended: { name: string; email: string; familyQboId: string }[] };
 export type Loaded = { decision: AccessDecision; settings: ParentSettings; shape: MembershipShape; roster: Roster };
 
 /**
@@ -40,12 +42,12 @@ export async function loadDecision(tx?: Tx, o: { requireActiveStudents?: boolean
  * caller holds ROSTER_LOCK and owns the transaction; nothing here sends mail. While parent sign-ins are off it changes
  * nothing. A link follows its QuickBooks customer (`sourceQboId`): when that customer's address changes, the person's
  * address is changed in place if nobody else has the new one and they have no other link (which signs them out);
- * otherwise the link moves.
+ * otherwise the link moves. `assumeSignin` proceeds as if sign-ins were on, for a dry run that is rolled back.
  */
-export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<ReconcileResult> {
+export async function reconcileAccess(tx: Tx, o: { cause: string; report?: EndedReport; assumeSignin?: boolean }): Promise<ReconcileResult> {
   const r: ReconcileResult = { ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 };
   const loaded = await loadDecision(tx);
-  if (!loaded || !loaded.settings.signin) return r;
+  if (!loaded || !(loaded.settings.signin || o.assumeSignin)) return r;
   r.ran = true;
   const { decision, settings } = loaded;
   const audit = (action: string, targetType: string, targetId: string, before: unknown, after: Record<string, unknown>) =>
@@ -60,6 +62,8 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
   const links = await tx.select().from(guardian).orderBy(guardian.id).for("update");
   const people = new Map((await tx.select().from(parent).orderBy(parent.id).for("update")).map((p) => [p.id, p]));
   const byEmail = new Map([...people.values()].map((p) => [p.email, p]));
+  // Who each person was before this run changed anything, for the clean-up preview's list of ended sign-ins.
+  const startedAs = new Map([...people.values()].map((p) => [p.id, { name: p.name, email: p.email }]));
   type Link = (typeof links)[number];
   type Person = NonNullable<ReturnType<typeof people.get>>;
   const ownerOf = (l: Link) => people.get(l.parentId)!;
@@ -75,6 +79,7 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
   const ours = (l: Link) => !foreign.has(l.id);
 
   const close = async (l: Link, reason: DisabledReason, dropSource = false) => {
+    const wasOpen = l.status !== "disabled";
     const was = l.status === "disabled" ? l.statusBeforeDisable : l.status;
     const set = { status: "disabled" as const, disabledReason: reason, statusBeforeDisable: was, ...(dropSource ? { sourceQboId: null } : {}) };
     await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, l.id));
@@ -83,6 +88,7 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
     if (!links.some((x) => x.parentId === l.parentId && x.status !== "disabled")) sessionsEnded += await endParentSessions(l.parentId, tx);
     await audit("parent.access.ended", "guardian", l.id, { status: was }, { parentId: l.parentId, familyQboId: l.familyQboId, reason, sessionsEnded });
     r.ended++;
+    if (o.report && wasOpen) o.report.ended.push({ ...startedAs.get(l.parentId)!, familyQboId: l.familyQboId });
   };
   /** Marks the person as owed a welcome when that is due; the caller records it on the grant's audit row. */
   const owe = async (p: Person): Promise<{ welcomeOwed?: true }> => {
