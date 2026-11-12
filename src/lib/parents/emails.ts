@@ -1,4 +1,4 @@
-import { normalizeEmail } from "@/lib/setup/state";
+import { normalizeEmail } from "@/lib/email";
 
 /**
  * Splits a QuickBooks email field into addresses (spec §1 Candidates). People type several addresses into one field,

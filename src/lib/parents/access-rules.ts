@@ -7,7 +7,7 @@ export type DenyReason = "inactive" | "family_inactive" | "no_email" | "held" | 
 export type Grant = { email: string; familyQboId: string; sourceQboId: string; name: string };
 export type Denial = { sourceQboId: string; familyQboId: string; name: string; email: string | null; reason: DenyReason };
 export type HeldAddress = { email: string; families: { qboId: string; name: string; held: boolean }[]; names: string[]; pending: boolean };
-export type AccessFlagRule = "no_email" | "bad_email" | "many_addresses" | "held_address" | "name_differs" | "family_no_signin";
+export type AccessFlagRule = "no_email" | "bad_email" | "many_addresses" | "held_address" | "name_differs" | "family_no_signin" | "same_address_in_family";
 export type AccessFlag = { rule: AccessFlagRule; qboId: string | null; name: string; detail: string };
 export type AccessDecision = { grants: Grant[]; denials: Denial[]; held: HeldAddress[]; flags: AccessFlag[]; personNames: Map<string, string> };
 
@@ -16,7 +16,7 @@ type Candidate = {
   sourceQboId: string; familyQboId: string; familyName: string; name: string; field: string | null;
   active: boolean; familyActive: boolean; hasActiveStudent: boolean | null; everyAddress: boolean; flagNoEmail: boolean;
 };
-type Claim = { email: string; familyQboId: string; familyName: string; sourceQboId: string; name: string };
+type Claim = { email: string; familyQboId: string; familyName: string; sourceQboId: string; name: string; field: string | null; hasActiveStudent: boolean | null };
 
 const byId = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
 
@@ -65,8 +65,9 @@ export function decideAccess(i: { roster: Roster; shape: MembershipShape; holds:
       if (c.flagNoEmail && !unusable.length) flags.push({ rule: "no_email", qboId: c.sourceQboId, name: c.name, detail: "This family has no email address in QuickBooks, so nobody can sign in for it." });
       deny("no_email"); continue;
     }
-    if (i.requireActiveStudents && c.hasActiveStudent === false) { deny("no_active_students", usable[0]!); continue; }
-    for (const email of c.everyAddress ? usable : usable.slice(0, 1)) claims.push({ email, familyQboId: c.familyQboId, familyName: c.familyName, sourceQboId: c.sourceQboId, name: c.name });
+    // Every active candidate with an address claims it, whether or not its family has an active student: the hold
+    // below must see every family an address is under. The active-students setting is applied after the hold.
+    for (const email of c.everyAddress ? usable : usable.slice(0, 1)) claims.push({ email, familyQboId: c.familyQboId, familyName: c.familyName, sourceQboId: c.sourceQboId, name: c.name, field: c.field, hasActiveStudent: c.hasActiveStudent });
   }
 
   // One sign-in per address per family: the claim from the lowest QuickBooks ID stands (claims are already in ID order).
@@ -76,7 +77,10 @@ export function decideAccess(i: { roster: Roster; shape: MembershipShape; holds:
     const names = allNames.get(cl.email) ?? [];
     if (!names.includes(cl.name)) names.push(cl.name);
     allNames.set(cl.email, names);
-    if (!kept.some((k) => k.email === cl.email && k.familyQboId === cl.familyQboId)) kept.push(cl);
+    const earlier = kept.find((k) => k.email === cl.email && k.familyQboId === cl.familyQboId);
+    if (!earlier) kept.push(cl);
+    // Two records with identical fields are caught by the roster's own `same_email` rule; this catches the rest.
+    else if (earlier.field !== cl.field) flags.push({ rule: "same_address_in_family", qboId: cl.sourceQboId, name: cl.name, detail: "This record's email address is also on another record in the same family in QuickBooks. Each person needs their own address." });
   }
 
   const grants: Grant[] = [], held: HeldAddress[] = [], personNames = new Map<string, string>();
@@ -86,12 +90,13 @@ export function decideAccess(i: { roster: Roster; shape: MembershipShape; holds:
     const names = allNames.get(email)!;
     personNames.set(email, names[0]!);
     if (new Set(names.map((n) => n.trim().toLowerCase())).size > 1) {
-      flags.push({ rule: "name_differs", qboId: mine[0]!.sourceQboId, name: names[0]!, detail: `The address ${email} is on records with different names in QuickBooks. The portal shows the first.` });
+      flags.push({ rule: "name_differs", qboId: mine[0]!.sourceQboId, name: names[0]!, detail: "This person's email address is on records with different names in QuickBooks. The portal shows the first." });
     }
     const sets = i.holds.get(email) ?? { approved: [], rejected: [] };
     const heldHere = mine.length > 1 ? mine.filter((m) => !sets.approved.includes(m.familyQboId)) : [];
     for (const m of mine) {
       if (heldHere.includes(m)) denials.push({ sourceQboId: m.sourceQboId, familyQboId: m.familyQboId, name: m.name, email, reason: "held" });
+      else if (i.requireActiveStudents && m.hasActiveStudent === false) denials.push({ sourceQboId: m.sourceQboId, familyQboId: m.familyQboId, name: m.name, email, reason: "no_active_students" });
       else grants.push({ email, familyQboId: m.familyQboId, sourceQboId: m.sourceQboId, name: m.name });
     }
     if (heldHere.length) {

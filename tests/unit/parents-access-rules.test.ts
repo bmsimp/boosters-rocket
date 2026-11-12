@@ -73,6 +73,7 @@ describe("decideAccess, layered with a parent type", () => {
     expect(d.held).toEqual([{ email: "ana@example.com", pending: true, names: ["Ana Rivera", "Ana R."],
       families: [{ qboId: "10", name: "Rivera Family", held: true }, { qboId: "20", name: "Chen Family", held: true }] }]);
     expect(rules(d)).toEqual(["family_no_signin:10", "family_no_signin:20", "held_address:null", "name_differs:11"]);
+    for (const f of d.flags.filter((x) => x.rule === "held_address" || x.rule === "name_differs")) for (const text of [f.name, f.detail]) { expect(text).not.toContain("ana@example.com"); expect(text).not.toContain("Chen"); }
 
     const approved = decide(LAYERED, customers, { holds: { "ana@example.com": { approved: ["10", "20"], rejected: [] } } });
     expect(grants(approved)).toEqual(["ana@example.com>10", "ana@example.com>20"]);
@@ -111,6 +112,41 @@ describe("decideAccess, layered with a parent type", () => {
     expect(denied(on)).toEqual(["11:no_active_students"]);
   });
 
+  describe("the active-students setting and a held address", () => {
+    const customers = [fam("10", "A"), par("11", "Ana", "10", "ana@example.com"), fam("20", "B"), par("21", "Ana", "20", "ana@example.com"), stu("22", "Kid", "20")];
+    const approved = { "ana@example.com": { approved: ["10", "20"], rejected: [] } };
+
+    it("keeps an address held when one of its families has no active students", () => {
+      const d = decide(LAYERED, customers, { requireActiveStudents: true });
+      expect(grants(d)).toEqual([]);
+      expect(denied(d)).toEqual(["11:held", "21:held"]);
+      expect(d.held).toHaveLength(1);
+      expect(d.held[0]).toMatchObject({ pending: true, families: [{ qboId: "10", held: true }, { qboId: "20", held: true }] });
+    });
+
+    it("once approved, grants only the family that has an active student", () => {
+      const d = decide(LAYERED, customers, { requireActiveStudents: true, holds: approved });
+      expect(grants(d)).toEqual(["ana@example.com>20"]);
+      expect(denied(d)).toEqual(["11:no_active_students"]);
+      expect(d.denials.find((x) => x.sourceQboId === "11")?.email).toBe("ana@example.com");
+    });
+
+    it("with the setting off, an approved address is granted to both", () => {
+      expect(grants(decide(LAYERED, customers, { holds: approved }))).toEqual(["ana@example.com>10", "ana@example.com>20"]);
+    });
+  });
+
+  it("flags a second record in a family that repeats an address its field did not match exactly", () => {
+    const d = decide(LAYERED, [fam("10", "R"), par("11", "Ana", "10", "ana@x.com, leo@x.com"), par("12", "Ana", "10", "ana@x.com")]);
+    expect(d.grants.filter((g) => g.email === "ana@x.com")).toEqual([{ email: "ana@x.com", familyQboId: "10", sourceQboId: "11", name: "Ana" }]);
+    expect(rules(d)).toEqual(expect.arrayContaining(["same_address_in_family:12", "many_addresses:11"]));
+  });
+
+  it("does not add that flag when the two fields are identical (the roster's own rule covers it)", () => {
+    const d = decide(LAYERED, [fam("10", "R"), par("11", "Ana", "10", "ana@x.com"), par("12", "Ana", "10", "ana@x.com")]);
+    expect(rules(d).filter((r) => r.startsWith("same_address_in_family"))).toEqual([]);
+  });
+
   it("ignores the active-students setting when the shape names no student type", () => {
     const d = decide(NO_STUDENT, [fam("10", "A"), par("11", "Ana", "10", "ana@example.com")], { requireActiveStudents: true });
     expect(grants(d)).toEqual(["ana@example.com>10"]);
@@ -137,7 +173,9 @@ describe("decideAccess, other shapes", () => {
   it("flat: one address on two members is held like any repeat across families", () => {
     const d = decide(FLAT, [c("5", "Ana", "M", { email: "ana@example.com" }), c("6", "Ana Two", "M", { email: "ana@example.com" })]);
     expect(grants(d)).toEqual([]);
+    expect(denied(d)).toEqual(["5:held", "6:held"]);
     expect(d.held).toHaveLength(1);
+    expect(d.held[0]!.families).toEqual([{ qboId: "5", name: "Ana", held: true }, { qboId: "6", name: "Ana Two", held: true }]);
   });
 });
 
@@ -146,7 +184,8 @@ describe("decideAccess is pure and steady", () => {
     const customers = [fam("20", "B"), par("21", "Bo", "20", "bo@example.com"), fam("10", "A"), par("11", "Ana", "10", "ana@example.com")];
     const frozen = JSON.stringify(customers);
     const a = decide(LAYERED, customers), b = decide(LAYERED, [...customers].reverse());
-    expect(a.grants).toEqual(b.grants);
+    const whole = (d: ReturnType<typeof decide>) => ({ grants: d.grants, denials: d.denials, held: d.held, flags: d.flags, personNames: [...d.personNames.entries()] });
+    expect(whole(a)).toEqual(whole(b));
     expect(a.grants.map((g) => g.familyQboId)).toEqual(["10", "20"]);
     expect(JSON.stringify(customers)).toBe(frozen);
   });

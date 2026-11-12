@@ -1,8 +1,8 @@
-import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
+import { normalizeEmail } from "@/lib/email";
 
 export const SETUP_STEPS = ["staff", "mail", "admin"] as const;
 /** Where to send someone who tries to reach the First Admin step before mail has been tested. */
@@ -29,11 +29,7 @@ export async function updateSetupState(patch: Partial<SetupState>, tx?: Tx): Pro
   return next;
 }
 
-const emailSchema = z.string().email();
-export function normalizeEmail(raw: string): string | null {
-  const e = raw.trim().toLowerCase();
-  return emailSchema.safeParse(e).success ? e : null;
-}
+export { normalizeEmail };
 
 export async function saveAdminEmail(raw: string, ip: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
   const email = normalizeEmail(raw);
