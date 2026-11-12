@@ -14,14 +14,23 @@ export const DEFAULT_PARENT_SETTINGS: ParentSettings = { signin: false, everEnab
 
 const stored = z.object({ signin: z.boolean(), everEnabled: z.boolean(), welcome: z.boolean(), requireActiveStudents: z.boolean(), reviewEmails: z.boolean() });
 
+/**
+ * What a stored value that can't be read means: sign-ins were on and are off, so the parent door is closed and the
+ * reconcile does nothing, until an Admin saves the settings again. Failing open (the defaults) would let hand-seeded
+ * sign-ins in with nothing keeping them in line with QuickBooks.
+ */
+export const CLOSED_PARENT_SETTINGS: ParentSettings = { signin: false, everEnabled: true, welcome: false, requireActiveStudents: false, reviewEmails: false };
+
+/** `undefined` is no stored row: the defaults. Anything stored that doesn't parse is the closed state. */
 export function parseParentSettings(value: unknown): ParentSettings {
+  if (value === undefined) return { ...DEFAULT_PARENT_SETTINGS };
   const parsed = stored.safeParse(value);
-  return parsed.success ? parsed.data : { ...DEFAULT_PARENT_SETTINGS };
+  return parsed.success ? parsed.data : { ...CLOSED_PARENT_SETTINGS };
 }
 
 export async function getParentSettings(tx?: Tx): Promise<ParentSettings> {
   const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, PARENTS_KEY));
-  return parseParentSettings(row?.value);
+  return row ? parseParentSettings(row.value) : { ...DEFAULT_PARENT_SETTINGS };
 }
 
 /** Writes the setting. The caller audits (`settings.parents.save`) in the same transaction. */

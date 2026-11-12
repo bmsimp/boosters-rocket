@@ -21,7 +21,7 @@ import { prerender } from "react-dom/static";
 import { db } from "@/lib/db/client";
 import { auditLog, heldAddress, jobRun, parent, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
-import { runReconcile } from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { ROSTER_JOB, setRosterSource } from "@/lib/roster/source";
 import ParentsPage from "@/app/staff/(app)/parents/page";

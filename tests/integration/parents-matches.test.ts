@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, familyMatch, guardian, heldAddress, parent, qboConnection, setting } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
-import { runReconcile } from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { deletePreviousCompany, PREVIOUS_COMPANY_KEY } from "@/lib/parents/company-change";
 import { acceptStrongMatches, decideMatch, matchReview } from "@/lib/parents/matches";
 import { decideHold } from "@/lib/parents/holds";

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { guardian, parent, parentAuthSession } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
@@ -13,11 +13,16 @@ export async function completeParentSignin(parentId: string, ip: string | null):
   const [p] = await db.select().from(parent).where(eq(parent.id, parentId));
   if (!p) return { familyQboId: null };
   const actor = parentActor(p);
-  const activated = await db.update(guardian).set({ status: "active", updatedAt: new Date() })
-    .where(and(eq(guardian.parentId, parentId), eq(guardian.status, "invited"))).returning({ id: guardian.id, familyQboId: guardian.familyQboId });
-  for (const g of activated) {
-    await writeAudit({ actor, action: "guardian.activate", targetType: "guardian", targetId: g.id, before: { status: "invited" }, after: { status: "active" }, ip });
-  }
+  // The person's rows are locked in id order first, the order the reconcile locks every row in, so the two never deadlock.
+  await db.transaction(async (tx) => {
+    const mine = await tx.select({ id: guardian.id, status: guardian.status }).from(guardian).where(eq(guardian.parentId, parentId)).orderBy(guardian.id).for("update");
+    const invited = mine.filter((g) => g.status === "invited").map((g) => g.id);
+    if (!invited.length) return;
+    await tx.update(guardian).set({ status: "active", updatedAt: new Date() }).where(inArray(guardian.id, invited));
+    for (const id of invited) {
+      await writeAudit({ actor, action: "guardian.activate", targetType: "guardian", targetId: id, before: { status: "invited" }, after: { status: "active" }, ip }, tx);
+    }
+  });
   const rows = await enabledGuardianRows(parentId);
   if (rows.length !== 1) return { familyQboId: null };
   await writeAudit({ actor, action: "signin", targetType: "parent", targetId: parentId, after: { familyQboId: rows[0]!.familyQboId }, ip });

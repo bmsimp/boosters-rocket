@@ -8,19 +8,22 @@ import { sendMail, currentBrand } from "@/lib/mail/send";
 import { mailWorking } from "@/lib/mail/settings";
 import { reviewNoticeMessage } from "@/lib/mail/messages";
 import { loadDecision } from "./reconcile";
+import { getParentSettings, type ParentSettings } from "./settings";
 
 export const REVIEW_NOTICE_KEY = "parents.review_notice";
 export const REVIEW_NOTICE_GAP_MS = 24 * 3_600_000;
 const NOTICE_ACTOR: Actor = { door: "system", id: null, label: "review-notice" };
 
-async function pending() {
+/** The held addresses waiting for a decision. The roster is built and the rules run only after the setting says they are needed. */
+async function pending(needs: (s: ParentSettings) => boolean) {
+  if (!needs(await getParentSettings())) return null;
   const loaded = await loadDecision();
-  return loaded?.settings.signin ? { settings: loaded.settings, items: loaded.decision.held.filter((h) => h.pending) } : null;
+  return loaded && needs(loaded.settings) ? { settings: loaded.settings, items: loaded.decision.held.filter((h) => h.pending) } : null;
 }
 
 /** How many held addresses are waiting for a decision: the number on the staff home (spec §5). */
 export async function reviewWaiting(): Promise<number> {
-  return (await pending())?.items.length ?? 0;
+  return (await pending((s) => s.signin))?.items.length ?? 0;
 }
 
 /**
@@ -50,8 +53,8 @@ async function releaseSlot(claimed: Date, previous: unknown): Promise<void> {
  * overlapping runs never send twice. Nothing is marked announced unless at least one email went.
  */
 export async function sendReviewNotice(now: Date = new Date()): Promise<{ sent: number; newItems: number }> {
-  const p = await pending();
-  if (!p || !p.settings.reviewEmails) return { sent: 0, newItems: 0 };
+  const p = await pending((s) => s.signin && s.reviewEmails);
+  if (!p) return { sent: 0, newItems: 0 };
   const rows = new Map((await db.select().from(heldAddress)).map((r) => [r.email, r]));
   const heldFamilies = (email: string) => p.items.find((i) => i.email === email)!.families.filter((f) => f.held).map((f) => f.qboId);
   const fresh = p.items.filter((i) => heldFamilies(i.email).some((f) => !(rows.get(i.email)?.announcedFamilyQboIds ?? []).includes(f)));

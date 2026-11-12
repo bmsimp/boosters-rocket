@@ -1,5 +1,6 @@
 import { requireStaffPage } from "@/lib/guards";
 import { accessPreview, missingForSignins } from "@/lib/parents/switches";
+import { getParentSettings } from "@/lib/parents/settings";
 import { welcomeEmailFor } from "@/lib/parents/welcome";
 import { SwitchButton } from "../forms";
 import { setSigninsAction, setWelcomeAction } from "../actions";
@@ -21,8 +22,10 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
   await requireStaffPage("Settings.Parents.ReadWrite");
   const sp = await searchParams;
   const asked = STEPS.find((s) => s.step === (typeof sp.step === "string" ? sp.step : ""))?.step;
-  const [p, missing] = await Promise.all([accessPreview(), missingForSignins()]);
-  const step: Step = asked ?? (p.settings.signin ? "welcome" : "preview");
+  const on = (await getParentSettings()).signin;
+  const step: Step = asked ?? (on ? "welcome" : "preview");
+  // The dry run behind "Sign-ins that would end" runs only on the steps that show it, and only while sign-ins are off.
+  const [p, missing] = await Promise.all([accessPreview({ ending: step !== "welcome" && !on }), missingForSignins()]);
   const names = (rows: { name: string }[]) => rows.map((r) => r.name).join(", ");
   const sample = step === "welcome" ? await welcomeEmailFor("parent@example.org") : null;
   const switchedOff = p.settings.everEnabled && !p.settings.signin;

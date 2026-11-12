@@ -16,7 +16,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, heldAddress, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
-import { runReconcile } from "@/lib/parents/reconcile";
+import * as reconcileModule from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { reviewWaiting, sendReviewNotice, REVIEW_NOTICE_KEY } from "@/lib/parents/review-notice";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
@@ -60,6 +61,21 @@ describe("the staff review notice", () => {
     expect(await reviewWaiting()).toBe(1);
     await seedParentSettings({ signin: false });
     expect(await reviewWaiting()).toBe(0);
+  });
+
+  it("reads the setting before building the roster: nothing is worked out while sign-ins or review emails are off", async () => {
+    await seedCache(TWO); await runReconcile({ cause: "test" });
+    const spy = vi.spyOn(reconcileModule, "loadDecision");
+    try {
+      await seedParentSettings({ signin: false });
+      expect(await reviewWaiting()).toBe(0);
+      expect(await sendReviewNotice()).toEqual({ sent: 0, newItems: 0 });
+      await seedParentSettings({ signin: true, reviewEmails: false });
+      expect(await sendReviewNotice()).toEqual({ sent: 0, newItems: 0 });
+      expect(spy).not.toHaveBeenCalled();
+      expect(await reviewWaiting()).toBe(1);                                  // the home notice still counts
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally { spy.mockRestore(); }
   });
 
   it("emails each person who can act, once per item, with numbers and a link only", async () => {

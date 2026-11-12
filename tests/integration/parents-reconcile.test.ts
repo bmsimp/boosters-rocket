@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
 import { SHAPE_KEY } from "@/lib/roster/shape";
-import { runReconcile } from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { resetDb, seedParent, seedGuardian, seedParentSession } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu, P_SHAPE } from "../helpers/roster-cache";
 

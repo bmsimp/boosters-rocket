@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
 import { auditLog, heldAddress, parent } from "@/lib/db/schema";
-import { runReconcile } from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { familyNames, familySignins, getPerson, listPeople } from "@/lib/parents/directory";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";

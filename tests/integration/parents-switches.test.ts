@@ -14,7 +14,7 @@ import * as reconcileModule from "@/lib/parents/reconcile";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { ROSTER_JOB } from "@/lib/roster/source";
 import { getParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
-import { runReconcile } from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { accessPreview, missingForSignins, peopleWithAccess, setRequireStudents, setReviewEmails, setSignins, setWelcome } from "@/lib/parents/switches";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
@@ -94,7 +94,7 @@ describe("the parent switches", () => {
       fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com"), fam("30", "Empty Family")]);
     const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
     await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
-    const p = await accessPreview();
+    const p = await accessPreview({ ending: true });
     // ana@example.com is under families 10 and 20 and held in both, so only Two Mail (a@example.com, family 10) is granted.
     expect(p).toMatchObject({ people: 1, families: 1, welcomeNow: 1,
       noEmail: [{ qboId: "13", name: "No Mail" }], manyAddresses: [{ qboId: "14", name: "Two Mail" }],
@@ -109,14 +109,14 @@ describe("the parent switches", () => {
     await ready();
     await setSignins(true, admin);
     await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com"), stu("12", "Leo Rivera", "10")]);
-    expect((await accessPreview()).ending).toEqual([]);
+    expect((await accessPreview({ ending: true })).ending).toEqual([]);
   });
 
   it("lists the sign-ins the reconcile would close, by the owner's name before the run", async () => {
     await ready();
     await setSignins(true, admin);
     await seedCache([fam("10", "Rivera Family"), stu("12", "Leo Rivera", "10")]);   // the parent left QuickBooks
-    expect((await accessPreview()).ending).toEqual([{ name: "Ana Rivera", email: "ana@example.com", familyQboId: "10" }]);
+    expect((await accessPreview({ ending: true })).ending).toEqual([{ name: "Ana Rivera", email: "ana@example.com", familyQboId: "10" }]);
     expect((await db.select().from(guardian))[0]!.status).toBe("invited");
   });
 
@@ -126,14 +126,33 @@ describe("the parent switches", () => {
     const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
     await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
     let before = await snapshot();
-    expect((await accessPreview()).ending).toHaveLength(1);
+    expect((await accessPreview({ ending: true })).ending).toHaveLength(1);
     expect(await snapshot()).toEqual(before);
     await seedParentSettings({ welcome: true });
     await setSignins(true, admin);
     await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com"), par("14", "Two Mail", "10", "c@example.com"), fam("30", "New Family"), par("31", "New Parent", "30", "new@example.com")]);
     before = await snapshot();
-    await accessPreview();
+    await accessPreview({ ending: true });
     expect(await snapshot()).toEqual(before);
+  });
+
+  it("runs the dry run only when asked for the ending list", async () => {
+    await ready();
+    const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
+    await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
+    const spy = vi.spyOn(reconcileModule, "reconcileAccess");
+    try {
+      expect(await accessPreview()).toMatchObject({ ending: [], endingUnknown: false, people: 1 });
+      expect(spy).not.toHaveBeenCalled();
+      expect((await accessPreview({ ending: true })).ending).toHaveLength(1);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally { spy.mockRestore(); }
+  });
+
+  it("counts no blocked person among the people who could sign in or would be welcomed", async () => {
+    await ready([...RIVERA, par("13", "Bo Rivera", "10", "bo@example.com")]);
+    await seedParent({ name: "Ana Rivera", email: "ana@example.com", blocked: true });
+    expect(await accessPreview()).toMatchObject({ people: 1, families: 1, welcomeNow: 1 });          // Bo only
   });
 
   it("never waits for a running refresh: it says the ending list is not known yet", async () => {
@@ -143,10 +162,10 @@ describe("the parent switches", () => {
     let busy!: Awaited<ReturnType<typeof accessPreview>>;
     await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
-      busy = await accessPreview();
+      busy = await accessPreview({ ending: true });
     });
     expect(busy).toMatchObject({ ending: [], endingUnknown: true });
-    expect(await accessPreview()).toMatchObject({ endingUnknown: false, ending: [{ email: "seeded@example.com" }] });
+    expect(await accessPreview({ ending: true })).toMatchObject({ endingUnknown: false, ending: [{ email: "seeded@example.com" }] });
   });
 
   it("switching on runs the reconcile and is audited with the counts", async () => {
@@ -185,6 +204,14 @@ describe("the parent switches", () => {
     expect(await setSignins(true, admin)).toEqual({ ok: true });
     expect((await db.select().from(parent)).filter((p) => p.welcomeOwed)).toEqual([]);
     expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
+  });
+
+  it("switching welcome emails off clears the owed welcomes and records how many", async () => {
+    await ready(); await setSignins(true, admin);
+    await setWelcome(true, admin);
+    expect(await setWelcome(false, admin)).toEqual({ ok: true });
+    expect((await db.select().from(parent)).filter((p) => p.welcomeOwed)).toEqual([]);
+    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ welcome: false, owedCleared: 1 });
   });
 
   it("refuses to switch welcome emails on while sign-ins are off, and saves nothing", async () => {

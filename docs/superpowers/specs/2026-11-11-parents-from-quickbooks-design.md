@@ -158,7 +158,9 @@ The existing `parent` (a person) and `guardian` (a person's link to a family) ta
   with the staff member who last decided, the time and their note. A row is made when the address first becomes
   held.
 - **Settings:** parent sign-ins on or off (and whether they were ever on); welcome emails on or off; require
-  active students on or off; review notices by email on or off.
+  active students on or off; review notices by email on or off. With nothing stored, everything is off except
+  review notices. A stored value that can't be read counts as sign-ins switched off after being on (the parent
+  door closed, the reconcile stopped, no emails) until an Admin saves the settings again.
 - **The previous company:** the snapshot kept after a company change (§6) is a setting, as is the time the last
   review email went (§5).
 - **Matches:** a new table recording, for good, that an old company's family ID is a new company's family ID.
@@ -227,8 +229,12 @@ Worked out by the rules function against the current roster, each time the page 
 - which existing sign-ins would end.
 
 The sign-ins that would end come from a dry run of the real reconcile, run as if sign-ins were on and then rolled
-back, so the preview and the switch can never disagree about them. The dry run never waits for a roster refresh:
-while one is running, the list is shown as being worked out, and the page asks the Admin to reload in a minute.
+back, so the preview and the switch can never disagree about them. It locks every link and person while it runs,
+so it runs only on steps 1 and 2, and only while sign-ins are off; no other page runs it. The dry run never waits
+for a roster refresh: while one is running, the list is shown as being worked out, and the page asks the Admin to
+reload in a minute.
+
+The counts leave out blocked people: they can't sign in and are never emailed.
 
 Nothing here blocks switching on. People with problems cannot sign in until the data is fixed in QuickBooks or
 a held address is decided.

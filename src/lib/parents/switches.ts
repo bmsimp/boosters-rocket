@@ -53,8 +53,14 @@ async function dryRunEnding(): Promise<EndedReport["ended"] | null> {
   return report.ended.sort((a, b) => a.name.localeCompare(b.name) || a.familyQboId.localeCompare(b.familyQboId, "en", { numeric: true }));
 }
 
-/** What switching on would do, and what needs cleaning up first (spec §3 step 1). It changes nothing. */
-export async function accessPreview(): Promise<AccessPreview> {
+/**
+ * What switching on would do, and what needs cleaning up first (spec §3 step 1). It changes nothing. The list of
+ * sign-ins that would end comes from a dry run of the reconcile, which locks every link and person and takes the roster
+ * lock: it runs only with `ending: true`, which the setup page passes only for the steps that show the list, and only
+ * while sign-ins are off.
+ * People and welcomes count nobody who is blocked: they can't sign in and are never emailed.
+ */
+export async function accessPreview(o: { ending?: boolean } = {}): Promise<AccessPreview> {
   const loaded = await loadDecision();
   const settings = loaded?.settings ?? (await getParentSettings());
   const ready = await readiness(loaded !== null);
@@ -63,8 +69,9 @@ export async function accessPreview(): Promise<AccessPreview> {
   if (!loaded) return empty;
   const { decision, shape } = loaded;
   const flagged = (rule: string) => decision.flags.filter((f) => f.rule === rule && f.qboId !== null).map((f) => ({ qboId: f.qboId!, name: f.name }));
-  const emails = new Set(decision.grants.map((g) => g.email));
-  const ending = await dryRunEnding();
+  const blocked = new Set((await db.select({ email: parent.email }).from(parent).where(eq(parent.blocked, true))).map((p) => p.email));
+  const emails = new Set(decision.grants.map((g) => g.email).filter((e) => !blocked.has(e)));
+  const ending = o.ending ? await dryRunEnding() : [];
   const welcomed = new Set((await db.select({ email: parent.email }).from(parent).where(sql`${parent.welcomedAt} is not null`)).map((p) => p.email));
   const offered = shape.kind === "layered" && shape.studentTypeId !== null;
   const strict = offered ? ((await loadDecision(undefined, { requireActiveStudents: true }))?.decision.grants ?? decision.grants) : decision.grants;
@@ -174,8 +181,8 @@ export async function peopleWithAccess(): Promise<number> {
 export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult> {
   return change({ welcome: on }, o, async (tx) => {
     if (!on) {
-      await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true));
-      return {};
+      const owed = await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true)).returning({ id: parent.id });
+      return { owedCleared: owed.length };
     }
     const rows = await tx.execute<{ id: string }>(sql`UPDATE parent SET welcome_owed = true, updated_at = now()
       WHERE welcomed_at IS NULL AND blocked = false AND welcome_owed = false

@@ -9,7 +9,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, guardian, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { resolveParentSession } from "@/lib/auth/resolve";
-import { chooseFamily } from "@/lib/parents/family-choice";
+import { chooseFamily, completeParentSignin } from "@/lib/parents/family-choice";
 import { blockPerson } from "@/lib/parents/people";
 import { endParentSessions, enabledGuardianRows } from "@/lib/parents/sessions";
 import { env } from "@/env";
@@ -89,6 +89,20 @@ describe("the parent door", () => {
     const rows = await db.select().from(auditLog);
     expect(rows.filter((x) => x.action === "guardian.activate")).toHaveLength(1);
     expect(rows.find((x) => x.action === "signin")).toMatchObject({ door: "parent", actorId: a.id, targetType: "parent", targetId: a.id, after: { familyQboId: "F1" }, ip: IP });
+  });
+
+  it("activates every invited link at once, audits each, and leaves a closed link closed", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const one = await seedGuardian({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    const two = await seedGuardian({ parentId: a.id, familyQboId: "F2", status: "invited" });
+    const shut = await seedGuardian({ parentId: a.id, familyQboId: "F3", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
+    expect(await completeParentSignin(a.id, IP)).toEqual({ familyQboId: null });                // two families: the parent chooses
+    const status = Object.fromEntries((await db.select().from(guardian)).map((g) => [g.id, g.status]));
+    expect(status).toEqual({ [one.id]: "active", [two.id]: "active", [shut.id]: "disabled" });
+    const activated = (await db.select().from(auditLog)).filter((x) => x.action === "guardian.activate");
+    expect(activated.map((x) => x.targetId).sort()).toEqual([one.id, two.id].sort());
+    for (const row of activated) expect(row).toMatchObject({ door: "parent", actorId: a.id, before: { status: "invited" }, after: { status: "active" }, ip: IP });
+    expect((await db.select().from(auditLog)).some((x) => x.action === "signin")).toBe(false);
   });
 
   it("signs a parent out on their next request when an Admin switched sign-ins off after they got in", async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
-import { runReconcile } from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { decideHold, reverseHold } from "@/lib/parents/holds";
 import { heldReview } from "@/lib/parents/directory";
 import { resetDb, seedParentSession } from "../helpers/db";

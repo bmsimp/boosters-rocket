@@ -13,7 +13,7 @@ import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthU
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { loadRosterPage, rosterEntry } from "@/lib/roster/queries";
-import { runReconcile } from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { getParentSettings } from "@/lib/parents/settings";
 import { familySignins, getPerson, listPeople } from "@/lib/parents/directory";
 import { expirePreviousCompany, getPreviousCompany, PREVIOUS_COMPANY_KEY } from "@/lib/parents/company-change";

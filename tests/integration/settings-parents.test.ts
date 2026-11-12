@@ -26,7 +26,8 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, familyMatch, heldAddress, jobRun, qboConnection, qboCustomer, qboCustomerType, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
-import { runReconcile } from "@/lib/parents/reconcile";
+import * as reconcileModule from "@/lib/parents/reconcile";
+import { runReconcile } from "../helpers/reconcile";
 import { getParentSettings } from "@/lib/parents/settings";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany, ROSTER_JOB, setRosterSource } from "@/lib/roster/source";
@@ -133,6 +134,21 @@ describe("the Parent sign-ins settings", () => {
     expect(free).not.toContain(busyText);
     expect(free).toContain("Hand Seeded (seeded@example.com)");
     expect(free).toContain("These were made by hand");
+  });
+
+  it("runs the dry run only on the steps that show its list, and only while sign-ins are off", async () => {
+    await ready();
+    const spy = vi.spyOn(reconcileModule, "reconcileAccess");
+    try {
+      await view(); await setup("welcome");
+      expect(spy).not.toHaveBeenCalled();                                     // the overview and step 3 never show the list
+      await setup("preview"); await setup("signins");
+      expect(spy).toHaveBeenCalledTimes(2);
+      await setSigninsAction(true);
+      spy.mockClear();
+      await view(); await setup(); await setup("preview"); await setup("signins");
+      expect(spy).not.toHaveBeenCalled();                                     // sign-ins are on: the reconcile itself keeps them in line
+    } finally { spy.mockRestore(); }
   });
 
   it("switching sign-ins on, then welcomes, through the actions", async () => {

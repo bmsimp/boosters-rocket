@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { guardian, heldAddress, parent, parentAuthUser, parentEmailChange, qboCustomer, qboCustomerType, type DisabledReason } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { getShape, missingTypes, ROSTER_LOCK, type MembershipShape } from "@/lib/roster/shape";
+import { getShape, missingTypes, type MembershipShape } from "@/lib/roster/shape";
 import { buildRoster, type Cust, type Roster } from "@/lib/roster/model";
 import { decideAccess, type AccessDecision, type HoldSets } from "./access-rules";
 import { getParentSettings, type ParentSettings } from "./settings";
@@ -58,9 +58,10 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
     if (made.length) await audit("parent.hold.opened", "held_address", h.email, null, {});
   }
 
-  // Lock everything this step may change, in a fixed order.
+  // Lock everything this step may change, in a fixed order. People are locked FOR NO KEY UPDATE, so a row that only
+  // references a person (a new sign-in code) is not held up by the run; changing an address takes the stronger lock then.
   const links = await tx.select().from(guardian).orderBy(guardian.id).for("update");
-  const people = new Map((await tx.select().from(parent).orderBy(parent.id).for("update")).map((p) => [p.id, p]));
+  const people = new Map((await tx.select().from(parent).orderBy(parent.id).for("no key update")).map((p) => [p.id, p]));
   const byEmail = new Map([...people.values()].map((p) => [p.email, p]));
   // Who each person was before this run changed anything, for the clean-up preview's list of ended sign-ins.
   const startedAs = new Map([...people.values()].map((p) => [p.id, { name: p.name, email: p.email }]));
@@ -208,12 +209,4 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
     if (l.status !== "disabled" && !kept.has(l.id)) await close(l, whyNot(l));
   }
   return r;
-}
-
-/** The reconcile on its own, for a staff decision or a switch: takes the roster lock, so it waits for a running refresh. */
-export async function runReconcile(o: { cause: string }): Promise<ReconcileResult> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
-    return reconcileAccess(tx, o);
-  });
 }
