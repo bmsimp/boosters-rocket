@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 type Msg = { to: string; subject: string; text: string; html: string };
-const mail = vi.hoisted(() => ({ outbox: [] as Msg[], gate: null as Promise<void> | null, fail: false }));
+const mail = vi.hoisted(() => ({ outbox: [] as Msg[], attempted: [] as Msg[], gate: null as Promise<void> | null, fail: false }));
 vi.mock("@/lib/mail/senders", async () => {
   const { MailSendError } = await import("@/lib/mail/types");
   return {
     SMTP_PASSWORD_AAD: "mail:smtp-password",
     buildSender: async () => async (m: Msg) => {
       if (mail.gate) await mail.gate;
+      mail.attempted.push(m); // every message handed to the sender, sent or not
       if (mail.fail) throw new MailSendError("The mail server didn't accept the message (EENVELOPE 550).");
       mail.outbox.push(m);
     },
@@ -16,7 +17,7 @@ vi.mock("@/lib/mail/senders", async () => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, setting, signinCode } from "@/lib/db/schema";
 import { requestSigninCode, verifySigninCode, hashSigninCode, CODE_TTL_MS } from "@/lib/parents/signin-codes";
 import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
 
@@ -34,8 +35,29 @@ async function ana(o: { blocked?: boolean; status?: "invited" | "active" | "disa
 }
 
 describe("requesting a code", () => {
-  beforeEach(async () => { await resetDb(); mail.outbox.length = 0; mail.gate = null; mail.fail = false; await seedWorkingMail(); });
+  beforeEach(async () => { await resetDb(); mail.outbox.length = 0; mail.attempted.length = 0; mail.gate = null; mail.fail = false; await seedWorkingMail(); });
   afterEach(() => vi.restoreAllMocks());
+
+  it("counts every spelling of an address against the same 3 codes", async () => {
+    await ana();
+    const spellings = [" Ana@Example.com ", "ANA@EXAMPLE.COM", "ana@example.com", "Ana@example.COM  "];
+    for (const [i, email] of spellings.entries()) await send(email, at(i * 61_000));
+    expect(mail.outbox).toHaveLength(3);
+    expect(mail.outbox.every((m) => m.to === "ana@example.com")).toBe(true);
+    expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ after: { reason: "rate_limited", limit: "email" } });
+  }, 30_000);
+
+  it("never puts the code in a log line, the audit log or the mail status when the send fails", async () => {
+    await ana();
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}));
+    mail.fail = true;
+    await send("ana@example.com");
+    expect(mail.outbox).toHaveLength(0);
+    const code = codeOf(mail.attempted[0]!);
+    expect((await audits("signin.code_refused"))[0]).toMatchObject({ after: { reason: "mail_failed" } });
+    for (const s of spies) expect(JSON.stringify(s.mock.calls)).not.toContain(code);
+    expect(JSON.stringify([await db.select().from(auditLog), await db.select().from(setting)])).not.toContain(code);
+  });
 
   it("sends a 6-digit code to a person with an enabled row, stored only as a hash, valid 10 minutes", async () => {
     const p = await ana();
