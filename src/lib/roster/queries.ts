@@ -6,6 +6,7 @@ import { getShape, missingTypes, describeShape, type MembershipShape, type TypeR
 import { buildRoster, type Cust, type Family, type Roster } from "./model";
 import { needsAttention, type AttentionItem, type SignIn } from "./attention";
 import { ROSTER_JOB, getRosterSource } from "./source";
+import { loadDecision } from "@/lib/parents/reconcile";
 
 export type RosterPage = {
   connected: boolean; shape: MembershipShape | null; shapeWords: string | null; brokenTypes: string[]; roster: Roster | null;
@@ -43,9 +44,11 @@ export async function loadRosterPage(): Promise<RosterPage> {
   }
   const brokenTypes = shape && lastOk ? missingTypes(shape, typeRows) : [];
   const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
+  // The sign-in rules' own findings (parents spec §1 What is flagged), shown whether or not sign-ins are switched on yet.
+  const access = roster && shape ? (await loadDecision())?.decision.flags ?? [] : [];
   return {
     connected: conn.connected, shape, shapeWords: shape ? describeShape(shape, typeRows) : null, brokenTypes, roster,
-    attention: roster && shape ? needsAttention(roster, shape, people) : [], signIns: people, types: typeRows,
+    attention: roster && shape ? [...needsAttention(roster, shape, people), ...access] : [], signIns: people, types: typeRows,
     lastRun: last ? { at: (last.finishedAt ?? last.startedAt).toISOString(), ok: last.outcome === "ok", detail: last.detail } : null,
     lastOkAt: lastOk?.finishedAt?.toISOString() ?? null,
   };

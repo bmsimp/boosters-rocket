@@ -1,8 +1,9 @@
 import type { MembershipShape } from "./shape";
 import type { Cust, Roster } from "./model";
+import type { AccessFlagRule } from "@/lib/parents/access-rules";
 
 export type SignIn = { guardianId: string; familyQboId: string; name: string; email: string; status: "invited" | "active" | "disabled" };
-export type AttentionRule = "family_no_parent" | "family_no_student" | "not_under_family" | "family_is_sub" | "no_email" | "same_email" | "signin_unknown" | "inactive_with_signin";
+export type AttentionRule = "family_no_parent" | "family_no_student" | "not_under_family" | "family_is_sub" | "no_email" | "same_email" | "signin_unknown" | "inactive_with_signin" | AccessFlagRule;
 export type AttentionItem = { rule: AttentionRule; qboId: string | null; name: string; detail: string };
 
 const item = (rule: AttentionRule, c: Cust, detail: string): AttentionItem => ({ rule, qboId: c.qboId, name: c.displayName, detail });

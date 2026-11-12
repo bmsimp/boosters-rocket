@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getParentState } from "@/lib/auth/identity";
 import { getClubSettings } from "@/lib/settings/club";
-import { familyLabel } from "@/app/components/family-label";
+import { familyNames } from "@/lib/parents/directory";
 import { SignOutButton } from "@/app/components/sign-out-button";
 import { chooseFamilyAction } from "./actions";
 
@@ -13,6 +13,7 @@ export default async function ChooseFamily() {
   if (state.status === "none") redirect("/sign-in");
   const families = state.status === "ok" ? state.identity.families : state.families;
   const current = state.status === "ok" ? state.identity.familyQboId : null;
+  const names = await familyNames(families.map((f) => f.familyQboId));
   return (
     <main className="wrap signin">
       <h1 className="page-title">{club.name}</h1>
@@ -21,7 +22,7 @@ export default async function ChooseFamily() {
         {families.map((f) => (
           <li key={f.guardianId}>
             <form action={chooseFamilyAction.bind(null, f.familyQboId)}>
-              <button className="btn" aria-current={f.familyQboId === current ? "true" : undefined}>{familyLabel(f.familyQboId)}</button>
+              <button className="btn" aria-current={f.familyQboId === current ? "true" : undefined}>{names.get(f.familyQboId)}</button>
             </form>
           </li>
         ))}

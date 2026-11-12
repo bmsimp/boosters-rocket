@@ -144,7 +144,7 @@ describe("the roster pages", () => {
     expect(html).toContain("ana@example.com");
     expect(html).toContain("555-0101");
     expect(html).toContain("ana.portal@example.com");
-    expect(html).toContain("Invited");
+    expect(html).toContain("ana.portal@example.com · Can sign in (hasn&#x27;t yet)"); // the sign-in's standing, in words (parents spec §4)
     expect((await audits("roster.family.read"))).toHaveLength(1);
     expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
       targetType: "qbo_customer", targetId: "10", ip: "203.0.113.40" });

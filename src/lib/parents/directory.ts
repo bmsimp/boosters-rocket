@@ -9,7 +9,11 @@ import { loadDecision } from "./reconcile";
 
 export type AccessKind = "can" | "cannot" | "held" | "blocked";
 export type FamilySignin = { parentId: string | null; name: string; email: string | null; kind: AccessKind; words: string };
-export type PersonFamily = { familyQboId: string; familyName: string; kind: AccessKind; words: string };
+/**
+ * `previousCompany`: the link was closed when a different QuickBooks company was connected. Its `familyQboId` is the
+ * old company's, so a page shows the family name as text and never links it to, or looks it up in, the roster.
+ */
+export type PersonFamily = { familyQboId: string; familyName: string; previousCompany: boolean; kind: AccessKind; words: string };
 export type PersonRow = { parentId: string; name: string; email: string; blocked: boolean; families: PersonFamily[]; lastSigninAt: string | null; welcomedAt: string | null };
 export type PersonDetail = PersonRow & { blockedReason: string | null; blockedAt: string | null; welcomeOwed: boolean };
 export type DecidedHold = { email: string; approved: string[]; rejected: string[]; note: string | null; decidedAt: string | null; decidedBy: string | null };
@@ -62,7 +66,7 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   return persons.map((p) => ({
     parentId: p.id, name: p.name, email: p.email, blocked: p.blocked,
     families: links.filter((l) => l.parentId === p.id).sort((a, b) => Number(oldCompany(a)) - Number(oldCompany(b)) || numeric(a.familyQboId, b.familyQboId)).map((l) => ({
-      familyQboId: l.familyQboId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!,
+      familyQboId: l.familyQboId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!, previousCompany: oldCompany(l),
       ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked,
         otherFamilies: held.find((h) => h.email === p.email)?.families.filter((f) => f.qboId !== l.familyQboId).map((f) => f.name) ?? null }) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,

@@ -18,7 +18,7 @@ describe("the people directory", () => {
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") });
     await db.insert(auditLog).values({ door: "parent", actorId: ana!.id, actorLabel: ana!.email, action: "signin", targetType: "parent", targetId: ana!.id, at: new Date("2026-11-05T12:00:00Z") });
     expect(await listPeople()).toEqual([{ parentId: ana!.id, name: "Ana Rivera", email: "ana@example.com", blocked: false,
-      families: [{ familyQboId: "10", familyName: "Rivera Family", kind: "can", words: "Can sign in (hasn't yet)" }],
+      families: [{ familyQboId: "10", familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" }],
       lastSigninAt: "2026-11-05T12:00:00.000Z", welcomedAt: "2026-11-01T12:00:00.000Z" }]);
     expect((await listPeople("RIVERA")).length).toBe(1);
     expect((await listPeople("ana@ex")).length).toBe(1);
@@ -80,8 +80,18 @@ describe("the people directory", () => {
     const people = await listPeople("sam");
     expect(people).toHaveLength(1);
     expect(people[0]!.families).toEqual([
-      { familyQboId: "10", familyName: "Rivera Family", kind: "held", words: "Held: this address is also under Chen Family" },
-      { familyQboId: "20", familyName: "Chen Family", kind: "can", words: "Can sign in (hasn't yet)" },
+      { familyQboId: "10", familyName: "Rivera Family", previousCompany: false, kind: "held", words: "Held: this address is also under Chen Family" },
+      { familyQboId: "20", familyName: "Chen Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
+    ]);
+  });
+
+  it("marks a link from a previous QuickBooks company, keeping its old ID but never naming the family that ID has now", async () => {
+    await seedCache(ALL); await runReconcile({ cause: "test" });
+    const [ana] = await db.select().from(parent).where(eq(parent.email, "ana@example.com"));
+    await seedGuardian({ parentId: ana!.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
+    expect((await getPerson(ana!.id))!.families).toEqual([
+      { familyQboId: "10", familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
+      { familyQboId: "20", familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected" },
     ]);
   });
 

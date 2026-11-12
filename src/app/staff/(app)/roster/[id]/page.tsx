@@ -5,14 +5,13 @@ import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
 import { loadRosterPage, entryFrom } from "@/lib/roster/queries";
+import { familySignins, type FamilySignin } from "@/lib/parents/directory";
 import { DisconnectedNotice, Freshness } from "../freshness";
 import type { Cust } from "@/lib/roster/model";
-import type { SignIn } from "@/lib/roster/attention";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
 
-const STATUS: Record<SignIn["status"], string> = { invited: "Invited", active: "Active", disabled: "Disabled" };
 const inactive = (c: Cust) => (c.active ? "" : " · Inactive in QuickBooks");
 
 function People({ id, title, people, contact, empty }: { id: string; title: string; people: Cust[]; contact: boolean; empty: string }) {
@@ -25,12 +24,16 @@ function People({ id, title, people, contact, empty }: { id: string; title: stri
   );
 }
 
-function SignIns({ signIns }: { signIns: SignIn[] }) {
+/** `detailed` is for staff with `Parents.ReadWrite`: only they see which other family a held address is under, and get links to people. */
+function SignIns({ signins, detailed }: { signins: FamilySignin[]; detailed: boolean }) {
   return (
     <section className="box" aria-labelledby="entry-signins-h"><h2 id="entry-signins-h">Portal sign-ins</h2>
-      <p>The people who can sign in to the portal for this QuickBooks customer. This comes from the portal, not from QuickBooks.</p>
-      {signIns.length === 0 ? <p>Nobody can sign in for it yet.</p> : <ul className="lines">{signIns.map((s) => (
-        <li key={s.guardianId}><div><span className="what">{s.name}</span><span className="when">{s.email} · {STATUS[s.status]}</span></div></li>))}</ul>}
+      <p>Who can sign in to the portal for this QuickBooks customer, and why someone can&apos;t.</p>
+      {signins.length === 0 ? <p>Nobody can sign in for it yet.</p> : <ul className="lines">{signins.map((s) => (
+        <li key={`${s.parentId ?? "none"}|${s.name}|${s.email ?? ""}`}><div>
+          {detailed && s.parentId ? <Link className="what" href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : <span className="what">{s.name}</span>}
+          <span className="when">{s.email ? `${s.email} · ` : ""}{s.words}</span>
+        </div></li>))}</ul>}
     </section>
   );
 }
@@ -47,6 +50,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // A staff read of family data (spec §5): recorded before anything is shown.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "roster.family.read", permission: "Roster.Read",
     targetType: "qbo_customer", targetId: qboId, ip: ctx.ip });
+  const detailed = can(ctx.effective, "Parents.ReadWrite");
+  const signins = await familySignins(qboId, { detailed });
   const customer = entry.kind === "family" ? entry.family.customer : entry.member;
   return (
     <main className="wrap single">
@@ -61,7 +66,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       ) : (
         <People id="entry-member-h" title="In QuickBooks" people={[entry.member]} contact empty="" />
       )}
-      <SignIns signIns={entry.signIns} />
+      <SignIns signins={signins} detailed={detailed} />
       <Freshness page={page} admin={admin} />
     </main>
   );
