@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { qboConnection, qboCustomerType } from "@/lib/db/schema";
+import { jobRun, qboConnection, qboCustomerType } from "@/lib/db/schema";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { disconnect } from "@/lib/quickbooks/connection";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -51,6 +51,24 @@ describe("the QuickBooks warning", () => {
     expect(await kinds()).toEqual(["expiring"]);
     await db.update(qboConnection).set({ refreshExpiresAt: new Date(Date.now() + 31 * 86_400_000) });
     expect(await kinds()).toEqual([]);
+  });
+  it("warns of expiry from just under 30 days, not at exactly 30", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    const now = new Date();
+    await db.update(qboConnection).set({ refreshExpiresAt: new Date(now.getTime() + 30 * 86_400_000) });
+    expect(await kinds(now)).toEqual([]);
+    await db.update(qboConnection).set({ refreshExpiresAt: new Date(now.getTime() + 30 * 86_400_000 - 1) });
+    expect(await kinds(now)).toEqual(["expiring"]);
+  });
+  it("calls the roster old from just over 48 hours, not at exactly 48", async () => {
+    await seedConnected(stub);
+    await refreshRoster(worker);
+    const now = new Date();
+    await db.update(jobRun).set({ finishedAt: new Date(now.getTime() - 48 * 3_600_000) });
+    expect(await kinds(now)).toEqual([]);
+    await db.update(jobRun).set({ finishedAt: new Date(now.getTime() - 48 * 3_600_000 - 1) });
+    expect(await kinds(now)).toEqual(["roster_old"]);
   });
   it("a failed roster refresh", async () => {
     await seedConnected(stub);

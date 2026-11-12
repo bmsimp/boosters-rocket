@@ -31,12 +31,12 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     const [run] = await db.insert(jobRun).values({ job: TOKEN_JOB, startedBy: "worker", startedAt: now }).returning();
     try {
       await accessToken({ force: true }); // spends the refresh token so a quiet summer can't let it lapse; failures are audited there
-      await db.update(jobRun).set({ finishedAt: now, outcome: "ok" }).where(eq(jobRun.id, run!.id));
+      await db.update(jobRun).set({ finishedAt: new Date(), outcome: "ok" }).where(eq(jobRun.id, run!.id));
       ran.push({ job: TOKEN_JOB, ok: true });
     } catch (e) {
       // A QboError's message is a fixed sentence and its code a short code; anything else is recorded without its text.
       const detail = e instanceof QboError ? `${e.message} (${e.code})` : "The connection couldn't be refreshed. (unexpected)";
-      await db.update(jobRun).set({ finishedAt: now, outcome: "failed", detail }).where(eq(jobRun.id, run!.id));
+      await db.update(jobRun).set({ finishedAt: new Date(), outcome: "failed", detail }).where(eq(jobRun.id, run!.id));
       ran.push({ job: TOKEN_JOB, ok: false });
     }
   }

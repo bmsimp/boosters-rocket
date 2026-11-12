@@ -57,14 +57,17 @@ describe("scripts/worker.mjs", { timeout: 30_000 }, () => {
       const child = spawn(process.execPath, [SCRIPT], { env: { ...process.env, BETTER_AUTH_SECRET: SECRET, WORKER_APP_URL: url }, stdio: ["pipe", "pipe", "pipe"] });
       let out = ""; child.stdout!.on("data", (d) => (out += d)); child.stderr!.on("data", (d) => (out += d));
       const closed = new Promise<number | null>((r) => child.on("close", (c) => r(c)));
-      for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
-      expect(seen).toHaveLength(1);
-      await new Promise((r) => setTimeout(r, 200)); // let the wake finish
-      stopWith(child);
-      const code = await Promise.race([closed, new Promise<"hung">((r) => setTimeout(() => r("hung"), 10_000))]);
-      if (code === "hung") child.kill("SIGKILL");
-      expect(code).not.toBe("hung");
-      result = { code: code as number | null, out };
+      try {
+        for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+        expect(seen).toHaveLength(1);
+        await new Promise((r) => setTimeout(r, 200)); // let the wake finish
+        stopWith(child);
+        const code = await Promise.race([closed, new Promise<"hung">((r) => setTimeout(() => r("hung"), 10_000))]);
+        expect(code).not.toBe("hung");
+        result = { code: code as number | null, out };
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); // a failed expect must not leave it running
+      }
     });
     return result!;
   }
@@ -78,12 +81,15 @@ describe("scripts/worker.mjs", { timeout: 30_000 }, () => {
     await withApp(200, { ok: true, ran: [] }, async (url, seen) => {
       const child = spawn(process.execPath, [SCRIPT], { env: { ...process.env, BETTER_AUTH_SECRET: SECRET, WORKER_APP_URL: url }, stdio: ["ignore", "pipe", "pipe"] });
       let out = ""; child.stdout!.on("data", (d) => (out += d)); child.stderr!.on("data", (d) => (out += d));
-      for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
-      await new Promise((r) => setTimeout(r, 1500));
-      expect(seen).toHaveLength(1);
-      expect(child.exitCode).toBeNull();
-      expect(out).not.toContain("worker stopped");
-      child.kill("SIGKILL");
+      try {
+        for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+        await new Promise((r) => setTimeout(r, 1500));
+        expect(seen).toHaveLength(1);
+        expect(child.exitCode).toBeNull();
+        expect(out).not.toContain("worker stopped");
+      } finally {
+        child.kill("SIGKILL"); // also when an expect above fails, so the app stub can close
+      }
     });
   });
 });

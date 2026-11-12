@@ -51,6 +51,20 @@ describe("scheduled jobs", () => {
     expect(await runDueJobs(hours(25))).toEqual({ ran: [{ job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
   });
 
+  it("records when the token job finished, not when the wake began", async () => {
+    await seedConnected(stub);
+    stub.tokenDelayMs = 300;
+    await runDueJobs();
+    const [run] = await runs(TOKEN_JOB);
+    expect(run!.finishedAt!.getTime() - run!.startedAt.getTime()).toBeGreaterThanOrEqual(250);
+    stub.tokenDelayMs = 300;
+    stub.failToken = "server_error";
+    await runDueJobs(hours(25));
+    const failed = (await runs(TOKEN_JOB))[1]!;
+    expect(failed.outcome).toBe("failed");
+    expect(failed.finishedAt!.getTime()).toBeLessThan(Date.now() + 5000); // the real time, not the 25 hours ahead the wake was told
+  });
+
   it("retries a failed job, but no more often than every 15 minutes", async () => {
     await seedConnected(stub);
     stub.failToken = "server_error";
