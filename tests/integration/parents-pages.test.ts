@@ -147,7 +147,9 @@ describe("the staff pages for parents", () => {
     expect(await loose(resendWelcomeAction)(null)).toEqual(refused);
     expect(await db.select().from(heldAddress)).toMatchObject([{ email: "sam@example.com", approvedFamilyQboIds: [], rejectedFamilyQboIds: [] }]);
     expect((await db.select().from(parent))[0]).toMatchObject({ blocked: false });
-    expect((await db.select().from(auditLog)).filter((r) => r.action.startsWith("parent.") && r.action !== "parent.hold.opened" && r.action !== "parent.access.granted")).toEqual([]);
+    // The setup's reconcile wrote the create, hold and grant rows; nothing else may have been written.
+    const fromSetup = new Set(["parent.create", "parent.hold.opened", "parent.access.granted"]);
+    expect((await db.select().from(auditLog)).filter((r) => r.action.startsWith("parent.") && !fromSetup.has(r.action))).toEqual([]);
     expect(revalidated.count).toBe(0);
   });
 

@@ -7,6 +7,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { DrizzleQueryError } from "drizzle-orm";
 import * as reconcile from "@/lib/parents/reconcile";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, jobRun, parent, parentAuthUser, qboCustomer } from "@/lib/db/schema";
@@ -42,7 +43,14 @@ describe("the reconcile inside a roster refresh", () => {
     const before = { customers: await db.select().from(qboCustomer), links: await db.select().from(guardian) };
     stub.customers = stub.customers.filter((c) => c.Id !== "11");          // would close Ana's link
     vi.spyOn(reconcile, "reconcileAccess").mockRejectedValueOnce(new Error("boom: ana@example.com"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = await refreshRoster(worker);
+    // The server log says what kind of failure it was, and never the message (it can hold an address).
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged.mock.calls[0]![0]).toBe("[roster] reconcile failed");
+    expect(Object.keys(logged.mock.calls[0]![1] as object).sort()).toEqual(["code", "constraint", "name"]);
+    expect(logged.mock.calls[0]![1]).toEqual({ name: "Error", code: undefined, constraint: undefined });
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("boom");
     expect(r).toEqual({ ok: false, reason: "failed", error: "The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)" });
     expect(await db.select().from(qboCustomer)).toEqual(before.customers);
     expect(await db.select().from(guardian)).toEqual(before.links);
@@ -51,6 +59,18 @@ describe("the reconcile inside a roster refresh", () => {
     expect(JSON.stringify(await db.select().from(auditLog))).not.toContain("boom");
     const failed = (await db.select().from(auditLog)).filter((x) => x.action === "roster.refresh.failed").at(-1)!;
     expect(failed.after).toEqual({ code: "reconcile_failed" });
+  });
+
+  it("logs a database failure's SQLSTATE and constraint, and never its query, parameters or message", async () => {
+    await seedParentSettings(SIGNINS_ON);
+    await refreshRoster(worker);
+    const pg = Object.assign(new Error('duplicate key value violates unique constraint "parent_email_key": ana@example.com'), { code: "23505", constraint_name: "parent_email_key" });
+    vi.spyOn(reconcile, "reconcileAccess").mockRejectedValueOnce(new DrizzleQueryError("insert into parent values ($1)", ["ana@example.com"], pg));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed" });
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(logged).toHaveBeenCalledWith("[roster] reconcile failed", { name: "DrizzleQueryError", code: "23505", constraint: "parent_email_key" });
+    for (const secret of ["ana@example.com", "insert into", "duplicate key"]) expect(JSON.stringify(logged.mock.calls)).not.toContain(secret);
   });
 
   it("undoes the reconcile's own changes too when it fails after making them", async () => {
@@ -63,6 +83,7 @@ describe("the reconcile inside a roster refresh", () => {
     const real = reconcile.reconcileAccess;
     let inside: reconcile.ReconcileResult | null = null;
     vi.spyOn(reconcile, "reconcileAccess").mockImplementationOnce(async (tx, o) => { inside = await real(tx, o); throw new Error("boom after writing"); });
+    vi.spyOn(console, "error").mockImplementation(() => {});
     expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed" });
     expect(inside).toMatchObject({ ran: true, ended: 1 });
     expect(await snapshot()).toEqual(before);

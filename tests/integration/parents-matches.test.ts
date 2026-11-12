@@ -14,6 +14,7 @@ import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source"
 import { runReconcile } from "@/lib/parents/reconcile";
 import { deletePreviousCompany, PREVIOUS_COMPANY_KEY } from "@/lib/parents/company-change";
 import { acceptStrongMatches, decideMatch, matchReview } from "@/lib/parents/matches";
+import { decideHold } from "@/lib/parents/holds";
 import { resetDb } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
@@ -66,12 +67,24 @@ describe("the match review", () => {
     const decided = await audits("parent.match.decided");
     expect(decided[0]).toMatchObject({ door: "staff", permission: "Settings.Parents.ReadWrite", targetType: "family_match", targetId: "12", ip: "203.0.113.9" });
     expect(decided.map((d) => d.after)).toEqual([
-      { decision: "matched", oldFamilyQboId: "12", newFamilyQboId: "87", approvalsCarried: 1, welcomesRestored: 1 },     // Ana
-      { decision: "matched", oldFamilyQboId: "20", newFamilyQboId: "90", approvalsCarried: 1, welcomesRestored: 1 }]);   // Mei; Ana's is back already
+      { decision: "matched", oldFamilyQboId: "12", newFamilyQboId: "87", approvalsCarried: 1, approvalsSkipped: 0, welcomesRestored: 1 },     // Ana
+      { decision: "matched", oldFamilyQboId: "20", newFamilyQboId: "90", approvalsCarried: 1, approvalsSkipped: 0, welcomesRestored: 1 }]);   // Mei; Ana's is back already
 
     await seedParentSettings({ signin: true, welcome: true });
     const r = await runReconcile({ cause: "test" });
     expect(r).toMatchObject({ granted: 3, welcomeOwed: 0 });                                             // Ana in both, Mei in one; nobody is welcomed twice
+  });
+
+  it("never carries an approval over a refusal staff made in the new company", async () => {
+    await seedParentSettings({ signin: true });
+    expect(await decideHold("ana@example.com", "not_same", ["87", "90"], "Two different people.", { ...admin, permission: "Parents.ReadWrite" })).toEqual({ ok: true });
+    expect(await decideMatch("12", "87", settingsAdmin)).toEqual({ ok: true });
+    expect((await db.select().from(heldAddress).where(eq(heldAddress.email, "ana@example.com")))[0])
+      .toMatchObject({ approvedFamilyQboIds: [], rejectedFamilyQboIds: ["87", "90"] });
+    const open = (await db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId)))
+      .filter((r) => r.p.email === "ana@example.com" && r.g.status !== "disabled");
+    expect(open).toEqual([]);
+    expect((await audits("parent.match.decided"))[0]!.after).toMatchObject({ approvalsCarried: 0, approvalsSkipped: 1 });
   });
 
   it("a carried approval says who carried it and why, and keeps the note of a real decision", async () => {

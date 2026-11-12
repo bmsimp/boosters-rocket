@@ -78,7 +78,8 @@ export async function matchReview(): Promise<{ suggestions: MatchSuggestion[]; f
 /**
  * Accepts (`newFamilyQboId` set) or rejects (null) a match. Both IDs come from a browser: anything that isn't a family
  * in the snapshot or in the connected company's list is refused. Accepting records it for good, carries over the
- * approvals that involved the old family and the welcome history of its people, then runs the reconcile. It never
+ * approvals that involved the old family (except where staff already refused that address for the new family) and the
+ * welcome history of its people, then runs the reconcile. It never
  * grants access by itself: that still comes only from the connected company's roster, and only while sign-ins are on.
  */
 export async function decideMatch(oldFamilyQboId: string, newFamilyQboId: string | null, o: StaffOp): Promise<Result> {
@@ -108,10 +109,14 @@ export async function decideMatch(oldFamilyQboId: string, newFamilyQboId: string
     await tx.insert(familyMatch).values({ oldRealmId: prev.realmId, oldFamilyQboId, newRealmId: prev.newRealmId, newFamilyQboId, decidedBy: o.actor.id, decidedAt: now })
       .onConflictDoUpdate({ target: [familyMatch.oldRealmId, familyMatch.oldFamilyQboId], set: { newRealmId: prev.newRealmId, newFamilyQboId, decidedBy: o.actor.id, decidedAt: now } });
     const carried = prev.approvals.filter((x) => x.familyQboIds.includes(oldFamilyQboId));
+    let approvalsCarried = 0, approvalsSkipped = 0;
     for (const a of carried) {
       await tx.insert(heldAddress).values({ email: a.email }).onConflictDoNothing();
       const [row] = await tx.select().from(heldAddress).where(eq(heldAddress.email, a.email)).for("update");
-      if (row!.approvedFamilyQboIds.includes(newFamilyQboId)) continue;
+      if (row!.approvedFamilyQboIds.includes(newFamilyQboId)) { approvalsCarried++; continue; }
+      // Staff in the connected company already said this address is not one person here: an old approval never overrides that.
+      if (row!.rejectedFamilyQboIds.includes(newFamilyQboId)) { approvalsSkipped++; continue; }
+      approvalsCarried++;
       const approved = [...new Set([...row!.approvedFamilyQboIds, newFamilyQboId])].sort(numeric);
       await tx.update(heldAddress).set({ approvedFamilyQboIds: approved, decidedBy: o.actor.id, decidedAt: now, note: row!.note ?? CARRIED_NOTE, updatedAt: now })
         .where(eq(heldAddress.email, a.email));
@@ -123,7 +128,7 @@ export async function decideMatch(oldFamilyQboId: string, newFamilyQboId: string
       welcomesRestored += done.length;
     }
     await save("matched", newFamilyQboId);
-    await audit({ decision: "matched", oldFamilyQboId, newFamilyQboId, approvalsCarried: carried.length, welcomesRestored });
+    await audit({ decision: "matched", oldFamilyQboId, newFamilyQboId, approvalsCarried, approvalsSkipped, welcomesRestored });
     await reconcileAccess(tx, { cause: "match" });
     return { ok: true };
   });

@@ -81,12 +81,15 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
   const close = async (l: Link, reason: DisabledReason, dropSource = false) => {
     const wasOpen = l.status !== "disabled";
     const was = l.status === "disabled" ? l.statusBeforeDisable : l.status;
+    const droppedSource = l.sourceQboId;
     const set = { status: "disabled" as const, disabledReason: reason, statusBeforeDisable: was, ...(dropSource ? { sourceQboId: null } : {}) };
     await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, l.id));
     Object.assign(l, set);
     let sessionsEnded = await endFamilySessions(l.parentId, l.familyQboId, tx);
     if (!links.some((x) => x.parentId === l.parentId && x.status !== "disabled")) sessionsEnded += await endParentSessions(l.parentId, tx);
-    await audit("parent.access.ended", "guardian", l.id, { status: was }, { parentId: l.parentId, familyQboId: l.familyQboId, reason, sessionsEnded });
+    // A dropped source is gone from the row: the audit row keeps what it was.
+    await audit("parent.access.ended", "guardian", l.id, dropSource ? { status: was, sourceQboId: droppedSource } : { status: was },
+      { parentId: l.parentId, familyQboId: l.familyQboId, reason, sessionsEnded });
     r.ended++;
     if (o.report && wasOpen) o.report.ended.push({ ...startedAs.get(l.parentId)!, familyQboId: l.familyQboId });
   };
@@ -97,9 +100,10 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
     p.welcomeOwed = true; r.welcomeOwed++;
     return { welcomeOwed: true };
   };
-  const createPerson = async (email: string, name: string): Promise<Person> => {
+  const createPerson = async (email: string, name: string, sourceQboId: string): Promise<Person> => {
     const [p] = await tx.insert(parent).values({ name, email }).returning();
     await tx.insert(parentAuthUser).values({ id: randomUUID(), name, email, emailVerified: true, parentId: p!.id });
+    await audit("parent.create", "parent", p!.id, null, { name, email, sourceQboId });
     people.set(p!.id, p!); byEmail.set(email, p!);
     return p!;
   };
@@ -139,7 +143,7 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
       }
     }
     if (!link) {
-      person ??= await createPerson(g.email, name);
+      person ??= await createPerson(g.email, name, g.sourceQboId);
       link = links.find((l) => l.familyQboId === g.familyQboId && l.parentId === person!.id);
       if (link && foreign.has(link.id)) {
         // Another company's row for this person and family: the unique index forces its reuse, as a new link.
@@ -186,8 +190,9 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
     kept.add(link.id);
   }
 
-  // Why a link closes: the denial for its own record and address (for a hand-made link, any denial for its address in
-  // that family); else a denial of the whole record, one that names no address; else it is not in QuickBooks.
+  // Why a link closes: the denial for its own record and address; else any denial for its address in that family (the
+  // address may now be on another record there); else a denial of the whole record, one that names no address; else it
+  // is not in QuickBooks.
   const exact = new Map<string, DisabledReason>(), byFamilyEmail = new Map<string, DisabledReason>(), wholeRecord = new Map<string, DisabledReason>();
   const first = (m: Map<string, DisabledReason>, k: string, v: DisabledReason) => { if (!m.has(k)) m.set(k, v); };
   for (const d of decision.denials) {
@@ -196,8 +201,8 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
   }
   const whyNot = (l: Link): DisabledReason => {
     const email = ownerOf(l).email;
-    return (l.sourceQboId === null ? byFamilyEmail.get(`${l.familyQboId}|${email}`) : exact.get(`${l.familyQboId}|${l.sourceQboId}|${email}`))
-      ?? wholeRecord.get(`${l.familyQboId}|${l.sourceQboId}`) ?? "not_in_quickbooks";
+    return (l.sourceQboId === null ? undefined : exact.get(`${l.familyQboId}|${l.sourceQboId}|${email}`))
+      ?? byFamilyEmail.get(`${l.familyQboId}|${email}`) ?? wholeRecord.get(`${l.familyQboId}|${l.sourceQboId}`) ?? "not_in_quickbooks";
   };
   for (const l of links) {
     if (l.status !== "disabled" && !kept.has(l.id)) await close(l, whyNot(l));

@@ -208,7 +208,9 @@ they have.
 ### Failure
 
 If the reconcile fails, the roster refresh fails the way it does today: the transaction rolls back, the old
-roster and the old access stay, the failure is recorded, and the staff warning shows it.
+roster and the old access stay, the failure is recorded, and the staff warning shows it. The app's log gets one
+line, `[roster] reconcile failed`, with the error's class name and, for a database error, its SQLSTATE code and
+constraint name; never its message, query or parameters, which can hold an address.
 
 ## 3. Turning it on
 
@@ -360,7 +362,9 @@ Accepting a match:
 
 - records that the old family ID is now the new family ID, permanently, for later features that attach portal
   data to a family;
-- carries over **Same person** decisions that involved that family, so those addresses are not held again;
+- carries over **Same person** decisions that involved that family, so those addresses are not held again, except
+  where staff in the new company have already said **Not the same person** for that address and family: a match
+  never overrides a refusal;
 - restores "already welcomed" for its people from the snapshot;
 - runs the reconcile.
 
@@ -379,6 +383,7 @@ automatically 90 days after the switch.
 | What happened | Action |
 |---|---|
 | A switch or setting changed, with the counts shown | `settings.parents.save` |
+| The reconcile made a person for an address it had not seen | `parent.create` |
 | The reconcile opened or closed a link, with the reason | `parent.access.granted`, `parent.access.ended` |
 | The reconcile pointed a link at a different QuickBooks record (taking over a hand-made sign-in, or following an address) | `parent.access.moved` |
 | The reconcile changed a person's address in place | `parent.email.changed` |
@@ -397,7 +402,9 @@ The `settings.parents.save` row for switching sign-ins on records how many links
 switching them off records how many sessions ended and codes were deleted and, when welcome emails were on, that
 they were switched off too and how many owed welcomes were cleared. `parent.access.cleared` records how many links,
 people, sessions, codes, held addresses and welcome dates it cleared and what the snapshot kept;
-`parent.match.decided` records how many approvals and welcome dates the match carried over.
+`parent.match.decided` records how many approvals and welcome dates the match carried over, and how many approvals
+it did not carry because staff in the new company had already said **Not the same person** for that address and
+family.
 
 Rows written by the reconcile are recorded as done by the system and name the roster run (or the staff action)
 that caused them. No row holds an email body or a sign-in code.

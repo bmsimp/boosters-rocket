@@ -51,6 +51,9 @@ describe("the reconcile", () => {
     const [row] = await audits("parent.access.granted");
     expect(row).toMatchObject({ door: "system", actorLabel: "reconcile", targetType: "guardian" });
     expect(row!.after).toMatchObject({ familyQboId: "10", sourceQboId: "11", cause: "test" });
+    const made = await audits("parent.create");
+    expect(made).toEqual([expect.objectContaining({ door: "system", actorId: null, actorLabel: "reconcile", targetType: "parent", targetId: p!.id })]);
+    expect(made[0]!.after).toEqual({ name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11", cause: "test" });
   });
 
   it("changes nothing the second time", async () => {
@@ -62,7 +65,7 @@ describe("the reconcile", () => {
     await seedGuardian({ parentId: mei.id, familyQboId: "20" });
     await run();
     const first = new Set((await db.select().from(auditLog)).map((r) => r.action));
-    expect(first).toEqual(new Set(["parent.access.granted", "parent.access.moved", "parent.hold.opened"]));
+    expect(first).toEqual(new Set(["parent.create", "parent.access.granted", "parent.access.moved", "parent.hold.opened"]));
     const before = (await db.select().from(auditLog)).length;
     expect(await run()).toEqual({ ran: true, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 });
     expect((await db.select().from(auditLog)).length).toBe(before);
@@ -181,6 +184,19 @@ describe("the reconcile", () => {
       { email: "mei@example.com", family: "20", source: "21", status: "invited", reason: null },
     ]);
     expect(await audits("parent.email.changed")).toEqual([]);
+    // The closed link's source is dropped so the new link can carry it: the audit row keeps what it was.
+    const [ended] = await audits("parent.access.ended");
+    expect(ended).toMatchObject({ before: { status: "invited", sourceQboId: "11" } });
+    expect(ended!.after).toMatchObject({ familyQboId: "10", reason: "address_changed" });
+  });
+
+  it("closes a sourced link as held when its owner's address is now on another record of the family and held there", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedCache(RIVERA); await run();
+    // Record 11 is gone; Ana's address is now on record 13 of the same family, and under the Chen family too.
+    await seedCache([fam("10", "Rivera Family"), par("13", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo Rivera", "10"),
+      fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")]);
+    expect(await run()).toMatchObject({ ended: 1 });
+    expect(await links()).toEqual([{ email: "ana@example.com", family: "10", source: "11", status: "disabled", reason: "held" }]);
   });
 
   it("holds an address under two families, keeps a row for it, and opens both once staff approve", async () => {

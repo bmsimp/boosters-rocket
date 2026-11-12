@@ -42,6 +42,19 @@ function customerRow(c: Raw, named: Set<string>, now: Date) {
 }
 
 /**
+ * The server log line for a failed reconcile: the error's class name and, for a database error, its SQLSTATE and the
+ * constraint it broke. Never the message, the query or its parameters: any of them can hold an address. Drizzle wraps
+ * a driver error, so the code and constraint are looked for on its cause too.
+ */
+function logReconcileFailure(e: unknown): void {
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const err = (typeof e === "object" && e !== null ? e : {}) as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
+  const pg = (err.code === undefined && typeof err.cause === "object" && err.cause !== null ? err.cause : err) as typeof err;
+  const name = typeof e === "object" && e !== null ? e.constructor?.name ?? "Object" : typeof e;
+  console.error("[roster] reconcile failed", { name, code: str(pg.code), constraint: str(pg.constraint_name) ?? str(pg.constraint) });
+}
+
+/**
  * Replaces the cache from QuickBooks: every customer type and every customer, active and inactive. QuickBooks is read
  * first; the tables change only if all of it arrived, in the same transaction, so a failure leaves the old cache whole.
  */
@@ -107,7 +120,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
         for (let i = 0; i < rows.length; i += CHUNK) await sp.insert(qboCustomer).values(rows.slice(i, i + CHUNK)).onConflictDoNothing();
         await setRosterSource(sp, realmId);
-        try { await reconcileAccess(sp, { cause: `roster.refresh#${run!.id}` }); } catch { throw new ReconcileFailed(); }
+        try { await reconcileAccess(sp, { cause: `roster.refresh#${run!.id}` }); } catch (e) { logReconcileFailure(e); throw new ReconcileFailed(); }
       });
     } catch (e) {
       return e instanceof ReconcileFailed
