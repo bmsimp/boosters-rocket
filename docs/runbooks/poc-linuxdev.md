@@ -295,6 +295,37 @@ connection (`ran quickbooks.token_refresh: ok`).
 Moving to the band's real books later means the app's **Production** keys, **Production** in step 1, and Intuit's app
 assessment first.
 
+### Parent sign-ins from QuickBooks
+
+Once an Admin switches it on, a parent who is a Parent customer in QuickBooks can sign in with the address on that
+record and a code; nobody seeds them by hand. Do this after the QuickBooks steps above.
+
+1. **Before you deploy, back up the database.** The deploy runs migration 0009, which changes the parent tables.
+   On linuxdev:
+   ```bash
+   cd ~/booster-rocket
+   docker compose -f docker-compose.poc.yml --env-file .env.poc exec -T db pg_dump -U booster -d booster > ~/booster-rocket-before-parents-from-quickbooks.sql
+   ```
+   As before, the file goes in your home folder, not the checkout. Then deploy (section 8).
+2. In the sandbox company, give the Parent customer `Test Parent` an email address you can read.
+3. Choose **Roster** in the staff menu, then **Refresh now**.
+4. Choose **Parent sign-ins** in the staff menu (Admins only), then **Set up**.
+5. Read **Step 1: What would happen**. The test sign-ins seeded by hand on `POC-FAMILY-1` (section 6) are listed
+   under **Sign-ins that would end**: QuickBooks doesn't list them, so they stop working when sign-ins are switched
+   on. The counts should match the sandbox.
+6. **Next: parent sign-ins**, then **Switch parent sign-ins on**. The step then says "Parent sign-ins are on." with
+   how many people can sign in. No email is sent.
+7. In a private window, sign in as that parent at `/sign-in` with the code that arrives.
+8. **Next: welcome emails** (step 3), then **Switch welcome emails on**. Within a minute or two the parent gets the
+   welcome email.
+
+Switching parent sign-ins **off** (step 2, **Switch parent sign-ins off**) signs every parent out at once, and also
+switches welcome emails off. Switching sign-ins on again does not switch welcomes back on: do step 3 again.
+
+**Parents** in the staff menu (needs the Parents permission; Admin has it) lists addresses to review and every
+person, with block and unblock on each person's page. Names and addresses are changed in QuickBooks, followed by
+**Refresh now**.
+
 ## 6. Test parents
 
 1. **Wait until the first deploy in section 8 has succeeded.** Then, on linuxdev, seed parent one:
@@ -437,6 +468,14 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 15. **Disconnect**, then connect a second sandbox company -> the old company's families are gone: **Roster** says "The membership shape hasn't been chosen yet." and the QuickBooks page shows the shape as "Not chosen yet." until it is chosen again in step 3. The audit log has `roster.cleared`.
 - [ ] 16. Customer query order: in the sandbox's API explorer, or with a query in the style of the plan's check script (`q("...")`), run `select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000` and confirm it is accepted (HTTP 200, customers in `Id` order). The portal sends this query for every page of a roster read, so a club with more than 1000 customers loses none between pages.
 - [ ] 17. Inactive customer types: make one customer type inactive in the sandbox, run `select * from CustomerType`, and note whether the inactive type still appears in the list (record it in section 11).
+- [ ] 18. Parent sign-ins, **Set up**, **Step 1: What would happen** (section 5, "Parent sign-ins from QuickBooks") -> the hand-seeded sign-ins on `POC-FAMILY-1` are listed under **Sign-ins that would end**, and the numbers match the sandbox.
+- [ ] 19. **Switch parent sign-ins on** -> the step says "Parent sign-ins are on."; the sandbox parent signs in at `/sign-in` with a code; the audit log has `settings.parents.save` and `parent.access.granted`, with `cause` in its details.
+- [ ] 20. In the sandbox, put the same address on a Parent customer under a second family, then **Refresh now** -> the staff home says "1 address to review", neither family can be signed in to with that address, and one staff email arrives (within a few minutes: the worker sends it).
+- [ ] 21. **Parents** in the staff menu, under **To review**: type a note in **How do you know? (staff only)** and choose **Same person** -> signing in with that address, the family chooser offers both families by name.
+- [ ] 22. Make that Parent customer inactive in the sandbox, then **Refresh now** -> the parent is signed out of that family, and the audit log has `parent.access.ended` with reason `inactive`.
+- [ ] 23. Open the person from **Parents**: **Block** with a reason in **Why? (staff only)** -> the box says Blocked with the reason, and their next code request gets the usual message and no email; **Unblock** -> they can sign in again. The audit log has `parent.read`, `parent.block` and `parent.unblock`.
+- [ ] 24. Step 3, **Switch welcome emails on** -> one welcome email arrives within two minutes, and `docker logs booster-rocket-worker` shows `ran parents.welcome: ok`.
+- [ ] 25. **Disconnect**, then connect the second sandbox company -> the audit log has `parent.access.cleared`; **Parent sign-ins** shows sign-ins switched off and welcome emails off, and a box for the previous QuickBooks company. **Review matches** appears there once the new company's roster is read and a membership shape is chosen (the second sandbox company has no customer types, so this part may not be possible there).
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
@@ -483,6 +522,8 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | Step 2 comes back with "That is a different QuickBooks company from the one already connected. Disconnect first if you mean to switch companies." | A company is already connected | **Disconnect** on the QuickBooks page first, then set up again |
 | The staff home says "QuickBooks needs attention" with "The roster hasn't been refreshed from QuickBooks in more than 2 days." | The worker isn't running | `docker ps`, then `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker` |
 | The staff home says "The QuickBooks connection couldn't be refreshed: Intuit no longer accepts this connection. Connect QuickBooks again." | The connection lapsed or was revoked at Intuit | Go through step 2 of the QuickBooks steps again |
+| The staff home says "The last roster refresh failed: The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)" (the roster pages say the same after "The latest try failed:") | The step that works out who can sign in failed inside the refresh | The roster and who can sign in are as they were before the refresh. Read `docker logs booster-rocket-app` and report it |
+| `/sign-in` says "Parent sign-in isn't available yet." after parent sign-ins were switched off | Sign-ins are off, so nobody can sign in (the audit shows `signin.code_refused`, reason `signins_off`) | **Parent sign-ins** in the staff menu, **Change**, step 2: **Switch parent sign-ins on**. Welcome emails went off with them; switch them on again in step 3 if wanted |
 | `docker logs booster-rocket-worker` says "couldn't reach the app: HTTP 404" | The worker and the app have different `BETTER_AUTH_SECRET` values | Both read `.env.poc`: recreate both |
 | Only if Access is set up: Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 7 B steps 1-3; check spam |
 

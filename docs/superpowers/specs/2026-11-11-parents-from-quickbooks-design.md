@@ -1,6 +1,6 @@
 # Parents from QuickBooks — design
 
-**Status:** approved by the owner on 2026-11-11. No plan is written yet.
+**Status:** approved by the owner on 2026-11-11; implemented by plan `2026-11-11-parents-from-quickbooks.md`.
 **Builds on:** parent email-code sign-in (`2026-11-10-parent-email-code-sign-in-design.md`) and the QuickBooks
 connection and roster (`2026-11-10-quickbooks-connection-and-roster-design.md`).
 **Roadmap:** the first half of Plan 3. The second half (anything that writes to QuickBooks) is a separate
@@ -89,6 +89,12 @@ A candidate has access to its family when all of these hold:
 - A **Same person** decision is remembered for that address and that set of families. If the address later
   appears under a further family, only the new family is held, and it is a new item to review.
 - A decision can be reversed. Reversing **Same person** holds the address again and ends the access it gave.
+- A decision applies only to the families the page showed under the address. If the families under it changed
+  after the page loaded (a refresh added or removed one), the decision is refused and staff reload the page.
+- Only active candidates in active families count toward a hold: an inactive record, or a record under an inactive
+  family, is refused for that reason and does not hold its address anywhere else.
+- An address stays held across its families even when one of those families has no active student. The
+  active-students setting (rule 5) is applied only to a claim that is not held.
 - **The same address on two candidates in one family** is not held. It gives one sign-in for that family, and
   is flagged.
 
@@ -104,10 +110,15 @@ Each of these is listed in the roster's existing Needs attention list, with what
 
 - a candidate with no email address, or an unusable one;
 - a Parent or flat-member record holding more than one address;
-- the same address on two candidates in one family;
+- the same address on two candidates in one family (the roster's existing rule, for records with identical email
+  fields), and the same address on two records in one family whose email fields differ;
 - an address held across families (also listed on the Parents page, §4);
 - one address with different names;
 - a family nobody can sign in to.
+
+The held-address and different-names items name the person only: they show no address and no other family,
+because Needs attention is shown to staff with only `Roster.Read`. The address and the families are on the
+Parents page (§4).
 
 ## 2. The reconcile step
 
@@ -115,8 +126,9 @@ Each of these is listed in the roster's existing Needs attention list, with what
 
 - Inside every roster refresh, in the same database transaction that swaps in the new copy of QuickBooks. Both
   succeed or neither does.
-- When something else changes the answer: a switch or setting in §3 is changed, a held address is decided or
-  reversed, a person is blocked or unblocked, a match is accepted (§6).
+- When something else changes the answer: parent sign-ins are switched on, the active-students setting is
+  changed, a held address is decided or reversed, a match is accepted (§6). Blocking and unblocking do not run
+  it: a block leaves every link as it is and is checked at sign-in, so unblocking gives back the same access.
 - While parent sign-ins are off it changes nothing. Sign-ins seeded by hand keep working until the switch is
   turned on, and are then closed by the first reconcile unless QuickBooks backs them.
 
@@ -137,23 +149,36 @@ It takes the roster lock that a refresh already holds, so two reconciles never r
 The existing `parent` (a person) and `guardian` (a person's link to a family) tables, with additions:
 
 - **Family link:** the QuickBooks ID of the candidate it came from; and when closed, the reason: `inactive`,
-  `no_email`, `held`, `no_active_students`, `not_in_quickbooks`, `company_changed`. The existing reasons stay.
+  `family_inactive`, `no_email`, `held`, `no_active_students`, `address_changed`, `not_in_quickbooks`,
+  `company_changed`. The existing reasons stay.
 - **Person:** who blocked them, when, and the reason; when they were last sent a welcome email, and whether one
   is owed.
-- **Decisions on held addresses:** a new table: the address, the set of family QuickBooks IDs, the decision,
-  the staff member, the time, and their note.
-- **Settings:** parent sign-ins on or off; welcome emails on or off; require active students on or off; review
-  notices by email on or off.
+- **Decisions on held addresses:** a new table with one row per address and three sets of family QuickBooks IDs:
+  approved (**Same person**), rejected (**Not the same person**) and announced (already in a review email, §5);
+  with the staff member who last decided, the time and their note. A row is made when the address first becomes
+  held.
+- **Settings:** parent sign-ins on or off (and whether they were ever on); welcome emails on or off; require
+  active students on or off; review notices by email on or off.
+- **The previous company:** the snapshot kept after a company change (§6) is a setting, as is the time the last
+  review email went (§5).
+- **Matches:** a new table recording, for good, that an old company's family ID is a new company's family ID.
 
 ### Email changes
 
 A family link follows its QuickBooks candidate. When that candidate's address changes:
 
-- If the person has no other link under the old address and the new address belongs to nobody else in the
-  portal, the person's address is updated in place. Their history and "already welcomed" stay, and no email is
-  sent.
+- The person's address is changed in place only when all of these hold: nobody in the portal had the new address
+  when the run started; nobody is given access with the old address in this run; and the person has no other
+  link. Their history and "already welcomed" stay, and no email is sent. Changing an address in place signs the
+  person out (their session was proved with the old address), deletes their unused sign-in codes and drops their
+  pending email-change requests.
 - Otherwise the link moves to the person who has the new address, creating that person if needed. A person
   created this way is new, and is owed a welcome when welcomes are on.
+- Each of these is decided from the people as they were when the run started, never from changes the same run
+  made, so one change cannot make room for the next. A record's own swap of addresses, or a chain of them within a
+  family, therefore moves links rather than changing addresses in place, and can sign a parent out once.
+- Links closed because a different company was connected (§6) take no part in matching by QuickBooks ID: their
+  IDs belong to the old company.
 
 The portal's own change-my-email feature (parent or staff) is switched off for people whose links come from
 QuickBooks. The pages say that the address is changed in QuickBooks.
@@ -169,6 +194,13 @@ The reconcile never sends mail. It marks a person as owed a welcome when they fi
 and welcomes are on. The worker sends owed welcomes afterwards, a few per minute. A failed send is retried at
 most once every 15 minutes, and holds nothing else up. A person is welcomed once, however many families
 they have.
+
+- Each welcome is claimed before it is sent, in one statement, so overlapping worker runs cannot email a person
+  twice.
+- A blocked person is never marked as owed a welcome, and blocking clears one that was owed. Unblocking marks the
+  person as owed again when they were never welcomed, still have access to a family, and welcomes are on.
+- **Resend welcome email** goes at once and does not depend on the welcome switch. It is refused for a blocked
+  person, for a person with no open link, and while parent sign-ins are switched off.
 
 ### Failure
 
@@ -189,6 +221,10 @@ Worked out by the rules function against the current roster, each time the page 
   one address, families nobody could sign in to;
 - which existing sign-ins would end.
 
+The sign-ins that would end come from a dry run of the real reconcile, run as if sign-ins were on and then rolled
+back, so the preview and the switch can never disagree about them. The dry run never waits for a roster refresh:
+while one is running, the list is shown as being worked out, and the page asks the Admin to reload in a minute.
+
 Nothing here blocks switching on. People with problems cannot sign in until the data is fixed in QuickBooks or
 a held address is decided.
 
@@ -197,14 +233,21 @@ a held address is decided.
 Offered only when QuickBooks is connected, a shape is chosen, the roster was read in the last 48 hours and
 outgoing mail works. The Admin confirms against the counts, and the reconcile runs.
 
-Switching sign-ins **off** closes the parent door at once, signs parents out and pauses the reconcile. Links and
-history are kept. Switching on again goes through the preview.
+Switching sign-ins **off** closes the parent door at once, signs parents out, deletes unused sign-in codes and
+pauses the reconcile. It also switches welcome emails off and clears any owed welcomes, so switching sign-ins on
+again never starts emailing families by itself. Links and history are kept. Switching on again goes through the
+preview.
+
+Before sign-ins have ever been switched on, the parent door is not closed: sign-ins seeded by hand keep working
+(§2). A switch already in the state asked for (a second press, or a page left open) does nothing and records
+nothing.
 
 ### Step 3: welcome emails
 
 Off by default, and separate from step 2, so an Admin can test with real families before anyone is emailed.
 The page shows how many people would be emailed now and shows the email. Switching on marks everyone with
 access who has not been welcomed as owed one; after that each new person is. Switching off stops new welcomes.
+Welcome emails cannot be switched on while parent sign-ins are off.
 
 The welcome email names the club, gives the portal's address, says to sign in with this email address and a
 code, and gives the club's reply address from Mail settings for questions. It holds no family details.
@@ -219,7 +262,9 @@ the page shows how many families and people it would close.
 ### Parents (staff menu, needs `Parents.ReadWrite`)
 
 - **To review:** held addresses awaiting a decision. Each shows the address, the families it appears under and
-  the names on those records, with **Same person** and **Not the same person**. A decision needs a short note.
+  the names on those records, with **Same person** and **Not the same person**. A decision needs a short note,
+  and applies only to the families the page showed: if they changed in the meantime it is refused, and staff
+  reload (§1). A refused decision keeps the note as typed.
 - **People:** everyone the portal knows, searchable by name or email: their families, whether they can sign in
   and why not, when they last signed in, when they were welcomed.
 - **One person's page:** their families and status, with **Resend welcome email**, **Block** (with a reason
@@ -257,7 +302,9 @@ unknown address.
   - Only held addresses awaiting a decision count. Other problems are fixed in QuickBooks and stay in Needs
     attention.
   - Each held item is announced once. An email is sent only when at least one item has not been announced.
-  - At most one email in any 24 hours; items that appear in between wait for the next one.
+  - At most one email in any 24 hours; items that appear in between wait for the next one. The day's slot is
+    taken before anything is sent, so overlapping worker runs send one email; if no email could be sent, the
+    slot is given back and nothing is marked announced.
   - There are no reminders for items that stay undecided.
   - The email gives the number of new items, the number waiting in total, and a link. It names no family,
     person or address.
@@ -276,12 +323,23 @@ different company will end all of it.
 
 In the step that already clears the roster and the shape:
 
-- every family link is closed with the reason `company_changed`, and parents are signed out;
+- every family link, open or already closed, is marked as belonging to the previous company (the reason
+  `company_changed`); open ones are closed. Parents are signed out and unused sign-in codes are deleted;
 - parent sign-ins and welcome emails are switched off;
-- people are kept, with their history, blocks and "already welcomed";
-- undecided and decided held-address records are kept for the match review;
-- a snapshot of the old company is saved: each family's name and QuickBooks ID, and the names and addresses of
-  the people who had access to it.
+- people are kept, with their history and blocks;
+- a snapshot of the old company is saved: each family's name and QuickBooks ID, the names and addresses of the
+  people who had access to it and when each was welcomed, and every **Same person** approval. A second company
+  change replaces the snapshot;
+- the live held-address records are deleted, and "already welcomed" is cleared for everyone. Rejected and
+  undecided addresses are not kept: in the new company an address under two families is held by default. The
+  approvals and welcome dates in the snapshot come back only through an accepted match.
+
+A roster refresh that finds its cache came from a different company (because the clean-up at connect time failed
+or never ran) runs the same clean-up itself, in the same transaction, before it stores the new roster.
+
+A link from the previous company keeps that company's family ID, which means some other family (or none) in the
+new one. Such links are left out of a family's roster page and of Needs attention, and a person's page lists each
+as "A family in the previous QuickBooks company", with no link.
 
 ### The match review
 
@@ -298,7 +356,8 @@ Accepting a match:
 - records that the old family ID is now the new family ID, permanently, for later features that attach portal
   data to a family;
 - carries over **Same person** decisions that involved that family, so those addresses are not held again;
-- keeps "already welcomed" for its people.
+- restores "already welcomed" for its people from the snapshot;
+- runs the reconcile.
 
 A match never grants access. Access comes only from the new company's roster, through §3.
 
@@ -315,17 +374,33 @@ automatically 90 days after the switch.
 | What happened | Action |
 |---|---|
 | A switch or setting changed, with the counts shown | `settings.parents.save` |
-| The reconcile opened, closed or moved a link, with the reason | `parent.access.granted`, `parent.access.ended`, `parent.email.changed` |
+| The reconcile opened or closed a link, with the reason | `parent.access.granted`, `parent.access.ended` |
+| The reconcile pointed a link at a different QuickBooks record (taking over a hand-made sign-in, or following an address) | `parent.access.moved` |
+| The reconcile changed a person's address in place | `parent.email.changed` |
+| The reconcile changed a person's name to match QuickBooks | `parent.name.changed` |
+| An address became held | `parent.hold.opened` |
 | A held address decided or reversed, with the note | `parent.hold.decided` |
 | A person blocked or unblocked, with the reason | `parent.block`, `parent.unblock` |
 | A welcome sent, resent or failed | `parent.welcome.sent`, `parent.welcome.failed` |
 | A review notice sent to staff | `parent.review.notified` |
 | Staff opened a person's page | `parent.read` |
-| A company change closed all access | `parent.access.cleared` |
-| A match accepted, changed or rejected | `parent.match.decided` |
+| A company change closed all access, with the counts | `parent.access.cleared` |
+| A match accepted or rejected, with what was carried over | `parent.match.decided` |
+| A code asked for, or a session used, while parent sign-ins are off | `signin.code_refused`, `signin.refused`, with reason `signins_off` |
 
-Rows written by the reconcile are recorded as done by the system and name the roster run that caused them. No
-row holds an email body or a sign-in code.
+The `settings.parents.save` row for switching sign-ins on records how many links opened and closed; the row for
+switching them off records how many sessions ended and codes were deleted and, when welcome emails were on, that
+they were switched off too and how many owed welcomes were cleared. `parent.access.cleared` records how many links,
+people, sessions, codes, held addresses and welcome dates it cleared and what the snapshot kept;
+`parent.match.decided` records how many approvals and welcome dates the match carried over.
+
+Rows written by the reconcile are recorded as done by the system and name the roster run (or the staff action)
+that caused them. No row holds an email body or a sign-in code.
+
+The worker reports three jobs of this piece by name, each only when it did something or failed:
+`parents.welcome` (welcomes sent or failed), `parents.review_notice` (a review email sent) and
+`parents.snapshot_expiry` (the snapshot deleted after 90 days). Each is guarded on its own, so a failure in one
+never stops the QuickBooks jobs.
 
 ### Permissions
 
@@ -371,6 +446,9 @@ To go in the user documentation when it is written:
 
 ## Open questions for the plan
 
-- Whether Intuit returns several addresses in one email field separated by commas, semicolons or both. The
-  parser accepts both; a sandbox check confirms what QuickBooks stores.
-- The sending rate for welcome emails against the mailbox's limits (Microsoft 365 and SMTP differ).
+- Settled in the plan: the parser splits an email field on commas, semicolons and spaces, in any mix. A sandbox
+  check of what QuickBooks actually stores is a proof-of-concept item.
+- The sending rate for welcome emails is five a minute (one batch per worker wake). Whether that suits the
+  mailbox's limits (Microsoft 365 and SMTP differ) is a proof-of-concept item.
+- Owner to confirm: making a family active again in QuickBooks puts a shared address back under two families, so
+  it is held again and the other family's access ends at the next refresh until staff decide.

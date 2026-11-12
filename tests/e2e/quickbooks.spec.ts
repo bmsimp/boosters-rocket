@@ -20,7 +20,7 @@ test("an Admin sees what is set for QuickBooks, and no inputs on the view", asyn
   await expect(page.getByText("Connected to E2E Sandbox Company")).toBeVisible();
   await expect(page.getByText("Sandbox (an Intuit test company)")).toBeVisible();
   await expect(page.getByText(LAYERED_WORDS)).toBeVisible();
-  await expect(page.getByText("2 families, 1 student, 1 parent; 1 customer outside the portal")).toBeVisible();
+  await expect(page.getByText("6 families, 1 student, 5 parents; 1 customer outside the portal")).toBeVisible();
   await expect(page.locator("main input:not([type=hidden])")).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText("9130000000000001");
   await expect(page.getByText("Disconnect", { exact: true })).toBeVisible(); // the closed section's summary; never opened
@@ -73,9 +73,9 @@ test("the three steps open in order, and a shape is previewed with the controls 
 
   // The saved layered shape, previewed: the kind and each select still hold the choice afterward.
   await page.getByRole("button", { name: "Preview" }).click();
-  await expect(page.getByText(/^2 families/)).toBeVisible();
+  await expect(page.getByText(/^6 families/)).toBeVisible();
   await expect(page.getByText(/^1 students/)).toBeVisible();
-  await expect(page.getByText(/^1 parents/)).toBeVisible();
+  await expect(page.getByText(/^5 parents/)).toBeVisible();
   await expect(page.getByText("1 customers outside the portal")).toBeVisible();
   await expect(layered).toBeChecked();
   await expect(family).toHaveValue("1");
@@ -100,7 +100,7 @@ test("the three steps open in order, and a shape is previewed with the controls 
   await type("Student").check();
   await page.getByRole("button", { name: "Preview" }).click();
   await expect(page.getByText("1 members (Leo Rivera)")).toBeVisible();
-  await expect(page.getByText("4 customers outside the portal")).toBeVisible();
+  await expect(page.getByText("12 customers outside the portal")).toBeVisible();
   await expect(page.getByText("The choice has changed since this preview.")).toHaveCount(0);
   await expect(flat).toBeChecked();
   await expect(type("Student")).toBeChecked();
@@ -112,8 +112,8 @@ test("the three steps open in order, and a shape is previewed with the controls 
   await expect(page.getByText("The choice has changed since this preview. Select Preview again to see what it would show.")).toBeVisible();
   await expect(page.getByText(/^1 members/)).toHaveCount(0);
   await page.getByRole("button", { name: "Preview" }).click();
-  await expect(page.getByText(/^2 members/)).toBeVisible();
-  await expect(page.getByText("3 customers outside the portal")).toBeVisible();
+  await expect(page.getByText(/^6 members/)).toBeVisible();
+  await expect(page.getByText("7 customers outside the portal")).toBeVisible();
   await expect(type("Parent")).toBeChecked();
   await expect(type("Student")).toBeChecked();
 

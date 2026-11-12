@@ -65,14 +65,30 @@ async function main() {
           ('11', 'Ana Rivera', true, '10', '2', 'ana@example.com', '555-0101', '0'),
           ('12', 'Leo Rivera', true, '10', '3', null, null, '0'),
           ('20', '<img src=x onerror=alert(1)> Family', true, null, '1', null, null, '0'),
-          ('30', 'Lincoln High', true, null, '4', null, null, '0')`;
+          ('30', 'Lincoln High', true, null, '4', null, null, '0'),
+          ('E2E-FAMILY', 'Quetzalcoatl Family', true, null, '1', null, null, '0'),
+          ('E2E-P1', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY', '2', 'zelda@example.com', null, '0'),
+          ('E2E-FAMILY-2', 'Second Family', true, null, '1', null, null, '0'),
+          ('E2E-P2', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY-2', '2', 'zelda@example.com', null, '0'),
+          ('40', 'Okafor Family', true, null, '1', null, null, '0'),
+          ('41', 'Sam Okafor', true, '40', '2', 'sam@example.com', null, '0'),
+          ('50', 'Lee Family', true, null, '1', null, null, '0'),
+          ('51', 'Sam Okafor', true, '50', '2', 'sam@example.com', null, '0')`;
+  // Zelda is in two families on purpose (the family chooser test), so staff have already said she is one person.
+  // Sam's address is under two families and waits for a decision (tests/e2e/parents.spec.ts decides and reverses it).
+  // The parents setting is cleared here and nowhere else: tests/e2e/parents.spec.ts switches sign-ins on, and that
+  // state must survive the second (desktop) pass of the run.
+  await sql`INSERT INTO held_address (email, approved_family_qbo_ids) VALUES ('zelda@example.com', ${sql.json(["E2E-FAMILY", "E2E-FAMILY-2"])})
+          ON CONFLICT (email) DO UPDATE SET approved_family_qbo_ids = EXCLUDED.approved_family_qbo_ids`;
+  await sql`DELETE FROM held_address WHERE email = 'sam@example.com'`;
+  await sql`DELETE FROM setting WHERE key IN ('parents.settings', 'parents.review_notice', 'parents.previous_company')`;
   await sql`INSERT INTO setting (key, value) VALUES ('membership.shape', ${sql.json({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   // The cache says which company it came from, as a real refresh records it; without this the pages treat it as unread.
   await sql`INSERT INTO setting (key, value) VALUES ('roster.source', ${sql.json({ realmId: "9130000000000001" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await sql`DELETE FROM job_run`;
-  await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '5 customers, 4 customer types', 'worker')`;
+  await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '13 customers, 4 customer types', 'worker')`;
   await sql.end();
 }
 

@@ -70,6 +70,21 @@ and the page. Move an item to **Done** when it ships.
   to enter values and use Send test email "on the setup page", but on a finished site that page is gone and the
   place is Mail. Say "in the portal" or name both.
 
+### Parents and Parent sign-ins (`/staff/parents`, `/staff/settings/parents`)
+- **No design of their own** (2026-11-12). Both pages, a person's page and the match review reuse the roster's
+  list styles: labels and values, and lines of grey text under a name.
+- **The To review items have no visual grouping** (2026-11-12, `/staff/parents`). Each item stacks the address,
+  the names, the families, a note field and two buttons, with nothing to show where one item ends and the next
+  begins, or that the note belongs to the buttons.
+- **The clean-up preview won't scale** (2026-11-12, `/staff/settings/parents/setup`, step 1). It is a heading per
+  problem and a comma-separated list of names under it. A real roster with dozens of names per heading needs lists
+  that open, with counts in the headings.
+- **The match review needs a table on wide screens** (2026-11-12, `/staff/settings/parents/matches`). The old
+  family, the suggestion, the reason and the choice are stacked lines; side by side they would compare at a glance.
+- **The staff menu has eleven entries** (2026-11-12). Home, Roster, Parents, Staff, Roles, Club, Sign-in, Mail,
+  QuickBooks, Parent sign-ins and Audit, for an Admin. It needs grouping; this ties in with the single Settings page
+  above.
+
 ## Done
 - **The Mail page's instructions didn't look like instructions** (2026-11-10, Mail and setup Step 2). The owner
   followed "Outgoing mail needs attention" > **Open mail settings** and found a form; the step that has to come

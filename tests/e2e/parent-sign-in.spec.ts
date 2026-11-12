@@ -36,13 +36,13 @@ test("a parent signs in with an emailed code, switches family, and signs out", a
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page).toHaveURL(/\/choose-family$/);
-  await page.getByRole("button", { name: "Family account E2E-FAMILY", exact: true }).click();
+  await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
   await expect(page).toHaveURL(/localhost:3100\/$/);
-  await expect(page.getByText("Viewing Family account E2E-FAMILY.")).toBeVisible();
+  await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
 
   await page.getByRole("link", { name: "Switch family" }).click();
-  await page.getByRole("button", { name: "Family account E2E-FAMILY-2", exact: true }).click();
-  await expect(page.getByText("Viewing Family account E2E-FAMILY-2.")).toBeVisible();
+  await page.getByRole("button", { name: "Second Family", exact: true }).click();
+  await expect(page.getByText("Viewing Second Family.")).toBeVisible();
 
   await page.goto("/display");
   await page.getByRole("button", { name: "Sign out" }).click();
