@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
 
@@ -14,6 +14,24 @@ test.describe.configure({ mode: "serial" });
 // seeded address would land in the sink that spec reads.
 
 const mark = async () => Number((await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`)[0]!.id);
+const HELD_DETAIL = "This person's email address is under more than one family in QuickBooks. Once parent sign-ins are on, nobody at that address can sign in to those families until someone with access to Parents says whether it is one person.";
+
+/**
+ * The decide test's clean-up, run whatever happened before it: when a decision on Sam's address is still there, it is
+ * reversed through the Parents page. Not through the database: only the real reverse runs the reconcile that closes
+ * the sign-ins the decision opened.
+ */
+async function reverseSamIfDecided(page: Page) {
+  const [row] = await sql`SELECT 1 FROM held_address WHERE email = 'sam@example.com'
+    AND (jsonb_array_length(approved_family_qbo_ids) > 0 OR jsonb_array_length(rejected_family_qbo_ids) > 0)`;
+  if (!row) return;
+  await page.goto("/staff/parents");
+  const decided = page.getByRole("region", { name: "Decided" }).getByRole("listitem").filter({ hasText: "sam@example.com" });
+  await decided.getByText("Reverse this decision").click();
+  await decided.getByLabel("Why? (staff only)").fill("Reversed by the e2e run.");
+  await decided.getByRole("button", { name: "Reverse", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "To review (1)" })).toBeVisible();
+}
 
 test("an Admin previews, then switches parent sign-ins on (and finds them on the second time)", async ({ page }) => {
   await page.goto("/staff/settings/parents/setup?step=preview");
@@ -61,39 +79,43 @@ test("the staff home and the Parents page show the held address; a refusal keeps
   await expect(waiting.getByText("Okafor Family (held)")).toBeVisible();
   await expect(waiting.getByText("Lee Family (held)")).toBeVisible();
 
-  // No note: refused.
-  await waiting.getByRole("button", { name: "Same person", exact: true }).click();
-  await expect(waiting.getByRole("alert")).toContainText("Add a short note saying how you know.");
-
-  // A note, but the address stopped being under two families after the page loaded: refused, and the note stays.
-  const note = waiting.getByLabel("How do you know? (staff only)");
-  await note.fill("Sam confirmed by phone.");
-  await sql`UPDATE qbo_customer SET active = false WHERE qbo_id = '51'`;
   try {
+    // No note: refused.
     await waiting.getByRole("button", { name: "Same person", exact: true }).click();
-    await expect(waiting.getByRole("alert")).toContainText("That address isn't held any more. Reload the page.");
+    await expect(waiting.getByRole("alert")).toContainText("Add a short note saying how you know.");
+
+    // A note, but the address stopped being under two families after the page loaded: refused, and the note stays.
+    const note = waiting.getByLabel("How do you know? (staff only)");
+    await note.fill("Sam confirmed by phone.");
+    await sql`UPDATE qbo_customer SET active = false WHERE qbo_id = '51'`;
+    try {
+      await waiting.getByRole("button", { name: "Same person", exact: true }).click();
+      await expect(waiting.getByRole("alert")).toContainText("That address isn't held any more. Reload the page.");
+    } finally {
+      await sql`UPDATE qbo_customer SET active = true WHERE qbo_id = '51'`;
+    }
+    await expect(note).toHaveValue("Sam confirmed by phone.");
+
+    const since = await mark();
+    await waiting.getByRole("button", { name: "Same person", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "To review (0)" })).toBeVisible();
+    const decided = page.getByRole("region", { name: "Decided" }).getByRole("listitem").filter({ hasText: "sam@example.com" });
+    await expect(decided).toContainText("Same person in Okafor Family, Lee Family.");
+    await expect(decided).toContainText("Sam confirmed by phone.");
+    const rows = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.hold.decided', 'parent.access.granted') ORDER BY id`;
+    expect(rows.map((r) => r.action)).toEqual(["parent.hold.decided", "parent.access.granted", "parent.access.granted"]);
+    expect(rows[0]!.after).toMatchObject({ decision: "same_person", familyQboIds: ["40", "50"], note: "Sam confirmed by phone." });
+    expect(rows[1]!.after).toMatchObject({ cause: "hold" });
+
+    // Put it back, so the second pass of the run starts from the same place.
+    await decided.getByText("Reverse this decision").click();
+    await decided.getByLabel("Why? (staff only)").fill("Reversed by the e2e run.");
+    await decided.getByRole("button", { name: "Reverse", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "To review (1)" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Decided" }).getByText("sam@example.com")).toHaveCount(0);
   } finally {
-    await sql`UPDATE qbo_customer SET active = true WHERE qbo_id = '51'`;
+    await reverseSamIfDecided(page);
   }
-  await expect(note).toHaveValue("Sam confirmed by phone.");
-
-  const since = await mark();
-  await waiting.getByRole("button", { name: "Same person", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "To review (0)" })).toBeVisible();
-  const decided = page.getByRole("region", { name: "Decided" }).getByRole("listitem").filter({ hasText: "sam@example.com" });
-  await expect(decided).toContainText("Same person in Okafor Family, Lee Family.");
-  await expect(decided).toContainText("Sam confirmed by phone.");
-  const rows = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.hold.decided', 'parent.access.granted') ORDER BY id`;
-  expect(rows.map((r) => r.action)).toEqual(["parent.hold.decided", "parent.access.granted", "parent.access.granted"]);
-  expect(rows[0]!.after).toMatchObject({ decision: "same_person", familyQboIds: ["40", "50"], note: "Sam confirmed by phone." });
-  expect(rows[1]!.after).toMatchObject({ cause: "hold" });
-
-  // Put it back, so the second pass of the run starts from the same place.
-  await decided.getByText("Reverse this decision").click();
-  await decided.getByLabel("Why? (staff only)").fill("Reversed by the e2e run.");
-  await decided.getByRole("button", { name: "Reverse", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "To review (1)" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Decided" }).getByText("sam@example.com")).toHaveCount(0);
 });
 
 test("a person's page: block needs a reason, block, then unblock; the visit is in the audit log", async ({ page }) => {
@@ -103,29 +125,36 @@ test("a person's page: block needs a reason, block, then unblock; the visit is i
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Ana Rivera");
   await expect(page.getByRole("button", { name: "Resend welcome email" })).toBeVisible(); // not selected: it would send an email
 
-  const block = page.getByRole("region", { name: "Block", exact: true });
-  await block.getByRole("button", { name: "Block", exact: true }).click();
-  await expect(block.getByRole("alert")).toContainText("Say why, in a few words. Only staff see it.");
-  await block.getByLabel("Why? (staff only)").fill("e2e block");
-  await block.getByRole("button", { name: "Block", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Blocked", exact: true })).toBeVisible();
-  await expect(page.getByText(/Reason: e2e block/)).toBeVisible();
-  await expect(page.getByText("This person is blocked, so no email can be sent.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Resend welcome email" })).toHaveCount(0);
+  try {
+    const block = page.getByRole("region", { name: "Block", exact: true });
+    await block.getByRole("button", { name: "Block", exact: true }).click();
+    await expect(block.getByRole("alert")).toContainText("Say why, in a few words. Only staff see it.");
+    await block.getByLabel("Why? (staff only)").fill("e2e block");
+    await block.getByRole("button", { name: "Block", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Blocked", exact: true })).toBeVisible();
+    await expect(page.getByText(/Reason: e2e block/)).toBeVisible();
+    await expect(page.getByText("This person is blocked, so no email can be sent.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Resend welcome email" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Unblock", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Block", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Unblock", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Resend welcome email" })).toBeVisible();
+    await page.getByRole("button", { name: "Unblock", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Block", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Unblock", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Resend welcome email" })).toBeVisible();
 
-  const rows = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.read', 'parent.block', 'parent.unblock') ORDER BY id`;
-  expect(rows.map((r) => r.action)).toEqual(expect.arrayContaining(["parent.read", "parent.block", "parent.unblock"]));
-  expect(JSON.stringify(rows.filter((r) => r.action === "parent.block").map((r) => r.after))).toContain("e2e block");
-  const [ana] = await sql`SELECT blocked, blocked_reason FROM parent WHERE email = 'ana@example.com'`;
-  expect({ ...ana }).toEqual({ blocked: false, blocked_reason: null });
+    const rows = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.read', 'parent.block', 'parent.unblock') ORDER BY id`;
+    expect(rows.map((r) => r.action)).toEqual(expect.arrayContaining(["parent.read", "parent.block", "parent.unblock"]));
+    expect(JSON.stringify(rows.filter((r) => r.action === "parent.block").map((r) => r.after))).toContain("e2e block");
+    const [ana] = await sql`SELECT blocked, blocked_reason FROM parent WHERE email = 'ana@example.com'`;
+    expect({ ...ana }).toEqual({ blocked: false, blocked_reason: null });
+  } finally {
+    // Whatever happened above, Ana ends unblocked. Through the database: unblocking changes no link and runs no
+    // reconcile, and with welcome emails off it owes nothing, so these columns are all an unblock changes.
+    await sql`UPDATE parent SET blocked = false, blocked_at = null, blocked_by = null, blocked_reason = null, updated_at = now()
+      WHERE email = 'ana@example.com' AND blocked`;
+  }
 });
 
-test("a family's roster page shows who can sign in and why someone can't; Needs attention names no held address", async ({ page }) => {
+test("a family's roster page shows who can sign in and why someone can't; Needs attention lists the held item without the address", async ({ page }) => {
   await page.goto("/staff/roster/40");
   await expect(page.getByRole("heading", { name: "Portal sign-ins" })).toBeVisible();
   const signins = page.getByRole("region", { name: "Portal sign-ins" });
@@ -135,6 +164,9 @@ test("a family's roster page shows who can sign in and why someone can't; Needs 
   await page.goto("/staff/roster");
   const attention = page.getByRole("region", { name: /^Needs attention/ });
   await expect(attention).toBeVisible();
+  const held = attention.getByRole("listitem").filter({ hasText: HELD_DETAIL });
+  await expect(held).toHaveCount(1);
+  await expect(held).toContainText("Sam Okafor");
   await expect(attention).not.toContainText("sam@example.com");
 });
 

@@ -42,7 +42,7 @@ Facts from the owner that shape the design:
 | 3 | The same address under different families | Held for all of them until staff decide. |
 | 4 | Welcome email | Automatic, behind its own Admin switch; staff can resend. |
 | 5 | Losing access | Follows QuickBooks at each refresh. "No active students, no access" is a club setting, off by default. |
-| 6 | Where the sign-in email lives | QuickBooks only. The portal's change-my-email feature is off until the portal can write to QuickBooks. |
+| 6 | Where the sign-in email lives | QuickBooks only. The portal has no page for changing a parent's address, for parents or staff, until the portal can write to QuickBooks. |
 | 7 | A different QuickBooks company | All family access ends and people are kept; a match review carries decisions over. |
 | 8 | Other membership shapes | Supported, per the table in §1. |
 | 9 | Staff permissions | Switches are Admin only; parent access actions are a grantable permission. |
@@ -180,13 +180,16 @@ A family link follows its QuickBooks candidate. When that candidate's address ch
 - Links closed because a different company was connected (§6) take no part in matching by QuickBooks ID: their
   IDs belong to the old company.
 
-The portal's own change-my-email feature (parent or staff) is switched off for people whose links come from
-QuickBooks. The pages say that the address is changed in QuickBooks.
+A person's address comes from QuickBooks. The portal has no page where a parent or staff member changes it; the
+Parents pages say that names and addresses are changed in QuickBooks. The library code for changing an address
+in the portal (`changeParentEmailByStaff` and `src/lib/parents/email-change.ts`) is not called by any page and
+is left for the spec that writes to QuickBooks.
 
 ### Closing a link
 
 Closing a link ends that person's sessions for that family at once. When the cause goes away (the record is
-made active again, the address is restored) the link opens again at the next reconcile, with no new welcome.
+made active again, the address is restored) the link opens again at the next reconcile. Someone already
+welcomed gets no new welcome; someone never welcomed is owed one when welcomes are on.
 
 ### Welcome emails
 
@@ -335,7 +338,9 @@ In the step that already clears the roster and the shape:
   approvals and welcome dates in the snapshot come back only through an accepted match.
 
 A roster refresh that finds its cache came from a different company (because the clean-up at connect time failed
-or never ran) runs the same clean-up itself, in the same transaction, before it stores the new roster.
+or never ran) runs the same clean-up itself, in the same transaction, before it stores the new roster. The
+clean-up removes the shape, so that refresh stores the new roster without contact details (as with no shape),
+and the shape must be chosen again before parent sign-ins can be switched on.
 
 A link from the previous company keeps that company's family ID, which means some other family (or none) in the
 new one. Such links are left out of a family's roster page and of Needs attention, and a person's page lists each
@@ -410,11 +415,12 @@ never stops the QuickBooks jobs.
 
 ### Existing code
 
-`src/lib/parents/people.ts` already holds block, unblock, resend-welcome, remove-guardian and
-students-changed functions that no page calls yet. This piece uses or replaces them; the review items recorded
-against that library (a welcome sent after a block, the lock order between block and confirm, ignored send
-results) are fixed as part of it. Sign-in, the family chooser and sessions are not changed, beyond showing
-family names.
+`src/lib/parents/people.ts` holds block and unblock, which the Parents pages call; blocking takes a reason.
+Resend welcome lives with the welcome emails in `src/lib/parents/welcome.ts`, and a person's page calls it. The
+functions for inviting a guardian by hand, removing one, and closing a family's links when its students changed
+were removed: links now come only from the reconcile. The review items recorded against that library (a welcome
+sent after a block, the lock order between block and confirm, ignored send results) are fixed. Sign-in, the
+family chooser and sessions are not changed, beyond showing family names and refusing while sign-ins are off.
 
 ### Testing
 
@@ -446,8 +452,8 @@ To go in the user documentation when it is written:
 
 ## Open questions for the plan
 
-- Settled in the plan: the parser splits an email field on commas, semicolons and spaces, in any mix. A sandbox
-  check of what QuickBooks actually stores is a proof-of-concept item.
+- The parser splits an email field on commas, semicolons and spaces, in any mix. A sandbox check of what
+  QuickBooks actually stores is a proof-of-concept item.
 - The sending rate for welcome emails is five a minute (one batch per worker wake). Whether that suits the
   mailbox's limits (Microsoft 365 and SMTP differ) is a proof-of-concept item.
 - Owner to confirm: making a family active again in QuickBooks puts a shared address back under two families, so

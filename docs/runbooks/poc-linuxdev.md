@@ -284,8 +284,9 @@ section 3, because they use the staff app. Deploy this version (the one with the
 
 **Switching companies.** Disconnecting and then connecting a different QuickBooks company (for example, moving from the
 sandbox to the band's real books) clears the roster and the membership shape, which must be chosen again in step 3.
-Any portal sign-ins attached to the old company's customer IDs still point at those numbers, which mean something else
-(or nothing) in the new company, so remove test sign-ins before switching.
+It also closes every parent sign-in link and signs parents out, switches parent sign-ins and welcome emails off,
+and keeps a list of the old company's families, and who could sign in to them, for the match review under
+**Parent sign-ins**. That list is deleted 90 days after the switch, or sooner by an Admin.
 
 The worker is verified to keep running with no input attached and to stop cleanly on `docker stop` (exit code 0,
 `worker stopped` in its log). That was checked on linuxdev on 2026-11-11 with the script alone in a `node:26-slim`
@@ -306,7 +307,8 @@ record and a code; nobody seeds them by hand. Do this after the QuickBooks steps
    cd ~/booster-rocket
    docker compose -f docker-compose.poc.yml --env-file .env.poc exec -T db pg_dump -U booster -d booster > ~/booster-rocket-before-parents-from-quickbooks.sql
    ```
-   As before, the file goes in your home folder, not the checkout. Then deploy (section 8).
+   As before, the file goes in your home folder, not the checkout. The restore steps are in section 4,
+   "Upgrading" (step 5), with this file name in place of the one there. Then deploy (section 8).
 2. In the sandbox company, give the Parent customer `Test Parent` an email address you can read.
 3. Choose **Roster** in the staff menu, then **Refresh now**.
 4. Choose **Parent sign-ins** in the staff menu (Admins only), then **Set up**.
@@ -338,11 +340,16 @@ person, with block and unblock on each person's page. Names and addresses are ch
    `--family POC-FAMILY-2` adds a second family to the same person.
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
 
-On this version, parents are added only with this seed script: the staff pages for people come with the roster work.
-The script sends no welcome email; tell the parent to go to `/sign-in` and ask for a code. It has no way to remove a
-parent. To stop one signing in, block them (below).
+The seed script makes a sign-in by hand, for testing before parent sign-ins are switched on. It sends no welcome
+email; tell the parent to go to `/sign-in` and ask for a code. Once parent sign-ins are switched on, sign-ins come
+from QuickBooks, and a hand-made one that QuickBooks doesn't list stops working (section 5, "Parent sign-ins from
+QuickBooks").
 
-**Blocking a parent in an emergency.** There is no staff page for people yet. On linuxdev:
+**Blocking a parent.** Choose **Parents** in the staff menu, open the person, enter a reason under
+**Why? (staff only)** and choose **Block**; **Unblock** on the same page gives back the same access. Both are in the
+audit log (`parent.block`, `parent.unblock`), and blocking signs the person out at once.
+
+**Last resort, only if the staff pages are unavailable.** On linuxdev:
 ```bash
 cd ~/booster-rocket
 docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update parent set blocked = true where email = '<address>';"
