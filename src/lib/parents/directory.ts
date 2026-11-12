@@ -1,6 +1,6 @@
 // Privacy: `listPeople`, `getPerson`, `heldReview` and `familySignins` with `detailed: true` return other families' names
 // or a block reason. Use them only on pages behind `Parents.ReadWrite`, never behind `Roster.Read`.
-import { and, eq, inArray, max } from "drizzle-orm";
+import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, heldAddress, parent, qboCustomer, staffUser, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
 import { familyLabel } from "@/app/components/family-label";
@@ -41,6 +41,9 @@ export async function familyNames(ids: string[]): Promise<Map<string, string>> {
 }
 
 const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
+/** The label for a link closed by a company change, in place of a family name. */
+export const PREVIOUS_COMPANY_FAMILY = "A family in the previous QuickBooks company";
+const oldCompany = (l: { disabledReason: DisabledReason | null }) => l.disabledReason === "company_changed";
 
 async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   const persons = await db.select().from(parent).where(where).orderBy(parent.name, parent.email);
@@ -52,12 +55,14 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
       .where(and(eq(auditLog.action, "signin"), eq(auditLog.door, "parent"), inArray(auditLog.targetId, ids))).groupBy(auditLog.targetId),
     loadDecision().then((l) => l?.decision.held ?? []),
   ]);
-  const names = await familyNames(links.map((l) => l.familyQboId));
+  // A link from a previous company holds that company's family ID, which names some other family (or none) in the
+  // connected one: it is never looked up in the cache.
+  const names = await familyNames(links.filter((l) => !oldCompany(l)).map((l) => l.familyQboId));
   const last = new Map(signins.map((s) => [s.id, s.at]));
   return persons.map((p) => ({
     parentId: p.id, name: p.name, email: p.email, blocked: p.blocked,
-    families: links.filter((l) => l.parentId === p.id).sort((a, b) => numeric(a.familyQboId, b.familyQboId)).map((l) => ({
-      familyQboId: l.familyQboId, familyName: names.get(l.familyQboId)!,
+    families: links.filter((l) => l.parentId === p.id).sort((a, b) => Number(oldCompany(a)) - Number(oldCompany(b)) || numeric(a.familyQboId, b.familyQboId)).map((l) => ({
+      familyQboId: l.familyQboId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!,
       ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked,
         otherFamilies: held.find((h) => h.email === p.email)?.families.filter((f) => f.qboId !== l.familyQboId).map((f) => f.name) ?? null }) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,
@@ -84,7 +89,9 @@ export async function getPerson(parentId: string): Promise<PersonDetail | null> 
  */
 export async function familySignins(familyQboId: string, o: { detailed: boolean }): Promise<FamilySignin[]> {
   const [links, loaded] = await Promise.all([
-    db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId)).where(eq(guardian.familyQboId, familyQboId)),
+    // A link from a previous company only shares this family's ID: it is not one of this family's sign-ins.
+    db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+      .where(and(eq(guardian.familyQboId, familyQboId), sql`${guardian.disabledReason} is distinct from 'company_changed'`)),
     loadDecision(),
   ]);
   const others = (email: string | null) => (!o.detailed || !email ? null

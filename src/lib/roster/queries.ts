@@ -1,4 +1,4 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboCustomer, qboCustomerType, jobRun, guardian, parent } from "@/lib/db/schema";
 import { connectionView, getConnection } from "@/lib/quickbooks/connection";
@@ -21,8 +21,9 @@ const customers = async (): Promise<Cust[]> => (await db.select().from(qboCustom
   ({ qboId: c.qboId, displayName: c.displayName, active: c.active, parentQboId: c.parentQboId, typeQboId: c.typeQboId, email: c.email, phone: c.phone }));
 const types = async (): Promise<TypeRow[]> => (await db.select().from(qboCustomerType)).map((t) => ({ qboId: t.qboId, name: t.name, active: t.active }))
   .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+/** The portal's family links, leaving out those from a previous company: their family IDs name other families here. */
 const signIns = async (): Promise<SignIn[]> => db.select({ guardianId: guardian.id, familyQboId: guardian.familyQboId, name: parent.name, email: parent.email, status: guardian.status })
-  .from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id));
+  .from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id)).where(sql`${guardian.disabledReason} is distinct from 'company_changed'`);
 
 /**
  * Everything the roster pages and the settings view show. A broken shape gives no roster rather than a wrong one (spec §1

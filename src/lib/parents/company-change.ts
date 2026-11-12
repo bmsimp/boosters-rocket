@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { guardian, heldAddress, parent, parentAuthSession, qboCustomer, setting } from "@/lib/db/schema";
+import { guardian, heldAddress, parent, parentAuthSession, qboCustomer, setting, signinCode } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getParentSettings, putParentSettings, PARENTS_KEY } from "./settings";
 
@@ -56,21 +56,28 @@ export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toReal
   const approvals = (await tx.select().from(heldAddress).orderBy(heldAddress.email)).filter((h) => h.approvedFamilyQboIds.length)
     .map((h) => ({ email: h.email, familyQboIds: h.approvedFamilyQboIds }));
 
+  // A link that had already closed holds the old company's IDs too, so it is marked as well: the reconcile then never
+  // matches it by those IDs (a new company's customer 13 in family 12 is somebody else). What it was before it closed stays.
+  const closedMarked = await tx.update(guardian).set({ disabledReason: "company_changed", updatedAt: new Date() })
+    .where(and(eq(guardian.status, "disabled"), sql`${guardian.disabledReason} is distinct from 'company_changed'`)).returning({ id: guardian.id });
   for (const { g } of open) {
-    await tx.update(guardian).set({ status: "disabled", disabledReason: "company_changed", statusBeforeDisable: g.status === "disabled" ? null : g.status, updatedAt: new Date() })
+    await tx.update(guardian).set({ status: "disabled", disabledReason: "company_changed", statusBeforeDisable: g.status as "invited" | "active", updatedAt: new Date() })
       .where(eq(guardian.id, g.id));
   }
   const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
+  const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
   const holds = await tx.delete(heldAddress).returning({ email: heldAddress.email });
   const welcomed = await tx.update(parent).set({ welcomedAt: null, updatedAt: new Date() }).where(isNotNull(parent.welcomedAt)).returning({ id: parent.id });
   await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null });
   const before = await getParentSettings(tx);
   await putParentSettings(tx, { ...before, signin: false, welcome: false });
+  const replaced = (await tx.select({ key: setting.key }).from(setting).where(eq(setting.key, PREVIOUS_COMPANY_KEY))).length > 0;
   await putPreviousCompany(tx, { realmId: o.fromRealmId, newRealmId: o.toRealmId, at: new Date().toISOString(), families, approvals });
   await writeAudit({ actor: o.actor, action: "parent.access.cleared", targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
     before: { signin: before.signin, welcome: before.welcome },
-    after: { reason: "different_company", signin: false, welcome: false, links: open.length, people: new Set(open.map((r) => r.p.id)).size,
-      sessionsEnded: ended.length, holdsDeleted: holds.length, welcomesCleared: welcomed.length, familiesKept: families.length, approvalsKept: approvals.length } }, tx);
+    after: { reason: "different_company", signin: false, welcome: false, links: open.length, closedLinksMarked: closedMarked.length,
+      people: new Set(open.map((r) => r.p.id)).size, sessionsEnded: ended.length, codesDeleted: codes.length, holdsDeleted: holds.length,
+      welcomesCleared: welcomed.length, familiesKept: families.length, approvalsKept: approvals.length, ...(replaced ? { snapshotReplaced: true } : {}) } }, tx);
 }
 
 export async function deletePreviousCompany(o: { actor: Actor; ip: string | null; permission?: string; reason: "admin" | "expired" }): Promise<boolean> {
@@ -85,7 +92,11 @@ export async function deletePreviousCompany(o: { actor: Actor; ip: string | null
 
 /** The snapshot holds names and addresses from a company the club left; it goes 90 days after the switch (spec §6). */
 export async function expirePreviousCompany(now: Date = new Date()): Promise<boolean> {
-  const prev = await getPreviousCompany();
-  if (!prev || now.getTime() - Date.parse(prev.at) < PREVIOUS_COMPANY_KEEP_MS) return false;
+  const [row] = await db.select().from(setting).where(eq(setting.key, PREVIOUS_COMPANY_KEY));
+  if (!row) return false;
+  // One that can't be read still holds whatever it held: it goes 90 days after it was last written.
+  const parsed = stored.safeParse(row.value);
+  const at = parsed.success ? Date.parse(parsed.data.at) : row.updatedAt.getTime();
+  if (now.getTime() - at < PREVIOUS_COMPANY_KEEP_MS) return false;
   return deletePreviousCompany({ actor: { door: "system", id: null, label: "worker" }, ip: null, reason: "expired" });
 }

@@ -16,6 +16,7 @@ export type MatchSuggestion = {
   decision: "matched" | "rejected" | null; matchedTo: { qboId: string; name: string } | null;
 };
 type Result = { ok: true } | { ok: false; errors: string[] };
+const CARRIED_NOTE = "Carried over from the previous QuickBooks company by an accepted match.";
 
 const sameName = (a: string, b: string) => a.trim().replace(/\s+/g, " ").toLowerCase() === b.trim().replace(/\s+/g, " ").toLowerCase();
 const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
@@ -102,13 +103,18 @@ export async function decideMatch(oldFamilyQboId: string, newFamilyQboId: string
     }
     if (!families.some((f) => f.qboId === newFamilyQboId)) return { ok: false, errors: ["Choose a family from the list."] };
     if (prev.families.some((f) => f.matchedTo === newFamilyQboId)) return { ok: false, errors: ["That family is already matched to another one."] };
-    await tx.insert(familyMatch).values({ oldRealmId: prev.realmId, oldFamilyQboId, newRealmId: prev.newRealmId, newFamilyQboId, decidedBy: o.actor.id });
+    // One match per old family for good; a club that went back to that company and away again decides it afresh.
+    const now = new Date();
+    await tx.insert(familyMatch).values({ oldRealmId: prev.realmId, oldFamilyQboId, newRealmId: prev.newRealmId, newFamilyQboId, decidedBy: o.actor.id, decidedAt: now })
+      .onConflictDoUpdate({ target: [familyMatch.oldRealmId, familyMatch.oldFamilyQboId], set: { newRealmId: prev.newRealmId, newFamilyQboId, decidedBy: o.actor.id, decidedAt: now } });
     const carried = prev.approvals.filter((x) => x.familyQboIds.includes(oldFamilyQboId));
     for (const a of carried) {
       await tx.insert(heldAddress).values({ email: a.email }).onConflictDoNothing();
       const [row] = await tx.select().from(heldAddress).where(eq(heldAddress.email, a.email)).for("update");
+      if (row!.approvedFamilyQboIds.includes(newFamilyQboId)) continue;
       const approved = [...new Set([...row!.approvedFamilyQboIds, newFamilyQboId])].sort(numeric);
-      await tx.update(heldAddress).set({ approvedFamilyQboIds: approved, updatedAt: new Date() }).where(eq(heldAddress.email, a.email));
+      await tx.update(heldAddress).set({ approvedFamilyQboIds: approved, decidedBy: o.actor.id, decidedAt: now, note: row!.note ?? CARRIED_NOTE, updatedAt: now })
+        .where(eq(heldAddress.email, a.email));
     }
     let welcomesRestored = 0;
     for (const p of old.people.filter((x) => x.welcomedAt)) {

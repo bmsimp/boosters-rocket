@@ -6,7 +6,7 @@ import { getConnection } from "@/lib/quickbooks/connection";
 import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
-import { ROSTER_JOB, setRosterSource } from "./source";
+import { clearRosterOfOtherCompanyLocked, ROSTER_JOB, setRosterSource } from "./source";
 import { reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
 
 export { ROSTER_LOCK, ROSTER_JOB };
@@ -97,10 +97,15 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       // A savepoint: a failure here undoes the cache changes and the parent-access changes together, so the roster and
       // who can sign in never disagree (parents spec §2), and the failed run can still be recorded.
       await tx.transaction(async (sp) => {
+        // The cache came from another company and connecting didn't clear it (it failed, or the process stopped): clear
+        // it now, with that company's parent access, in the same savepoint as the swap. Its shape goes with it, so the
+        // rows are stored with no contact details, as with no shape, and the reconcile below does nothing.
+        const cleared = await clearRosterOfOtherCompanyLocked(sp, realmId, { actor: o.actor, ip: o.ip, keepRunId: run!.id });
+        const rows = cleared ? customerRows.map((r) => ({ ...r, email: null, phone: null })) : customerRows;
         await sp.delete(qboCustomerType);
         await sp.delete(qboCustomer);
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
-        for (let i = 0; i < customerRows.length; i += CHUNK) await sp.insert(qboCustomer).values(customerRows.slice(i, i + CHUNK)).onConflictDoNothing();
+        for (let i = 0; i < rows.length; i += CHUNK) await sp.insert(qboCustomer).values(rows.slice(i, i + CHUNK)).onConflictDoNothing();
         await setRosterSource(sp, realmId);
         try { await reconcileAccess(sp, { cause: `roster.refresh#${run!.id}` }); } catch { throw new ReconcileFailed(); }
       });

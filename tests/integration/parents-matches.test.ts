@@ -7,11 +7,12 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMatch, guardian, heldAddress, parent, qboConnection } from "@/lib/db/schema";
+import { auditLog, familyMatch, guardian, heldAddress, parent, qboConnection, setting } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { runReconcile } from "@/lib/parents/reconcile";
-import { deletePreviousCompany } from "@/lib/parents/company-change";
+import { deletePreviousCompany, PREVIOUS_COMPANY_KEY } from "@/lib/parents/company-change";
 import { acceptStrongMatches, decideMatch, matchReview } from "@/lib/parents/matches";
 import { resetDb } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
@@ -71,6 +72,27 @@ describe("the match review", () => {
     await seedParentSettings({ signin: true, welcome: true });
     const r = await runReconcile({ cause: "test" });
     expect(r).toMatchObject({ granted: 3, welcomeOwed: 0 });                                             // Ana in both, Mei in one; nobody is welcomed twice
+  });
+
+  it("a carried approval says who carried it and why, and keeps the note of a real decision", async () => {
+    await db.insert(heldAddress).values({ email: "mei@example.com", note: "Real decision." });
+    const snap = (await db.select().from(setting).where(eq(setting.key, PREVIOUS_COMPANY_KEY)))[0]!.value as { approvals: unknown[] };
+    await db.update(setting).set({ value: { ...snap, approvals: [...snap.approvals, { email: "mei@example.com", familyQboIds: ["20"] }] } }).where(eq(setting.key, PREVIOUS_COMPANY_KEY));
+    expect(await decideMatch("12", "87", settingsAdmin)).toEqual({ ok: true });
+    expect(await decideMatch("20", "90", settingsAdmin)).toEqual({ ok: true });
+    const rows = new Map((await db.select().from(heldAddress)).map((h) => [h.email, h]));
+    expect(rows.get("ana@example.com")).toMatchObject({ approvedFamilyQboIds: ["87", "90"], decidedBy: admin.actor.id, note: "Carried over from the previous QuickBooks company by an accepted match." });
+    expect(rows.get("ana@example.com")!.decidedAt).not.toBeNull();
+    expect(rows.get("mei@example.com")).toMatchObject({ approvedFamilyQboIds: ["90"], decidedBy: admin.actor.id, note: "Real decision." });
+  });
+
+  it("matching a family again after the club went back and forth between companies replaces the earlier match", async () => {
+    await db.insert(familyMatch).values({ oldRealmId: "1111", oldFamilyQboId: "12", newRealmId: "9999", newFamilyQboId: "5", decidedBy: null, decidedAt: new Date("2026-01-01T00:00:00Z") });
+    expect(await decideMatch("12", "87", settingsAdmin)).toEqual({ ok: true });
+    const rows = await db.select().from(familyMatch);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ oldRealmId: "1111", oldFamilyQboId: "12", newRealmId: "2222", newFamilyQboId: "87", decidedBy: admin.actor.id });
+    expect(rows[0]!.decidedAt.getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
 
   it("a person who is not part of an accepted match is new: owed a welcome once welcomes are on", async () => {
