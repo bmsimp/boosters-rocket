@@ -201,6 +201,11 @@ any step already completed.
   cache, the membership shape (customer type IDs belong to one company) and the roster's run history, and records
   `roster.cleared`. Reconnecting the same company clears nothing. Portal sign-ins keep the QuickBooks IDs they carry;
   what happens to them when the company changes is decided with the next piece.
+- **A connect refused after Intuit issued tokens leaves no grant behind.** When the code was exchanged and the portal
+  then doesn't keep the tokens (another company got connected, or the keys changed, while Intuit was answering; or
+  storing them failed), it asks Intuit to revoke them. This is best effort: it never changes the refusal the Admin
+  sees, and the audit row records whether Intuit confirmed it. A return refused before the exchange (a bad or stale
+  `state`, a refusal at Intuit, a company ID that isn't one) has no tokens to revoke.
 - **Disconnect** asks Intuit to revoke the tokens, then deletes them from the portal. The client ID and
   secret are kept. The cache is kept but every roster page says it is no longer current, with the date.
 - All QuickBooks calls happen on the server. The browser never receives a token or the client secret, and no
@@ -311,7 +316,7 @@ Audited, with the actor, the target and the request IP:
 |---|---|
 | `settings.quickbooks.save` | The client ID, secret or environment was saved. Records that the secret changed, never the secret |
 | `quickbooks.connect` | A company was connected. Records the company's name, ID and environment |
-| `quickbooks.connect_refused` | A return from Intuit was refused (bad or stale `state`, a different company, Intuit said no) |
+| `quickbooks.connect_refused` | A return from Intuit was refused (bad or stale `state`, a different company, Intuit said no). Records the reason, Intuit's error code when it gave one, and, when tokens had been issued and were not kept, `revoked`: whether Intuit confirmed revoking them |
 | `quickbooks.disconnect` | The connection was removed |
 | `settings.membership.save` | The shape was saved. Records the shape before and after, with type names |
 | `quickbooks.token_refresh.failed` | A token refresh failed. Records Intuit's error code. Always recorded as the worker, whoever's request needed the refresh, and only when the error differs from the one already recorded |

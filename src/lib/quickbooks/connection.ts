@@ -88,6 +88,22 @@ export async function saveQboApp(d: QboAppDraft, o: QboOp): Promise<{ ok: true }
   });
 }
 
+/**
+ * Asks Intuit to revoke a refresh token (and the access token that came with it). Best effort: true only when Intuit
+ * confirmed it; an unreachable Intuit, a timeout or a refusal is false. It never throws and keeps nothing of the answer.
+ */
+async function revokeAtIntuit(refreshToken: string, app: { clientId: string; clientSecret: string }): Promise<boolean> {
+  try {
+    const res = await fetch(qboEndpoints().revoke, {
+      method: "POST", body: JSON.stringify({ token: refreshToken }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error",
+      headers: { authorization: `Basic ${Buffer.from(`${app.clientId}:${app.clientSecret}`).toString("base64")}`, accept: "application/json", "content-type": "application/json" },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Starts a connect: a new single-use state for this Admin (replacing any earlier one) and the Intuit address to send them to. */
 export async function beginConnect(staffUserId: string): Promise<{ ok: true; url: string } | { ok: false; reason: "not_configured" }> {
   const state = randomBytes(32).toString("base64url");
@@ -102,8 +118,9 @@ export async function completeConnect(
   p: { code: string | null; state: string | null; realmId: string | null; error: string | null },
   o: { staffUserId: string; actor: Actor; ip: string | null; permission?: string },
 ): Promise<{ ok: true } | { ok: false; reason: ConnectRefusal }> {
-  const refuse = async (reason: ConnectRefusal, code?: string) => {
-    await writeAudit({ actor: o.actor, action: "quickbooks.connect_refused", permission: o.permission, ...TARGET, after: code ? { reason, code } : { reason }, ip: o.ip });
+  // `revoked` is recorded only when Intuit had issued tokens that the portal then didn't keep (see step 3).
+  const refuse = async (reason: ConnectRefusal, extra: { code?: string; revoked?: boolean } = {}) => {
+    await writeAudit({ actor: o.actor, action: "quickbooks.connect_refused", permission: o.permission, ...TARGET, after: { reason, ...extra }, ip: o.ip });
     return { ok: false as const, reason };
   };
   // 1. Spend the state. It is cleared only when it matches, so a stray return can't cancel a connect in progress.
@@ -130,10 +147,13 @@ export async function completeConnect(
   try {
     tokens = await tokenRequest({ grant_type: "authorization_code", code: p.code!, redirect_uri: qboRedirectUri() }, claim);
   } catch (e) {
-    if (e instanceof QboError) return refuse("intuit", e.code);
+    if (e instanceof QboError) return refuse("intuit", { code: e.code });
     throw e;
   }
-  // 3. Store the connection, unless another company got connected while Intuit was answering.
+  // 3. Store the connection, unless another company got connected while Intuit was answering. From here until the
+  // row is saved the portal holds tokens Intuit issued: if it doesn't keep them, it asks Intuit to revoke them, so a
+  // refused connect leaves no grant standing. The revoke changes nothing about the refusal.
+  const revokeIssued = () => revokeAtIntuit(tokens.refreshToken, claim);
   const stored = await db.transaction(async (tx) => {
     const [c] = await tx.select().from(qboConnection).for("update");
     if (!c) return "other_company" as const;
@@ -142,8 +162,8 @@ export async function completeConnect(
     if (c.realmId && c.realmId !== p.realmId) return "other_company" as const;
     await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, ...sealTokens(tokens) });
     return "stored" as const;
-  });
-  if (stored !== "stored") return refuse(stored);
+  }).catch(async (e: unknown) => { await revokeIssued(); throw e; });
+  if (stored !== "stored") return refuse(stored, { revoked: await revokeIssued() });
   // 3b. A different company from the one the cache was read from: clear what belonged to that one before anything reads
   // the new one. Run after the row lock above is released, never inside it (see clearRosterOfOtherCompany).
   await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
@@ -168,15 +188,11 @@ export async function disconnect(o: QboOp): Promise<{ ok: true; revoked: boolean
   let revoked = false;
   try {
     const box = secretBox();
-    const secret = box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret);
+    const clientSecret = box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret);
     const token = box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh);
-    const res = await fetch(qboEndpoints().revoke, {
-      method: "POST", body: JSON.stringify({ token }), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error",
-      headers: { authorization: `Basic ${Buffer.from(`${c.clientId}:${secret}`).toString("base64")}`, accept: "application/json", "content-type": "application/json" },
-    });
-    revoked = res.ok;
+    revoked = await revokeAtIntuit(token, { clientId: c.clientId, clientSecret });
   } catch {
-    revoked = false; // Intuit unreachable or the keys unreadable: the tokens are still deleted here
+    revoked = false; // the keys unreadable (Intuit unreachable is false already): the tokens are still deleted here
   }
   await db.transaction(async (tx) => {
     await tx.update(qboConnection).set({ ...DISCONNECTED, updatedAt: new Date() });

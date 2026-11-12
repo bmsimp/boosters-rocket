@@ -14,6 +14,8 @@ export type QboStub = {
   failToken: string | null;     // answer token requests with this OAuth error
   failQueryFrom: number | null; // answer query number N and later with HTTP 500 (1 is the first query)
   nullQueryBody: boolean;       // answer every query with the JSON body null
+  failRevoke: boolean;          // answer revoke requests with HTTP 500 and revoke nothing
+  revokeDelayMs: number;
   tokenDelayMs: number; queryDelayMs: number; companyInfoDelayMs: number; refreshExpiresIn: number;
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
 };
@@ -22,7 +24,7 @@ export type QboStub = {
 export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
-    failToken: null, failQueryFrom: null, nullQueryBody: false, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
+    failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -50,6 +52,8 @@ export async function startQboStub(): Promise<QboStub> {
       }
       if (url.pathname === "/revoke") {
         if (!hasAppKeys) return json(401, { error: "invalid_client" });
+        if (stub.revokeDelayMs) await new Promise((r) => setTimeout(r, stub.revokeDelayMs));
+        if (stub.failRevoke) return json(500, { error: "a revoke answer the portal must never store" });
         let token: unknown;
         try { token = (JSON.parse(body) as { token?: unknown }).token; } catch { return json(400, {}); }
         if (typeof token === "string") stub.refreshTokens.delete(token);
@@ -89,7 +93,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.reset = () => {
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
-    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
+    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));
   return stub;

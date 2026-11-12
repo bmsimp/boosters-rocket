@@ -21,6 +21,15 @@ const REALM = "9130000000000001";
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const allAuditText = async () => JSON.stringify(await db.select().from(auditLog));
 const row = async () => (await db.select().from(qboConnection))[0]!;
+const revokes = () => stub.calls.filter((c) => c.path === "/revoke");
+const APP_KEYS = `Basic ${Buffer.from("ABclientid1234567890:s3cret-value-1234567890").toString("base64")}`;
+/** The one revoke a refused connect sends: the refresh token Intuit had just issued, under the keys it was issued to. */
+const expectIssuedTokenRevoked = () => {
+  expect(revokes()).toHaveLength(1);
+  expect(revokes()[0]).toMatchObject({ method: "POST", auth: APP_KEYS });
+  expect(JSON.parse(revokes()[0]!.body)).toEqual({ token: "rt-1" });
+  expect(stub.refreshTokens.has("rt-1")).toBe(false);
+};
 
 describe("connecting QuickBooks", () => {
   let admin: Awaited<ReturnType<typeof seedStaff>>;
@@ -101,7 +110,8 @@ describe("connecting QuickBooks", () => {
     expect(await finish(await make())).toEqual({ ok: false, reason: "state" });
     expect((await row()).realmId).toBeNull();
     expect(stub.tokenCalls()).toHaveLength(0);
-    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "state" } });
+    expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "state" }); // nothing was issued, so nothing to revoke
+    expect(revokes()).toHaveLength(0);
   });
 
   it.each([
@@ -114,6 +124,7 @@ describe("connecting QuickBooks", () => {
     expect(await finish(s)).toEqual({ ok: false, reason: "state" });
     expect(stub.tokenCalls()).toHaveLength(0);
     expect((await row()).realmId).toBeNull();
+    expect(revokes()).toHaveLength(0);
   });
 
   it("a secret-only change leaves a connect in progress alone", async () => {
@@ -136,7 +147,52 @@ describe("connecting QuickBooks", () => {
     await db.update(qboConnection).set(change);
     expect(await pending).toEqual({ ok: false, reason: "state" });
     expect(await row()).toMatchObject({ realmId: null, accessTokenCiphertext: null, refreshTokenCiphertext: null });
-    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "state" } });
+    expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "state", revoked: true });
+    expectIssuedTokenRevoked(); // with the keys the code was exchanged under, not the changed ones
+  });
+
+  const refusedAfterExchange = async () => {
+    await app();
+    const s = await start();
+    stub.tokenDelayMs = 300;
+    const pending = finish(s);
+    for (let i = 0; i < 200 && stub.tokenCalls().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    await db.update(qboConnection).set({ realmId: "9130000000000002" });
+    return pending;
+  };
+
+  it("a refused connect whose revoke Intuit turns down is refused the same way, and audited as not revoked", async () => {
+    stub.failRevoke = true;
+    expect(await refusedAfterExchange()).toEqual({ ok: false, reason: "other_company" });
+    expect(revokes()).toHaveLength(1);
+    expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "other_company", revoked: false });
+    expect(await allAuditText()).not.toContain("a revoke answer the portal must never store");
+    for (const secret of ["at-1", "rt-1", "code-1", "s3cret"]) expect(await allAuditText()).not.toContain(secret);
+  });
+
+  it("a refused connect whose revoke times out is refused the same way, and audited as not revoked", async () => {
+    stub.revokeDelayMs = 1500;
+    // Only the revoke is slow here, so a short limit on every request to Intuit times out just that one.
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => real(ms === 15_000 ? 400 : ms));
+    try {
+      expect(await refusedAfterExchange()).toEqual({ ok: false, reason: "other_company" });
+    } finally { spy.mockRestore(); }
+    expect(revokes()).toHaveLength(1);
+    expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "other_company", revoked: false });
+    await new Promise((r) => setTimeout(r, 1300)); // let the stub finish its slow answer before the next test
+  });
+
+  it("revokes what Intuit issued when storing the connection fails, and lets the failure through", async () => {
+    await app();
+    const s = await start();
+    const client = await import("@/lib/quickbooks/client");
+    const spy = vi.spyOn(client, "sealTokens").mockImplementationOnce(() => { throw new Error("the database went away"); });
+    try {
+      await expect(finish(s)).rejects.toThrow("the database went away");
+    } finally { spy.mockRestore(); }
+    expectIssuedTokenRevoked();
+    expect(await row()).toMatchObject({ realmId: null, refreshTokenCiphertext: null });
   });
 
   it.each(["..", "123/456", "12a", "1".repeat(40)])("refuses the company ID %j as denied, exchanging and storing nothing", async (realmId) => {
@@ -144,6 +200,7 @@ describe("connecting QuickBooks", () => {
     expect(await finish(await start(), { realmId })).toEqual({ ok: false, reason: "denied" });
     expect(stub.tokenCalls()).toHaveLength(0);
     expect((await row()).realmId).toBeNull();
+    expect(revokes()).toHaveLength(0); // refused before any code was exchanged
   });
 
   it("a state works once", async () => {
@@ -184,7 +241,8 @@ describe("connecting QuickBooks", () => {
     await db.update(qboConnection).set({ realmId: "9130000000000002" });
     expect(await pending).toEqual({ ok: false, reason: "other_company" });
     expect(await row()).toMatchObject({ realmId: "9130000000000002", accessTokenCiphertext: null, refreshTokenCiphertext: null });
-    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "other_company" } });
+    expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "other_company", revoked: true });
+    expectIssuedTokenRevoked();
   });
 
   it("puts no company name on a connection that was disconnected while the name was being read", async () => {
@@ -211,7 +269,8 @@ describe("connecting QuickBooks", () => {
     const s = await start();
     stub.failToken = "invalid_client";
     expect(await finish(s)).toEqual({ ok: false, reason: "intuit" });
-    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "intuit", code: "invalid_client" } });
+    expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "intuit", code: "invalid_client" });
+    expect(revokes()).toHaveLength(0); // Intuit issued nothing
     expect(await allAuditText()).not.toContain("a description the portal must never store");
   });
 
