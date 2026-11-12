@@ -154,6 +154,22 @@ export async function completeConnect(
   // row is saved the portal holds tokens Intuit issued: if it doesn't keep them, it asks Intuit to revoke them, so a
   // refused connect leaves no grant standing. The revoke changes nothing about the refusal.
   const revokeIssued = () => revokeAtIntuit(tokens.refreshToken, claim);
+  // When storing throws: Intuit's revoke can cancel the company's whole grant to the app, not just these tokens. So
+  // if the row still holds a connection to this company (the Admin was signing in again to renew it), nothing is
+  // revoked and that connection carries on. The row is read fresh; if even that fails, nothing is revoked. The
+  // failure is audited when it can be, and the original error always goes on to the caller.
+  const storeFailed = async (): Promise<void> => {
+    let revoked: boolean | undefined;
+    try {
+      const now = await getConnection();
+      const stillConnected = now?.realmId === p.realmId && Boolean(now?.refreshTokenCiphertext);
+      if (!stillConnected) revoked = await revokeIssued();
+    } catch { /* can't tell what the portal holds: leave Intuit alone */ }
+    try {
+      await writeAudit({ actor: o.actor, action: "quickbooks.connect_refused", permission: o.permission, ...TARGET,
+        after: revoked === undefined ? { reason: "store_failed" } : { reason: "store_failed", revoked }, ip: o.ip });
+    } catch { /* the audit write must not replace the error that brought us here */ }
+  };
   const stored = await db.transaction(async (tx) => {
     const [c] = await tx.select().from(qboConnection).for("update");
     if (!c) return "other_company" as const;
@@ -162,7 +178,7 @@ export async function completeConnect(
     if (c.realmId && c.realmId !== p.realmId) return "other_company" as const;
     await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, ...sealTokens(tokens) });
     return "stored" as const;
-  }).catch(async (e: unknown) => { await revokeIssued(); throw e; });
+  }).catch(async (e: unknown) => { await storeFailed(); throw e; });
   if (stored !== "stored") return refuse(stored, { revoked: await revokeIssued() });
   // 3b. A different company from the one the cache was read from: clear what belonged to that one before anything reads
   // the new one. Run after the row lock above is released, never inside it (see clearRosterOfOtherCompany).

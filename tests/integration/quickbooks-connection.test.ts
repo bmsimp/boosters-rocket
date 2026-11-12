@@ -183,16 +183,59 @@ describe("connecting QuickBooks", () => {
     await new Promise((r) => setTimeout(r, 1300)); // let the stub finish its slow answer before the next test
   });
 
-  it("revokes what Intuit issued when storing the connection fails, and lets the failure through", async () => {
+  const failTheStore = async () => {
+    const client = await import("@/lib/quickbooks/client");
+    return vi.spyOn(client, "sealTokens").mockImplementationOnce(() => { throw new Error("the database went away"); });
+  };
+
+  it("on a first connect, revokes what Intuit issued when storing the connection fails, audits it and lets the failure through", async () => {
     await app();
     const s = await start();
-    const client = await import("@/lib/quickbooks/client");
-    const spy = vi.spyOn(client, "sealTokens").mockImplementationOnce(() => { throw new Error("the database went away"); });
+    const spy = await failTheStore();
     try {
       await expect(finish(s)).rejects.toThrow("the database went away");
     } finally { spy.mockRestore(); }
     expectIssuedTokenRevoked();
     expect(await row()).toMatchObject({ realmId: null, refreshTokenCiphertext: null });
+    const refused = await audits("quickbooks.connect_refused");
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ actorId: admin.id, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite", targetType: "qbo_connection" });
+    expect(refused[0]!.after).toEqual({ reason: "store_failed", revoked: true });
+    expect(await allAuditText()).not.toContain("the database went away");
+    for (const secret of ["at-1", "rt-1", "code-1", "s3cret"]) expect(await allAuditText()).not.toContain(secret);
+  });
+
+  it("when storing fails while renewing the connected company, revokes nothing, so the connection that was there still works", async () => {
+    await seedConnected(stub, { realmId: REALM });
+    const before = await row();
+    const s = await start();
+    const spy = await failTheStore();
+    try {
+      await expect(finish(s)).rejects.toThrow("the database went away");
+    } finally { spy.mockRestore(); }
+    // Intuit's revoke can cancel the company's whole grant to the app, which would take the old connection with it.
+    expect(revokes()).toHaveLength(0);
+    expect(await row()).toMatchObject({ realmId: REALM, refreshTokenCiphertext: before.refreshTokenCiphertext });
+    expect(stub.refreshTokens.has("rt-seed")).toBe(true);
+    const { accessToken } = await import("@/lib/quickbooks/client");
+    expect((await accessToken({ force: true })).token).toBe("at-2"); // the old refresh token is still good at Intuit
+    expect(Object.fromEntries(new URLSearchParams(stub.tokenCalls().at(-1)!.body))).toEqual({ grant_type: "refresh_token", refresh_token: "rt-seed" });
+    const refused = await audits("quickbooks.connect_refused");
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.after).toEqual({ reason: "store_failed" }); // no revoke was tried, so none is recorded
+  });
+
+  it("a failure to audit a failed store doesn't hide the failure itself", async () => {
+    await app();
+    const s = await start();
+    const spy = await failTheStore();
+    const log = await import("@/lib/audit/log");
+    const audit = vi.spyOn(log, "writeAudit").mockRejectedValueOnce(new Error("the audit log went away too"));
+    try {
+      await expect(finish(s)).rejects.toThrow("the database went away");
+      expect(audit).toHaveBeenCalledTimes(1);
+    } finally { spy.mockRestore(); audit.mockRestore(); }
+    expectIssuedTokenRevoked();
   });
 
   it.each(["..", "123/456", "12a", "1".repeat(40)])("refuses the company ID %j as denied, exchanging and storing nothing", async (realmId) => {

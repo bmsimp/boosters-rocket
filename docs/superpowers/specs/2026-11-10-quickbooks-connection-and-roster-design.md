@@ -206,6 +206,10 @@ any step already completed.
   storing them failed), it asks Intuit to revoke them. This is best effort: it never changes the refusal the Admin
   sees, and the audit row records whether Intuit confirmed it. A return refused before the exchange (a bad or stale
   `state`, a refusal at Intuit, a company ID that isn't one) has no tokens to revoke.
+- **One exception: a failed store while renewing.** Intuit's revoke can cancel the company's whole grant to the app.
+  So when storing fails and the portal still holds a connection to that same company (the Admin was signing in again
+  to renew it), nothing is revoked and the connection that was there carries on. The failure is still recorded
+  (`store_failed`), and the Admin sees the error.
 - **Disconnect** asks Intuit to revoke the tokens, then deletes them from the portal. The client ID and
   secret are kept. The cache is kept but every roster page says it is no longer current, with the date.
 - All QuickBooks calls happen on the server. The browser never receives a token or the client secret, and no
@@ -316,7 +320,7 @@ Audited, with the actor, the target and the request IP:
 |---|---|
 | `settings.quickbooks.save` | The client ID, secret or environment was saved. Records that the secret changed, never the secret |
 | `quickbooks.connect` | A company was connected. Records the company's name, ID and environment |
-| `quickbooks.connect_refused` | A return from Intuit was refused (bad or stale `state`, a different company, Intuit said no). Records the reason, Intuit's error code when it gave one, and, when tokens had been issued and were not kept, `revoked`: whether Intuit confirmed revoking them |
+| `quickbooks.connect_refused` | A return from Intuit was refused (bad or stale `state`, a different company, Intuit said no), or storing the connection failed (reason `store_failed`). Records the reason, Intuit's error code when it gave one, and, when the portal asked Intuit to revoke tokens it had been issued and didn't keep, `revoked`: whether Intuit confirmed it (left out when no revoke was tried) |
 | `quickbooks.disconnect` | The connection was removed |
 | `settings.membership.save` | The shape was saved. Records the shape before and after, with type names |
 | `quickbooks.token_refresh.failed` | A token refresh failed. Records Intuit's error code. Always recorded as the worker, whoever's request needed the refresh, and only when the error differs from the one already recorded |
