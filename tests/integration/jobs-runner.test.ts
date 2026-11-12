@@ -17,6 +17,7 @@ import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { runDueJobs, lastWake, TOKEN_JOB } from "@/lib/jobs/runner";
 import * as welcomeModule from "@/lib/parents/welcome";
+import * as noticeModule from "@/lib/parents/review-notice";
 import { workerToken } from "@/lib/jobs/worker-token";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
 import { POST, GET } from "@/app/api/internal/worker/route";
@@ -110,6 +111,17 @@ describe("scheduled jobs", () => {
     try {
       const r = await runDueJobs();
       expect(r).toEqual({ ran: [{ job: "parents.welcome", ok: false }, { job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
+      expect(JSON.stringify(logs.map((l) => l.mock.calls))).not.toContain("secret-detail");
+    } finally { spy.mockRestore(); logs.forEach((l) => l.mockRestore()); }
+  });
+
+  it("a review-notice step that throws is recorded as failed and the other jobs still run", async () => {
+    await seedConnected(stub);
+    const spy = vi.spyOn(noticeModule, "sendReviewNotice").mockRejectedValueOnce(new Error("secret-detail-from-the-notice"));
+    const logs = (["log", "info", "warn", "error"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}));
+    try {
+      const r = await runDueJobs();
+      expect(r).toEqual({ ran: [{ job: "parents.review_notice", ok: false }, { job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
       expect(JSON.stringify(logs.map((l) => l.mock.calls))).not.toContain("secret-detail");
     } finally { spy.mockRestore(); logs.forEach((l) => l.mockRestore()); }
   });

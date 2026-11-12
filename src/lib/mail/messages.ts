@@ -34,6 +34,17 @@ export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contac
   return { to, subject: `You can now sign in to ${b.clubName}`, text: text(lines), html: html(b, lines) };
 }
 
+/** To staff who can decide held addresses (parents spec §5). Two numbers and a link: no family, person or address. */
+export function reviewNoticeMessage(b: Brand, to: string, o: { newCount: number; waiting: number; link: string }): MailMessage {
+  const items = (n: number) => `${n} parent ${n === 1 ? "sign-in" : "sign-ins"}`;
+  const lines = [
+    `${o.newCount} new, ${o.waiting} waiting in all: some email addresses in QuickBooks are under more than one family, so the people at those addresses can't sign in until someone reviews them.`,
+    `Review them here: ${o.link}`,
+    "You won't be reminded about these again. They stay on the staff home page until they are decided.",
+  ];
+  return { to, subject: `${b.clubName}: ${items(o.newCount)} to review`, text: text(lines), html: html(b, lines) };
+}
+
 export function emailChangeConfirmMessage(b: Brand, to: string, o: { link: string }): MailMessage {
   const lines = [
     `Someone asked to use this address to sign in to ${b.clubName}. If it was you, open this link within 24 hours to confirm:`,

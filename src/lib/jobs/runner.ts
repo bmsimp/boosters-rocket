@@ -6,6 +6,7 @@ import { connectionView } from "@/lib/quickbooks/connection";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
+import { sendReviewNotice } from "@/lib/parents/review-notice";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -32,6 +33,13 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (welcomes.sent + welcomes.failed > 0) ran.push({ job: "parents.welcome", ok: welcomes.failed === 0 });
   } catch {
     ran.push({ job: "parents.welcome", ok: false });
+  }
+  // The review notice is guarded the same way: it needs mail and the roster cache, not a live QuickBooks connection.
+  try {
+    const notice = await sendReviewNotice(now);
+    if (notice.sent > 0) ran.push({ job: "parents.review_notice", ok: true });
+  } catch {
+    ran.push({ job: "parents.review_notice", ok: false });
   }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record.
