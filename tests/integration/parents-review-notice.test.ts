@@ -19,6 +19,7 @@ import { runDueJobs } from "@/lib/jobs/runner";
 import * as reconcileModule from "@/lib/parents/reconcile";
 import { runReconcile } from "../helpers/reconcile";
 import { reviewWaiting, sendReviewNotice, REVIEW_NOTICE_KEY } from "@/lib/parents/review-notice";
+import { decideHold, reverseHold } from "@/lib/parents/holds";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
@@ -150,6 +151,37 @@ describe("the staff review notice", () => {
     expect(await db.select().from(setting).where(eq(setting.key, REVIEW_NOTICE_KEY))).toEqual([]);
     sink.rejectRecipient = null;
     expect(await sendReviewNotice()).toEqual({ sent: 1, newItems: 1 });
+  });
+
+  it("when one of two sends fails, the items are announced and the audit row counts the failure", async () => {
+    await seedCache(TWO); await runReconcile({ cause: "test" });
+    const second = await seedStaff({ email: "treasurer@club.org" });
+    await reviewerRole(second.id, "parents2");
+    sink.rejectRecipient = "treasurer@club.org";
+    expect(await sendReviewNotice()).toEqual({ sent: 1, newItems: 1 });
+    expect(sink.messages.map((m) => m.to[0])).toEqual(["reg@club.org"]);
+    expect((await db.select().from(heldAddress))[0]!.announcedFamilyQboIds).toEqual(["10", "20"]);
+    expect((await audits("parent.review.notified"))[0]!.after).toEqual({ newItems: 1, waiting: 1, recipients: 2, failed: 1 });
+  });
+
+  it("an item decided and then reversed is not announced a second time", async () => {
+    await seedCache(TWO); await runReconcile({ cause: "test" });
+    expect(await sendReviewNotice()).toEqual({ sent: 1, newItems: 1 });
+    const op = { actor: { door: "staff" as const, id: reviewer.id, label: reviewer.email }, ip: null, permission: "Parents.ReadWrite" };
+    expect(await decideHold("ana@example.com", "not_same", ["10", "20"], "Two people.", op)).toEqual({ ok: true });
+    expect(await reviewWaiting()).toBe(0);
+    expect(await reverseHold("ana@example.com", "Wrong after all.", op)).toEqual({ ok: true });
+    expect(await reviewWaiting()).toBe(1);                                                // waiting again on the home notice
+    expect(await sendReviewNotice(hours(25))).toEqual({ sent: 0, newItems: 0 });         // but already announced
+    expect(sink.messages).toHaveLength(1);
+  });
+
+  it("an active Admin with no other role is emailed", async () => {
+    await seedCache(TWO); await runReconcile({ cause: "test" });
+    await db.delete(roleAssignment);
+    await seedStaff({ email: "chair@club.org", admin: true });
+    expect(await sendReviewNotice()).toEqual({ sent: 1, newItems: 1 });
+    expect(sink.messages.map((m) => m.to[0])).toEqual(["chair@club.org"]);
   });
 
   it("giving the slot back restores the earlier send time", async () => {

@@ -128,12 +128,12 @@ describe("the Parent sign-ins settings", () => {
       busy = await setup("preview");
     });
     expect(busy).toContain(busyText);
-    expect(busy).not.toContain("These were made by hand");                    // the busy sentence stands alone
+    expect(busy).not.toContain("QuickBooks no longer backs these");           // the busy sentence stands alone
     expect(busy).not.toContain("seeded@example.com");
     const free = await setup("preview");
     expect(free).not.toContain(busyText);
     expect(free).toContain("Hand Seeded (seeded@example.com)");
-    expect(free).toContain("These were made by hand");
+    expect(free).toContain("QuickBooks no longer backs these, so they stop working when sign-ins are switched on.");
   });
 
   it("runs the dry run only on the steps that show its list, and only while sign-ins are off", async () => {

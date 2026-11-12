@@ -52,7 +52,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
               ) : (
                 <><h3>Sign-ins that would end ({p.ending.length})</h3>
                   {p.ending.length === 0 ? <p>None.</p> : <ul>{p.ending.map((e) => <li key={`${e.email}|${e.familyQboId}`}>{e.name} ({e.email})</li>)}</ul>}
-                  <p className="hint">These were made by hand and QuickBooks doesn&apos;t list them, so they stop working when sign-ins are switched on.</p></>
+                  <p className="hint">QuickBooks no longer backs these, so they stop working when sign-ins are switched on.</p></>
               )}
             </>
           )}

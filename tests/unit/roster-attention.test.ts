@@ -68,8 +68,9 @@ describe("Needs attention", () => {
     const company = [c("40", "Old Family", "1", null, { active: false })];
     expect(rules(company, layered, [signIn("40", "active", "a@example.com"), signIn("40", "invited", "b@example.com")])).toEqual(["inactive_with_signin:40"]);
   });
-  it("a disabled sign-in on an unknown QuickBooks ID is still listed", () => {
-    expect(rules(tidy, layered, [signIn("POC-FAMILY-1", "disabled")])).toEqual(["signin_unknown:P"]);
+  it("a closed sign-in on an unknown QuickBooks ID is not listed: nobody can sign in with it and nothing would clear it", () => {
+    expect(rules(tidy, layered, [signIn("POC-FAMILY-1", "disabled")])).toEqual([]);
+    expect(rules(tidy, layered, [signIn("POC-FAMILY-1", "disabled"), signIn("POC-FAMILY-1", "invited")])).toEqual(["signin_unknown:P"]);
   });
   it("a family whose only student is inactive has no student", () => {
     const company = [c("10", "Rivera Family", "1"), c("11", "Ana Rivera", "2", "10", { email: "ana@example.com" }), c("12", "Leo Rivera", "3", "10", { active: false })];

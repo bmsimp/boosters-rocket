@@ -205,7 +205,9 @@ they have.
 - A blocked person is never marked as owed a welcome, and blocking clears one that was owed. Unblocking marks the
   person as owed again when they were never welcomed, still have access to a family, and welcomes are on.
 - **Resend welcome email** goes at once and does not depend on the welcome switch. It is refused for a blocked
-  person, for a person with no open link, and while parent sign-ins are switched off.
+  person, for a person with no open link, and once parent sign-ins have been on and are now switched off (the
+  parent door is closed). Before sign-ins have ever been switched on a resend still goes, so a parent seeded by hand
+  for testing can be welcomed.
 
 ### Failure
 

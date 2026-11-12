@@ -16,7 +16,7 @@ function sameEmail(people: Cust[], detail: string): AttentionItem[] {
 
 /**
  * The club's clean-up list (spec §5 Needs attention). Pure; it changes nothing. Inactive customers are left out of the
- * QuickBooks clean-up rules; the two sign-in rules look at every customer.
+ * QuickBooks clean-up rules; the two sign-in rules look at every customer, and only at sign-ins that are not closed.
  */
 export function needsAttention(roster: Roster, shape: MembershipShape, signIns: SignIn[]): AttentionItem[] {
   const out: AttentionItem[] = [];
@@ -42,6 +42,8 @@ export function needsAttention(roster: Roster, shape: MembershipShape, signIns: 
   for (const s of signIns) {
     const customer = known.get(s.familyQboId);
     if (!customer) {
+      // A closed sign-in can't be used, and nothing in QuickBooks would clear it from the list: leave it out.
+      if (s.status === "disabled") continue;
       out.push({ rule: "signin_unknown", qboId: null, name: s.name,
         detail: `This portal sign-in is attached to QuickBooks ID ${s.familyQboId}, which isn't a ${roster.kind === "flat" ? "member" : "family"} in QuickBooks.` });
     } else if (!customer.active && s.status !== "disabled" && !out.some((o) => o.rule === "inactive_with_signin" && o.qboId === customer.qboId)) {

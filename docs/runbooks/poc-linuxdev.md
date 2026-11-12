@@ -328,6 +328,9 @@ switches welcome emails off. Switching sign-ins on again does not switch welcome
 person, with block and unblock on each person's page. Names and addresses are changed in QuickBooks, followed by
 **Refresh now**.
 
+A sign-in made by hand that staff removed before this version is opened again if QuickBooks lists that parent under
+that family.
+
 ## 6. Test parents
 
 1. **Wait until the first deploy in section 8 has succeeded.** Then, on linuxdev, seed parent one:
@@ -500,15 +503,15 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The guardian row exists but its status is disabled | Test data: set it back with `docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U booster -d booster -c "update guardian set status='invited', disabled_reason=null where parent_id=(select id from parent where email='<email>');"` (this SQL fix bypasses the audit log, so it is acceptable only for test data) |
-| A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Seed them (section 6); addresses are matched trimmed and lowercased |
-| `signin.code_refused`, reason `no_enabled_guardian` | All of the person's guardian rows are disabled | Test data: re-enable the row (see the row above) |
+| `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The person's links to their families are all closed | Before parent sign-ins are switched on: seed the test parent again (section 6). After they are switched on, the fix is in QuickBooks: the Parent customer exists, is active, has one email address and sits under an active family. Then **Refresh now** on the Roster. The reason a person can't sign in is shown on their page under **Parents**, and in the family's **Portal sign-ins** box. Don't re-enable a link with SQL once sign-ins are on: the next reconcile closes it again, and the SQL bypasses the audit log |
+| A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Before parent sign-ins are switched on: seed them (section 6). After they are switched on, the fix is in QuickBooks: the Parent customer exists, is active, has one email address and sits under an active family. Then **Refresh now** on the Roster. The reason a person can't sign in is shown on their page under **Parents**, and in the family's **Portal sign-ins** box. Addresses are matched trimmed and lowercased |
+| `signin.code_refused`, reason `no_enabled_guardian` | All of the person's links to their families are closed | As in the first row: before sign-ins are on, the seed script (section 6); after, fix the record in QuickBooks and **Refresh now** |
 | `signin.code_refused`, reason `rate_limited` | Details `limit` says which limit: `resend`, a new code asked for within 60 seconds of the last one; `email`, 3 codes to one address; `ip`, 10 code requests from one IP; `check_ip`, 30 code checks from one IP (the parent sees "Too many tries. Wait a few minutes and request a new code."). The last three count 15 minutes back. For `email`, `ip` and `check_ip`, a full window is recorded once: the first refused request writes the row, and later ones in the same window write nothing | `resend`: wait 60 seconds. The others: wait up to 15 minutes, until the oldest request in the window is 15 minutes old |
 | The sign-in page says "We couldn't reach the portal just then. Please try again in a moment." and there's no audit row | More than 20 code requests, or 20 code checks, from one IP in a minute: the portal turns them away before they are counted or recorded | Wait a minute |
 | `signin.code_refused`, reason `mail_failed`, with `detail: "mail_not_working"`, and no `mail.failed` row | Mail isn't set up, or its settings haven't had a successful test email since they were saved, so nothing was sent | **Mail** in the staff menu (Admins only): **Send test email** |
 | `signin.code_refused`, reason `mail_failed` with no `detail`, and a `mail.failed` row | Microsoft 365 or SMTP refused the message; the `mail.failed` row has the provider's error | For `ErrorAccessDenied`, rerun section 4 step 3 and wait up to 2 hours; staff see the same error on the staff home page |
 | `/sign-in` says "Parent sign-in isn't available yet." | Mail settings aren't saved, or haven't had a successful test since they changed | **Mail** in the staff menu (Admins only): **Send test email** |
-| Parent `signin.refused`, reason `family_not_enabled` | The parent was in, or chose, a family that isn't one of their enabled families. Usually the family's row was disabled while they were signed in: they are sent back to choose a family, and Details names the one they lost. With no family in Details, the chooser was sent something that isn't a family ID | Nothing, if the row was removed on purpose. Otherwise check their guardian rows (test data: re-enable as in the first row) |
+| Parent `signin.refused`, reason `family_not_enabled` | The parent was in, or chose, a family that isn't one of their enabled families. Usually the family's row was disabled while they were signed in: they are sent back to choose a family, and Details names the one they lost. With no family in Details, the chooser was sent something that isn't a family ID | Nothing, if the link was closed on purpose. Otherwise see the first row: the person's page under **Parents** says why the link is closed |
 | "Too many tries. Wait a few minutes and request a new code." | 30 code checks from one IP in 15 minutes | Wait 15 minutes |
 | Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not the first Admin email entered in Step 3 of setup | Sign in with that email, or have an Admin add the person first (**Staff** menu) |
 | Microsoft error "AADSTS50011: The redirect URI ... does not match" | Redirect URI in the app registration differs from the one the portal sends | `https://portaltest.rhinoautomator.com/api/auth/staff/callback/microsoft`. Platform must be **Web**; no trailing slash |
@@ -529,7 +532,7 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | Step 2 comes back with "That is a different QuickBooks company from the one already connected. Disconnect first if you mean to switch companies." | A company is already connected | **Disconnect** on the QuickBooks page first, then set up again |
 | The staff home says "QuickBooks needs attention" with "The roster hasn't been refreshed from QuickBooks in more than 2 days." | The worker isn't running | `docker ps`, then `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker` |
 | The staff home says "The QuickBooks connection couldn't be refreshed: Intuit no longer accepts this connection. Connect QuickBooks again." | The connection lapsed or was revoked at Intuit | Go through step 2 of the QuickBooks steps again |
-| The staff home says "The last roster refresh failed: The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)" (the roster pages say the same after "The latest try failed:") | The step that works out who can sign in failed inside the refresh | The roster and who can sign in are as they were before the refresh. Read `docker logs booster-rocket-app` and report it |
+| The staff home says "The last roster refresh failed: The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)" (the roster pages say the same after "The latest try failed:") | The step that works out who can sign in failed inside the refresh | The roster and who can sign in are as they were before the refresh. Read `docker logs booster-rocket-app` for a line like `[roster] reconcile failed { name: 'DrizzleQueryError', code: '23505', constraint: 'parent_email_key' }` (the error's class name, the database's SQLSTATE code and the constraint; never the message or an address) and report it |
 | `/sign-in` says "Parent sign-in isn't available yet." after parent sign-ins were switched off | Sign-ins are off, so nobody can sign in (the audit shows `signin.code_refused`, reason `signins_off`) | **Parent sign-ins** in the staff menu, **Change**, step 2: **Switch parent sign-ins on**. Welcome emails went off with them; switch them on again in step 3 if wanted |
 | `docker logs booster-rocket-worker` says "couldn't reach the app: HTTP 404" | The worker and the app have different `BETTER_AUTH_SECRET` values | Both read `.env.poc`: recreate both |
 | Only if Access is set up: Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 7 B steps 1-3; check spam |
@@ -600,9 +603,6 @@ Findings from the 2026-11-11 run (QuickBooks):
 - **The disconnected notice on a family's page ran wider than the column.** It keeps to the column now.
 - **A second sandbox company has no customer types,** so step 3 has nothing to choose from there. That is the
   sandbox's data, not a fault, but it means a company-switch test can only check the clearing.
-- **Open question for the owner:** portal sign-ins are attached to QuickBooks customer IDs, and switching companies
-  leaves them pointing at the old company's numbers. The "Parents from QuickBooks" plan has to decide what happens
-  to them.
 
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
 
