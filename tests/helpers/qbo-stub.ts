@@ -116,7 +116,7 @@ export function fznCompany() {
       c("30", "Lincoln High", "4", { PrimaryEmailAddr: { Address: "office@lincoln.example" }, PrimaryPhone: { FreeFormNumber: "555-0199" } }),
       c("40", "Old Family", "1", { Active: false }),
       c("50", "Stray Student", "3"),
-      c("60", "No Type At All", null),
+      c("60", "No Type At All", null, { PrimaryEmailAddr: { Address: "untyped@example.com" }, PrimaryPhone: { FreeFormNumber: "555-0160" } }),
     ],
   };
 }

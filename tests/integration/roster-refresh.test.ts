@@ -23,7 +23,7 @@ const worker = { startedBy: "worker", actor: { door: "system" as const, id: null
 const staffOp = { actor: { door: "staff" as const, id: "5a1e7a2e-0000-4000-8000-000000000001", label: "admin@example.org" }, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite" };
 const customers = async () => Object.fromEntries((await db.select().from(qboCustomer)).map((c) => [c.qboId, c]));
 const lastRun = async () => (await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1))[0]!;
-const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
+const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 
 describe("the roster refresh", () => {
   beforeEach(async () => {
@@ -70,6 +70,21 @@ describe("the roster refresh", () => {
     const c = await customers();
     expect(c["11"]).toMatchObject({ email: "ana@example.com", phone: "555-0101" });
     expect(c["30"]).toMatchObject({ displayName: "Lincoln High", email: null, phone: null });
+    expect(c["60"]).toMatchObject({ displayName: "No Type At All", email: null, phone: null }); // no type, so no shape can name it
+  });
+
+  it("stores a customer QuickBooks sends twice once, and counts what it stored", async () => {
+    stub.customers = [...stub.customers, { ...stub.customers[0]!, DisplayName: "Rivera Family again" }];
+    expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 9, types: 5 });
+    expect(Object.keys(await customers())).toHaveLength(9);
+    expect(await lastRun()).toMatchObject({ outcome: "ok", detail: "9 customers, 5 customer types" });
+    expect((await audits("roster.refresh"))[0]).toMatchObject({ after: { customers: 9, types: 5 } });
+  });
+
+  it("refuses to save a shape the stored form wouldn't read back", async () => {
+    await expect(saveShape({ kind: "flat", memberTypeIds: [] }, staffOp)).rejects.toThrow();
+    expect(await getShape()).toBeNull();
+    expect(await audits("settings.membership.save")).toHaveLength(0);
   });
 
   it("drops contact details when a shape change stops naming a type", async () => {
@@ -144,8 +159,8 @@ describe("the roster refresh", () => {
     await saveShape(FZN_SHAPE, staffOp);
     await refreshRoster(worker);
     expect((await customers())["11"]).toMatchObject({ email: "ana@example.com", phone: "555-0101" });
-    stub.failQueryFrom = 1;
-    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp); // no refresh has run since
+    expect(stub.apiCalls()).toHaveLength(2);
     expect((await customers())["11"]).toMatchObject({ email: null, phone: null });
   });
 
@@ -167,6 +182,8 @@ describe("the roster refresh", () => {
       expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "running" });
     });
     expect(await db.select().from(qboCustomer)).toHaveLength(0);
+    expect(stub.calls).toHaveLength(0); // the refused run asked QuickBooks nothing
+    expect(await db.select().from(jobRun)).toHaveLength(0); // and left no run for the worker's retry rule to count
   });
 
   it("limits a hand-started refresh to one every 5 minutes, but not the worker", async () => {

@@ -79,9 +79,11 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
 /**
  * Saves the shape and, in the same transaction, drops email and phone from every customer the new shape doesn't name
  * (spec §1 Rules). It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
- * a refresh afterward to bring the rest of the cache up to date.
+ * a refresh afterward to bring the rest of the cache up to date. A shape `getShape` wouldn't read back is refused (it
+ * throws): saved, it would show as "no shape" while its audit row said otherwise.
  */
-export async function saveShape(shape: MembershipShape, o: QboOp): Promise<void> {
+export async function saveShape(input: MembershipShape, o: QboOp): Promise<void> {
+  const shape: MembershipShape = stored.parse(input);
   await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
     const before = await getShape(tx);

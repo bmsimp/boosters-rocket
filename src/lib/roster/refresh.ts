@@ -77,9 +77,11 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       prepared = await tx.transaction(async (sp) => {
         const now = new Date();
         const named = new Set(shapeTypeIds(await getShape(sp)));
-        const typeRows = types.filter(isRow).map((t) => ({ qboId: text(t.Id, 64), name: text(t.Name, 200) ?? "(no name)", active: isActive(t.Active), refreshedAt: now }))
-          .filter((t): t is TypeRowIn => t.qboId !== null);
-        const customerRows = customers.filter(isRow).map((x) => customerRow(x, named, now)).filter((r) => r !== null);
+        // One row per QuickBooks ID, the first one sent, so the counts recorded below are what the cache holds.
+        const firstOfEach = <T extends { qboId: string }>(rows: T[]) => { const seen = new Set<string>(); return rows.filter((r) => !seen.has(r.qboId) && seen.add(r.qboId)); };
+        const typeRows = firstOfEach(types.filter(isRow).map((t) => ({ qboId: text(t.Id, 64), name: text(t.Name, 200) ?? "(no name)", active: isActive(t.Active), refreshedAt: now }))
+          .filter((t): t is TypeRowIn => t.qboId !== null));
+        const customerRows = firstOfEach(customers.filter(isRow).map((x) => customerRow(x, named, now)).filter((r) => r !== null));
         // Each page re-reads the connection, so a disconnect and a connect to another company mid-read would mix companies.
         const still = await getConnection(sp);
         if (!still?.realmId || !still.refreshTokenCiphertext || still.realmId !== realmId) return "company_changed" as const;
