@@ -49,13 +49,18 @@ describe("the QuickBooks client", () => {
     expect(stub.tokenCalls()).toHaveLength(1);
   });
 
-  it("a forced refresh and an ordinary caller at once spend the refresh token once", async () => {
+  it("a forced refresh racing an ordinary caller never spends a refresh token twice", async () => {
     await seedConnected(stub, { accessExpiresInMs: -1000 });
     stub.tokenDelayMs = 150;
     const [forced, plain] = await Promise.all([accessToken({ force: true }), accessToken()]);
-    expect(stub.tokenCalls()).toHaveLength(1);
-    expect(forced.token).toBe("at-1");
-    expect(plain.token).toBe("at-1");
+    // Whichever takes the row lock first refreshes with the seeded token. If that was the ordinary caller, the forced
+    // one then refreshes again, with the token the first refresh saved; if it was the forced one, the other reuses it.
+    const spent = stub.tokenCalls().map((c) => new URLSearchParams(c.body).get("refresh_token"));
+    expect([["rt-seed"], ["rt-seed", "rt-1"]]).toContainEqual(spent);
+    expect([forced.token, plain.token]).toContain(`at-${spent.length}`);
+    expect(stub.accessTokens.has(forced.token) && stub.accessTokens.has(plain.token)).toBe(true);
+    expect((await row()).lastError).toBeNull(); // Intuit never answered invalid_grant
+    expect((await accessToken()).token).toBe(`at-${spent.length}`); // and the saved token is the newest
   });
 
   it("records a refused refresh with Intuit's code, never its text, and throws", async () => {
