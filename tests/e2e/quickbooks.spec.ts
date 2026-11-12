@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
+import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
+
+const sql = postgres(process.env.DATABASE_URL!);
+test.afterAll(async () => { await sql.end(); });
 
 // This run never reaches Intuit: the app has no switch that points it elsewhere. The spec never selects
 // "Sign in to Intuit", "Save this shape", "Refresh now" or "Disconnect"; it only checks that they are there.
@@ -78,6 +82,18 @@ test("the three steps open in order, and a shape is previewed with the controls 
   await expect(student).toHaveValue("3");
   await expect(parent).toHaveValue("2");
 
+  // A layered choice that differs from the saved shape (no student type): a control that went back to its starting
+  // value after Preview would show Student again here.
+  await student.selectOption("");
+  await expect(page.getByText("The choice has changed since this preview. Select Preview again to see what it would show.")).toBeVisible();
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByText(/^0 students/)).toBeVisible();
+  await expect(page.getByText("2 customers outside the portal")).toBeVisible();
+  await expect(layered).toBeChecked();
+  await expect(family).toHaveValue("1");
+  await expect(student).toHaveValue("");
+  await expect(parent).toHaveValue("2");
+
   // Switch to flat and choose Student: the layered preview no longer applies.
   await flat.check();
   await expect(page.getByText("The choice has changed since this preview. Select Preview again to see what it would show.")).toBeVisible();
@@ -122,10 +138,14 @@ test("staff open a family from the roster, hostile names stay text, and the visi
   await page.getByRole("button", { name: "Find" }).click();
   await expect(families.getByRole("link", { name: "Rivera Family" })).toBeVisible();
   await expect(families.locator("a[href='/staff/roster/20']")).toHaveCount(0);
+  // Only rows written from here on count: an earlier run, or the other project, leaves the same action behind.
+  const [mark] = await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`;
   await families.getByRole("link", { name: "Rivera Family" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Rivera Family");
   await expect(page.getByText("ana@example.com · 555-0101")).toBeVisible();
   await expect(page.getByText("Leo Rivera")).toBeVisible();
+  const reads = await sql`SELECT target_id, actor_label FROM audit_log WHERE id > ${mark!.id} AND action = 'roster.family.read'`;
+  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "10", actor_label: "e2e-admin@example.org" }]); // one visit, one row
   await page.goto("/staff/audit");
   await expect(page.getByText("roster.family.read").first()).toBeVisible();
 });

@@ -2,8 +2,20 @@ import postgres from "postgres";
 import { createSecretBox } from "../src/lib/crypto/secret-box";
 import { mailConfigHash } from "../src/lib/mail/config-hash";
 
+/** This script overwrites settings and deletes the QuickBooks connection, cache and job history: test databases only. */
+function testDatabaseUrl(): string {
+  const url = process.env.DATABASE_URL ?? "";
+  let name = "";
+  try { name = decodeURIComponent(new URL(url).pathname.slice(1)); } catch { /* not an address: refused below */ }
+  if (!name.endsWith("_test")) {
+    console.error(`seed-e2e refuses to run: DATABASE_URL must name a database ending in "_test" (it names "${name}"). This script deletes and overwrites data.`);
+    process.exit(2);
+  }
+  return url;
+}
+
 async function main() {
-  const sql = postgres(process.env.DATABASE_URL!);
+  const sql = postgres(testDatabaseUrl());
   const [p] = await sql`INSERT INTO parent (name, email) VALUES ('Zelda Quetzalcoatl', 'zelda@example.com')
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
