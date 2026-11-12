@@ -87,7 +87,10 @@ describe("mail settings", () => {
     expect(box.sent[0]!.to).toBe("admin@example.org");
     expect(await mailWorking()).toBe(true);
     expect(await mailAttention()).toBeNull();
-    await saveMailSettings({ ...smtp, port: 465, security: "tls", password: "p" }, o); // a new port needs the password again
+    // Only settings a blank password may accompany: the saved password is kept, so the change alone is what counts.
+    const sealed = await cipher();
+    expect(await saveMailSettings({ ...smtp, security: "tls", from: "treasurer@example.org", password: null }, o)).toEqual({ ok: true });
+    expect(await cipher()).toBe(sealed);
     expect(await mailWorking()).toBe(false);
     expect((await db.select().from(auditLog)).map((a) => a.action)).toEqual(["settings.mail.save", "settings.mail.test", "settings.mail.save"]);
   });

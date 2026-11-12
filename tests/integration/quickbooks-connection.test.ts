@@ -171,17 +171,19 @@ describe("connecting QuickBooks", () => {
   });
 
   it("a refused connect whose revoke times out is refused the same way, and audited as not revoked", async () => {
-    stub.revokeDelayMs = 1500;
-    // Only the revoke is slow here, so a short limit on every request to Intuit times out just that one.
+    // The limit on every request to Intuit is cut from 15 s to 1.5 s. The code exchange answers in 0.3 s, five times
+    // inside it even on a slow machine; the revoke answers in 4 s, well outside it. So only the revoke times out.
+    stub.revokeDelayMs = 4000;
     const real = AbortSignal.timeout.bind(AbortSignal);
-    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => real(ms === 15_000 ? 400 : ms));
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => real(ms === 15_000 ? 1500 : ms));
     try {
       expect(await refusedAfterExchange()).toEqual({ ok: false, reason: "other_company" });
     } finally { spy.mockRestore(); }
+    expect(stub.tokenCalls()).toHaveLength(1);
     expect(revokes()).toHaveLength(1);
     expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "other_company", revoked: false });
-    await new Promise((r) => setTimeout(r, 1300)); // let the stub finish its slow answer before the next test
-  });
+    await new Promise((r) => setTimeout(r, 2800)); // let the stub finish its slow answer before the next test
+  }, 30_000);
 
   const failTheStore = async () => {
     const client = await import("@/lib/quickbooks/client");
