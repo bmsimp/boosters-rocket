@@ -12,6 +12,20 @@ import { deleteUnusedSigninCodes, endFamilySessions, endParentSessions } from ".
 export const RECONCILE_ACTOR: Actor = { door: "system", id: null, label: "reconcile" };
 /** Thrown by the roster refresh when the reconcile inside it fails, so the refresh can say which part failed. */
 export class ReconcileFailed extends Error {}
+
+/**
+ * The server log line for a reconcile that failed inside a refresh: the error's class name and, for a database error,
+ * its SQLSTATE and the constraint it broke. Never the message, the query or its parameters: any of them can hold an
+ * address. Drizzle wraps a driver error, so the code and constraint are looked for on its cause too. It lives here, not
+ * in the roster code, which logs nothing at all (QuickBooks spec §7).
+ */
+export function logReconcileFailure(e: unknown): void {
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const err = (typeof e === "object" && e !== null ? e : {}) as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
+  const pg = (err.code === undefined && typeof err.cause === "object" && err.cause !== null ? err.cause : err) as typeof err;
+  const name = typeof e === "object" && e !== null ? e.constructor?.name ?? "Object" : typeof e;
+  console.error("[roster] reconcile failed", { name, code: str(pg.code), constraint: str(pg.constraint_name) ?? str(pg.constraint) });
+}
 export type ReconcileResult = { ran: boolean; granted: number; ended: number; emailChanged: number; welcomeOwed: number };
 /** Collects the links a run closes (owner as before the run), for the clean-up preview's dry run. */
 export type EndedReport = { ended: { name: string; email: string; familyQboId: string }[] };

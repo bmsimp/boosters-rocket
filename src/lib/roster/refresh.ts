@@ -7,7 +7,7 @@ import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { clearRosterOfOtherCompanyLocked, ROSTER_JOB, setRosterSource } from "./source";
-import { reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
+import { logReconcileFailure, reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
 
 export { ROSTER_LOCK, ROSTER_JOB };
 
@@ -39,19 +39,6 @@ function customerRow(c: Raw, named: Set<string>, now: Date) {
     phone: keep ? text((c.PrimaryPhone as { FreeFormNumber?: unknown } | undefined)?.FreeFormNumber, 50) : null,
     syncToken: text(c.SyncToken, 20) ?? "0", qboUpdatedAt: updated && !Number.isNaN(Date.parse(updated)) ? new Date(updated) : null, refreshedAt: now,
   };
-}
-
-/**
- * The server log line for a failed reconcile: the error's class name and, for a database error, its SQLSTATE and the
- * constraint it broke. Never the message, the query or its parameters: any of them can hold an address. Drizzle wraps
- * a driver error, so the code and constraint are looked for on its cause too.
- */
-function logReconcileFailure(e: unknown): void {
-  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
-  const err = (typeof e === "object" && e !== null ? e : {}) as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
-  const pg = (err.code === undefined && typeof err.cause === "object" && err.cause !== null ? err.cause : err) as typeof err;
-  const name = typeof e === "object" && e !== null ? e.constructor?.name ?? "Object" : typeof e;
-  console.error("[roster] reconcile failed", { name, code: str(pg.code), constraint: str(pg.constraint_name) ?? str(pg.constraint) });
 }
 
 /**
