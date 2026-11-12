@@ -109,13 +109,16 @@ const rowsOf = (body: unknown, entity: string): Record<string, unknown>[] => {
   return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
 };
 
-/** Every customer, a page at a time. `where` is fixed text from this codebase, never anything a person typed. */
+/**
+ * Every customer, a page at a time, in Id order: without an order a customer could be skipped or repeated between
+ * pages. `where` is fixed text from this codebase, never anything a person typed.
+ */
 export async function qboQueryAll(entity: "Customer", where = ""): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
   for (let start = 1; ; start += QBO_PAGE) {
     // With where = "Active in (true, false)" this is the string verified against the sandbox on 2026-11-11 (spec §8),
-    // starting at 1. Don't change it (an orderby, say) without trying the new string there first.
-    const page = rowsOf(await qboGet("query", { query: `select * from ${entity}${where ? ` where ${where}` : ""} startposition ${start} maxresults ${QBO_PAGE}` }), entity);
+    // starting at 1. Don't change it without trying the new string there first.
+    const page = rowsOf(await qboGet("query", { query: `select * from ${entity}${where ? ` where ${where}` : ""} orderby Id startposition ${start} maxresults ${QBO_PAGE}` }), entity);
     out.push(...page);
     if (page.length < QBO_PAGE) return out;
   }

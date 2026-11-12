@@ -138,8 +138,9 @@ refreshed_at
 
 ### Refreshing
 
-- A refresh reads every customer type and every customer, active and inactive, a page at a time, and
-  replaces the cache in one transaction. A customer QuickBooks no longer returns is removed from the cache.
+- A refresh reads every customer type and every customer, active and inactive, a page at a time in `Id` order (so
+  no customer is skipped or repeated between pages), and replaces the cache in one transaction. A customer
+  QuickBooks no longer returns is removed from the cache.
 - Only one refresh runs at a time. A second request while one is running reports that one is under way.
 - A failed refresh leaves the previous cache in place, records the failure, and raises the staff warning (§5).
 - **The cache records which company it came from** (the `roster.source` setting, written with every cache swap). While
@@ -368,7 +369,7 @@ fails, the section it bears on is revised before its code is written.
 | Can customer types be listed through the API (`select * from CustomerType`), and does each customer carry its type (`CustomerTypeRef`)? Is a minor version needed? | §1. Intuit's own reference wasn't found for this on 2026-11-10; only third-party references say so | **Yes to both.** The query answered 200 with each type's `Id`, `Name` and `Active` (IDs look like `1000000002`). Typed customers carry `CustomerTypeRef.value` equal to a type's `Id`; untyped customers have no `CustomerTypeRef`. Checked with `minorversion=75` |
 | Do sandbox companies have customer types, or must they be created by hand first? | §7. The proof of concept needs a sandbox shaped like FZN | **By hand.** The sandbox's sample customers have no type. The owner created `Family`, `Parent`, `Student`, `School` and `Vendor` and a few typed customers |
 | What does the token response give for the refresh token's expiry, and is there a hard limit beyond the rolling 100 days? | §4 and §5. Third-party guides report a 5-year limit from a November 2025 policy change; Intuit's FAQ still says a rolling 100 days. The portal uses whatever expiry the response states | `expires_in` is `3600` and `x_refresh_token_expires_in` is `8726400` seconds (101 days). The response states no hard limit, so the portal goes by the stated expiry on each refresh |
-| How many customers can one query page return, and does `Active IN (true, false)` return inactive customers? | §2. The old CiviCRM extension paged by 100 and used that filter | **1000 a page** (`maxresults 1001` is refused: "Max allowed value is 1000"). The filter returns inactive customers, with `Active` as the JSON boolean `false` |
+| How many customers can one query page return, and does `Active IN (true, false)` return inactive customers? | §2. The old CiviCRM extension paged by 100 and used that filter | **1000 a page** (`maxresults 1001` is refused: "Max allowed value is 1000"). The filter returns inactive customers, with `Active` as the JSON boolean `false`. Paging is only safe with an order, so the portal sends `select * from Customer where Active in (true, false) orderby Id startposition N maxresults 1000`; that string was accepted and returned the customers in `Id` order (compared as numbers) |
 | Does a sub-customer's `ParentRef` always point at its direct parent, and how are deeper levels reported? | §1. "Directly under a family" must mean what QuickBooks means | `ParentRef.value` is the direct parent's `Id`, and each sub-customer also carries `Level` (1 for a direct sub-customer) and `Job: true`. The sandbox had no customer two levels down, so deeper levels weren't seen; the portal goes by `ParentRef` alone |
 
 Also seen in the sandbox, and worth knowing:

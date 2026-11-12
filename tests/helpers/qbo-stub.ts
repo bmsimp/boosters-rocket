@@ -54,8 +54,12 @@ export async function startQboStub(): Promise<QboStub> {
         const q = url.searchParams.get("query") ?? "";
         const entity = /from (\w+)/i.exec(q)?.[1] ?? "";
         const start = Number(/startposition (\d+)/i.exec(q)?.[1] ?? 1), max = Number(/maxresults (\d+)/i.exec(q)?.[1] ?? 100);
-        const all = entity === "CustomerType" ? stub.types
+        const matched = entity === "CustomerType" ? stub.types
           : /active in \(true, ?false\)/i.test(q) ? stub.customers : stub.customers.filter((c) => c.Active !== false);
+        // `orderby Id` sorts as QuickBooks was seen to in the sandbox (Ids compared as numbers); without it the rows
+        // come back in whatever order the test stored them. A row with no numeric Id (some tests store junk) goes last.
+        const idOf = (c: unknown) => { const n = Number((c as { Id?: unknown } | null)?.Id ?? NaN); return Number.isNaN(n) ? Infinity : n; };
+        const all = /\borderby Id\b/i.test(q) ? [...matched].sort((a, b) => (idOf(a) === idOf(b) ? 0 : idOf(a) - idOf(b))) : matched;
         // The portal sends the type query with no paging clause, as it was tried against the sandbox: answer with every type.
         const unpagedTypes = entity === "CustomerType" && !/startposition|maxresults/i.test(q);
         const page = unpagedTypes ? all : all.slice(start - 1, start - 1 + max);

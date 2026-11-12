@@ -49,7 +49,7 @@ describe("the roster refresh", () => {
     expect(await refreshRoster(worker)).toMatchObject({ ok: true, types: 150 });
     expect(stub.apiCalls().map((x) => x.query.get("query"))).toEqual([
       "select * from CustomerType",
-      "select * from Customer where Active in (true, false) startposition 1 maxresults 1000",
+      "select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000",
     ]);
   });
 

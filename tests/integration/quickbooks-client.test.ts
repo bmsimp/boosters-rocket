@@ -90,6 +90,19 @@ describe("the QuickBooks client", () => {
     expect(stub.apiCalls().map((c) => /startposition (\d+)/.exec(c.query.get("query")!)![1])).toEqual(["1", "1001", "2001"]);
   });
 
+  it("asks for every page in Id order, so no customer is skipped or repeated between pages", { timeout: 30_000 }, async () => {
+    await seedConnected(stub);
+    // Stored newest first, as an unordered query could return them: only the orderby makes the pages line up.
+    stub.customers = Array.from({ length: 2050 }, (_, i) => ({ Id: String(2050 - i), DisplayName: `Customer ${2050 - i}`, Active: true }));
+    const rows = await qboQueryAll("Customer", "Active in (true, false)");
+    expect(stub.apiCalls().map((c) => c.query.get("query"))).toEqual([
+      "select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000",
+      "select * from Customer where Active in (true, false) orderby Id startposition 1001 maxresults 1000",
+      "select * from Customer where Active in (true, false) orderby Id startposition 2001 maxresults 1000",
+    ]);
+    expect(rows.map((r) => r.Id)).toEqual(Array.from({ length: 2050 }, (_, i) => String(i + 1)));
+  });
+
   it("turns a QuickBooks failure into a short code", async () => {
     await seedConnected(stub);
     stub.failQueryFrom = 1;
