@@ -95,7 +95,14 @@ describe("the staff pages for parents", () => {
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Can sign in (hasn&#x27;t yet)");
     expect(html).toContain("Names and email addresses are changed in QuickBooks");
+    expect(html).toContain('<span class="when">Never signed in · Not welcomed yet</span>');
     expect(await parentsPage("zzz")).toContain("Nobody matches");
+    const [ana] = await db.select().from(parent);
+    await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") });
+    await db.insert(auditLog).values({ door: "parent", actorId: ana!.id, actorLabel: ana!.email, action: "signin", targetType: "parent", targetId: ana!.id, at: new Date("2026-11-05T12:00:00Z") });
+    const dated = await parentsPage();
+    expect(dated).toContain('<span class="when">Last signed in <time dateTime="2026-11-05T12:00:00.000Z" title="2026-11-05T12:00:00.000Z">');
+    expect(dated).toContain(' · Welcomed <time dateTime="2026-11-01T12:00:00.000Z" title="2026-11-01T12:00:00.000Z">');
   });
 
   it("deciding and reversing go through the actions, and the page follows", async () => {
@@ -154,6 +161,8 @@ describe("the staff pages for parents", () => {
     expect(html).toContain("Block");
     expect(await audits("parent.read")).toEqual([expect.objectContaining({ actorId: registrar.id, permission: "Parents.ReadWrite", targetType: "parent", targetId: ana!.id })]);
     expect((await thrown(PersonPage({ params: Promise.resolve({ id: "not-an-id" }) }))).notFound).toBe(true);
+    expect((await thrown(PersonPage({ params: Promise.resolve({ id: "00000000-0000-4000-8000-00000000dead" }) }))).notFound).toBe(true);
+    expect(await audits("parent.read")).toHaveLength(1); // an unknown ID records no read
   });
 
   it("names a link from a previous QuickBooks company without looking up or linking its old family ID", async () => {
@@ -178,7 +187,10 @@ describe("the staff pages for parents", () => {
     expect(html).toContain("Custody order on file.");
     expect(html).toContain("Unblock");
     expect(await unblockAction(ana!.id)).toEqual({ ok: true, message: "Unblocked." });
-    expect(await unblockAction(ana!.id)).toEqual({ ok: true, message: "Unblocked." }); // not blocked: nothing changes
+    const refreshed = revalidated.count;
+    // Not blocked: nothing changes, and the page is not rendered again, so no further read is recorded.
+    expect(await unblockAction(ana!.id)).toEqual({ ok: true, message: "This person isn't blocked." });
+    expect(revalidated.count).toBe(refreshed);
     expect(await audits("parent.unblock")).toHaveLength(1);
     expect(await blockAction("00000000-0000-4000-8000-00000000dead", "Custody order on file.")).toEqual({ ok: false, errors: ["That person isn't in the portal any more."] });
   });
@@ -187,6 +199,9 @@ describe("the staff pages for parents", () => {
     const [ana] = await db.select().from(parent);
     await seedParentSettings({ signin: false });
     expect(await resendWelcomeAction(ana!.id)).toEqual({ ok: false, errors: ["This person can't sign in to any family right now, so no email was sent."] });
+    const html = await personPage(ana!.id);
+    expect(html).toContain("Parent sign-ins are switched off, so no welcome can be sent.");
+    expect(html).not.toContain("Resend welcome email");
   });
 
   it("a family's roster page shows each sign-in's standing; only Parents.ReadWrite sees the other family and gets links", async () => {
@@ -200,6 +215,14 @@ describe("the staff pages for parents", () => {
     expect(plain).toContain("Held: this address is also under another family");
     expect(plain).not.toContain("Chen");
     expect(plain).not.toContain("/staff/parents/");
+  });
+
+  // Server rendering never reports a repeated key; the key's parts (the source ID) are checked in parents-directory.test.ts.
+  it("lists two same-named people with no address in one family as two rows", async () => {
+    await seedCache([...ALL, par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null)]);
+    await runReconcile({ cause: "test" });
+    const html = await familyPage("10");
+    expect(html.match(/<span class="what">Pat Rivera<\/span><span class="when">Can&#x27;t sign in: no email address in QuickBooks<\/span>/g)).toHaveLength(2);
   });
 
   it("the staff home tells people who can act that something is waiting, and nobody else", async () => {

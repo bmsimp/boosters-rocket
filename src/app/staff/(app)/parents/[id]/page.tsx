@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { writeAudit } from "@/lib/audit/log";
 import { getPerson } from "@/lib/parents/directory";
+import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { NoteAction, OneButton } from "../forms";
 import { blockAction, unblockAction, resendWelcomeAction } from "../actions";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireStaffPage("Parents.ReadWrite");
   const { id } = await params;
-  const p = await getPerson(id);
+  const [p, settings] = await Promise.all([getPerson(id), getParentSettings()]);
   if (!p) notFound();
   // A staff read of family data (spec §7): recorded before anything is shown.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "parent.read", permission: "Parents.ReadWrite",
@@ -42,7 +43,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
 
       <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Welcome email</h2>
         <p>Sends the welcome again, now: where to sign in, and that they sign in with this address and a code.</p>
-        {canSignIn ? <OneButton label="Resend welcome email" pendingLabel="Sending…" act={resendWelcomeAction.bind(null, p.parentId)} />
+        {parentDoorClosed(settings) ? <p>Parent sign-ins are switched off, so no welcome can be sent.</p>
+          : canSignIn ? <OneButton label="Resend welcome email" pendingLabel="Sending…" act={resendWelcomeAction.bind(null, p.parentId)} />
           : <p>{p.blocked ? "This person is blocked, so no email can be sent." : "This person can't sign in to any family right now, so there is nothing to welcome them to."}</p>}
       </section>
 

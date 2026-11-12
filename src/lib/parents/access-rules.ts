@@ -102,7 +102,7 @@ export function decideAccess(i: { roster: Roster; shape: MembershipShape; holds:
     if (heldHere.length) {
       held.push({ email, names, pending: !heldHere.every((m) => sets.rejected.includes(m.familyQboId)),
         families: mine.map((m) => ({ qboId: m.familyQboId, name: m.familyName, held: heldHere.includes(m) })) });
-      flags.push({ rule: "held_address", qboId: null, name: names[0]!, detail: "This person's email address is under more than one family in QuickBooks, so it is held until someone with access to Parents reviews it." });
+      flags.push({ rule: "held_address", qboId: null, name: names[0]!, detail: "This person's email address is under more than one family in QuickBooks. Once parent sign-ins are on, nobody at that address can sign in to those families until someone with access to Parents says whether it is one person." });
     }
   }
 

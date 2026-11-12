@@ -30,7 +30,7 @@ describe("blocking and unblocking", () => {
     expect(await sessionsOf(p.authUserId)).toHaveLength(0);
     expect(await db.select().from(signinCode)).toHaveLength(0);
     expect(await db.select().from(guardian)).toMatchObject([{ status: "active" }]);
-    expect(await unblockPerson(p.id, o)).toEqual({ ok: true });
+    expect(await unblockPerson(p.id, o)).toEqual({ ok: true, changed: true });
     expect((await db.select().from(parent))[0]!.blocked).toBe(false);
     expect(await actions()).toEqual(["parent.block", "parent.unblock"]);
   });
@@ -49,7 +49,7 @@ describe("blocking and unblocking", () => {
 
   it("blocking again records the earlier reason; unblocking someone who is not blocked changes nothing and is not audited", async () => {
     const p = await seedParent({ name: "Ana Rivera" });
-    expect(await unblockPerson(p.id, staff)).toEqual({ ok: true });
+    expect(await unblockPerson(p.id, staff)).toEqual({ ok: true, changed: false });
     expect(await audits("parent.unblock")).toEqual([]);
     await blockPerson(p.id, "First reason.", staff);
     await blockPerson(p.id, "Second reason.", staff);

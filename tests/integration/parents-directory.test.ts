@@ -46,7 +46,13 @@ describe("the people directory", () => {
     await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     await seedGuardian({ parentId: p.id, familyQboId: "10" });
-    expect(await familySignins("10", { detailed: true })).toEqual([{ parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked" }]);
+    expect(await familySignins("10", { detailed: true })).toEqual([{ parentId: p.id, sourceQboId: null, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked" }]);
+  });
+
+  it("keeps two same-named records with no address in one family apart by their QuickBooks source", async () => {
+    await seedCache([fam("10", "Rivera Family"), par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null)]);
+    await runReconcile({ cause: "test" });
+    expect((await familySignins("10", { detailed: false })).map((s) => [s.sourceQboId, s.name, s.email])).toEqual([["14", "Pat Rivera", null], ["15", "Pat Rivera", null]]);
   });
 
   it("lists two addresses on a family record with no parent type separately, one of them held", async () => {

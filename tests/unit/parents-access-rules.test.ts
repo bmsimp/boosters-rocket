@@ -73,6 +73,7 @@ describe("decideAccess, layered with a parent type", () => {
     expect(d.held).toEqual([{ email: "ana@example.com", pending: true, names: ["Ana Rivera", "Ana R."],
       families: [{ qboId: "10", name: "Rivera Family", held: true }, { qboId: "20", name: "Chen Family", held: true }] }]);
     expect(rules(d)).toEqual(["family_no_signin:10", "family_no_signin:20", "held_address:null", "name_differs:11"]);
+    expect(d.flags.find((x) => x.rule === "held_address")!.detail).toBe("This person's email address is under more than one family in QuickBooks. Once parent sign-ins are on, nobody at that address can sign in to those families until someone with access to Parents says whether it is one person.");
     for (const f of d.flags.filter((x) => x.rule === "held_address" || x.rule === "name_differs")) for (const text of [f.name, f.detail]) { expect(text).not.toContain("ana@example.com"); expect(text).not.toContain("Chen"); }
 
     const approved = decide(LAYERED, customers, { holds: { "ana@example.com": { approved: ["10", "20"], rejected: [] } } });

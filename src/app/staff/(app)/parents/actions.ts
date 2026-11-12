@@ -8,6 +8,8 @@ import { resendWelcome } from "@/lib/parents/welcome";
 const P = "Parents.ReadWrite" as const;
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P });
+// A successful change re-renders the page, so a person's page records one more `parent.read`: by design, as the staff
+// member is shown the person again.
 const refresh = () => revalidatePath("/staff", "layout");
 
 // A server action can be called with any values, not only the ones its page sends: each argument is checked here,
@@ -47,6 +49,7 @@ export const unblockAction = staffAction(P, async (ctx, parentId: string): Promi
   if (!personId(parentId)) return NOT_FROM_PAGE;
   const r = await unblockPerson(parentId, op(ctx));
   if (!r.ok) return { ok: false, errors: ["That person isn't in the portal any more."] };
+  if (!r.changed) return { ok: true, message: "This person isn't blocked." }; // nothing changed: nothing to show again
   refresh();
   return { ok: true, message: "Unblocked." };
 });

@@ -28,17 +28,17 @@ export async function blockPerson(parentId: string, rawReason: string, o: StaffO
 }
 
 /** Puts back what blocking cleared: a person never welcomed, with an open link, is owed the welcome again when welcomes are on. */
-export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok: true } | { ok: false; reason: "not_found" }> {
+export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok: true; changed: boolean } | { ok: false; reason: "not_found" }> {
   return db.transaction(async (tx) => {
     const [p] = await tx.select().from(parent).where(eq(parent.id, parentId)).for("update");
     if (!p) return { ok: false as const, reason: "not_found" as const };
-    if (!p.blocked) return { ok: true as const };
+    if (!p.blocked) return { ok: true as const, changed: false };
     const open = (await tx.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, p.id), ne(guardian.status, "disabled"))).limit(1)).length > 0;
     const owed = !p.welcomedAt && open && (await getParentSettings(tx)).welcome;
     await tx.update(parent).set({ blocked: false, blockedAt: null, blockedBy: null, blockedReason: null, ...(owed ? { welcomeOwed: true } : {}), updatedAt: new Date() }).where(eq(parent.id, p.id));
     await writeAudit({ actor: o.actor, action: "parent.unblock", permission: o.permission, targetType: "parent", targetId: p.id,
       before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: false, ...(owed ? { welcomeOwed: true } : {}) }, ip: o.ip }, tx);
-    return { ok: true as const };
+    return { ok: true as const, changed: true };
   });
 }
 

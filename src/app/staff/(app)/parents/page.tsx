@@ -62,6 +62,7 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
             <li key={p.parentId}><div>
               <Link className="what" href={`/staff/parents/${p.parentId}`}>{p.name}</Link>
               <span className="when">{p.email}{p.blocked ? " · Blocked" : ""}</span>
+              <span className="when">{p.lastSigninAt ? <>Last signed in <LocalTime iso={p.lastSigninAt} /></> : "Never signed in"}{" · "}{p.welcomedAt ? <>Welcomed <LocalTime iso={p.welcomedAt} /></> : "Not welcomed yet"}</span>
               {/* Family names are text here, never links: a previous company's row carries that company's ID. */}
               <span className="when">{p.families.map((f) => `${f.familyName}: ${f.words}`).join(" · ") || "No families"}</span>
             </div></li>))}</ul>

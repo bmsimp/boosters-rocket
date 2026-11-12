@@ -30,7 +30,7 @@ function SignIns({ signins, detailed }: { signins: FamilySignin[]; detailed: boo
     <section className="box" aria-labelledby="entry-signins-h"><h2 id="entry-signins-h">Portal sign-ins</h2>
       <p>Who can sign in to the portal for this QuickBooks customer, and why someone can&apos;t.</p>
       {signins.length === 0 ? <p>Nobody can sign in for it yet.</p> : <ul className="lines">{signins.map((s) => (
-        <li key={`${s.parentId ?? "none"}|${s.name}|${s.email ?? ""}`}><div>
+        <li key={`${s.parentId ?? "none"}|${s.sourceQboId ?? "none"}|${s.email ?? ""}`}><div>
           {detailed && s.parentId ? <Link className="what" href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : <span className="what">{s.name}</span>}
           <span className="when">{s.email ? `${s.email} · ` : ""}{s.words}</span>
         </div></li>))}</ul>}

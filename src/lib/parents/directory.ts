@@ -8,7 +8,8 @@ import type { HeldAddress } from "./access-rules";
 import { loadDecision } from "./reconcile";
 
 export type AccessKind = "can" | "cannot" | "held" | "blocked";
-export type FamilySignin = { parentId: string | null; name: string; email: string | null; kind: AccessKind; words: string };
+/** `sourceQboId`: the QuickBooks record the link or the refusal came from (null for a link made by hand). */
+export type FamilySignin = { parentId: string | null; sourceQboId: string | null; name: string; email: string | null; kind: AccessKind; words: string };
 /**
  * `previousCompany`: the link was closed when a different QuickBooks company was connected. Its `familyQboId` is the
  * old company's, so a page shows the family name as text and never links it to, or looks it up in, the roster.
@@ -100,7 +101,7 @@ export async function familySignins(familyQboId: string, o: { detailed: boolean 
   ]);
   const others = (email: string | null) => (!o.detailed || !email ? null
     : loaded?.decision.held.find((h) => h.email === email)?.families.filter((f) => f.qboId !== familyQboId).map((f) => f.name) ?? null);
-  const out: FamilySignin[] = links.map(({ g, p }) => ({ parentId: p.id, name: p.name, email: p.email,
+  const out: FamilySignin[] = links.map(({ g, p }) => ({ parentId: p.id, sourceQboId: g.sourceQboId, name: p.name, email: p.email,
     ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, otherFamilies: others(p.email) }) }));
   if (loaded?.settings.signin) {
     // A denial is already shown when a link in this family is owned by its address; one with no address can only be
@@ -109,7 +110,7 @@ export async function familySignins(familyQboId: string, o: { detailed: boolean 
     const sources = new Set(links.map(({ g }) => g.sourceQboId));
     for (const d of loaded.decision.denials) {
       if (d.familyQboId !== familyQboId || (d.email ? owners.has(d.email) : sources.has(d.sourceQboId))) continue;
-      out.push({ parentId: null, name: d.name, email: d.email, ...accessWords({ status: "disabled", reason: d.reason, blocked: false, otherFamilies: others(d.email) }) });
+      out.push({ parentId: null, sourceQboId: d.sourceQboId, name: d.name, email: d.email, ...accessWords({ status: "disabled", reason: d.reason, blocked: false, otherFamilies: others(d.email) }) });
     }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }) || (a.email ?? "").localeCompare(b.email ?? ""));
