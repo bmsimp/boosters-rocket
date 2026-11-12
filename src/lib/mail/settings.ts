@@ -110,6 +110,13 @@ export async function saveMailSettings(draft: MailDraft, o: { actor: Actor; ip: 
     else {
       const { password, ...rest } = draft;
       if (password === null && existing?.method !== "smtp") return { ok: false, errors: ["Enter the SMTP password."] };
+      // A blank field keeps the saved password only for the place it already goes. Otherwise someone who doesn't know
+      // it could point the host at a server of their own and be sent it.
+      const sameServer = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+      if (password === null && existing?.method === "smtp"
+        && !(sameServer(existing.host, rest.host) && existing.port === rest.port && existing.username === rest.username)) {
+        return { ok: false, errors: ["Enter the SMTP password again. The server or username changed, and the saved password is only kept for the server and username it was saved with."] };
+      }
       const sealed = password !== null ? secretBox().seal(password, SMTP_PASSWORD_AAD)
         : { ciphertext: (existing as StoredSmtp).passwordCiphertext, keyId: (existing as StoredSmtp).passwordKeyId };
       next = { ...rest, passwordCiphertext: sealed.ciphertext, passwordKeyId: sealed.keyId };

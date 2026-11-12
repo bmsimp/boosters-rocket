@@ -42,8 +42,33 @@ describe("mail settings", () => {
     expect(await saveMailSettings({ ...smtp, password: null }, o)).toEqual({ ok: false, errors: ["Enter the SMTP password."] });
     await saveMailSettings({ ...smtp, password: "first" }, o);
     const before = await cipher();
-    await saveMailSettings({ ...smtp, username: "u2", password: null }, o);
+    // The same server, port and username (the host only spelled differently): the password would go where it already goes.
+    expect(await saveMailSettings({ ...smtp, host: "  SMTP.Example.ORG ", from: "treasurer@example.org", security: "tls", password: null }, o)).toEqual({ ok: true });
     expect(await cipher()).toBe(before);
+    expect(await getStoredMailConfig()).toMatchObject({ from: "treasurer@example.org", security: "tls" });
+  });
+
+  it.each([
+    ["host", { host: "smtp.elsewhere.example" }],
+    ["port", { port: 2525 }],
+    ["username", { username: "u2" }],
+  ])("won't send the saved password somewhere new: a changed %s with a blank password is refused and nothing is saved", async (_name, change) => {
+    await saveMailSettings({ ...smtp, password: "first" }, o);
+    const before = await db.select().from(setting);
+    const auditsBefore = (await db.select().from(auditLog)).length;
+    expect(await saveMailSettings({ ...smtp, ...change, password: null }, o))
+      .toEqual({ ok: false, errors: ["Enter the SMTP password again. The server or username changed, and the saved password is only kept for the server and username it was saved with."] });
+    expect(await db.select().from(setting)).toEqual(before);
+    expect(await db.select().from(auditLog)).toHaveLength(auditsBefore);
+  });
+
+  it("a changed server saves when the password is entered with it", async () => {
+    await saveMailSettings({ ...smtp, password: "first" }, o);
+    const before = await cipher();
+    expect(await saveMailSettings({ ...smtp, host: "smtp.elsewhere.example", port: 465, username: "u2", password: "second" }, o)).toEqual({ ok: true });
+    expect(await getStoredMailConfig()).toMatchObject({ host: "smtp.elsewhere.example", port: 465, username: "u2" });
+    expect(await cipher()).not.toBe(before);
+    expect((await db.select().from(auditLog)).filter((a) => a.action === "settings.mail.save").at(-1)).toMatchObject({ after: { host: "smtp.elsewhere.example", passwordChanged: true } });
   });
 
   it("offers Microsoft 365 only when staff sign-in with Microsoft is set up", async () => {
@@ -62,7 +87,7 @@ describe("mail settings", () => {
     expect(box.sent[0]!.to).toBe("admin@example.org");
     expect(await mailWorking()).toBe(true);
     expect(await mailAttention()).toBeNull();
-    await saveMailSettings({ ...smtp, port: 465, security: "tls", password: null }, o);
+    await saveMailSettings({ ...smtp, port: 465, security: "tls", password: "p" }, o); // a new port needs the password again
     expect(await mailWorking()).toBe(false);
     expect((await db.select().from(auditLog)).map((a) => a.action)).toEqual(["settings.mail.save", "settings.mail.test", "settings.mail.save"]);
   });

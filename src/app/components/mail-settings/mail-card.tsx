@@ -43,7 +43,7 @@ export function MailSettingsCard({ summary, save, test }: {
               </select>
             </label>
             <label className="field"><span>Username</span><input name="username" required autoComplete="off" spellCheck={false} defaultValue={smtp?.username ?? ""} /></label>
-            <label className="field"><span>Password{summary.passwordSaved && summary.passwordReadable ? " (leave blank to keep the saved one)" : ""}</span>
+            <label className="field"><span>Password{summary.passwordSaved && summary.passwordReadable ? " (leave blank to keep the saved one; enter it again if you change the host, port or username)" : ""}</span>
               <input name="password" type="password" autoComplete="new-password" required={!(summary.passwordSaved && summary.passwordReadable)} />
             </label>
             {summary.passwordSaved && !summary.passwordReadable && <p className="hint">The saved password can&apos;t be read with this server&apos;s encryption key. Enter it again.</p>}
