@@ -10,7 +10,7 @@ import { mailConfigHash } from "@/lib/mail/config-hash";
 import type { StoredMailConfig } from "@/lib/mail/types";
 
 const TABLES = [
-  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "signin_code", "rate_limit_event", "parent_email_change", "qbo_connection", "qbo_customer", "qbo_customer_type", "job_run", "setting", "auth_provider", "provider_certificate",
+  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "held_address", "family_match", "signin_code", "rate_limit_event", "parent_email_change", "qbo_connection", "qbo_customer", "qbo_customer_type", "job_run", "setting", "auth_provider", "provider_certificate",
   "staff_auth_session", "staff_auth_account", "staff_auth_verification", "staff_auth_user",
   "parent_auth_session", "parent_auth_account", "parent_auth_verification", "parent_auth_user",
 ];
@@ -41,20 +41,20 @@ export async function seedStaff(opts: { email: string; name?: string; status?: "
 export type ParentRow = typeof parent.$inferSelect;
 export type GuardianRow = typeof guardian.$inferSelect;
 
-export async function seedParent(o: { name: string; email?: string; phone?: string | null; blocked?: boolean }): Promise<ParentRow & { authUserId: string }> {
+export async function seedParent(o: { name: string; email?: string; phone?: string | null; blocked?: boolean; welcomedAt?: Date | null; welcomeOwed?: boolean }): Promise<ParentRow & { authUserId: string }> {
   const email = (o.email ?? `${o.name.toLowerCase().replace(/\s+/g, ".")}@example.com`).trim().toLowerCase();
-  const [p] = await db.insert(parent).values({ name: o.name, email, phone: o.phone ?? null, blocked: o.blocked ?? false }).returning();
+  const [p] = await db.insert(parent).values({ name: o.name, email, phone: o.phone ?? null, blocked: o.blocked ?? false, welcomedAt: o.welcomedAt ?? null, welcomeOwed: o.welcomeOwed ?? false }).returning();
   const [u] = await db.insert(parentAuthUser).values({ id: crypto.randomUUID(), name: o.name, email, emailVerified: true, parentId: p!.id }).returning();
   return { ...p!, authUserId: u!.id };
 }
 
 export async function seedGuardian(o: {
   parentId: string; familyQboId: string; status?: GuardianStatus; isPrimary?: boolean;
-  disabledReason?: DisabledReason | null; statusBeforeDisable?: "invited" | "active" | null;
+  disabledReason?: DisabledReason | null; statusBeforeDisable?: "invited" | "active" | null; sourceQboId?: string | null;
 }): Promise<GuardianRow> {
   const [g] = await db.insert(guardian).values({
     parentId: o.parentId, familyQboId: o.familyQboId, status: o.status ?? "active", isPrimary: o.isPrimary ?? false,
-    disabledReason: o.disabledReason ?? null, statusBeforeDisable: o.statusBeforeDisable ?? null,
+    disabledReason: o.disabledReason ?? null, statusBeforeDisable: o.statusBeforeDisable ?? null, sourceQboId: o.sourceQboId ?? null,
   }).returning();
   return g!;
 }

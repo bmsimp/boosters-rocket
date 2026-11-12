@@ -59,7 +59,8 @@ export const staffUser = pgTable("staff_user", {
 ]);
 
 export type GuardianStatus = "invited" | "active" | "disabled";
-export type DisabledReason = "no_active_students" | "removed";
+export type DisabledReason = "no_active_students" | "removed" | "inactive" | "family_inactive" | "no_email" | "held" | "address_changed" | "not_in_quickbooks" | "company_changed";
+const DISABLED_REASONS = ["no_active_students", "removed", "inactive", "family_inactive", "no_email", "held", "address_changed", "not_in_quickbooks", "company_changed"] as const;
 
 /** One record per parent, whatever families they're in (spec ยง2). Everything refers to the id, never to the email. */
 export const parent = pgTable("parent", {
@@ -68,6 +69,12 @@ export const parent = pgTable("parent", {
   email: text("email").notNull(), // stored trimmed + lower-cased
   phone: text("phone"),
   blocked: boolean("blocked").notNull().default(false),
+  blockedAt: timestamp("blocked_at", { withTimezone: true }),
+  blockedBy: uuid("blocked_by"),                       // staff_user.id
+  blockedReason: text("blocked_reason"),               // staff see it; the parent never does
+  welcomedAt: timestamp("welcomed_at", { withTimezone: true }),
+  welcomeOwed: boolean("welcome_owed").notNull().default(false),
+  welcomeTriedAt: timestamp("welcome_tried_at", { withTimezone: true }),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [uniqueIndex("parent_email_uq").on(t.email)]);
@@ -79,7 +86,8 @@ export const guardian = pgTable("guardian", {
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
   status: text("status", { enum: ["invited", "active", "disabled"] }).notNull().default("invited"),
-  disabledReason: text("disabled_reason", { enum: ["no_active_students", "removed"] }),
+  sourceQboId: text("source_qbo_id"),                  // the QuickBooks customer this link came from; null for one made by hand
+  disabledReason: text("disabled_reason", { enum: DISABLED_REASONS }),
   statusBeforeDisable: text("status_before_disable", { enum: ["invited", "active"] }),
   createdAt: created(),
   updatedAt: updated(),
@@ -123,6 +131,34 @@ export const parentEmailChange = pgTable("parent_email_change", {
   uniqueIndex("parent_email_change_token_uq").on(t.tokenHash),
   uniqueIndex("parent_email_change_one_live").on(t.parentId).where(sql`used_at IS NULL`),
 ]);
+
+/**
+ * One row per email address that is, or was, under more than one family (spec ง1 Held addresses). The three sets hold
+ * family QuickBooks IDs: approved by staff as the same person, rejected as not the same person, and already announced
+ * to staff by email. The IDs belong to the connected company; a company change deletes every row.
+ */
+export const heldAddress = pgTable("held_address", {
+  email: text("email").primaryKey(),                   // trimmed + lower-cased
+  approvedFamilyQboIds: jsonb("approved_family_qbo_ids").$type<string[]>().notNull().default([]),
+  rejectedFamilyQboIds: jsonb("rejected_family_qbo_ids").$type<string[]>().notNull().default([]),
+  announcedFamilyQboIds: jsonb("announced_family_qbo_ids").$type<string[]>().notNull().default([]),
+  note: text("note"),
+  decidedBy: uuid("decided_by"),                       // staff_user.id
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  createdAt: created(),
+  updatedAt: updated(),
+});
+
+/** "This family in the previous QuickBooks company is this family in the connected one" (spec ง6). Kept for good. */
+export const familyMatch = pgTable("family_match", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  oldRealmId: text("old_realm_id").notNull(),
+  oldFamilyQboId: text("old_family_qbo_id").notNull(),
+  newRealmId: text("new_realm_id").notNull(),
+  newFamilyQboId: text("new_family_qbo_id").notNull(),
+  decidedBy: uuid("decided_by"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("family_match_old_uq").on(t.oldRealmId, t.oldFamilyQboId)]);
 
 export type QboEnvironment = "sandbox" | "production";
 
