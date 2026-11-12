@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
+import { SHAPE_KEY } from "@/lib/roster/shape";
 import { runReconcile } from "@/lib/parents/reconcile";
 import { resetDb, seedParent, seedGuardian, seedParentSession } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu, P_SHAPE } from "../helpers/roster-cache";
@@ -25,7 +26,15 @@ describe("the reconcile", () => {
     expect(await db.select().from(auditLog)).toEqual([]);
   });
 
-  it("changes nothing when there is no shape, or the shape names a type QuickBooks no longer has", async () => {
+  it("changes nothing when there is no shape", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedCache(RIVERA);
+    await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
+    expect((await run()).ran).toBe(false);
+    expect(await links()).toEqual([]);
+    expect(await audits("parent.access.granted")).toEqual([]);
+  });
+
+  it("changes nothing when the shape names a type QuickBooks no longer has", async () => {
     await seedParentSettings(SIGNINS_ON);
     await seedCache(RIVERA, [{ qboId: "F", name: "Family" }]);           // "P" and "S" are gone
     expect((await run()).ran).toBe(false);
@@ -45,8 +54,15 @@ describe("the reconcile", () => {
   });
 
   it("changes nothing the second time", async () => {
-    await seedParentSettings(SIGNINS_ON); await seedCache(RIVERA);
+    // The first run grants, owes a welcome, takes over a hand-made link and opens a hold, so every kind of write happens once.
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    await seedCache([...RIVERA, fam("20", "Chen Family"), par("21", "Mei Chen", "20", "mei@example.com"),
+      fam("30", "Bo Family"), par("31", "Bo Lee", "30", "bo@example.com"), fam("40", "Lee Family"), par("41", "Bo Lee", "40", "bo@example.com")]);
+    const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com" });
+    await seedGuardian({ parentId: mei.id, familyQboId: "20" });
     await run();
+    const first = new Set((await db.select().from(auditLog)).map((r) => r.action));
+    expect(first).toEqual(new Set(["parent.access.granted", "parent.access.moved", "parent.hold.opened"]));
     const before = (await db.select().from(auditLog)).length;
     expect(await run()).toEqual({ ran: true, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 });
     expect((await db.select().from(auditLog)).length).toBe(before);
@@ -59,6 +75,11 @@ describe("the reconcile", () => {
     expect((await run()).welcomeOwed).toBe(1);
     const owed = Object.fromEntries((await db.select().from(parent)).map((p) => [p.email, p.welcomeOwed]));
     expect(owed).toEqual({ "ana@example.com": true, "old@example.com": false });
+    const granted = await audits("parent.access.granted");
+    expect(granted).toHaveLength(2);
+    const [anaRow, oldRow] = [granted.find((r) => (r.after as { sourceQboId: string }).sourceQboId === "11")!, granted.find((r) => (r.after as { sourceQboId: string }).sourceQboId === "13")!];
+    expect(anaRow.after).toMatchObject({ welcomeOwed: true });
+    expect(oldRow.after).not.toHaveProperty("welcomeOwed");
   });
 
   it("closes a hand-seeded link QuickBooks doesn't back, and takes over one it does", async () => {
@@ -74,6 +95,19 @@ describe("the reconcile", () => {
     ]);
     expect((await db.select().from(parent).where(eq(parent.id, ana.id)))[0]!.name).toBe("Ana Rivera");
     expect(await audits("parent.name.changed")).toHaveLength(1);
+    const moved = await audits("parent.access.moved");
+    expect(moved).toHaveLength(1);
+    expect(moved[0]).toMatchObject({ door: "system", actorLabel: "reconcile", targetType: "guardian", before: { sourceQboId: null } });
+    expect(moved[0]!.after).toEqual({ sourceQboId: "11", parentId: ana.id, familyQboId: "10", cause: "test" });
+  });
+
+  it("closes a hand-made link for an address that is held as held, not as missing from QuickBooks", async () => {
+    await seedParentSettings(SIGNINS_ON);
+    await seedCache([...RIVERA, fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")]);
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    await seedGuardian({ parentId: ana.id, familyQboId: "10" });
+    expect(await run()).toMatchObject({ ended: 1 });
+    expect(await links()).toEqual([{ email: "ana@example.com", family: "10", source: null, status: "disabled", reason: "held" }]);
   });
 
   it("ends the session for a closed family at once and leaves the person's other family alone, then reopens it as it was", async () => {
@@ -155,6 +189,10 @@ describe("the reconcile", () => {
     expect(await run()).toMatchObject({ granted: 0 });
     expect(await links()).toEqual([]);
     expect(await db.select().from(heldAddress)).toEqual([expect.objectContaining({ email: "ana@example.com", approvedFamilyQboIds: [] })]);
+    const opened = await audits("parent.hold.opened");
+    expect(opened).toEqual([expect.objectContaining({ door: "system", actorLabel: "reconcile", targetType: "held_address", targetId: "ana@example.com", after: { cause: "test" } })]);
+    await run();
+    expect(await audits("parent.hold.opened")).toHaveLength(1);                 // the row already exists: nothing new to audit
     await db.update(heldAddress).set({ approvedFamilyQboIds: ["10", "20"] });
     expect(await run()).toMatchObject({ granted: 2 });
     expect(await db.select().from(parent)).toHaveLength(1);
@@ -183,5 +221,91 @@ describe("the reconcile", () => {
     await seedParentSettings({ requireActiveStudents: true });
     expect(await run()).toMatchObject({ ended: 1 });
     expect((await links())[0]).toMatchObject({ status: "disabled", reason: "no_active_students" });
+  });
+});
+
+describe("the reconcile when addresses move between records", () => {
+  beforeEach(async () => { await resetDb(); await seedShape(); await seedParentSettings(SIGNINS_ON); });
+  const ids = async () => Object.fromEntries((await db.select().from(parent)).map((p) => [p.email, p.id]));
+  const family = (a: string, b: string) => [fam("10", "Rivera Family"), par("11", "Ann Rivera", "10", a), par("13", "Fay Rivera", "10", b), stu("12", "Leo Rivera", "10")];
+
+  it("never changes a person onto an address someone else had: record 11 goes E to X while record 13 goes F to E", async () => {
+    await seedCache(family("e@example.com", "f@example.com")); await run();
+    const start = await ids();
+    await seedCache(family("x@example.com", "e@example.com"));
+    expect(await run()).toMatchObject({ emailChanged: 0 });
+    expect(await links()).toEqual([
+      { email: "e@example.com", family: "10", source: "13", status: "invited", reason: null },
+      { email: "f@example.com", family: "10", source: null, status: "disabled", reason: "address_changed" },
+      { email: "x@example.com", family: "10", source: "11", status: "invited", reason: null },
+    ]);
+    const now = await ids();
+    expect(now["e@example.com"]).toBe(start["e@example.com"]);
+    expect(now["f@example.com"]).toBe(start["f@example.com"]);
+    expect(Object.values(start)).not.toContain(now["x@example.com"]);
+    expect(await audits("parent.email.changed")).toEqual([]);
+  });
+
+  it("does the same with the IDs the other way round: record 11 goes F to E while record 13 goes E to X", async () => {
+    await seedCache(family("f@example.com", "e@example.com")); await run();
+    const start = await ids();
+    await seedCache(family("e@example.com", "x@example.com"));
+    expect(await run()).toMatchObject({ emailChanged: 0 });
+    expect(await links()).toEqual([
+      { email: "e@example.com", family: "10", source: "11", status: "invited", reason: null },
+      { email: "f@example.com", family: "10", source: null, status: "disabled", reason: "address_changed" },
+      { email: "x@example.com", family: "10", source: "13", status: "invited", reason: null },
+    ]);
+    const now = await ids();
+    expect(now["e@example.com"]).toBe(start["e@example.com"]);
+    expect(now["f@example.com"]).toBe(start["f@example.com"]);
+    expect(await audits("parent.email.changed")).toEqual([]);
+  });
+
+  it("keeps each person when two records swap addresses", async () => {
+    await seedCache(family("e@example.com", "f@example.com")); await run();
+    const start = await ids();
+    await seedCache(family("f@example.com", "e@example.com"));
+    expect(await run()).toMatchObject({ emailChanged: 0 });
+    expect(await links()).toEqual([
+      { email: "e@example.com", family: "10", source: "13", status: "invited", reason: null },
+      { email: "f@example.com", family: "10", source: "11", status: "invited", reason: null },
+    ]);
+    expect(await ids()).toEqual(start);
+    expect(await audits("parent.email.changed")).toEqual([]);
+  });
+
+  it("leaves a blocked person blocked at their address through the chain", async () => {
+    await seedCache(family("e@example.com", "f@example.com")); await run();
+    await db.update(parent).set({ blocked: true }).where(eq(parent.email, "e@example.com"));
+    const start = await ids();
+    await seedCache(family("x@example.com", "e@example.com"));
+    await run();
+    const [atE] = await db.select().from(parent).where(eq(parent.email, "e@example.com"));
+    expect(atE).toMatchObject({ id: start["e@example.com"], blocked: true });
+    expect((await db.select().from(parent).where(eq(parent.email, "f@example.com")))[0]!.blocked).toBe(false);
+  });
+
+  it("never treats another company's link as the same link, even with the same IDs", async () => {
+    const old = await seedParent({ name: "Old Company", email: "old@example.com" });
+    await seedGuardian({ parentId: old.id, familyQboId: "10", sourceQboId: "11", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
+    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "new@example.com")]);
+    expect(await run()).toMatchObject({ granted: 1, emailChanged: 0, ended: 0 });
+    expect(await links()).toEqual([
+      { email: "new@example.com", family: "10", source: "11", status: "invited", reason: null },
+      { email: "old@example.com", family: "10", source: "11", status: "disabled", reason: "company_changed" },
+    ]);
+    expect((await db.select().from(parent).where(eq(parent.id, old.id)))[0]).toMatchObject({ email: "old@example.com", name: "Old Company" });
+  });
+
+  it("reuses another company's row for the same person only as a new invited link", async () => {
+    const old = await seedParent({ name: "Ana Rivera", email: "old@example.com" });
+    const row = await seedGuardian({ parentId: old.id, familyQboId: "10", sourceQboId: "11", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
+    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "old@example.com")]);
+    expect(await run()).toMatchObject({ granted: 1 });
+    expect((await db.select().from(guardian))[0]).toMatchObject({ id: row.id, status: "invited", disabledReason: null, statusBeforeDisable: null, sourceQboId: "11" });
+    const [g] = await audits("parent.access.granted");
+    expect(g).toMatchObject({ targetId: row.id });
+    expect(g!.after).toMatchObject({ status: "invited", sourceQboId: "11", reopenedFrom: "company_changed", cause: "test" });
   });
 });

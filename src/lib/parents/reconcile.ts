@@ -51,7 +51,10 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
   const audit = (action: string, targetType: string, targetId: string, before: unknown, after: Record<string, unknown>) =>
     writeAudit({ actor: RECONCILE_ACTOR, action, targetType, targetId, before, after: { ...after, cause: o.cause } }, tx);
 
-  for (const h of decision.held) await tx.insert(heldAddress).values({ email: h.email }).onConflictDoNothing();
+  for (const h of decision.held) {
+    const made = await tx.insert(heldAddress).values({ email: h.email }).onConflictDoNothing().returning({ email: heldAddress.email });
+    if (made.length) await audit("parent.hold.opened", "held_address", h.email, null, {});
+  }
 
   // Lock everything this step may change, in a fixed order.
   const links = await tx.select().from(guardian).orderBy(guardian.id).for("update");
@@ -61,6 +64,15 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
   type Person = NonNullable<ReturnType<typeof people.get>>;
   const ownerOf = (l: Link) => people.get(l.parentId)!;
   const kept = new Set<string>();
+  // Decided from the run's start, never from changes made during it, so one change can't make room for the next
+  // (a chain E to X, F to E would otherwise move F's record onto E's address).
+  const heldAtStart = new Set(byEmail.keys());
+  const grantEmails = new Set(decision.grants.map((g) => g.email));
+  const handMade = new Set(links.filter((l) => l.sourceQboId === null).map((l) => l.id));
+  // A link closed by a company change holds another company's IDs: it is never matched as the same link. Only the
+  // unique (family, person) index can make its row be reused, and then as a new link.
+  const foreign = new Set(links.filter((l) => l.status === "disabled" && l.disabledReason === "company_changed").map((l) => l.id));
+  const ours = (l: Link) => !foreign.has(l.id);
 
   const close = async (l: Link, reason: DisabledReason, dropSource = false) => {
     const was = l.status === "disabled" ? l.statusBeforeDisable : l.status;
@@ -72,10 +84,12 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
     await audit("parent.access.ended", "guardian", l.id, { status: was }, { parentId: l.parentId, familyQboId: l.familyQboId, reason, sessionsEnded });
     r.ended++;
   };
-  const owe = async (p: Person) => {
-    if (!settings.welcome || p.welcomedAt || p.welcomeOwed) return;
+  /** Marks the person as owed a welcome when that is due; the caller records it on the grant's audit row. */
+  const owe = async (p: Person): Promise<{ welcomeOwed?: true }> => {
+    if (!settings.welcome || p.welcomedAt || p.welcomeOwed) return {};
     await tx.update(parent).set({ welcomeOwed: true, updatedAt: new Date() }).where(eq(parent.id, p.id));
     p.welcomeOwed = true; r.welcomeOwed++;
+    return { welcomeOwed: true };
   };
   const createPerson = async (email: string, name: string): Promise<Person> => {
     const [p] = await tx.insert(parent).values({ name, email }).returning();
@@ -86,10 +100,10 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
 
   for (const g of decision.grants) {
     const name = decision.personNames.get(g.email) ?? g.name;
-    const fromSource = links.filter((l) => l.familyQboId === g.familyQboId && l.sourceQboId === g.sourceQboId);
+    const fromSource = links.filter((l) => ours(l) && l.familyQboId === g.familyQboId && l.sourceQboId === g.sourceQboId);
     // The link for this grant: from this customer and owned by this address; or one made by hand for this family and address.
     let link: Link | undefined = fromSource.find((l) => ownerOf(l).email === g.email)
-      ?? links.find((l) => l.familyQboId === g.familyQboId && l.sourceQboId === null && ownerOf(l).email === g.email);
+      ?? links.find((l) => ours(l) && handMade.has(l.id) && l.familyQboId === g.familyQboId && l.sourceQboId === null && ownerOf(l).email === g.email);
     let person = byEmail.get(g.email);
 
     if (!link) {
@@ -98,7 +112,11 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
         && !decision.grants.some((x) => x.familyQboId === g.familyQboId && x.sourceQboId === g.sourceQboId && x.email === ownerOf(l).email));
       if (stale) {
         const owner = ownerOf(stale);
-        if (!person && !links.some((l) => l.id !== stale.id && l.parentId === owner.id)) {
+        // In place only when nobody had the new address at the start, nobody keeps the old address under this decision,
+        // and the person has no other link of ours.
+        const inPlace = !person && !heldAtStart.has(g.email) && !grantEmails.has(owner.email)
+          && !links.some((l) => ours(l) && l.id !== stale.id && l.parentId === owner.id);
+        if (inPlace) {
           const old = owner.email;
           await tx.update(parent).set({ email: g.email, updatedAt: new Date() }).where(eq(parent.id, owner.id));
           await tx.update(parentAuthUser).set({ email: g.email, updatedAt: new Date() }).where(eq(parentAuthUser.parentId, owner.id));
@@ -117,24 +135,41 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
     if (!link) {
       person ??= await createPerson(g.email, name);
       link = links.find((l) => l.familyQboId === g.familyQboId && l.parentId === person!.id);
-      if (!link) {
+      if (link && foreign.has(link.id)) {
+        // Another company's row for this person and family: the unique index forces its reuse, as a new link.
+        const before = { status: link.status, disabledReason: link.disabledReason, sourceQboId: link.sourceQboId };
+        const set = { status: "invited" as const, disabledReason: null, statusBeforeDisable: null, sourceQboId: g.sourceQboId };
+        await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, link.id));
+        Object.assign(link, set); foreign.delete(link.id);
+        const owed = await owe(person);
+        await audit("parent.access.granted", "guardian", link.id, before,
+          { parentId: person.id, familyQboId: g.familyQboId, sourceQboId: g.sourceQboId, status: "invited", reopenedFrom: "company_changed", ...owed });
+        r.granted++;
+      } else if (!link) {
         const [row] = await tx.insert(guardian).values({ familyQboId: g.familyQboId, parentId: person.id, sourceQboId: g.sourceQboId, status: "invited" }).returning();
         links.push(row!); link = row!;
-        await audit("parent.access.granted", "guardian", link.id, null, { parentId: person.id, familyQboId: g.familyQboId, sourceQboId: g.sourceQboId, status: "invited" });
-        r.granted++; await owe(person);
+        const owed = await owe(person);
+        await audit("parent.access.granted", "guardian", link.id, null, { parentId: person.id, familyQboId: g.familyQboId, sourceQboId: g.sourceQboId, status: "invited", ...owed });
+        r.granted++;
       }
     }
     person = ownerOf(link);
-    if (link.sourceQboId !== g.sourceQboId) {
+    if (link.status === "disabled") {
+      // Reopened as it was before it closed; a change of source, if any, is on the same audit row.
+      const status = link.statusBeforeDisable ?? "invited";
+      const before = { status: "disabled", disabledReason: link.disabledReason, sourceQboId: link.sourceQboId };
+      const set = { status, disabledReason: null, statusBeforeDisable: null, sourceQboId: g.sourceQboId };
+      await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, link.id));
+      Object.assign(link, set);
+      const owed = await owe(person);
+      await audit("parent.access.granted", "guardian", link.id, before, { parentId: person.id, familyQboId: g.familyQboId, sourceQboId: g.sourceQboId, status, ...owed });
+      r.granted++;
+    } else if (link.sourceQboId !== g.sourceQboId) {
+      // Taking over a hand-made link, or re-pointing a link to the record that now carries this address.
+      const was = link.sourceQboId;
       await tx.update(guardian).set({ sourceQboId: g.sourceQboId, updatedAt: new Date() }).where(eq(guardian.id, link.id));
       link.sourceQboId = g.sourceQboId;
-    }
-    if (link.status === "disabled") {
-      const status = link.statusBeforeDisable ?? "invited", was = link.disabledReason;
-      await tx.update(guardian).set({ status, disabledReason: null, statusBeforeDisable: null, updatedAt: new Date() }).where(eq(guardian.id, link.id));
-      Object.assign(link, { status, disabledReason: null, statusBeforeDisable: null });
-      await audit("parent.access.granted", "guardian", link.id, { status: "disabled", disabledReason: was }, { parentId: person.id, familyQboId: g.familyQboId, sourceQboId: g.sourceQboId, status });
-      r.granted++; await owe(person);
+      await audit("parent.access.moved", "guardian", link.id, { sourceQboId: was }, { sourceQboId: g.sourceQboId, parentId: person.id, familyQboId: g.familyQboId });
     }
     if (person.name !== name) {
       await tx.update(parent).set({ name, updatedAt: new Date() }).where(eq(parent.id, person.id));
@@ -145,9 +180,21 @@ export async function reconcileAccess(tx: Tx, o: { cause: string }): Promise<Rec
     kept.add(link.id);
   }
 
-  const whyNot = new Map(decision.denials.map((d) => [`${d.familyQboId}|${d.sourceQboId}`, d.reason]));
+  // Why a link closes: the denial for its own record and address (for a hand-made link, any denial for its address in
+  // that family); else a denial of the whole record, one that names no address; else it is not in QuickBooks.
+  const exact = new Map<string, DisabledReason>(), byFamilyEmail = new Map<string, DisabledReason>(), wholeRecord = new Map<string, DisabledReason>();
+  const first = (m: Map<string, DisabledReason>, k: string, v: DisabledReason) => { if (!m.has(k)) m.set(k, v); };
+  for (const d of decision.denials) {
+    if (d.email) { first(exact, `${d.familyQboId}|${d.sourceQboId}|${d.email}`, d.reason); first(byFamilyEmail, `${d.familyQboId}|${d.email}`, d.reason); }
+    else first(wholeRecord, `${d.familyQboId}|${d.sourceQboId}`, d.reason);
+  }
+  const whyNot = (l: Link): DisabledReason => {
+    const email = ownerOf(l).email;
+    return (l.sourceQboId === null ? byFamilyEmail.get(`${l.familyQboId}|${email}`) : exact.get(`${l.familyQboId}|${l.sourceQboId}|${email}`))
+      ?? wholeRecord.get(`${l.familyQboId}|${l.sourceQboId}`) ?? "not_in_quickbooks";
+  };
   for (const l of links) {
-    if (l.status !== "disabled" && !kept.has(l.id)) await close(l, whyNot.get(`${l.familyQboId}|${l.sourceQboId}`) ?? "not_in_quickbooks");
+    if (l.status !== "disabled" && !kept.has(l.id)) await close(l, whyNot(l));
   }
   return r;
 }

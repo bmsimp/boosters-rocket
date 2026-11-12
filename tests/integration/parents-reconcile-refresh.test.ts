@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import * as reconcile from "@/lib/parents/reconcile";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, jobRun, qboCustomer } from "@/lib/db/schema";
+import { auditLog, guardian, jobRun, parent, parentAuthUser, qboCustomer } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
 import { resetDb } from "../helpers/db";
@@ -51,5 +51,21 @@ describe("the reconcile inside a roster refresh", () => {
     expect(JSON.stringify(await db.select().from(auditLog))).not.toContain("boom");
     const failed = (await db.select().from(auditLog)).filter((x) => x.action === "roster.refresh.failed").at(-1)!;
     expect(failed.after).toEqual({ code: "reconcile_failed" });
+  });
+
+  it("undoes the reconcile's own changes too when it fails after making them", async () => {
+    await seedParentSettings(SIGNINS_ON);
+    await refreshRoster(worker);
+    const snapshot = async () => ({ customers: await db.select().from(qboCustomer), links: await db.select().from(guardian),
+      people: await db.select().from(parent), accounts: await db.select().from(parentAuthUser) });
+    const before = await snapshot();
+    stub.customers = stub.customers.filter((c) => c.Id !== "11");                          // the real reconcile closes Ana's link
+    const real = reconcile.reconcileAccess;
+    let inside: reconcile.ReconcileResult | null = null;
+    vi.spyOn(reconcile, "reconcileAccess").mockImplementationOnce(async (tx, o) => { inside = await real(tx, o); throw new Error("boom after writing"); });
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed" });
+    expect(inside).toMatchObject({ ran: true, ended: 1 });
+    expect(await snapshot()).toEqual(before);
+    expect((await db.select().from(auditLog)).filter((r) => r.action === "parent.access.ended")).toEqual([]);
   });
 });
