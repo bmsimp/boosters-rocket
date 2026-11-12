@@ -40,9 +40,9 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
         </section>
       )}
 
+      {roster && <DisconnectedNotice page={page} admin={admin} />}
       {roster && (
         <section className="box" aria-labelledby="roster-list-h"><h2 id="roster-list-h">{roster.kind === "flat" ? "Members" : "Families"}</h2>
-          <DisconnectedNotice page={page} admin={admin} />
           <p>{rosterCounts(roster)}</p>
           <form method="get" role="search" className="stack">
             <label className="field"><span>Find a {noun}</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
