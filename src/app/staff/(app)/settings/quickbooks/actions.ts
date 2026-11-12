@@ -32,10 +32,11 @@ export const beginConnectAction = staffAction(P, async (ctx): Promise<void> => {
   redirect(r.ok ? r.url : `${SETUP}?step=app&error=keys`);
 });
 
-export const disconnectAction = staffAction(P, async (ctx): Promise<{ ok: true } | { ok: false; error: string }> => {
+export const disconnectAction = staffAction(P, async (ctx): Promise<{ ok: true; revoked: boolean } | { ok: false; error: string }> => {
   const r = await disconnect({ actor: actor(ctx), ip: ctx.ip, permission: P });
   revalidatePath("/staff", "layout");
-  return r.ok ? { ok: true } : { ok: false, error: "QuickBooks isn't connected." };
+  // `revoked` is whether Intuit confirmed it canceled the portal's access; the connection is deleted here either way.
+  return r.ok ? { ok: true, revoked: r.revoked } : { ok: false, error: "QuickBooks isn't connected." };
 });
 
 export const previewShapeAction = staffAction(P, async (_ctx, form: FormData): Promise<{ ok: true; preview: ShapePreview } | { ok: false; errors: string[] }> => {

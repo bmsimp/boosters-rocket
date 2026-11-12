@@ -10,7 +10,7 @@ export const refreshRosterAction = staffAction(P, async (ctx): Promise<{ ok: tru
   // A refusal changed nothing, so the page isn't rendered again: on a family's page that would write a second
   // roster.family.read row for one visit.
   if (r.ok || (r.reason !== "too_soon" && r.reason !== "running")) revalidatePath("/staff", "layout");
-  if (r.ok) return { ok: true, message: `Read ${r.customers} customers from QuickBooks.` };
+  if (r.ok) return { ok: true, message: `Read ${r.customers} ${r.customers === 1 ? "customer" : "customers"} from QuickBooks.` };
   return { ok: false, error:
     r.reason === "running" ? "A refresh is already under way. Try again in a minute."
     : r.reason === "too_soon" ? "A refresh ran less than 5 minutes ago. Try again shortly."

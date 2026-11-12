@@ -142,14 +142,19 @@ export function ShapeForm({ types, shape, preview, save }: {
   );
 }
 
-type Disconnected = { ok: true } | { ok: false; error: string };
+type Disconnected = { ok: true; revoked: boolean } | { ok: false; error: string };
+/** What the view says after a disconnect. When Intuit didn't confirm, the portal's access may still stand there. */
+export function disconnectedNote(revoked: boolean): string {
+  const kept = "The roster stays as it was last read, and is marked as no longer current.";
+  return revoked ? `Disconnected. ${kept}` : `Disconnected here, but Intuit didn't confirm that it canceled the portal's access. ${kept}`;
+}
 /**
  * On the view, tucked inside a closed section so it isn't pressed by accident. It stays mounted when the page comes
  * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected.
  */
 export function Disconnect({ connected, disconnect }: { connected: boolean; disconnect: () => Promise<Disconnected> }) {
   const [state, run, pending] = useActionState(async () => safely(() => disconnect(), { ok: false as const, error: ACTION_FAILED }), null);
-  if (!connected) return state?.ok ? <p role="status">Disconnected. The roster stays as it was last read, and is marked as no longer current.</p> : null;
+  if (!connected) return state?.ok ? <p role="status">{disconnectedNote(state.revoked)}</p> : null;
   return (
     <details><summary>Disconnect</summary>
       <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>

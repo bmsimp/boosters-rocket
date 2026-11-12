@@ -43,6 +43,16 @@ describe("building the roster from cached customers", () => {
     if (r.kind !== "layered") throw new Error("expected layered");
     expect(r.families.map((f) => f.customer.qboId)).toContain("80");
   });
+  it("sorts names without regard to case, and same-named customers by QuickBooks ID as a number", () => {
+    const people = [c("100", "ana rivera", "3"), c("9", "Ana Rivera", "3"), c("20", "BETH Chen", "3"), c("3", "adam Wu", "3"), c("21", "beth chen", "3")];
+    const flat = buildRoster({ kind: "flat", memberTypeIds: ["3"] }, people);
+    if (flat.kind !== "flat") throw new Error("expected flat");
+    expect(flat.members.map((m) => m.qboId)).toEqual(["3", "9", "100", "20", "21"]);
+    const families = buildRoster(layered, [c("200", "smith family", "1"), c("30", "Smith Family", "1"), c("7", "Smith Family", "1"), c("31", "Zed", "3", "30"), c("32", "amy", "3", "30"), c("33", "Bob", "3", "30")]);
+    if (families.kind !== "layered") throw new Error("expected layered");
+    expect(families.families.map((f) => f.customer.qboId)).toEqual(["7", "30", "200"]);
+    expect(families.families[1]!.students.map((s) => s.displayName)).toEqual(["amy", "Bob", "Zed"]);
+  });
   it("flat: every customer of the member types, in name order, whatever they sit under", () => {
     const r = buildRoster({ kind: "flat", memberTypeIds: ["3", "2"] }, company);
     if (r.kind !== "flat") throw new Error("expected flat");

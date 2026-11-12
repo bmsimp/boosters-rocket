@@ -100,6 +100,14 @@ describe("the roster pages", () => {
     expect(html).not.toMatch(/Chen Family<\/a><span class="when">\d+ student/); // a list row; Needs attention is not filtered and still names Chen Family
     expect(html).toMatch(/Rivera Family<\/a><span class="when">1 student, 1 parent<\/span>/);
     expect(await list("%")).toContain("No family matches");
+    expect(await list("_")).toContain("No family matches"); // not a one-character wildcard
+    expect(await list("Rivera' or '1'='1")).toContain("No family matches");
+    const angle = await list("<b>Rivera</b>");
+    expect(angle).toContain("No family matches &quot;&lt;b&gt;Rivera&lt;/b&gt;&quot;");
+    expect(angle).not.toContain("<b>Rivera</b>");
+    const long = await list("x".repeat(150)); // only the first 100 characters are used, and shown
+    expect(long).toContain(`No family matches &quot;${"x".repeat(100)}&quot;`);
+    expect(long).not.toContain("x".repeat(101));
   });
 
   it("shows Needs attention with plain words, linking only to things that have a page", async () => {
@@ -144,7 +152,8 @@ describe("the roster pages", () => {
 
   it("is not found, and writes no audit row, for anything that isn't a family", async () => {
     await ready();
-    for (const id of ["30", "11", "nope", "10%27"]) expect((await thrown(RosterEntryPage({ params: Promise.resolve({ id }) }))).notFound).toBe(true);
+    // "%E0%A4%A" is not valid percent-encoding: it must be a plain not-found, never an error page.
+    for (const id of ["30", "11", "nope", "10%27", "%E0%A4%A", "%"]) expect((await thrown(RosterEntryPage({ params: Promise.resolve({ id }) }))).notFound).toBe(true);
     expect(await audits("roster.family.read")).toEqual([]);
   });
 
@@ -184,6 +193,12 @@ describe("the roster pages", () => {
     // A refusal renders nothing again, so a family's page doesn't record a second read for one visit.
     expect(revalidated.count).toBe(1);
     expect((await audits("roster.refresh")).at(-1)).toMatchObject({ actorId: reader.id, ip: "203.0.113.40" });
+  });
+
+  it("Refresh now counts one customer as one customer", async () => {
+    await seedConnected(stub);
+    stub.customers = stub.customers.slice(0, 1);
+    expect(await refreshRosterAction()).toEqual({ ok: true, message: "Read 1 customer from QuickBooks." });
   });
 
   it("Refresh now right after a failed read says a refresh ran, not that the roster was refreshed", async () => {

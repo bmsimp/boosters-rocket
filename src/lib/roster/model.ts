@@ -6,7 +6,8 @@ export type Roster =
   | { kind: "flat"; members: Cust[]; outside: number }
   | { kind: "layered"; families: Family[]; strays: Cust[]; outside: number };
 
-const byName = (a: Cust, b: Cust) => a.displayName.localeCompare(b.displayName, "en", { sensitivity: "base" }) || a.qboId.localeCompare(b.qboId);
+// Same-named customers keep a steady order: by QuickBooks ID, compared as numbers (9 before 100).
+const byName = (a: Cust, b: Cust) => a.displayName.localeCompare(b.displayName, "en", { sensitivity: "base" }) || a.qboId.localeCompare(b.qboId, "en", { numeric: true });
 
 /**
  * Turns cached customers into the club's roster (spec §1). Pure. A student or parent belongs to a family only when it

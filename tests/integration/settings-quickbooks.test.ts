@@ -21,7 +21,7 @@ vi.mock("next/navigation", () => ({
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { ShapeForm, shapeFormData } from "@/app/staff/(app)/settings/quickbooks/forms";
+import { ShapeForm, shapeFormData, disconnectedNote } from "@/app/staff/(app)/settings/quickbooks/forms";
 import { db } from "@/lib/db/client";
 import { auditLog, qboConnection, qboCustomer, role, roleRule, roleAssignment } from "@/lib/db/schema";
 import { saveQboAppAction, beginConnectAction, disconnectAction, previewShapeAction, saveShapeAction } from "@/app/staff/(app)/settings/quickbooks/actions";
@@ -165,6 +165,18 @@ describe("QuickBooks settings", () => {
     expect(await setupHtml("app")).not.toContain(">Sign in to Intuit</button>");
   });
 
+  it("a connected site opens on step 3 and can go back to any step; a step that doesn't exist is treated as none asked for", async () => {
+    await seedConnected(stub);
+    const current = async (step?: string) => /<li aria-current="step">.*?>(\d)\. /.exec(await setupHtml(step))?.[1];
+    expect(await current()).toBe("3");
+    expect(await current("shape")).toBe("3");
+    expect(await current("connect")).toBe("2");
+    expect(await current("app")).toBe("1");
+    for (const junk of ["finish", "constructor", "__proto__", "SHAPE", "shape ", "4"]) expect(await current(junk)).toBe("3");
+    await db.delete(qboConnection);
+    expect(await current("constructor")).toBe("1"); // on a site with nothing set up, junk opens the first step
+  });
+
   it("step 1 shows the redirect address to copy and never the saved secret", async () => {
     await saveQboAppAction(form(keys));
     const html = await setupHtml("app");
@@ -267,9 +279,25 @@ describe("QuickBooks settings", () => {
 
   it("disconnects from the view", async () => {
     await seedConnected(stub);
-    expect(await disconnectAction()).toEqual({ ok: true });
+    expect(await disconnectAction()).toEqual({ ok: true, revoked: true });
     expect(await disconnectAction()).toEqual({ ok: false, error: "QuickBooks isn't connected." });
     expect((await audits("quickbooks.disconnect"))[0]).toMatchObject({ actorId: admin.id, permission: "Settings.QuickBooks.ReadWrite" });
+  });
+});
+
+describe("disconnecting when Intuit doesn't confirm", () => {
+  it("tells the Admin Intuit didn't confirm it, since the access may still stand there", async () => {
+    await resetDb(); stub.reset();
+    const admin = await seedStaff({ email: "admin@club.org", name: "Admin Person", admin: true });
+    who.staff = { door: "staff", staffUserId: admin.id, name: admin.name, email: admin.email };
+    await seedConnected(stub);
+    const real = stubBase.url;
+    stubBase.url = "http://127.0.0.1:1"; // nothing listens there
+    try {
+      expect(await disconnectAction()).toEqual({ ok: true, revoked: false });
+    } finally { stubBase.url = real; }
+    expect(disconnectedNote(true)).toBe("Disconnected. The roster stays as it was last read, and is marked as no longer current.");
+    expect(disconnectedNote(false)).toBe("Disconnected here, but Intuit didn't confirm that it canceled the portal's access. The roster stays as it was last read, and is marked as no longer current.");
   });
 });
 
