@@ -509,7 +509,8 @@ Fill one row per checklist step each time you run it.
 | 2026-11-11 | f0f6bb0 | 13 | Not run | Needs a day. The worker did renew the connection during the walkthrough (`ran quickbooks.token_refresh: ok`). |
 | 2026-11-11 | f0f6bb0 | 14 | Pass | `quickbooks.disconnect` with `revoked: true`; the roster pages said the roster was no longer current and hid **Refresh now**; after reconnecting to the same company the notice was gone and nothing was cleared. |
 | 2026-11-11 | f0f6bb0 | 15 | Pass | Both directions. Connecting "Sandbox Company US a680" wrote `roster.cleared` (reason `different_company`), removed the shape and read 29 customers and no types; **Roster** and the QuickBooks page said what the checklist expects. Switching back to "9954" cleared it again, and the shape was chosen again. |
-| 2026-11-11 | f0f6bb0 | 16, 17 | Not run | Need a sandbox token from Intuit's OAuth Playground. |
+| 2026-11-11 | fdebe0b | 16 | Pass | `select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000` was accepted (HTTP 200) and returned all 34 customers in `Id` order, compared as numbers (1 to 100000041). |
+| 2026-11-11 | fdebe0b | 17 | Pass | With `School` made inactive, `select * from CustomerType` returned 4 types, all `Active=true`: QuickBooks leaves an inactive type out of the list. So a shape that names a type later made inactive is reported as naming a type QuickBooks no longer has, after the next refresh. |
 
 Findings from the 2026-11-09 run, all fixed on `main`:
 
