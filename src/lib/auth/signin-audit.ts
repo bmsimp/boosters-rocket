@@ -12,7 +12,7 @@ type HookContext = { headers?: Headers; request?: Request } | null | undefined;
  * `databaseHooks.session.create.after`, so it fires once per new session. The parent door writes its own `signin` row
  * when the family is entered (family-choice.ts), so this is only called for staff.
  * The provider has authenticated the person; whether the portal then lets them in
- * is decided (and refusals recorded) by resolveStaff / resolveGuardian.
+ * is decided (and refusals recorded) by resolveStaff.
  */
 export async function recordSignin(door: "staff" | "parent", session: NewSession, ctx?: HookContext): Promise<void> {
   const table = door === "staff" ? staffAuthUser : parentAuthUser;

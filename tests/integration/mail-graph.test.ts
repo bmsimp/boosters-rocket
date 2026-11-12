@@ -82,6 +82,18 @@ describe("Graph sender", () => {
     expect((e as Error).message).not.toContain("482913");
   });
 
+  it("keeps only a short, plain error code from Graph, and falls back to the HTTP status", async () => {
+    const { send } = await sender();
+    for (const code of ["x".repeat(300), "<script>alert(1)</script>", "Error Access\nDenied", ""]) {
+      reply = (s) => (s.url.includes("/oauth2/") ? okGraph(s) : { status: 400, body: { error: { code, message: "Access is denied." } } });
+      const e = await send(msg).catch((x: unknown) => x);
+      expect(e).toBeInstanceOf(MailSendError);
+      expect((e as Error).message).toBe("Microsoft Graph didn't accept the message (HTTP 400).");
+    }
+    reply = (s) => (s.url.includes("/oauth2/") ? okGraph(s) : { status: 400, body: { error: { code: "ErrorInvalidRecipients" } } });
+    await expect(send(msg)).rejects.toThrow("Microsoft Graph didn't accept the message (ErrorInvalidRecipients).");
+  });
+
   it("reports a refused token with its AADSTS code", async () => {
     reply = () => ({ status: 401, body: { error_codes: [700027] } });
     const { send } = await sender();

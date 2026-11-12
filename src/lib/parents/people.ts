@@ -145,7 +145,7 @@ export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok:
  */
 export async function onFamilyStudentsChanged(familyQboId: string, hasActiveStudents: boolean, o: StaffOp): Promise<{ changed: number }> {
   return db.transaction(async (tx) => {
-    const rows = await tx.select().from(guardian).where(eq(guardian.familyQboId, familyQboId)).for("update");
+    const rows = await tx.select().from(guardian).where(eq(guardian.familyQboId, familyQboId)).orderBy(guardian.id).for("update");
     // Lock each person once, in a fixed order, so racing calls over shared people can't deadlock or miscount.
     for (const id of [...new Set(rows.map((r) => r.parentId))].sort()) {
       await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, id)).for("update");

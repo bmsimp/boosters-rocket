@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const ident = vi.hoisted(() => ({ staff: null as unknown, parent: null as unknown, perms: new Set<string>(), admin: false }));
+const ident = vi.hoisted(() => ({ staff: null as unknown, parent: null as unknown, choosing: null as unknown, perms: new Set<string>(), admin: false }));
 vi.mock("@/lib/auth/identity", () => ({
   getStaffIdentity: async () => ident.staff,
   getParentIdentity: async () => ident.parent,
-  getParentState: async () => (ident.parent ? { status: "ok", identity: ident.parent } : { status: "none" }),
+  getParentState: async () => (ident.choosing ?? (ident.parent ? { status: "ok", identity: ident.parent } : { status: "none" })),
   hasStaffSession: async () => Boolean(ident.staff),
   hasParentSession: async () => Boolean(ident.parent),
 }));
@@ -20,7 +20,10 @@ import { staffAction, parentAction, parentSessionAction, guardOf, AccessDenied }
 const STAFF = { door: "staff", staffUserId: "s1", name: "Pat", email: "pat@club.org" };
 const PARENT = { door: "parent", parentId: "p1", sessionId: "s1", guardianId: "g1", familyQboId: "123", name: "Ana", email: "ana@example.com", families: [{ guardianId: "g1", familyQboId: "123" }] };
 
-beforeEach(() => { ident.staff = null; ident.parent = null; ident.perms = new Set(); ident.admin = false; });
+// Signed in, with no family chosen yet (two families, or the chosen one went away).
+const CHOOSING = { status: "choose", parentId: "p1", sessionId: "s1", name: "Ana", families: [{ guardianId: "g1", familyQboId: "123" }, { guardianId: "g2", familyQboId: "456" }] };
+
+beforeEach(() => { ident.staff = null; ident.parent = null; ident.choosing = null; ident.perms = new Set(); ident.admin = false; });
 
 describe("staffAction", () => {
   const act = staffAction("Settings.Club.ReadWrite", async (ctx, x: number) => `${ctx.staffUserId}:${x}`);
@@ -53,6 +56,10 @@ describe("parentAction", () => {
     ident.staff = STAFF; ident.admin = true;
     await expect(act()).rejects.toBeInstanceOf(AccessDenied);
   });
+  it("refuses a parent who hasn't chosen a family yet", async () => {
+    ident.choosing = CHOOSING;
+    await expect(act()).rejects.toBeInstanceOf(AccessDenied);
+  });
 });
 
 describe("parentSessionAction", () => {
@@ -61,6 +68,10 @@ describe("parentSessionAction", () => {
     ident.parent = PARENT;
     await expect(act()).resolves.toBe("p1");
     expect(guardOf(act)).toEqual({ door: "parent" });
+  });
+  it("runs for a signed-in parent who hasn't chosen a family yet", async () => {
+    ident.choosing = CHOOSING;
+    await expect(act()).resolves.toBe("p1");
   });
   it("refuses without a parent session", async () => {
     await expect(act()).rejects.toBeInstanceOf(AccessDenied);

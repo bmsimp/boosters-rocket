@@ -13,6 +13,10 @@ import { db } from "@/lib/db/client";
 import { auditLog, parentAuthSession } from "@/lib/db/schema";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { chooseFamilyAction } from "@/app/choose-family/actions";
+import ChooseFamily from "@/app/choose-family/page";
+import { renderToStaticMarkup } from "react-dom/server";
+import { eq } from "drizzle-orm";
+import { guardian } from "@/lib/db/schema";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
 
@@ -25,6 +29,25 @@ const redirectOf = async (p: Promise<unknown>) => { try { await p; return null; 
 
 describe("chooseFamilyAction", () => {
   beforeEach(async () => { await resetDb(); state.outbox.length = 0; state.cookie = ""; await seedWorkingMail(); });
+
+  it("the chooser says 'more than one family' only when there is more than one to choose from", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    await seedGuardian({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
+    await post("/portal-code/send", { email: "ana@example.com" });
+    await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
+    const res = await post("/portal-code/verify", { email: "ana@example.com", code: /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]! });
+    state.cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
+    const two = renderToStaticMarkup(await ChooseFamily());
+    expect(two).toContain("more than one family");
+    expect(two.match(/<button class="btn"/g)).toHaveLength(2);
+    // The chosen family goes away and one is left: the parent is sent back here, with one family to choose.
+    expect(await redirectOf(chooseFamilyAction("F2"))).toBe("/");
+    await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, second.id));
+    const one = renderToStaticMarkup(await ChooseFamily());
+    expect(one.match(/<button class="btn"/g)).toHaveLength(1);
+    expect(one).not.toContain("more than one family");
+    expect(one).toContain("Choose the family to look at.");
+  });
 
   it("refuses anything but a short string, leaves the session's family alone and doesn't audit the value", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });

@@ -16,7 +16,7 @@ export default async function ChooseFamily() {
   return (
     <main className="wrap signin">
       <h1 className="page-title">{club.name}</h1>
-      <p className="lede">You&apos;re a guardian in more than one family. Choose the one to look at; you can switch later.</p>
+      <p className="lede">{families.length > 1 ? "You're a guardian in more than one family. Choose the one to look at; you can switch later." : "Choose the family to look at."}</p>
       <ul className="stack">
         {families.map((f) => (
           <li key={f.guardianId}>

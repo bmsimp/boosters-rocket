@@ -32,8 +32,8 @@ export async function certificateRows(key: CertificateProviderKey, tx?: Tx) {
 
 type CertificateOpts = { actor: Actor; ip: string | null; createdBy: string | null; permission?: string };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for callers; staff Microsoft is the only certificate provider now
-const newCertificate = (key: CertificateProviderKey) => generateCertificate(`Booster Rocket staff (${new URL(env.APP_URL).hostname})`);
+// Staff Microsoft is the only certificate provider, so the name doesn't depend on which one.
+const newCertificate = () => generateCertificate(`Booster Rocket staff (${new URL(env.APP_URL).hostname})`);
 
 async function insertPending(tx: Tx, key: CertificateProviderKey, g: GeneratedCertificate, opts: CertificateOpts): Promise<CertificateRow> {
   const id = crypto.randomUUID();
@@ -53,7 +53,7 @@ export async function getOrCreatePendingCertificate(key: CertificateProviderKey,
   const existing = (await certificateRows(key)).pending;
   if (existing) return existing;
   // Key generation is slow, so it happens before taking the lock; a concurrent winner's row is returned instead.
-  const g = await newCertificate(key);
+  const g = await newCertificate();
   return db.transaction(async (tx) => {
     await tx.execute(LOCK);
     const raced = (await certificateRows(key, tx)).pending;
@@ -70,7 +70,7 @@ export async function startCertificateReplacement(key: CertificateProviderKey, o
   const readable = (r: CertificateRow | null): r is CertificateRow => r !== null && openCertificateKey(r) !== null;
   const existing = (await certificateRows(key)).pending;
   if (readable(existing)) return existing;
-  const g = await newCertificate(key);
+  const g = await newCertificate();
   return db.transaction(async (tx) => {
     await tx.execute(LOCK);
     const { pending } = await certificateRows(key, tx);

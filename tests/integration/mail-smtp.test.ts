@@ -34,6 +34,7 @@ describe("SMTP sender", () => {
     sink = await startMailSink({ secure: false, hideSTARTTLS: true, ...tls });
     await expect(sender(sink.port, "starttls")(msg)).rejects.toBeInstanceOf(MailSendError);
     expect(sink.messages).toHaveLength(0);
+    expect(sink.logins).toHaveLength(0); // the password never went over the unencrypted connection
   });
 
   it("says plainly when the password is wrong, without the message", async () => {
@@ -41,5 +42,6 @@ describe("SMTP sender", () => {
     const e = await sender(sink.port, "tls", "wrong")(msg).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(MailSendError);
     expect((e as Error).message).toBe("The mail server refused the username or password.");
+    expect(sink.logins).toEqual([{ user: "sender", ok: false }]);
   });
 });

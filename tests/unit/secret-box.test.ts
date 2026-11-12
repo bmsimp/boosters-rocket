@@ -34,7 +34,7 @@ describe("secret box", () => {
   it("refuses a ciphertext moved to another row", () => {
     const box = createSecretBox({ current: KEY_A });
     const sealed = box.seal("value", "staff-microsoft");
-    expect(() => box.open(sealed, "parent-oidc")).toThrow(SecretBoxError);
+    expect(() => box.open(sealed, "mail:smtp-password")).toThrow(SecretBoxError);
   });
 
   it("refuses the wrong key", () => {

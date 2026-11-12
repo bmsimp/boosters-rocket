@@ -178,6 +178,10 @@ describe("the parent door", () => {
       ["/list-sessions", "GET", null], ["/list-accounts", "GET", null], ["/account-info", "GET", null],
     ];
     for (const [path, method, body] of writes) expect([path, (await call(path, method, body)).status]).toEqual([path, 404]);
+    // And every other disabled path, both ways, so the list above can't fall behind the configuration.
+    const disabled = auth.options.disabledPaths ?? [];
+    expect(disabled.length).toBeGreaterThanOrEqual(writes.length);
+    for (const path of disabled) for (const method of ["GET", "POST"] as const) expect([path, method, (await call(path, method)).status]).toEqual([path, method, 404]);
     const [u] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, a.authUserId));
     expect(u).toMatchObject({ name: "Ana", image: null, email: "ana@example.com" });
     expect(await db.select().from(parentAuthSession).where(eq(parentAuthSession.userId, a.authUserId))).toHaveLength(1);

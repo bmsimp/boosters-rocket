@@ -18,6 +18,8 @@ try {
   fail(USAGE);
 }
 const name = values.name?.trim();
+// Trimmed and lowercased, as the portal stores every parent email (normalizeEmail in src/lib/setup/state.ts, which a
+// plain .mjs script can't import). Sign-in looks the address up in this form.
 const email = values.email?.trim().toLowerCase();
 const family = values.family?.trim();
 if (!name || !email || !family) fail(USAGE);
