@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { env } from "@/env";
 import { db, type Tx } from "@/lib/db/client";
 import { qboConnection, type QboEnvironment } from "@/lib/db/schema";
@@ -99,10 +100,10 @@ export async function beginConnect(staffUserId: string): Promise<{ ok: true; url
 /** Finishes a connect when Intuit sends the Admin back (spec §3 Rules for the connection). */
 export async function completeConnect(
   p: { code: string | null; state: string | null; realmId: string | null; error: string | null },
-  o: { staffUserId: string; actor: Actor; ip: string | null },
+  o: { staffUserId: string; actor: Actor; ip: string | null; permission?: string },
 ): Promise<{ ok: true } | { ok: false; reason: ConnectRefusal }> {
   const refuse = async (reason: ConnectRefusal, code?: string) => {
-    await writeAudit({ actor: o.actor, action: "quickbooks.connect_refused", ...TARGET, after: code ? { reason, code } : { reason }, ip: o.ip });
+    await writeAudit({ actor: o.actor, action: "quickbooks.connect_refused", permission: o.permission, ...TARGET, after: code ? { reason, code } : { reason }, ip: o.ip });
     return { ok: false as const, reason };
   };
   // 1. Spend the state. It is cleared only when it matches, so a stray return can't cancel a connect in progress.
@@ -154,8 +155,9 @@ export async function completeConnect(
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
   }
-  await db.update(qboConnection).set({ companyName, updatedAt: new Date() });
-  await writeAudit({ actor: o.actor, action: "quickbooks.connect", ...TARGET, after: { companyName, realmId: p.realmId, environment: claim.environment }, ip: o.ip });
+  // Only while this company is still the connected one: a disconnect during the read must not get a name back.
+  await db.update(qboConnection).set({ companyName, updatedAt: new Date() }).where(eq(qboConnection.realmId, p.realmId!));
+  await writeAudit({ actor: o.actor, action: "quickbooks.connect", permission: o.permission, ...TARGET, after: { companyName, realmId: p.realmId, environment: claim.environment }, ip: o.ip });
   return { ok: true };
 }
 

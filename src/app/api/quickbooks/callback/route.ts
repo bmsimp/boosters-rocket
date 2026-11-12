@@ -16,12 +16,13 @@ export async function GET(req: Request): Promise<Response> {
   // Signed in but not resolvable (disabled) goes where the pages send them; only no session at all goes to sign-in.
   if (!id) return to((await hasStaffSession()) ? "/refused" : "/staff/sign-in");
   const actor = { door: "staff" as const, id: id.staffUserId, label: id.email }, ip = clientIpFrom(req.headers);
-  if (!can(await effectivePermissions(id.staffUserId), "Settings.QuickBooks.ReadWrite")) {
-    await writeAudit({ actor, action: "access.refused", permission: "Settings.QuickBooks.ReadWrite", ip });
+  const permission = "Settings.QuickBooks.ReadWrite" as const;
+  if (!can(await effectivePermissions(id.staffUserId), permission)) {
+    await writeAudit({ actor, action: "access.refused", permission, ip });
     return to("/refused");
   }
   const q = new URL(req.url).searchParams;
-  const r = await completeConnect({ code: q.get("code"), state: q.get("state"), realmId: q.get("realmId"), error: q.get("error") }, { staffUserId: id.staffUserId, actor, ip });
+  const r = await completeConnect({ code: q.get("code"), state: q.get("state"), realmId: q.get("realmId"), error: q.get("error") }, { staffUserId: id.staffUserId, actor, ip, permission });
   if (!r.ok) return to(`/staff/settings/quickbooks/setup?step=connect&error=${r.reason}`);
   // The first read, so step 3 can list the customer types. If it fails, step 3 says so and offers to read again.
   await refreshRoster({ startedBy: id.staffUserId, actor, ip });

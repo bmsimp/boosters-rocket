@@ -59,8 +59,8 @@ export async function accessToken(o: { force?: boolean } = {}): Promise<Access> 
   const r = await db.transaction(async (tx): Promise<{ ok: true; access: Access } | { ok: false; error: QboError }> => {
     const [c] = await tx.select().from(qboConnection).for("update");
     if (!c?.realmId || !c.refreshTokenCiphertext || !c.refreshTokenKeyId) return { ok: false, error: new QboError("QuickBooks isn't connected.", "not_connected") };
-    const box = secretBox();
     try {
+      const box = secretBox(); // inside the try: a server key that can't be used is recorded like any unreadable secret
       if (!o.force && c.accessTokenCiphertext && c.accessTokenKeyId && c.accessExpiresAt && c.accessExpiresAt.getTime() - Date.now() > REFRESH_EARLY_MS) {
         return { ok: true, access: { token: box.open({ ciphertext: c.accessTokenCiphertext, keyId: c.accessTokenKeyId }, QBO_AAD.access), realmId: c.realmId, environment: c.environment } };
       }

@@ -14,7 +14,7 @@ export type QboStub = {
   failToken: string | null;     // answer token requests with this OAuth error
   failQueryFrom: number | null; // answer query number N and later with HTTP 500 (1 is the first query)
   nullQueryBody: boolean;       // answer every query with the JSON body null
-  tokenDelayMs: number; queryDelayMs: number; refreshExpiresIn: number;
+  tokenDelayMs: number; queryDelayMs: number; companyInfoDelayMs: number; refreshExpiresIn: number;
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
 };
 
@@ -22,7 +22,7 @@ export type QboStub = {
 export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
-    failToken: null, failQueryFrom: null, nullQueryBody: false, tokenDelayMs: 0, queryDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
+    failToken: null, failQueryFrom: null, nullQueryBody: false, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -31,21 +31,36 @@ export async function startQboStub(): Promise<QboStub> {
       const call: StubCall = { method: req.method!, path: url.pathname, query: url.searchParams, auth: req.headers.authorization ?? "", body };
       stub.calls.push(call);
       const json = (status: number, value: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
+      // Intuit's token and revoke endpoints take the app's keys as HTTP Basic: a Client ID and a secret, both present.
+      const keys = /^Basic (.+)$/.exec(call.auth)?.[1];
+      const hasAppKeys = keys !== undefined && /^[^:]+:.+$/.test(Buffer.from(keys, "base64").toString("utf8"));
       if (url.pathname === "/token") {
         if (stub.tokenDelayMs) await new Promise((r) => setTimeout(r, stub.tokenDelayMs));
         const form = new URLSearchParams(body);
+        if (!hasAppKeys) return json(401, { error: "invalid_client" });
         if (stub.failToken) return json(400, { error: stub.failToken, error_description: "a description the portal must never store" });
         const grant = form.get("grant_type");
-        const ok = grant === "authorization_code" ? stub.codes.delete(form.get("code") ?? "") : grant === "refresh_token" ? stub.refreshTokens.delete(form.get("refresh_token") ?? "") : false;
+        // A code is exchanged with the address Intuit sent the Admin back to; Intuit refuses one that doesn't match.
+        const redirectOk = /\/api\/quickbooks\/callback$/.test(form.get("redirect_uri") ?? "");
+        const ok = grant === "authorization_code" ? redirectOk && stub.codes.delete(form.get("code") ?? "") : grant === "refresh_token" ? stub.refreshTokens.delete(form.get("refresh_token") ?? "") : false;
         if (!ok) return json(400, { error: "invalid_grant" });
         issued++;
         stub.accessTokens.add(`at-${issued}`); stub.refreshTokens.add(`rt-${issued}`);
         return json(200, { access_token: `at-${issued}`, refresh_token: `rt-${issued}`, expires_in: 3600, x_refresh_token_expires_in: stub.refreshExpiresIn, token_type: "bearer" });
       }
-      if (url.pathname === "/revoke") return json(200, {});
+      if (url.pathname === "/revoke") {
+        if (!hasAppKeys) return json(401, { error: "invalid_client" });
+        let token: unknown;
+        try { token = (JSON.parse(body) as { token?: unknown }).token; } catch { return json(400, {}); }
+        if (typeof token === "string") stub.refreshTokens.delete(token);
+        return json(200, {});
+      }
       if (!url.pathname.startsWith("/v3/company/")) return json(404, {});
       if (!stub.accessTokens.has(call.auth.replace(/^Bearer /, ""))) return json(401, { fault: { error: [{ code: "3200" }] } });
-      if (url.pathname.includes("/companyinfo/")) return json(200, { CompanyInfo: { CompanyName: stub.companyName } });
+      if (url.pathname.includes("/companyinfo/")) {
+        if (stub.companyInfoDelayMs) await new Promise((r) => setTimeout(r, stub.companyInfoDelayMs));
+        return json(200, { CompanyInfo: { CompanyName: stub.companyName } });
+      }
       if (url.pathname.endsWith("/query")) {
         queries++;
         if (stub.queryDelayMs) await new Promise((r) => setTimeout(r, stub.queryDelayMs));
@@ -74,7 +89,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.reset = () => {
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
-    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
+    stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));
   return stub;

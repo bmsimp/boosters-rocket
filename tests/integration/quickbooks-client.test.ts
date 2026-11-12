@@ -33,6 +33,7 @@ describe("the QuickBooks client", () => {
     await seedConnected(stub, { accessExpiresInMs: 4 * 60_000 });
     expect((await accessToken()).token).toBe("at-1");
     expect(Object.fromEntries(new URLSearchParams(stub.tokenCalls()[0]!.body))).toEqual({ grant_type: "refresh_token", refresh_token: "rt-seed" });
+    expect(stub.tokenCalls()[0]!.auth).toBe(`Basic ${Buffer.from("stub-client-id:stub-secret").toString("base64")}`);
     await db.update(qboConnection).set({ accessExpiresAt: new Date(Date.now() - 1000) });
     expect((await accessToken()).token).toBe("at-2");
     expect(Object.fromEntries(new URLSearchParams(stub.tokenCalls()[1]!.body))).toMatchObject({ refresh_token: "rt-1" });
@@ -46,6 +47,15 @@ describe("the QuickBooks client", () => {
     expect(a.token).toBe("at-1");
     expect(b.token).toBe("at-1");
     expect(stub.tokenCalls()).toHaveLength(1);
+  });
+
+  it("a forced refresh and an ordinary caller at once spend the refresh token once", async () => {
+    await seedConnected(stub, { accessExpiresInMs: -1000 });
+    stub.tokenDelayMs = 150;
+    const [forced, plain] = await Promise.all([accessToken({ force: true }), accessToken()]);
+    expect(stub.tokenCalls()).toHaveLength(1);
+    expect(forced.token).toBe("at-1");
+    expect(plain.token).toBe("at-1");
   });
 
   it("records a refused refresh with Intuit's code, never its text, and throws", async () => {

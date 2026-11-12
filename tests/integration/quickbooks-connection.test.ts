@@ -18,7 +18,7 @@ beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; }
 afterAll(() => stub.close());
 
 const REALM = "9130000000000001";
-const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
+const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const allAuditText = async () => JSON.stringify(await db.select().from(auditLog));
 const row = async () => (await db.select().from(qboConnection))[0]!;
 
@@ -35,7 +35,7 @@ describe("connecting QuickBooks", () => {
   const start = async () => { const r = await beginConnect(admin.id); if (!r.ok) throw new Error("not configured"); return stateOf(r.url); };
   const finish = (state: string | null, extra: Partial<{ code: string | null; realmId: string | null; error: string | null }> = {}) => {
     stub.codes.add("code-1");
-    return completeConnect({ code: "code-1", realmId: REALM, error: null, state, ...extra }, { staffUserId: admin.id, actor: op.actor, ip: op.ip });
+    return completeConnect({ code: "code-1", realmId: REALM, error: null, state, ...extra }, { staffUserId: admin.id, actor: op.actor, ip: op.ip, permission: op.permission });
   };
 
   it("reads the Intuit app form", () => {
@@ -82,7 +82,7 @@ describe("connecting QuickBooks", () => {
     expect(c).toMatchObject({ realmId: REALM, companyName: "Stub Boosters", connectedBy: admin.id, stateHash: null });
     expect(c.accessTokenCiphertext).not.toContain("at-1");
     expect(c.refreshExpiresAt!.getTime()).toBeGreaterThan(Date.now() + 99 * 86_400_000);
-    expect((await audits("quickbooks.connect"))[0]).toMatchObject({ after: { companyName: "Stub Boosters", realmId: REALM, environment: "sandbox" }, ip: "203.0.113.9" });
+    expect((await audits("quickbooks.connect"))[0]).toMatchObject({ after: { companyName: "Stub Boosters", realmId: REALM, environment: "sandbox" }, ip: "203.0.113.9", permission: "Settings.QuickBooks.ReadWrite" });
     const text = await allAuditText();
     for (const secret of ["at-1", "rt-1", "code-1", "s3cret"]) expect(text).not.toContain(secret);
     const token = stub.tokenCalls()[0]!;
@@ -164,7 +164,7 @@ describe("connecting QuickBooks", () => {
   it("refuses when the Admin said no at Intuit", async () => {
     await app();
     expect(await finish(await start(), { code: null, error: "access_denied" })).toEqual({ ok: false, reason: "denied" });
-    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "denied" } });
+    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "denied" }, permission: "Settings.QuickBooks.ReadWrite" });
   });
 
   it("refuses a different company than the one connected, and keeps the connection", async () => {
@@ -173,6 +173,37 @@ describe("connecting QuickBooks", () => {
     expect(await finish(await start(), { realmId: "9130000000000002" })).toEqual({ ok: false, reason: "other_company" });
     expect(await row()).toMatchObject({ realmId: REALM, accessTokenCiphertext: before.accessTokenCiphertext });
     expect(stub.tokenCalls()).toHaveLength(0);
+  });
+
+  it("refuses when another company got connected while Intuit was answering, and keeps that connection", async () => {
+    await app();
+    const s = await start();
+    stub.tokenDelayMs = 400;
+    const pending = finish(s);
+    for (let i = 0; i < 200 && stub.tokenCalls().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    await db.update(qboConnection).set({ realmId: "9130000000000002" });
+    expect(await pending).toEqual({ ok: false, reason: "other_company" });
+    expect(await row()).toMatchObject({ realmId: "9130000000000002", accessTokenCiphertext: null, refreshTokenCiphertext: null });
+    expect((await audits("quickbooks.connect_refused"))[0]).toMatchObject({ after: { reason: "other_company" } });
+  });
+
+  it("puts no company name on a connection that was disconnected while the name was being read", async () => {
+    await app();
+    const s = await start();
+    stub.companyInfoDelayMs = 400;
+    const pending = finish(s);
+    for (let i = 0; i < 300 && stub.apiCalls().length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(stub.apiCalls()).toHaveLength(1);
+    expect(await disconnect(op)).toMatchObject({ ok: true });
+    expect(await pending).toEqual({ ok: true });
+    expect(await row()).toMatchObject({ realmId: null, companyName: null });
+  });
+
+  it("a first save needs the Client secret", async () => {
+    const r = await saveQboApp({ clientId: "ABclientid1234567890", clientSecret: null, environment: "sandbox" }, op);
+    expect(r).toEqual({ ok: false, errors: ["Enter the Client secret from your Intuit app's Keys and credentials page."] });
+    expect(await db.select().from(qboConnection)).toHaveLength(0);
+    expect(await audits("settings.quickbooks.save")).toHaveLength(0);
   });
 
   it("refuses when Intuit won't take the code, with Intuit's code and none of its text", async () => {
@@ -194,10 +225,45 @@ describe("connecting QuickBooks", () => {
   it("disconnects: asks Intuit to revoke, forgets the tokens, keeps the keys", async () => {
     await seedConnected(stub);
     expect(await disconnect(op)).toEqual({ ok: true, revoked: true });
-    expect(stub.calls.some((c) => c.path === "/revoke" && c.method === "POST" && JSON.parse(c.body).token === "rt-seed")).toBe(true);
+    const revoke = stub.calls.filter((c) => c.path === "/revoke");
+    expect(revoke).toHaveLength(1);
+    expect(revoke[0]).toMatchObject({ method: "POST", auth: `Basic ${Buffer.from("stub-client-id:stub-secret").toString("base64")}` });
+    expect(JSON.parse(revoke[0]!.body)).toEqual({ token: "rt-seed" });
+    expect(stub.refreshTokens.has("rt-seed")).toBe(false); // revoked at the stub, as at Intuit
     expect(await row()).toMatchObject({ clientId: "stub-client-id", realmId: null, accessTokenCiphertext: null, refreshTokenCiphertext: null, companyName: null });
     expect((await audits("quickbooks.disconnect"))[0]).toMatchObject({ before: { companyName: "Stub Boosters" }, after: { revoked: true } });
     expect(await connectionView()).toMatchObject({ configured: true, connected: false });
     expect(await disconnect(op)).toEqual({ ok: false, reason: "not_connected" });
+  });
+
+  it("disconnects here even when Intuit can't be reached, and records that nothing was revoked", async () => {
+    await seedConnected(stub);
+    const real = stubBase.url;
+    stubBase.url = "http://127.0.0.1:1"; // nothing listens there
+    try {
+      expect(await disconnect(op)).toEqual({ ok: true, revoked: false });
+    } finally { stubBase.url = real; }
+    expect(await row()).toMatchObject({ clientId: "stub-client-id", realmId: null, accessTokenCiphertext: null, refreshTokenCiphertext: null });
+    expect((await audits("quickbooks.disconnect"))[0]).toMatchObject({ after: { revoked: false } });
+  });
+
+  it("disconnects here when the saved keys can't be read, without asking Intuit", async () => {
+    await seedConnected(stub);
+    await db.update(qboConnection).set({ clientSecretKeyId: "00000000" });
+    expect(await disconnect(op)).toEqual({ ok: true, revoked: false });
+    expect(stub.calls).toHaveLength(0);
+    expect(await row()).toMatchObject({ realmId: null, refreshTokenCiphertext: null });
+    expect((await audits("quickbooks.disconnect"))[0]).toMatchObject({ after: { revoked: false } });
+  });
+
+  it("the stub, like Intuit, refuses a token or revoke request that doesn't carry an app's keys", async () => {
+    const post = (path: string, authorization?: string) => fetch(`${stub.base}${path}`, { method: "POST", body: "grant_type=refresh_token&refresh_token=rt-seed", headers: authorization ? { authorization } : {} });
+    stub.refreshTokens.add("rt-seed");
+    for (const path of ["/token", "/revoke"]) {
+      expect((await post(path)).status).toBe(401);
+      expect((await post(path, "Bearer at-seed")).status).toBe(401);
+      expect((await post(path, `Basic ${Buffer.from("no-secret:").toString("base64")}`)).status).toBe(401);
+    }
+    expect(stub.refreshTokens.has("rt-seed")).toBe(true);
   });
 });
