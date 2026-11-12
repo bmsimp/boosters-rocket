@@ -7,6 +7,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { sendReviewNotice } from "@/lib/parents/review-notice";
+import { expirePreviousCompany } from "@/lib/parents/company-change";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -40,6 +41,12 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (notice.sent > 0) ran.push({ job: "parents.review_notice", ok: true });
   } catch {
     ran.push({ job: "parents.review_notice", ok: false });
+  }
+  // The previous company's snapshot goes 90 days after a company change; guarded like the steps above.
+  try {
+    if (await expirePreviousCompany(now)) ran.push({ job: "parents.snapshot_expiry", ok: true });
+  } catch {
+    ran.push({ job: "parents.snapshot_expiry", ok: false });
   }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record.

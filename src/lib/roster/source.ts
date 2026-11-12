@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { clearParentAccess } from "@/lib/parents/company-change";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
 
 export const ROSTER_JOB = "roster.refresh";
@@ -22,7 +23,8 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
 /**
  * Called once a connection to `realmId` is stored. When the cache came from a different company, everything that
  * belonged to that company goes: the cache, the membership shape (its type IDs mean nothing in another company) and
- * the roster's run history (so the worker reads the new company at once). Reconnecting the same company keeps it all.
+ * the roster's run history (so the worker reads the new company at once), and all parent access (`clearParentAccess`).
+ * Reconnecting the same company keeps it all.
  *
  * It takes the roster lock and nothing else, so it waits for a running refresh or shape save. The caller must not hold
  * the connection row lock: a running refresh holds the roster lock and can be waiting for that row.
@@ -32,6 +34,8 @@ export async function clearRosterOfOtherCompany(realmId: string, o: { actor: Act
     await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
     const from = await getRosterSource(tx);
     if (from === null || from === realmId) return false;
+    // Parent access first: the snapshot it keeps takes the family names from the cache deleted below.
+    await clearParentAccess(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
     await tx.delete(qboCustomer);
     await tx.delete(qboCustomerType);
     await tx.delete(setting).where(eq(setting.key, SHAPE_KEY));
