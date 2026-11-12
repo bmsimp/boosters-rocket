@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
-import { auditLog, parent } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { auditLog, heldAddress, parent } from "@/lib/db/schema";
 import { runReconcile } from "@/lib/parents/reconcile";
 import { familyNames, familySignins, getPerson, listPeople } from "@/lib/parents/directory";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
@@ -46,6 +47,42 @@ describe("the people directory", () => {
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     await seedGuardian({ parentId: p.id, familyQboId: "10" });
     expect(await familySignins("10", { detailed: true })).toEqual([{ parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked" }]);
+  });
+
+  it("lists two addresses on a family record with no parent type separately, one of them held", async () => {
+    await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
+    await seedCache([fam("10", "Rivera Family", { email: "a@x.org; b@x.org" }), fam("20", "Chen Family", { email: "b@x.org" })]);
+    await runReconcile({ cause: "test" });
+    const rows = await familySignins("10", { detailed: false });
+    expect(rows.map((s) => `${s.email}: ${s.words}`)).toEqual([
+      "a@x.org: Can sign in (hasn't yet)",
+      "b@x.org: Held: this address is also under another family",
+    ]);
+  });
+
+  it("shows a hand-made link that is closed as held exactly once", async () => {
+    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")]);
+    const p = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    await seedGuardian({ parentId: p.id, familyQboId: "10" });
+    await seedGuardian({ parentId: p.id, familyQboId: "20" });
+    await runReconcile({ cause: "test" });
+    const rows = await familySignins("10", { detailed: false });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ parentId: p.id, kind: "held" });
+  });
+
+  it("gives staff each family's words for a person held under one family and let in to another", async () => {
+    await seedCache(ALL); await runReconcile({ cause: "test" });
+    await db.update(heldAddress).set({ approvedFamilyQboIds: ["10", "20"] }).where(eq(heldAddress.email, "sam@example.com"));
+    await runReconcile({ cause: "test" });
+    await db.update(heldAddress).set({ approvedFamilyQboIds: ["20"] }).where(eq(heldAddress.email, "sam@example.com"));
+    await runReconcile({ cause: "test" });
+    const people = await listPeople("sam");
+    expect(people).toHaveLength(1);
+    expect(people[0]!.families).toEqual([
+      { familyQboId: "10", familyName: "Rivera Family", kind: "held", words: "Held: this address is also under Chen Family" },
+      { familyQboId: "20", familyName: "Chen Family", kind: "can", words: "Can sign in (hasn't yet)" },
+    ]);
   });
 
   it("gives family names from the roster, and a stand-in for an ID it doesn't know", async () => {

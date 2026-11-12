@@ -9,6 +9,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, guardian, parent, parentAuthUser, parentAuthSession, signinCode } from "@/lib/db/schema";
 import { blockPerson, unblockPerson, changeParentEmailByStaff } from "@/lib/parents/people";
 import { enabledGuardianRows } from "@/lib/parents/sessions";
+import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { resetDb, seedParent, seedGuardian, seedParentSession, seedWorkingMail } from "../helpers/db";
 
 const o = { actor: { door: "staff" as const, id: null, label: "board@club.org" }, ip: "203.0.113.5" };
@@ -44,6 +45,39 @@ describe("blocking and unblocking", () => {
     expect((await audits("parent.block"))[0]!.after).toMatchObject({ blocked: true, reason: "Custody order on file." });
     await unblockPerson(p.id, staff);
     expect((await db.select().from(parent))[0]).toMatchObject({ blocked: false, blockedReason: null, blockedBy: null, blockedAt: null });
+  });
+
+  it("blocking again records the earlier reason; unblocking someone who is not blocked changes nothing and is not audited", async () => {
+    const p = await seedParent({ name: "Ana Rivera" });
+    expect(await unblockPerson(p.id, staff)).toEqual({ ok: true });
+    expect(await audits("parent.unblock")).toEqual([]);
+    await blockPerson(p.id, "First reason.", staff);
+    await blockPerson(p.id, "Second reason.", staff);
+    const rows = await audits("parent.block");
+    expect(rows[0]!.before).toEqual({ blocked: false, reason: null });
+    expect(rows[1]!.before).toEqual({ blocked: true, reason: "First reason." });
+  });
+
+  it("unblocking owes the welcome back to someone never welcomed who has an open link, when welcomes are on", async () => {
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    const p = await seedParent({ name: "Ana Rivera", welcomeOwed: true });
+    await seedGuardian({ parentId: p.id, familyQboId: "F1", status: "invited" });
+    await blockPerson(p.id, "reason", staff);
+    await unblockPerson(p.id, staff);
+    expect((await db.select().from(parent))[0]!.welcomeOwed).toBe(true);
+    expect((await audits("parent.unblock"))[0]!.after).toMatchObject({ blocked: false, welcomeOwed: true });
+  });
+
+  it("unblocking owes nothing when welcomes are off, the person was welcomed, or no link is open", async () => {
+    const a = await seedParent({ name: "Ann One" }); await seedGuardian({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    await blockPerson(a.id, "r", staff); await unblockPerson(a.id, staff);       // welcomes off
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    const b = await seedParent({ name: "Bea Two", welcomedAt: new Date() }); await seedGuardian({ parentId: b.id, familyQboId: "F1", status: "invited" });
+    await blockPerson(b.id, "r", staff); await unblockPerson(b.id, staff);       // already welcomed
+    const c = await seedParent({ name: "Cy Three" }); await seedGuardian({ parentId: c.id, familyQboId: "F1", status: "disabled", disabledReason: "removed" });
+    await blockPerson(c.id, "r", staff); await unblockPerson(c.id, staff);       // no open link
+    expect((await db.select().from(parent)).map((x) => x.welcomeOwed)).toEqual([false, false, false]);
+    for (const u of await audits("parent.unblock")) expect(u.after).not.toHaveProperty("welcomeOwed");
   });
 
   it("a blocked person owed a welcome is no longer owed one", async () => {

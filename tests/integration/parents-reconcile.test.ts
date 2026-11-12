@@ -308,4 +308,12 @@ describe("the reconcile when addresses move between records", () => {
     expect(g).toMatchObject({ targetId: row.id });
     expect(g!.after).toMatchObject({ status: "invited", sourceQboId: "11", reopenedFrom: "company_changed", cause: "test" });
   });
+
+  it("never owes a welcome to a blocked person, and says nothing of one on the grant", async () => {
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true }); await seedCache(RIVERA);
+    await seedParent({ name: "Ana Rivera", email: "ana@example.com", blocked: true });
+    expect(await run()).toMatchObject({ granted: 1, welcomeOwed: 0 });
+    expect((await db.select().from(parent))[0]!.welcomeOwed).toBe(false);
+    expect((await audits("parent.access.granted"))[0]!.after).not.toHaveProperty("welcomeOwed");
+  });
 });

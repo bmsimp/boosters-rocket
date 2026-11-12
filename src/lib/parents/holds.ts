@@ -20,15 +20,18 @@ const union = (a: string[], b: string[]) => [...new Set([...a, ...b])].sort((x, 
 /**
  * A staff decision on an address that is under more than one family (spec §1 Held addresses). **Same person** approves
  * every family the address is under now; **Not the same person** keeps the held ones held and takes the item off the
- * waiting list. Access changes in the same transaction, through the reconcile.
+ * waiting list. Both act only on the families the caller was shown (`shownFamilyQboIds`). Access changes in the same transaction, through the reconcile.
  */
-export async function decideHold(email: string, decision: HoldDecision, rawNote: string, o: StaffOp): Promise<Result> {
+export async function decideHold(email: string, decision: HoldDecision, shownFamilyQboIds: string[], rawNote: string, o: StaffOp): Promise<Result> {
   const checked = checkNote(rawNote);
   if (!checked.ok) return checked;
   return db.transaction(async (tx): Promise<Result> => {
     await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
     const item = (await loadDecision(tx))?.decision.held.find((h) => h.email === email);
     if (!item) return { ok: false, errors: ["That address isn't held any more. Reload the page."] };
+    // Decide only on what the staff member was shown: a refresh may have added or removed a family since the page loaded.
+    const shown = new Set(shownFamilyQboIds), now = new Set(item.families.map((f) => f.qboId));
+    if (shown.size !== now.size || [...now].some((id) => !shown.has(id))) return { ok: false, errors: ["That address has changed since this page loaded. Reload the page and look again."] };
     await tx.insert(heldAddress).values({ email }).onConflictDoNothing();
     const [row] = await tx.select().from(heldAddress).where(eq(heldAddress.email, email)).for("update");
     const all = item.families.map((f) => f.qboId), heldNow = item.families.filter((f) => f.held).map((f) => f.qboId);

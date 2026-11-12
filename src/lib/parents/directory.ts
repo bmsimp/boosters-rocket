@@ -1,3 +1,5 @@
+// Privacy: `listPeople`, `getPerson`, `heldReview` and `familySignins` with `detailed: true` return other families' names
+// or a block reason. Use them only on pages behind `Parents.ReadWrite`, never behind `Roster.Read`.
 import { and, eq, inArray, max } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, heldAddress, parent, qboCustomer, staffUser, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
@@ -90,9 +92,12 @@ export async function familySignins(familyQboId: string, o: { detailed: boolean 
   const out: FamilySignin[] = links.map(({ g, p }) => ({ parentId: p.id, name: p.name, email: p.email,
     ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, otherFamilies: others(p.email) }) }));
   if (loaded?.settings.signin) {
-    const linked = new Set(links.map(({ g }) => g.sourceQboId));
+    // A denial is already shown when a link in this family is owned by its address; one with no address can only be
+    // matched by the QuickBooks record it came from.
+    const owners = new Set(links.map(({ p }) => p.email));
+    const sources = new Set(links.map(({ g }) => g.sourceQboId));
     for (const d of loaded.decision.denials) {
-      if (d.familyQboId !== familyQboId || linked.has(d.sourceQboId)) continue;
+      if (d.familyQboId !== familyQboId || (d.email ? owners.has(d.email) : sources.has(d.sourceQboId))) continue;
       out.push({ parentId: null, name: d.name, email: d.email, ...accessWords({ status: "disabled", reason: d.reason, blocked: false, otherFamilies: others(d.email) }) });
     }
   }

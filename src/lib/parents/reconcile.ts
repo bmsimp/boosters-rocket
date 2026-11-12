@@ -92,7 +92,7 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
   };
   /** Marks the person as owed a welcome when that is due; the caller records it on the grant's audit row. */
   const owe = async (p: Person): Promise<{ welcomeOwed?: true }> => {
-    if (!settings.welcome || p.welcomedAt || p.welcomeOwed) return {};
+    if (!settings.welcome || p.welcomedAt || p.welcomeOwed || p.blocked) return {};
     await tx.update(parent).set({ welcomeOwed: true, updatedAt: new Date() }).where(eq(parent.id, p.id));
     p.welcomeOwed = true; r.welcomeOwed++;
     return { welcomeOwed: true };
