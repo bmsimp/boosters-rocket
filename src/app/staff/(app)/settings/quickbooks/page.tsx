@@ -7,6 +7,8 @@ import { LocalTime } from "@/app/components/local-time";
 import { Disconnect } from "./forms";
 import { disconnectAction } from "./actions";
 import { rosterCounts } from "./roster-counts";
+import { getParentSettings } from "@/lib/parents/settings";
+import { peopleWithAccess } from "@/lib/parents/switches";
 
 export const metadata = { title: "QuickBooks settings" };
 export const dynamic = "force-dynamic";
@@ -14,8 +16,9 @@ export const dynamic = "force-dynamic";
 /** What is set, shown plainly, with no inputs (spec §3 The settings view). Changing anything opens the steps. */
 export default async function QuickBooksSettingsPage() {
   await requireStaffPage("Settings.QuickBooks.ReadWrite");
-  const [conn, page, wake, problems] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems()]);
+  const [conn, page, wake, problems, settings, people] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(), getParentSettings(), peopleWithAccess()]);
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
+  const warning = settings.signin && people > 0 ? `${people} ${people === 1 ? "person" : "people"} can sign in to the portal now. Connecting a different QuickBooks company afterwards ends all of that access, switches parent sign-ins and welcome emails off, and needs them set up again. Reconnecting this same company changes nothing.` : undefined;
   return (
     <main className="wrap single">
       <h1 className="page-title">QuickBooks</h1>
@@ -51,7 +54,7 @@ export default async function QuickBooksSettingsPage() {
       <section className="box" aria-labelledby="qbo-change-h"><h2 id="qbo-change-h">{conn.configured ? "Change" : "Set up"}</h2>
         <p>{conn.configured ? "Open the steps to change the Intuit app's keys, renew the connection or choose the shape again." : "Three steps: the Intuit app's keys, signing in to Intuit, and the shape of your membership."}</p>
         <p><a className="btn" href="/staff/settings/quickbooks/setup">{conn.configured ? "Change" : "Set up"}</a></p>
-        <Disconnect connected={conn.connected} disconnect={disconnectAction} />
+        <Disconnect connected={conn.connected} disconnect={disconnectAction} warning={warning} />
       </section>
     </main>
   );

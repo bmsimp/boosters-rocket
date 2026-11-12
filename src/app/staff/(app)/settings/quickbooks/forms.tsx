@@ -150,14 +150,16 @@ export function disconnectedNote(revoked: boolean): string {
 }
 /**
  * On the view, tucked inside a closed section so it isn't pressed by accident. It stays mounted when the page comes
- * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected.
+ * back disconnected, so it can say so: the page renders it whether or not QuickBooks is connected. `warning`, when
+ * given, is shown above the button while connected.
  */
-export function Disconnect({ connected, disconnect }: { connected: boolean; disconnect: () => Promise<Disconnected> }) {
+export function Disconnect({ connected, disconnect, warning }: { connected: boolean; disconnect: () => Promise<Disconnected>; warning?: string }) {
   const [state, run, pending] = useActionState(async () => safely(() => disconnect(), { ok: false as const, error: ACTION_FAILED }), null);
   if (!connected) return state?.ok ? <p role="status">{disconnectedNote(state.revoked)}</p> : null;
   return (
     <details><summary>Disconnect</summary>
       <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>
+      {warning && <p role="status">{warning}</p>}
       <form action={run} className="stack">
         {state && !state.ok && <p role="alert" className="errors">{state.error}</p>}
         <button className="btn btn-line" disabled={pending}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</button>

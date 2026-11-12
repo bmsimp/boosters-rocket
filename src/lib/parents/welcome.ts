@@ -13,7 +13,8 @@ export const WELCOME_BATCH = 5;
 export const WELCOME_RETRY_MS = 15 * 60_000;
 const WELCOME_ACTOR: Actor = { door: "system", id: null, label: "welcome" };
 
-async function message(to: string) {
+/** The welcome email as it would go to `to`. Step 3 of the settings shows it as a sample. */
+export async function welcomeEmailFor(to: string) {
   const stored = await getStoredMailConfig();
   // The club's own sending address is the one a reply reaches (spec §3). Both settings hold a bare address.
   const contact = stored ? (stored.method === "graph" ? stored.mailbox : stored.from) : null;
@@ -49,7 +50,7 @@ export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: 
   for (const p of due) {
     if (!(await welcomesOn())) break; // switched off while this run was going
     if (!(await claim(p.id, now))) continue;
-    const r = await sendMail(await message(p.email), { purpose: "welcome", actor: WELCOME_ACTOR });
+    const r = await sendMail(await welcomeEmailFor(p.email), { purpose: "welcome", actor: WELCOME_ACTOR });
     if (r.ok) {
       await db.update(parent).set({ welcomedAt: new Date(), welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, p.id));
       await writeAudit({ actor: WELCOME_ACTOR, action: "parent.welcome.sent", targetType: "parent", targetId: p.id, after: { to: p.email } });
@@ -71,7 +72,7 @@ export async function resendWelcome(parentId: string, o: StaffOp): Promise<{ ok:
   if (parentDoorClosed(await getParentSettings())) return { ok: false, reason: "no_access" }; // they could not sign in
   const [open] = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, p.id), ne(guardian.status, "disabled"))).limit(1);
   if (!open) return { ok: false, reason: "no_access" };
-  const r = await sendMail(await message(p.email), { purpose: "welcome", actor: o.actor, ip: o.ip });
+  const r = await sendMail(await welcomeEmailFor(p.email), { purpose: "welcome", actor: o.actor, ip: o.ip });
   if (!r.ok) {
     await writeAudit({ actor: o.actor, action: "parent.welcome.failed", permission: o.permission, targetType: "parent", targetId: p.id, after: { to: p.email, error: r.error, resend: true }, ip: o.ip });
     return { ok: false, reason: "mail_failed" };
