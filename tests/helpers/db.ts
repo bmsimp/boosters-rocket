@@ -9,15 +9,21 @@ import { eq } from "drizzle-orm";
 import { mailConfigHash } from "@/lib/mail/config-hash";
 import type { StoredMailConfig } from "@/lib/mail/types";
 
-const TABLES = [
-  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "held_address", "family_match", "signin_code", "rate_limit_event", "parent_email_change", "qbo_connection", "qbo_customer", "qbo_customer_type", "job_run", "setting", "auth_provider", "provider_certificate",
-  "staff_auth_session", "staff_auth_account", "staff_auth_verification", "staff_auth_user",
-  "parent_auth_session", "parent_auth_account", "parent_auth_verification", "parent_auth_user",
-];
+/**
+ * Every table in the public schema except "role", read from the database so a new table can't be left out and leak
+ * rows between tests. Asked once per process: the schema doesn't change during a run.
+ */
+let tables: Promise<string[]> | null = null;
+function tablesToEmpty(): Promise<string[]> {
+  tables ??= db.execute<{ tablename: string }>(sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'role' ORDER BY tablename`)
+    .then((rows) => rows.map((r) => r.tablename), (e) => { tables = null; throw e; });
+  return tables;
+}
 
 /** Empties every table except the built-in Admin role, and removes custom roles. */
 export async function resetDb() {
-  await db.execute(sql.raw(`TRUNCATE ${TABLES.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`));
+  const names = await tablesToEmpty();
+  await db.execute(sql.raw(`TRUNCATE ${names.map((t) => `"${t.replaceAll('"', '""')}"`).join(", ")} RESTART IDENTITY CASCADE`));
   await db.execute(sql`DELETE FROM "role" WHERE "builtin" = false`);
   invalidateProviders();
 }
