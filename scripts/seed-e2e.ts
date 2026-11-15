@@ -118,17 +118,19 @@ async function main() {
   // that found them stale would ask Intuit's real servers, with the made-up tokens above. Dates are counted from today
   // so the due words ("in 8 days", "Was due") come out the same whenever the run is.
   const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
-  const invoice = (qboId: string, number: string, forName: string | null, cents: number, o: { due?: number; paid?: boolean; payLink?: string } = {}) => ({
-    qboId, number, forName, date: day(-30), dueDate: o.due === undefined ? null : day(o.due), totalCents: cents, balanceCents: o.paid ? 0 : cents, currency: "USD", payLink: o.payLink ?? null });
+  // Each invoice names the customer it was raised on (the family itself, or a student under it in the cache above): a
+  // stored invoice of a customer who is not the family's is not shown.
+  const invoice = (qboId: string, number: string, customerQboId: string, forName: string | null, cents: number, o: { due?: number; paid?: boolean; payLink?: string } = {}) => ({
+    qboId, number, customerQboId, forName, date: day(-30), dueDate: o.due === undefined ? null : day(o.due), totalCents: cents, balanceCents: o.paid ? 0 : cents, currency: "USD", payLink: o.payLink ?? null });
   const families = [
     { id: "E2E-FAMILY", total: 18500, invoices: [
-      invoice("902", "QZ-1042", null, 10000, { due: -20 }), // soonest due first, as a read from QuickBooks stores them
-      invoice("901", "QZ-1041", "Xochitl Quetzalcoatl", 8500, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-quetzalcoatl-1041" }),
-      invoice("903", "QZ-1017", null, 15000, { paid: true }) ] },
+      invoice("902", "QZ-1042", "E2E-FAMILY", null, 10000, { due: -20 }), // soonest due first, as a read from QuickBooks stores them
+      invoice("901", "QZ-1041", "E2E-S1", "Xochitl Quetzalcoatl", 8500, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-quetzalcoatl-1041" }),
+      invoice("903", "QZ-1017", "E2E-FAMILY", null, 15000, { paid: true }) ] },
     { id: "E2E-FAMILY-2", total: 37666, invoices: [
-      invoice("911", "SF-2051", "Wolfgang Secondborn", 31247, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-second-2051" }),
-      invoice("912", "SF-2052", null, 6419, { due: 40 }),
-      invoice("913", "SF-2009", null, 27358, { paid: true }) ] },
+      invoice("911", "SF-2051", "E2E-S3", "Wolfgang Secondborn", 31247, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-second-2051" }),
+      invoice("912", "SF-2052", "E2E-FAMILY-2", null, 6419, { due: 40 }),
+      invoice("913", "SF-2009", "E2E-FAMILY-2", null, 27358, { paid: true }) ] },
   ];
   await sql`INSERT INTO setting (key, value) VALUES ('money.settings', ${sql.json({ freshSeconds: 7 * 86_400 })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;

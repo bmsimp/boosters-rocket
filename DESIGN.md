@@ -360,7 +360,7 @@ The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px
 - **One Pay per invoice:** QuickBooks pays one invoice at a time. The soonest-due invoice gets the filled black Pay with an arrow; others get outlined Pay. Each Pay's accessible name states the amount and invoice.
 - **As of:** the owed figure always carries its source and time ("Owed now. From QuickBooks, as of 2:14 pm.").
 - **Paid up:** `done` tick plus "You're all paid up. Thank you!"
-- **QuickBooks offline:** the last known figures stay on screen with a note under the as-of line in `due`, bold Meta size, `role="status"` ("We can't reach QuickBooks right now. These are the last figures we have, and paying will work again shortly."). Every Pay becomes disabled, keeps its place and says why in its accessible name ("Pay $85.00, unavailable while QuickBooks is offline").
+- **Figures that are not current:** when QuickBooks can't be read just now, the last known figures stay on screen with a note under the as-of line in `due`, bold Meta size, `role="status"` ("We couldn't get the latest figures from QuickBooks just now. These are the last ones we have. Paying here is paused until we can. Need to pay sooner? Ask the treasurer."). Every Pay becomes disabled, keeps its place and says why in its accessible name ("Pay $85.00, paused until the figures are up to date"). The note is the same whatever the cause, and the causes are not all an outage: QuickBooks may need connecting again by an Admin, or another read may be under way. So it never says QuickBooks is down, and never promises when paying will be back.
 
 ### Buttons
 - **Shape:** square (0px), 2px border, Atkinson 700.
@@ -405,7 +405,7 @@ Under `forced-colors: active` the system palette wins; the build only keeps ever
 Inputs and forms beyond radio choice groups, the entrance motion moment, the waiting and closed states, and the monogram fallback for a club without a logo (the build's monogram is a prototype).
 
 ### Copy patterns
-The voice is PRODUCT.md's warm, plain neighbor, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and when it will come back.
+The voice is PRODUCT.md's warm, plain neighbor, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and who can help, and say when it will come back only if the portal knows.
 
 ## Installed app
 
@@ -441,4 +441,5 @@ The portal can be put on a phone's home screen and then opens without browser ch
 - **Don't** set sentences in Barlow Condensed or numbers on the chart in Atkinson.
 - **Don't** put a small uppercase label above a heading as decoration; labels name content beside them.
 - **Don't** load fonts from Google in the app; self-host them.
-- **Don't** hide a Pay button when QuickBooks is offline; disable it in place and say why.
+- **Don't** hide a Pay button when the figures are not current; disable it in place and say why.
+- **Don't** promise when a service will be back unless the portal knows; say what still works and who can help.

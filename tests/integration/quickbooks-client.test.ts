@@ -268,6 +268,62 @@ describe("what a parent's page load asks of the client", () => {
     expect((await accessToken()).token).toBe("at-1");
   });
 
+  it("several page loads that find the token expired share one refresh, and all are answered", async () => {
+    await seedConnected(stub, { accessExpiresInMs: -1000 });
+    stub.invoices = [inv("1", "10"), inv("2", "12"), inv("3", "14")];
+    stub.customers = [{ Id: "10", BalanceWithJobs: 85 }];
+    stub.tokenDelayMs = 150;
+    const [one, two, three, customer] = await Promise.all([qboInvoices(["10"], PARENT), qboInvoices(["12"], PARENT), qboInvoices(["14"], PARENT), qboCustomerById("10", PARENT)]);
+    expect([one, two, three].map((rows) => rows.map((r) => r.Id))).toEqual([["1"], ["2"], ["3"]]);
+    expect(customer).toMatchObject({ Id: "10" });
+    expect(stub.tokenCalls()).toHaveLength(1);
+    expect(stub.apiCalls().every((c) => c.auth === "Bearer at-1")).toBe(true);
+    expect((await row()).lastError).toBeNull();
+  });
+
+  it("page loads whose token QuickBooks no longer takes refresh it and try again, and never spend a refresh token twice", async () => {
+    await seedConnected(stub);
+    stub.accessTokens.delete("at-seed"); // revoked or replaced: the API answers 401
+    stub.invoices = [inv("1", "10"), inv("2", "12")];
+    const all = await Promise.all([qboInvoices(["10"], PARENT), qboInvoices(["12"], PARENT)]);
+    expect(all.map((rows) => rows.map((r) => r.Id))).toEqual([["1"], ["2"]]);
+    expect((await row()).lastError).toBeNull(); // no refresh was refused
+    expect(stub.tokenCalls().length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("a page load does not wait for the connection row: held elsewhere, a token that needs refreshing is 'busy' at once", async () => {
+    await seedConnected(stub, { accessExpiresInMs: -1000 });
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let holder!: Promise<void>;
+    const locked = new Promise<void>((r) => { holder = db.transaction(async (tx) => { await tx.select().from(qboConnection).for("update"); r(); await held; }); });
+    await locked;
+    try {
+      const started = Date.now();
+      expect(await codeOf(qboInvoices(["10"], { ...PARENT, signal: AbortSignal.timeout(1500) }))).toBe("busy");
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(stub.calls).toHaveLength(0);
+      // A caller that is not a page load (the worker, a staff check) still waits its turn, as before.
+      const waiting = accessToken();
+      release();
+      expect((await waiting).token).toBe("at-1");
+    } finally { release(); await holder; }
+    expect(await codeOf(accessToken({ noWait: true }))).toBe("no error");
+  });
+
+  it("a page load with a token that is still good takes no lock on the connection row", async () => {
+    await seedConnected(stub);
+    stub.invoices = [inv("1", "10")];
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let holder!: Promise<void>;
+    const locked = new Promise<void>((r) => { holder = db.transaction(async (tx) => { await tx.select().from(qboConnection).for("update"); r(); await held; }); });
+    await locked;
+    try {
+      expect((await qboInvoices(["10"], { ...PARENT, signal: AbortSignal.timeout(1500) })).map((r) => r.Id)).toEqual(["1"]);
+    } finally { release(); await holder; }
+  });
+
   it.each([
     ["Intuit no longer accepts this connection. Connect QuickBooks again. (invalid_grant)"],
     ["The saved QuickBooks keys can't be read with this server's encryption key. Connect QuickBooks again. (unreadable)"],

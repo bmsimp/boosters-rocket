@@ -50,20 +50,46 @@ export function sealTokens(t: TokenSet) {
 }
 
 type Access = { token: string; realmId: string; environment: QboEnvironment };
+type Refreshed = { ok: true; access: Access } | { ok: false; error: QboError };
+
+/** The saved access token, still sealed, when it has more than 5 minutes left; null when it must be refreshed first. */
+const savedToken = (c: typeof qboConnection.$inferSelect) =>
+  c.accessTokenCiphertext && c.accessTokenKeyId && c.accessExpiresAt && c.accessExpiresAt.getTime() - Date.now() > REFRESH_EARLY_MS
+    ? { ciphertext: c.accessTokenCiphertext, keyId: c.accessTokenKeyId } : null;
+
+/** Postgres could not take a lock at once (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
+const lockNotAvailable = (e: unknown): boolean => {
+  const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
+  return code(e) === "55P03" || code((e as { cause?: unknown } | null)?.cause) === "55P03";
+};
 
 /**
  * A usable access token. Refreshes it when it is expired or within 5 minutes of expiring (or when `force` is set), under
  * a lock on the connection row: Intuit's refresh token works once, so two callers must never both spend it (spec §4).
+ *
+ * A caller waits its turn for that lock, through another caller's request to Intuit if need be. With `noWait` it does
+ * not: when the row is locked, the call ends at once as "busy" and holds nothing.
  */
-export async function accessToken(o: { force?: boolean } = {}): Promise<Access> {
-  const r = await db.transaction(async (tx): Promise<{ ok: true; access: Access } | { ok: false; error: QboError }> => {
-    const [c] = await tx.select().from(qboConnection).for("update");
+export async function accessToken(o: { force?: boolean; noWait?: boolean } = {}): Promise<Access> {
+  let r: Refreshed;
+  try {
+    r = await tokenUnderLock(o);
+  } catch (e) {
+    if (o.noWait && lockNotAvailable(e)) throw new QboError("QuickBooks is busy just now.", "busy");
+    throw e;
+  }
+  if (!r.ok) throw r.error;
+  return r.access;
+}
+
+function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refreshed> {
+  return db.transaction(async (tx): Promise<Refreshed> => {
+    const [c] = await (o.noWait ? tx.select().from(qboConnection).for("update", { noWait: true }) : tx.select().from(qboConnection).for("update"));
     if (!c?.realmId || !c.refreshTokenCiphertext || !c.refreshTokenKeyId) return { ok: false, error: new QboError("QuickBooks isn't connected.", "not_connected") };
     try {
       const box = secretBox(); // inside the try: a server key that can't be used is recorded like any unreadable secret
-      if (!o.force && c.accessTokenCiphertext && c.accessTokenKeyId && c.accessExpiresAt && c.accessExpiresAt.getTime() - Date.now() > REFRESH_EARLY_MS) {
-        return { ok: true, access: { token: box.open({ ciphertext: c.accessTokenCiphertext, keyId: c.accessTokenKeyId }, QBO_AAD.access), realmId: c.realmId, environment: c.environment } };
-      }
+      const saved = o.force ? null : savedToken(c);
+      if (saved) return { ok: true, access: { token: box.open(saved, QBO_AAD.access), realmId: c.realmId, environment: c.environment } };
       const t = await tokenRequest(
         { grant_type: "refresh_token", refresh_token: box.open({ ciphertext: c.refreshTokenCiphertext, keyId: c.refreshTokenKeyId }, QBO_AAD.refresh) },
         { clientId: c.clientId, clientSecret: box.open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) });
@@ -82,8 +108,36 @@ export async function accessToken(o: { force?: boolean } = {}): Promise<Access> 
       return { ok: false, error };
     }
   });
-  if (!r.ok) throw r.error;
-  return r.access;
+}
+
+/** The refresh a page load started, which the others in this process wait for. `forced`: it will not settle for the saved token. */
+let pageRefresh: { forced: boolean; work: Promise<Access> } | null = null;
+
+/**
+ * The access token for a parent's page load. A page load must not wait in line for the connection row, or keep a
+ * database connection after the page has given up: a refresh holds the row through its request to Intuit, 15 seconds
+ * when Intuit hangs, and callers queued behind it would each hold one of the pool's 10 connections, then each make
+ * that request in turn.
+ *
+ * A saved token that is still good is read with no lock at all. One that needs refreshing is refreshed by one caller
+ * in this process; the others wait for that refresh in memory, each for as long as its own page will wait. The refresh
+ * takes the row only if it is free (`noWait`): held by a job or by another copy of the portal, the answer is "busy".
+ * So however many pages are loading, one database connection at most is kept for a refresh.
+ */
+async function accessTokenForPage(force: boolean): Promise<Access> {
+  if (!force) {
+    const [c] = await db.select().from(qboConnection); // a plain read: no row lock
+    const saved = c?.realmId && c.refreshTokenCiphertext ? savedToken(c) : null;
+    if (c?.realmId && saved) {
+      // A key that can't be read is left to the refresh below, which records it.
+      try { return { token: secretBox().open(saved, QBO_AAD.access), realmId: c.realmId, environment: c.environment }; } catch (e) { if (!(e instanceof SecretBoxError)) throw e; }
+    }
+  }
+  if (!pageRefresh || (force && !pageRefresh.forced)) {
+    const mine = { forced: force, work: accessToken({ force, noWait: true }).finally(() => { if (pageRefresh === mine) pageRefresh = null; }) };
+    pageRefresh = mine;
+  }
+  return pageRefresh.work;
 }
 
 export type QboGetOptions = {
@@ -96,9 +150,9 @@ export type QboGetOptions = {
   /** The company the caller means to read. When another company is the connected one, nothing is asked of it. */
   realmId?: string;
   /**
-   * Refuse at once when the saved connection error is one only an Admin can fix (errorNeedsAdmin). accessToken() would
-   * try the refresh again under the connection row lock, holding it across its call to Intuit; with this set, a
-   * parent's page load never waits in that queue for a refresh that cannot succeed.
+   * For a parent's page load, which must answer soon and leave nothing queued behind it. Refuses at once when the saved
+   * connection error is one only an Admin can fix (errorNeedsAdmin), and never waits in line for the connection row:
+   * the token comes from accessTokenForPage(), which refuses as "busy" when the row is held elsewhere.
    */
   failFast?: boolean;
 };
@@ -134,7 +188,7 @@ export async function qboGet(path: string, params: Record<string, string> = {}, 
   if (o.failFast) await refuseWhenOnlyAnAdminCanFixIt();
   let force = false, refreshed = false, retried = false;
   for (;;) {
-    const a = await within(accessToken({ force }), o.signal);
+    const a = await within(o.failFast ? accessTokenForPage(force) : accessToken({ force }), o.signal);
     force = false;
     if (o.realmId !== undefined && a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${path}`);
@@ -194,7 +248,8 @@ export const isQboId = (id: string): boolean => /^\d{1,19}$/.test(id);
  * string in this file was verified in the sandbox before it was built on (spec §8), and nobody could reach the sandbox
  * for these. The owner's sandbox check must confirm, with `include=invoiceLink` and `minorversion` 75:
  *   1. that `inForm` is accepted (CustomerRef in a quoted list, ordered by Id, paged), or that QuickBooks answers it
- *      with HTTP 400, in which case qboInvoices() falls back to `oneForm`, one query per customer;
+ *      with HTTP 400 (or a Fault with status 200), in which case qboInvoices() falls back to `oneForm`, one query per
+ *      customer;
  *   2. that `oneForm` is accepted;
  *   3. that each returns only the invoices of the customers named, with `InvoiceLink` on those payable online.
  * Don't change either string without trying the new one there first. The ids are checked by isQboId() before they
@@ -209,13 +264,38 @@ export const INVOICE_QUERIES = {
 /** What makes QuickBooks send InvoiceLink at all (v1 spec §8.3). */
 export const INVOICE_INCLUDE = "invoiceLink";
 
-/** True once the in-form was refused with a 400 and the one-customer form then worked: kept for the life of the process. */
+/** True once the in-form was refused (a 400, or a Fault) and the one-customer form then worked: kept for the life of the process. */
 let invoicesOneCustomerAtATime = false;
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const badAnswer = () => new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
+
+/**
+ * The rows of a query answer that a parent is shown, where no rows reads as "nothing owed". So "no rows" is taken from
+ * one shape only, the one QuickBooks gives: an object whose QueryResponse is an object holding no rows at all. Anything
+ * else with status 200 is refused, never read as an empty list: a body that isn't an object, a missing QueryResponse,
+ * rows that aren't a list, rows of another entity. A Fault sent with status 200 is a refusal and gets its own code
+ * ("fault"); none of its text is kept.
+ */
+function strictRowsOf(body: unknown, entity: string): Record<string, unknown>[] {
+  if (!isPlainObject(body)) throw badAnswer();
+  if ("Fault" in body || "fault" in body) throw new QboError("QuickBooks refused the request.", "fault");
+  const answer = body.QueryResponse;
+  if (!isPlainObject(answer)) throw badAnswer();
+  const rows = answer[entity];
+  if (rows === undefined) {
+    // Only paging numbers may sit beside no rows: a list or an object here is the answer to some other question.
+    if (Object.values(answer).some((v) => typeof v === "object" && v !== null)) throw badAnswer();
+    return [];
+  }
+  if (!Array.isArray(rows)) throw badAnswer();
+  return rows as Record<string, unknown>[];
+}
 
 async function invoicePages(query: (start: number) => string, o: QboGetOptions): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
   for (let start = 1; ; start += QBO_PAGE) {
-    const page = rowsOf(await qboGet("query", { query: query(start), include: INVOICE_INCLUDE }, o), "Invoice");
+    const page = strictRowsOf(await qboGet("query", { query: query(start), include: INVOICE_INCLUDE }, o), "Invoice");
     out.push(...page);
     if (page.length < QBO_PAGE) return out;
   }
@@ -237,7 +317,8 @@ export async function qboInvoices(customerIds: string[], o: QboGetOptions = {}):
   try {
     return await invoicePages((start) => INVOICE_QUERIES.inForm(ids, start), o);
   } catch (e) {
-    if (!(e instanceof QboError) || e.code !== "http_400") throw e;
+    // The form itself was refused: with a 400, or with a Fault sent as a 200. Anything else is not about the form.
+    if (!(e instanceof QboError) || (e.code !== "http_400" && e.code !== "fault")) throw e;
   }
   const rows = await oneAtATime();
   invoicesOneCustomerAtATime = true; // remembered only once the other form has worked

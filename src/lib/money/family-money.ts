@@ -1,7 +1,7 @@
 // Parent-facing: everything here takes one family's id, which the caller takes from the session (ctx.familyQboId), and
 // returns that family's money alone. Nothing in a request ever chooses the customers: they are read from the roster
 // cache for that family. This module is in the staff-only import scan (tests/integration/page-guards.test.ts).
-import { eq, or, sql } from "drizzle-orm";
+import { eq, inArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, qboConnection, qboCustomer, type StoredInvoice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
@@ -19,8 +19,10 @@ const CALL_TIMEOUT_MS = 4_000;
 /** After a failed try, a page load shows what is stored for this long before QuickBooks is asked again. */
 export const RETRY_AFTER_FAILURE_MS = 30_000;
 /**
- * Live reads running at once in this process. Each holds a database connection for its lock while QuickBooks answers
- * and takes a second one for the access token; the pool has 10, and Intuit allows an app 10 requests at a time.
+ * Live reads running at once in this process. Each holds a database connection for its lock while QuickBooks answers;
+ * the pool has 10, and Intuit allows an app 10 requests at a time. The access token costs them no second connection
+ * to wait on: a page load never queues for the connection row (`failFast`, accessTokenForPage in the client), so a
+ * token refresh that hangs keeps one connection at most, however many families are loading.
  */
 export const MAX_LIVE_READS = 4;
 /** How long a page load waits for one of those places before it shows what is stored. */
@@ -34,7 +36,11 @@ type Row = typeof familyMoney.$inferSelect;
 export type MoneyFigures = {
   /** When QuickBooks gave these figures (ISO). */
   asOf: string;
-  /** False when QuickBooks couldn't be asked just now: these are the last figures it gave, and paying is switched off. */
+  /**
+   * False when QuickBooks couldn't be read just now: these are the last figures it gave, and paying is switched off.
+   * The cause may be an outage, a connection only an Admin can mend, or another read under way; the page is not told
+   * which, and says nothing that is true of only one of them.
+   */
   current: boolean;
   /** The sum of the open invoices. Not shown as one figure when `currency` is null (invoices in more than one currency). */
   totalCents: number;
@@ -47,12 +53,19 @@ export type MoneyFigures = {
 /** `figures` is null when there is nothing to show: no successful read yet for this family in the connected company. */
 export type FamilyMoney = { familyName: string | null; figures: MoneyFigures | null };
 
-type FamilyCustomers = { familyName: string; customers: Map<string, string | null> };
+type FamilyCustomers = {
+  familyName: string;
+  /** The customers whose invoices are the family's, each with the name to show beside its invoices (null for the family itself). */
+  customers: Map<string, string | null>;
+  /** The cache holds a customer directly under the family that is not one of those. */
+  othersUnder: boolean;
+};
 
 /**
  * Whose invoices are a family's (v1 spec §8.2). Layered: the family customer and its active direct sub-customers of the
  * student or the parent type. A sub-customer of the family type is another family and is never included. Flat: the
- * member's own customer. Null when the cache doesn't hold this id as a family.
+ * member's own customer. Null when the cache doesn't hold this id as an active family: QuickBooks made it inactive, or
+ * the shape doesn't call it a family (the rule of loadMyFamily, src/lib/parents/my-family.ts).
  */
 async function familyCustomers(familyQboId: string, tx?: Tx): Promise<FamilyCustomers | null> {
   const shape = await getShape(tx);
@@ -60,20 +73,51 @@ async function familyCustomers(familyQboId: string, tx?: Tx): Promise<FamilyCust
   const rows = await (tx ?? db).select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName, active: qboCustomer.active, parentQboId: qboCustomer.parentQboId, typeQboId: qboCustomer.typeQboId })
     .from(qboCustomer).where(or(eq(qboCustomer.qboId, familyQboId), eq(qboCustomer.parentQboId, familyQboId)));
   const family = rows.find((r) => r.qboId === familyQboId);
-  if (!family || family.typeQboId === null) return null;
+  if (!family || !family.active || family.typeQboId === null) return null;
   const customers = new Map<string, string | null>([[family.qboId, null]]);
-  if (shape.kind === "flat") return shape.memberTypeIds.includes(family.typeQboId) ? { familyName: family.name, customers } : null;
+  const under = rows.filter((r) => r.qboId !== familyQboId && r.parentQboId === familyQboId);
+  if (shape.kind === "flat") return shape.memberTypeIds.includes(family.typeQboId) ? { familyName: family.name, customers, othersUnder: under.length > 0 } : null;
   if (family.typeQboId !== shape.familyTypeId) return null;
-  const under = [shape.studentTypeId, shape.parentTypeId].filter((t): t is string => t !== null);
-  for (const r of rows) {
-    if (r.qboId !== familyQboId && r.parentQboId === familyQboId && r.active && r.typeQboId !== null && under.includes(r.typeQboId)) customers.set(r.qboId, r.name);
+  const included = [shape.studentTypeId, shape.parentTypeId].filter((t): t is string => t !== null);
+  for (const r of under) {
+    if (r.active && r.typeQboId !== null && included.includes(r.typeQboId)) customers.set(r.qboId, r.name);
   }
-  return { familyName: family.name, customers };
+  return { familyName: family.name, customers, othersUnder: under.length > customers.size - 1 };
 }
 
-/** The stored figures, unless they came from another QuickBooks company than the roster cache: those are treated as absent. */
-function figuresOf(row: Row | undefined, source: string | null, current: boolean): MoneyFigures | null {
-  if (!row?.readAt || !row.invoices || row.totalCents === null || row.realmId === null || row.realmId !== source) return null;
+/**
+ * Whether QuickBooks' BalanceWithJobs for the family customer adds up the same customers as the family's total. It
+ * counts the family customer and every customer under it, at every depth; the total leaves some of those out on
+ * purpose (another family nested under this one, an inactive student, a sponsor, a student's own sub-customer).
+ * Compared anyway, a credit or a debt of a customer the family is not shown would be told to it as its own, and
+ * audited as a difference that isn't one. So the two are compared only when the cache holds nothing under the family
+ * but the customers whose invoices were read.
+ */
+async function balanceCoversTheSame(familyQboId: string, family: FamilyCustomers, tx: Tx): Promise<boolean> {
+  if (family.othersUnder) return false;
+  const under = [...family.customers.keys()].filter((id) => id !== familyQboId);
+  if (!under.length) return true;
+  const [deeper] = await tx.select({ qboId: qboCustomer.qboId }).from(qboCustomer).where(inArray(qboCustomer.parentQboId, under)).limit(1);
+  return deeper === undefined;
+}
+
+type ShownRow = Row & { readAt: Date; invoices: StoredInvoice[]; totalCents: number };
+
+/**
+ * Whether a stored row is this family's to see now. Not when it came from another QuickBooks company than the roster
+ * cache. Not when the cache no longer holds the family as one. And not when it holds an invoice of a customer the
+ * cache no longer puts in this family: a student moved to another family or made inactive since the read, or a row
+ * that doesn't say whose its invoices are. Such a row is treated as absent, however fresh, until QuickBooks is read
+ * again: it is never shown with somebody else's invoice in it.
+ */
+function mayShow(row: Row | undefined, source: string | null, family: FamilyCustomers | null): row is ShownRow {
+  return Boolean(row?.readAt && row.invoices && row.totalCents !== null && row.realmId !== null && row.realmId === source
+    && family && row.invoices.every((i) => family.customers.has(i.customerQboId)));
+}
+
+/** The stored figures, when they may be shown (mayShow); otherwise they are treated as absent. */
+function figuresOf(row: Row | undefined, source: string | null, family: FamilyCustomers | null, current: boolean): MoneyFigures | null {
+  if (!mayShow(row, source, family)) return null;
   // A stored link is checked again on its way out: the page never trusts the table to hold only good ones.
   const invoices = row.invoices.map((i) => ({ ...i, payLink: safePayLink(i.payLink) }));
   return {
@@ -83,8 +127,8 @@ function figuresOf(row: Row | undefined, source: string | null, current: boolean
   };
 }
 
-const isFresh = (row: Row | undefined, source: string | null, freshSeconds: number): boolean =>
-  Boolean(row?.readAt && row.realmId !== null && row.realmId === source && Date.now() - row.readAt.getTime() < freshSeconds * 1000);
+const isFresh = (row: Row | undefined, source: string | null, family: FamilyCustomers | null, freshSeconds: number): boolean =>
+  mayShow(row, source, family) && Date.now() - row.readAt.getTime() < freshSeconds * 1000;
 const failedJustNow = (row: Row | undefined): boolean =>
   Boolean(row?.failedAt && (!row.readAt || row.failedAt > row.readAt) && Date.now() - row.failedAt.getTime() < RETRY_AFTER_FAILURE_MS);
 
@@ -108,7 +152,7 @@ type Read =
   | { ok: false; code: string };
 
 /** One read of a family's invoices from QuickBooks, refused before anything is asked unless it is certain to be the right company. */
-async function readFromQuickBooks(familyQboId: string, tx: Tx, timeoutMs: number): Promise<Read> {
+async function readFromQuickBooks(familyQboId: string, family: FamilyCustomers | null, tx: Tx, timeoutMs: number): Promise<Read> {
   const fail = (code: string): Read => ({ ok: false, code });
   // Never the wrong company: QuickBooks is connected, and to the company the roster cache (and so this family's
   // customer ids) was read from. Every request then checks the company again as it is sent (`realmId`).
@@ -116,17 +160,20 @@ async function readFromQuickBooks(familyQboId: string, tx: Tx, timeoutMs: number
   if (!connection?.realmId || !connection.refresh) return fail("not_connected");
   const realmId = await getRosterSource(tx);
   if (realmId === null || realmId !== connection.realmId) return fail("other_company");
-  const family = await familyCustomers(familyQboId, tx);
   if (!family) return fail("not_a_family");
   const ids = [...family.customers.keys()];
   if (!ids.every(isQboId)) return fail("bad_id");
+  const comparable = await balanceCoversTheSame(familyQboId, family, tx);
   const o: QboGetOptions = { timeoutMs, signal: AbortSignal.timeout(timeoutMs * 1.5), retry: true, failFast: true, realmId };
   try {
     const shown = shownInvoices(await qboInvoices(ids, o), family.customers, utcDay());
     if (!shown) return fail("bad_answer");
-    // QuickBooks' own balance, as a cross-check only (v1 spec §8.3): the figure a parent sees never waits on it.
+    // QuickBooks' own balance, as a cross-check only (v1 spec §8.3): the figure a parent sees never waits on it. It is
+    // not asked for when it would count customers the total leaves out: there is then nothing to compare it with.
     let balanceWithJobsCents: number | null = null;
-    try { balanceWithJobsCents = toCents((await qboCustomerById(familyQboId, o))?.BalanceWithJobs); } catch (e) { if (!(e instanceof QboError)) throw e; }
+    if (comparable) {
+      try { balanceWithJobsCents = toCents((await qboCustomerById(familyQboId, o))?.BalanceWithJobs); } catch (e) { if (!(e instanceof QboError)) throw e; }
+    }
     return { ok: true, realmId, ...shown, balanceWithJobsCents };
   } catch (e) {
     // Only a QboError's own short code is kept; anything else (an answer that wasn't the shape expected) gets a fixed one.
@@ -148,10 +195,11 @@ async function liveRead(familyQboId: string, timeoutMs: number): Promise<boolean
       const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${sql.raw(String(MONEY_LOCK))}, hashtext(${familyQboId}::text)) as locked`)) as unknown as { locked: boolean }[];
       if (!lock?.locked) return false;
       const [before] = await tx.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId));
+      const family = await familyCustomers(familyQboId, tx);
       // Whoever held the lock a moment ago may have just read it, or just failed to.
-      if (isFresh(before, await getRosterSource(tx), (await getMoneySettings(tx)).freshSeconds)) return true;
+      if (isFresh(before, await getRosterSource(tx), family, (await getMoneySettings(tx)).freshSeconds)) return true;
       if (failedJustNow(before)) return false;
-      const read = await readFromQuickBooks(familyQboId, tx, timeoutMs);
+      const read = await readFromQuickBooks(familyQboId, family, tx, timeoutMs);
       const now = new Date();
       // The company the cache belongs to changed while QuickBooks was answering: these figures are the old company's.
       const outcome: Read = read.ok && (await getRosterSource(tx)) !== read.realmId ? { ok: false, code: "other_company" } : read;
@@ -195,18 +243,20 @@ function readOnce(familyQboId: string, timeoutMs: number): Promise<boolean> {
  *
  * Fresh stored figures are shown at once. Older ones (or none) mean one read from QuickBooks first, with a short
  * timeout; if that can't be done, the last figures QuickBooks gave are shown marked as not current, and with none
- * stored there is nothing to show. Figures from another QuickBooks company are never shown.
+ * stored there is nothing to show. Figures from another QuickBooks company are never shown, nor figures that hold an
+ * invoice of a customer who is no longer this family's (mayShow), and nothing is shown for an id the roster cache does
+ * not hold as an active family.
  */
 export async function loadFamilyMoney(familyQboId: string, o: { timeoutMs?: number } = {}): Promise<FamilyMoney> {
   const load = async () => {
-    const [[row], source] = await Promise.all([db.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId)), getRosterSource()]);
-    return { row, source };
+    const [[row], source, family] = await Promise.all([db.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId)), getRosterSource(), familyCustomers(familyQboId)]);
+    return { row, source, family, familyName: family?.familyName ?? null };
   };
-  const [stored, settings, family] = await Promise.all([load(), getMoneySettings(), familyCustomers(familyQboId)]);
-  const familyName = family?.familyName ?? null;
-  if (isFresh(stored.row, stored.source, settings.freshSeconds)) return { familyName, figures: figuresOf(stored.row, stored.source, true) };
-  if (failedJustNow(stored.row)) return { familyName, figures: figuresOf(stored.row, stored.source, false) };
+  const [stored, settings] = await Promise.all([load(), getMoneySettings()]);
+  if (isFresh(stored.row, stored.source, stored.family, settings.freshSeconds)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, true) };
+  if (failedJustNow(stored.row)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, false) };
   const current = await readOnce(familyQboId, o.timeoutMs ?? CALL_TIMEOUT_MS);
+  // Everything is read again: the roster cache may have been replaced while QuickBooks was answering.
   const after = await load();
-  return { familyName, figures: figuresOf(after.row, after.source, current) };
+  return { familyName: after.familyName, figures: figuresOf(after.row, after.source, after.family, current) };
 }
