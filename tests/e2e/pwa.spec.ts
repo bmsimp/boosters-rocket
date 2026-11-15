@@ -99,6 +99,13 @@ test("the head of the sign-in page carries what a phone needs to install the por
   expect(headers["content-security-policy"]).toBe("frame-ancestors 'none'");
   expect(headers["x-frame-options"]).toBe("DENY");
   expect(headers["x-powered-by"]).toBeUndefined();
+  // The same on the root address and on a redirect, an API answer and a page that isn't there.
+  for (const path of ["/", "/api/health", "/no-such-page"]) {
+    const other = (await page.request.get(path, { maxRedirects: 0 })).headers();
+    expect(other["x-content-type-options"], path).toBe("nosniff");
+    expect(other["content-security-policy"], path).toBe("frame-ancestors 'none'");
+    expect(other["x-powered-by"], path).toBeUndefined();
+  }
 });
 
 test("the service worker and the offline page are served as themselves", async ({ request }) => {
@@ -257,7 +264,8 @@ test.describe("the install hint on the Display page", () => {
     await expect(steps).toHaveCount(3);
     await expect(steps.nth(0)).toContainText("Tap Share");
     await expect(steps.nth(1)).toContainText("Add to Home Screen");
-    await expect(page.locator(".install-hint")).not.toContainText("Safari");
+    await expect(page.locator(".install-hint")).not.toContainText("First open this page in Safari");
+    await expect(page.locator(".install-hint")).toContainText("No Add to Home Screen in the list?"); // some apps' browsers look just like Safari
     await expect(page.locator(".install-hint").getByRole("button")).toHaveCount(0); // a permanent box: nothing to dismiss, no button Apple won't honor
     await context.close();
   });

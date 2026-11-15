@@ -74,6 +74,10 @@ export function InstallHint({ permanent = false }: { permanent?: boolean }) {
             <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
             <li>Tap <b>Add</b>.</li>
           </ol>
+          {view === "ios" && (
+            // A link opened from some apps looks exactly like Safari to this page, and has no Add to Home Screen.
+            <p className="hint install-first">No Add to Home Screen in the list? This page is open inside another app. Tap the compass icon to open it in Safari, then try again.</p>
+          )}
           {!permanent && (
             <div className="row-actions install-actions">
               <button type="button" className="btn btn-line" onClick={dismiss}>Not now</button>
