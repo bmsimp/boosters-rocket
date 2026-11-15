@@ -356,6 +356,99 @@ describe("two requests for the same family never both go to QuickBooks", () => {
   });
 });
 
+describe("a page load never waits in line for the QuickBooks connection, and leaves nothing running that could pile up", () => {
+  /** The database's other connections that are in use right now: in a transaction, running a query, or waiting for a lock. */
+  const inUse = async () => (await db.execute(sql`select state, wait_event_type as waiting from pg_stat_activity
+    where datname = current_database() and pid <> pg_backend_pid() and state <> 'idle'`)) as unknown as { state: string; waiting: string | null }[];
+  /** Another copy of the portal (or a job) holding the connection row, as a token refresh does across its request to Intuit. */
+  async function holdConnectionRow(): Promise<() => Promise<void>> {
+    let release!: () => void, locked!: () => void;
+    const held = new Promise<void>((r) => { release = r; }), taken = new Promise<void>((r) => { locked = r; });
+    const holder = db.transaction(async (tx) => { await tx.select().from(qboConnection).for("update"); locked(); await held; });
+    await taken;
+    return async () => { release(); await holder; };
+  }
+  const expireToken = () => db.update(qboConnection).set({ accessExpiresAt: new Date(Date.now() - 1000) });
+
+  it("an expired token and a token endpoint that hangs: every page answers, and one connection at most is still in use", { timeout: 30_000 }, async () => {
+    await seedShape();
+    const ids = Array.from({ length: MAX_LIVE_READS + 1 }, (_, i) => String(100 + i));
+    await addToCache(ids.map((id) => fam(id, `Family ${id}`)));
+    await connectCompany(stub);
+    await expireToken();
+    stub.customers = ids.map((Id) => ({ Id, BalanceWithJobs: 85 }));
+    stub.invoices = ids.map((id, i) => inv(String(i + 1), id));
+    stub.tokenDelayMs = 3000;
+    const started = Date.now();
+    const all = await Promise.all(ids.map((id) => loadFamilyMoney(id, { timeoutMs: 200 })));
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(all.map((m) => m.figures)).toEqual(ids.map(() => null));
+    expect((await Promise.all(ids.map(moneyRow))).map((r) => r!.failedCode)).toEqual(ids.map(() => "timeout"));
+    // The pages have answered. The one refresh is still waiting for Intuit, with the connection row; nobody is in line behind it.
+    const busy = await inUse();
+    expect(busy.filter((c) => c.waiting === "Lock")).toEqual([]);
+    expect(busy.length).toBeLessThanOrEqual(1);
+    // That refresh finishes and is saved: the refresh token was spent once, by one request for all the families.
+    await expect.poll(async () => (await db.select().from(qboConnection))[0]!.lastTokenRefreshAt!.getTime() > started, { timeout: 15_000 }).toBe(true);
+    expect(stub.tokenCalls()).toHaveLength(1);
+    expect(await inUse()).toEqual([]);
+    for (const id of ids) await ageMoney(id, RETRY_AFTER_FAILURE_MS + 1000);
+    stub.tokenDelayMs = 0;
+    expect((await Promise.all(ids.map((id) => loadFamilyMoney(id)))).map((m) => m.figures?.totalCents)).toEqual(ids.map(() => 8500));
+    expect(stub.tokenCalls()).toHaveLength(1);
+  });
+
+  it("an expired token refreshed while several families load: one refresh, and every family gets its figures", async () => {
+    await seedShape();
+    const ids = Array.from({ length: MAX_LIVE_READS }, (_, i) => String(100 + i));
+    await addToCache(ids.map((id) => fam(id, `Family ${id}`)));
+    await connectCompany(stub);
+    await expireToken();
+    stub.customers = ids.map((Id) => ({ Id, BalanceWithJobs: 85 }));
+    stub.invoices = ids.map((id, i) => inv(String(i + 1), id));
+    stub.tokenDelayMs = 150;
+    const all = await Promise.all(ids.map((id) => loadFamilyMoney(id)));
+    expect(all.map((m) => [m.figures?.current, m.figures?.totalCents])).toEqual(ids.map(() => [true, 8500]));
+    expect(stub.tokenCalls()).toHaveLength(1);
+  });
+
+  it("when the token needs refreshing and the connection row is held elsewhere, shows what is stored at once and waits for nothing", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    await loadFamilyMoney("10");
+    await ageMoney("10", 6 * MINUTE);
+    await expireToken();
+    const asked = stub.calls.length;
+    const release = await holdConnectionRow();
+    try {
+      const started = Date.now();
+      expect((await loadFamilyMoney("10", { timeoutMs: 2000 })).figures).toMatchObject({ current: false, totalCents: 8500 });
+      expect(Date.now() - started).toBeLessThan(1500); // not the 3 seconds the page would have waited
+      expect((await moneyRow("10"))!.failedCode).toBe("busy");
+      expect(stub.calls).toHaveLength(asked);
+      expect((await inUse()).filter((c) => c.waiting === "Lock")).toEqual([]);
+    } finally { await release(); }
+    await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
+    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
+  });
+
+  it("with a token that is still good, takes no lock on the connection: a held row holds nobody up", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    balanceWithJobs(85);
+    const release = await holdConnectionRow();
+    try {
+      const started = Date.now();
+      expect((await loadFamilyMoney("10", { timeoutMs: 2000 })).figures).toMatchObject({ current: true, totalCents: 8500 });
+      expect(Date.now() - started).toBeLessThan(1500);
+      expect((await moneyRow("10"))!.balanceWithJobsCents).toBe(8500); // the cross-check was read too
+      expect(stub.tokenCalls()).toHaveLength(0);
+    } finally { await release(); }
+  });
+});
+
 describe("never the wrong company", () => {
   it("asks QuickBooks nothing while it is disconnected, and shows the last figures as not current", async () => {
     await twoFamilies();

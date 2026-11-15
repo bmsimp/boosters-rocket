@@ -19,8 +19,10 @@ const CALL_TIMEOUT_MS = 4_000;
 /** After a failed try, a page load shows what is stored for this long before QuickBooks is asked again. */
 export const RETRY_AFTER_FAILURE_MS = 30_000;
 /**
- * Live reads running at once in this process. Each holds a database connection for its lock while QuickBooks answers
- * and takes a second one for the access token; the pool has 10, and Intuit allows an app 10 requests at a time.
+ * Live reads running at once in this process. Each holds a database connection for its lock while QuickBooks answers;
+ * the pool has 10, and Intuit allows an app 10 requests at a time. The access token costs them no second connection
+ * to wait on: a page load never queues for the connection row (`failFast`, accessTokenForPage in the client), so a
+ * token refresh that hangs keeps one connection at most, however many families are loading.
  */
 export const MAX_LIVE_READS = 4;
 /** How long a page load waits for one of those places before it shows what is stored. */
