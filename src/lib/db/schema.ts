@@ -263,8 +263,7 @@ export const jobRun = pgTable("job_run", {
 
 /* ---- Seasons, steps and requirements (v1 spec §10). Calendar dates are `date` columns read as YYYY-MM-DD, in the club's own time zone. ---- */
 
-export const REQUIREMENT_KINDS = ["form", "payment", "volunteer", "checklist"] as const;
-export type RequirementKind = (typeof REQUIREMENT_KINDS)[number];
+export type RequirementKind = "form" | "payment" | "volunteer" | "checklist";
 
 /** A season, such as "Fall 2027". At most one is the current season, the one parents see (`season_current_uq`). */
 export const season = pgTable("season", {
@@ -295,7 +294,7 @@ export const seasonStep = pgTable("season_step", {
 export const requirement = pgTable("requirement", {
   id: uuid("id").primaryKey().defaultRandom(),
   stepId: uuid("step_id").notNull().references(() => seasonStep.id, { onDelete: "cascade" }),
-  kind: text("kind", { enum: REQUIREMENT_KINDS }).notNull(),
+  kind: text("kind", { enum: ["form", "payment", "volunteer", "checklist"] }).notNull(), // how each is met: src/lib/seasons/kinds.ts
   title: text("title").notNull(),                       // in the club's own words
   required: boolean("required").notNull().default(true), // an optional one shows progress and never holds a step open
   appliesTo: text("applies_to", { enum: ["family", "student"] }).notNull(),

@@ -1,20 +1,60 @@
 import type { MyContact, MyFamily, MyStudent } from "@/lib/parents/my-family";
+import type { MySeason } from "@/lib/seasons/my-season";
 import { LocalTime } from "../components/local-time";
+import { DoneCount, RequirementLines, SeasonFoot, StepState, asksAnything, currentStep } from "./season-parts";
 
 /**
  * The boxes Home and Family share. Server components: every name, address and number here is QuickBooks text or the
  * person's own, written as text only.
  */
 
-export function StudentsBox({ students }: { students: MyStudent[] }) {
+/**
+ * The family's students. With `season` (Home), each student also shows where they stand in the current step: the state
+ * in words, then each requirement asked of them. What the family itself is asked comes after the students.
+ */
+export function StudentsBox({ students, season = null }: { students: MyStudent[]; season?: MySeason | null }) {
+  const step = currentStep(season);
+  const standing = new Map((step?.students ?? []).map((s) => [s.qboId, s]));
   return (
     <section className="box students-box" aria-labelledby="stu-h">
       <h2 id="stu-h">Your students</h2>
+      {season && step && <p>{season.name} · {step.name}</p>}
       {students.length > 0 ? (
         <ul className="students">
-          {students.map((s) => <li key={s.qboId}><span className="who"><b>{s.name}</b></span></li>)}
+          {students.map((s) => {
+            const mine = step ? standing.get(s.qboId) : undefined;
+            return (
+              <li key={s.qboId}>
+                <span className="who"><b>{s.name}</b></span>
+                {mine && step && (
+                  <>
+                    <DoneCount lines={mine.lines} />
+                    <StepState lines={mine.lines} stepName={step.name} />
+                    {mine.lines.length > 0 && <RequirementLines lines={mine.lines} today={season!.today} />}
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : <p>The club has no active students listed for your family right now.</p>}
+      {season && <SeasonFoot season={season} />}
+    </section>
+  );
+}
+
+/**
+ * For a club that doesn't list students: what the current step asks of the family itself, in the students box's place.
+ * Nothing when the step asks nothing of it and nothing is left behind.
+ */
+export function FamilyStepBox({ season }: { season: MySeason }) {
+  const step = currentStep(season);
+  if (!(step && step.family.length > 0) && season.leftBefore === 0 && (step || !asksAnything(season))) return null;
+  return (
+    <section className="box students-box" aria-labelledby="step-h">
+      <h2 id="step-h">{season.name}</h2>
+      {step && <p>{step.name}</p>}
+      <SeasonFoot season={season} />
     </section>
   );
 }

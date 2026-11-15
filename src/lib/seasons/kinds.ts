@@ -3,7 +3,7 @@
  * items are worked out. Forms, payments and volunteering each get their entry in the slice that builds them: until a
  * kind has one, staff can't create a requirement of it (KIND_RULES[kind] is null), and nothing else has to change.
  */
-import { REQUIREMENT_KINDS, type RequirementKind } from "@/lib/db/schema";
+import type { RequirementKind } from "@/lib/db/schema";
 import type { Requirement, Standing } from "./progress";
 
 /** What `requirement_progress` holds for one requirement and one family or student. */
@@ -47,6 +47,8 @@ export const KIND_RULES: Record<RequirementKind, KindRule | null> = {
 /** What staff call each kind. */
 export const KIND_LABELS: Record<RequirementKind, string> = { checklist: "Checklist item", form: "Form", payment: "Payment", volunteer: "Volunteering" };
 
+/** Every kind, in the order staff are offered them. */
+export const REQUIREMENT_KINDS = Object.keys(KIND_RULES) as RequirementKind[];
 /** The kinds staff can create today: those whose rule exists. */
 export const availableKinds = (): RequirementKind[] => REQUIREMENT_KINDS.filter((k) => KIND_RULES[k] !== null);
 export const isAvailableKind = (kind: unknown): kind is RequirementKind => typeof kind === "string" && (availableKinds() as string[]).includes(kind);
