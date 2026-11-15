@@ -1,6 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { readdirSync } from "node:fs";
-import { parentSessionCookie } from "./parent-session";
+import postgres from "postgres";
+import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
+import { addressOf, isDynamic, paramsProblems, parentRoutes, type DynamicRouteParams } from "./parent-routes";
+
+const sql = postgres(process.env.DATABASE_URL!);
+test.afterAll(async () => { await sql.end(); });
 
 // The seeded session (scripts/seed-e2e.ts) is Zelda's, with the Quetzalcoatl family chosen. Nothing here changes it,
 // so both passes of the run, and a run without a new seed, find it as it was.
@@ -31,26 +35,64 @@ test("a cookie signed with another secret, or for a session that doesn't exist, 
   }
 });
 
-// Every parent page without a dynamic segment, found on disk: a new page is covered without being listed here.
-const PARENT_DIR = "src/app/(parent)";
-const parentRoutes = readdirSync(PARENT_DIR, { recursive: true }).map((f) => String(f).replaceAll("\\", "/"))
-  .filter((f) => /(^|\/)page\.tsx$/.test(f))
-  .map((f) => `/${f.split("/").slice(0, -1).filter((s) => !/^\(.*\)$/.test(s)).join("/")}`)
-  .filter((route) => !route.includes("["));
-// Everything scripts/seed-e2e.ts puts in QuickBooks that is not the Quetzalcoatl family's, Zelda's second family included.
+// Every parent page, found on disk: a new page is covered without being listed here.
+const routes = parentRoutes();
+
+/**
+ * For a page with a dynamic segment: the params to ask for it with, ids from scripts/seed-e2e.ts. `own` is something of
+ * the Quetzalcoatl family (E2E-FAMILY), `other` the same kind of thing in another family.
+ *   "/students/[id]": { own: { id: "E2E-S1" }, other: { id: "E2E-S3" } },
+ */
+const PARAMS: Record<string, DynamicRouteParams> = {};
+
+// Everything scripts/seed-e2e.ts gives a family that is not the Quetzalcoatl family, Zelda's second family included:
+// strings that would give that family away, in the HTML or in the data sent with it. When the seed gives another
+// family something new (a customer, an invoice, a form), add its recognizable strings here.
 const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerror=alert", "Second Family", "Wolfgang", "Secondborn",
   "ana@example.com", "sam@example.com", "555-0101", "E2E-FAMILY-2", "E2E-P2", "E2E-S3"];
+
+test("every parent page with a dynamic segment has params to ask for it with", () => {
+  const problems = paramsProblems(routes, PARAMS);
+  expect(problems, problems.join(" ")).toEqual([]);
+});
+
+test("every customer the seed gives another family is searched for", async () => {
+  // The list above is kept by hand; this keeps it honest for the roster. A customer outside the Quetzalcoatl family
+  // must hold at least one of the strings, in its name, id, email address or phone number.
+  const others = await sql`SELECT qbo_id, display_name, email, phone FROM qbo_customer
+    WHERE qbo_id <> ${PARENT_SESSION_FAMILY} AND parent_qbo_id IS DISTINCT FROM ${PARENT_SESSION_FAMILY}`;
+  expect(others.length).toBeGreaterThan(5);
+  const unsearched = others.filter((c) => !OTHER_FAMILIES.some((s) => [c.qbo_id, c.display_name, c.email, c.phone].some((v) => typeof v === "string" && v.includes(s))))
+    .map((c) => `${c.qbo_id} (${c.display_name})`);
+  expect(unsearched, `These customers in scripts/seed-e2e.ts belong to another family, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
+    + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable string of each: a name, an email address, an id that isn't a short number.`).toEqual([]);
+});
 
 test("no parent page sends the browser anything of another family, in the HTML or in the data sent with it", async ({ context, page }) => {
   // tests/integration/parent-isolation.test.ts searches each page's HTML. This reads the whole response, which also
   // carries every prop a server component passes to a client component, rendered or not.
-  expect(parentRoutes).toEqual(expect.arrayContaining(["/", "/display"]));
+  expect(routes).toEqual(expect.arrayContaining(["/", "/display"]));
   await context.addCookies([parentSessionCookie()]);
-  for (const route of parentRoutes) {
-    const res = await page.goto(route);
-    expect(res?.status(), route).toBe(200);
+  for (const route of routes) {
+    const params = PARAMS[route];
+    if (isDynamic(route) && !params) continue; // the test above fails and says what to add
+    const own = addressOf(route, params?.own);
+    const res = await page.goto(own);
+    expect(res?.status(), own).toBe(200);
     const sent = await res!.text();
-    expect(sent, route).toContain("Zelda"); // the signed-in parent's own page, not the sign-in page
-    for (const theirs of OTHER_FAMILIES) expect(sent, `${route} sent "${theirs}" to a parent of the Quetzalcoatl family`).not.toContain(theirs);
+    expect(sent, own).toContain("Zelda"); // the signed-in parent's own page, not the sign-in page
+    for (const theirs of OTHER_FAMILIES) expect(sent, `${own} sent "${theirs}" to a parent of the Quetzalcoatl family`).not.toContain(theirs);
+
+    if (!params) continue;
+    // Asked for another family's ids: a 404 or a page, but nothing of theirs. The address is echoed in what Next.js
+    // sends, so a string that is in the address itself is not searched for.
+    const other = addressOf(route, params.other);
+    const asked = decodeURIComponent(other);
+    const answer = await page.goto(other);
+    expect(answer?.status(), `${other} must answer 404 or a page, not fail`).toBeLessThan(500);
+    const answered = await answer!.text();
+    for (const theirs of OTHER_FAMILIES.filter((s) => !asked.includes(s))) {
+      expect(answered, `${other}, asked for by a parent of the Quetzalcoatl family with another family's ids, sent "${theirs}"`).not.toContain(theirs);
+    }
   }
 });

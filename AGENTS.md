@@ -33,8 +33,9 @@ Booster Rocket is an open-source, self-hosted parent portal for booster clubs: e
 New parent page (`src/app/(parent)/**/page.tsx`; example `src/app/(parent)/page.tsx`):
 - Make the first line of the page `const ctx = await requireParentPage();`. The layout's guard does not count.
 - Read data with `ctx.familyQboId` only. Do not audit a parent viewing their own family.
-- A dynamic segment: add its params to `PARAMS` in `tests/integration/parent-isolation.test.ts`.
+- A dynamic segment: add its params to `PARAMS` in both `tests/integration/parent-isolation.test.ts` and `tests/e2e/parent-session.spec.ts` (there with ids from `scripts/seed-e2e.ts`). Each fails until it has them.
 - New kinds of family data: seed them for both families in `seedTwoFamilies()` and add their strings to the markers.
+- New `scripts/seed-e2e.ts` data for any family but `E2E-FAMILY`: add its strings to `OTHER_FAMILIES` in `tests/e2e/parent-session.spec.ts`, the only test that reads the props sent to client components.
 
 New parent server action (no `parentAction` example exists yet; the closest is `src/app/choose-family/actions.ts` with `src/lib/parents/family-choice.ts`):
 - Put `"use server"` first, in a file under `src/app/(parent)/`; export only functions wrapped in `parentAction`.
