@@ -6,11 +6,11 @@ import { PARENT_NAV } from "@/app/components/parent-nav";
 const pageFile = (href: string) => `src/app/(parent)${href === "/" ? "" : href}/page.tsx`;
 
 describe("PARENT_NAV", () => {
-  // The tabs and the top nav list only pages that exist. Payments and Forms join this list when their pages are built.
+  // The tabs and the top nav list only pages that exist. Forms joins this list when its page is built.
   it("is a real array of the parent pages that exist, in tab order", () => {
     expect(Array.isArray(PARENT_NAV)).toBe(true);
-    expect(PARENT_NAV.map((n) => n.href)).toEqual(["/", "/family"]);
-    expect(PARENT_NAV.map((n) => n.label)).toEqual(["Home", "Family"]);
+    expect(PARENT_NAV.map((n) => n.href)).toEqual(["/", "/payments", "/family"]);
+    expect(PARENT_NAV.map((n) => n.label)).toEqual(["Home", "Payments", "Family"]);
   });
   it.each(PARENT_NAV)("$label ($href) has a page on disk, so no tab leads to the not-ready page", ({ href }) => {
     expect(href).toMatch(/^\/[a-z0-9/-]*$/);

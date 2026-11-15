@@ -205,13 +205,18 @@ test("after a signed-in parent has browsed, the caches hold the offline page and
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
   await page.goto("/display");
   await page.reload();
+  // What the family owes, by its tab and asked for directly.
+  await page.getByRole("link", { name: "Payments", exact: true }).click();
+  await expect(page.locator(".money .amt")).toHaveText("$185.00");
+  await page.goto("/payments");
+  await expect(page.locator(".money .amt")).toHaveText("$185.00");
   await page.goto("/forms"); // a page that isn't built yet: a 404 from the app is not stored either
 
   const held = await cacheContents(page);
   expect(held.map((h) => `${h.cache} ${h.url}`)).toEqual(["br-offline-v1 /offline.html"]);
   expect(held[0]!.body).toBe(readFileSync("public/offline.html", "utf8"));
   const everything = JSON.stringify(held);
-  for (const theirs of ["Zelda", "Quetzalcoatl", "E2E-FAMILY", "zelda@example.com", "Second Family", "Rivera", "Okafor", CLUB.name]) {
+  for (const theirs of ["Zelda", "Quetzalcoatl", "E2E-FAMILY", "zelda@example.com", "Second Family", "Rivera", "Okafor", "QZ-10", "$185.00", "connect.intuit.com", CLUB.name]) {
     expect(everything, `the caches hold "${theirs}"`).not.toContain(theirs);
   }
 

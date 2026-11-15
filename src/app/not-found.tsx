@@ -7,7 +7,7 @@ export const metadata = { title: "Not ready yet" };
 /**
  * Every address with no page, and every page that answers notFound(). A signed-in parent keeps the club bar and the
  * tabs around it; anyone else gets the plain page, which says nothing about who is signed in or what exists.
- * It also covers the parent pages that are not built yet (Forms, Payments).
+ * It also covers the parent pages that are not built yet (Forms).
  */
 export default async function NotFound() {
   const state = await getParentState();

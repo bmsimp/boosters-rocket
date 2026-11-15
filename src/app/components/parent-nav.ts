@@ -5,5 +5,6 @@
  */
 export const PARENT_NAV: { href: string; label: string }[] = [
   { href: "/", label: "Home" },
+  { href: "/payments", label: "Payments" },
   { href: "/family", label: "Family" },
 ];

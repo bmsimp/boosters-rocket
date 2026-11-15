@@ -48,7 +48,8 @@ const NO_FAMILY_DATA: Record<string, string> = {
 
 /** What a page must show its own family, beyond "something": the exact words. */
 const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
-  "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`, ...rosterOf(family)],
+  // The greeting, the roster, and what the family owes now (what it has paid is on the Payments page).
+  "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`, ...rosterOf(family), ...moneyMarkers(family.spec, "open")],
   "/family": (family) => rosterOf(family),
   // The family's name, every invoice's number and amount, the total, and the address behind the Pay button.
   "/payments": (family) => [family.spec.family.name, ...moneyMarkers(family.spec)],

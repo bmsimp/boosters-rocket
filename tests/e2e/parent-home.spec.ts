@@ -16,12 +16,21 @@ const noSidewaysScroll = async (page: Page) =>
 
 test.beforeEach(async ({ context }) => { await context.addCookies([parentSessionCookie()]); });
 
-test("Home greets the parent and shows their family's students and their own details", async ({ page }) => {
+test("Home greets the parent and shows what the family owes, its students and the parent's own details", async ({ page }) => {
   const res = await page.goto("/");
   expect(res?.status()).toBe(200);
   await expect(page).toHaveTitle(/^Home · /);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
-  await expect(page.locator(".family-name")).toHaveText("Quetzalcoatl Family");
+
+  // The money box comes first, under the family's name, with the way to the Payments page.
+  await expect(page.locator("main > section").first()).toHaveClass(/\bmoney\b/);
+  const money = page.getByRole("region", { name: "Quetzalcoatl Family" });
+  await expect(money.locator(".amt")).toHaveText("$185.00");
+  await expect(money.locator(".asof")).toContainText("Owed now. From QuickBooks, as of ");
+  await expect(money.locator(".lines li")).toHaveCount(2);
+  await expect(money.getByRole("link", { name: "Pay $85.00, invoice QZ-1041 for Xochitl Quetzalcoatl" })).toHaveAttribute("href", /^https:\/\/connect\.intuit\.com\//);
+  await expect(money).not.toContainText("QZ-1017"); // what was paid is on the Payments page
+  await expect(money.getByRole("link", { name: "See your payments" })).toHaveAttribute("href", "/payments");
 
   const students = page.getByRole("region", { name: "Your students" });
   await expect(students.getByRole("listitem")).toHaveText(STUDENTS);
@@ -38,7 +47,7 @@ test("Home greets the parent and shows their family's students and their own det
   // starts at the left edge and one ends at the right, so no column stands empty.
   const head = (await page.locator(".home-head").boundingBox())!;
   const boxes = await page.locator("main > section").evaluateAll((all) => all.map((s) => { const r = s.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top }; }));
-  expect(boxes.length).toBeGreaterThanOrEqual(2);
+  expect(boxes).toHaveLength(3);
   expect(Math.min(...boxes.map((b) => b.left))).toBeCloseTo(head.x, 0);
   expect(Math.max(...boxes.map((b) => b.right))).toBeCloseTo(head.x + head.width, 0);
   if (isPhone(page)) {
@@ -49,6 +58,12 @@ test("Home greets the parent and shows their family's students and their own det
     // The first row holds a box in each column.
     const top = Math.min(...boxes.map((b) => b.top));
     expect(boxes.filter((b) => Math.abs(b.top - top) < 1)).toHaveLength(2);
+    // As in design/reference/parent-home.html: money on the left, the students and then the details on the right.
+    const [moneyBox, studentsBox, detailsBox] = boxes as [typeof boxes[0], typeof boxes[0], typeof boxes[0]];
+    expect(moneyBox.left).toBeCloseTo(head.x, 0);
+    expect(studentsBox.left).toBeGreaterThan(moneyBox.right);
+    expect(detailsBox.left).toBeCloseTo(studentsBox.left, 0);
+    expect(detailsBox.top).toBeGreaterThan(studentsBox.top);
   }
   await noSidewaysScroll(page);
 });
@@ -116,7 +131,7 @@ test("the tab bar has one column for each tab, across the whole screen", async (
 });
 
 test("a signed-in parent who asks for a page that doesn't exist keeps the club bar and the tabs", async ({ page }) => {
-  for (const path of ["/forms", "/payments", "/no-such-page"]) {
+  for (const path of ["/forms", "/no-such-page"]) {
     // A tab is only listed once its page is built: if one of these now exists, it is no longer this test's business.
     if (existsSync(`${PARENT_DIR}${path}/page.tsx`)) continue;
     const res = await page.goto(path);

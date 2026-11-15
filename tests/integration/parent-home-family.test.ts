@@ -1,5 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { asParent, asParentChoosing, atPath, renderPage } from "../helpers/signed-in";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { asParent, asParentChoosing, atPath, pageOutcome, renderPage } from "../helpers/signed-in";
+
+// Home shows what the family owes, and stale or missing figures mean a read from QuickBooks: here that is the stub.
+const stubBase = vi.hoisted(() => ({ url: "" }));
+vi.mock("@/lib/quickbooks/endpoints", async (original) => {
+  const m = await original<typeof import("@/lib/quickbooks/endpoints")>();
+  return { ...m, qboEndpoints: () => ({ authorize: `${stubBase.url}/authorize`, token: `${stubBase.url}/token`, revoke: `${stubBase.url}/revoke`,
+    api: { sandbox: stubBase.url, production: stubBase.url } }) };
+});
+
 import { createElement } from "react";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -13,7 +22,7 @@ import FamilyPage from "@/app/(parent)/family/page";
 import ParentLayout from "@/app/(parent)/layout";
 import NotFound from "@/app/not-found";
 import { resetDb, seedGuardian } from "../helpers/db";
-import { FAMILY_A, FAMILY_B, identityNow, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, identityNow, moneyMarkers, seedFamilyMoney, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 
@@ -23,9 +32,10 @@ const A_STUDENTS = FAMILY_A.students.map((s) => s.name), B_STUDENTS = FAMILY_B.s
 const setTreasurer = (treasurerEmail: string) => db.insert(setting).values({ key: "club", value: { name: "Test Boosters", shortName: "TB", color: "#5b2a86", treasurerEmail } });
 const NOT_SET_UP = "set up here yet";
 
-// Nothing here reaches Intuit: the stub is only what seedConnected() needs to write a connection row.
+// Nothing here reaches Intuit: the stub is what seedConnected() needs to write a connection row, and what a read of a
+// family's invoices would be sent to (the families here have ids QuickBooks never gives, so none is sent).
 let stub: QboStub;
-beforeAll(async () => { stub = await startQboStub(); });
+beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
 afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
 
@@ -192,7 +202,7 @@ describe("Home", () => {
     asParent(a.identity);
     const html = await renderPage(ParentHome);
     expect(html).toContain("Hi, Ansgar</h1>");
-    expect(html).toContain("Alderquist Family");
+    expect(html).toContain("Alderquist Family</h2>");
     expect(html).toContain("Your students");
     for (const name of A_STUDENTS) expect(html).toContain(`<b>${name}</b>`);
     expect(html).toContain("Your details");
@@ -202,7 +212,63 @@ describe("Home", () => {
     for (const marker of b.markers) expect(html).not.toContain(marker);
     // No placeholder, and nothing that has no data yet: no forms counts, no season, no part or grade.
     expect(html).not.toMatch(/will show here|forms|season|grade/i);
-    expect(html).not.toContain("as of");
+    // The roster has not been read by a refresh yet, so the page doesn't say when it was.
+    expect(html).not.toContain("roster-asof");
+  });
+
+  it("shows what the family owes first, under the family's name, with the way to the Payments page", async () => {
+    const { a, b } = await seedTwoFamilies();
+    asParent(a.identity);
+    const html = await renderPage(ParentHome);
+    // The boxes in the order a phone shows them: money, students, details.
+    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["box money", "box students-box", "box details-box"]);
+    expect(html).toContain(`<section class="box money" aria-labelledby="money-h"><h2 id="money-h">Alderquist Family</h2>`);
+    // The family's name stands once, as that heading (the Display link's label and the details hold the parent's own name).
+    expect(html.split("Alderquist Family")).toHaveLength(2);
+    expect(html).toContain(`<div class="amt num">$14,283.16</div>`);
+    expect(html).toMatch(/Owed now\. From QuickBooks, as of <time/);
+    for (const words of moneyMarkers(FAMILY_A, "open")) expect(html).toContain(words);
+    expect(html).toContain(`href="https://connect.intuit.com/t/scs-v1-alderquist-7101"`);
+    // What was paid is on the Payments page, which the box leads to.
+    expect(html).not.toContain("INV-ALDERQUIST-7103");
+    expect(html).toContain(`<a class="btn btn-line" href="/payments">See your payments</a>`);
+    for (const marker of b.markers) expect(html).not.toContain(marker);
+    expect(await db.select().from(auditLog)).toEqual([]);
+  });
+
+  it("with no figures to show, the money box says so calmly and the rest of the page is as it was", async () => {
+    const a = await seedSignedInParent();
+    asParent(a.identity);
+    const html = await renderPage(ParentHome);
+    expect(html).toContain(`<h2 id="money-h">Alderquist Family</h2><p class="help" role="status">We can&#x27;t show what you owe right now. Please check back in a little while.</p>`);
+    expect(html).toContain("Your students");
+    expect(html).toContain("Your details");
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("shows no money for a family the roster may not show: not in the cache, or a cache from another company", async () => {
+    await seedShape();
+    const stray = await seedParentIn({ familyQboId: "NOT-IN-QUICKBOOKS", name: "Hester Handmade", email: "hester@handmade.example" });
+    // Figures stored under that id are not shown either: the page says only that the family isn't set up yet.
+    await seedFamilyMoney({ ...FAMILY_B, family: { qboId: "NOT-IN-QUICKBOOKS", name: "Nobody" } });
+    asParent(stray.identity);
+    let html = await renderPage(ParentHome);
+    expect(html).toContain(NOT_SET_UP);
+    expect(html).not.toMatch(/class="box money"|owe|INV-|\$\d/);
+
+    await resetDb();
+    const { a } = await seedTwoFamilies();
+    await seedConnected(stub, { realmId: OTHER_REALM });
+    asParent(a.identity);
+    html = await renderPage(ParentHome);
+    expect(html).toContain(NOT_SET_UP);
+    expect(html).not.toMatch(/class="box money"|owe|INV-|\$\d/);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("sends a visitor with no session to sign in, and has no return address to carry: Home is where everyone lands", async () => {
+    expect(await pageOutcome(ParentHome)).toEqual({ redirect: "/sign-in" });
+    expect(await pageOutcome(FamilyPage)).toEqual({ redirect: "/sign-in?next=%2Ffamily" });
   });
 
   it("says how to change the details: the treasurer's address when the club has set one", async () => {
@@ -406,8 +472,8 @@ describe("what surrounds the parent pages", () => {
     const a = await seedSignedInParent();
     asParent(a.identity);
     const html = await frame();
-    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: true }, { href: "/family", current: false }]);
-    expect(html).not.toMatch(/href="\/(forms|payments)"/);
+    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: true }, { href: "/payments", current: false }, { href: "/family", current: false }]);
+    expect(html).not.toMatch(/href="\/forms"/);
   });
 
   it("marks the tab of the page that is open, and the account control on the Display page", async () => {
@@ -415,13 +481,13 @@ describe("what surrounds the parent pages", () => {
     asParent(a.identity);
     atPath("/family");
     let html = await frame();
-    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/family", current: true }]);
+    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/payments", current: false }, { href: "/family", current: true }]);
     expect(account(html)).toContain(`href="/display"`);
     expect(account(html)).not.toContain("aria-current");
     atPath("/display");
     html = await frame();
     expect(account(html)).toContain(`aria-current="page"`);
-    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/family", current: false }]);
+    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/payments", current: false }, { href: "/family", current: false }]);
   });
 
   it("the not-found page keeps the club bar and the tabs for a signed-in parent, and is plain for anyone else", async () => {

@@ -67,9 +67,12 @@ const unique = (values: string[]) => [...new Set(values)];
 export const MONEY_REALM = "9130000000000001";
 const owed = (spec: ParentFamilySpec) => (spec.invoices ?? []).filter((i) => !i.paid).reduce((sum, i) => sum + i.cents, 0);
 
-/** What a family's money looks like on a page: each invoice's number and amount, the total owed, and the address behind Pay. */
-export function moneyMarkers(spec: ParentFamilySpec): string[] {
-  const invoices = spec.invoices ?? [];
+/**
+ * What a family's money looks like on a page: each invoice's number and amount, the total owed, and the address behind
+ * Pay. "open" leaves out what is paid: Home shows what is owed, and the Payments page shows both.
+ */
+export function moneyMarkers(spec: ParentFamilySpec, which: "all" | "open" = "all"): string[] {
+  const invoices = (spec.invoices ?? []).filter((i) => which === "all" || !i.paid);
   if (!invoices.length) return [];
   return unique([...invoices.flatMap((i) => [i.number, formatMoney(i.cents), ...(i.payLink ? [i.payLink] : [])]), formatMoney(owed(spec))]);
 }

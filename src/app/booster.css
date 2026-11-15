@@ -219,9 +219,9 @@ dl.details dt { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-tra
 footer.wrap { padding-top: var(--s5); padding-bottom: var(--s5); color: var(--ink-2); font-size: 0.875rem; }
 footer a { color: var(--club-text); }
 
-/* Bottom tabs on phones */
+/* Bottom tabs on phones: one column for each tab in PARENT_NAV, however many there are */
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; background: var(--paper); border-top: 2px solid var(--ink);
-  display: grid; grid-template-columns: repeat(4, 1fr); padding-bottom: env(safe-area-inset-bottom); }
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding-bottom: env(safe-area-inset-bottom); }
 .tabs a { min-height: 64px; display: grid; place-items: center; align-content: center; gap: 2px; text-decoration: none;
   color: var(--ink-2); font: 600 0.9375rem var(--mark); letter-spacing: .03em; }
 .tabs svg { width: 24px; height: 24px; }
@@ -347,9 +347,6 @@ p.errors, .sign-out .errors { padding-left: 0; }
 
 /* ---- Home and Family (parent pages): the rules added with those pages. Keep new ones for them inside this block. ---- */
 
-/* The tab bar has one column for each tab in PARENT_NAV, however many there are (this replaces the four above). */
-.tabs { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
-
 /* The account control is filled, like the monogram, while its page (Display) is open. */
 .account[aria-current="page"] { background: var(--club-on); color: var(--club); }
 
@@ -362,24 +359,21 @@ ul.stack { list-style: none; padding: 0; }
 
 /* A long name or email address wraps where it stands instead of widening the page. */
 dl.details dd { min-width: 0; overflow-wrap: anywhere; }
-.home-head .page-title, .family-page .page-title, .students .who { overflow-wrap: anywhere; }
+.home-head .page-title, .family-page .page-title, .students .who, .money > h2 { overflow-wrap: anywhere; }
 
 /* Where the students and details come from, and when they were read. */
 .roster-asof { font-size: 0.875rem; color: var(--ink-2); }
 main.wrap.single > .roster-asof { margin-top: var(--s4); max-width: 760px; }
 
-/* Home: the head (family name over the greeting), then the boxes. */
-.family-name { font: 600 0.9375rem var(--mark); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); margin-top: var(--s4); overflow-wrap: anywhere; }
+/* Home: the head (the greeting), then the boxes. The family's name is the money box's heading. */
 .home-head .page-title { margin-top: var(--s4); }
-.home-head .family-name + .page-title { margin-top: var(--s1); }
 @media (min-width: 760px) {
   /* Boxes fill the two columns in order, so there is no empty column whichever boxes a family has. */
   main.wrap.home { grid-template-areas: none; grid-template-rows: auto auto 1fr; }
   .home > * { grid-area: auto; }
   .home > .home-head, .home > p { grid-column: 1 / -1; }
   .home > section:only-of-type { grid-column: 1 / -1; max-width: 760px; }
-  .home-head .page-title, .home-head .family-name { margin-top: 0; }
-  .home-head .family-name + .page-title { margin-top: var(--s1); }
+  .home-head .page-title { margin-top: 0; }
   /* With the money box, which comes first in the markup: money on the left, as in design/reference/parent-home.html,
      beside the students and the details stacked on the right. The last row takes up whatever height the money box
      has over them, so the details sit right under the students. */
