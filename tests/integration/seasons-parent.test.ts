@@ -158,8 +158,11 @@ describe("Home: the season ruler and the current step's requirements", () => {
   it("shows what the step asks of the family itself after the students, and says a waiver in words without its reason", async () => {
     const { a, b } = await seedTwoFamilies();
     asParent(a.identity);
-    const text = textOf(await renderPage(ParentHome));
+    const html = await renderPage(ParentHome), text = textOf(html);
     expect(text).toContain("Set 1 of 3 : Sign-up");
+    // Wrap-up asks nothing, so it is done already; but it is still ahead, and the ruler draws it as a set to come.
+    expect(html).not.toContain(`<li class="done">`);
+    expect(html).toContain(`<li><span class="n">3</span><span class="label">Wrap-up</span><span class="visually-hidden"></span></li>`);
     expect(text).toContain(`${AURELIO!.name} Nothing to do in Sign-up`);
     expect(text).toContain("Your family 1 thing left to do in Sign-up Handbook read Done Carpool pledge QA71 Not done yet");
 

@@ -48,6 +48,8 @@ test("Home shows the season ruler for the current season, and each student's pro
   await expect(cells.nth(1)).toHaveAttribute("aria-current", "step");
   await expect(cells.nth(1)).toContainText("Uniforms, current set");
   await expect(ruler.locator("[aria-current]")).toHaveCount(1);
+  // Season asks nothing of the family, but it is still ahead: only a set behind the current one is ticked.
+  await expect(ruler.locator("ol.sets > li.done")).toHaveCount(1);
   // The current step is filled with the club's color; the others are paper.
   const fill = (i: number) => cells.nth(i).evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(await fill(1)).toBe("rgb(91, 42, 134)");
