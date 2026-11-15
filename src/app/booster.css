@@ -373,16 +373,16 @@ main.wrap.single > .roster-asof { margin-top: var(--s4); max-width: 760px; }
 .home-head .family-name + .page-title { margin-top: var(--s1); }
 @media (min-width: 760px) {
   /* Boxes fill the two columns in order, so there is no empty column whichever boxes a family has. */
-  main.wrap.home { grid-template-areas: none; }
+  main.wrap.home { grid-template-areas: none; grid-template-rows: auto auto 1fr; }
   .home > * { grid-area: auto; }
   .home > .home-head, .home > p { grid-column: 1 / -1; }
   .home > section:only-of-type { grid-column: 1 / -1; max-width: 760px; }
   .home-head .page-title, .home-head .family-name { margin-top: 0; }
   .home-head .family-name + .page-title { margin-top: var(--s1); }
-  /* With the money box, which comes first in the markup: money and paid history on the left, students and details
-     on the right, as in design/reference/parent-home.html. */
-  .home > .money { grid-column: 1; grid-row: 2; }
-  .home > .paid-box { grid-column: 1; grid-row: 3; }
+  /* With the money box, which comes first in the markup: money on the left, as in design/reference/parent-home.html,
+     beside the students and the details stacked on the right. The last row takes up whatever height the money box
+     has over them, so the details sit right under the students. */
+  .home > .money { grid-column: 1; grid-row: 2 / span 2; }
   .home > .money ~ .students-box, .home > .money ~ .details-box { grid-column: 2; }
 }
 /* ---- End of Home and Family ---- */

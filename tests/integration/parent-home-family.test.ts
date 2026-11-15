@@ -200,8 +200,8 @@ describe("Home", () => {
     expect(html).toContain("Ask the club");
     for (const name of B_STUDENTS) expect(html).not.toContain(name);
     for (const marker of b.markers) expect(html).not.toContain(marker);
-    // Nothing that has no data yet: no placeholder, no money, no forms, no season.
-    expect(html).not.toMatch(/will show here|owed|invoice|forms|season|grade/i);
+    // No placeholder, and nothing that has no data yet: no forms counts, no season, no part or grade.
+    expect(html).not.toMatch(/will show here|forms|season|grade/i);
     expect(html).not.toContain("as of");
   });
 
