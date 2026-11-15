@@ -247,7 +247,52 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     stub.nullQueryBody = true;
     await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
     expect((await loadFamilyMoney("10")).figures).toBeNull();
-    expect((await moneyRow("10"))!.failedCode).toBe("unexpected");
+    expect((await moneyRow("10"))!.failedCode).toBe("bad_answer");
+  });
+
+  // QuickBooks answers "no invoices" with 200 and an empty QueryResponse. Any other 200 without invoices in it is not
+  // that answer, and must never be shown as $0.00 owed.
+  const FAULT = { Fault: { Error: [{ Message: "a message the portal must never store", code: "4000" }], type: "ValidationFault" } };
+  it.each([
+    ["a Fault", FAULT, "fault"],
+    ["a Fault beside an empty QueryResponse", { QueryResponse: {}, ...FAULT }, "fault"],
+    ["an empty object", {}, "bad_answer"],
+    ["a list", [], "bad_answer"],
+    ["a QueryResponse that is a list", { QueryResponse: [] }, "bad_answer"],
+    ["invoices that aren't a list", { QueryResponse: { Invoice: { Id: "1" } } }, "bad_answer"],
+    ["rows of something else", { QueryResponse: { Customer: [{ Id: "10" }], startPosition: 1, maxResults: 1 } }, "bad_answer"],
+  ])("never takes a 200 that is %s for a family that owes nothing", async (_what, body, code) => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "12")]; // the family owes $85.00
+    balanceWithJobs(85);
+    stub.oddInvoiceAnswer = { body };
+    // Nothing stored: nothing is shown, and the try is recorded as failed.
+    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    const failed = (await moneyRow("10"))!;
+    expect(failed).toMatchObject({ readAt: null, invoices: null, totalCents: null, failedCode: code });
+    expect(JSON.stringify(failed)).not.toContain("a message the portal must never store");
+    // Figures stored: they stay, marked as not current, and are not replaced by a zero.
+    stub.oddInvoiceAnswer = null;
+    await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
+    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
+    await ageMoney("10", 6 * MINUTE);
+    stub.oddInvoiceAnswer = { body };
+    const money = await loadFamilyMoney("10");
+    expect(money.figures).toMatchObject({ current: false, totalCents: 8500 });
+    expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
+    expect(await moneyRow("10")).toMatchObject({ totalCents: 8500, failedCode: code });
+  });
+
+  it("an empty QueryResponse is the one answer that means no invoices", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.oddInvoiceAnswer = { body: { QueryResponse: {}, time: "2026-11-15T10:00:00.000-08:00" } };
+    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 0, open: [], paid: [] });
+    stub.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: [], startPosition: 1, maxResults: 0 } } };
+    await ageMoney("10", 6 * MINUTE);
+    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 0 });
+    expect((await moneyRow("10"))!.failedAt).toBeNull();
   });
 
   it("still shows the invoices when the cross-check can't be read", async () => {

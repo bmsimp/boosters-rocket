@@ -16,6 +16,11 @@ export type QboStub = {
    */
   invoices: Record<string, unknown>[];
   refuseInQuery: boolean;       // answer an invoice query in the `CustomerRef in (...)` form with HTTP 400
+  /**
+   * Answer invoice queries with HTTP 200 and this body, which is not the QueryResponse the portal expects (a Fault, an
+   * empty object, invoices that aren't a list). `inFormOnly` leaves the one-customer form answering as usual.
+   */
+  oddInvoiceAnswer: { body: unknown; inFormOnly?: boolean } | null;
   rateLimitNext: number;        // answer this many API requests, from the next one, with HTTP 429
   failNext: number;             // answer this many API requests, from the next one, with HTTP 500
   apiDelayMs: number;           // wait this long before answering any API request (a slow QuickBooks)
@@ -36,7 +41,7 @@ export type QboStub = {
 export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0, answering = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
-    invoices: [], refuseInQuery: false, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
+    invoices: [], refuseInQuery: false, oddInvoiceAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
@@ -105,6 +110,7 @@ export async function startQboStub(): Promise<QboStub> {
           const list = /where CustomerRef in \(([^)]*)\)/i.exec(q)?.[1], one = /where CustomerRef = '([^']*)'/i.exec(q)?.[1];
           if (list === undefined && one === undefined) return json(400, { Fault: { Error: [{ Message: "QueryParserError" }] } });
           if (list !== undefined && stub.refuseInQuery) return json(400, { Fault: { Error: [{ Message: "QueryValidationError: a message the portal must never store" }] } });
+          if (stub.oddInvoiceAnswer && (list !== undefined || !stub.oddInvoiceAnswer.inFormOnly)) return json(200, stub.oddInvoiceAnswer.body);
           const ids = new Set(list !== undefined ? [...list.matchAll(/'([^']*)'/g)].map((m) => m[1]!) : [one!]);
           const withLink = (url.searchParams.get("include") ?? "").toLowerCase() === "invoicelink";
           matched = stub.invoices.filter((i) => ids.has(String((i.CustomerRef as { value?: unknown } | undefined)?.value)))
@@ -131,7 +137,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.reset = () => {
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
-    stub.invoices = []; stub.refuseInQuery = false; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
+    stub.invoices = []; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));

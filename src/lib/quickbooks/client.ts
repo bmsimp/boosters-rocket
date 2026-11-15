@@ -187,7 +187,8 @@ export const isQboId = (id: string): boolean => /^\d{1,19}$/.test(id);
  * string in this file was verified in the sandbox before it was built on (spec §8), and nobody could reach the sandbox
  * for these. The owner's sandbox check must confirm, with `include=invoiceLink` and `minorversion` 75:
  *   1. that `inForm` is accepted (CustomerRef in a quoted list, ordered by Id, paged), or that QuickBooks answers it
- *      with HTTP 400, in which case qboInvoices() falls back to `oneForm`, one query per customer;
+ *      with HTTP 400 (or a Fault with status 200), in which case qboInvoices() falls back to `oneForm`, one query per
+ *      customer;
  *   2. that `oneForm` is accepted;
  *   3. that each returns only the invoices of the customers named, with `InvoiceLink` on those payable online.
  * Don't change either string without trying the new one there first. The ids are checked by isQboId() before they
@@ -202,13 +203,38 @@ export const INVOICE_QUERIES = {
 /** What makes QuickBooks send InvoiceLink at all (v1 spec §8.3). */
 export const INVOICE_INCLUDE = "invoiceLink";
 
-/** True once the in-form was refused with a 400 and the one-customer form then worked: kept for the life of the process. */
+/** True once the in-form was refused (a 400, or a Fault) and the one-customer form then worked: kept for the life of the process. */
 let invoicesOneCustomerAtATime = false;
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const badAnswer = () => new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
+
+/**
+ * The rows of a query answer that a parent is shown, where no rows reads as "nothing owed". So "no rows" is taken from
+ * one shape only, the one QuickBooks gives: an object whose QueryResponse is an object holding no rows at all. Anything
+ * else with status 200 is refused, never read as an empty list: a body that isn't an object, a missing QueryResponse,
+ * rows that aren't a list, rows of another entity. A Fault sent with status 200 is a refusal and gets its own code
+ * ("fault"); none of its text is kept.
+ */
+function strictRowsOf(body: unknown, entity: string): Record<string, unknown>[] {
+  if (!isPlainObject(body)) throw badAnswer();
+  if ("Fault" in body || "fault" in body) throw new QboError("QuickBooks refused the request.", "fault");
+  const answer = body.QueryResponse;
+  if (!isPlainObject(answer)) throw badAnswer();
+  const rows = answer[entity];
+  if (rows === undefined) {
+    // Only paging numbers may sit beside no rows: a list or an object here is the answer to some other question.
+    if (Object.values(answer).some((v) => typeof v === "object" && v !== null)) throw badAnswer();
+    return [];
+  }
+  if (!Array.isArray(rows)) throw badAnswer();
+  return rows as Record<string, unknown>[];
+}
 
 async function invoicePages(query: (start: number) => string, o: QboGetOptions): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
   for (let start = 1; ; start += QBO_PAGE) {
-    const page = rowsOf(await qboGet("query", { query: query(start), include: INVOICE_INCLUDE }, o), "Invoice");
+    const page = strictRowsOf(await qboGet("query", { query: query(start), include: INVOICE_INCLUDE }, o), "Invoice");
     out.push(...page);
     if (page.length < QBO_PAGE) return out;
   }
@@ -230,7 +256,8 @@ export async function qboInvoices(customerIds: string[], o: QboGetOptions = {}):
   try {
     return await invoicePages((start) => INVOICE_QUERIES.inForm(ids, start), o);
   } catch (e) {
-    if (!(e instanceof QboError) || e.code !== "http_400") throw e;
+    // The form itself was refused: with a 400, or with a Fault sent as a 200. Anything else is not about the form.
+    if (!(e instanceof QboError) || (e.code !== "http_400" && e.code !== "fault")) throw e;
   }
   const rows = await oneAtATime();
   invoicesOneCustomerAtATime = true; // remembered only once the other form has worked
