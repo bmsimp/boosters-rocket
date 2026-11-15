@@ -83,7 +83,13 @@ and the page. Move an item to **Done** when it ships.
   family, the suggestion, the reason and the choice are stacked lines; side by side they would compare at a glance.
 - **The staff menu has eleven entries** (2026-11-12). Home, Roster, Parents, Staff, Roles, Club, Sign-in, Mail,
   QuickBooks, Parent sign-ins and Audit, for an Admin. It needs grouping; this ties in with the single Settings page
-  above.
+  above. **Parents** and **Parent sign-ins** are also easy to mix up.
+- **Step 2 says sign-ins "made by hand" would end** (2026-11-12, `/staff/settings/parents/setup`, step 2). After
+  sign-ins have been switched off and on again, the sign-ins that would end can come from QuickBooks too. Step 1
+  was reworded to "QuickBooks no longer backs these"; step 2 should say the same.
+- **Step 1 shows "Sign-ins that would end (0)" while sign-ins are on** (2026-11-12, same page). The list is only
+  worked out while sign-ins are off, so when they are on the heading and its hint read oddly. Leave the heading out
+  then.
 
 ## Done
 - **The Mail page's instructions didn't look like instructions** (2026-11-10, Mail and setup Step 2). The owner

@@ -1,6 +1,8 @@
 # Parents from QuickBooks — design
 
-**Status:** approved by the owner on 2026-11-11; implemented by plan `2026-11-11-parents-from-quickbooks.md`.
+**Status:** approved by the owner on 2026-11-11; implemented by plan `2026-11-11-parents-from-quickbooks.md`;
+merged and deployed to the linuxdev proof of concept on 2026-11-12 (commit `82e4639`). Parent sign-ins are still
+switched off there, and the runbook's checks 18-25 have not been run.
 **Builds on:** parent email-code sign-in (`2026-11-10-parent-email-code-sign-in-design.md`) and the QuickBooks
 connection and roster (`2026-11-10-quickbooks-connection-and-roster-design.md`).
 **Roadmap:** the first half of Plan 3. The second half (anything that writes to QuickBooks) is a separate
@@ -473,3 +475,26 @@ To go in the user documentation when it is written:
   mailbox's limits (Microsoft 365 and SMTP differ) is a proof-of-concept item.
 - Owner to confirm: making a family active again in QuickBooks puts a shared address back under two families, so
   it is held again and the other family's access ends at the next refresh until staff decide.
+- Owner to confirm: switching parent sign-ins off also switches welcome emails off, so an Admin who pauses
+  sign-ins switches welcomes on again afterwards (§3). This was decided during the build so that switching sign-ins
+  back on can never email families by surprise.
+
+## Known gaps
+
+Found by the whole-branch review on 2026-11-12 and not yet fixed. The first should be closed before real parents
+use parent sign-ins.
+
+- **A sign-in code can go to an address that was just replaced.** A code request reads the person's address
+  before its own transaction. If a roster refresh changes that person's address in place at that moment, the code
+  is mailed to the old address and still works with the new one. The window is a fraction of a second during a
+  refresh. The cure is to read the address again inside the code's transaction, or to take the same lock on the
+  person.
+- **A rare deadlock between a code request and an address change.** The database ends one side. If it ends the
+  reconcile, the refresh is recorded as failed (`reconcile_failed`, code `40P01`) and runs again by itself.
+- **An unreadable parents setting closes the parent door without saying why.** The pages show sign-ins as off;
+  switching them on writes a good setting again. A company change in that state writes the closed setting back,
+  which leaves staff review emails off. Only a hand-edited database row can cause it.
+- **The same check is written in several places.** "This link is open", "this link is from the previous
+  company" and the comparison of QuickBooks IDs as numbers each appear in several files, and the code calls one
+  thing a guardian, a link and a sign-in. A tidy-up is owed; behavior is not affected.
+- **Two wording slips** are in `docs/ui-backlog.md` (step 2 of the set-up steps; step 1 while sign-ins are on).
