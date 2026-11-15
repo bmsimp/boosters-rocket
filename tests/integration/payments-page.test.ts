@@ -199,7 +199,7 @@ describe("the Payments page", () => {
     expect(html).toContain(NOTHING);
     expect(html).not.toMatch(/INV-OTHER-COMPANY|\$42\.42|other-company|INV-1|\$85\.00/);
     expect(stub.calls).toHaveLength(0);
-    // Stored figures from the cache's company are shown again once QuickBooks is connected to it... and only then current.
+    // Figures stored from the cache's own company are shown, but as not current while another company is the connected one.
     await db.update(familyMoney).set({ realmId: "2222", readAt: new Date(Date.now() - 6 * MINUTE) });
     const stale = await renderPage(PaymentsPage);
     expect(stale).toContain("INV-OTHER-COMPANY");

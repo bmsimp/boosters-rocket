@@ -49,7 +49,9 @@ const PARAMS: Record<string, DynamicRouteParams> = {};
 // strings that would give that family away, in the HTML or in the data sent with it. When the seed gives another
 // family something new (a customer, an invoice, a form), add its recognizable strings here.
 const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerror=alert", "Second Family", "Wolfgang", "Secondborn",
-  "ana@example.com", "sam@example.com", "555-0101", "E2E-FAMILY-2", "E2E-P2", "E2E-S3"];
+  "ana@example.com", "sam@example.com", "555-0101", "E2E-FAMILY-2", "E2E-P2", "E2E-S3",
+  // What the second family owes: its invoice numbers, each amount, its total and the address behind its Pay button.
+  "SF-2051", "SF-2052", "SF-2009", "$312.47", "$64.19", "$273.58", "$376.66", "scs-v1-e2e-second"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);
@@ -66,6 +68,23 @@ test("every customer the seed gives another family is searched for", async () =>
     .map((c) => `${c.qbo_id} (${c.display_name})`);
   expect(unsearched, `These customers in scripts/seed-e2e.ts belong to another family, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
     + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable string of each: a name, an email address, an id that isn't a short number.`).toEqual([]);
+});
+
+test("every invoice the seed gives another family is searched for", async () => {
+  // As above, for money: each invoice stored for a family other than the Quetzalcoatl family must be findable by its
+  // number and its amount, and by its pay link when it has one.
+  type Stored = { number: string; totalCents: number; payLink: string | null };
+  const rows = await sql`SELECT family_qbo_id, invoices, total_cents FROM family_money WHERE family_qbo_id <> ${PARENT_SESSION_FAMILY}`;
+  const invoices = rows.flatMap((r) => (r.invoices as Stored[]).map((i) => ({ family: r.family_qbo_id as string, ...i })));
+  expect(invoices.length).toBeGreaterThanOrEqual(3);
+  const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const searched = (value: string) => OTHER_FAMILIES.some((s) => value.includes(s));
+  const unsearched = [
+    ...invoices.flatMap((i) => [i.number, dollars(i.totalCents), ...(i.payLink ? [i.payLink] : [])].filter((v) => !searched(v)).map((v) => `${v} (an invoice of ${i.family})`)),
+    ...rows.map((r) => dollars(Number(r.total_cents))).filter((v) => !searched(v)).map((v) => `${v} (a family's total)`),
+  ];
+  expect(unsearched, `scripts/seed-e2e.ts gives another family these, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
+    + `would find them on a parent page: ${unsearched.join(", ")}. Add each.`).toEqual([]);
 });
 
 test("no parent page sends the browser anything of another family, in the HTML or in the data sent with it", async ({ context, page }) => {
