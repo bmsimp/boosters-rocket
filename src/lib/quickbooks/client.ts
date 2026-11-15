@@ -114,7 +114,7 @@ function tokenUnderLock(o: { force?: boolean; noWait?: boolean }): Promise<Refre
 let pageRefresh: { forced: boolean; work: Promise<Access> } | null = null;
 
 /**
- * The access token for a parent's page load. A page load must not wait in line for the connection row, or keep a
+ * The access token for a parent's page load, and for a parent's save. A page load must not wait in line for the connection row, or keep a
  * database connection after the page has given up: a refresh holds the row through its request to Intuit, 15 seconds
  * when Intuit hangs, and callers queued behind it would each hold one of the pool's 10 connections, then each make
  * that request in turn.
@@ -398,10 +398,12 @@ export type QboWriteOptions = {
  * that is not a GET. `syncToken` is the version the person editing was shown; QuickBooks refuses the change when the
  * record has moved on since (`fault_5010`), and nothing is overwritten. It returns the customer as QuickBooks now has it.
  *
- * Like a parent's reads, it refuses at once when only an Admin can fix the connection, and asks nothing of a company
- * other than the one the caller means. A 401 is answered by one token refresh and one more try: QuickBooks did not
- * act on a request it refused to authenticate. Nothing else is tried twice: after a timeout or a 5xx the portal can't
- * know whether the change was made, and sending it again could only meet its own new SyncToken.
+ * Like a parent's reads, it refuses at once when only an Admin can fix the connection, asks nothing of a company
+ * other than the one the caller means, and never waits in line for the connection row: a parent is waiting on the
+ * save, so the token comes from accessTokenForPage(), which refuses as "busy" when the row is held elsewhere, before
+ * anything is sent. A 401 is answered by one token refresh and one more try: QuickBooks did not act on a request it
+ * refused to authenticate. Nothing else is tried twice: after a timeout or a 5xx the portal can't know whether the
+ * change was made, and sending it again could only meet its own new SyncToken.
  *
  * `customerId` is the caller's to get right: it comes from the session's own roster record, never from a request.
  */
@@ -412,7 +414,7 @@ export async function qboUpdateCustomerContact(customerId: string, syncToken: st
   const body = JSON.stringify(CUSTOMER_UPDATE.body(customerId, syncToken, change));
   let force = false, refreshed = false;
   for (;;) {
-    const a = await within(accessToken({ force }), o.signal);
+    const a = await within(accessTokenForPage(force), o.signal);
     force = false;
     if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${CUSTOMER_UPDATE.path}`);

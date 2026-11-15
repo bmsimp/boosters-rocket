@@ -277,6 +277,25 @@ describe("when QuickBooks can't be reached or refuses, nothing is changed and th
     await unchanged();
   });
 
+  it("the connection is being renewed by someone else: the save doesn't wait in line for it, and nothing is sent", async () => {
+    const { r } = await seedContactFamilies(stub);
+    await db.update(qboConnection).set({ accessExpiresAt: new Date(Date.now() - 1000) }); // the token must be refreshed first
+    let release!: () => void;
+    const held = new Promise<void>((done) => { release = done; });
+    let holder!: Promise<void>;
+    const locked = new Promise<void>((done) => { holder = db.transaction(async (tx) => { await tx.select().from(qboConnection).for("update"); done(); await held; }); });
+    await locked;
+    asParent(r.identity);
+    try {
+      const started = Date.now();
+      expect(await save({ ...SHOWN, phone: NEW_PHONE })).toEqual({ ok: false, errors: [CONTACT_COPY.tryLater] });
+      expect(Date.now() - started).toBeLessThan(2000);
+    } finally { release(); await holder; }
+    expect(await failure()).toBe("busy");
+    expect(stub.calls).toHaveLength(0);
+    await unchanged();
+  });
+
   it.each([["6000"], ["2050"]])("QuickBooks won't take a value (Fault %s): the parent is asked to check it", async (code) => {
     const { r } = await seedContactFamilies(stub);
     stub.updateFault = code;

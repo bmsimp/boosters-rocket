@@ -491,6 +491,38 @@ describe("the one write: a customer's phone and billing address", () => {
     } finally { release(); }
   });
 
+  it("does not wait for the connection row: held elsewhere, a token that needs refreshing is 'busy' at once and nothing is sent", async () => {
+    await seedConnected(stub, { accessExpiresInMs: -1000 });
+    stub.customers = [ana()];
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let holder!: Promise<void>;
+    const locked = new Promise<void>((r) => { holder = db.transaction(async (tx) => { await tx.select().from(qboConnection).for("update"); r(); await held; }); });
+    await locked;
+    try {
+      const started = Date.now();
+      expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO))).toBe("busy");
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(stub.calls).toHaveLength(0);
+      expect(stub.customers[0]).toEqual(ana());
+    } finally { release(); await holder; }
+    // With the row free again the same save refreshes the token and goes through.
+    expect((await qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO)).SyncToken).toBe("4");
+  });
+
+  it("with a token that is still good, takes no lock on the connection row", async () => {
+    await seedConnected(stub);
+    stub.customers = [ana()];
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let holder!: Promise<void>;
+    const locked = new Promise<void>((r) => { holder = db.transaction(async (tx) => { await tx.select().from(qboConnection).for("update"); r(); await held; }); });
+    await locked;
+    try {
+      expect((await qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, { ...TO, signal: AbortSignal.timeout(1500) })).SyncToken).toBe("4");
+    } finally { release(); await holder; }
+  });
+
   it("sends nothing to a company other than the one the caller means", async () => {
     await seedConnected(stub, { realmId: "9130000000000002" });
     stub.customers = [ana()];
