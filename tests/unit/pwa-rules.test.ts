@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { createElement } from "react";
+import { ImageResponse } from "next/og";
 import { glyphWidthEm, iconText, textWidthEm, ICON_TEXT_MAX } from "@/lib/pwa/icon-text";
 import { appLabel, LABEL_MAX } from "@/lib/pwa/label";
 import { ICONS, iconArt, iconHref, iconVersion, isIconName } from "@/lib/pwa/icons";
@@ -109,6 +111,45 @@ describe("the icon font tables match the font Next.js ships", () => {
     expect(font.widthEm(0x65e5)).toBe(0); // 日
     expect(font.widthEm(0x00ad)).toBe(0); // soft hyphen
     expect(font.widthEm(0x41)).toBeGreaterThan(0);
+  });
+});
+
+describe("the renderer never reaches for the network", () => {
+  /** Runs `draw` and returns every address fetched meanwhile, except data: addresses (the renderer loads its own layout engine from one). */
+  async function fetchedDuring(draw: () => Promise<unknown>): Promise<string[]> {
+    const asked: string[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith("data:")) return new Response(Buffer.from(url.slice(url.indexOf(",") + 1), "base64"));
+      asked.push(url);
+      throw new Error(`no network in this test: ${url}`);
+    });
+    try { await draw(); } finally { spy.mockRestore(); }
+    return asked;
+  }
+  const drawText = (text: string) => new ImageResponse(
+    createElement("div", { style: { display: "flex", fontSize: 20, whiteSpace: "nowrap" } }, text), { width: 96, height: 48 }).arrayBuffer();
+
+  it("for any character the rule allows: the font has it, and none is taken for an emoji", async () => {
+    // The renderer fetches a font from Google for a character its font lacks, and a picture from a CDN for anything
+    // it takes for an emoji. Some plain characters are emoji to Unicode (©, ®, the digits, # and *), so every allowed
+    // character is drawn here, between two letters, with the network watched.
+    const reached: string[] = [];
+    for (let code = 0; code <= 0x2ff; code++) {
+      const char = String.fromCodePoint(code);
+      if (glyphWidthEm(char) === 0) continue;
+      const asked = await fetchedDuring(() => drawText(`A${char}A`));
+      if (asked.length) reached.push(`U+${code.toString(16)} (${char}): ${asked.join(", ")}`);
+    }
+    expect(reached).toEqual([]);
+  }, 60_000);
+
+  it("the check above does catch a renderer that goes to the network", async () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const asked = await fetchedDuring(() => drawText("日本").catch(() => undefined));
+    quiet.mockRestore();
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked[0]).toContain("fonts.googleapis.com");
   });
 });
 
