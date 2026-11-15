@@ -125,6 +125,24 @@ test("'Use a different email' forgets the code step, and so does the end of the 
   await expect.poll(() => storedStep(page)).toBeNull();
 });
 
+test("on a shared device, 'Use a different email' hands the next person nothing of the last one: no address, no page to return to", async ({ page }) => {
+  // Somebody asked for a code on this device a minute ago, heading for Payments, and walked away.
+  await page.goto("/sign-in");
+  await page.evaluate((key) => window.localStorage.setItem(key, JSON.stringify({ email: "someone.else@example.com", sentAt: Date.now() - 60_000, next: "/payments" })), CODE_STEP_KEY);
+  await page.reload();
+  await expect(page.getByLabel("6-digit code")).toBeVisible(); // their code step, picked up for whoever opens the page
+  await page.getByRole("button", { name: "Use a different email" }).click();
+  await expect(page.getByLabel("Email")).toHaveValue("");
+  expect(await storedStep(page)).toBeNull();
+  // The next person signs in from here: their step holds their own address, and no page the other person asked for.
+  await page.getByLabel("Email").fill("zelda@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByLabel("6-digit code")).toBeVisible();
+  expect(JSON.parse((await storedStep(page))!)).toMatchObject({ email: "zelda@example.com", next: null });
+  await page.getByRole("button", { name: "Use a different email" }).click();
+  await expect(page.getByLabel("Email")).toHaveValue("");
+});
+
 test("a page to return to that is not a parent page of this site is dropped", async ({ page, baseURL }) => {
   for (const next of ["//evil.example/display", "/staff/roster"]) {
     sink.messages.length = 0;

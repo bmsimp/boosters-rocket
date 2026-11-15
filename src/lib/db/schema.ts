@@ -222,6 +222,7 @@ export const qboCustomer = pgTable("qbo_customer", {
 export type StoredInvoice = {
   qboId: string;
   number: string | null;            // QuickBooks' DocNumber: free text, shown as text only
+  customerQboId: string;            // the customer it was raised on: the row is shown only while that customer is still the family's
   forName: string | null;           // the student or parent sub-customer it was raised on; null when on the family itself
   date: string | null;
   dueDate: string | null;
@@ -234,7 +235,8 @@ export type StoredInvoice = {
 /**
  * What QuickBooks last said one family owes (v1 spec §8.2): one row per family. The read columns are replaced only by
  * a successful read and are all null until the first one; `failed_at` and `failed_code` record the latest try that
- * failed. Never a source of truth. The ids belong to the company in `realm_id`; a company change deletes every row.
+ * failed. Never a source of truth. The ids belong to the company in `realm_id`; a company change deletes every row,
+ * and so does a change of membership shape, which changes whose invoices are a family's.
  */
 export const familyMoney = pgTable("family_money", {
   familyQboId: text("family_qbo_id").primaryKey(),
@@ -242,7 +244,7 @@ export const familyMoney = pgTable("family_money", {
   readAt: timestamp("read_at", { withTimezone: true }),
   invoices: jsonb("invoices").$type<StoredInvoice[]>(),              // open invoices, then those paid in the last 12 months
   totalCents: bigint("total_cents", { mode: "number" }),             // the sum of the open invoices
-  balanceWithJobsCents: bigint("balance_with_jobs_cents", { mode: "number" }), // QuickBooks' own figure, kept as a cross-check only
+  balanceWithJobsCents: bigint("balance_with_jobs_cents", { mode: "number" }), // QuickBooks' own figure, a cross-check only; null when it would count customers the total leaves out
   currency: text("currency"),                                        // null when the open invoices are in more than one
   mismatchAuditedAt: timestamp("mismatch_audited_at", { withTimezone: true }), // the last time a differing cross-check was audited
   failedAt: timestamp("failed_at", { withTimezone: true }),

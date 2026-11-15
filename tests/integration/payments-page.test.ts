@@ -16,7 +16,7 @@ import PaymentsPage from "@/app/(parent)/payments/page";
 import { MoneyBox } from "@/app/(parent)/money-box";
 import { resetDb } from "../helpers/db";
 import { ageMoney, CHENOWETH, connectCompany, invoiceQueries, moneyRow, RIVERA, stubInvoice as inv } from "../helpers/money";
-import { FAMILY_A, FAMILY_B, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedShape } from "../helpers/roster-cache";
 
@@ -26,8 +26,9 @@ afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
 
 const MINUTE = 60_000;
-const OFFLINE = "We can&#x27;t reach QuickBooks right now. These are the last figures we have, and paying will work again shortly.";
+const NOT_CURRENT = "We couldn&#x27;t get the latest figures from QuickBooks just now. These are the last ones we have. Paying here is paused until we can. Need to pay sooner? Ask the treasurer.";
 const NOTHING = "We can&#x27;t show what you owe right now. Please check back in a little while.";
+const NOT_SET_UP = "Your family isn&#x27;t set up here yet";
 const PAID_UP = "You&#x27;re all paid up. Thank you!";
 const CREDIT = "The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.";
 /** Every Pay button on the page, as its opening tag. */
@@ -67,7 +68,7 @@ describe("the Payments page", () => {
     expect(pay).toMatch(/referrerpolicy="no-referrer"/i);
     expect(pay).toContain('aria-label="Pay $7,131.07, invoice INV-ALDERQUIST-7101"');
     expect(pay).not.toMatch(/target=|aria-disabled/); // the same tab, and switched on
-    expect(html).not.toContain(OFFLINE);
+    expect(html).not.toContain("offline-note");
     expect(html).not.toContain(CREDIT);
     expect(html).toContain("An invoice with no Pay button can&#x27;t be paid online. The treasurer can tell you how to pay it.");
     // Paid in the last 12 months: listed with the word, not counted in the total.
@@ -96,7 +97,7 @@ describe("the Payments page", () => {
     expect(html).toContain('<span class="what">Invoice INV-2, Rafferty Riverquill</span>'); // raised on the student
     expect(html).toContain('<span class="what">Invoice INV-1</span>');                      // raised on the family itself
     expect(html).toContain('<span class="amount num">$40.50</span>');                        // what is still due, not the invoice's total
-    expect(html).not.toContain(OFFLINE);
+    expect(html).not.toContain("offline-note");
     // The soonest-due invoice comes first and has the filled button; the other is outlined.
     const [first, second] = pays(html);
     expect(first).toContain('class="btn pay"');
@@ -118,20 +119,44 @@ describe("the Payments page", () => {
     await ageMoney(FAMILY, 6 * MINUTE);
     stub.failNext = 2;
     const html = await renderPage(PaymentsPage);
-    expect(html).toContain(`<p class="offline-note" role="status">${OFFLINE}</p>`);
+    expect(html).toContain(`<p class="offline-note" role="status">${NOT_CURRENT}</p>`);
     expect(html).toContain('<div class="amt num">$185.00</div>');
     expect(html).toContain('<span class="amount num">$85.00</span>');
     expect(html).toContain('<div class="sum"><span>Total</span><span class="num">$185.00</span></div>');
     const [pay, ...more] = pays(html);
     expect(more).toEqual([]);
     expect(pay).toContain('aria-disabled="true"');
-    expect(pay).toContain('aria-label="Pay $85.00, unavailable while QuickBooks is offline"');
+    expect(pay).toContain('aria-label="Pay $85.00, paused until the figures are up to date"');
     expect(pay).not.toContain("href=");
     expect(html).not.toContain("connect.intuit.com"); // the link itself is not sent while Pay is off
     expect(html).not.toMatch(/http_500|a message the portal must never store/);
     // The as-of time is still the time QuickBooks gave the figures, not now.
     const asOf = /as of <time dateTime="([^"]+)"/.exec(html)![1]!;
     expect(Date.now() - Date.parse(asOf)).toBeGreaterThan(5 * MINUTE);
+  });
+
+  // The figures are also "not current" for reasons that are not an outage and may last: the note says what is true of
+  // all of them, and promises no time.
+  it.each([
+    ["only an Admin can mend the connection", "needs_admin", () => db.update(qboConnection).set({ lastError: "Intuit no longer accepts this connection. Connect QuickBooks again. (invalid_grant)", lastErrorAt: new Date() })],
+    ["QuickBooks has been disconnected", "not_connected", () => db.update(qboConnection).set({ refreshTokenCiphertext: null, refreshTokenKeyId: null })],
+  ])("figures that are not current because %s: no promise of when paying will be back, and no word of an outage", async (_what, code, breakIt) => {
+    const r = await riverquills();
+    stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" })];
+    asParent(r.identity);
+    await renderPage(PaymentsPage);
+    await ageMoney(FAMILY, 6 * MINUTE);
+    await breakIt();
+    const html = await renderPage(PaymentsPage);
+    expect((await moneyRow(FAMILY))!.failedCode).toBe(code);
+    expect(html).toContain(`<p class="offline-note" role="status">${NOT_CURRENT}</p>`);
+    expect(text(html)).not.toMatch(/shortly|\bsoon\b|can&#x27;t reach|offline|minutes/i);
+    expect(html).toContain('<div class="amt num">$85.00</div>');
+    const [pay] = pays(html);
+    expect(pay).toContain('aria-disabled="true"');
+    expect(pay).toContain('aria-label="Pay $85.00, paused until the figures are up to date"');
+    expect(html).not.toContain("connect.intuit.com");
+    expect(text(html)).not.toMatch(/invalid_grant|needs_admin|not_connected|Admin|disconnected/);
   });
 
   it("QuickBooks down, with nothing stored: a calm line, no figures, and no reason given", async () => {
@@ -145,7 +170,7 @@ describe("the Payments page", () => {
     expect(html).not.toMatch(/\$\d/);
     expect(html).not.toContain("Paid in the last 12 months");
     expect(pays(html)).toEqual([]);
-    expect(html).not.toContain(OFFLINE);
+    expect(html).not.toContain("offline-note");
     expect(text(html)).not.toMatch(/error|failed|500|QuickBooks is|disconnected/i);
   });
 
@@ -188,23 +213,54 @@ describe("the Payments page", () => {
     expect(await renderPage(PaymentsPage)).not.toContain(CREDIT);
   });
 
-  it("another company: figures stored from a different QuickBooks company are not shown, and that company is not asked", async () => {
-    const r = await riverquills();
+  it("another company: figures stored from a different QuickBooks company than the roster cache are not shown", async () => {
+    const r = await seedSignedInParent(RIVERA);
     await seedFamilyMoney({ ...RIVERA, invoices: [{ number: "INV-OTHER-COMPANY", cents: 4242, payLink: "https://connect.intuit.com/t/other-company" }] });
-    // The roster cache now belongs to another company than the stored figures, and than the connected one.
+    // QuickBooks is disconnected, and the roster cache says it came from another company than the stored figures.
     await db.transaction((tx) => setRosterSource(tx, "2222"));
-    stub.invoices = [inv("1", FAMILY)];
     asParent(r.identity);
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(NOTHING);
-    expect(html).not.toMatch(/INV-OTHER-COMPANY|\$42\.42|other-company|INV-1|\$85\.00/);
+    expect(html).not.toMatch(/INV-OTHER-COMPANY|\$42\.42|other-company/);
     expect(stub.calls).toHaveLength(0);
-    // Figures stored from the cache's own company are shown, but as not current while another company is the connected one.
-    await db.update(familyMoney).set({ realmId: "2222", readAt: new Date(Date.now() - 6 * MINUTE) });
-    const stale = await renderPage(PaymentsPage);
-    expect(stale).toContain("INV-OTHER-COMPANY");
-    expect(stale).toContain(OFFLINE);
-    expect(stub.calls).toHaveLength(0);
+  });
+
+  // Home shows the money box only for a family loadMyFamily() returns. Payments goes by the same rule, so the two
+  // pages never disagree about whose money may be shown.
+  const NO_MONEY = /class="box money"|class="box paid-box"|INV-|\$\d|connect\.intuit\.com|what you owe|\(deleted\)/i;
+  it("shows no money for a family the roster may not show, as Home does: a family QuickBooks has made inactive", async () => {
+    const r = await riverquills();
+    stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" }), inv("2", FAMILY, { Balance: 0, TxnDate: new Date().toISOString().slice(0, 10) })];
+    asParent(r.identity);
+    expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>'); // stored, and fresh
+    await db.update(qboCustomer).set({ active: false, displayName: "Riverquill Family (deleted)" }).where(eq(qboCustomer.qboId, FAMILY));
+    const asked = stub.calls.length;
+    const html = await renderPage(PaymentsPage);
+    expect(html).toContain('<h1 class="page-title">Payments</h1>');
+    expect(html).toContain(NOT_SET_UP);
+    expect(html).not.toMatch(NO_MONEY);
+    expect(stub.calls).toHaveLength(asked);
+    expect((await moneyRow(FAMILY))!.failedAt).toBeNull(); // the family's money was not even looked up
+  });
+
+  it("shows no money while another company is connected than the one the roster cache came from, however fresh the figures", async () => {
+    const r = await riverquills();
+    stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" })];
+    asParent(r.identity);
+    expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>');
+    // An Admin connects a different company, and clearing the old company's cache has not happened yet.
+    await db.update(qboConnection).set({ realmId: "2222" });
+    const asked = stub.calls.length;
+    const html = await renderPage(PaymentsPage);
+    expect(html).toContain(NOT_SET_UP);
+    expect(html).not.toMatch(NO_MONEY);
+    expect(stub.calls).toHaveLength(asked);
+    // And the same when the shape names a customer type QuickBooks no longer has.
+    await db.update(qboConnection).set({ realmId: MONEY_REALM });
+    await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" });
+    const broken = await renderPage(PaymentsPage);
+    expect(broken).toContain(NOT_SET_UP);
+    expect(broken).not.toMatch(NO_MONEY);
   });
 
   it("flat shape: the member's own invoices", async () => {

@@ -15,7 +15,8 @@ import { DueLine } from "./due-line";
  *   ...
  *   <MoneyBox ctx={ctx} />
  *
- * The family is ctx.familyQboId, from the session, and nothing else. It sends the browser only what it shows.
+ * The family is ctx.familyQboId, from the session, and nothing else. It sends the browser only what it shows. A page
+ * shows a family's money only when loadMyFamily() returns the family: Home and Payments both ask it first.
  */
 export async function MoneyBox({ ctx }: { ctx: Pick<ParentCtx, "familyQboId"> }) {
   return <MoneySection money={await loadFamilyMoney(ctx.familyQboId)} more />;
@@ -42,7 +43,7 @@ function OpenLine({ invoice, current, filled }: { invoice: StoredInvoice; curren
           Pay{filled && <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>}
         </a>
       ) : (
-        <a className={style} aria-disabled="true" role="link" aria-label={`Pay ${amount}, unavailable while QuickBooks is offline`}>Pay</a>
+        <a className={style} aria-disabled="true" role="link" aria-label={`Pay ${amount}, paused until the figures are up to date`}>Pay</a>
       ))}
     </li>
   );
@@ -58,7 +59,10 @@ function Figures({ f }: { f: MoneyFigures }) {
       <div className="owed">
         {total !== null && <div className="amt num">{total}</div>}
         <div className="asof">{f.open.length ? "Owed now." : "Nothing owed."} From QuickBooks, as of <LocalTime iso={f.asOf} />.</div>
-        {!f.current && <p className="offline-note" role="status">We can&apos;t reach QuickBooks right now. These are the last figures we have, and paying will work again shortly.</p>}
+        {/* Not current for many reasons, some of which last until a person acts (QuickBooks needs connecting again), and
+            some of which are not an outage at all (another read is under way). So the note says only what is true of
+            every one of them, and promises no time. */}
+        {!f.current && <p className="offline-note" role="status">We couldn&apos;t get the latest figures from QuickBooks just now. These are the last ones we have. Paying here is paused until we can. Need to pay sooner? Ask the treasurer.</p>}
       </div>
       {f.open.length > 0 ? (
         <>
