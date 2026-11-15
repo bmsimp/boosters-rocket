@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check, date } from "drizzle-orm/pg-core";
 import type { PgColumnBuilderBase } from "drizzle-orm/pg-core";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -260,6 +260,88 @@ export const jobRun = pgTable("job_run", {
   detail: text("detail"),                            // counts, or a fixed sentence and a code
   startedBy: text("started_by").notNull(),           // "worker" or a staff_user.id
 }, (t) => [index("job_run_job_ix").on(t.job, t.startedAt)]);
+
+/* ---- Seasons, steps and requirements (v1 spec §10). Calendar dates are `date` columns read as YYYY-MM-DD, in the club's own time zone. ---- */
+
+export const REQUIREMENT_KINDS = ["form", "payment", "volunteer", "checklist"] as const;
+export type RequirementKind = (typeof REQUIREMENT_KINDS)[number];
+
+/** A season, such as "Fall 2027". At most one is the current season, the one parents see (`season_current_uq`). */
+export const season = pgTable("season", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  isCurrent: boolean("is_current").notNull().default(false),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [uniqueIndex("season_current_uq").on(t.isCurrent).where(sql`is_current`)]);
+
+/** A season's steps, in the order of `position` (the sets of the season ruler). Both dates are optional. */
+export const seasonStep = pgTable("season_step", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  seasonId: uuid("season_id").notNull().references(() => season.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  position: integer("position").notNull(),
+  startsOn: date("starts_on", { mode: "string" }),
+  endsOn: date("ends_on", { mode: "string" }),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [index("season_step_season_ix").on(t.seasonId, t.position)]);
+
+/**
+ * Something a step asks of each family or each student (v1 spec §10.1). `kind` and `applies_to` are fixed once it is
+ * made. `amount` and `amount_unit` are for the volunteer kind only. `covers` says whether it is asked of everyone or of
+ * the families or students listed in `requirement_cover`.
+ */
+export const requirement = pgTable("requirement", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  stepId: uuid("step_id").notNull().references(() => seasonStep.id, { onDelete: "cascade" }),
+  kind: text("kind", { enum: REQUIREMENT_KINDS }).notNull(),
+  title: text("title").notNull(),                       // in the club's own words
+  required: boolean("required").notNull().default(true), // an optional one shows progress and never holds a step open
+  appliesTo: text("applies_to", { enum: ["family", "student"] }).notNull(),
+  amount: integer("amount"),
+  amountUnit: text("amount_unit", { enum: ["shifts", "hours"] }),
+  dueOn: date("due_on", { mode: "string" }),
+  covers: text("covers", { enum: ["everyone", "chosen"] }).notNull().default("everyone"),
+  position: integer("position").notNull(),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [index("requirement_step_ix").on(t.stepId, t.position)]);
+
+/**
+ * The families or students a requirement with `covers = 'chosen'` is asked of: QuickBooks customer ids, families for a
+ * per-family requirement and students for a per-student one. No foreign key to the roster cache: one that has left the
+ * roster stays listed and is simply not shown.
+ */
+export const requirementCover = pgTable("requirement_cover", {
+  requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "cascade" }),
+  subjectQboId: text("subject_qbo_id").notNull(),
+  createdAt: created(),
+}, (t) => [uniqueIndex("requirement_cover_uq").on(t.requirementId, t.subjectQboId), index("requirement_cover_subject_ix").on(t.subjectQboId)]);
+
+/**
+ * What is recorded for one family or one student against one requirement: that it is met, a waiver, or both. A row
+ * exists only while it records something. `subject_qbo_id` is the family's QuickBooks id for a per-family requirement
+ * and the student's for a per-student one. `met_at` is a checklist item's tick; the other kinds are judged from their
+ * own records and leave it null. A waiver always has a reason. The row keeps the requirement from being deleted.
+ */
+export const requirementProgress = pgTable("requirement_progress", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "restrict" }),
+  subjectQboId: text("subject_qbo_id").notNull(),
+  metAt: timestamp("met_at", { withTimezone: true }),
+  metBy: uuid("met_by"),                                 // staff_user.id
+  waivedAt: timestamp("waived_at", { withTimezone: true }),
+  waivedBy: uuid("waived_by"),                           // staff_user.id
+  waivedReason: text("waived_reason"),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [
+  uniqueIndex("requirement_progress_subject_uq").on(t.requirementId, t.subjectQboId),
+  index("requirement_progress_subject_ix").on(t.subjectQboId),
+  check("requirement_progress_records_something", sql`${t.metAt} is not null or ${t.waivedAt} is not null`),
+  check("requirement_progress_waiver_reason", sql`(${t.waivedAt} is null) = (${t.waivedReason} is null)`),
+]);
 
 /** Roles. The built-in Admin role has key 'admin' and builtin=true. */
 export const role = pgTable("role", {

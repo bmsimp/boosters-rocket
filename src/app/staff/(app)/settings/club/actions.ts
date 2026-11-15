@@ -7,6 +7,8 @@ export const saveClubAction = staffAction("Settings.Club.ReadWrite", async (ctx,
   const r = await saveClubSettings({
     name: String(form.get("name") ?? ""), shortName: String(form.get("shortName") ?? ""),
     color: String(form.get("color") ?? ""), treasurerEmail: String(form.get("treasurerEmail") ?? ""),
+    // A form without the field keeps the stored zone.
+    timeZone: typeof form.get("timeZone") === "string" ? String(form.get("timeZone")) : undefined,
   }, { door: "staff", id: ctx.staffUserId, label: ctx.email }, ctx.ip);
   revalidatePath("/", "layout");
   return r;

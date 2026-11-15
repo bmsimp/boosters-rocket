@@ -16,6 +16,10 @@ export const PERMISSIONS = [
   "Roster.Read",                   // see families, students and parents (or members) as QuickBooks lists them
   "Settings.Parents.ReadWrite",    // admin-only: switch parent sign-ins and welcome emails on, and review company matches
   "Parents.ReadWrite",             // decide held addresses, block and unblock a parent, resend a welcome email
+  "Season.Steps.Read",             // see the seasons, their steps and the requirements in them
+  "Season.Steps.ReadWrite",        // create and change seasons, steps and requirements, and choose the current season
+  "Season.Progress.Read",          // see which families and students have met each requirement
+  "Season.Progress.ReadWrite",     // tick checklist items off, and waive a requirement for a family or student
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
