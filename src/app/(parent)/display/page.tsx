@@ -1,9 +1,12 @@
+import { requireParentPage } from "@/lib/guards";
 import { DisplaySettings } from "./display-settings";
 import { SignOutButton } from "../../components/sign-out-button";
 
 export const metadata = { title: "Display" };
 
-export default function DisplayPage() {
+export default async function DisplayPage() {
+  // The page guards itself: the layout's guard does not run again when the browser navigates here from another page.
+  await requireParentPage();
   return (
     <main className="wrap single">
       <h1 className="page-title">Display</h1>
