@@ -85,7 +85,7 @@ export function moneyMarkers(spec: ParentFamilySpec, which: "all" | "open" = "al
 export async function seedFamilyMoney(spec: ParentFamilySpec, o: { readAt?: Date; balanceWithJobsCents?: number | null } = {}): Promise<void> {
   await db.insert(setting).values({ key: SOURCE_KEY, value: { realmId: MONEY_REALM } }).onConflictDoNothing();
   const invoices: StoredInvoice[] = (spec.invoices ?? []).map((i, n) => ({
-    qboId: String(9001 + n), number: i.number, forName: null, date: "2026-10-01", dueDate: i.paid ? null : "2026-12-01",
+    qboId: String(9001 + n), number: i.number, customerQboId: spec.family.qboId, forName: null, date: "2026-10-01", dueDate: i.paid ? null : "2026-12-01",
     totalCents: i.cents, balanceCents: i.paid ? 0 : i.cents, currency: "USD", payLink: i.payLink ?? null,
   }));
   const row = { realmId: await getRosterSource(), readAt: o.readAt ?? new Date(), invoices, totalCents: owed(spec), currency: "USD",

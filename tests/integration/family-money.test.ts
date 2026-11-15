@@ -11,6 +11,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { loadFamilyMoney, MAX_LIVE_READS, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
+import { saveShape } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { resetDb } from "../helpers/db";
 import { ageMoney, connectCompany, invoiceQueries, moneyRow, setFreshSeconds, stubInvoice as inv } from "../helpers/money";
@@ -449,6 +450,82 @@ describe("a page load never waits in line for the QuickBooks connection, and lea
       expect((await moneyRow("10"))!.balanceWithJobsCents).toBe(8500); // the cross-check was read too
       expect(stub.tokenCalls()).toHaveLength(0);
     } finally { await release(); }
+  });
+});
+
+describe("stored figures are shown only while they are still this family's", () => {
+  it("keeps, with each invoice, the customer it was raised on", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 40 }), inv("3", "11", { Balance: 0, TxnDate: new Date().toISOString().slice(0, 10) })];
+    await loadFamilyMoney("10");
+    expect((await moneyRow("10"))!.invoices!.map((i) => [i.number, i.customerQboId])).toEqual([["INV-1", "10"], ["INV-2", "12"], ["INV-3", "11"]]);
+  });
+
+  it("a student moved to another family: the first family's row is not shown again, however fresh, and each family then gets its own", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 40 })];
+    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 12500 });
+    // The roster refresh finds Leo (12) under the Chen family now, and then QuickBooks stops answering.
+    await db.update(qboCustomer).set({ parentQboId: "20" }).where(eq(qboCustomer.qboId, "12"));
+    stub.failNext = 2;
+    expect((await loadFamilyMoney("10")).figures).toBeNull(); // not the row that holds Leo's invoice, read seconds ago
+    expect((await moneyRow("10"))!.failedCode).toBe("http_500");
+    expect((await loadFamilyMoney("10")).figures).toBeNull(); // nor while the portal waits to ask again
+    await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
+    const mine = await loadFamilyMoney("10");
+    expect(mine.figures).toMatchObject({ current: true, totalCents: 8500 });
+    expect(numbers(mine.figures!.open)).toEqual(["INV-1"]);
+    expect((await loadFamilyMoney("20")).figures!.open.map((i) => [i.number, i.forName])).toEqual([["INV-2", "Leo Rivera"]]);
+  });
+
+  it("a student made inactive: the row that holds their invoice is read again before anything is shown", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 40 })];
+    await loadFamilyMoney("10");
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "12"));
+    const money = await loadFamilyMoney("10"); // still inside the freshness window
+    expect(money.figures).toMatchObject({ current: true, totalCents: 8500 });
+    expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
+  });
+
+  it("a row that doesn't say whose its invoices are is treated as absent", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    await loadFamilyMoney("10");
+    const [row] = await db.select().from(familyMoney);
+    const unnamed = row!.invoices!.map((i) => ({ ...i, customerQboId: undefined })) as unknown as NonNullable<typeof row>["invoices"];
+    await db.update(familyMoney).set({ invoices: unnamed });
+    stub.failNext = 2;
+    expect((await loadFamilyMoney("10")).figures).toBeNull();
+  });
+
+  it("a family the cache no longer holds as an active family is shown nothing, whatever is stored", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    await loadFamilyMoney("10");
+    await db.update(qboCustomer).set({ active: false, displayName: "Rivera Family (deleted)" }).where(eq(qboCustomer.qboId, "10"));
+    const asked = stub.calls.length;
+    expect(await loadFamilyMoney("10")).toEqual({ familyName: null, figures: null });
+    expect(stub.calls).toHaveLength(asked);
+    expect((await moneyRow("10"))!.failedCode).toBe("not_a_family");
+  });
+
+  it("a change of membership shape forgets what every family was last seen to owe", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10"), inv("2", "12"), inv("3", "20")];
+    await loadFamilyMoney("10");
+    await loadFamilyMoney("20");
+    expect(await db.select().from(familyMoney)).toHaveLength(2);
+    // Students are no longer identified: Leo's invoice is not the Rivera family's to see any more.
+    await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }, { actor: SYSTEM.actor, ip: null });
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
+    expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1"]);
   });
 });
 

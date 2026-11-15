@@ -60,7 +60,7 @@ export function shownInvoices(raw: unknown[], forNames: ReadonlyMap<string, stri
     const totalCents = toCents(r.TotalAmt), balanceCents = toCents(r.Balance);
     if (totalCents === null || balanceCents === null) return null;
     const invoice: StoredInvoice = {
-      qboId, number: text(r.DocNumber, 50), forName: forNames.get(customer) ?? null, date: day(r.TxnDate), dueDate: day(r.DueDate),
+      qboId, number: text(r.DocNumber, 50), customerQboId: customer, forName: forNames.get(customer) ?? null, date: day(r.TxnDate), dueDate: day(r.DueDate),
       totalCents, balanceCents: Math.max(balanceCents, 0), currency: currencyOf((r.CurrencyRef as { value?: unknown } | null | undefined)?.value),
       payLink: balanceCents > 0 ? safePayLink(r.InvoiceLink) : null,
     };
