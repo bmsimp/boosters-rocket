@@ -2,15 +2,21 @@ import { redirect } from "next/navigation";
 import { getParentState } from "@/lib/auth/identity";
 import { getClubSettings } from "@/lib/settings/club";
 import { familyNames } from "@/lib/parents/directory";
+import { RETURN_PARAM, safeReturnPath, withReturnPath } from "@/lib/auth/return-path";
 import { SignOutButton } from "@/app/components/sign-out-button";
 import { chooseFamilyAction } from "./actions";
 
 export const metadata = { title: "Choose a family" };
 export const dynamic = "force-dynamic";
 
-export default async function ChooseFamily() {
-  const [state, club] = await Promise.all([getParentState(), getClubSettings()]);
-  if (state.status === "none") redirect("/sign-in");
+type Query = Record<string, string | string[] | undefined>;
+
+export default async function ChooseFamily({ searchParams }: { searchParams?: Promise<Query> } = {}) {
+  const [state, club, query] = await Promise.all([getParentState(), getClubSettings(), searchParams]);
+  // The page the parent asked for, carried here from the sign-in page or from that page's own guard. Checked here, and
+  // again by the action when a family is chosen.
+  const next = safeReturnPath(query?.[RETURN_PARAM]);
+  if (state.status === "none") redirect(withReturnPath("/sign-in", next));
   const families = state.status === "ok" ? state.identity.families : state.families;
   const current = state.status === "ok" ? state.identity.familyQboId : null;
   const names = await familyNames(families.map((f) => f.familyQboId));
@@ -21,7 +27,8 @@ export default async function ChooseFamily() {
       <ul className="stack">
         {families.map((f) => (
           <li key={f.guardianId}>
-            <form action={chooseFamilyAction.bind(null, f.familyQboId)}>
+            {/* Both arguments are bound, always: a form adds its FormData after them, and it must never arrive as `next`. */}
+            <form action={chooseFamilyAction.bind(null, f.familyQboId, next ?? undefined)}>
               <button className="btn" aria-current={f.familyQboId === current ? "true" : undefined}>{names.get(f.familyQboId)}</button>
             </form>
           </li>

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
-import { takeRateLimit } from "@/lib/parents/rate-limit";
+import { RATE_LIMITS, takeRateLimit } from "@/lib/parents/rate-limit";
 import { resetDb } from "../helpers/db";
 
 describe("database rate limits", () => {
@@ -40,8 +40,15 @@ describe("database rate limits", () => {
 
   it("holds under a burst of parallel requests", async () => {
     const t = new Date("2026-11-10T12:00:00Z");
-    const got = await Promise.all(Array.from({ length: 25 }, () => takeRateLimit("code_send_ip", "203.0.113.9", t)));
-    expect(got.filter((r) => r === "taken")).toHaveLength(10);
+    const got = await Promise.all(Array.from({ length: 75 }, () => takeRateLimit("code_send_ip", "203.0.113.9", t)));
+    expect(got.filter((r) => r === "taken")).toHaveLength(60);
     expect(got.filter((r) => r === "first_refusal")).toHaveLength(1);
+  }, 30_000);
+
+  it("guards against guessing per address, and only against a flood per IP address", () => {
+    // 3 codes to one address; 60 requests and 180 checks from one IP address, which a school's shared Wi-Fi needs on a
+    // registration night (spec §1 Rate limits). All in 15 minutes.
+    const window = { windowMs: 15 * 60 * 1000 };
+    expect(RATE_LIMITS).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window } });
   });
 });

@@ -33,11 +33,30 @@ const pageBody = (source: string): string => {
 const importsFromGuards = (source: string, name: string) =>
   new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']@/lib/guards["']`).test(code(source));
 
-/** What is wrong with a parent page's guard, in words that say what to add; null when it is right. */
+/** "src/app/(parent)/students/[id]/page.tsx" is the route "/students/[id]": route groups in (parentheses) are not part of the address. */
+const parentRouteOf = (file: string) =>
+  `/${file.slice(PARENT_PAGES.length).split("/").slice(0, -1).filter((s) => !/^\(.*\)$/.test(s)).join("/")}`;
+
+/**
+ * What is wrong with a parent page's guard, in words that say what to add; null when it is right. The guard may be
+ * given the page's own address, so a visitor who has to sign in first is brought back to it: that address must be
+ * written out where this scan can read it, and must be this page's, not another's.
+ */
 function parentPageProblem(file: string, source = read(file)): string | null {
-  if (importsFromGuards(source, "requireParentPage") && /\brequireParentPage\(\s*\)/.test(pageBody(source))) return null;
-  return `${file}: a parent page must call requireParentPage() itself; the guard in the layout does not run on client navigation. `
-    + `Add \`import { requireParentPage } from "@/lib/guards";\` and make \`const ctx = await requireParentPage();\` the first line of the page's default export (an async function).`;
+  const call = /\brequireParentPage\(\s*([^)]*?)\s*\)/.exec(pageBody(source));
+  if (!importsFromGuards(source, "requireParentPage") || !call) {
+    return `${file}: a parent page must call requireParentPage() itself; the guard in the layout does not run on client navigation. `
+      + `Add \`import { requireParentPage } from "@/lib/guards";\` and make \`const ctx = await requireParentPage();\` the first line of the page's default export (an async function).`;
+  }
+  const argument = call[1]!;
+  if (argument === "") return null;
+  const route = parentRouteOf(file);
+  const fixedPart = route.split("[")[0]!;
+  const literal = /^(["'])([^"'`]*)\1$/.exec(argument)?.[2];
+  const ok = route.includes("[") ? argument.startsWith(`\`${fixedPart}\${`) : literal === route;
+  if (ok) return null;
+  return `${file}: requireParentPage(${argument}) must be given this page's own address, written out, so a parent who signs in is brought back here and not somewhere else: `
+    + (route.includes("[") ? `a template that starts with \`${fixedPart}\${...}\` for the route ${route}.` : `"${route}".`);
 }
 
 /** The same for a staff page: the guard, with a permission from src/lib/permissions/registry.ts on every page but the staff home. */
@@ -125,6 +144,31 @@ describe("every page guards itself", () => {
   it("accepts a parent page that calls the guard, alone or beside other loads", () => {
     expect(parentPageProblem(NEW, `${PARENT_IMPORT}export default async function P() {\n  const ctx = await requireParentPage();\n  return <p>{ctx.name}</p>;\n}`)).toBeNull();
     expect(parentPageProblem(NEW, `${PARENT_IMPORT}export default async function P() {\n  const [ctx, club] = await Promise.all([requireParentPage(), getClubSettings()]);\n  return null;\n}`)).toBeNull();
+  });
+
+  // The guard may be told the page's own address (src/lib/guards.ts): a visitor who signs in is brought back to it.
+  const NEW_DYNAMIC = "src/app/(parent)/forms/[id]/page.tsx";
+  const withGuard = (call: string) => `${PARENT_IMPORT}export default async function P({ params }) {\n  const { id } = await params;\n  const ctx = await ${call};\n  return null;\n}`;
+
+  it("accepts a parent page that gives the guard its own address", () => {
+    expect(parentPageProblem(NEW, withGuard(`requireParentPage("/new")`))).toBeNull();
+    expect(parentPageProblem(NEW, withGuard(`requireParentPage('/new')`))).toBeNull();
+    expect(parentPageProblem("src/app/(parent)/page.tsx", withGuard(`requireParentPage("/")`))).toBeNull();
+    expect(parentPageProblem("src/app/(parent)/(money)/payments/page.tsx", withGuard(`requireParentPage("/payments")`))).toBeNull();
+    expect(parentPageProblem(NEW_DYNAMIC, withGuard("requireParentPage(`/forms/${id}`)"))).toBeNull();
+    expect(parentPageProblem(NEW_DYNAMIC, withGuard("requireParentPage(`/forms/${encodeURIComponent(id)}`)"))).toBeNull();
+  });
+
+  it.each([
+    ["gives the guard another page's address", NEW, `requireParentPage("/payments")`],
+    ["gives the guard an address this scan can't read", NEW, `requireParentPage(HERE)`],
+    ["gives the guard an address on another site", NEW, `requireParentPage("https://evil.example/new")`],
+    ["has a dynamic segment and gives the guard a fixed address", NEW_DYNAMIC, `requireParentPage("/forms")`],
+    ["has a dynamic segment and gives the guard another page's template", NEW_DYNAMIC, "requireParentPage(`/students/${id}`)"],
+    ["has a dynamic segment and gives the guard only what it was asked for", NEW_DYNAMIC, "requireParentPage(id)"],
+  ])("catches a parent page that %s", (_what, file, call) => {
+    expect(parentPageProblem(file, withGuard(call))).toContain(`${file}: ${call.split("(")[0]}(`);
+    expect(parentPageProblem(file, withGuard(call))).toContain("must be given this page's own address");
   });
 
   it.each([

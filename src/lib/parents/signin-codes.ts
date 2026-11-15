@@ -9,7 +9,7 @@ import { mailWorking } from "@/lib/mail/settings";
 import { sendMail, currentBrand } from "@/lib/mail/send";
 import { signinCodeMessage } from "@/lib/mail/messages";
 import { takeRateLimit, type RateLimitTake } from "./rate-limit";
-import { enabledGuardianRows, parentActor } from "./sessions";
+import { enabledGuardianRows, lockedPerson, parentActor } from "./sessions";
 import { getParentSettings, parentDoorClosed } from "./settings";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
@@ -59,23 +59,33 @@ export async function requestSigninCode(rawEmail: string, ip: string | null, now
   const code = generateSigninCode();
   const stored = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`booster.signin_code:${p.id}`}))`);
+    // `p` was read before this transaction, and a roster refresh or staff may be changing the person's address right
+    // now. The address is read again under a lock (lockedPerson): a change under way finishes first and is seen here,
+    // and one that starts later waits for this code to be stored and then deletes it. The code is mailed to the
+    // address read here and to no other, so it can never go to an address the person no longer has.
+    const live = await lockedPerson(tx, p.id);
+    if (!live || live.email !== email) return "moved" as const;
+    if (live.blocked) return "blocked" as const;
     const [last] = await tx.select({ createdAt: signinCode.createdAt }).from(signinCode).where(eq(signinCode.parentId, p.id))
       .orderBy(desc(signinCode.createdAt)).limit(1);
-    if (last && now.getTime() - last.createdAt.getTime() < RESEND_AFTER_MS) return null;
+    if (last && now.getTime() - last.createdAt.getTime() < RESEND_AFTER_MS) return "resend" as const;
     await tx.delete(signinCode).where(and(eq(signinCode.parentId, p.id), isNull(signinCode.usedAt)));
     const [row] = await tx.insert(signinCode).values({ parentId: p.id, codeHash: hashSigninCode(p.id, code), expiresAt: new Date(now.getTime() + CODE_TTL_MS), createdAt: now })
       .returning({ id: signinCode.id });
-    return row!.id;
+    return { id: row!.id, to: live.email };
   });
-  if (!stored) { await refuse("rate_limited", email, p, ip, { limit: "resend" }); return DONE; }
+  // The address is nobody's any more as far as this request can tell: the same refusal as an address never on file.
+  if (stored === "moved") { await refuse("unknown_email", email, null, ip); return DONE; }
+  if (stored === "blocked") { await refuse("blocked", email, p, ip); return DONE; }
+  if (stored === "resend") { await refuse("rate_limited", email, p, ip, { limit: "resend" }); return DONE; }
 
   const delivery = (async () => {
-    const r = await sendMail(signinCodeMessage(await currentBrand(), p.email, code), { purpose: "signin_code", actor: parentActor(p), ip });
+    const r = await sendMail(signinCodeMessage(await currentBrand(), stored.to, code), { purpose: "signin_code", actor: parentActor(p), ip });
     if (r.ok) {
       await writeAudit({ actor: parentActor(p), action: "signin.code_sent", targetType: "parent", targetId: p.id,
         after: { expiresAt: new Date(now.getTime() + CODE_TTL_MS).toISOString() }, ip });
     } else {
-      await db.delete(signinCode).where(eq(signinCode.id, stored)); // nobody got it, so nobody may use it
+      await db.delete(signinCode).where(eq(signinCode.id, stored.id)); // nobody got it, so nobody may use it
       await refuse("mail_failed", email, p, ip);
     }
   })().catch(() => undefined); // every failure above is already audited; nothing here may surface to the caller
@@ -85,7 +95,7 @@ export async function requestSigninCode(rawEmail: string, ip: string | null, now
 export type VerifyResult = { ok: true; parentId: string } | { ok: false; reason: "rejected" | "rate_limited" };
 const REJECTED: VerifyResult = { ok: false, reason: "rejected" };
 
-/** Spec §1. Single use, 10 minutes, 5 wrong tries, 30 checks per IP per 15 minutes. */
+/** Spec §1. Single use, 10 minutes, 5 wrong tries, 180 checks per IP per 15 minutes. */
 export async function verifySigninCode(rawEmail: string, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
   const email = normalizeEmail(rawEmail);
   const label = email ?? rawEmail.trim().toLowerCase().slice(0, 254);
@@ -119,7 +129,8 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
     await writeAudit({ actor: parentActor(p), action: "signin.code_wrong", targetType: "parent", targetId: p.id, after: { try: outcome.wrong }, ip });
     return REJECTED;
   }
-  // The code was right; the person must still be allowed in now (they may have been blocked or removed since it was sent).
+  // The code was right; the person must still be allowed in now (they may have been blocked or removed since it was
+  // sent). Whether the address is still theirs is settled last of all, once the session exists (signinStands).
   const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));
   const reason = parentDoorClosed(await getParentSettings()) ? "signins_off"
     : !fresh || fresh.blocked ? "blocked" : (await enabledGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
@@ -128,4 +139,20 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
     return REJECTED;
   }
   return { ok: true, parentId: p.id };
+}
+
+/**
+ * The last check of a sign-in, made once the session row exists: the address the code was proved with is still the
+ * person's, and they are not blocked. Read under the lock an address change or a block waits for (lockedPerson), and
+ * after the session is stored, so there is no moment in which a session proved with a replaced address can slip
+ * through. A change that committed first is seen here and the caller removes the session; a change that comes later
+ * ends the person's sessions itself, and by then this one is stored where it can see it.
+ */
+export async function signinStands(parentId: string, rawEmail: string, ip: string | null): Promise<boolean> {
+  const email = normalizeEmail(rawEmail);
+  const live = await db.transaction((tx) => lockedPerson(tx, parentId));
+  if (live && email && live.email === email && !live.blocked) return true;
+  await writeAudit({ actor: { door: "parent", id: parentId, label: email }, action: "signin.refused", targetType: "parent", targetId: parentId,
+    after: { reason: live?.blocked ? "blocked" : "address_changed" }, ip });
+  return false;
 }

@@ -4,10 +4,15 @@ import { rateLimitEvent } from "@/lib/db/schema";
 
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip";
 const WINDOW_MS = 15 * 60 * 1000;
+/**
+ * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
+ * per-IP limits only stop a flood: on a registration night a whole room of parents shares the school's one address, so
+ * they sit well above what a full room asks for (spec §1 Rate limits).
+ */
 export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number }> = {
   code_send_email: { max: 3, windowMs: WINDOW_MS },
-  code_send_ip: { max: 10, windowMs: WINDOW_MS },
-  code_check_ip: { max: 30, windowMs: WINDOW_MS },
+  code_send_ip: { max: 60, windowMs: WINDOW_MS },
+  code_check_ip: { max: 180, windowMs: WINDOW_MS },
 };
 
 /**

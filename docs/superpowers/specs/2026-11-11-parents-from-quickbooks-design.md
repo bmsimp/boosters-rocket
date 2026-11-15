@@ -481,16 +481,21 @@ To go in the user documentation when it is written:
 
 ## Known gaps
 
-Found by the whole-branch review on 2026-11-12 and not yet fixed. The first should be closed before real parents
-use parent sign-ins.
+Found by the whole-branch review on 2026-11-12. The first two were closed on 2026-11-15; the rest are not yet
+fixed.
 
-- **A sign-in code can go to an address that was just replaced.** A code request reads the person's address
-  before its own transaction. If a roster refresh changes that person's address in place at that moment, the code
-  is mailed to the old address and still works with the new one. The window is a fraction of a second during a
-  refresh. The cure is to read the address again inside the code's transaction, or to take the same lock on the
-  person.
-- **A rare deadlock between a code request and an address change.** The database ends one side. If it ends the
-  reconcile, the refresh is recorded as failed (`reconcile_failed`, code `40P01`) and runs again by itself.
+- **Closed: a sign-in code could go to an address that was just replaced.** A code request read the person's
+  address before its own transaction, so a roster refresh that changed the address at that moment left a code
+  that was mailed to the old address and worked with the new one. A code request now reads the address again
+  under a lock that every change of address waits for, and mails only that address. A request made with an
+  address that has just been replaced is refused like an address that was never on file. The same lock is
+  taken once more when a code is right, after the session is stored: a code proved with the old address while
+  the change was under way no longer becomes a session. It is refused and audited (`signin.refused`, reason
+  `address_changed`).
+- **Closed: a rare deadlock between a code request and an address change.** A code request now takes the
+  person's row before it touches a code, the order every change of address uses, so neither side can hold what
+  the other waits for. `tests/integration/signin-address-race.test.ts` runs a code request and a code check
+  against a reconcile that is half way through a change of address.
 - **An unreadable parents setting closes the parent door without saying why.** The pages show sign-ins as off;
   switching them on writes a good setting again. A company change in that state writes the closed setting back,
   which leaves staff review emails off. Only a hand-edited database row can cause it.

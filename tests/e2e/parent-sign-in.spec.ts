@@ -70,3 +70,98 @@ test("an unknown address gets the same answer and no email", async ({ page }) =>
   await page.waitForTimeout(2000);
   expect(sink.messages).toHaveLength(0);
 });
+
+// The code step is kept on the device under this key (src/app/sign-in/code-step.ts).
+const CODE_STEP_KEY = "booster.signin.code-step";
+const storedStep = (page: import("@playwright/test").Page) => page.evaluate((key) => window.localStorage.getItem(key), CODE_STEP_KEY);
+
+test("the code step survives a reload, and the parent lands on the page they asked for", async ({ page, baseURL }) => {
+  await page.goto("/sign-in?next=%2Fdisplay");
+  await page.getByLabel("Email").fill("zelda@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByLabel("6-digit code")).toBeVisible();
+  expect(JSON.parse((await storedStep(page))!)).toMatchObject({ email: "zelda@example.com", next: "/display" });
+
+  // The parent goes to their mail and the phone reloads the app: the same page first, then the app's start address.
+  await page.reload();
+  await expect(page.getByLabel("6-digit code")).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Resend code \(\d+ s\)/ })).toBeDisabled();
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page.getByLabel("6-digit code")).toBeVisible();
+  expect(sink.messages.filter((m) => m.to.includes("zelda@example.com"))).toHaveLength(1); // nothing was asked for again
+
+  await page.getByLabel("6-digit code").fill(await codeFor("zelda@example.com"));
+  await page.getByRole("button", { name: "Sign in" }).click();
+  // Two families: the chooser comes first and carries the page with it.
+  await expect(page).toHaveURL(`${baseURL}/choose-family?next=%2Fdisplay`);
+  await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
+  await expect(page).toHaveURL(`${baseURL}/display`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Display");
+  expect(await storedStep(page)).toBeNull();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page.getByLabel("Email")).toBeVisible();   // signed out, and nothing left to pick up
+});
+
+test("'Use a different email' forgets the code step, and so does the end of the code's 10 minutes", async ({ page }) => {
+  await page.goto("/sign-in");
+  await page.getByLabel("Email").fill("zelda@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await expect(page.getByLabel("6-digit code")).toBeVisible();
+  await page.getByRole("button", { name: "Use a different email" }).click();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  expect(await storedStep(page)).toBeNull();
+  await page.reload();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("6-digit code")).toHaveCount(0);
+
+  // A step whose code has run out is not picked up, and is removed.
+  await page.evaluate((key) => window.localStorage.setItem(key, JSON.stringify({ email: "zelda@example.com", sentAt: Date.now() - 10 * 60 * 1000, next: null })), CODE_STEP_KEY);
+  await page.reload();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("6-digit code")).toHaveCount(0);
+  await expect.poll(() => storedStep(page)).toBeNull();
+});
+
+test("a page to return to that is not a parent page of this site is dropped", async ({ page, baseURL }) => {
+  for (const next of ["//evil.example/display", "/staff/roster"]) {
+    sink.messages.length = 0;
+    await sql`DELETE FROM signin_code`;
+    await sql`DELETE FROM rate_limit_event`;
+    await page.goto(`/sign-in?next=${encodeURIComponent(next)}`);
+    await page.getByLabel("Email").fill("zelda@example.com");
+    await page.getByRole("button", { name: "Send code" }).click();
+    await page.getByLabel("6-digit code").fill(await codeFor("zelda@example.com"));
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(`${baseURL}/choose-family`);
+    await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
+    await expect(page).toHaveURL(`${baseURL}/`);
+    await page.goto("/display");
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page).toHaveURL(/\/sign-in$/);
+  }
+});
+
+// The parent pages and their layout pass their own address to the guard once they are wired to (src/lib/guards.ts:
+// requireParentPage("/display") in the page, parentLayoutCtx() in the layout). Until then a visitor is sent to /sign-in
+// with no page to come back to, and this test has nothing to check.
+const displayPage = readFileSync("src/app/(parent)/display/page.tsx", "utf8");
+const parentLayout = readFileSync("src/app/(parent)/layout.tsx", "utf8");
+const pagesPassTheirAddress = /requireParentPage\(\s*["']\/display["']\s*\)/.test(displayPage) && parentLayout.includes("parentLayoutCtx");
+
+test("a visitor who asks for a parent page signs in and is brought back to it", async ({ page, baseURL }) => {
+  test.skip(!pagesPassTheirAddress, "The Display page does not pass its address to requireParentPage(), or the parent layout still redirects first.");
+  await page.goto("/display");
+  await expect(page).toHaveURL(`${baseURL}/sign-in?next=%2Fdisplay`);
+  await page.getByLabel("Email").fill("zelda@example.com");
+  await page.getByRole("button", { name: "Send code" }).click();
+  await page.getByLabel("6-digit code").fill(await codeFor("zelda@example.com"));
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(`${baseURL}/choose-family?next=%2Fdisplay`);
+  await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
+  await expect(page).toHaveURL(`${baseURL}/display`);
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+});

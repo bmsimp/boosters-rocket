@@ -3,6 +3,8 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/lib/db/client";
 import { recordSignout } from "./signin-audit";
 import { parentCodePlugin } from "./parent-code-plugin";
+import { PARENT_SESSION_SECONDS } from "@/lib/parents/sessions";
+import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env } from "@/env";
 
@@ -34,8 +36,13 @@ function buildParentAuth() {
     disabledPaths: PARENT_DISABLED_PATHS,
     // A cheap in-memory cap per IP and path in front of the database limits (signin-codes.ts), so a flood is turned
     // away before it reaches Postgres. Better Auth turns its limiter on only when NODE_ENV is production; that default
-    // is kept, so the integration tests don't meet it.
-    rateLimit: { customRules: { "/portal-code/send": { window: 60, max: 20 }, "/portal-code/verify": { window: 60, max: 20 } } },
+    // is kept, so the integration tests don't meet it. A minute here allows what the database allows in 15 minutes
+    // (RATE_LIMITS in src/lib/parents/rate-limit.ts), so this cap is never the first one a room full of parents on one
+    // Wi-Fi address meets: 20 a minute turned the twenty-first parent of a registration night away.
+    rateLimit: { customRules: {
+      "/portal-code/send": { window: 60, max: RATE_LIMITS.code_send_ip.max },
+      "/portal-code/verify": { window: 60, max: RATE_LIMITS.code_check_ip.max },
+    } },
     account: { accountLinking: { enabled: false } },
     // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
     advanced: { cookiePrefix: "br_parent", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
@@ -43,9 +50,12 @@ function buildParentAuth() {
       // The portal writes the parent `signin` row itself, with the family entered (family-choice.ts).
       session: { delete: { after: (session, ctx) => recordSignout("parent", session, ctx) } },
     },
-    // Spec §1: 7 days from sign-in, never extended; no cookie cache, so ended sessions stop at the next request.
+    // Spec §1: 90 days, renewed by use; no cookie cache, so ended sessions stop at the next request. Better Auth only
+    // sets the row's first expiry and refuses a row past it. Its own refresh stays off: the portal renews the row
+    // itself (renewParentSession in src/lib/parents/sessions.ts, called from identity.ts), and the cookie is set once,
+    // at sign-in, to outlive it (parent-code-plugin.ts).
     session: {
-      expiresIn: 60 * 60 * 24 * 7,
+      expiresIn: PARENT_SESSION_SECONDS,
       disableSessionRefresh: true,
       additionalFields: { familyQboId: { type: "string", required: false, input: false } },
     },
