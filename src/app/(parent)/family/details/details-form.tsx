@@ -53,6 +53,7 @@ export function DetailsForm({ initial }: { initial: ContactForm }) {
         </p>
       )}
       <button className="btn" disabled={pending}>{pending ? "Saving…" : "Save my details"}</button>
+      <a className="btn btn-line" href="/family">Back to Family</a>
     </form>
   );
 }

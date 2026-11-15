@@ -45,7 +45,6 @@ export default async function FamilyDetailsPage() {
               <h2 id="edit-h">Phone and mailing address</h2>
               <p>How the club reaches you</p>
               <DetailsForm initial={view.form} />
-              <div className="box-foot"><a className="btn btn-line" href="/family">Back to Family</a></div>
             </section>
           ) : (
             <section className="box" aria-labelledby="later-h">
