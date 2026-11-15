@@ -119,6 +119,9 @@ const ROUTE_HANDLERS: Record<string, string> = {
 const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string }[] = [
   { module: "@/lib/roster/queries", names: "all", why: "loadRosterPage() and rosterEntry() load every family in the club" },
   { module: "@/lib/parents/directory", names: ["listPeople", "getPerson", "heldReview", "familySignins"], why: "they return other families' names, or a block reason (see the note at the top of the module)" },
+  { module: "@/lib/seasons/setup", names: "all", why: "a requirement's chosen list names other families and students" },
+  { module: "@/lib/seasons/subjects", names: "all", why: "loadSubjects() loads every family in the club" },
+  { module: "@/lib/seasons/staff-progress", names: "all", why: "it reads every family's ticks and waivers, with the reasons" },
 ];
 
 describe("every page guards itself", () => {
@@ -314,6 +317,10 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
  */
 const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
+  "src/lib/seasons/my-season.ts",
+  "src/lib/seasons/recorded.ts",
+  "src/lib/seasons/kinds.ts",
+  "src/lib/seasons/progress.ts",
   "src/app/components/parent-frame.tsx",
   "src/app/not-found.tsx",
 ];

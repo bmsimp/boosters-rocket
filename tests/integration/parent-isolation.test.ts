@@ -49,10 +49,13 @@ const NO_FAMILY_DATA: Record<string, string> = {
 /** What a page must show its own family, beyond "something": the exact words. */
 const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // The greeting, the roster, and what the family owes now (what it has paid is on the Payments page).
-  "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`, ...rosterOf(family), ...moneyMarkers(family.spec, "open")],
+  // And the season ruler with the step the family is on, and what that step asks of it.
+  "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`, ...rosterOf(family), ...moneyMarkers(family.spec, "open"), ...family.season!.home],
   "/family": (family) => rosterOf(family),
   // The family's name, every invoice's number and amount, the total, and the address behind the Pay button.
   "/payments": (family) => [family.spec.family.name, ...moneyMarkers(family.spec)],
+  // Every step of the current season, the family's own requirements among them, and its students by name.
+  "/season": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.season!.page],
 };
 /** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */
 function rosterOf(family: SeededParent): string[] {
@@ -122,6 +125,8 @@ describe("one family never sees another's data on a parent page", () => {
           + `If the page shows nothing about the family, add it to NO_FAMILY_DATA with the reason.`);
       }
       for (const words of MUST_SHOW[route]?.(viewer) ?? []) expect(outcome.html, `${file} for ${viewer.spec.family.name}`).toContain(words);
+      // What staff wrote for staff (a waiver's reason) reaches no parent page, the family's own included.
+      for (const words of viewer.season!.staffOnly) expect(outcome.html, `${file} shows ${viewer.spec.family.name} a note that is for staff only`).not.toContain(words);
     });
 
     it.runIf(isDynamic(route))("shows nothing when asked for the other family's ids in the address", async () => {

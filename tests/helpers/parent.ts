@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/money/cents";
 import { getRosterSource, SOURCE_KEY } from "@/lib/roster/source";
 import { seedGuardian, seedParent, seedParentSession } from "./db";
 import { SIGNINS_ON, addToCache, fam, par, seedParentSettings, seedShape, stu } from "./roster-cache";
+import { seedTwoFamilySeason, type FamilySeason } from "./season";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -33,6 +34,8 @@ export type SeededParent = {
    * to another family must contain none of them.
    */
   markers: string[];
+  /** With seedTwoFamilies(): how the current season stands for this family, in the words its pages must show (tests/helpers/season.ts). */
+  season?: FamilySeason;
 };
 
 /**
@@ -136,7 +139,8 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
  * parent page as each parent and searches for the other's markers. Each family has its own invoices (numbers, amounts
  * and a total found nowhere else). When a step gives families new data (forms, sign-ups), seed it here for both
  * families and add its recognizable strings to each family's markers, so the gate covers the new pages without being
- * told about them.
+ * told about them. The club has a current season (seedTwoFamilySeason): each family has its own ticks and a waiver, and
+ * a requirement asked of it alone, whose title, id and waiver reason are among its markers.
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
   const a = await seedSignedInParent(FAMILY_A);
@@ -144,6 +148,9 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   // Each family's invoices and total, stored as fresh figures: the money box and the Payments page show them as they are.
   await seedFamilyMoney(FAMILY_A);
   await seedFamilyMoney(FAMILY_B);
+  const seasons = await seedTwoFamilySeason(FAMILY_A, FAMILY_B);
+  a.season = seasons.a; a.markers.push(...seasons.a.markers);
+  b.season = seasons.b; b.markers.push(...seasons.b.markers);
   return { a, b };
 }
 

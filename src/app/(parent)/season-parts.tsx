@@ -31,7 +31,7 @@ export function SeasonRuler({ season }: { season: MySeason }) {
         <div className="season-head">
           <p id="season-h" className="season-title">{season.name} · <b>{current
             ? <>Step {currentIndex! + 1} of {steps.length}<span className="current-name">: {current.name}</span></>
-            : <>All {steps.length} steps done</>}</b></p>
+            : steps.length === 1 ? <>The one step is done</> : <>All {steps.length} steps done</>}</b></p>
           <a href="/season">See the whole season</a>
         </div>
         <ol className={steps.length > 6 ? "sets many" : "sets"} style={{ ["--count" as string]: steps.length }}>
