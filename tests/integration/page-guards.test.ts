@@ -250,13 +250,15 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
 }
 
 /**
- * Parent code that lives outside src/app/(parent)/: the query modules parent pages read their family through, and the
- * frame drawn around every parent page. They pass the same scan, so they can never come to import a staff-only module.
+ * Parent code that lives outside src/app/(parent)/: the query modules parent pages read their family through, the
+ * frame drawn around every parent page, and the not-found page, which draws that frame for a signed-in parent. They
+ * pass the same scan, so they can never come to import a staff-only module.
  * A new query module for parent pages is added here, one to a line.
  */
 const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
   "src/app/components/parent-frame.tsx",
+  "src/app/not-found.tsx",
 ];
 
 describe("parent code never imports the staff-only queries", () => {
