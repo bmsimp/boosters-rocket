@@ -217,6 +217,17 @@ describe("a record that changed in QuickBooks while the parent was editing is ne
     expect((await audits()).map((a) => [a.action, a.after])).toEqual([["parent.contact.save.failed", { code: "stale" }]]);
   });
 
+  it("when the record can't be read again after QuickBooks refuses, the parent is not shown what they typed as if it were current", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    // Someone changes the record as the update arrives, and QuickBooks then stops answering.
+    stub.beforeUpdate = (customer) => { Object.assign(customer, { PrimaryPhone: { FreeFormNumber: "512-555-0444" }, SyncToken: "1" }); stub.failNext = 5; };
+    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toEqual({ ok: false, errors: [CONTACT_COPY.changedUnseen] });
+    expect(posts()).toHaveLength(1);
+    expect(inQuickBooks(stub, R_PARENT)).toMatchObject({ PrimaryPhone: { FreeFormNumber: "512-555-0444" }, SyncToken: "1" });
+    expect((await audits()).map((a) => [a.action, a.after])).toEqual([["parent.contact.save.failed", { code: "stale" }]]);
+  });
+
   it("a version that was never this record's is a stale one", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);

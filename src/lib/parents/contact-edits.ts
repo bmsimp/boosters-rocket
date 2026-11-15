@@ -25,6 +25,7 @@ export const CONTACT_COPY = {
   saved: "Saved. The club's books have your new details.",
   nothingChanged: "Those are the details the club already has, so there was nothing to change.",
   changed: "Your details changed in the club's books while you were editing, so nothing was saved. Here they are as they stand now. Please make your change again.",
+  changedUnseen: "Your details changed in the club's books while you were editing, so nothing was saved. Please open this page again to see them as they stand now.",
   tryLater: "We couldn't reach the club's books just now, so nothing was changed. Please try again in a little while.",
   unsure: "We couldn't tell whether your details were saved. Please open this page again in a little while to check.",
   notAccepted: "The club's books wouldn't take those details, so nothing was changed. Please check them and try again, or ask the club for help.",
@@ -182,7 +183,8 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
     if (fault === CUSTOMER_UPDATE.faults.stale) {
       // Someone changed the record between the read above and the write: QuickBooks kept theirs. Read it again to show it.
       const now = await readLive(record, company.realmId, readMs);
-      return refuse("stale", [CONTACT_COPY.changed], record, now.ok ? now.form : undefined);
+      // If that read fails too, the parent is not told that what they typed is what the books hold.
+      return now.ok ? refuse("stale", [CONTACT_COPY.changed], record, now.form) : refuse("stale", [CONTACT_COPY.changedUnseen], record);
     }
     if (fault !== null && CUSTOMER_UPDATE.faults.validation.test(fault)) return refuse(e.code, [CONTACT_COPY.notAccepted], record);
     return refuse(e.code, [mayHaveSaved(e.code) ? CONTACT_COPY.unsure : CONTACT_COPY.tryLater], record);

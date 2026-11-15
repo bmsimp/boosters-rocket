@@ -363,7 +363,8 @@ arguments, as the mail tests do):
   is refused the roster pages; the invariants test covers the new server actions; opening a family's page
   writes the read audit row.
 - **Nothing writes to QuickBooks:** a test fails if any request the client sends, other than to Intuit's
-  token and revoke endpoints, uses a method other than GET.
+  token and revoke endpoints, uses a method other than GET. *Since 2026-11-15 the test also allows the one
+  customer update, sent by one function that one module may call; see the note under Goals.*
 - No token, secret or response body reaches a log line or an audit row.
 
 **End-to-end:** an Admin opens the settings view on a site that is already connected, walks the three steps without
