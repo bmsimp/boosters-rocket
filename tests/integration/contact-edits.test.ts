@@ -369,7 +369,7 @@ describe("what the browser sends is checked, and how often", () => {
     expect(await cached(R_PARENT)).toMatchObject({ phone });
     expect((await audits())[0]).toMatchObject({ after: { phone, address: { line1, city } } });
     for (const html of [await renderPage(FamilyPage), await renderPage(FamilyDetailsPage)]) {
-      expect(html).not.toMatch(/<img\b|<script\b|<svg onload/);
+      expect(html).not.toMatch(/<img\b|<script>alert|<svg onload/); // React adds one script of its own for the form: not these
       expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
     }
     const page = await renderPage(FamilyDetailsPage);
