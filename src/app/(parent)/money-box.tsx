@@ -15,7 +15,8 @@ import { DueLine } from "./due-line";
  *   ...
  *   <MoneyBox ctx={ctx} />
  *
- * The family is ctx.familyQboId, from the session, and nothing else. It sends the browser only what it shows.
+ * The family is ctx.familyQboId, from the session, and nothing else. It sends the browser only what it shows. A page
+ * shows a family's money only when loadMyFamily() returns the family: Home and Payments both ask it first.
  */
 export async function MoneyBox({ ctx }: { ctx: Pick<ParentCtx, "familyQboId"> }) {
   return <MoneySection money={await loadFamilyMoney(ctx.familyQboId)} more />;
