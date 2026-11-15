@@ -89,7 +89,7 @@ export function atPath(pathname: string): void { state.pathname = pathname; }
 /** The paths passed to revalidatePath() since the test began. */
 export const revalidatedPaths = (): readonly string[] => state.revalidated;
 
-export type PageProps = { params?: Record<string, string | string[]>; searchParams?: Record<string, string | string[] | undefined> };
+export type PageProps = { params?: Record<string, string | string[]>; searchParams?: Record<string, string | string[] | undefined>; children?: ReactNode };
 // A page declares its own props type; the helper passes params and searchParams as the promises Next.js gives it.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Page = (props: any) => ReactNode | Promise<ReactNode>;
@@ -98,10 +98,14 @@ export type PageOutcome = { html: string } | { redirect: string } | { notFound: 
 /**
  * What asking for a page gives: its HTML, or where it redirects, or a 404. The rendering waits for async server
  * components and data, and its text-node separators (<!-- -->) are dropped so text reads as it does on the page.
+ * A layout renders the same way, with `children`.
+ *
+ * This is the HTML only. In the browser, Next.js also sends every prop a server component passes to a client component,
+ * rendered or not; tests/e2e/parent-session.spec.ts searches the real response for that.
  */
 export async function pageOutcome(page: Page, props: PageProps = {}): Promise<PageOutcome> {
   try {
-    const element = await page({ params: Promise.resolve(props.params ?? {}), searchParams: Promise.resolve(props.searchParams ?? {}) });
+    const element = await page({ params: Promise.resolve(props.params ?? {}), searchParams: Promise.resolve(props.searchParams ?? {}), children: props.children });
     const errors: unknown[] = [];
     const { prelude } = await prerender(element, { onError: (e) => { errors.push(e); } });
     if (errors.length) throw errors[0];
