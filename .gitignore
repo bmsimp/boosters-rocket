@@ -41,6 +41,9 @@ yarn-error.log*
 test-results/
 playwright-report/
 
+# git worktrees for agents working in parallel (AGENTS.md)
+/.worktrees/
+
 # vercel
 .vercel
 
