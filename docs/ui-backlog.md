@@ -25,8 +25,8 @@ and the page. Move an item to **Done** when it ships.
 
 ### Before sign-in (`/sign-in`, `/staff/sign-in`)
 - **Reported as not mobile-friendly** (2026-11-09). In a phone-size test (390 and 360 pixels wide) both pages fit
-  with no sideways scroll, so the problem isn't known yet. Waiting on a screenshot from the owner's phone. The pages also
-  have no club bar, so they look unlike the rest of the portal.
+  with no sideways scroll, so the problem isn't known yet. Waiting on a screenshot from the owner's phone. Both pages
+  carry the club bar since 2026-11-15 (the club's name and monogram, no menu). The family chooser still has none.
 
 ### Parent family chooser (`/choose-family`, parent pages)
 - **Family names** (2026-11-10). The chooser and Switch family show `Family account <QBO id>` until the roster plan

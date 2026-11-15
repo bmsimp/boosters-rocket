@@ -57,8 +57,22 @@ identity system.
    whether the address is on file.
 2. The code screen asks for the 6 digits. It has **Resend code**, available 60 seconds after the last
    send, and **Use a different email**.
-3. A correct code signs the parent in. A parent with one family lands on the parent home. A
-   parent with two or more families picks one first (see §2).
+3. A correct code signs the parent in. A parent with one family lands on the page they asked for,
+   or on the parent home if they asked for none. A parent with two or more families picks one first
+   (see §2) and lands there after choosing.
+
+**The code step survives a reload** (added 2026-11-15, for the installed app). A parent leaves the
+portal to read the code in their mail, and a phone may reload an installed app when they come back.
+The address they typed, the time the code was sent and the page they asked for are kept on the device
+for the code's 10 minutes, so they return to the code screen, not to the email screen. The device
+forgets them on sign-in, on **Use a different email**, and when the 10 minutes are over. Nothing the
+portal knows is kept: the page never learns whether the address is on file.
+
+**The page asked for** (added 2026-11-15). A parent page that sends a visitor to sign in passes its
+own address along (`/sign-in?next=…`), and the code step and the family chooser carry it. The value
+travels through the browser, so it is checked each time it is read: only a path on this site that
+leads to a parent page is honored. It can't lead to another site, or to a staff, setup or API path.
+Anything else is dropped, and the parent lands on the parent home.
 
 ### The code
 
@@ -86,12 +100,19 @@ Limits are counted in the database, so they hold across restarts and across more
 | Limit | Value |
 |---|---|
 | Codes sent to one email address | 3 per 15 minutes |
-| Code requests from one IP address | 10 per 15 minutes |
-| Code checks from one IP address | 30 per 15 minutes |
+| Code requests from one IP address | 60 per 15 minutes |
+| Code checks from one IP address | 180 per 15 minutes |
 
 Requests over a limit get the same "if this email belongs to a family…" message, and nothing is
 sent. A code check over the limit gets *"Too many tries. Wait a few minutes and request a new
 code."* Hitting a limit is audited.
+
+**Why the per-IP limits are high** (changed 2026-11-15; they were 10 and 30). On a registration
+night a room full of parents signs in from the school's Wi-Fi, which the portal sees as one IP
+address. At 10 requests the eleventh parent got the usual message and no email, with nothing to
+tell them why. Guessing a code is stopped by the limits that belong to the code and the address:
+5 wrong tries end a code, a code lasts 10 minutes, and an address gets 3 codes in 15 minutes. The
+per-IP limits only stop a flood, so they are set well above what a full room needs.
 
 ### Addresses
 
@@ -100,8 +121,14 @@ same as for `staff_user.email` today.
 
 ### The session
 
-- Lasts **7 days from sign-in**. Using the portal doesn't extend it. After 7 days the parent asks
-  for a new code.
+- Lasts **90 days, renewed by use** (the owner's decision of 2026-11-14; it was a fixed 7 days). Each
+  day the parent uses the portal, the 90 days start again. A parent who stays away for 90 days asks
+  for a new code when they come back.
+- The stored session decides when it ends, not the cookie. The cookie is set once, at sign-in, with
+  the longest life browsers allow (400 days), so a parent who keeps using the portal is asked for a
+  code about once a year.
+- Every request still checks the person, the block and the family link (§2). A long session never
+  outlasts what QuickBooks or staff say.
 - **Sign out** ends the session.
 - **These end every session the person has, immediately:**
   - blocking the person;
@@ -350,8 +377,8 @@ Until mail works, `/sign-in` shows *"Parent sign-in isn't available yet."* and s
 - Rate limits hold per email and per IP, and the responses don't reveal anything.
 - One family signs in straight to it. Two families require a choice. A family that has been
   disabled or removed mid-session is refused on the next request.
-- The session ends at 7 days, and immediately on block, on the last row being disabled, and on an
-  email change.
+- The session is renewed by use, at most once a day. It ends after 90 days without use, and
+  immediately on block, on the last row being disabled, and on an email change.
 - Adding an existing person asks for confirmation and links the same person. A second link to the
   same family is refused.
 - Students:
