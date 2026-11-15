@@ -314,6 +314,8 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
  */
 const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
+  "src/lib/parents/contact-edits.ts",
+  "src/lib/parents/contact-fields.ts",
   "src/app/components/parent-frame.tsx",
   "src/app/not-found.tsx",
 ];

@@ -27,16 +27,37 @@ export type QboStub = {
   failQueryFrom: number | null; // answer query number N and later with HTTP 500 (1 is the first query)
   nullQueryBody: boolean;       // answer every query with the JSON body null
   failRevoke: boolean;          // answer revoke requests with HTTP 500 and revoke nothing
+  /**
+   * A customer update (POST .../customer with Id, SyncToken and sparse: true) is answered as QuickBooks is understood to
+   * answer one; like the request itself, this has not been checked against a real company (CUSTOMER_UPDATE in
+   * src/lib/quickbooks/client.ts lists what the owner's sandbox check must confirm, and the stub must follow it).
+   * The SyncToken must be the stored customer's, or the answer is HTTP 400 with Fault code 5010 and nothing changes.
+   * Each top-level field sent replaces the stored one; an empty string clears (a part of the address, or the phone); what
+   * isn't sent stays, unless the request left out `sparse: true`, in which case it is gone, as in a full update. The
+   * token goes up by one and the answer is `{ Customer }` as now stored. An Id the stub doesn't hold answers code 610.
+   */
+  updateFault: string | null;   // answer every customer update with HTTP 400 and this Fault code ("6000": a validation failure; "5010": a stale object)
+  beforeUpdate: ((customer: Record<string, unknown>) => void) | null; // run on the stored customer as an update for it arrives, before its SyncToken is checked: someone editing in QuickBooks at that moment
+  dropApi: boolean;             // close the connection on every API request without answering: QuickBooks can't be reached
   revokeDelayMs: number;
   tokenDelayMs: number; queryDelayMs: number; companyInfoDelayMs: number; refreshExpiresIn: number;
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
 };
+
+/** A value as a customer update stores it: an empty string clears, in an object too, and an object left with nothing is gone. */
+function withoutEmpty(value: unknown): unknown {
+  if (value === "") return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const kept = Object.entries(value).filter(([, v]) => v !== "");
+  return kept.length ? Object.fromEntries(kept) : undefined;
+}
 
 /** Intuit's token and revoke endpoints and the QuickBooks query API, enough for the portal's real client to talk to. */
 export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0, answering = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
     invoices: [], refuseInQuery: false, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
+    updateFault: null, beforeUpdate: null, dropApi: false,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
@@ -46,6 +67,8 @@ export async function startQboStub(): Promise<QboStub> {
       const call: StubCall = { method: req.method!, path: url.pathname, query: url.searchParams, auth: req.headers.authorization ?? "", body };
       stub.calls.push(call);
       const json = (status: number, value: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
+      // A refused write, as QuickBooks sends one: always HTTP 400, told apart by the code. The words are never the portal's to keep.
+      const fault = (code: string) => ({ Fault: { Error: [{ Message: "a message the portal must never store", Detail: "a detail the portal must never store", code, element: "" }], type: "ValidationFault" }, time: new Date().toISOString() });
       // Intuit's token and revoke endpoints take the app's keys as HTTP Basic: a Client ID and a secret, both present.
       const keys = /^Basic (.+)$/.exec(call.auth)?.[1];
       const hasAppKeys = keys !== undefined && /^[^:]+:.+$/.test(Buffer.from(keys, "base64").toString("utf8"));
@@ -73,12 +96,35 @@ export async function startQboStub(): Promise<QboStub> {
         return json(200, {});
       }
       if (!url.pathname.startsWith("/v3/company/")) return json(404, {});
+      if (stub.dropApi) { req.socket.destroy(); return; }
       if (!stub.accessTokens.has(call.auth.replace(/^Bearer /, ""))) return json(401, { fault: { error: [{ code: "3200" }] } });
       answering++; stub.peakApi = Math.max(stub.peakApi, answering);
       res.once("close", () => { answering--; });
       if (stub.apiDelayMs) await new Promise((r) => setTimeout(r, stub.apiDelayMs));
       if (stub.rateLimitNext > 0) { stub.rateLimitNext--; return json(429, { Fault: { Error: [{ Message: "a throttling message the portal must never store" }] } }); }
       if (stub.failNext > 0) { stub.failNext--; return json(500, { Fault: { Error: [{ Message: "a message the portal must never store" }] } }); }
+      if (call.method === "POST") {
+        // The one write the portal sends. Anything else posted to the API is refused.
+        if (!/\/customer$/.test(url.pathname)) return json(400, fault("2010"));
+        if (stub.updateFault) return json(400, fault(stub.updateFault));
+        let sent: Record<string, unknown>;
+        try { sent = JSON.parse(body) as Record<string, unknown>; } catch { return json(400, fault("2010")); }
+        const at = stub.customers.findIndex((c) => c.Id === sent.Id);
+        if (at < 0) return json(400, fault("610"));
+        stub.beforeUpdate?.(stub.customers[at]!);
+        const stored = stub.customers[at]!;
+        if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault("5010"));
+        const updated: Record<string, unknown> = sent.sparse === true ? { ...stored } : { Id: stored.Id };
+        for (const [field, value] of Object.entries(sent)) {
+          if (field === "Id" || field === "SyncToken" || field === "sparse") continue;
+          const kept = withoutEmpty(value);
+          if (kept === undefined) delete updated[field]; else updated[field] = kept;
+        }
+        updated.SyncToken = String(Number(stored.SyncToken ?? 0) + 1);
+        updated.MetaData = { ...(stored.MetaData as object | undefined), LastUpdatedTime: new Date().toISOString() };
+        stub.customers[at] = updated;
+        return json(200, { Customer: updated, time: new Date().toISOString() });
+      }
       const byId = /\/customer\/([^/]+)$/.exec(url.pathname)?.[1];
       if (byId !== undefined) {
         const customer = stub.customers.find((c) => c.Id === decodeURIComponent(byId));
@@ -130,6 +176,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.tokenCalls = () => stub.calls.filter((c) => c.path === "/token");
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.reset = () => {
+    stub.updateFault = null; stub.beforeUpdate = null; stub.dropApi = false;
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
     stub.invoices = []; stub.refuseInQuery = false; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;

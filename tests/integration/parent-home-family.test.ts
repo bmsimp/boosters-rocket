@@ -46,7 +46,7 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     expect(await loadMyFamily(ctxOf(a.identity))).toEqual({
       name: "Alderquist Family",
       students: [{ qboId: FAMILY_A.students[0]!.qboId, name: "Aurelio Alderquist" }, { qboId: FAMILY_A.students[1]!.qboId, name: "Azalea Alderquist" }],
-      me: { name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone },
+      me: { name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone, edits: "own" },
       rosterReadAt: readAt.toISOString(),
     });
     // Each parent gets their own family and not a string of the other's.
@@ -100,7 +100,7 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
       par("NP-P1", "Nora Noparent", "NP-FAM", "nora@noparent.example")]);
     const fromFamily = await seedParentIn({ familyQboId: "NP-FAM", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "NP-FAM" });
     expect(await loadMyFamily(ctxOf(fromFamily.identity))).toEqual({ name: "Noparent Family", students: [{ qboId: "NP-S1", name: "Nico Noparent" }],
-      me: { name: "Noparent Family", email: "home@noparent.example, work@noparent.example", phone: "512-555-0199" }, rosterReadAt: null });
+      me: { name: "Noparent Family", email: "home@noparent.example, work@noparent.example", phone: "512-555-0199", edits: "family" }, rosterReadAt: null });
     // A link that names a record the shape doesn't call a parent is not the person's own record.
     const stale = await seedParentIn({ familyQboId: "NP-FAM", name: "Nora Noparent", email: "nora@noparent.example", sourceQboId: "NP-P1" });
     expect((await loadMyFamily(ctxOf(stale.identity)))!.me).toBeNull();
@@ -115,7 +115,7 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     ]);
     const m = await seedParentIn({ familyQboId: "FLAT-M1", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "FLAT-M1" });
     expect(await loadMyFamily(ctxOf(m.identity))).toEqual({ name: "Marisol Thackeray", students: null,
-      me: { name: "Marisol Thackeray", email: "marisol@flat.example", phone: "512-555-0144" }, rosterReadAt: null });
+      me: { name: "Marisol Thackeray", email: "marisol@flat.example", phone: "512-555-0144", edits: "family" }, rosterReadAt: null });
     // A customer that isn't a member type is not a family in a flat club.
     const notMember = await seedParentIn({ familyQboId: "FLAT-SUB", name: "Tobias Thackeray", email: "tobias@flat.example" });
     expect(await loadMyFamily(ctxOf(notMember.identity))).toBeNull();

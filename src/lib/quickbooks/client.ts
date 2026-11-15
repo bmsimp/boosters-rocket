@@ -119,12 +119,19 @@ function within<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T
 
 const pause = (ms: number, signal: AbortSignal | undefined) => within(new Promise<void>((r) => setTimeout(r, ms)), signal);
 
-/** GET one QuickBooks API path. This module has no way to send anything else to the API (spec §3). */
+/** Refuses when the saved connection error is one only an Admin can fix (QboGetOptions.failFast). A plain read: no row lock. */
+async function refuseWhenOnlyAnAdminCanFixIt(): Promise<void> {
+  const [c] = await db.select({ lastError: qboConnection.lastError }).from(qboConnection);
+  if (errorNeedsAdmin(c?.lastError)) throw new QboError("QuickBooks needs to be connected again.", "needs_admin");
+}
+
+/**
+ * GET one QuickBooks API path. Every read goes through here. The one thing this module can change in QuickBooks is a
+ * customer's phone and billing address, through qboUpdateCustomerContact() at the foot of the file and nothing else
+ * (tests/unit/quickbooks-writes.test.ts).
+ */
 export async function qboGet(path: string, params: Record<string, string> = {}, o: QboGetOptions = {}): Promise<unknown> {
-  if (o.failFast) {
-    const [c] = await db.select({ lastError: qboConnection.lastError }).from(qboConnection); // a plain read: no row lock
-    if (errorNeedsAdmin(c?.lastError)) throw new QboError("QuickBooks needs to be connected again.", "needs_admin");
-  }
+  if (o.failFast) await refuseWhenOnlyAnAdminCanFixIt();
   let force = false, refreshed = false, retried = false;
   for (;;) {
     const a = await within(accessToken({ force }), o.signal);
@@ -242,4 +249,111 @@ export async function qboCustomerById(customerId: string, o: QboGetOptions = {})
   if (!isQboId(customerId)) throw new QboError("That isn't a QuickBooks customer.", "bad_id");
   const customer = ((await qboGet(`customer/${customerId}`, {}, o)) as { Customer?: unknown } | null)?.Customer;
   return typeof customer === "object" && customer !== null && !Array.isArray(customer) ? (customer as Record<string, unknown>) : null;
+}
+
+export type CustomerAddress = { line1: string; line2: string; city: string; region: string; postalCode: string; country: string };
+/** What a contact update may change: the phone, the billing address, or both. A part left out is not sent, and so not touched. */
+export type CustomerContactChange = { phone?: string; address?: CustomerAddress };
+
+/**
+ * The one write the portal sends to QuickBooks, exactly as it is sent, and the Fault codes its callers rely on.
+ * NOT YET TRIED AGAINST A REAL QUICKBOOKS COMPANY: nobody could reach the sandbox when this was built, so it follows
+ * Intuit's documentation as remembered. The owner's sandbox check must confirm, with `minorversion` 75:
+ *   1. `POST /v3/company/<realm>/customer` with `{ Id, SyncToken, sparse: true, PrimaryPhone: { FreeFormNumber } }`
+ *      answers 200 with `{ Customer: {...} }`, changes the phone and nothing else (DisplayName, the email, ParentRef,
+ *      CustomerTypeRef, Active and BillAddr are as they were), and raises SyncToken;
+ *   2. the same with `BillAddr: { Line1, Line2, Line3, Line4, Line5, City, CountrySubDivisionCode, PostalCode, Country }`
+ *      replaces the billing address, and the phone is as it was;
+ *   3. HOW A FIELD IS CLEARED. This sends an empty string: `PrimaryPhone: { FreeFormNumber: "" }` for no phone, and
+ *      `""` for each part of the address left empty (Line3 to Line5 always, since the portal shows two lines). Confirm
+ *      that QuickBooks accepts the empty strings and that the field is then empty in QuickBooks. If it refuses them, or
+ *      keeps the old value, `body` below is the one place to change, and tests/helpers/qbo-stub.ts must follow it;
+ *   4. an update with an old SyncToken answers HTTP 400 with `Fault.Error[0].code` "5010" (`faults.stale`) and
+ *      changes nothing;
+ *   5. a value QuickBooks will not take (a phone of 31 characters, say) answers HTTP 400 with a code that
+ *      `faults.validation` matches (2xxx, or 6000), and changes nothing;
+ *   6. for the record: a duplicate DisplayName is "6240" (`faults.duplicateName`). This update never sends a name, so
+ *      the code is kept only to name it in the audit log if it ever comes back.
+ * A stale object, a duplicate name and a validation failure all arrive as HTTP 400: the code is what tells them apart.
+ * Don't change the body without trying the new one in the sandbox first.
+ */
+export const CUSTOMER_UPDATE = {
+  /** A create and an update share this address; `sparse: true` with an Id and a SyncToken makes it an update of the fields sent. */
+  path: "customer",
+  body: (customerId: string, syncToken: string, change: CustomerContactChange) => ({
+    Id: customerId, SyncToken: syncToken, sparse: true,
+    ...(change.phone !== undefined ? { PrimaryPhone: { FreeFormNumber: change.phone } } : {}),
+    ...(change.address !== undefined ? { BillAddr: {
+      Line1: change.address.line1, Line2: change.address.line2, Line3: "", Line4: "", Line5: "",
+      City: change.address.city, CountrySubDivisionCode: change.address.region, PostalCode: change.address.postalCode, Country: change.address.country,
+    } } : {}),
+  }),
+  faults: { stale: "5010", duplicateName: "6240", validation: /^(2\d{3}|6000)$/ },
+} as const;
+
+/** The code QuickBooks gave a refused write (`e.code` is `fault_<code>`), or null when the failure was something else. */
+export const faultCodeOf = (e: QboError): string | null => /^fault_(\d{1,6})$/.exec(e.code)?.[1] ?? null;
+
+/** QuickBooks' own code for a refusal, and none of its words: `fault_<code>` from `Fault.Error[0].code`, else `http_<status>`. */
+async function refusalCode(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  const fault = (body?.Fault ?? body?.fault) as Record<string, unknown> | undefined;
+  const errors = fault?.Error ?? fault?.error;
+  const first = (Array.isArray(errors) ? errors[0] : undefined) as { code?: unknown } | null | undefined;
+  return typeof first?.code === "string" && /^\d{1,6}$/.test(first.code) ? `fault_${first.code}` : `http_${res.status}`;
+}
+
+export type QboWriteOptions = {
+  /** The company the caller means to change, as the roster cache names it. When another company is connected, nothing is sent. */
+  realmId: string;
+  /** How long the request may take. */
+  timeoutMs?: number;
+  /** The caller's own deadline for everything it is doing. */
+  signal?: AbortSignal;
+};
+
+/**
+ * Changes one customer's phone, billing address or both: the only request this module sends to the QuickBooks API
+ * that is not a GET. `syncToken` is the version the person editing was shown; QuickBooks refuses the change when the
+ * record has moved on since (`fault_5010`), and nothing is overwritten. It returns the customer as QuickBooks now has it.
+ *
+ * Like a parent's reads, it refuses at once when only an Admin can fix the connection, and asks nothing of a company
+ * other than the one the caller means. A 401 is answered by one token refresh and one more try: QuickBooks did not
+ * act on a request it refused to authenticate. Nothing else is tried twice: after a timeout or a 5xx the portal can't
+ * know whether the change was made, and sending it again could only meet its own new SyncToken.
+ *
+ * `customerId` is the caller's to get right: it comes from the session's own roster record, never from a request.
+ */
+export async function qboUpdateCustomerContact(customerId: string, syncToken: string, change: CustomerContactChange, o: QboWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(customerId) || !/^\d{1,20}$/.test(syncToken)) throw new QboError("That isn't a QuickBooks customer.", "bad_id");
+  if (change.phone === undefined && change.address === undefined) throw new QboError("There is nothing to change.", "nothing_to_change");
+  await refuseWhenOnlyAnAdminCanFixIt();
+  const body = JSON.stringify(CUSTOMER_UPDATE.body(customerId, syncToken, change));
+  let force = false, refreshed = false;
+  for (;;) {
+    const a = await within(accessToken({ force }), o.signal);
+    force = false;
+    if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
+    const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${CUSTOMER_UPDATE.path}`);
+    url.searchParams.set("minorversion", QBO_MINOR_VERSION);
+    const timeout = AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS);
+    const gaveUp = () => timeout.aborted || o.signal?.aborted === true;
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "POST", body, headers: { authorization: `Bearer ${a.token}`, accept: "application/json", "content-type": "application/json" },
+        signal: o.signal ? AbortSignal.any([timeout, o.signal]) : timeout, redirect: "error" });
+    } catch {
+      throw gaveUp() ? timedOut() : new QboError("Couldn't reach QuickBooks.", "unreachable");
+    }
+    if (res.status === 401 && !refreshed) { // the token was revoked or replaced: refresh once and send it again
+      refreshed = true; force = true;
+      await res.body?.cancel().catch(() => {});
+      continue;
+    }
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    let customer: unknown;
+    try { customer = ((await res.json()) as { Customer?: unknown } | null)?.Customer; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
+    if (typeof customer !== "object" || customer === null || Array.isArray(customer)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
+    return customer as Record<string, unknown>;
+  }
 }
