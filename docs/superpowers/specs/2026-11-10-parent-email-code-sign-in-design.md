@@ -112,7 +112,9 @@ night a room full of parents signs in from the school's Wi-Fi, which the portal 
 address. At 10 requests the eleventh parent got the usual message and no email, with nothing to
 tell them why. Guessing a code is stopped by the limits that belong to the code and the address:
 5 wrong tries end a code, a code lasts 10 minutes, and an address gets 3 codes in 15 minutes. The
-per-IP limits only stop a flood, so they are set well above what a full room needs.
+per-IP limits only stop a flood, so they are set well above what a full room needs. The cheap
+in-memory cap in front of them (per IP address and minute, before a request reaches the database)
+was 20 a minute and is now the same two numbers, so it is never the first limit a full room meets.
 
 ### Addresses
 

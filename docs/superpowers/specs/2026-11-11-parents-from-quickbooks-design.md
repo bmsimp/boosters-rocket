@@ -490,7 +490,8 @@ fixed.
   under a lock that every change of address waits for, and mails only that address. A request made with an
   address that has just been replaced is refused like an address that was never on file. The same lock is
   taken once more when a code is right, after the session is stored: a code proved with the old address while
-  the change was under way no longer becomes a session.
+  the change was under way no longer becomes a session. It is refused and audited (`signin.refused`, reason
+  `address_changed`).
 - **Closed: a rare deadlock between a code request and an address change.** A code request now takes the
   person's row before it touches a code, the order every change of address uses, so neither side can hold what
   the other waits for. `tests/integration/signin-address-race.test.ts` runs a code request and a code check

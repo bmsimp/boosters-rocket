@@ -21,7 +21,7 @@ import { chooseFamily, completeParentSignin } from "@/lib/parents/family-choice"
 import { blockPerson } from "@/lib/parents/people";
 import { endParentSessions, enabledGuardianRows, renewParentSession } from "@/lib/parents/sessions";
 import { env } from "@/env";
-import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { seedParentSettings } from "../helpers/roster-cache";
 
 const IP = "203.0.113.30";
@@ -123,6 +123,21 @@ describe("the parent door", () => {
     expect(activated.map((x) => x.targetId).sort()).toEqual([one.id, two.id].sort());
     for (const row of activated) expect(row).toMatchObject({ door: "parent", actorId: a.id, before: { status: "invited" }, after: { status: "active" }, ip: IP });
     expect((await db.select().from(auditLog)).some((x) => x.action === "signin")).toBe(false);
+  });
+
+  it("activates nothing and records no sign-in for a session that was ended while it was being made", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g = await seedGuardian({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    const live = await seedParentSession(a.authUserId);
+    await endParentSessions(a.id);                                       // a block or a change of address got there first
+    expect(await completeParentSignin(a.id, IP, live.id)).toEqual({ familyQboId: null, sessionEnded: true });
+    expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
+    expect(await db.select().from(auditLog)).toEqual([]);
+    // The session that is still there is entered into the one family, and audited.
+    const kept = await seedParentSession(a.authUserId);
+    expect(await completeParentSignin(a.id, IP, kept.id)).toEqual({ familyQboId: "F1" });
+    expect((await db.select().from(parentAuthSession))[0]).toMatchObject({ id: kept.id, familyQboId: "F1" });
+    expect((await db.select().from(auditLog)).map((x) => x.action)).toEqual(["guardian.activate", "signin"]);
   });
 
   it("signs a parent out on their next request when an Admin switched sign-ins off after they got in", async () => {
@@ -311,7 +326,8 @@ describe("the parent door", () => {
     expect(o.advanced?.ipAddress?.ipAddressHeaders).toEqual(["cf-connecting-ip"]);
     expect(o.emailAndPassword?.enabled).toBe(false);
     // In front of the database limits, an in-memory cap per IP on the two code routes (on when NODE_ENV is production).
-    expect(o.rateLimit?.customRules).toEqual({ "/portal-code/send": { window: 60, max: 20 }, "/portal-code/verify": { window: 60, max: 20 } });
+    // A minute of it allows what the database allows in 15, so it is never the first limit a full room meets.
+    expect(o.rateLimit?.customRules).toEqual({ "/portal-code/send": { window: 60, max: 60 }, "/portal-code/verify": { window: 60, max: 180 } });
     expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });
 

@@ -46,7 +46,8 @@ export const parentCodePlugin = () => ({
         await ctx.context.internalAdapter.deleteSession(session.token);
         return ctx.json({ ok: false, error: "rejected" });
       }
-      const { familyQboId } = await completeParentSignin(r.parentId, ip, session.id);
+      const { familyQboId, sessionEnded } = await completeParentSignin(r.parentId, ip, session.id);
+      if (sessionEnded) return ctx.json({ ok: false, error: "rejected" });   // ended while it was being made: no cookie for it
       // The cookie is sent this once and has to outlive the session row, which use renews (sessions.ts).
       await setSessionCookie(ctx, { session, user }, false, { maxAge: PARENT_SESSION_COOKIE_SECONDS });
       return ctx.json({ ok: true, next: familyQboId ? landingPath(ctx.body.next) : withReturnPath("/choose-family", ctx.body.next) });
