@@ -242,7 +242,7 @@ export const familyMoney = pgTable("family_money", {
   readAt: timestamp("read_at", { withTimezone: true }),
   invoices: jsonb("invoices").$type<StoredInvoice[]>(),              // open invoices, then those paid in the last 12 months
   totalCents: bigint("total_cents", { mode: "number" }),             // the sum of the open invoices
-  balanceWithJobsCents: bigint("balance_with_jobs_cents", { mode: "number" }), // QuickBooks' own figure, kept as a cross-check only
+  balanceWithJobsCents: bigint("balance_with_jobs_cents", { mode: "number" }), // QuickBooks' own figure, a cross-check only; null when it would count customers the total leaves out
   currency: text("currency"),                                        // null when the open invoices are in more than one
   mismatchAuditedAt: timestamp("mismatch_audited_at", { withTimezone: true }), // the last time a differing cross-check was audited
   failedAt: timestamp("failed_at", { withTimezone: true }),

@@ -1,7 +1,7 @@
 // Parent-facing: everything here takes one family's id, which the caller takes from the session (ctx.familyQboId), and
 // returns that family's money alone. Nothing in a request ever chooses the customers: they are read from the roster
 // cache for that family. This module is in the staff-only import scan (tests/integration/page-guards.test.ts).
-import { eq, or, sql } from "drizzle-orm";
+import { eq, inArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, qboConnection, qboCustomer, type StoredInvoice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
@@ -49,7 +49,13 @@ export type MoneyFigures = {
 /** `figures` is null when there is nothing to show: no successful read yet for this family in the connected company. */
 export type FamilyMoney = { familyName: string | null; figures: MoneyFigures | null };
 
-type FamilyCustomers = { familyName: string; customers: Map<string, string | null> };
+type FamilyCustomers = {
+  familyName: string;
+  /** The customers whose invoices are the family's, each with the name to show beside its invoices (null for the family itself). */
+  customers: Map<string, string | null>;
+  /** The cache holds a customer directly under the family that is not one of those. */
+  othersUnder: boolean;
+};
 
 /**
  * Whose invoices are a family's (v1 spec §8.2). Layered: the family customer and its active direct sub-customers of the
@@ -64,13 +70,30 @@ async function familyCustomers(familyQboId: string, tx?: Tx): Promise<FamilyCust
   const family = rows.find((r) => r.qboId === familyQboId);
   if (!family || family.typeQboId === null) return null;
   const customers = new Map<string, string | null>([[family.qboId, null]]);
-  if (shape.kind === "flat") return shape.memberTypeIds.includes(family.typeQboId) ? { familyName: family.name, customers } : null;
+  const under = rows.filter((r) => r.qboId !== familyQboId && r.parentQboId === familyQboId);
+  if (shape.kind === "flat") return shape.memberTypeIds.includes(family.typeQboId) ? { familyName: family.name, customers, othersUnder: under.length > 0 } : null;
   if (family.typeQboId !== shape.familyTypeId) return null;
-  const under = [shape.studentTypeId, shape.parentTypeId].filter((t): t is string => t !== null);
-  for (const r of rows) {
-    if (r.qboId !== familyQboId && r.parentQboId === familyQboId && r.active && r.typeQboId !== null && under.includes(r.typeQboId)) customers.set(r.qboId, r.name);
+  const included = [shape.studentTypeId, shape.parentTypeId].filter((t): t is string => t !== null);
+  for (const r of under) {
+    if (r.active && r.typeQboId !== null && included.includes(r.typeQboId)) customers.set(r.qboId, r.name);
   }
-  return { familyName: family.name, customers };
+  return { familyName: family.name, customers, othersUnder: under.length > customers.size - 1 };
+}
+
+/**
+ * Whether QuickBooks' BalanceWithJobs for the family customer adds up the same customers as the family's total. It
+ * counts the family customer and every customer under it, at every depth; the total leaves some of those out on
+ * purpose (another family nested under this one, an inactive student, a sponsor, a student's own sub-customer).
+ * Compared anyway, a credit or a debt of a customer the family is not shown would be told to it as its own, and
+ * audited as a difference that isn't one. So the two are compared only when the cache holds nothing under the family
+ * but the customers whose invoices were read.
+ */
+async function balanceCoversTheSame(familyQboId: string, family: FamilyCustomers, tx: Tx): Promise<boolean> {
+  if (family.othersUnder) return false;
+  const under = [...family.customers.keys()].filter((id) => id !== familyQboId);
+  if (!under.length) return true;
+  const [deeper] = await tx.select({ qboId: qboCustomer.qboId }).from(qboCustomer).where(inArray(qboCustomer.parentQboId, under)).limit(1);
+  return deeper === undefined;
 }
 
 /** The stored figures, unless they came from another QuickBooks company than the roster cache: those are treated as absent. */
@@ -122,13 +145,17 @@ async function readFromQuickBooks(familyQboId: string, tx: Tx, timeoutMs: number
   if (!family) return fail("not_a_family");
   const ids = [...family.customers.keys()];
   if (!ids.every(isQboId)) return fail("bad_id");
+  const comparable = await balanceCoversTheSame(familyQboId, family, tx);
   const o: QboGetOptions = { timeoutMs, signal: AbortSignal.timeout(timeoutMs * 1.5), retry: true, failFast: true, realmId };
   try {
     const shown = shownInvoices(await qboInvoices(ids, o), family.customers, utcDay());
     if (!shown) return fail("bad_answer");
-    // QuickBooks' own balance, as a cross-check only (v1 spec §8.3): the figure a parent sees never waits on it.
+    // QuickBooks' own balance, as a cross-check only (v1 spec §8.3): the figure a parent sees never waits on it. It is
+    // not asked for when it would count customers the total leaves out: there is then nothing to compare it with.
     let balanceWithJobsCents: number | null = null;
-    try { balanceWithJobsCents = toCents((await qboCustomerById(familyQboId, o))?.BalanceWithJobs); } catch (e) { if (!(e instanceof QboError)) throw e; }
+    if (comparable) {
+      try { balanceWithJobsCents = toCents((await qboCustomerById(familyQboId, o))?.BalanceWithJobs); } catch (e) { if (!(e instanceof QboError)) throw e; }
+    }
     return { ok: true, realmId, ...shown, balanceWithJobsCents };
   } catch (e) {
     // Only a QboError's own short code is kept; anything else (an answer that wasn't the shape expected) gets a fixed one.

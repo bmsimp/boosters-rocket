@@ -82,6 +82,9 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
     expect(money.figures!.totalCents).toBe(8500);
     expect(invoiceQueries(stub)).toEqual(["select * from Invoice where CustomerRef = '30' orderby Id startposition 1 maxresults 1000"]);
+    // QuickBooks' balance for the member counts the job under it, so it is not compared with the member's own invoices.
+    expect(await moneyRow("30")).toMatchObject({ balanceWithJobsCents: null, mismatchAuditedAt: null });
+    expect(await audits()).toHaveLength(0);
   });
 
   it.each([
@@ -575,6 +578,30 @@ describe("the cross-check against QuickBooks' own balance (v1 spec §8.3)", () =
     const money = await loadFamilyMoney("10");
     expect(money.figures).toMatchObject({ totalCents: 18500, credit: true }); // the figure stays the sum
     expect(await audits()).toHaveLength(1);
+  });
+
+  // QuickBooks' BalanceWithJobs adds up the family customer and every customer under it. The family's total leaves
+  // some of those out on purpose, so the two are compared only when nothing else is under the family.
+  it.each([
+    ["another family nested under it", fam("14", "A Family Under A Family", { parentQboId: "10" })],
+    ["an inactive student", stu("13", "Old Student", "10", { active: false })],
+    ["a sub-customer that is neither a student nor a parent", { qboId: "15", displayName: "A Sponsor", typeQboId: "M", parentQboId: "10" }],
+    ["a student's own sub-customer", stu("16", "Grandchild", "12")],
+  ])("makes no cross-check, says nothing of a credit and audits nothing when QuickBooks' balance also counts %s", async (_what, other) => {
+    await twoFamilies();
+    await addToCache([other]);
+    await connectCompany(stub);
+    await setFreshSeconds(0);
+    stub.invoices = [inv("1", "12"), inv("2", other.qboId, { Balance: 0, TotalAmt: 50 })];
+    balanceWithJobs(35); // the family's own $85.00, less $50.00 held as a credit for the customer it is not shown
+    const money = await loadFamilyMoney("10");
+    expect(money.figures).toMatchObject({ current: true, totalCents: 8500, credit: false });
+    expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
+    expect(await moneyRow("10")).toMatchObject({ totalCents: 8500, balanceWithJobsCents: null, mismatchAuditedAt: null });
+    balanceWithJobs(500); // nor is what that customer owes audited as this family's difference
+    await loadFamilyMoney("10");
+    expect(await audits()).toHaveLength(0);
+    expect(stub.apiCalls().filter((c) => c.path.includes("/customer/"))).toEqual([]); // the balance is not asked for at all
   });
 
   it("audits nothing when the two agree", async () => {
