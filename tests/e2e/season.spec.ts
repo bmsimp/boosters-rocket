@@ -1,6 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
+import postgres from "postgres";
 import { parentSessionCookie } from "./parent-session";
 import { staffSessionCookie } from "./staff-session";
+
+const sql = postgres(process.env.DATABASE_URL!);
+test.afterAll(async () => { await sql.end(); });
 
 // The season scripts/seed-e2e.ts gives the club: "Fall 2026", current, four steps with no dates (Join, Uniforms, Season,
 // Wrap-up). The Quetzalcoatl family has done Join; in Uniforms, Xochitl is ticked off for the fitting and Yaretzi is
@@ -131,6 +135,25 @@ test("staff tick a student off, and the parent then sees it; unticked, the famil
   await expect(again.locator(".state")).toHaveText("Not done yet");
   await page.goto("/");
   await expect(page.getByRole("region", { name: /^Fall 2026/ }).locator(".season-title")).toContainText("Set 2 of 4");
+});
+
+test("staff open one family's season from a requirement's list, and the visit is in the audit log", async ({ page }) => {
+  const row = await fittingWithYaretziUnticked(page);
+  // Only rows written from here on count. The list links to every family on it: none of those links is a visit.
+  const [mark] = await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`;
+  await row.getByRole("link", { name: "Everything asked of Quetzalcoatl Family" }).click();
+  await expect(page).toHaveURL(/\/staff\/seasons\/progress\/family\/E2E-FAMILY\?season=/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);
+  const uniforms = page.getByRole("region", { name: "2. Uniforms" });
+  await expect(uniforms).toContainText("The step this family is on.");
+  await expect(uniforms).toContainText(`Xochitl Quetzalcoatl${FITTING}Done`);
+  await expect(uniforms).toContainText(`Yaretzi Quetzalcoatl${FITTING}Not done yet`);
+  // One family's page: nothing asked of another family alone, and nobody else's name.
+  await expect(page.getByRole("main")).not.toContainText(/Tuba locker|Percussion truck|Cast on his arm|Rivera|Wolfgang/);
+  await noSidewaysScroll(page);
+  const reads = await sql`SELECT target_id, actor_label, permission FROM audit_log WHERE id > ${mark!.id} AND action = 'season.progress.family.read'`;
+  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "E2E-FAMILY", actor_label: "e2e-admin@example.org", permission: "Season.Progress.Read" }]); // one visit, one row
 });
 
 test("staff see the season's set-up: its steps, what each asks, and the kinds that are coming later", async ({ page }) => {

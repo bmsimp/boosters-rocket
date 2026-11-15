@@ -59,7 +59,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
             </form>
           )}
           {canChange && ticked && shown.length > 0 && (
-            <div className="row-actions">
+            <div className="row-actions everyone-shown">
               {anyUnticked && <OneButton label={`Tick everyone shown (${shown.length})`} pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, shownIds, true)} />}
               {anyTicked && <OneButton label={`Untick everyone shown (${shown.length})`} pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, shownIds, false)} />}
             </div>

@@ -420,6 +420,8 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .one-button { display: grid; gap: var(--s2); justify-items: start; }
 .lines.progress-rows li { grid-template-columns: minmax(0, 1fr); align-items: start; }
 .progress-rows .state { margin-top: 2px; }
+.progress-rows .when a { display: inline-block; padding: var(--s2) 0; } /* room to tap the way to a family's page, above the row's buttons */
+.everyone-shown { margin-top: var(--s3); } /* stands clear of the search above it */
 /* ---- End of Season ---- */
 
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====
