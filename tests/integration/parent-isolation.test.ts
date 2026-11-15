@@ -4,7 +4,7 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 import { createElement } from "react";
 import { resetDb } from "../helpers/db";
-import { seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 
 /**
  * The gate every parent page passes through: one family never sees another's data.
@@ -50,6 +50,8 @@ const NO_FAMILY_DATA: Record<string, string> = {
 const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`, ...rosterOf(family)],
   "/family": (family) => rosterOf(family),
+  // The family's name, every invoice's number and amount, the total, and the address behind the Pay button.
+  "/payments": (family) => [family.spec.family.name, ...moneyMarkers(family.spec)],
 };
 /** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */
 function rosterOf(family: SeededParent): string[] {

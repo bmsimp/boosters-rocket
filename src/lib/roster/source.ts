@@ -1,6 +1,6 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
+import { familyMoney, jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { clearParentAccess } from "@/lib/parents/company-change";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
@@ -23,8 +23,9 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
 /**
  * When the cache came from a company other than `realmId`, everything that belonged to that company goes: the cache,
  * the membership shape (its type IDs mean nothing in another company), the roster's run history (so the worker reads
- * the new company at once; `keepRunId` spares the run doing this), and all parent access (`clearParentAccess`). The
- * same company, or a cache that says no company, keeps it all. The caller owns the transaction and holds ROSTER_LOCK.
+ * the new company at once; `keepRunId` spares the run doing this), all parent access (`clearParentAccess`), and what
+ * each family was last seen to owe (`family_money`: another company's invoices are never shown). The same company, or
+ * a cache that says no company, keeps it all. The caller owns the transaction and holds ROSTER_LOCK.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
   const from = await getRosterSource(tx);
@@ -33,6 +34,7 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   await clearParentAccess(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomer);
   await tx.delete(qboCustomerType);
+  await tx.delete(familyMoney);
   await tx.delete(setting).where(eq(setting.key, SHAPE_KEY));
   await tx.delete(jobRun).where(o.keepRunId === undefined ? eq(jobRun.job, ROSTER_JOB) : and(eq(jobRun.job, ROSTER_JOB), ne(jobRun.id, o.keepRunId)));
   await setRosterSource(tx, realmId);

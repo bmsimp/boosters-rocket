@@ -5,7 +5,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { qboConnection, type QboEnvironment } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { qboEndpoints, QboError, QBO_SCOPE } from "./endpoints";
+import { errorNeedsAdmin, qboEndpoints, QboError, QBO_SCOPE } from "./endpoints";
 import { QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 
@@ -38,13 +38,8 @@ export async function getConnection(tx?: Tx) {
 /** The address Intuit returns the Admin to. It must be listed, exactly, on the Intuit app. */
 export function qboRedirectUri(): string { return `${env.APP_URL.replace(/\/+$/, "")}/api/quickbooks/callback`; }
 
-/**
- * Whether a recorded connection error (`<sentence> (<code>)`) is one only an Admin can fix by connecting again:
- * Intuit no longer accepts the refresh token, or this server can't read the saved keys. Retrying either changes nothing.
- */
-export function errorNeedsAdmin(lastError: string | null | undefined): boolean {
-  return /\((invalid_grant|unreadable)\)$/.test(lastError ?? "");
-}
+// Defined beside QboError so the client can ask it too (parent reads refuse at once) without importing this module.
+export { errorNeedsAdmin };
 
 /** What the settings pages may show: never the secret, a token or the company's ID. */
 export async function connectionView(): Promise<QboConnectionView> {

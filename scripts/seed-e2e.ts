@@ -103,6 +103,30 @@ async function main() {
   // The cache says which company it came from, as a real refresh records it; without this the pages treat it as unread.
   await sql`INSERT INTO setting (key, value) VALUES ('roster.source', ${sql.json({ realmId: "9130000000000001" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+  // What each of Zelda's two families owes, as figures QuickBooks has just given: an invoice with a pay link, one
+  // without, and one paid. The freshness window is set to a week so the rows stay fresh for the whole run: a page load
+  // that found them stale would ask Intuit's real servers, with the made-up tokens above. Dates are counted from today
+  // so the due words ("in 8 days", "Was due") come out the same whenever the run is.
+  const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+  const invoice = (qboId: string, number: string, forName: string | null, cents: number, o: { due?: number; paid?: boolean; payLink?: string } = {}) => ({
+    qboId, number, forName, date: day(-30), dueDate: o.due === undefined ? null : day(o.due), totalCents: cents, balanceCents: o.paid ? 0 : cents, currency: "USD", payLink: o.payLink ?? null });
+  const families = [
+    { id: "E2E-FAMILY", total: 18500, invoices: [
+      invoice("902", "QZ-1042", null, 10000, { due: -20 }), // soonest due first, as a read from QuickBooks stores them
+      invoice("901", "QZ-1041", "Xochitl Quetzalcoatl", 8500, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-quetzalcoatl-1041" }),
+      invoice("903", "QZ-1017", null, 15000, { paid: true }) ] },
+    { id: "E2E-FAMILY-2", total: 37666, invoices: [
+      invoice("911", "SF-2051", "Wolfgang Secondborn", 31247, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-second-2051" }),
+      invoice("912", "SF-2052", null, 6419, { due: 40 }),
+      invoice("913", "SF-2009", null, 27358, { paid: true }) ] },
+  ];
+  await sql`INSERT INTO setting (key, value) VALUES ('money.settings', ${sql.json({ freshSeconds: 7 * 86_400 })})
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+  await sql`DELETE FROM family_money`;
+  for (const f of families) {
+    await sql`INSERT INTO family_money (family_qbo_id, realm_id, read_at, invoices, total_cents, balance_with_jobs_cents, currency)
+            VALUES (${f.id}, '9130000000000001', now(), ${sql.json(f.invoices)}, ${f.total}, ${f.total}, 'USD')`;
+  }
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   await sql.end();
