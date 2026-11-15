@@ -5,11 +5,7 @@ const outbox = vi.hoisted(() => [] as Msg[]);
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { outbox.push(m); } }));
 // The request a page is rendered for, so getParentState() can be asked what the portal makes of a browser's cookie:
 // the real Better Auth session read, the real re-check and the real renewal, with only the request itself made up.
-const browser = vi.hoisted(() => ({ cookie: "" }));
-vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ cookie: browser.cookie, "cf-connecting-ip": "203.0.113.30" }),
-  cookies: async () => ({ get: () => undefined }),
-}));
+import { fromBrowser } from "../helpers/page-request";
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -54,7 +50,7 @@ async function signIn(email: string, extra: Record<string, unknown> = {}) {
 }
 const DAY = 86_400_000;
 /** What the portal makes of a page request from a browser holding this cookie. */
-const pageRequest = async (cookie: string) => { browser.cookie = cookie; return getParentState(); };
+const pageRequest = async (cookie: string) => { fromBrowser(cookie); return getParentState(); };
 /** Moves every stored time of the session back, as if this long had passed since they were written. */
 async function timePasses(ms: number) {
   const [row] = await db.select().from(parentAuthSession);
@@ -69,7 +65,7 @@ const stateOf = async (cookie: string) => {
 };
 
 describe("the parent door", () => {
-  beforeEach(async () => { await resetDb(); outbox.length = 0; browser.cookie = ""; await seedWorkingMail(); });
+  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); });
 
   it("answers the same for known, unknown, blocked and all-disabled, and only the known one gets mail", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardian({ parentId: a.id, familyQboId: "F1" });

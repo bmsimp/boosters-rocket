@@ -15,12 +15,8 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 type Msg = { to: string; subject: string; text: string; html: string };
 const outbox = vi.hoisted(() => [] as Msg[]);
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { outbox.push(m); } }));
-// The request a page is rendered for: the browser's cookie and its address.
-const browser = vi.hoisted(() => ({ cookie: "" }));
-vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ cookie: browser.cookie, "cf-connecting-ip": "203.0.113.60" }),
-  cookies: async () => ({ get: () => undefined }),
-}));
+// The request a page is rendered for (the browser's cookie and its address) is made up; the session read is real.
+import { cookiesSetBy, fromBrowser } from "../helpers/page-request";
 
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, parent, parentAuthSession, parentAuthUser, signinCode } from "@/lib/db/schema";
@@ -44,7 +40,7 @@ async function post(path: string, body: unknown) {
     method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", origin: env.APP_URL, "cf-connecting-ip": IP },
   }));
 }
-const cookieFrom = (res: Response) => res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
+const cookieFrom = cookiesSetBy;
 /** Asks for a code as the sign-in page does and waits for the email; null when none came. */
 async function codeMailedTo(typed: string): Promise<Msg | null> {
   const before = outbox.length;
@@ -53,14 +49,14 @@ async function codeMailedTo(typed: string): Promise<Msg | null> {
   return outbox.at(-1)!;
 }
 const codeIn = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
-const pageRequest = async (cookie: string) => { browser.cookie = cookie; return getParentState(); };
+const pageRequest = async (cookie: string) => { fromBrowser(cookie, IP); return getParentState(); };
 const actions = async () => (await db.select().from(auditLog).orderBy(auditLog.id)).map((r) => r.action);
 /** A minute and more goes by: a second code may be asked for (the portal refuses one inside 60 seconds). */
 const aMinutePasses = () => db.update(signinCode).set({ createdAt: new Date(Date.now() - 120_000) });
 
 describe("a parent the roster refresh made signs in", () => {
   beforeEach(async () => {
-    await resetDb(); outbox.length = 0; browser.cookie = "";
+    await resetDb(); outbox.length = 0;
     stub.reset(); Object.assign(stub, fznCompany());
     await seedConnected(stub); await saveShape(FZN_SHAPE, { actor: worker.actor, ip: null });
     await seedWorkingMail(); await seedParentSettings(SIGNINS_ON);
