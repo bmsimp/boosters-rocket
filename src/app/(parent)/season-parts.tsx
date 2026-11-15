@@ -19,7 +19,8 @@ const first = (name: string) => name.trim().split(/\s+/)[0] || name;
 /**
  * The season ruler (DESIGN.md, Season set ruler): the steps as cells in order, the finished ones ticked, the current
  * one filled with the club's color, and a dot for each student on it. Not a control. The dots are decoration: the same
- * facts are in words in the students box. Nothing is drawn for a season with no steps.
+ * facts are in words in the students box. Nothing is drawn for a season with no steps. To a parent a step is a "set",
+ * the word the ruler's design uses; staff, who build the season, call it a step.
  */
 export function SeasonRuler({ season }: { season: MySeason }) {
   const { steps, currentIndex } = season;
@@ -30,8 +31,8 @@ export function SeasonRuler({ season }: { season: MySeason }) {
       <div className="wrap">
         <div className="season-head">
           <p id="season-h" className="season-title">{season.name} · <b>{current
-            ? <>Step {currentIndex! + 1} of {steps.length}<span className="current-name">: {current.name}</span></>
-            : steps.length === 1 ? <>The one step is done</> : <>All {steps.length} steps done</>}</b></p>
+            ? <>Set {currentIndex! + 1} of {steps.length}<span className="current-name">: {current.name}</span></>
+            : steps.length === 1 ? <>The one set is done</> : <>All {steps.length} sets done</>}</b></p>
           <a href="/season">See the whole season</a>
         </div>
         <ol className={steps.length > 6 ? "sets many" : "sets"} style={{ ["--count" as string]: steps.length }}>
@@ -44,7 +45,7 @@ export function SeasonRuler({ season }: { season: MySeason }) {
                   {i + 1}
                 </span>
                 <span className="label">{step.name}</span>
-                <span className="visually-hidden">{isCurrent ? ", current step" : step.done ? ", done" : currentIndex !== null && i < currentIndex ? ", not finished" : ""}</span>
+                <span className="visually-hidden">{isCurrent ? ", current set" : step.done ? ", done" : currentIndex !== null && i < currentIndex ? ", not finished" : ""}</span>
                 {isCurrent && step.students.length > 0 && (
                   <span className="on-set" aria-hidden="true">
                     {step.students.map((s) => <i key={s.qboId} className={s.done ? "done" : undefined} title={s.done ? `${first(s.name)} is done` : `${first(s.name)} has more to do`}>{initial(s.name)}</i>)}
@@ -108,9 +109,9 @@ export function SeasonFoot({ season }: { season: MySeason }) {
           <RequirementLines lines={step.family} today={season.today} />
         </div>
       )}
-      {season.leftBefore > 0 && <p className="help">{things(season.leftBefore)} from an earlier step {season.leftBefore === 1 ? "is" : "are"} still to do. <a href="/season">See the whole season</a></p>}
+      {season.leftBefore > 0 && <p className="help">{things(season.leftBefore)} from an earlier set {season.leftBefore === 1 ? "is" : "are"} still to do. <a href="/season">See the whole season</a></p>}
       {!step && season.steps.length > 0 && asksAnything(season) && (
-        <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;ve finished every step of {season.name}. Thank you!</p>
+        <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>You&apos;ve finished every set of {season.name}. Thank you!</p>
       )}
     </>
   );

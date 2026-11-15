@@ -409,7 +409,7 @@ main.wrap.single > .roster-asof { margin-top: var(--s4); max-width: 760px; }
 
 /* Staff season pages: dropdowns drawn like the other fields, lists of tick boxes, and forms kept folded until wanted. */
 .field select { font: inherit; color: var(--ink); background: var(--paper); border: var(--rule) solid var(--ink); border-radius: 0;
-  min-height: 44px; padding: var(--s2) var(--s3); max-width: 100%; }
+  min-height: 44px; padding: var(--s2) var(--s3); width: 100%; min-width: 0; } /* never wider than its column, however long an option is */
 .field select:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
 fieldset.checks { border: 0; padding: 0; min-width: 0; }
 .checks legend { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); padding: 0; }

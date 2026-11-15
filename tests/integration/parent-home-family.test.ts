@@ -210,8 +210,9 @@ describe("Home", () => {
     expect(html).toContain("Ask the club");
     for (const name of B_STUDENTS) expect(html).not.toContain(name);
     for (const marker of b.markers) expect(html).not.toContain(marker);
-    // No placeholder, and nothing that has no data yet: no forms counts, no season, no part or grade.
-    expect(html).not.toMatch(/will show here|forms|season|grade/i);
+    // No placeholder, and nothing that has no data yet: no forms counts, no part or grade. (The season is
+    // tests/integration/seasons-parent.test.ts.)
+    expect(html).not.toMatch(/will show here|\bforms\b|grade/i);
     // The roster has not been read by a refresh yet, so the page doesn't say when it was.
     expect(html).not.toContain("roster-asof");
   });
@@ -220,8 +221,8 @@ describe("Home", () => {
     const { a, b } = await seedTwoFamilies();
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    // The boxes in the order a phone shows them: money, students, details.
-    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["box money", "box students-box", "box details-box"]);
+    // The season ruler, then the boxes in the order a phone shows them: money, students, details.
+    expect([...html.matchAll(/<section class="([^"]+)"/g)].map((m) => m[1])).toEqual(["season", "box money", "box students-box", "box details-box"]);
     expect(html).toContain(`<section class="box money" aria-labelledby="money-h"><h2 id="money-h">Alderquist Family</h2>`);
     // The family's name stands once, as that heading (the Display link's label and the details hold the parent's own name).
     expect(html.split("Alderquist Family")).toHaveLength(2);

@@ -6,6 +6,7 @@ import { auditLog, qboCustomer, requirementProgress, season, setting } from "@/l
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
+import type { MembershipShape } from "@/lib/roster/shape";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import { calendarDayIn } from "@/lib/settings/club";
 import ParentHome from "@/app/(parent)/page";
@@ -13,7 +14,7 @@ import SeasonPage from "@/app/(parent)/season/page";
 import { resetDb } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { addToCache, seedCache, seedShape, stu } from "../helpers/roster-cache";
-import { TWO_FAMILY_SEASON, seedSeason, type SeededSeason } from "../helpers/season";
+import { TWO_FAMILY_SEASON, seedSeason } from "../helpers/season";
 
 /**
  * The season as a parent sees it: the query that reads one family's standing, the ruler and requirement lines on Home,
@@ -136,10 +137,10 @@ describe("Home: the season ruler and the current step's requirements", () => {
     asParent(b.identity);
     const html = await renderPage(ParentHome);
     // The steps in order, the first done, the second current.
-    expect(html).toContain(`<p id="season-h" class="season-title">${TWO_FAMILY_SEASON} · <b>Step 2 of 3<span class="current-name">: Uniforms</span></b></p>`);
+    expect(html).toContain(`<p id="season-h" class="season-title">${TWO_FAMILY_SEASON} · <b>Set 2 of 3<span class="current-name">: Uniforms</span></b></p>`);
     expect(html).toContain(`<ol class="sets" style="--count:3">`);
     expect(html).toMatch(/<li class="done"><span class="n"><svg[^>]*>.*?<\/svg>1<\/span><span class="label">Sign-up<\/span><span class="visually-hidden">, done<\/span><\/li>/);
-    expect(html).toMatch(/<li aria-current="step"><span class="n">2<\/span><span class="label">Uniforms<\/span><span class="visually-hidden">, current step<\/span>/);
+    expect(html).toMatch(/<li aria-current="step"><span class="n">2<\/span><span class="label">Uniforms<\/span><span class="visually-hidden">, current set<\/span>/);
     // Barnaby still has the fitting to do; Briseis has finished the step. The dots are decoration, hidden from a screen reader.
     expect(html).toContain(`<span class="on-set" aria-hidden="true"><i title="Barnaby has more to do">B</i><i class="done" title="Briseis is done">B</i></span>`);
     expect(html).toContain(`<a href="/season">See the whole season</a>`);
@@ -158,7 +159,7 @@ describe("Home: the season ruler and the current step's requirements", () => {
     const { a, b } = await seedTwoFamilies();
     asParent(a.identity);
     const text = textOf(await renderPage(ParentHome));
-    expect(text).toContain("Step 1 of 3 : Sign-up");
+    expect(text).toContain("Set 1 of 3 : Sign-up");
     expect(text).toContain(`${AURELIO!.name} Nothing to do in Sign-up`);
     expect(text).toContain("Your family 1 thing left to do in Sign-up Handbook read Done Carpool pledge QA71 Not done yet");
 
@@ -176,7 +177,7 @@ describe("Home: the season ruler and the current step's requirements", () => {
     const html = await renderPage(ParentHome);
     expect(html).not.toContain(`class="season"`);
     expect(html).not.toContain("sets");
-    expect(html).not.toMatch(/Not current yet|Hidden step|Hidden item|Step \d|\/season/);
+    expect(html).not.toMatch(/Not current yet|Hidden step|Hidden item|Set \d|\/season/);
     // The students are listed as before, with nothing under them.
     expect(html).toContain(`<li><span class="who"><b>${AURELIO!.name}</b></span></li>`);
     expect(textOf(await renderPage(SeasonPage))).toContain("The club hasn't set up a season here yet.");
@@ -190,15 +191,15 @@ describe("Home: the season ruler and the current step's requirements", () => {
     ] });
     asParent(a.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain("<b>All 2 steps done</b>");
+    expect(html).toContain("<b>All 2 sets done</b>");
     expect(html).not.toContain("aria-current=\"step\"");
     expect(html.match(/<li class="done">/g)).toHaveLength(2);
-    expect(textOf(html)).toContain("You've finished every step of Fall. Thank you!");
+    expect(textOf(html)).toContain("You've finished every set of Fall. Thank you!");
 
     await db.delete(requirementProgress); await db.delete(season);
     await seedSeason({ name: "Bare", steps: [{ name: "Join" }, { name: "Wrap-up" }] });
     const bare = await renderPage(ParentHome);
-    expect(bare).toContain("<b>All 2 steps done</b>");
+    expect(bare).toContain("<b>All 2 sets done</b>");
     expect(textOf(bare)).not.toContain("Thank you");
   });
 
@@ -230,7 +231,7 @@ describe("Home: the season ruler and the current step's requirements", () => {
     asParent(a.identity);
     const html = await renderPage(ParentHome);
     expect(html).toMatch(/<li><span class="n">1<\/span><span class="label">Join<\/span><span class="visually-hidden">, not finished<\/span><\/li>/);
-    expect(textOf(html)).toContain("1 thing from an earlier step is still to do. See the whole season");
+    expect(textOf(html)).toContain("1 thing from an earlier set is still to do. See the whole season");
     expect(textOf(html)).not.toContain("Membership form"); // it is on the Season page, with the step it belongs to
     expect(textOf(await renderPage(SeasonPage))).toContain("1. Join Ends " + day(-3) + " 1 thing left to do Your family Membership form Not done yet");
   });
@@ -254,10 +255,10 @@ describe("the Season page", () => {
     const { b } = await seedTwoFamilies();
     asParent(b.identity);
     const text = textOf(await renderPage(SeasonPage));
-    expect(text).toContain(`${TWO_FAMILY_SEASON} Every step of the season for ${FAMILY_B.family.name}, and what's done so far.`);
+    expect(text).toContain(`${TWO_FAMILY_SEASON} Every set of the season for ${FAMILY_B.family.name}, and what's done so far.`);
     expect(text).toContain("1. Sign-up Done Your family Handbook read Done Trailer key returned QB82 Waived");
-    expect(text).toContain(`2. Uniforms The current step 1 thing left to do ${BARNABY!.name} Uniform fitting attended Not done yet Sousaphone harness check QB83 Done ${BRISEIS!.name} Uniform fitting attended Done`);
-    expect(text).toContain("3. Wrap-up Nothing is asked of your family in this step.");
+    expect(text).toContain(`2. Uniforms The current set 1 thing left to do ${BARNABY!.name} Uniform fitting attended Not done yet Sousaphone harness check QB83 Done ${BRISEIS!.name} Uniform fitting attended Done`);
+    expect(text).toContain("3. Wrap-up Nothing is asked of your family in this set.");
   });
 
   it("shows a family the roster can't show nothing of the season", async () => {
@@ -280,7 +281,7 @@ describe("the Season page", () => {
 });
 
 describe("a club that lists no students", () => {
-  const FLAT = { kind: "flat", memberTypeIds: ["M"] } as const;
+  const FLAT: MembershipShape = { kind: "flat", memberTypeIds: ["M"] };
   const seedMember = async () => {
     await seedShape(FLAT);
     await seedCache([{ qboId: "MEM-1", displayName: "Marisol Member", typeQboId: "M", email: "marisol@member.example" }, { qboId: "MEM-2", displayName: "Other Member", typeQboId: "M" }]);
@@ -297,11 +298,11 @@ describe("a club that lists no students", () => {
     asParent(p.identity);
     const html = await renderPage(ParentHome);
     const text = textOf(html);
-    expect(text).toContain("Step 1 of 1 : Join");
+    expect(text).toContain("Set 1 of 1 : Join");
     expect(text).toContain("Members' year Join Your family 1 thing left to do in Join Dues form Not done yet");
     expect(html).not.toContain("on-set"); // nobody is a student, so the ruler has no dots
     expect(html).not.toMatch(/Only the other member|Other member|A per-student item|Your students/);
-    expect(textOf(await renderPage(SeasonPage))).toContain("1. Join The current step 1 thing left to do Your family Dues form Not done yet");
+    expect(textOf(await renderPage(SeasonPage))).toContain("1. Join The current set 1 thing left to do Your family Dues form Not done yet");
   });
 
   it("draws no box when the step asks nothing of the member", async () => {
@@ -309,7 +310,7 @@ describe("a club that lists no students", () => {
     await seedSeason({ name: "Members' year", steps: [{ name: "Join", requirements: [{ title: "A per-student item", appliesTo: "student" }] }] });
     asParent(p.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain("The one step is done");
+    expect(html).toContain("The one set is done");
     expect(html).not.toContain("students-box");
   });
 });

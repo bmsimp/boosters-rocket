@@ -51,7 +51,9 @@ const PARAMS: Record<string, DynamicRouteParams> = {};
 const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerror=alert", "Second Family", "Wolfgang", "Secondborn",
   "ana@example.com", "sam@example.com", "555-0101", "E2E-FAMILY-2", "E2E-P2", "E2E-S3",
   // What the second family owes: its invoice numbers, each amount, its total and the address behind its Pay button.
-  "SF-2051", "SF-2052", "SF-2009", "$312.47", "$64.19", "$273.58", "$376.66", "scs-v1-e2e-second"];
+  "SF-2051", "SF-2052", "SF-2009", "$312.47", "$64.19", "$273.58", "$376.66", "scs-v1-e2e-second",
+  // What the season asks of other families alone, and why one of them was let off.
+  "Tuba locker key", "Percussion truck crew", "Cast on his arm"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);
@@ -85,6 +87,20 @@ test("every invoice the seed gives another family is searched for", async () => 
   ];
   expect(unsearched, `scripts/seed-e2e.ts gives another family these, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
     + `would find them on a parent page: ${unsearched.join(", ")}. Add each.`).toEqual([]);
+});
+
+test("every requirement and waiver the seed gives another family alone is searched for", async () => {
+  // As above, for the season: a requirement whose chosen list names nobody of the Quetzalcoatl family must be findable
+  // by its title, and a waiver recorded for anyone outside that family by its reason.
+  const mine = sql`SELECT qbo_id FROM qbo_customer WHERE qbo_id = ${PARENT_SESSION_FAMILY} OR parent_qbo_id = ${PARENT_SESSION_FAMILY}`;
+  const titles = await sql`SELECT r.title FROM requirement r WHERE r.covers = 'chosen'
+    AND NOT EXISTS (SELECT 1 FROM requirement_cover c WHERE c.requirement_id = r.id AND c.subject_qbo_id IN (${mine}))`;
+  const reasons = await sql`SELECT waived_reason FROM requirement_progress WHERE waived_reason IS NOT NULL AND subject_qbo_id NOT IN (${mine})`;
+  expect(titles.length).toBeGreaterThanOrEqual(2);
+  expect(reasons.length).toBeGreaterThanOrEqual(1);
+  const unsearched = [...titles.map((r) => r.title as string), ...reasons.map((r) => r.waived_reason as string)].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)));
+  expect(unsearched, `scripts/seed-e2e.ts gives another family these in the season, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
+    + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
 });
 
 test("no parent page sends the browser anything of another family, in the HTML or in the data sent with it", async ({ context, page }) => {

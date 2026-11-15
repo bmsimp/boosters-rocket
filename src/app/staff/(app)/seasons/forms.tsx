@@ -133,9 +133,9 @@ export function RequirementForm({ kinds, kind, initial, add, save }: {
             <option value="student">Each student</option><option value="family">Each family, once</option>
           </select></label>
       )}
-      <label className="field"><span>Required or optional</span>
+      <label className="field"><span>Required or optional (an optional one is shown, and never holds the step open)</span>
         <select value={required ? "required" : "optional"} onChange={(e) => setRequired(e.target.value === "required")}>
-          <option value="required">Required: the step stays open until it is done</option><option value="optional">Optional: shown, and never holds the step open</option>
+          <option value="required">Required</option><option value="optional">Optional</option>
         </select></label>
       {volunteer && (
         <>

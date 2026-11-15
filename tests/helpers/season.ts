@@ -80,10 +80,10 @@ export async function seedTwoFamilySeason(a: ParentFamilySpec, b: ParentFamilySp
   return {
     season: seeded,
     a: { markers: [A.carpool, A.piccolo, A.reason, id(A.carpool), id(A.piccolo)], staffOnly: [A.reason],
-      home: [TWO_FAMILY_SEASON, "Step 1 of 3", "Sign-up", A.carpool, "1 thing left to do in Sign-up"],
+      home: [TWO_FAMILY_SEASON, "Set 1 of 3", "Sign-up", A.carpool, "1 thing left to do in Sign-up"],
       page: [TWO_FAMILY_SEASON, "Sign-up", "Uniforms", "Wrap-up", "Handbook read", A.carpool, A.piccolo, "Uniform fitting attended", "Waived"] },
     b: { markers: [B.trailer, B.sousaphone, B.reason, id(B.trailer), id(B.sousaphone)], staffOnly: [B.reason],
-      home: [TWO_FAMILY_SEASON, "Step 2 of 3", "Uniforms", B.sousaphone, "Uniform fitting attended", "1 thing left to do in Uniforms"],
+      home: [TWO_FAMILY_SEASON, "Set 2 of 3", "Uniforms", B.sousaphone, "Uniform fitting attended", "1 thing left to do in Uniforms"],
       page: [TWO_FAMILY_SEASON, "Sign-up", "Uniforms", "Wrap-up", "Handbook read", B.trailer, B.sousaphone, "Uniform fitting attended", "Waived"] },
   };
 }

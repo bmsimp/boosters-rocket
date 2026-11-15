@@ -132,6 +132,34 @@ async function main() {
     await sql`INSERT INTO family_money (family_qbo_id, realm_id, read_at, invoices, total_cents, balance_with_jobs_cents, currency)
             VALUES (${f.id}, '9130000000000001', now(), ${sql.json(f.invoices)}, ${f.total}, ${f.total}, 'USD')`;
   }
+  // The club's current season (v1 spec §10): four steps with no dates, so each family is on the first step it hasn't
+  // finished. The Quetzalcoatl family has done Join; in Uniforms, Xochitl has been ticked off and Yaretzi has not
+  // (tests/e2e/season.spec.ts ticks her, and unticks her again). Two requirements are asked of other families alone,
+  // one with a waiver: their titles and the reason are in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts).
+  const [fall] = await sql`INSERT INTO season (name, is_current) VALUES ('Fall 2026', true) RETURNING id`;
+  const stepIds: Record<string, string> = {};
+  for (const [position, name] of ["Join", "Uniforms", "Season", "Wrap-up"].entries()) {
+    const [step] = await sql`INSERT INTO season_step (season_id, name, position) VALUES (${fall!.id}, ${name}, ${position}) RETURNING id`;
+    stepIds[name] = step!.id as string;
+  }
+  type SeedRequirement = { step: string; title: string; appliesTo: "family" | "student"; required?: boolean; due?: number; chosen?: string[]; ticked?: string[]; waived?: Record<string, string> };
+  const requirements: SeedRequirement[] = [
+    { step: "Join", title: "Handbook read", appliesTo: "family", ticked: ["E2E-FAMILY", "10"] },
+    { step: "Join", title: "Tuba locker key returned", appliesTo: "family", chosen: ["10"] },
+    { step: "Uniforms", title: "Uniform fitting attended", appliesTo: "student", ticked: ["E2E-S1", "12"] },
+    { step: "Uniforms", title: "Marching shoes sized", appliesTo: "student", required: false },
+    { step: "Uniforms", title: "Percussion truck crew sign-off", appliesTo: "student", chosen: ["E2E-S3"], waived: { "E2E-S3": "Cast on his arm until December" } },
+    { step: "Wrap-up", title: "Banquet RSVP", appliesTo: "family", due: 30 },
+  ];
+  for (const [position, r] of requirements.entries()) {
+    const [row] = await sql`INSERT INTO requirement (step_id, kind, title, required, applies_to, due_on, covers, position)
+            VALUES (${stepIds[r.step]!}, 'checklist', ${r.title}, ${r.required ?? true}, ${r.appliesTo}, ${r.due === undefined ? null : day(r.due)}, ${r.chosen ? "chosen" : "everyone"}, ${position}) RETURNING id`;
+    for (const subject of r.chosen ?? []) await sql`INSERT INTO requirement_cover (requirement_id, subject_qbo_id) VALUES (${row!.id}, ${subject})`;
+    for (const subject of r.ticked ?? []) await sql`INSERT INTO requirement_progress (requirement_id, subject_qbo_id, met_at) VALUES (${row!.id}, ${subject}, now())`;
+    for (const [subject, reason] of Object.entries(r.waived ?? {})) {
+      await sql`INSERT INTO requirement_progress (requirement_id, subject_qbo_id, waived_at, waived_reason) VALUES (${row!.id}, ${subject}, now(), ${reason})`;
+    }
+  }
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   await sql.end();
