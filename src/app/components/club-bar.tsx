@@ -1,10 +1,9 @@
-import Link from "next/link";
-import { TopNav } from "./top-nav";
+import { AccountLink, TopNav } from "./top-nav";
 
 type NavItem = { href: string; label: string };
 
 export function ClubBar({ name, shortName, nav, account, mobileMenu = false }: {
-  name: string; shortName: string; nav: NavItem[]; mobileMenu?: boolean; account?: { href: string; initials: string; label: string; current?: boolean };
+  name: string; shortName: string; nav: NavItem[]; mobileMenu?: boolean; account?: { href: string; initials: string; label: string };
 }) {
   return (
     <header className="bar">
@@ -12,7 +11,7 @@ export function ClubBar({ name, shortName, nav, account, mobileMenu = false }: {
         <span className="monogram" aria-hidden="true">{shortName}</span>
         <span className="club">{name}</span>
         <TopNav nav={nav} mobileMenu={mobileMenu} />
-        {account && <Link className="account" href={account.href} aria-label={account.label} aria-current={account.current ? "page" : undefined}>{account.initials}</Link>}
+        {account && <AccountLink href={account.href} initials={account.initials} label={account.label} />}
       </div>
     </header>
   );

@@ -24,6 +24,12 @@ export function TopNav({ nav, mobileMenu = false }: { nav: NavItem[]; mobileMenu
   );
 }
 
+/** The account control in the club bar: initials that lead to the Display page, marked current while that page is open (DESIGN.md). */
+export function AccountLink({ href, initials, label }: { href: string; initials: string; label: string }) {
+  const path = usePathname();
+  return <Link className="account" href={href} aria-label={label} aria-current={isCurrent(path, href) ? "page" : undefined}>{initials}</Link>;
+}
+
 /**
  * On narrow screens the top menu is hidden. Parent pages use the bottom tabs; staff pages use this Menu button,
  * which opens the same links. It closes when a link is chosen or Escape is pressed.

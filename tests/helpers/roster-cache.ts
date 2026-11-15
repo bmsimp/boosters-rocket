@@ -1,6 +1,7 @@
 import { db } from "@/lib/db/client";
-import { qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
+import { jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { SHAPE_KEY, type MembershipShape } from "@/lib/roster/shape";
+import { ROSTER_JOB, SOURCE_KEY } from "@/lib/roster/source";
 import { DEFAULT_PARENT_SETTINGS, PARENTS_KEY, getParentSettings, type ParentSettings } from "@/lib/parents/settings";
 
 export type CacheCustomer = { qboId: string; displayName: string; typeQboId: string; active?: boolean; parentQboId?: string | null; email?: string | null; phone?: string | null };
@@ -35,3 +36,17 @@ export async function seedParentSettings(patch: Partial<ParentSettings>): Promis
   await db.insert(setting).values({ key: PARENTS_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value } });
 }
 export const SIGNINS_ON = { signin: true, everEnabled: true } as const;
+
+/**
+ * What a successful refresh leaves beside the cache: the company it was read from (leave `realmId` out for a cache
+ * that doesn't say) and a finished roster run, which is the roster's "as of" time.
+ */
+export async function seedRosterRead(o: { realmId?: string; finishedAt?: Date } = {}): Promise<Date> {
+  const finishedAt = o.finishedAt ?? new Date();
+  if (o.realmId) {
+    const value = { realmId: o.realmId };
+    await db.insert(setting).values({ key: SOURCE_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value } });
+  }
+  await db.insert(jobRun).values({ job: ROSTER_JOB, startedAt: finishedAt, finishedAt, outcome: "ok", detail: "seeded", startedBy: "worker" });
+  return finishedAt;
+}

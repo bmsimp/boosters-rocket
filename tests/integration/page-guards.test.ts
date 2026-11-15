@@ -249,11 +249,31 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
   return problems;
 }
 
+/**
+ * Parent code that lives outside src/app/(parent)/: the query modules parent pages read their family through, and the
+ * frame drawn around every parent page. They pass the same scan, so they can never come to import a staff-only module.
+ * A new query module for parent pages is added here, one to a line.
+ */
+const PARENT_CODE_ELSEWHERE = [
+  "src/lib/parents/my-family.ts",
+  "src/app/components/parent-frame.tsx",
+];
+
 describe("parent code never imports the staff-only queries", () => {
-  const parentCode = app.filter((f) => f.startsWith(PARENT_PAGES) && /\.(tsx?|jsx?|mjs|cjs)$/.test(f));
+  const parentCode = [...app.filter((f) => f.startsWith(PARENT_PAGES) && /\.(tsx?|jsx?|mjs|cjs)$/.test(f)), ...PARENT_CODE_ELSEWHERE];
 
   it("finds the parent code on disk", () => {
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/page.tsx", "src/app/(parent)/layout.tsx", "src/app/(parent)/display/display-settings.tsx"]));
+    // read() throws for a file that is gone, so a module renamed or removed can't stay listed and unscanned.
+    for (const file of PARENT_CODE_ELSEWHERE) expect(read(file).length, file).toBeGreaterThan(0);
+  });
+
+  it("catches a parent query module that reaches a staff-only module the way a neighbor in src/lib would", () => {
+    const QUERY = "src/lib/parents/my-family.ts";
+    expect(staffOnlyImportProblems(QUERY, `import { familyNames } from "./directory";\nimport { getShape } from "@/lib/roster/shape";`)).toEqual([]);
+    expect(staffOnlyImportProblems(QUERY, `import { listPeople } from "./directory";`)).toHaveLength(1);
+    expect(staffOnlyImportProblems(QUERY, `import { loadRosterPage } from "../roster/queries";`)).toHaveLength(1);
+    expect(staffOnlyImportProblems(QUERY, `import { rosterEntry } from "@/lib/roster/queries";`)).toHaveLength(1);
   });
 
   it.each(parentCode)("%s imports nothing that reads across families", (file) => {
