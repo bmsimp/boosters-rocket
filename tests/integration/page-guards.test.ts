@@ -181,17 +181,143 @@ describe("every route handler is listed with its guard", () => {
   });
 });
 
-describe("parent code never imports the staff-only queries", () => {
-  const parentCode = app.filter((f) => f.startsWith(PARENT_PAGES) && /\.(tsx|ts)$/.test(f));
+/** One place a source file names another module, in any of the ways JavaScript has. `module` is null when it isn't written as a plain string. */
+type ModuleUse = { module: string | null; clause: string; text: string };
 
-  it.each(parentCode)("%s imports nothing that reads across families", (file) => {
-    const source = code(read(file));
+/**
+ * Every module a file reaches for: `import ... from`, `export ... from`, a bare `import "m"`, `import("m")` and
+ * `require("m")`. `clause` is what stands between the keyword and `from` (the names taken); the other forms take the
+ * whole module, written here as "*".
+ */
+function moduleUses(source: string): ModuleUse[] {
+  const src = code(source);
+  const uses: ModuleUse[] = [];
+  const oneLine = (text: string) => text.replace(/\s+/g, " ");
+  // The clause holds no quote, semicolon, "=" or bracket and no second keyword, so it can't run on from an earlier statement.
+  for (const m of src.matchAll(/\b(?:import|export)\s+(?:type\s+)?((?:(?!\b(?:import|export)\b)[^;"'`=()])*?)\s*\bfrom\s*(["'`])([^"'`]+)\2/g)) {
+    uses.push({ module: m[3]!, clause: m[1]!, text: oneLine(m[0]) });
+  }
+  for (const m of src.matchAll(/\bimport\s*(["'`])([^"'`]+)\1/g)) uses.push({ module: m[2]!, clause: "*", text: oneLine(m[0]) });
+  for (const m of src.matchAll(/\b(?:import|require)\s*\(\s*([^)]*?)\s*\)/g)) {
+    const literal = /^(["'`])([^"'`$]+)\1$/.exec(m[1]!)?.[2] ?? null;
+    uses.push({ module: literal, clause: "*", text: oneLine(m[0]) });
+  }
+  return uses;
+}
+
+/** The names a clause takes ("listPeople" in `{ listPeople as people }`), and whether it takes the module whole: a default, `* as name` or `*`. */
+function taken(clause: string): { whole: boolean; names: string[] } {
+  const names = (/\{([^}]*)\}/.exec(clause)?.[1] ?? "").split(",")
+    .map((name) => name.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]!.trim()).filter(Boolean);
+  const outsideBraces = clause.replace(/\{[^}]*\}/, "").replace(/,/g, "").trim();
+  return { whole: outsideBraces !== "" || names.includes("default"), names };
+}
+
+/** The file a module path names, without its extension: "@/lib/x", "@/lib/x.ts" and "../../../lib/x" (from a page three folders down) are one module. */
+function moduleFile(module: string, importer: string): string {
+  const file = module.startsWith("@/") ? `src/${module.slice(2)}`
+    : module.startsWith(".") ? path.posix.join(path.posix.dirname(importer), module) : module;
+  return path.posix.normalize(file).replace(/\.(tsx?|jsx?|mjs|cjs)$/, "").replace(/\/index$/, "");
+}
+
+/** Everything in a parent file that reaches a staff-only module, in words that say what to do instead; empty when there is nothing. */
+function staffOnlyImportProblems(file: string, source = read(file)): string[] {
+  const instead = `Read through a query that takes ctx.familyQboId and returns that family alone.`;
+  const problems: string[] = [];
+  for (const use of moduleUses(source)) {
+    if (use.module === null) {
+      problems.push(`${file}: \`${use.text}\` loads a module this scan can't read, so it can't tell whether it is a staff-only one. Write the module's path as a plain string.`);
+      continue;
+    }
+    const target = moduleFile(use.module, file);
     for (const { module, names, why } of STAFF_ONLY_IMPORTS) {
-      for (const [, imported] of source.matchAll(new RegExp(`import\\s+(?:type\\s+)?([^;]*?)\\s+from\\s*["']${module}["']`, "g"))) {
-        const bad = names === "all" ? [imported!.trim()] : names.filter((n) => new RegExp(`\\b${n}\\b`).test(imported!));
-        expect(bad, `${file} imports ${bad.join(", ")} from ${module}, which is for staff pages only: ${why}. `
-          + `Read through a query that takes ctx.familyQboId and returns that family alone.`).toEqual([]);
+      const staffOnly = moduleFile(module, file);
+      // The same file, or the same path under another root: a relative path or an alias the scan resolved differently.
+      if (target !== staffOnly && !target.endsWith(staffOnly.slice("src".length))) continue;
+      const { whole, names: takenNames } = taken(use.clause);
+      if (names === "all") {
+        problems.push(`${file}: \`${use.text}\` reaches ${module}, which is for staff pages only: ${why}. ${instead}`);
+      } else if (whole) {
+        problems.push(`${file}: \`${use.text}\` takes the whole of ${module}, and with it ${names.join(", ")}, which are for staff pages only: ${why}. `
+          + `Import by name only what the page needs (\`import { accessWords } from "${module}"\`), never the module whole. ${instead}`);
+      } else {
+        const bad = names.filter((n) => takenNames.includes(n));
+        if (bad.length) problems.push(`${file}: \`${use.text}\` takes ${bad.join(", ")} from ${module}, which ${bad.length > 1 ? "are" : "is"} for staff pages only: ${why}. ${instead}`);
       }
     }
+  }
+  return problems;
+}
+
+describe("parent code never imports the staff-only queries", () => {
+  const parentCode = app.filter((f) => f.startsWith(PARENT_PAGES) && /\.(tsx?|jsx?|mjs|cjs)$/.test(f));
+
+  it("finds the parent code on disk", () => {
+    expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/page.tsx", "src/app/(parent)/layout.tsx", "src/app/(parent)/display/display-settings.tsx"]));
+  });
+
+  it.each(parentCode)("%s imports nothing that reads across families", (file) => {
+    const problems = staffOnlyImportProblems(file);
+    if (problems.length) expect.fail(problems.join("\n"));
+  });
+
+  // The scan itself, on sources written here: what it accepts and every way of reaching a module that it catches.
+  const NEW = "src/app/(parent)/students/[id]/page.tsx";
+  const ROSTER = "@/lib/roster/queries", DIRECTORY = "@/lib/parents/directory";
+
+  it("accepts what a parent page may import, the names of the directory that are not staff-only among them", () => {
+    expect(staffOnlyImportProblems(NEW, [
+      `import { requireParentPage } from "@/lib/guards";`,
+      `import { accessWords, familyNames, type PersonFamily } from "${DIRECTORY}";`,
+      `import type { AccessKind } from "../../../../lib/parents/directory";`,
+      `import * as model from "@/lib/roster/model";`,
+      `import Link from "next/link";`,
+      `import "./students.css";`,
+      `export { metadata } from "../metadata";`,
+      `export const dynamic = "force-dynamic";`,
+      `const Chart = lazy(() => import("./chart"));`,
+      `export default async function P() { const ctx = await requireParentPage(); return <p>{accessWords(ctx).words} imports nothing from "${ROSTER}"</p>; }`,
+    ].join("\n"))).toEqual([]);
+  });
+
+  it.each([
+    ["a named import", `import { listPeople } from "${DIRECTORY}";`, "takes listPeople from"],
+    ["a named import under another name", `import { accessWords, getPerson as person } from "${DIRECTORY}";`, "takes getPerson from"],
+    ["a named import over several lines", `import {\n  accessWords,\n  heldReview,\n  familySignins,\n} from "${DIRECTORY}";`, "takes heldReview, familySignins from"],
+    ["a named import after a line with no semicolon", `export const dynamic = "force-dynamic"\nimport { listPeople } from '${DIRECTORY}'`, "takes listPeople from"],
+    ["a namespace import", `import * as dir from "${DIRECTORY}";\nconst people = await dir.listPeople();`, "takes the whole of"],
+    ["a default import", `import dir from "${DIRECTORY}";`, "takes the whole of"],
+    ["a default import beside an allowed name", `import dir, { accessWords } from "${DIRECTORY}";`, "takes the whole of"],
+    ["a dynamic import", `const dir = await import("${DIRECTORY}");`, "takes the whole of"],
+    ["a dynamic import in backticks", `const { listPeople } = await import(\n  \`${DIRECTORY}\`\n);`, "takes the whole of"],
+    ["require", `const { listPeople } = require("${DIRECTORY}");`, "takes the whole of"],
+    ["a re-export by name", `export { listPeople } from "${DIRECTORY}";`, "takes listPeople from"],
+    ["a re-export of everything", `export * from "${DIRECTORY}";`, "takes the whole of"],
+    ["a re-export as a namespace", `export * as dir from "${DIRECTORY}";`, "takes the whole of"],
+    ["a relative path to the directory", `import { listPeople } from "../../../../lib/parents/directory";`, "takes listPeople from"],
+    ["a relative path with its extension", `const dir = await import("../../../../lib/parents/directory.ts");`, "takes the whole of"],
+    ["any name from the roster queries", `import { previewShape } from "${ROSTER}";`, `reaches ${ROSTER}`],
+    ["a type from the roster queries", `import type { RosterPage } from "${ROSTER}";`, `reaches ${ROSTER}`],
+    ["the roster queries as a namespace", `import * as roster from "${ROSTER}";`, `reaches ${ROSTER}`],
+    ["the roster queries by a relative path", `import { rosterEntry } from "../../../../lib/roster/queries";`, `reaches ${ROSTER}`],
+    ["the roster queries by a dynamic import", `const { loadRosterPage } = await import("${ROSTER}");`, `reaches ${ROSTER}`],
+    ["the roster queries re-exported", `export { rosterEntry } from "${ROSTER}";`, `reaches ${ROSTER}`],
+    ["the roster queries imported for nothing", `import "${ROSTER}";`, `reaches ${ROSTER}`],
+  ])("catches %s", (_what, source, problem) => {
+    const problems = staffOnlyImportProblems(NEW, `import { requireParentPage } from "@/lib/guards";\n${source}\nexport default async function P() { await requireParentPage(); return null; }`);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain(`${NEW}: `);
+    expect(problems[0]).toContain(problem);
+    expect(problems[0]).toContain("for staff pages only");
+  });
+
+  it("catches a module it can't read, and says so", () => {
+    const problems = staffOnlyImportProblems(NEW, "const where = `@/lib/${area}/queries`;\nconst queries = await import(where);\nconst other = await import(`@/lib/${area}/directory`);");
+    expect(problems).toHaveLength(2);
+    for (const problem of problems) expect(problem).toContain("loads a module this scan can't read");
+  });
+
+  it("doesn't count an import that is only mentioned in a comment", () => {
+    expect(staffOnlyImportProblems(NEW, `// import { listPeople } from "${DIRECTORY}";\n/* const dir = await import("${ROSTER}"); */\nexport default function P() { return null; }`)).toEqual([]);
   });
 });
