@@ -151,7 +151,7 @@ test("the worker takes charge, and pages still load and redirect through it", as
   // An anonymous visitor is still sent to sign in, and a signed-in parent still gets their page: the worker hands
   // every page load to the network, redirects and cookies included.
   await page.goto("/display");
-  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fdisplay$/);
   await context.addCookies([parentSessionCookie()]);
   const home = await page.goto("/");
   expect(home?.status()).toBe(200);

@@ -17,8 +17,8 @@ test("parent and staff pages send an anonymous visitor to sign in", async ({ pag
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in$/);
   await page.goto("/display");
-  // A parent page may pass its own address along, so the parent is brought back to it after signing in.
-  await expect(page).toHaveURL(/\/sign-in(\?next=%2Fdisplay)?$/);
+  // A parent page passes its own address along, so the parent is brought back to it after signing in.
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fdisplay$/);
   await page.goto("/staff/roles");
   await expect(page).toHaveURL(/\/staff\/sign-in$/);
 });

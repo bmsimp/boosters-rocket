@@ -13,7 +13,7 @@ import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/par
  * family B's. The output must hold none of the other family's markers (names, QuickBooks ids, email addresses, phone
  * numbers, the portal's own ids: see tests/helpers/parent.ts) and must show something of the family it was rendered
  * for, so a page that renders an empty state can't pass by showing nothing. Each page is also asked for with no
- * session and with no family chosen, and must send the visitor away itself.
+ * session and with no family chosen, and must send the visitor away itself, with its own address to come back to.
  *
  * A new page needs nothing here unless:
  *  - it has a dynamic segment: give its params in PARAMS (the test says so when one is missing);
@@ -72,10 +72,11 @@ const paramsFor = (route: string, family: SeededParent) => {
 const addressOf = (route: string, params: Record<string, string | string[]> = {}) =>
   route.replace(/\[(?:\.\.\.)?([^\]]+)\]/g, (_all, name: string) => [params[name] ?? ""].flat().join("/"));
 /**
- * Where a page's guard may send a visitor: the sign-in page (or the chooser), alone or carrying this page's own address
- * so the parent is brought back to it afterward (requireParentPage(returnTo) in src/lib/guards.ts). Never another page's.
+ * Where a page's guard sends a visitor: the sign-in page (or the chooser), carrying this page's own address so the
+ * parent is brought back to it afterward (requireParentPage(returnTo) in src/lib/guards.ts). Never another page's.
+ * The home page carries none: everyone lands there anyway.
  */
-const awayTo = (to: "/sign-in" | "/choose-family", address: string) => [to, `${to}?next=${encodeURIComponent(address)}`];
+const awayTo = (to: "/sign-in" | "/choose-family", address: string) => (address === "/" ? to : `${to}?next=${encodeURIComponent(address)}`);
 const markersIn = (html: string, markers: string[]) => { const text = html.toLowerCase(); return markers.filter((m) => text.includes(m.toLowerCase())); };
 const describeOutcome = (o: PageOutcome) => ("html" in o ? "rendered" : "redirect" in o ? `redirected to ${o.redirect}` : "answered 404");
 
@@ -140,10 +141,10 @@ describe("one family never sees another's data on a parent page", () => {
       // Every test starts signed out (tests/helpers/signed-in.ts).
       const address = addressOf(route, props.params);
       const anonymous = await pageOutcome(page, props);
-      expect(awayTo("/sign-in", address).map((redirect) => ({ redirect })), `${file} ${describeOutcome(anonymous)} for a visitor with no session; it must call requireParentPage() itself, before anything else, and may pass only its own address (${address}).`).toContainEqual(anonymous);
+      expect(anonymous, `${file} ${describeOutcome(anonymous)} for a visitor with no session; it must call requireParentPage() itself, before anything else, with its own address (${address}).`).toEqual({ redirect: awayTo("/sign-in", address) });
       asParentChoosing(a.identity);
       const choosing = await pageOutcome(page, props);
-      expect(awayTo("/choose-family", address).map((redirect) => ({ redirect })), `${file} ${describeOutcome(choosing)} for a parent who has not chosen a family; it must call requireParentPage() itself, before anything else, and may pass only its own address (${address}).`).toContainEqual(choosing);
+      expect(choosing, `${file} ${describeOutcome(choosing)} for a parent who has not chosen a family; it must call requireParentPage() itself, before anything else, with its own address (${address}).`).toEqual({ redirect: awayTo("/choose-family", address) });
       asRefusedParent();
       const refused = await pageOutcome(page, props);
       expect(refused, `${file} ${describeOutcome(refused)} for a session the portal refuses; it must call requireParentPage() itself, before anything else.`).toEqual({ redirect: "/refused" });

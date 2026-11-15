@@ -6,7 +6,7 @@ import { DetailsBox, NotSetUpBox, RosterAsOf, StudentsBox } from "../family-boxe
 export const metadata = { title: "Family" };
 
 export default async function FamilyPage() {
-  const ctx = await requireParentPage();
+  const ctx = await requireParentPage("/family");
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
   return (
     <main className="wrap single family-page">

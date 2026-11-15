@@ -5,7 +5,7 @@ import { MoneySection, PaidSection } from "../money-box";
 export const metadata = { title: "Payments" };
 
 export default async function PaymentsPage() {
-  const ctx = await requireParentPage();
+  const ctx = await requireParentPage("/payments");
   // The family comes from the session and nothing else: no address, query string or form chooses whose invoices these are.
   const money = await loadFamilyMoney(ctx.familyQboId);
   return (

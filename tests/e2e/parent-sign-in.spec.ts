@@ -144,15 +144,9 @@ test("a page to return to that is not a parent page of this site is dropped", as
   }
 });
 
-// The parent pages and their layout pass their own address to the guard once they are wired to (src/lib/guards.ts:
-// requireParentPage("/display") in the page, parentLayoutCtx() in the layout). Until then a visitor is sent to /sign-in
-// with no page to come back to, and this test has nothing to check.
-const displayPage = readFileSync("src/app/(parent)/display/page.tsx", "utf8");
-const parentLayout = readFileSync("src/app/(parent)/layout.tsx", "utf8");
-const pagesPassTheirAddress = /requireParentPage\(\s*["']\/display["']\s*\)/.test(displayPage) && parentLayout.includes("parentLayoutCtx");
-
+// Each parent page passes its own address to its guard (requireParentPage("/display") in src/lib/guards.ts), and the
+// parent layout redirects nobody (parentLayoutCtx()): its redirect would come first and could not name the page.
 test("a visitor who asks for a parent page signs in and is brought back to it", async ({ page, baseURL }) => {
-  test.skip(!pagesPassTheirAddress, "The Display page does not pass its address to requireParentPage(), or the parent layout still redirects first.");
   await page.goto("/display");
   await expect(page).toHaveURL(`${baseURL}/sign-in?next=%2Fdisplay`);
   await page.getByLabel("Email").fill("zelda@example.com");

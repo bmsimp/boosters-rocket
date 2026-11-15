@@ -6,8 +6,9 @@ import { InstallHint } from "../../components/pwa/install-hint";
 export const metadata = { title: "Display" };
 
 export default async function DisplayPage() {
-  // The page guards itself: the layout's guard does not run again when the browser navigates here from another page.
-  await requireParentPage();
+  // The page guards itself, with its own address to come back to after signing in. The layout is not a guard: it does
+  // not run again when the browser navigates here from another page.
+  await requireParentPage("/display");
   return (
     <main className="wrap single">
       <h1 className="page-title">Display</h1>

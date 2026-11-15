@@ -38,25 +38,29 @@ const parentRouteOf = (file: string) =>
   `/${file.slice(PARENT_PAGES.length).split("/").slice(0, -1).filter((s) => !/^\(.*\)$/.test(s)).join("/")}`;
 
 /**
- * What is wrong with a parent page's guard, in words that say what to add; null when it is right. The guard may be
- * given the page's own address, so a visitor who has to sign in first is brought back to it: that address must be
- * written out where this scan can read it, and must be this page's, not another's.
+ * What is wrong with a parent page's guard, in words that say what to add; null when it is right. The guard is given
+ * the page's own address, so a visitor who has to sign in first is brought back to it: that address must be written
+ * out where this scan can read it, and must be this page's, not another's. Only the home page may leave it out:
+ * everyone lands there anyway.
  */
 function parentPageProblem(file: string, source = read(file)): string | null {
   const call = /\brequireParentPage\(\s*([^)]*?)\s*\)/.exec(pageBody(source));
   if (!importsFromGuards(source, "requireParentPage") || !call) {
-    return `${file}: a parent page must call requireParentPage() itself; the guard in the layout does not run on client navigation. `
-      + `Add \`import { requireParentPage } from "@/lib/guards";\` and make \`const ctx = await requireParentPage();\` the first line of the page's default export (an async function).`;
+    return `${file}: a parent page must call requireParentPage() itself; the layout guards nothing, and does not run again on client navigation. `
+      + `Add \`import { requireParentPage } from "@/lib/guards";\` and make \`const ctx = await requireParentPage("/this-page");\` (the page's own address) the first line of the page's default export (an async function).`;
   }
   const argument = call[1]!;
-  if (argument === "") return null;
   const route = parentRouteOf(file);
   const fixedPart = route.split("[")[0]!;
+  const own = route.includes("[") ? `a template that starts with \`${fixedPart}\${...}\` for the route ${route}.` : `"${route}".`;
+  if (argument === "") {
+    return route === "/" ? null
+      : `${file}: requireParentPage() is called with no address, which only the home page may do. Pass this page's own address, written out, so a parent who signs in is brought back here: ${own}`;
+  }
   const literal = /^(["'])([^"'`]*)\1$/.exec(argument)?.[2];
   const ok = route.includes("[") ? argument.startsWith(`\`${fixedPart}\${`) : literal === route;
   if (ok) return null;
-  return `${file}: requireParentPage(${argument}) must be given this page's own address, written out, so a parent who signs in is brought back here and not somewhere else: `
-    + (route.includes("[") ? `a template that starts with \`${fixedPart}\${...}\` for the route ${route}.` : `"${route}".`);
+  return `${file}: requireParentPage(${argument}) must be given this page's own address, written out, so a parent who signs in is brought back here and not somewhere else: ${own}`;
 }
 
 /** The same for a staff page: the guard, with a permission from src/lib/permissions/registry.ts on every page but the staff home. */
@@ -140,11 +144,19 @@ describe("every page guards itself", () => {
   // The scan itself, on sources written here: what it accepts and what it catches.
   const PARENT_IMPORT = `import { requireParentPage } from "@/lib/guards";\n`;
   const STAFF_IMPORT = `import { requireStaffPage } from "@/lib/guards";\n`;
-  const NEW = "src/app/(parent)/new/page.tsx", NEW_STAFF = "src/app/staff/(app)/new/page.tsx";
+  const HOME = "src/app/(parent)/page.tsx", NEW = "src/app/(parent)/new/page.tsx", NEW_STAFF = "src/app/staff/(app)/new/page.tsx";
 
   it("accepts a parent page that calls the guard, alone or beside other loads", () => {
-    expect(parentPageProblem(NEW, `${PARENT_IMPORT}export default async function P() {\n  const ctx = await requireParentPage();\n  return <p>{ctx.name}</p>;\n}`)).toBeNull();
-    expect(parentPageProblem(NEW, `${PARENT_IMPORT}export default async function P() {\n  const [ctx, club] = await Promise.all([requireParentPage(), getClubSettings()]);\n  return null;\n}`)).toBeNull();
+    expect(parentPageProblem(NEW, `${PARENT_IMPORT}export default async function P() {\n  const ctx = await requireParentPage("/new");\n  return <p>{ctx.name}</p>;\n}`)).toBeNull();
+    expect(parentPageProblem(NEW, `${PARENT_IMPORT}export default async function P() {\n  const [ctx, club] = await Promise.all([requireParentPage("/new"), getClubSettings()]);\n  return null;\n}`)).toBeNull();
+  });
+
+  it("lets the home page, and no other, call the guard with no address", () => {
+    const bare = `${PARENT_IMPORT}export default async function P() {\n  const ctx = await requireParentPage();\n  return <p>{ctx.name}</p>;\n}`;
+    expect(parentPageProblem(HOME, bare)).toBeNull();
+    expect(parentPageProblem(NEW, bare)).toContain(`${NEW}: requireParentPage() is called with no address, which only the home page may do`);
+    expect(parentPageProblem(NEW, bare)).toContain(`"/new".`);
+    expect(parentPageProblem("src/app/(parent)/forms/[id]/page.tsx", bare)).toContain("a template that starts with `/forms/${...}`");
   });
 
   // The guard may be told the page's own address (src/lib/guards.ts): a visitor who signs in is brought back to it.
@@ -154,7 +166,7 @@ describe("every page guards itself", () => {
   it("accepts a parent page that gives the guard its own address", () => {
     expect(parentPageProblem(NEW, withGuard(`requireParentPage("/new")`))).toBeNull();
     expect(parentPageProblem(NEW, withGuard(`requireParentPage('/new')`))).toBeNull();
-    expect(parentPageProblem("src/app/(parent)/page.tsx", withGuard(`requireParentPage("/")`))).toBeNull();
+    expect(parentPageProblem(HOME, withGuard(`requireParentPage("/")`))).toBeNull();
     expect(parentPageProblem("src/app/(parent)/(money)/payments/page.tsx", withGuard(`requireParentPage("/payments")`))).toBeNull();
     expect(parentPageProblem(NEW_DYNAMIC, withGuard("requireParentPage(`/forms/${id}`)"))).toBeNull();
     expect(parentPageProblem(NEW_DYNAMIC, withGuard("requireParentPage(`/forms/${encodeURIComponent(id)}`)"))).toBeNull();

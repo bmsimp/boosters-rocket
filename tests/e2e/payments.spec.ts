@@ -10,9 +10,9 @@ test.afterAll(async () => { await sql.end(); });
 // them, so both passes of the run (phone and desktop width) find them as they were.
 const PAY_LINK = "https://connect.intuit.com/t/scs-v1-e2e-quetzalcoatl-1041";
 
-test("an anonymous visitor is sent to sign in", async ({ page }) => {
+test("an anonymous visitor is sent to sign in, with this page to come back to", async ({ page }) => {
   await page.goto("/payments");
-  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fpayments$/);
 });
 
 test("a parent sees what the family owes, each open invoice, the total and what was paid", async ({ context, page }) => {
