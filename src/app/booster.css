@@ -360,8 +360,9 @@ p.errors, .sign-out .errors { padding-left: 0; }
 /* The family chooser lists families as buttons, not bullets. */
 ul.stack { list-style: none; padding: 0; }
 
-/* A long email address wraps inside its box instead of widening the page. */
+/* A long name or email address wraps where it stands instead of widening the page. */
 dl.details dd { min-width: 0; overflow-wrap: anywhere; }
+.home-head .page-title, .family-page .page-title, .students .who { overflow-wrap: anywhere; }
 
 /* Where the students and details come from, and when they were read. */
 .roster-asof { font-size: 0.875rem; color: var(--ink-2); }

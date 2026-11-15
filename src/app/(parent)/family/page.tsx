@@ -9,7 +9,7 @@ export default async function FamilyPage() {
   const ctx = await requireParentPage();
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
   return (
-    <main className="wrap single">
+    <main className="wrap single family-page">
       <h1 className="page-title">{family ? family.name : "Your family"}</h1>
       {family ? (
         <>
