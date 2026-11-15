@@ -11,6 +11,7 @@ for (const [path, heading] of [["/sign-in", "Sign in"], ["/staff/sign-in", "Staf
     await expect(bar.locator(".monogram")).toHaveText("E2E");
     await expect(bar.getByRole("link")).toHaveCount(0);
     await expect(bar.getByRole("button")).toHaveCount(0);
+    await expect(page.getByRole("navigation")).toHaveCount(0); // no empty landmark for a screen reader to announce
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(heading);
     // The bar spans the page and nothing spills sideways, on a phone as on a desktop.
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);

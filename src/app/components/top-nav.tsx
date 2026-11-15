@@ -14,6 +14,9 @@ type NavItem = { href: string; label: string };
 
 export function TopNav({ nav, mobileMenu = false }: { nav: NavItem[]; mobileMenu?: boolean }) {
   const path = usePathname();
+  // No links, no landmark: the sign-in pages carry the club bar with no menu, and an empty "Main" navigation would
+  // only be announced to a screen reader with nothing in it.
+  if (nav.length === 0) return null;
   return (
     <>
       <nav className="top-nav" aria-label="Main">
