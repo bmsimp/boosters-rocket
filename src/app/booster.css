@@ -387,3 +387,22 @@ main.wrap.single > .roster-asof { margin-top: var(--s4); max-width: 760px; }
   .home > .money ~ .students-box, .home > .money ~ .details-box { grid-column: 2; }
 }
 /* ---- End of Home and Family ---- */
+
+/* ===== Installed app: safe areas and the install hint. Keep this block last. =====
+   The viewport is "cover" (src/app/layout.tsx), so the page reaches under a notch, rounded corners and the home
+   indicator. These rules keep content clear of them. env() is 0 where there is nothing to clear, so an ordinary
+   browser tab looks as it did. They set padding (and the menu panel's top) only; the rules above keep the rest. */
+body { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+.wrap { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
+.bar { padding-top: env(safe-area-inset-top); }
+.menu-panel { top: calc(56px + env(safe-area-inset-top)); }
+.menu-panel a { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
+.tabs { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+@media (min-width: 760px) { body { padding-bottom: env(safe-area-inset-bottom); } }
+
+/* Install hint (src/app/components/pwa/install-hint.tsx) */
+.install-hint .install-first { margin-top: var(--s3); }
+.install-hint .steps-list { margin-top: var(--s3); }
+.install-hint .install-actions { margin-top: var(--s4); }
+.install-icon { width: 20px; height: 20px; vertical-align: -4px; }
+/* ===== end of the installed-app block ===== */
