@@ -399,4 +399,7 @@ body { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 .install-hint .steps-list { margin-top: var(--s3); }
 .install-hint .install-actions { margin-top: var(--s4); }
 .install-icon { width: 20px; height: 20px; vertical-align: -4px; }
+/* Under the sign-in form: set apart from it, and its buttons in a row, not the form's full-width ones. */
+.signin .install-hint { margin-top: var(--s6); }
+.signin .install-hint .btn { width: auto; margin-top: 0; }
 /* ===== end of the installed-app block ===== */

@@ -123,3 +123,18 @@ describe("the safe-area rules sit in one block at the end of the stylesheet", ()
     expect(block).toContain(rule);
   });
 });
+
+describe("where the installed-app pieces are mounted", () => {
+  it("the parent layout mounts the refresh on resume, once", () => {
+    const layout = code(read("src/app/(parent)/layout.tsx"));
+    expect(layout).toContain(`import { RefreshOnResume } from "../components/pwa/refresh-on-resume";`);
+    expect(layout.match(/<RefreshOnResume\b/g)).toHaveLength(1);
+  });
+  it("the sign-in page carries the hint a person can put away, and the Display page the permanent one", () => {
+    expect(code(read("src/app/sign-in/page.tsx")).match(/<InstallHint\b[^>]*>/g)).toEqual(["<InstallHint />"]);
+    expect(code(read("src/app/(parent)/display/page.tsx")).match(/<InstallHint\b[^>]*>/g)).toEqual(["<InstallHint permanent />"]);
+  });
+  it("the hint is given nothing but that: no club or family data is passed to it", () => {
+    expect(code(read("src/app/components/pwa/install-hint.tsx"))).toContain("export function InstallHint({ permanent = false }: { permanent?: boolean })");
+  });
+});

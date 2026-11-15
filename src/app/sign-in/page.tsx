@@ -4,6 +4,7 @@ import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { SIGNIN_UNAVAILABLE } from "@/lib/parents/signin-copy";
 import { RETURN_PARAM, safeReturnPath } from "@/lib/auth/return-path";
 import { ClubBar } from "@/app/components/club-bar";
+import { InstallHint } from "@/app/components/pwa/install-hint";
 import { CodeSignIn } from "./code-sign-in";
 
 export const metadata = { title: "Sign in" };
@@ -24,6 +25,8 @@ export default async function ParentSignIn({ searchParams }: { searchParams?: Pr
         <h1 className="page-title">Sign in</h1>
         {ready ? <CodeSignIn next={next} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
         <p className="lede"><a href="/staff/sign-in">Board and staff sign in here</a></p>
+        {/* How to put the portal on the home screen. It takes nothing from the server, and "Not now" puts it away on this device. */}
+        <InstallHint />
       </main>
     </>
   );

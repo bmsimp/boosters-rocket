@@ -339,6 +339,123 @@ test.describe("the install hint on the Display page", () => {
   }
 });
 
+test.describe("the install hint on the sign-in page", () => {
+  const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
+  const hint = (page: Page) => page.locator(".install-hint");
+  /** Waits until React has taken over the sign-in form: only then has the browser decided what the hint shows. */
+  const awake = (page: Page) => page.waitForFunction(() => {
+    const input = document.querySelector('input[name="email"]');
+    return input !== null && Object.keys(input).some((key) => key.startsWith("__reactProps"));
+  });
+
+  test("on an iPhone it gives the steps under the form, and Not now puts it away on this device", async ({ browser }) => {
+    const context = await browser.newContext({ userAgent: IPHONE });
+    const page = await context.newPage();
+    await page.goto("/sign-in");
+    await expect(hint(page).getByRole("heading", { level: 2, name: "Add the portal to your home screen" })).toBeVisible();
+    await expect(hint(page).locator("ol li")).toHaveCount(3);
+    // Under the form and the staff link, set apart from them, and inside the page's width.
+    const send = (await page.getByRole("button", { name: "Send code" }).boundingBox())!;
+    const staff = (await page.getByRole("link", { name: "Board and staff sign in here" }).boundingBox())!;
+    const box = (await hint(page).boundingBox())!;
+    expect(box.y).toBeGreaterThan(send.y + send.height);
+    expect(box.y).toBeGreaterThanOrEqual(staff.y + staff.height + 24);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), "no sideways scroll").toBe(false);
+    // It says nothing about the club or anyone in it: the same words for every visitor.
+    await expect(hint(page)).not.toContainText(/E2E|Zelda|Quetzalcoatl/);
+
+    const notNow = hint(page).getByRole("button", { name: "Not now" });
+    expect((await notNow.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await notNow.click();
+    await expect(hint(page)).toHaveCount(0);
+    await expect(page.getByLabel("Email")).toBeVisible(); // the form is as it was
+    await page.reload();
+    await awake(page);
+    await expect(hint(page)).toHaveCount(0);
+
+    // The box on the Display page is permanent: it is still there for the same device.
+    await context.addCookies([parentSessionCookie()]);
+    await page.goto("/display");
+    await expect(hint(page).getByRole("heading", { level: 2, name: "Add the portal to your home screen" })).toBeVisible();
+    await expect(hint(page).getByRole("button")).toHaveCount(0);
+    await context.close();
+  });
+
+  test("on Chromium it offers Install once the browser has offered a prompt, and nothing before that", async ({ page }) => {
+    await page.goto("/sign-in");
+    await awake(page);
+    await expect(hint(page)).toHaveCount(0); // no prompt offered, no sure steps to give: the page keeps quiet
+    await page.evaluate(() => {
+      const offer = Object.assign(new Event("beforeinstallprompt"), {
+        prompt: async () => { (window as unknown as { prompted: number }).prompted = ((window as unknown as { prompted?: number }).prompted ?? 0) + 1; },
+        userChoice: Promise.resolve({ outcome: "dismissed" }),
+      });
+      window.dispatchEvent(offer);
+    });
+    const install = hint(page).getByRole("button", { name: "Install" });
+    await expect(install).toBeVisible();
+    await expect(hint(page).getByRole("button", { name: "Not now" })).toBeVisible();
+    // Two buttons side by side, not the form's full-width ones.
+    const [a, b] = [(await install.boundingBox())!, (await hint(page).getByRole("button", { name: "Not now" }).boundingBox())!];
+    expect(a.height).toBeGreaterThanOrEqual(44);
+    expect(Math.abs(a.y - b.y)).toBeLessThanOrEqual(1);
+    await install.click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { prompted?: number }).prompted)).toBe(1);
+    await expect(hint(page)).toHaveCount(0); // an offer is used once; with none left the page keeps quiet again
+  });
+
+  test("it shows nothing when the portal is already running from the home screen", async ({ browser }) => {
+    const context = await browser.newContext({ userAgent: IPHONE });
+    await context.addInitScript(() => { Object.defineProperty(navigator, "standalone", { value: true }); });
+    const page = await context.newPage();
+    await page.goto("/sign-in");
+    await awake(page);
+    await expect(hint(page)).toHaveCount(0);
+    await context.close();
+  });
+});
+
+test("an app brought back to the front after a minute away reads its page again, with nothing tapped", async ({ page, context }) => {
+  await context.addCookies([parentSessionCookie()]);
+  // The test moves the page's clock on and says whether the app is in front: a test browser can't be put away.
+  await context.addInitScript(() => {
+    const w = window as unknown as { aheadMs: number };
+    const real = Date.now.bind(Date);
+    w.aheadMs = 0;
+    Date.now = () => real() + w.aheadMs;
+  });
+  const putAwayFor = (ms: number) => page.evaluate((ahead) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    (window as unknown as { aheadMs: number }).aheadMs += ahead;
+  }, ms);
+  const bringBack = () => page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+
+  await page.goto("/");
+  const owed = page.locator(".money .amt");
+  await expect(owed).toHaveText("$185.00");
+  await expect(page.locator(".money .asof time")).not.toContainText("UTC"); // the page is awake: the browser has drawn the time
+  try {
+    // Meanwhile the family's figures change (an invoice paid from another device, read by another page load).
+    await sql`UPDATE family_money SET total_cents = 10000 WHERE family_qbo_id = 'E2E-FAMILY'`;
+    // A glance at a text message: nothing is read again.
+    await putAwayFor(5_000);
+    await bringBack();
+    await page.waitForTimeout(1_500);
+    await expect(owed).toHaveText("$185.00");
+    // Over a minute away: the page's data is read again when the app comes back.
+    await putAwayFor(61_000);
+    await bringBack();
+    await expect(owed).toHaveText("$100.00");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
+  } finally {
+    await sql`UPDATE family_money SET total_cents = 18500 WHERE family_qbo_id = 'E2E-FAMILY'`;
+  }
+});
+
 test("with a notch and a home indicator, the bar, the gutters, the tabs and the body keep clear of them", async ({ page, context }, testInfo) => {
   await context.addCookies([parentSessionCookie()]);
   const cdp = await context.newCDPSession(page);
