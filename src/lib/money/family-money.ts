@@ -36,7 +36,11 @@ type Row = typeof familyMoney.$inferSelect;
 export type MoneyFigures = {
   /** When QuickBooks gave these figures (ISO). */
   asOf: string;
-  /** False when QuickBooks couldn't be asked just now: these are the last figures it gave, and paying is switched off. */
+  /**
+   * False when QuickBooks couldn't be read just now: these are the last figures it gave, and paying is switched off.
+   * The cause may be an outage, a connection only an Admin can mend, or another read under way; the page is not told
+   * which, and says nothing that is true of only one of them.
+   */
   current: boolean;
   /** The sum of the open invoices. Not shown as one figure when `currency` is null (invoices in more than one currency). */
   totalCents: number;
