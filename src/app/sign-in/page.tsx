@@ -2,19 +2,29 @@ import { getClubSettings } from "@/lib/settings/club";
 import { mailWorking } from "@/lib/mail/settings";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { SIGNIN_UNAVAILABLE } from "@/lib/parents/signin-copy";
+import { RETURN_PARAM, safeReturnPath } from "@/lib/auth/return-path";
+import { ClubBar } from "@/app/components/club-bar";
 import { CodeSignIn } from "./code-sign-in";
 
 export const metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
 
-export default async function ParentSignIn() {
-  const [club, mail, settings] = await Promise.all([getClubSettings(), mailWorking(), getParentSettings()]);
+type Query = Record<string, string | string[] | undefined>;
+
+export default async function ParentSignIn({ searchParams }: { searchParams?: Promise<Query> }) {
+  const [club, mail, settings, query] = await Promise.all([getClubSettings(), mailWorking(), getParentSettings(), searchParams]);
   const ready = mail && !parentDoorClosed(settings);
+  // The page the parent asked for (requireParentPage). Anyone can write this page's address, so only a parent page of
+  // this site gets through, and the portal checks it again when the code is right.
+  const next = safeReturnPath(query?.[RETURN_PARAM]);
   return (
-    <main className="wrap signin">
-      <h1 className="page-title">{club.name}</h1>
-      {ready ? <CodeSignIn /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
-      <p className="lede"><a href="/staff/sign-in">Board and staff sign in here</a></p>
-    </main>
+    <>
+      <ClubBar name={club.name} shortName={club.shortName} nav={[]} />
+      <main className="wrap signin">
+        <h1 className="page-title">Sign in</h1>
+        {ready ? <CodeSignIn next={next} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
+        <p className="lede"><a href="/staff/sign-in">Board and staff sign in here</a></p>
+      </main>
+    </>
   );
 }

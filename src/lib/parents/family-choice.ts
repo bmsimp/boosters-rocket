@@ -7,9 +7,9 @@ import { enabledGuardianRows, parentActor } from "./sessions";
 /**
  * After a correct code: the person's invited rows become active (spec §2 Status changes), and with exactly one enabled
  * family that family is entered now and the sign-in is audited with it. With two or more, the sign-in is audited when
- * the parent chooses (chooseFamily).
+ * the parent chooses (chooseFamily). `sessionId` is the session just made for this sign-in: the family is entered on it.
  */
-export async function completeParentSignin(parentId: string, ip: string | null): Promise<{ familyQboId: string | null }> {
+export async function completeParentSignin(parentId: string, ip: string | null, sessionId?: string): Promise<{ familyQboId: string | null }> {
   const [p] = await db.select().from(parent).where(eq(parent.id, parentId));
   if (!p) return { familyQboId: null };
   const actor = parentActor(p);
@@ -25,8 +25,12 @@ export async function completeParentSignin(parentId: string, ip: string | null):
   });
   const rows = await enabledGuardianRows(parentId);
   if (rows.length !== 1) return { familyQboId: null };
-  await writeAudit({ actor, action: "signin", targetType: "parent", targetId: parentId, after: { familyQboId: rows[0]!.familyQboId }, ip });
-  return { familyQboId: rows[0]!.familyQboId };
+  const familyQboId = rows[0]!.familyQboId;
+  await db.transaction(async (tx) => {
+    if (sessionId) await tx.update(parentAuthSession).set({ familyQboId, updatedAt: new Date() }).where(eq(parentAuthSession.id, sessionId));
+    await writeAudit({ actor, action: "signin", targetType: "parent", targetId: parentId, after: { familyQboId }, ip }, tx);
+  });
+  return { familyQboId };
 }
 
 /**

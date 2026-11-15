@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/lib/db/client";
 import { recordSignout } from "./signin-audit";
 import { parentCodePlugin } from "./parent-code-plugin";
+import { PARENT_SESSION_SECONDS } from "@/lib/parents/sessions";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env } from "@/env";
 
@@ -43,9 +44,12 @@ function buildParentAuth() {
       // The portal writes the parent `signin` row itself, with the family entered (family-choice.ts).
       session: { delete: { after: (session, ctx) => recordSignout("parent", session, ctx) } },
     },
-    // Spec §1: 7 days from sign-in, never extended; no cookie cache, so ended sessions stop at the next request.
+    // Spec §1: 90 days, renewed by use; no cookie cache, so ended sessions stop at the next request. Better Auth only
+    // sets the row's first expiry and refuses a row past it. Its own refresh stays off: the portal renews the row
+    // itself (renewParentSession in src/lib/parents/sessions.ts, called from identity.ts), and the cookie is set once,
+    // at sign-in, to outlive it (parent-code-plugin.ts).
     session: {
-      expiresIn: 60 * 60 * 24 * 7,
+      expiresIn: PARENT_SESSION_SECONDS,
       disableSessionRefresh: true,
       additionalFields: { familyQboId: { type: "string", required: false, input: false } },
     },
