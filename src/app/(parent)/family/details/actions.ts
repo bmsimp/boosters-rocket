@@ -11,6 +11,12 @@ import { CONTACT_FIELDS } from "@/lib/parents/contact-fields";
  * whatever it is, and saveMyContact() checks them: their type, their length, their characters. No field names a
  * customer, and none is looked for: whose record changes is decided from the session (ctx) alone, so an id sent along
  * in any field is never read.
+ *
+ * After a save, the pages that show these details are revalidated: this one, and Family and Home for the phone in
+ * the details box. The server caches none of them (each is rendered from the session), but the browser's router keeps
+ * the pages it has visited, and without this the Back button could bring up this form with the values from before
+ * the save. Revalidating also makes Next.js draw this page again as the answer comes back, which reads QuickBooks
+ * once more; DetailsEditor keeps the form and its "Saved" on the screen even if that read fails.
  */
 export const saveDetailsAction = parentAction(async (ctx, form: FormData) => {
   const sent = form as unknown;
@@ -18,10 +24,6 @@ export const saveDetailsAction = parentAction(async (ctx, form: FormData) => {
   const input: Record<string, unknown> = { version: field("version") };
   for (const { name } of CONTACT_FIELDS) input[name] = field(name);
   const result = await saveMyContact(ctx, input);
-  if (result.ok) {
-    // The details box on Family and on Home shows the phone.
-    revalidatePath("/family");
-    revalidatePath("/");
-  }
+  if (result.ok) for (const path of ["/family/details", "/family", "/"]) revalidatePath(path);
   return result;
 });

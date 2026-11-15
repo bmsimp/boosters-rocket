@@ -71,7 +71,8 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     expect(log).toHaveLength(1);
     expect(log[0]).toMatchObject({ door: "parent", actorId: r.identity.parentId, actorLabel: RIVERA.parent.email, action: "parent.contact.save",
       targetType: "qbo_customer", targetId: R_PARENT, before: { phone: RIVERA.parent.phone }, after: { phone: NEW_PHONE }, ip: "203.0.113.77" });
-    expect(revalidatedPaths()).toEqual(["/family", "/"]);
+    // The pages that show these details: the browser's router drops its copies of them.
+    expect(revalidatedPaths()).toEqual(["/family/details", "/family", "/"]);
 
     // The details box shows the new phone.
     const family = await renderPage(FamilyPage);

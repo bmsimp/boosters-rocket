@@ -174,7 +174,8 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
 
   let answer: Record<string, unknown>;
   try {
-    answer = await qboUpdateCustomerContact(record.qboId, version, change, { realmId: company.realmId, timeoutMs: o.timeoutMs ?? WRITE_TIMEOUT_MS });
+    const writeMs = o.timeoutMs ?? WRITE_TIMEOUT_MS;
+    answer = await qboUpdateCustomerContact(record.qboId, version, change, { realmId: company.realmId, timeoutMs: writeMs, signal: AbortSignal.timeout(writeMs * 1.5) });
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
     const fault = faultCodeOf(e);
