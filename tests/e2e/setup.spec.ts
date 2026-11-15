@@ -30,13 +30,13 @@ test("while setup is open, every page goes to /setup, and a wrong code is refuse
   await expect(page.locator("p[role=alert]")).toContainText("isn't right");
 });
 
-test("the right code unlocks the staff step with the redirect URI to copy", async ({ page }) => {
+test("the right code unlocks the staff step with the redirect URI to copy", async ({ page, baseURL }) => {
   const code = reopen();
   await page.goto("/setup");
   await page.getByLabel("Setup code").fill(code.toLowerCase());
   await page.getByRole("button", { name: "Unlock" }).click();
   await expect(page.getByRole("heading", { name: "Step 1: Staff sign-in" })).toBeVisible();
-  await expect(page.getByLabel("Redirect URI").first()).toHaveValue("http://localhost:3100/api/auth/staff/callback/microsoft");
+  await expect(page.getByLabel("Redirect URI").first()).toHaveValue(`${baseURL}/api/auth/staff/callback/microsoft`);
   expect(await page.content()).not.toContain("ci-fake");
 });
 

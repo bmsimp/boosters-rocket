@@ -1,21 +1,28 @@
 import postgres from "postgres";
 import { createSecretBox } from "../src/lib/crypto/secret-box";
 import { mailConfigHash } from "../src/lib/mail/config-hash";
+import { runMigrations } from "../src/lib/db/migrate";
+import { assertE2eDatabase, e2eMailPort } from "../tests/e2e/run-config";
 
-/** This script overwrites settings and deletes the QuickBooks connection, cache and job history: test databases only. */
+/**
+ * This script overwrites settings and deletes the QuickBooks connection, cache and job history: test databases only,
+ * and in a git worktree never the database every tree shares (tests/e2e/run-config.ts).
+ */
 function testDatabaseUrl(): string {
   const url = process.env.DATABASE_URL ?? "";
-  let name = "";
-  try { name = decodeURIComponent(new URL(url).pathname.slice(1)); } catch { /* not an address: refused below */ }
-  if (!name.endsWith("_test")) {
-    console.error(`seed-e2e refuses to run: DATABASE_URL must name a database ending in "_test" (it names "${name}"). This script deletes and overwrites data.`);
+  try { assertE2eDatabase(url); } catch (e) {
+    console.error(`seed-e2e refuses to run: DATABASE_URL names a database this script must not touch. It deletes and overwrites data.
+${(e as Error).message}`);
     process.exit(2);
   }
   return url;
 }
 
 async function main() {
-  const sql = postgres(testDatabaseUrl());
+  const url = testDatabaseUrl(), mailPort = e2eMailPort();
+  // Migrated here, after the check, so a worktree's migrations only ever reach the database the check let through.
+  await runMigrations(url);
+  const sql = postgres(url);
   const [p] = await sql`INSERT INTO parent (name, email) VALUES ('Zelda Quetzalcoatl', 'zelda@example.com')
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
@@ -32,7 +39,7 @@ async function main() {
           VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, 'E2E-FAMILY', now() + interval '7 days')`;
   // SMTP to the e2e mail sink (tests/e2e/parent-sign-in.spec.ts), counted as tested.
   const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal("sink-password", "mail:smtp-password");
-  const mail = { method: "smtp", host: "127.0.0.1", port: 2465, security: "tls", username: "sender", from: "boosters@e2e.example.org",
+  const mail = { method: "smtp", host: "127.0.0.1", port: mailPort, security: "tls", username: "sender", from: "boosters@e2e.example.org",
     passwordCiphertext: sealed.ciphertext, passwordKeyId: sealed.keyId } as const;
   const status = { verifiedHash: mailConfigHash(mail), verifiedAt: new Date().toISOString(), lastSuccessAt: null, lastFailureAt: null, lastError: null };
   await sql`INSERT INTO setting (key, value) VALUES ('mail', ${sql.json(mail)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;

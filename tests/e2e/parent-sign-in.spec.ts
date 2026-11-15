@@ -2,13 +2,17 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
+import { e2eMailPort } from "./run-config";
 
 const sql = postgres(process.env.DATABASE_URL!);
 let sink: MailSink;
 
 test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
-  sink = await startMailSink({ secure: true, port: 2465, key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
+  // The app sends to the port scripts/seed-e2e.ts wrote into the mail settings: seed and run with the same E2E_MAIL_PORT.
+  const [seeded] = await sql`SELECT value FROM setting WHERE key = 'mail'`;
+  expect((seeded?.value as { port?: number } | undefined)?.port, "the mail port in the seeded settings; seed again with this run's E2E_MAIL_PORT").toBe(e2eMailPort());
+  sink = await startMailSink({ secure: true, port: e2eMailPort(), key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
 });
 test.afterAll(async () => { await sink.close(); await sql.end(); });
 test.beforeEach(async () => {
@@ -23,7 +27,7 @@ async function codeFor(email: string): Promise<string> {
   return /^Subject: .*sign-in code: (\d{6})/m.exec(raw)![1]!;
 }
 
-test("a parent signs in with an emailed code, switches family, and signs out", async ({ page }) => {
+test("a parent signs in with an emailed code, switches family, and signs out", async ({ page, baseURL }) => {
   const since = new Date();
   await page.goto("/sign-in");
   await page.getByLabel("Email").fill(" Zelda@Example.com ");
@@ -37,7 +41,7 @@ test("a parent signs in with an emailed code, switches family, and signs out", a
 
   await expect(page).toHaveURL(/\/choose-family$/);
   await page.getByRole("button", { name: "Quetzalcoatl Family", exact: true }).click();
-  await expect(page).toHaveURL(/localhost:3100\/$/);
+  await expect(page).toHaveURL(`${baseURL}/`);
   await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
 
   await page.getByRole("link", { name: "Switch family" }).click();

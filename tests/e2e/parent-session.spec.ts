@@ -9,11 +9,11 @@ test.afterAll(async () => { await sql.end(); });
 // The seeded session (scripts/seed-e2e.ts) is Zelda's, with the Quetzalcoatl family chosen. Nothing here changes it,
 // so both passes of the run, and a run without a new seed, find it as it was.
 
-test("the seeded parent session opens the parent home, not the sign-in page", async ({ context, page }) => {
+test("the seeded parent session opens the parent home, not the sign-in page", async ({ context, page, baseURL }) => {
   await context.addCookies([parentSessionCookie()]);
   const res = await page.goto("/");
   expect(res?.status()).toBe(200);
-  await expect(page).toHaveURL(/localhost:3100\/$/);
+  await expect(page).toHaveURL(`${baseURL}/`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
   await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();
   await page.goto("/display");

@@ -26,9 +26,9 @@ test("an Admin sees what is set for QuickBooks, and no inputs on the view", asyn
   await expect(page.getByText("Disconnect", { exact: true })).toBeVisible(); // the closed section's summary; never opened
 });
 
-test("step 1 keeps what was typed after a refusal and empties the secret after a save", async ({ page }) => {
+test("step 1 keeps what was typed after a refusal and empties the secret after a save", async ({ page, baseURL }) => {
   await page.goto("/staff/settings/quickbooks/setup?step=app");
-  await expect(page.getByLabel("Redirect address")).toHaveValue("http://localhost:3100/api/quickbooks/callback");
+  await expect(page.getByLabel("Redirect address")).toHaveValue(`${baseURL}/api/quickbooks/callback`);
   await expect(page.getByLabel("Client ID")).toHaveValue("e2e-client-id-1234567890");
   await expect(page.getByLabel(/Client secret/)).toHaveValue("");
 
