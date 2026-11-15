@@ -36,7 +36,8 @@ test("Home greets the parent and shows what the family owes, its students and th
   await expect(students.getByRole("listitem")).toHaveText(STUDENTS);
   const details = page.getByRole("region", { name: "Your details" });
   await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
-  await expect(details).toContainText("For now, the club makes changes for you. Ask the club and they'll update it.");
+  await expect(details).toContainText("You can change your phone and mailing address yourself. The club changes your name and email for you. Ask the club and they'll update it.");
+  await expect(details.getByRole("link", { name: "Update my details" })).toHaveAttribute("href", "/family/details");
   await expect(page.locator(".roster-asof")).toContainText("From the club's QuickBooks, as of");
   await expect(page.locator(".roster-asof time")).toBeVisible();
 

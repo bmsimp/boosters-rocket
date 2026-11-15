@@ -32,9 +32,14 @@ async function main() {
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
           VALUES (${crypto.randomUUID()}, 'Zelda Quetzalcoatl', 'zelda@example.com', true, ${p!.id}) ON CONFLICT (parent_id) DO NOTHING`;
-  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status) VALUES ('E2E-FAMILY', ${p!.id}, true, 'active')
+  // Each link names the QuickBooks record it came from (E2E-P1, E2E-P2 below), as the reconcile leaves it once parent
+  // sign-ins are switched on (tests/e2e/parents.spec.ts): "Your details" then offers "Update my details" in both passes
+  // of the run. Those ids are not numbers on purpose. The edit page reads a parent's record from QuickBooks as it
+  // opens, and an id that isn't digits is never sent: with the made-up tokens below, a number here would send this
+  // run's requests to Intuit's real servers (tests/e2e/family-details.spec.ts checks the id before it opens the page).
+  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY', ${p!.id}, true, 'active', 'E2E-P1')
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
-  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status) VALUES ('E2E-FAMILY-2', ${p!.id}, false, 'active')
+  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY-2', ${p!.id}, false, 'active', 'E2E-P2')
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
   // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
   // code (tests/e2e/parent-session.ts makes the cookie). Every session she has is deleted first, as the staff one is.

@@ -39,7 +39,7 @@ test("an Admin previews, then switches parent sign-ins on (and finds them on the
   await expect(page.getByText("2 people would be able to sign in, to 3 families.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Addresses under more than one family (1)" })).toBeVisible();
   await expect(page.getByText("sam@example.com: Okafor Family, Lee Family")).toBeVisible();
-  // Zelda's two hand-made sign-ins are listed in QuickBooks now, so the reconcile takes them over: none would end.
+  // Zelda's two sign-ins come from records that are in QuickBooks (scripts/seed-e2e.ts), so the reconcile keeps them: none would end.
   await expect(page.getByRole("heading", { name: "Sign-ins that would end (0)" })).toBeVisible();
 
   const since = await mark();
