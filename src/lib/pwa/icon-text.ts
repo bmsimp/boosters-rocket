@@ -5,7 +5,7 @@
  * drawn; a short name with anything else gets the plain mark.
  *
  * The tables are that font's advance widths in thousandths of an em, read from the file; a 0 is a character it lacks.
- * tests/unit/pwa-icon-text.test.ts reads the font and fails if a Next.js upgrade changes it.
+ * tests/unit/pwa-rules.test.ts reads the font and fails if a Next.js upgrade changes it.
  */
 const ASCII_FROM = 0x20;
 const ASCII = [

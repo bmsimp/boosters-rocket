@@ -354,7 +354,7 @@ body { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 .bar { padding-top: env(safe-area-inset-top); }
 .menu-panel { top: calc(56px + env(safe-area-inset-top)); }
 .menu-panel a { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
-.tabs { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+.tabs { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 @media (min-width: 760px) { body { padding-bottom: env(safe-area-inset-bottom); } }
 
 /* Install hint (src/app/components/pwa/install-hint.tsx) */
