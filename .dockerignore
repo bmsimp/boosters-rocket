@@ -2,6 +2,8 @@
 .github
 .next
 node_modules
+# Git worktrees for agents working in parallel: whole copies of the repo, each with its own node_modules and build.
+.worktrees
 **/.env
 **/.env.*
 !.env.example
