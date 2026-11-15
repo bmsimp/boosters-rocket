@@ -5,8 +5,8 @@ import { runMigrations } from "../src/lib/db/migrate";
 import { assertE2eDatabase, e2eMailPort } from "../tests/e2e/run-config";
 
 /**
- * This script overwrites settings and deletes the QuickBooks connection, cache and job history: test databases only,
- * and in a git worktree never the database every tree shares (tests/e2e/run-config.ts).
+ * This script empties the database and seeds it again: test databases only, and in a git worktree never the database
+ * every tree shares (tests/e2e/run-config.ts).
  */
 function testDatabaseUrl(): string {
   const url = process.env.DATABASE_URL ?? "";
@@ -23,6 +23,11 @@ async function main() {
   // Migrated here, after the check, so a worktree's migrations only ever reach the database the check let through.
   await runMigrations(url);
   const sql = postgres(url);
+  // Start from nothing, as vitest's resetDb() does: every table but the built-in roles the migrations make. A vitest
+  // run on this database leaves its own people and settings behind, and the specs count what the pages list.
+  const tables = (await sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'role'`).map((r) => r.tablename as string);
+  await sql.unsafe(`TRUNCATE ${tables.map((t) => `"${t.replaceAll('"', '""')}"`).join(", ")} RESTART IDENTITY CASCADE`);
+  await sql`DELETE FROM role WHERE builtin = false`;
   const [p] = await sql`INSERT INTO parent (name, email) VALUES ('Zelda Quetzalcoatl', 'zelda@example.com')
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
