@@ -6,7 +6,8 @@ import { verifySetupCode, resetSetupCodeLimiter } from "@/lib/setup/code";
 import { getSetupState, updateSetupState } from "@/lib/setup/state";
 import { resetDb } from "../helpers/db";
 
-const DB = "postgres://booster:booster@localhost:5433/booster_test";
+// The script writes to the database this run uses (vitest.config.mts sets DATABASE_URL), where the app code below reads.
+const DB = process.env.DATABASE_URL!;
 const run = (...args: string[]) => spawnSync("node", ["scripts/setup-code.mjs", ...args], {
   encoding: "utf8", env: { ...process.env, DATABASE_URL: DB, APP_URL: "https://portal.example.org" },
 });

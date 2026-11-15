@@ -5,10 +5,11 @@ import path from "node:path";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { adminDatabaseUrl, scratchDatabase } from "../setup/database-url";
 
-const ADMIN_URL = "postgres://booster:booster@localhost:5433/postgres";
-const NAME = "booster_migrate_parents_test";
-const DB_URL = `postgres://booster:booster@localhost:5433/${NAME}`;
+// On the run's own server, named after the run's database, so two runs never drop each other's scratch database.
+const ADMIN_URL = adminDatabaseUrl();
+const { name: NAME, url: DB_URL } = scratchDatabase("migrate_parents");
 let oldFolder = "";
 
 async function migrateWith(folder: string) {

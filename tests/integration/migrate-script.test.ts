@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { adminDatabaseUrl, scratchDatabase } from "../setup/database-url";
 
-const ADMIN_URL = "postgres://booster:booster@localhost:5433/postgres";
-const FRESH = "booster_migrate_script_test";
-const FRESH_URL = `postgres://booster:booster@localhost:5433/${FRESH}`;
+// On the run's own server, named after the run's database, so two runs never drop each other's scratch database.
+const ADMIN_URL = adminDatabaseUrl();
+const { name: FRESH, url: FRESH_URL } = scratchDatabase("migrate_script");
 
 describe("scripts/migrate.mjs", { timeout: 30_000 }, () => {
   beforeAll(async () => {

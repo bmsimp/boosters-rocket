@@ -4,7 +4,8 @@ import { db } from "@/lib/db/client";
 import { guardian, parent, parentAuthUser, auditLog } from "@/lib/db/schema";
 import { resetDb } from "../helpers/db";
 
-const TEST_URL = "postgres://booster:booster@localhost:5433/booster_test";
+// The script writes to the database this run uses (vitest.config.mts sets DATABASE_URL), where the assertions below read.
+const TEST_URL = process.env.DATABASE_URL!;
 const run = (appUrl: string, args: string[]) => spawnSync("node", ["scripts/seed-poc-guardian.mjs", ...args],
   { env: { ...process.env, DATABASE_URL: TEST_URL, APP_URL: appUrl }, encoding: "utf8" });
 const ARGS = ["--name", "Test Parent", "--email", "Test.Parent@Example.com", "--family", "POC-FAMILY-1"];
