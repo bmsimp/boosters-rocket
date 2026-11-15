@@ -62,7 +62,9 @@ export function CodeSignIn({ next }: { next: string | null }) {
       setError(r.error === "rate_limited" ? TOO_MANY_TRIES : CODE_REJECTED);
     } catch (e) { setError(failure(e)); } finally { setBusy(false); }
   };
-  const startOver = () => { clearCodeStep(deviceStore()); setStep("email"); setCode(""); setError(null); };
+  // Starting over keeps nothing of the step it leaves, which on a shared device may have been somebody else's: not the
+  // address in the field, and not the page they were heading to. Only what this page load itself was asked for stays.
+  const startOver = () => { clearCodeStep(deviceStore()); setStep("email"); setEmail(""); setBack(next); setCode(""); setError(null); };
   const wait = Math.max(0, RESEND_SECONDS - Math.floor((now - sentAt) / 1000));
 
   if (step === "email") {
