@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  Shown by the service worker (sw.js) when a page can't be loaded because there is no connection.
+  It is the only thing the worker ever stores, so it must stay the same for every club and every person:
+  no club name or color, no family data, nothing fetched from anywhere. Styles are inline for that reason.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<title>You're offline</title>
+<style>
+  :root { color-scheme: light dark; --paper: #ffffff; --ink: #14161a; --ink-2: #4c5159; --grid: #e8eae6; }
+  @media (prefers-color-scheme: dark) { :root { --paper: #16181c; --ink: #eceee9; --ink-2: #a9aeb6; --grid: #22252b; } }
+  @media (prefers-contrast: more) { :root { --ink: #000000; --ink-2: #1f2328; --grid: transparent; } }
+  @media (prefers-contrast: more) and (prefers-color-scheme: dark) { :root { --paper: #000000; --ink: #ffffff; --ink-2: #e6e6e6; } }
+  * { box-sizing: border-box; margin: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    min-height: 100vh; min-height: 100dvh; display: grid; place-items: center;
+    padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+    color: var(--ink); background-color: var(--paper);
+    background-image: linear-gradient(90deg, var(--grid) 1px, transparent 1px), linear-gradient(0deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+    font: 400 1.0625rem/1.45 system-ui, sans-serif; /* the portal's own fallback stack: its fonts can't be loaded offline */
+  }
+  main { width: 100%; max-width: 440px; background: var(--paper); border: 2px solid var(--ink); padding: 24px; }
+  svg { width: 40px; height: 40px; display: block; }
+  h1 { font-size: 1.75rem; line-height: 1.15; margin-top: 12px; }
+  p { margin-top: 12px; color: var(--ink-2); }
+  a.btn {
+    display: flex; align-items: center; justify-content: center; min-height: 48px; margin-top: 24px; padding: 0 20px;
+    border: 2px solid var(--ink); background: var(--ink); color: var(--paper); font-weight: 700; text-decoration: none;
+  }
+  a.btn:hover { background: var(--paper); color: var(--ink); }
+  a.btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  @media (forced-colors: active) { body { background-image: none; } a.btn { border-color: ButtonText; } }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+    <path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0M3 3l18 18"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/>
+  </svg>
+  <h1>You're offline</h1>
+  <p>The portal needs a connection to show your family's information. Check your Wi-Fi or mobile data, then try again.</p>
+  <p>Nothing is lost. What you owe and what you've signed are kept safe by your club.</p>
+  <!-- A link to this same address: the page the person asked for is asked for again. No script, so it works anywhere. -->
+  <a class="btn" href="">Try again</a>
+</main>
+</body>
+</html>
