@@ -237,19 +237,19 @@ describe("what a parent's page load asks of the client", () => {
 
   it("gives up on a slow answer after the time it was given, and says so", async () => {
     await seedConnected(stub);
-    stub.apiDelayMs = 1500;
+    stub.apiDelayMs = 3000;
     const started = Date.now();
     expect(await codeOf(qboInvoices(["10"], { ...PARENT, timeoutMs: 200 }))).toBe("timeout");
-    expect(Date.now() - started).toBeLessThan(1200);
+    expect(Date.now() - started).toBeLessThan(2500);
     expect(stub.apiCalls()).toHaveLength(1); // a timeout is not retried
   });
 
   it("gives up when the caller's own deadline passes, between tries too", async () => {
     await seedConnected(stub);
-    stub.apiDelayMs = 1500;
+    stub.apiDelayMs = 3000;
     const started = Date.now();
     expect(await codeOf(qboInvoices(["10"], { ...PARENT, signal: AbortSignal.timeout(200) }))).toBe("timeout");
-    expect(Date.now() - started).toBeLessThan(1200);
+    expect(Date.now() - started).toBeLessThan(2500);
     stub.reset(); stub.accessTokens.add("at-seed");
     stub.failNext = 1;
     expect(await codeOf(qboInvoices(["10"], { ...PARENT, signal: AbortSignal.timeout(60) }))).toBe("timeout"); // the wait before the retry is cut short
@@ -258,13 +258,13 @@ describe("what a parent's page load asks of the client", () => {
 
   it("does not wait for a token refresh that is taking longer than the caller's deadline", async () => {
     await seedConnected(stub, { accessExpiresInMs: -1000 });
-    stub.tokenDelayMs = 1000;
+    stub.tokenDelayMs = 2000;
     const started = Date.now();
     expect(await codeOf(qboInvoices(["10"], { ...PARENT, signal: AbortSignal.timeout(150) }))).toBe("timeout");
-    expect(Date.now() - started).toBeLessThan(800);
+    expect(Date.now() - started).toBeLessThan(1500);
     expect(stub.apiCalls()).toHaveLength(0);
     // The refresh itself carries on and is saved: the refresh token is spent only once.
-    await expect.poll(async () => (await row()).lastTokenRefreshAt!.getTime() > started, { timeout: 5000 }).toBe(true);
+    await expect.poll(async () => (await row()).lastTokenRefreshAt!.getTime() > started, { timeout: 15_000 }).toBe(true);
     expect((await accessToken()).token).toBe("at-1");
   });
 

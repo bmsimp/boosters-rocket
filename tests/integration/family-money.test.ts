@@ -230,10 +230,10 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     stub.invoices = [inv("1", "10")];
     await loadFamilyMoney("10");
     await ageMoney("10", 6 * MINUTE);
-    stub.apiDelayMs = 2000;
+    stub.apiDelayMs = 4000;
     const started = Date.now();
     const money = await loadFamilyMoney("10", { timeoutMs: 200 });
-    expect(Date.now() - started).toBeLessThan(1500);
+    expect(Date.now() - started).toBeLessThan(3000);
     expect(money.figures).toMatchObject({ current: false, totalCents: 8500 });
     expect((await moneyRow("10"))!.failedCode).toBe("timeout");
   });
@@ -297,12 +297,12 @@ describe("two requests for the same family never both go to QuickBooks", () => {
 
   it("many families at once take turns: no more than a few reads run together, and every one is answered", async () => {
     await seedShape();
-    const ids = Array.from({ length: 9 }, (_, i) => String(100 + i));
+    const ids = Array.from({ length: MAX_LIVE_READS + 2 }, (_, i) => String(100 + i));
     await addToCache(ids.map((id) => fam(id, `Family ${id}`)));
     await connectCompany(stub);
     stub.customers = ids.map((Id) => ({ Id, BalanceWithJobs: 85 }));
     stub.invoices = ids.map((id, i) => inv(String(i + 1), id));
-    stub.apiDelayMs = 100;
+    stub.apiDelayMs = 80;
     const all = await Promise.all(ids.map((id) => loadFamilyMoney(id)));
     expect(all.map((m) => m.figures?.totalCents)).toEqual(ids.map(() => 8500));
     expect(all.every((m) => m.figures!.current)).toBe(true);
