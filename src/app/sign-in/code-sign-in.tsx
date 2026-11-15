@@ -68,7 +68,7 @@ export function CodeSignIn({ next }: { next: string | null }) {
   if (step === "email") {
     return (
       <form className="stack" onSubmit={(e) => { e.preventDefault(); void send(); }}>
-        <p className="lede">Sign in to see your students, what&apos;s owed, and this season&apos;s forms. We&apos;ll email you a 6-digit code.</p>
+        <p className="lede">Sign in to see your students and what&apos;s owed. We&apos;ll email you a 6-digit code.</p>
         <label className="field"><span>Email</span>
           <input name="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
