@@ -16,7 +16,8 @@ export default defineConfig({
     hookTimeout: 30_000,
     env: {
       // Values here override the shell, so a run is pointed at a private database with TEST_DATABASE_URL, not DATABASE_URL.
-      // tests/setup/global-setup.ts checks the name and migrates this same database.
+      // tests/setup/global-setup.ts checks the name, refuses this shared default in a git worktree, and migrates this same
+      // database. The default is also DEFAULT_TEST_DATABASE_URL in tests/setup/database-url.ts: change them together.
       DATABASE_URL: process.env.TEST_DATABASE_URL || "postgres://booster:booster@localhost:5433/booster_test",
       BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-32",
       SETTINGS_ENCRYPTION_KEY: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
