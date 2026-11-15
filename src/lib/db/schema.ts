@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, integer, check } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check } from "drizzle-orm/pg-core";
 import type { PgColumnBuilderBase } from "drizzle-orm/pg-core";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -217,6 +217,38 @@ export const qboCustomer = pgTable("qbo_customer", {
   qboUpdatedAt: timestamp("qbo_updated_at", { withTimezone: true }),
   refreshedAt: timestamp("refreshed_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("qbo_customer_parent_ix").on(t.parentQboId), index("qbo_customer_type_ix").on(t.typeQboId)]);
+
+/** An invoice as a parent sees it, kept in `family_money.invoices`. Amounts are integer cents; dates are calendar dates (YYYY-MM-DD). */
+export type StoredInvoice = {
+  qboId: string;
+  number: string | null;            // QuickBooks' DocNumber: free text, shown as text only
+  forName: string | null;           // the student or parent sub-customer it was raised on; null when on the family itself
+  date: string | null;
+  dueDate: string | null;
+  totalCents: number;
+  balanceCents: number;             // what is still due; 0 on a paid invoice
+  currency: string;
+  payLink: string | null;           // QuickBooks' hosted payment page, only when it passed src/lib/money/pay-link.ts
+};
+
+/**
+ * What QuickBooks last said one family owes (v1 spec §8.2): one row per family. The read columns are replaced only by
+ * a successful read and are all null until the first one; `failed_at` and `failed_code` record the latest try that
+ * failed. Never a source of truth. The ids belong to the company in `realm_id`; a company change deletes every row.
+ */
+export const familyMoney = pgTable("family_money", {
+  familyQboId: text("family_qbo_id").primaryKey(),
+  realmId: text("realm_id"),                                         // the QuickBooks company the figures were read from
+  readAt: timestamp("read_at", { withTimezone: true }),
+  invoices: jsonb("invoices").$type<StoredInvoice[]>(),              // open invoices, then those paid in the last 12 months
+  totalCents: bigint("total_cents", { mode: "number" }),             // the sum of the open invoices
+  balanceWithJobsCents: bigint("balance_with_jobs_cents", { mode: "number" }), // QuickBooks' own figure, kept as a cross-check only
+  currency: text("currency"),                                        // null when the open invoices are in more than one
+  mismatchAuditedAt: timestamp("mismatch_audited_at", { withTimezone: true }), // the last time a differing cross-check was audited
+  failedAt: timestamp("failed_at", { withTimezone: true }),
+  failedCode: text("failed_code"),                                   // a short code, never a response body
+  updatedAt: updated(),
+});
 
 /** One row per run of a scheduled or hand-started job (spec §4). `outcome` is null while it runs. */
 export const jobRun = pgTable("job_run", {
