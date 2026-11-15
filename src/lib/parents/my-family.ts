@@ -34,7 +34,7 @@ export type MyFamily = {
  * The signed-in person's own QuickBooks record, for the code that reads and changes it in QuickBooks
  * (./contact-edits.ts). The id is for the server only: it is never given to a page or a client component.
  */
-export type MyRecord = { qboId: string; parentQboId: string | null; familyName: string; contact: MyContact & { edits: "own" | "family" } };
+export type MyRecord = { qboId: string; parentQboId: string | null; contact: MyContact & { edits: "own" | "family" } };
 
 type Row = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; email: string | null; phone: string | null };
 
@@ -64,8 +64,9 @@ export async function loadMyFamily(ctx: ParentCtx): Promise<MyFamily | null> {
  */
 export async function loadMyRecord(ctx: ParentCtx): Promise<MyRecord | null> {
   const got = await read(ctx);
-  if (!got?.mine || !got.family.me?.edits) return null;
-  return { qboId: got.mine.qboId, parentQboId: got.mine.parentQboId, familyName: got.family.name, contact: { ...got.family.me, edits: got.family.me.edits } };
+  const edits = got?.family.me?.edits;
+  if (!got?.mine || !got.family.me || !edits) return null;
+  return { qboId: got.mine.qboId, parentQboId: got.mine.parentQboId, contact: { ...got.family.me, edits } };
 }
 
 async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Row | null } | null> {

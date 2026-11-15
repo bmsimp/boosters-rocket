@@ -11,8 +11,9 @@ export const metadata = { title: "Update your details" };
  * session and nothing else: the address of this page has no id in it, and neither has the form.
  *
  * The phone and address are read from QuickBooks as the page opens, since the roster cache keeps no address. When
- * QuickBooks can't be asked, the page shows what the roster last had and no form (DetailsEditor says so). A parent whose sign-in has no
- * QuickBooks record of its own gets the same box as on Family, which tells them to ask the club.
+ * QuickBooks can't be asked, the page shows what the roster last had, and DetailsEditor says so in place of the form.
+ * A parent whose sign-in has no QuickBooks record of its own gets the same box as on Family, which tells them to ask
+ * the club.
  */
 export default async function FamilyDetailsPage() {
   const ctx = await requireParentPage("/family/details");
