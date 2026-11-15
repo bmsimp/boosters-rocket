@@ -24,6 +24,12 @@ async function main() {
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
   await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status) VALUES ('E2E-FAMILY-2', ${p!.id}, false, 'active')
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
+  // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
+  // code (tests/e2e/parent-session.ts makes the cookie). Every session she has is deleted first, as the staff one is.
+  const [zelda] = await sql`SELECT id FROM parent_auth_user WHERE parent_id = ${p!.id}`;
+  await sql`DELETE FROM parent_auth_session WHERE user_id = ${zelda!.id}`;
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_qbo_id, expires_at)
+          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, 'E2E-FAMILY', now() + interval '7 days')`;
   // SMTP to the e2e mail sink (tests/e2e/parent-sign-in.spec.ts), counted as tested.
   const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal("sink-password", "mail:smtp-password");
   const mail = { method: "smtp", host: "127.0.0.1", port: 2465, security: "tls", username: "sender", from: "boosters@e2e.example.org",
@@ -68,8 +74,11 @@ async function main() {
           ('30', 'Lincoln High', true, null, '4', null, null, '0'),
           ('E2E-FAMILY', 'Quetzalcoatl Family', true, null, '1', null, null, '0'),
           ('E2E-P1', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY', '2', 'zelda@example.com', null, '0'),
+          ('E2E-S1', 'Xochitl Quetzalcoatl', true, 'E2E-FAMILY', '3', null, null, '0'),
+          ('E2E-S2', 'Yaretzi Quetzalcoatl', true, 'E2E-FAMILY', '3', null, null, '0'),
           ('E2E-FAMILY-2', 'Second Family', true, null, '1', null, null, '0'),
           ('E2E-P2', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY-2', '2', 'zelda@example.com', null, '0'),
+          ('E2E-S3', 'Wolfgang Secondborn', true, 'E2E-FAMILY-2', '3', null, null, '0'),
           ('40', 'Okafor Family', true, null, '1', null, null, '0'),
           ('41', 'Sam Okafor', true, '40', '2', 'sam@example.com', null, '0'),
           ('50', 'Lee Family', true, null, '1', null, null, '0'),
@@ -88,7 +97,7 @@ async function main() {
   await sql`INSERT INTO setting (key, value) VALUES ('roster.source', ${sql.json({ realmId: "9130000000000001" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await sql`DELETE FROM job_run`;
-  await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '13 customers, 4 customer types', 'worker')`;
+  await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   await sql.end();
 }
 

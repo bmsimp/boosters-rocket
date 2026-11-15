@@ -15,7 +15,12 @@ export const stu = (qboId: string, displayName: string, family: string, o: Parti
 /** Replaces the roster cache with these rows, as a refresh would have left it. */
 export async function seedCache(customers: CacheCustomer[], types = P_TYPES): Promise<void> {
   await db.delete(qboCustomer); await db.delete(qboCustomerType);
-  await db.insert(qboCustomerType).values(types.map((t) => ({ ...t, active: true })));
+  await addToCache(customers, types);
+}
+
+/** Adds rows to the roster cache and keeps what is there (tests/helpers/parent.ts seeds one family at a time with it). */
+export async function addToCache(customers: CacheCustomer[], types = P_TYPES): Promise<void> {
+  await db.insert(qboCustomerType).values(types.map((t) => ({ ...t, active: true }))).onConflictDoNothing();
   if (customers.length) await db.insert(qboCustomer).values(customers.map((c) => ({
     qboId: c.qboId, displayName: c.displayName, active: c.active ?? true, parentQboId: c.parentQboId ?? null, typeQboId: c.typeQboId,
     email: c.email ?? null, phone: c.phone ?? null, syncToken: "0" })));
