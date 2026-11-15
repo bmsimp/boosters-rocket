@@ -249,11 +249,19 @@ function staffOnlyImportProblems(file: string, source = read(file)): string[] {
   return problems;
 }
 
+/**
+ * Parent-facing code outside src/app/(parent)/: folders under src/lib/ that parent pages call to read one family's
+ * data. The scan reads every file in them as it reads the pages, so none can reach a staff-only query either.
+ */
+const PARENT_FACING_LIB = ["src/lib/money"];
+
 describe("parent code never imports the staff-only queries", () => {
-  const parentCode = app.filter((f) => f.startsWith(PARENT_PAGES) && /\.(tsx?|jsx?|mjs|cjs)$/.test(f));
+  const isSource = (f: string) => /\.(tsx?|jsx?|mjs|cjs)$/.test(f);
+  const parentCode = [...app.filter((f) => f.startsWith(PARENT_PAGES) && isSource(f)), ...PARENT_FACING_LIB.flatMap(filesUnder).filter(isSource)];
 
   it("finds the parent code on disk", () => {
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/page.tsx", "src/app/(parent)/layout.tsx", "src/app/(parent)/display/display-settings.tsx"]));
+    expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/payments/page.tsx", "src/app/(parent)/money-box.tsx", "src/lib/money/family-money.ts"]));
   });
 
   it.each(parentCode)("%s imports nothing that reads across families", (file) => {

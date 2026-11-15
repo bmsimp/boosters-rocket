@@ -4,7 +4,7 @@ import { readdirSync } from "node:fs";
 import path from "node:path";
 import { createElement } from "react";
 import { resetDb } from "../helpers/db";
-import { seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 
 /**
  * The gate every parent page passes through: one family never sees another's data.
@@ -49,6 +49,8 @@ const NO_FAMILY_DATA: Record<string, string> = {
 /** What a page must show its own family, beyond "something": the exact words. */
 const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`],
+  // The family's name, every invoice's number and amount, the total, and the address behind the Pay button.
+  "/payments": (family) => [family.spec.family.name, ...moneyMarkers(family.spec)],
 };
 
 const load = async (file: string): Promise<Page> => ((await import(path.join(root, file))) as { default: Page }).default;

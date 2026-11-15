@@ -8,6 +8,18 @@ export type StubCall = { method: string; path: string; query: URLSearchParams; a
 export type QboStub = {
   base: string; calls: StubCall[];
   customers: Record<string, unknown>[]; types: Record<string, unknown>[]; companyName: string;
+  /**
+   * Invoices the test sets, each with `CustomerRef: { value }`. An invoice query answers only those of the customers its
+   * filter names, in either form the portal sends, and leaves `InvoiceLink` out unless the request has include=invoiceLink.
+   * A customer read by id (GET .../customer/<id>) answers the matching row of `customers`, with whatever
+   * `BalanceWithJobs` the test gave it.
+   */
+  invoices: Record<string, unknown>[];
+  refuseInQuery: boolean;       // answer an invoice query in the `CustomerRef in (...)` form with HTTP 400
+  rateLimitNext: number;        // answer this many API requests, from the next one, with HTTP 429
+  failNext: number;             // answer this many API requests, from the next one, with HTTP 500
+  apiDelayMs: number;           // wait this long before answering any API request (a slow QuickBooks)
+  peakApi: number;              // the most API requests that were being answered at one time
   codes: Set<string>;           // authorization codes the token endpoint accepts, once each
   accessTokens: Set<string>;    // bearer tokens the API accepts
   refreshTokens: Set<string>;   // refresh tokens the token endpoint accepts, once each (Intuit rotates them)
@@ -22,8 +34,9 @@ export type QboStub = {
 
 /** Intuit's token and revoke endpoints and the QuickBooks query API, enough for the portal's real client to talk to. */
 export async function startQboStub(): Promise<QboStub> {
-  let issued = 0, queries = 0;
+  let issued = 0, queries = 0, answering = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
+    invoices: [], refuseInQuery: false, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
@@ -61,6 +74,17 @@ export async function startQboStub(): Promise<QboStub> {
       }
       if (!url.pathname.startsWith("/v3/company/")) return json(404, {});
       if (!stub.accessTokens.has(call.auth.replace(/^Bearer /, ""))) return json(401, { fault: { error: [{ code: "3200" }] } });
+      answering++; stub.peakApi = Math.max(stub.peakApi, answering);
+      res.once("close", () => { answering--; });
+      if (stub.apiDelayMs) await new Promise((r) => setTimeout(r, stub.apiDelayMs));
+      if (stub.rateLimitNext > 0) { stub.rateLimitNext--; return json(429, { Fault: { Error: [{ Message: "a throttling message the portal must never store" }] } }); }
+      if (stub.failNext > 0) { stub.failNext--; return json(500, { Fault: { Error: [{ Message: "a message the portal must never store" }] } }); }
+      const byId = /\/customer\/([^/]+)$/.exec(url.pathname)?.[1];
+      if (byId !== undefined) {
+        const customer = stub.customers.find((c) => c.Id === decodeURIComponent(byId));
+        // QuickBooks answers a record it doesn't have with a 400 and a fault, not a 404.
+        return customer ? json(200, { Customer: customer }) : json(400, { Fault: { Error: [{ Message: "Object Not Found" }] } });
+      }
       if (url.pathname.includes("/companyinfo/")) {
         if (stub.companyInfoDelayMs) await new Promise((r) => setTimeout(r, stub.companyInfoDelayMs));
         return json(200, { CompanyInfo: { CompanyName: stub.companyName } });
@@ -73,8 +97,22 @@ export async function startQboStub(): Promise<QboStub> {
         const q = url.searchParams.get("query") ?? "";
         const entity = /from (\w+)/i.exec(q)?.[1] ?? "";
         const start = Number(/startposition (\d+)/i.exec(q)?.[1] ?? 1), max = Number(/maxresults (\d+)/i.exec(q)?.[1] ?? 100);
-        const matched = entity === "CustomerType" ? stub.types
-          : /active in \(true, ?false\)/i.test(q) ? stub.customers : stub.customers.filter((c) => c.Active !== false);
+        // An entity the stub doesn't hold is refused, as QuickBooks refuses a query it can't parse: never the customer list.
+        if (!["Customer", "CustomerType", "Invoice"].includes(entity)) return json(400, { Fault: { Error: [{ Message: "QueryParserError" }] } });
+        let matched: Record<string, unknown>[];
+        if (entity === "Invoice") {
+          // The two filters the portal sends: CustomerRef in ('1','2') and CustomerRef = '1'. Any other invoice query is refused.
+          const list = /where CustomerRef in \(([^)]*)\)/i.exec(q)?.[1], one = /where CustomerRef = '([^']*)'/i.exec(q)?.[1];
+          if (list === undefined && one === undefined) return json(400, { Fault: { Error: [{ Message: "QueryParserError" }] } });
+          if (list !== undefined && stub.refuseInQuery) return json(400, { Fault: { Error: [{ Message: "QueryValidationError: a message the portal must never store" }] } });
+          const ids = new Set(list !== undefined ? [...list.matchAll(/'([^']*)'/g)].map((m) => m[1]!) : [one!]);
+          const withLink = (url.searchParams.get("include") ?? "").toLowerCase() === "invoicelink";
+          matched = stub.invoices.filter((i) => ids.has(String((i.CustomerRef as { value?: unknown } | undefined)?.value)))
+            .map((i) => (withLink ? i : Object.fromEntries(Object.entries(i).filter(([field]) => field !== "InvoiceLink"))));
+        } else {
+          matched = entity === "CustomerType" ? stub.types
+            : /active in \(true, ?false\)/i.test(q) ? stub.customers : stub.customers.filter((c) => c.Active !== false);
+        }
         // `orderby Id` sorts as QuickBooks was seen to in the sandbox (Ids compared as numbers); without it the rows
         // come back in whatever order the test stored them. A row with no numeric Id (some tests store junk) goes last.
         const idOf = (c: unknown) => { const n = Number((c as { Id?: unknown } | null)?.Id ?? NaN); return Number.isNaN(n) ? Infinity : n; };
@@ -93,6 +131,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.reset = () => {
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
+    stub.invoices = []; stub.refuseInQuery = false; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));

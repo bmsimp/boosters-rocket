@@ -6,8 +6,12 @@ const read = (dir: string) => (existsSync(path.resolve(dir)) ? readdirSync(path.
   .filter((f) => /\.tsx?$/.test(f)).map((f) => ({ file: `${dir}/${f.replaceAll("\\", "/")}`, text: readFileSync(path.resolve(dir, f), "utf8") }));
 
 describe("the portal writes nothing to QuickBooks (spec §3)", () => {
-  const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs")];
-  it("finds the QuickBooks code", () => { expect(sources.length).toBeGreaterThan(2); });
+  // src/lib/money reads invoices for parents through the client's GET-only functions: scanned with the rest, on purpose.
+  const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs"), ...read("src/lib/money")];
+  it("finds the QuickBooks code", () => {
+    expect(sources.length).toBeGreaterThan(2);
+    expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining(["src/lib/quickbooks/client.ts", "src/lib/money/family-money.ts"]));
+  });
   it("uses no write method anywhere", () => {
     for (const s of sources) expect(s.text, s.file).not.toMatch(/["']?method["']?\s*:\s*["'](PUT|PATCH|DELETE)["']/i);
   });

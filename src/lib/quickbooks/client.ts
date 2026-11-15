@@ -2,7 +2,7 @@ import { db } from "@/lib/db/client";
 import { qboConnection, type QboEnvironment } from "@/lib/db/schema";
 import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit } from "@/lib/audit/log";
-import { qboEndpoints, QboError, QBO_MINOR_VERSION } from "./endpoints";
+import { errorNeedsAdmin, qboEndpoints, QboError, QBO_MINOR_VERSION } from "./endpoints";
 
 const TIMEOUT_MS = 15_000;
 const REFRESH_EARLY_MS = 5 * 60_000;
@@ -86,21 +86,69 @@ export async function accessToken(o: { force?: boolean } = {}): Promise<Access> 
   return r.access;
 }
 
+export type QboGetOptions = {
+  /** How long one request may take. The roster's reads keep the default; a parent's page load asks for less. */
+  timeoutMs?: number;
+  /** The caller's own deadline for everything it is doing: when it fires, the call ends as a timeout. */
+  signal?: AbortSignal;
+  /** Try once more, after a short random wait, when QuickBooks answers 429 or 5xx. */
+  retry?: boolean;
+  /** The company the caller means to read. When another company is the connected one, nothing is asked of it. */
+  realmId?: string;
+  /**
+   * Refuse at once when the saved connection error is one only an Admin can fix (errorNeedsAdmin). accessToken() would
+   * try the refresh again under the connection row lock, holding it across its call to Intuit; with this set, a
+   * parent's page load never waits in that queue for a refresh that cannot succeed.
+   */
+  failFast?: boolean;
+};
+
+const RETRY_WAIT_MS = { min: 150, spread: 350 };
+const timedOut = () => new QboError("QuickBooks took too long to answer.", "timeout");
+
+/** `work`, given up on when `signal` fires. The work itself carries on (a token refresh must finish and be saved); only the wait ends. */
+function within<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => { work.catch(() => {}); reject(timedOut()); };
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+const pause = (ms: number, signal: AbortSignal | undefined) => within(new Promise<void>((r) => setTimeout(r, ms)), signal);
+
 /** GET one QuickBooks API path. This module has no way to send anything else to the API (spec §3). */
-export async function qboGet(path: string, params: Record<string, string> = {}): Promise<unknown> {
-  for (let attempt = 0; ; attempt++) {
-    const a = await accessToken({ force: attempt === 1 });
+export async function qboGet(path: string, params: Record<string, string> = {}, o: QboGetOptions = {}): Promise<unknown> {
+  if (o.failFast) {
+    const [c] = await db.select({ lastError: qboConnection.lastError }).from(qboConnection); // a plain read: no row lock
+    if (errorNeedsAdmin(c?.lastError)) throw new QboError("QuickBooks needs to be connected again.", "needs_admin");
+  }
+  let force = false, refreshed = false, retried = false;
+  for (;;) {
+    const a = await within(accessToken({ force }), o.signal);
+    force = false;
+    if (o.realmId !== undefined && a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${path}`);
     for (const [k, v] of Object.entries({ ...params, minorversion: QBO_MINOR_VERSION })) url.searchParams.set(k, v);
+    const timeout = AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS);
+    const gaveUp = () => timeout.aborted || o.signal?.aborted === true;
     let res: Response;
     try {
-      res = await fetch(url, { method: "GET", headers: { authorization: `Bearer ${a.token}`, accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+      res = await fetch(url, { method: "GET", headers: { authorization: `Bearer ${a.token}`, accept: "application/json" }, signal: o.signal ? AbortSignal.any([timeout, o.signal]) : timeout, redirect: "error" });
     } catch {
-      throw new QboError("Couldn't reach QuickBooks.", "unreachable");
+      throw gaveUp() ? timedOut() : new QboError("Couldn't reach QuickBooks.", "unreachable");
     }
-    if (res.status === 401 && attempt === 0) continue; // the token was revoked or replaced: refresh once and try again
+    if (res.status === 401 && !refreshed) { refreshed = true; force = true; continue; } // the token was revoked or replaced: refresh once and try again
+    if (o.retry && !retried && (res.status === 429 || res.status >= 500)) {
+      retried = true;
+      await res.body?.cancel().catch(() => {});
+      await pause(RETRY_WAIT_MS.min + Math.random() * RETRY_WAIT_MS.spread, o.signal); // jitter: callers refused together don't come back together
+      continue;
+    }
     if (!res.ok) throw new QboError("QuickBooks refused the request.", `http_${res.status}`);
-    try { return await res.json(); } catch { throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
+    try { return await res.json(); } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
   }
 }
 
@@ -129,4 +177,69 @@ export async function qboCustomerTypes(): Promise<Record<string, unknown>[]> {
   // The string verified against the sandbox on 2026-11-11 (spec §8). Don't change it (a paging clause, say) without
   // trying the new string there first.
   return rowsOf(await qboGet("query", { query: "select * from CustomerType" }), "CustomerType");
+}
+
+/** A QuickBooks record id as it may go into query text or a path: digits only. Anything else is never sent. */
+export const isQboId = (id: string): boolean => /^\d{1,19}$/.test(id);
+
+/**
+ * The invoice queries, exactly as they are sent. NOT YET TRIED AGAINST A REAL QUICKBOOKS COMPANY: every other query
+ * string in this file was verified in the sandbox before it was built on (spec §8), and nobody could reach the sandbox
+ * for these. The owner's sandbox check must confirm, with `include=invoiceLink` and `minorversion` 75:
+ *   1. that `inForm` is accepted (CustomerRef in a quoted list, ordered by Id, paged), or that QuickBooks answers it
+ *      with HTTP 400, in which case qboInvoices() falls back to `oneForm`, one query per customer;
+ *   2. that `oneForm` is accepted;
+ *   3. that each returns only the invoices of the customers named, with `InvoiceLink` on those payable online.
+ * Don't change either string without trying the new one there first. The ids are checked by isQboId() before they
+ * reach a string; nothing else is ever put into query text.
+ */
+export const INVOICE_QUERIES = {
+  inForm: (customerIds: string[], start: number) =>
+    `select * from Invoice where CustomerRef in (${customerIds.map((id) => `'${id}'`).join(",")}) orderby Id startposition ${start} maxresults ${QBO_PAGE}`,
+  oneForm: (customerId: string, start: number) =>
+    `select * from Invoice where CustomerRef = '${customerId}' orderby Id startposition ${start} maxresults ${QBO_PAGE}`,
+} as const;
+/** What makes QuickBooks send InvoiceLink at all (v1 spec §8.3). */
+export const INVOICE_INCLUDE = "invoiceLink";
+
+/** True once the in-form was refused with a 400 and the one-customer form then worked: kept for the life of the process. */
+let invoicesOneCustomerAtATime = false;
+
+async function invoicePages(query: (start: number) => string, o: QboGetOptions): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let start = 1; ; start += QBO_PAGE) {
+    const page = rowsOf(await qboGet("query", { query: query(start), include: INVOICE_INCLUDE }, o), "Invoice");
+    out.push(...page);
+    if (page.length < QBO_PAGE) return out;
+  }
+}
+
+/**
+ * Every invoice raised on these customers, with its pay link where QuickBooks gives one. The ids come from the roster
+ * cache, never from a request; one that isn't digits only is refused here, before any query text is built.
+ */
+export async function qboInvoices(customerIds: string[], o: QboGetOptions = {}): Promise<Record<string, unknown>[]> {
+  const ids = [...new Set(customerIds)];
+  if (!ids.length || !ids.every(isQboId)) throw new QboError("That isn't a QuickBooks customer.", "bad_id");
+  const oneAtATime = async () => {
+    const out: Record<string, unknown>[] = [];
+    for (const id of ids) out.push(...await invoicePages((start) => INVOICE_QUERIES.oneForm(id, start), o));
+    return out;
+  };
+  if (ids.length === 1 || invoicesOneCustomerAtATime) return oneAtATime();
+  try {
+    return await invoicePages((start) => INVOICE_QUERIES.inForm(ids, start), o);
+  } catch (e) {
+    if (!(e instanceof QboError) || e.code !== "http_400") throw e;
+  }
+  const rows = await oneAtATime();
+  invoicesOneCustomerAtATime = true; // remembered only once the other form has worked
+  return rows;
+}
+
+/** One customer, read by id: used for its BalanceWithJobs, the cross-check on a family's total (v1 spec §8.3). */
+export async function qboCustomerById(customerId: string, o: QboGetOptions = {}): Promise<Record<string, unknown> | null> {
+  if (!isQboId(customerId)) throw new QboError("That isn't a QuickBooks customer.", "bad_id");
+  const customer = ((await qboGet(`customer/${customerId}`, {}, o)) as { Customer?: unknown } | null)?.Customer;
+  return typeof customer === "object" && customer !== null && !Array.isArray(customer) ? (customer as Record<string, unknown>) : null;
 }

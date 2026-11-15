@@ -19,3 +19,11 @@ export const QBO_MINOR_VERSION = "75";
 export class QboError extends Error {
   constructor(message: string, readonly code: string) { super(message); this.name = "QboError"; }
 }
+
+/**
+ * Whether a recorded connection error (`<sentence> (<code>)`) is one only an Admin can fix by connecting again:
+ * Intuit no longer accepts the refresh token, or this server can't read the saved keys. Retrying either changes nothing.
+ */
+export function errorNeedsAdmin(lastError: string | null | undefined): boolean {
+  return /\((invalid_grant|unreadable)\)$/.test(lastError ?? "");
+}
