@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { parentAuthSession } from "@/lib/db/schema";
 import { resolveParentSession, type ParentIdentity } from "@/lib/auth/resolve";
 import { seedGuardian, seedParent, seedParentSession } from "./db";
 import { SIGNINS_ON, addToCache, fam, par, seedParentSettings, seedShape, stu } from "./roster-cache";
@@ -93,4 +96,30 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const a = await seedSignedInParent(FAMILY_A);
   const b = await seedSignedInParent(FAMILY_B);
   return { a, b };
+}
+
+/**
+ * A signed-in parent for a family the test has put in the roster cache itself, in whatever membership shape: the
+ * portal person, an active link to `familyQboId` (naming the QuickBooks record it came from, or made by hand when
+ * `sourceQboId` is left out) and a session with that family chosen. Switches sign-ins on. For the two standard
+ * families use seedSignedInParent() and seedTwoFamilies(), which also give the markers.
+ */
+export async function seedParentIn(o: { familyQboId: string; name: string; email: string; phone?: string | null; sourceQboId?: string | null }): Promise<{ identity: ParentIdentity; session: { id: string; token: string } }> {
+  await seedParentSettings(SIGNINS_ON);
+  const person = await seedParent({ name: o.name, email: o.email, phone: o.phone ?? null, welcomedAt: new Date() });
+  await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId ?? null });
+  const session = await seedParentSession(person.authUserId, { familyQboId: o.familyQboId });
+  return { identity: await identityNow(session.id), session };
+}
+
+/**
+ * The identity the portal resolves for a seeded session now: after a test has given the person another family, or
+ * changed a link, the one returned when the parent was seeded is out of date.
+ */
+export async function identityNow(sessionId: string): Promise<ParentIdentity> {
+  const [s] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, sessionId));
+  if (!s) throw new Error(`identityNow: there is no parent session ${sessionId}`);
+  const state = await resolveParentSession({ id: s.id, userId: s.userId, familyQboId: s.familyQboId });
+  if (state.status !== "ok") throw new Error(`identityNow: the portal would not sign this session in (session state "${state.status}")`);
+  return state.identity;
 }

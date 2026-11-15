@@ -387,7 +387,7 @@ One vocabulary across the product: **to do, waiting, done, closed**. Each is an 
 Two-column definition list: Label-style terms in `ink-2`, values in Body row.
 
 ### Navigation
-- **Phone:** fixed bottom tab bar, 2px `ink` top rule, four 64px tabs (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labeled ("2 to sign").
+- **Phone:** fixed bottom tab bar, 2px `ink` top rule, one 64px tab of equal width for each parent page that exists (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labeled ("2 to sign").
 - **Desktop (760px+):** tabs hide; links move into the club bar in Barlow 600 1.125rem, `club-on`, active marked by a 3px inset underline.
 
 ### Focus

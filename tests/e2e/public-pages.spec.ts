@@ -30,7 +30,7 @@ test("no horizontal scroll on the sign-in page", async ({ page }) => {
 });
 
 test("pages that aren't built yet get the plain not-ready page, not the framework default", async ({ page }) => {
-  for (const path of ["/forms", "/payments", "/family", "/no-such-page"]) {
+  for (const path of ["/forms", "/payments", "/no-such-page"]) {
     const res = await page.goto(path);
     expect(res?.status()).toBe(404);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("This part of the portal isn't ready yet");

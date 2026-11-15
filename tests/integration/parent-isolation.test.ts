@@ -48,8 +48,14 @@ const NO_FAMILY_DATA: Record<string, string> = {
 
 /** What a page must show its own family, beyond "something": the exact words. */
 const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
-  "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`],
+  "/": (family) => [`Hi, ${family.spec.parent.name.split(" ")[0]}`, ...rosterOf(family)],
+  "/family": (family) => rosterOf(family),
 };
+/** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */
+function rosterOf(family: SeededParent): string[] {
+  const { spec } = family;
+  return [spec.family.name, ...spec.students.map((s) => s.name), spec.parent.name, spec.parent.email, spec.parent.phone];
+}
 
 const load = async (file: string): Promise<Page> => ((await import(path.join(root, file))) as { default: Page }).default;
 const missingParams = (route: string) => `The parent page ${route} has a dynamic segment and no params to render it with. `
