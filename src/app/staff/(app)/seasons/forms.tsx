@@ -97,15 +97,16 @@ export type KindChoice = { value: string; label: string; available: boolean };
 /**
  * A requirement's settings (v1 spec §10.1). With `kinds` it is the form for a new one, which also asks the kind and
  * who it applies to: both are fixed once it is made. A kind that can't be met yet is listed and can't be picked.
- * An amount is asked only of a volunteering requirement.
+ * An amount is asked only of a volunteering requirement. With `perStudent` false (a club whose roster lists no
+ * students) a new one can only be asked of each family.
  */
-export function RequirementForm({ kinds, kind, initial, add, save }: {
-  kinds?: KindChoice[]; kind?: string; initial?: RequirementFields;
+export function RequirementForm({ kinds, kind, initial, perStudent = true, add, save }: {
+  kinds?: KindChoice[]; kind?: string; initial?: RequirementFields; perStudent?: boolean;
   add?: (kind: string, appliesTo: "family" | "student", fields: RequirementFields) => Promise<Done>;
   save?: (fields: RequirementFields) => Promise<Done>;
 }) {
   const [chosenKind, setKind] = useState(kind ?? kinds?.find((k) => k.available)?.value ?? "checklist");
-  const [appliesTo, setAppliesTo] = useState<"family" | "student">("student");
+  const [appliesTo, setAppliesTo] = useState<"family" | "student">(perStudent ? "student" : "family");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [required, setRequired] = useState(initial?.required ?? true);
   const [amount, setAmount] = useState(initial?.amount === null || initial?.amount === undefined ? "" : String(initial.amount));
@@ -130,7 +131,7 @@ export function RequirementForm({ kinds, kind, initial, add, save }: {
       {add && (
         <label className="field"><span>Asked of</span>
           <select value={appliesTo} onChange={(e) => setAppliesTo(e.target.value === "family" ? "family" : "student")}>
-            <option value="student">Each student</option><option value="family">Each family, once</option>
+            {perStudent && <option value="student">Each student</option>}<option value="family">Each family, once</option>
           </select></label>
       )}
       <label className="field"><span>Required or optional (an optional one is shown, and never holds the step open)</span>

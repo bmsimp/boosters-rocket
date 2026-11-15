@@ -5,12 +5,15 @@ import { db } from "@/lib/db/client";
 import { auditLog, qboCustomer, requirement, requirementCover, requirementProgress, role, roleAssignment, roleRule, season, seasonStep } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
+import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
+import type { MembershipShape } from "@/lib/roster/shape";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import SeasonsPage from "@/app/staff/(app)/seasons/page";
 import SeasonSetupPage from "@/app/staff/(app)/seasons/[id]/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
 import ProgressPage from "@/app/staff/(app)/seasons/progress/page";
 import RequirementProgressPage from "@/app/staff/(app)/seasons/progress/[requirementId]/page";
+import FamilyProgressPage from "@/app/staff/(app)/seasons/progress/family/[familyId]/page";
 import {
   addRequirementAction, addStepAction, clearCurrentSeasonAction, createSeasonAction, moveStepAction, removeRequirementAction, removeStepAction, removeWaiverAction,
   renameSeasonAction, setCoverageAction, setCurrentSeasonAction, setTicksAction, updateRequirementAction, updateStepAction, waiveAction,
@@ -80,7 +83,8 @@ describe("the season permissions", () => {
     const fitting = fall.requirementIds["Uniform fitting attended"]!, uniforms = fall.stepIds.Uniforms!;
     const setupPages = [() => pageOutcome(SeasonsPage), () => pageOutcome(SeasonSetupPage, { params: { id: fall.seasonId } }),
       () => pageOutcome(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } })];
-    const progressPages = [() => pageOutcome(ProgressPage), () => pageOutcome(RequirementProgressPage, { params: { requirementId: fitting } })];
+    const progressPages = [() => pageOutcome(ProgressPage), () => pageOutcome(RequirementProgressPage, { params: { requirementId: fitting } }),
+      () => pageOutcome(FamilyProgressPage, { params: { familyId: "10" } })];
     const setupActions = [
       () => createSeasonAction("Spring", "template"), () => renameSeasonAction(fall.seasonId, "X"), () => setCurrentSeasonAction(fall.seasonId), () => clearCurrentSeasonAction(),
       () => addStepAction(fall.seasonId, "X"), () => updateStepAction(uniforms, "X", null, null), () => moveStepAction(uniforms, "later"), () => removeStepAction(uniforms),
@@ -115,7 +119,7 @@ describe("the season permissions", () => {
     expect(JSON.stringify([await seasons(), await stepsOf(fall.seasonId), await db.select().from(requirement), await db.select().from(requirementCover), await recorded()])).toBe(before);
     expect(revalidatedPaths()).toEqual([]);
     const rows = await audits();
-    expect(rows.every((r) => r.action === "access.refused")).toBe(true);
+    expect(rows.every((r) => r.action === "access.refused")).toBe(true); // a family's page refused is a family's page not read
     expect(rows.filter((r) => r.actorId === reader.id).map((r) => r.permission)).toEqual(expect.arrayContaining(["Season.Steps.ReadWrite", "Season.Progress.ReadWrite"]));
   });
 
@@ -124,7 +128,8 @@ describe("the season permissions", () => {
     asStaff(reader);
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
     for (const html of [await renderPage(SeasonsPage), await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } }),
-      await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } }), await renderPage(ProgressPage)]) {
+      await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } }), await renderPage(ProgressPage),
+      await renderPage(FamilyProgressPage, { params: { familyId: "10" } })]) {
       expect(html).not.toMatch(/<button|<input|<select|<textarea/);
     }
     // The list of who has done it keeps its search box, and nothing that ticks or waives.
@@ -283,6 +288,18 @@ describe("requirements", () => {
     expect((await audits("season.requirement.add"))[0]).toMatchObject({ targetType: "requirement", targetId: rows[1]!.id, permission: "Season.Steps.ReadWrite",
       after: { step: "Wrap-up", kind: "checklist", title: "Trophy returned", required: false, appliesTo: "family", dueOn: "2026-11-30", covers: "everyone" } });
     expect(textOf(await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } }))).toContain("Trophy returned Checklist item · Optional · Each family · Everyone Due 2026-11-30");
+  });
+
+  it("offers a club whose roster lists no students only requirements for each family", async () => {
+    const fall = await seedFall();
+    const offered = async () => (await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } })).match(/<option value="(student|family)"/g) ?? [];
+    expect(await offered()).toEqual(expect.arrayContaining([`<option value="student"`, `<option value="family"`]));
+    // Members who are their own families, and families with no student type: nobody is a student.
+    const shapes: MembershipShape[] = [{ kind: "flat", memberTypeIds: ["M"] }, { kind: "layered", familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }];
+    for (const shape of shapes) {
+      await seedShape(shape);
+      expect(new Set(await offered())).toEqual(new Set([`<option value="family"`]));
+    }
   });
 
   it.each(["form", "payment", "volunteer"])("won't make a %s requirement yet: its rule isn't built", async (kind) => {
@@ -522,6 +539,109 @@ describe("ticks and waivers", () => {
     expect(now.steps[0]!.students.map((s) => s.lines[0]!.words)).toEqual(["Done", "Waived"]);
     expect(now.currentIndex).toBe(1);
     expect(parent.identity.familyQboId).toBe(FAMILY_A.family.qboId);
+  });
+});
+
+describe("one family's season, for staff", () => {
+  const seedFamilyFall = () => seedSeason({ name: "Fall 2026", steps: [
+    { name: "Join", requirements: [{ title: "Handbook read", appliesTo: "family", ticked: ["10", "20"] }, { title: "Chen carpool pledge", appliesTo: "family", chosen: ["20"] }] },
+    { name: "Uniforms", requirements: [
+      { title: "Uniform fitting attended", appliesTo: "student", dueOn: "2026-09-01", ticked: ["12", "22"] },
+      { title: "Guard gloves", appliesTo: "student", required: false, chosen: ["13"], waived: [{ qboId: "13", reason: "Brings <b>her</b> own" }] },
+      { title: "Tuba strap", appliesTo: "student", chosen: ["22"], waived: [{ qboId: "22", reason: "Kai's own reason" }] }] },
+    { name: "Wrap-up" },
+  ] });
+
+  it("shows where one family stands in every step, with the reason for a waiver, and audits the read", async () => {
+    const fall = await seedFamilyFall();
+    asStaff(reader);
+    const html = await renderPage(FamilyProgressPage, { params: { familyId: "10" } });
+    const text = textOf(html);
+    expect(text).toContain("Rivera Family Where this family stands in Fall 2026, the current season.");
+    expect(text).toContain("1. Join Done The family Handbook read Done");
+    expect(text).toContain("2. Uniforms The step this family is on. 1 thing left to do Leo Rivera Uniform fitting attended Done");
+    expect(text).toMatch(/Maya Rivera Uniform fitting attended Not done yet Due 2026-09-01 Guard gloves Optional Waived Waived .{1,30}? UTC : Brings &lt;b&gt;her&lt;\/b&gt; own/);
+    expect(text).toContain("3. Wrap-up Nothing is asked of this family in this step.");
+    expect(html).not.toContain("<b>her</b>");
+    // Each requirement leads to the page where it is ticked off or waived; nothing is changed from here.
+    expect(html).toContain(`href="/staff/seasons/progress/${fall.requirementIds["Uniform fitting attended"]}"`);
+    expect(html).not.toMatch(/<button|<input|<textarea/);
+    // One family's page: nothing of the Chens, not their name, a title asked only of them, or their waiver's reason.
+    expect(html).not.toMatch(/Chen|Kai|Tuba strap/);
+    // A student QuickBooks has made inactive is not shown.
+    expect(text).not.toContain("Gone Rivera");
+
+    expect(await audits()).toEqual([expect.objectContaining({ action: "season.progress.family.read", permission: "Season.Progress.Read", actorId: reader.id, actorLabel: "reader@club.org",
+      targetType: "qbo_customer", targetId: "10", ip: "203.0.113.50", after: { season: "Fall 2026" } })]);
+  });
+
+  it("is reached from a requirement's list, and shows another season when the address asks for it", async () => {
+    const fall = await seedFamilyFall();
+    const old = await seedSeason({ name: "Fall 2025", current: false, steps: [{ name: "Old step", requirements: [{ title: "Old item", appliesTo: "family", ticked: ["10"] }] }] });
+    asStaff(reader);
+    const list = await renderPage(RequirementProgressPage, { params: { requirementId: fall.requirementIds["Uniform fitting attended"]! } });
+    expect(list).toContain(`href="/staff/seasons/progress/family/10?season=${fall.seasonId}"`);
+    expect(list).toContain(`href="/staff/seasons/progress/family/20?season=${fall.seasonId}"`);
+    expect(textOf(list)).toContain("Everything asked of Rivera Family");
+    expect(list).not.toContain("<b>Family</b>");
+    const text = textOf(await renderPage(FamilyProgressPage, { params: { familyId: "10" }, searchParams: { season: old.seasonId } }));
+    expect(text).toContain("Where this family stands in Fall 2025, which parents don't see.");
+    expect(text).toContain("1. Old step Done The family Old item Done");
+    expect(text).not.toContain("Handbook read");
+  });
+
+  it("is not found, and writes no audit row, for anything that isn't an active family or a season", async () => {
+    const fall = await seedFamilyFall();
+    asStaff(reader);
+    // A student, a parent, a family QuickBooks has made inactive, nobody at all, and text that isn't an id.
+    for (const familyId of ["12", "11", "30", "999", "10%27", "%E0%A4%A", "x".repeat(65)]) {
+      expect(await pageOutcome(FamilyProgressPage, { params: { familyId } }), familyId).toEqual({ notFound: true });
+    }
+    for (const seasonId of [NO_SUCH, "x", `${fall.seasonId}' or '1'='1`]) {
+      expect(await pageOutcome(FamilyProgressPage, { params: { familyId: "10" }, searchParams: { season: seasonId } }), seasonId).toEqual({ notFound: true });
+    }
+    // With no season at all there is nothing to show for anyone.
+    await db.delete(requirementProgress); await db.delete(season);
+    expect(await pageOutcome(FamilyProgressPage, { params: { familyId: "10" } })).toEqual({ notFound: true });
+    expect(await audits()).toEqual([]);
+  });
+});
+
+describe("a different QuickBooks company", () => {
+  const SYSTEM = { actor: { door: "system" as const, id: null, label: "test" }, ip: null };
+
+  it("takes every tick, waiver and chosen list with it: the same ids are other people there", async () => {
+    const fall = await seedSeason({ name: "Fall 2026", steps: [{ name: "Uniforms", requirements: [
+      { title: "Uniform fitting attended", appliesTo: "student", ticked: ["12", "22"], waived: [{ qboId: "13", reason: "Borrowed one" }] },
+      { title: "Guard gloves", appliesTo: "student", chosen: ["13"], ticked: ["13"] }] }] });
+    await db.transaction((tx) => setRosterSource(tx, "1111"));
+    // The same company keeps it all.
+    expect(await clearRosterOfOtherCompany("1111", SYSTEM)).toBe(false);
+    expect(await recorded()).toHaveLength(4);
+    expect(await db.select().from(requirementCover)).toHaveLength(1);
+
+    expect(await clearRosterOfOtherCompany("2222", SYSTEM)).toBe(true);
+    expect(await recorded()).toEqual([]);
+    expect(await db.select().from(requirementCover)).toEqual([]);
+    // The season is the club's own and stays. The chosen list is empty, not "everyone": it asks nobody until staff choose again.
+    expect((await seasons()).map((x) => x.name)).toEqual(["Fall 2026"]);
+    expect((await db.select().from(requirement).orderBy(asc(requirement.position))).map((r) => [r.title, r.covers])).toEqual([["Uniform fitting attended", "everyone"], ["Guard gloves", "chosen"]]);
+    expect(await audits("season.records.cleared")).toEqual([expect.objectContaining({ door: "system", targetType: "season", before: { realmId: "1111" },
+      after: { reason: "different_company", realmId: "2222", ticks: 3, waivers: 1, chosenListEntries: 1, requirementsLeftWithNobodyChosen: 1 } })]);
+
+    // The new company's customer 13 is somebody else: nothing is ticked for them, and the gloves aren't asked of them.
+    await seedShape(); await addToCache(ROSTER);
+    asStaff(reader);
+    const text = textOf(await renderPage(RequirementProgressPage, { params: { requirementId: fall.requirementIds["Uniform fitting attended"]! } }));
+    expect(text).toContain("0 of 3 done, 3 still to do.");
+    expect(textOf(await renderPage(RequirementProgressPage, { params: { requirementId: fall.requirementIds["Guard gloves"]! } }))).toContain("It is asked of no students on the roster right now.");
+  });
+
+  it("writes no season row when the seasons record nothing against anyone", async () => {
+    await seedFall();
+    await db.transaction((tx) => setRosterSource(tx, "1111"));
+    expect(await clearRosterOfOtherCompany("2222", SYSTEM)).toBe(true);
+    expect(await audits("season.records.cleared")).toEqual([]);
   });
 });
 

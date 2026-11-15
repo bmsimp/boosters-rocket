@@ -5,6 +5,7 @@ import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { KIND_LABELS, KIND_RULES, REQUIREMENT_KINDS } from "@/lib/seasons/kinds";
 import { describeRequirement, getSeasonSetup } from "@/lib/seasons/setup";
+import { rosterListsNoStudents } from "@/lib/seasons/subjects";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { OneButton, RequirementForm, StepForm, TextAction, type KindChoice } from "../forms";
 import {
@@ -30,6 +31,8 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
   const canChange = can(ctx.effective, "Season.Steps.ReadWrite"), seesProgress = can(ctx.effective, "Season.Progress.Read");
   const kinds: KindChoice[] = REQUIREMENT_KINDS.map((k) => ({ value: k, label: KIND_LABELS[k], available: KIND_RULES[k] !== null }));
   const dated = season.steps.some((s) => s.startsOn !== null || s.endsOn !== null);
+  // A club whose roster lists no students is offered only requirements for each family: one for each student would be asked of nobody.
+  const perStudent = canChange ? !(await rosterListsNoStudents()) : true;
   return (
     <main className="wrap single">
       <h1 className="page-title">{season.name}</h1>
@@ -71,7 +74,7 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
           {canChange && (
             <>
               <details className="more"><summary>Add a requirement to {step.name}</summary>
-                <RequirementForm kinds={kinds} add={addRequirementAction.bind(null, step.id)} />
+                <RequirementForm kinds={kinds} perStudent={perStudent} add={addRequirementAction.bind(null, step.id)} />
               </details>
               <details className="more"><summary>Change, move or remove {step.name}</summary>
                 <StepForm initial={{ name: step.name, startsOn: step.startsOn, endsOn: step.endsOn }} save={updateStepAction.bind(null, step.id)} />

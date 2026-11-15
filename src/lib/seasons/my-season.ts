@@ -1,16 +1,16 @@
 // Privacy: the one query a parent page reads its season through. The family is the session's (ctx.familyQboId) and
 // nothing else: progress and chosen lists are read only for that family and the students under it, and a requirement
-// that covers none of them is dropped here, title and all. It never imports the staff-only modules (./setup.ts,
-// ./subjects.ts, ./staff-progress.ts, src/lib/roster/queries.ts): tests/integration/page-guards.test.ts scans this file.
+// that covers none of them is dropped, title and all (loadFamilyStanding in ./recorded.ts). It never imports the
+// staff-only modules (./setup.ts, ./subjects.ts, ./staff-progress.ts, src/lib/roster/queries.ts):
+// tests/integration/page-guards.test.ts scans this file.
 import "server-only";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { qboCustomer, requirement, season, seasonStep } from "@/lib/db/schema";
+import { qboCustomer, season } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
 import type { MyStudent } from "@/lib/parents/my-family";
-import { clubToday } from "@/lib/settings/club";
-import { loadCovers, loadFacts, toRequirement } from "./recorded";
-import { seasonStanding, subjectsOf, type FamilyRoster, type SeasonStanding, type Step } from "./progress";
+import { loadFamilyStanding } from "./recorded";
+import type { FamilyRoster, SeasonStanding } from "./progress";
 
 export type MySeason = SeasonStanding & {
   /** The current season's name, in the club's words. */
@@ -33,25 +33,11 @@ export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId">, students
   if (!current) return null;
 
   const asked = (students ?? []).map((s) => s.qboId);
-  const [steps, under, today] = await Promise.all([
-    db.select().from(seasonStep).where(eq(seasonStep.seasonId, current.id)).orderBy(asc(seasonStep.position), asc(seasonStep.createdAt)),
-    asked.length === 0 ? [] : db.select({ qboId: qboCustomer.qboId }).from(qboCustomer)
-      .where(and(eq(qboCustomer.parentQboId, familyQboId), eq(qboCustomer.active, true), inArray(qboCustomer.qboId, asked))),
-    clubToday(),
-  ]);
+  const under = asked.length === 0 ? [] : await db.select({ qboId: qboCustomer.qboId }).from(qboCustomer)
+    .where(and(eq(qboCustomer.parentQboId, familyQboId), eq(qboCustomer.active, true), inArray(qboCustomer.qboId, asked)));
   const mine = new Set(under.map((c) => c.qboId));
   const family: FamilyRoster = { familyQboId, students: (students ?? []).filter((s) => mine.has(s.qboId)).map((s) => ({ qboId: s.qboId, name: s.name })) };
-  const subjects = [familyQboId, ...family.students.map((s) => s.qboId)];
-
-  const rows = steps.length === 0 ? [] : await db.select().from(requirement).where(inArray(requirement.stepId, steps.map((s) => s.id)))
-    .orderBy(asc(requirement.position), asc(requirement.createdAt));
-  // Only this family's own entries of each chosen list are read.
-  const covers = await loadCovers(rows.filter((r) => r.covers === "chosen").map((r) => r.id), subjects);
-  // A requirement that is asked of nobody in this family goes no further than this line.
-  const asksUs = rows.map((r) => ({ stepId: r.stepId, requirement: toRequirement(r, covers.get(r.id) ?? []) })).filter((r) => subjectsOf(r.requirement, family).length > 0);
-  const { facts } = await loadFacts(asksUs.map((r) => r.requirement), subjects);
-
-  const ordered: Step[] = steps.map((s) => ({ id: s.id, name: s.name, startsOn: s.startsOn, endsOn: s.endsOn,
-    requirements: asksUs.filter((r) => r.stepId === s.id).map((r) => r.requirement) }));
-  return { name: current.name, today, ...seasonStanding(ordered, family, facts, today) };
+  // The waiver reasons that come back with the standing are for staff, and stop here.
+  const { today, standing } = await loadFamilyStanding(current.id, family);
+  return { name: current.name, today, ...standing };
 }

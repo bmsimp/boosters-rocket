@@ -6,9 +6,9 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboCustomer, requirement, requirementProgress, season, seasonStep, staffUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { KIND_RULES } from "./kinds";
-import { lineFor, type LineState, type Requirement } from "./progress";
-import { loadCovers, loadFacts, toRequirement } from "./recorded";
+import { KIND_RULES, pairKey } from "./kinds";
+import { lineFor, type LineState, type Requirement, type SeasonStanding } from "./progress";
+import { loadCovers, loadFacts, loadFamilyStanding, toRequirement } from "./recorded";
 import { getRequirementSetup, type Refused, type RequirementSetup, type SeasonOp } from "./setup";
 import { coveredBy, loadSubjects, type FamilySubject, type Subject } from "./subjects";
 
@@ -100,6 +100,32 @@ export async function defaultProgressSeasonId(): Promise<string | null> {
   const all = await db.select({ id: season.id, isCurrent: season.isCurrent, createdAt: season.createdAt }).from(season);
   const newest = [...all].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
   return (all.find((x) => x.isCurrent) ?? newest)?.id ?? null;
+}
+
+export type FamilyProgress = SeasonStanding & {
+  family: { qboId: string; name: string };
+  season: { id: string; name: string; isCurrent: boolean };
+  /** The club's date the standing was worked out for (YYYY-MM-DD). */
+  today: string;
+  /** Each waiver recorded for the family or one of its students, by pairKey(requirementId, subjectQboId): staff see the reason. */
+  waivers: Map<string, { reason: string; at: string; by: string | null }>;
+};
+
+/**
+ * One family's standing through one season, in full: what a parent of the family sees, and the reason for each waiver.
+ * Null when there is no such season, when the roster can't be shown, or when the id isn't an active family on it (a
+ * student's id, a parent's, a family QuickBooks has made inactive). Only that family's records are read. The page that
+ * shows this audits the read.
+ */
+export async function loadFamilyProgress(familyQboId: string, seasonId: string): Promise<FamilyProgress | null> {
+  const [families, [s]] = await Promise.all([loadSubjects(), db.select().from(season).where(eq(season.id, seasonId))]);
+  const family = families?.find((f) => f.qboId === familyQboId);
+  if (!family || !s) return null;
+  const { today, standing, recorded } = await loadFamilyStanding(s.id, { familyQboId: family.qboId, students: family.students });
+  const who = await staffNames(recorded.map((r) => r.waivedBy));
+  const waivers = new Map(recorded.filter((r) => r.waivedAt !== null).map((r) => [pairKey(r.requirementId, r.subjectQboId),
+    { reason: r.waivedReason ?? "", at: r.waivedAt!.toISOString(), by: r.waivedBy ? who.get(r.waivedBy) ?? null : null }]));
+  return { ...standing, family: { qboId: family.qboId, name: family.name }, season: { id: s.id, name: s.name, isCurrent: s.isCurrent }, today, waivers };
 }
 
 type Target = { setup: RequirementSetup; families: FamilySubject[] | null };

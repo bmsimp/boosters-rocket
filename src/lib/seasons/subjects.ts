@@ -1,6 +1,7 @@
 // Staff only: this loads every family in the club. Never imported by parent code (tests/integration/page-guards.test.ts).
 import "server-only";
 import { loadRosterPage } from "@/lib/roster/queries";
+import { getShape } from "@/lib/roster/shape";
 import { isCovered, type Requirement } from "./progress";
 
 export type FamilySubject = { qboId: string; name: string; students: { qboId: string; name: string }[] };
@@ -32,4 +33,14 @@ export function candidatesFor(appliesTo: Requirement["appliesTo"], families: rea
 /** Those a requirement is asked of now: its candidates, less whoever a chosen list leaves out. */
 export function coveredBy(requirement: Requirement, families: readonly FamilySubject[]): Subject[] {
   return candidatesFor(requirement.appliesTo, families).filter((s) => isCovered(requirement, s.qboId));
+}
+
+/**
+ * True when the club's membership shape is set and lists no students (members who are their own families, or families
+ * with no student type): a requirement asked of each student would then be asked of nobody. False while there is no
+ * shape yet, so a season can be set up before the roster is.
+ */
+export async function rosterListsNoStudents(): Promise<boolean> {
+  const shape = await getShape();
+  return shape !== null && (shape.kind === "flat" || shape.studentTypeId === null);
 }
