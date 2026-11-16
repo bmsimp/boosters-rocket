@@ -4,6 +4,7 @@ import { loadMyFamily } from "@/lib/parents/my-family";
 import { loadMySeason, type MySeason } from "@/lib/seasons/my-season";
 import type { Line } from "@/lib/seasons/progress";
 import { getClubSettings } from "@/lib/settings/club";
+import { loadMyCredit } from "@/lib/volunteer/credit";
 import { loadMyVolunteering } from "@/lib/volunteer/my-volunteer";
 import { placesWords } from "@/lib/volunteer/rules";
 import { NotSetUpBox } from "../family-boxes";
@@ -36,7 +37,7 @@ export default async function VolunteerPage() {
   if (!family) {
     return <main className="wrap single"><h1 className="page-title">Volunteer</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
-  const [mine, season] = await Promise.all([loadMyVolunteering(ctx), loadMySeason(ctx, family.students)]);
+  const [mine, season, credit] = await Promise.all([loadMyVolunteering(ctx), loadMySeason(ctx, family.students), loadMyCredit(ctx, family.students ?? [])]);
   const asked = volunteerLines(season);
   return (
     <main className="wrap single volunteer-page">
@@ -57,17 +58,38 @@ export default async function VolunteerPage() {
               <span className="when">{s.dateWords}, {s.timeWords} · {s.location}</span>
               <span className="when">{s.who === "You" ? "You're doing this one" : `${s.who} is doing this one`}</span>
               {/* Plain words: the state icons mean done, to do and waived, and a place is none of those. */}
-              <span className="state">{s.cancel === "cancelled" ? "The club cancelled this shift. There's nothing you need to do." : "Signed up"}</span>
+              <span className="state">{s.checkedIn ? "Checked in" : s.cancel === "cancelled" ? "The club cancelled this shift. There's nothing you need to do." : "Signed up"}</span>
               {s.cancel === "open" && (
                 <>
                   <span className="when">You can cancel here until {s.cancelUntil}.</span>
                   <CancelSignup label={s.who === "You" ? "Cancel my sign-up" : `Cancel ${s.who}'s sign-up`} act={cancelSignupAction.bind(null, s.id)} />
                 </>
               )}
-              {s.cancel === "closed" && <p className="help">It&apos;s less than {mine.cutoffHours} {mine.cutoffHours === 1 ? "hour" : "hours"} before the shift, so it can&apos;t be cancelled here. If you can&apos;t make it, please contact {s.contact}.</p>}
+              {s.cancel === "closed" && !s.checkedIn && <p className="help">It&apos;s less than {mine.cutoffHours} {mine.cutoffHours === 1 ? "hour" : "hours"} before the shift, so it can&apos;t be cancelled here. If you can&apos;t make it, please contact {s.contact}.</p>}
             </div></li>))}</ul>
         )}
       </section>
+
+      {credit.length > 0 && (
+        <section className="box" aria-labelledby="done-h"><h2 id="done-h">Done so far</h2>
+          <p>Thank you! This is the volunteering your family has to its name, newest first.</p>
+          <ul className="lines">{credit.map((c) => (
+            <li key={c.id}><div>
+              {c.kind === "checkin" ? (
+                <>
+                  <span className="what">{c.event}</span>
+                  <span className="when">{c.when} · {c.who === "You" ? "you" : c.who}</span>
+                </>
+              ) : (
+                <>
+                  <span className="what">{c.amount} toward {c.toward}</span>
+                  <span className="when">{c.who}</span>
+                </>
+              )}
+              <span className="state">{c.words}</span>
+            </div></li>))}</ul>
+        </section>
+      )}
 
       {mine.events.length === 0 ? (
         <section className="box" aria-labelledby="events-h"><h2 id="events-h">Upcoming events</h2><p>There are no volunteer shifts coming up right now. Check back soon.</p></section>

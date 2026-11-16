@@ -106,3 +106,62 @@ export function CutoffForm({ initial, save }: { initial: number; save: (hours: s
     </form>
   );
 }
+
+/** One button that asks first: removing someone's place, or making a new check-in code. */
+export function ConfirmButton({ label, question, yes, act }: { label: string; question: string; yes: string; act: () => Promise<Done> }) {
+  const [asking, setAsking] = useState(false);
+  const [state, run, pending] = useActionState(async () => safely(() => act(), failed), null);
+  if (state?.ok) return <Outcome state={state} />;
+  return (
+    <div className="stack">
+      {!asking ? <div className="row-actions"><button type="button" className="btn btn-line" onClick={() => setAsking(true)}>{label}</button></div> : (
+        <>
+          <p>{question}</p>
+          <div className="row-actions">
+            <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Working…" : yes}</button>
+            <button type="button" className="btn btn-line" disabled={pending} onClick={() => setAsking(false)}>Keep it</button>
+          </div>
+        </>
+      )}
+      <Outcome state={state} />
+    </div>
+  );
+}
+
+export type OutsideRequirement = { id: string; label: string; unit: "shifts" | "hours"; appliesTo: "family" | "student" };
+export type OutsideFields = { requirementId: string; who: string; amount: string; note: string };
+
+/**
+ * Credit for volunteering done outside the portal: the requirement, who did it (the family, or one of its students for
+ * a per-student requirement), the amount in the requirement's unit, and a note only staff see.
+ */
+export function OutsideCreditForm({ requirements, students, save }: { requirements: OutsideRequirement[]; students: { value: string; label: string }[]; save: (f: OutsideFields) => Promise<Done> }) {
+  const [requirementId, setRequirementId] = useState(requirements[0]?.id ?? "");
+  const chosen = requirements.find((r) => r.id === requirementId);
+  const [student, setStudent] = useState(students[0]?.value ?? "");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [state, run, pending] = useActionState(async () => {
+    const r = await safely(() => save({ requirementId, who: chosen?.appliesTo === "student" ? student : "family", amount, note }), failed);
+    if (r.ok) { setAmount(""); setNote(""); }
+    return r;
+  }, null);
+  if (requirements.length === 0) return <p>The current season asks no volunteering of this family, so there&apos;s nothing to credit toward.</p>;
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      <label className="field"><span>Counts toward</span>
+        <select value={requirementId} onChange={(e) => setRequirementId(e.target.value)}>{requirements.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
+      </label>
+      {chosen?.appliesTo === "student" && (students.length === 0 ? <p>The roster lists no active students in this family.</p> : (
+        <label className="field"><span>Who did it</span>
+          <select value={student} onChange={(e) => setStudent(e.target.value)}>{students.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>
+        </label>
+      ))}
+      <label className="field"><span>{chosen?.unit === "hours" ? "Hours, such as 2 or 1.5" : "Shifts"}</span>
+        <input inputMode="decimal" maxLength={7} value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+      <label className="field"><span>What was done (only staff see this)</span><textarea rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+      <Outcome state={state} />
+      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Add credit"}</button>
+    </form>
+  );
+}

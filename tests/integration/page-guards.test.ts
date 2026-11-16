@@ -138,6 +138,9 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/signed-forms/start-again", names: "all", why: "it starts any family's form again, by its id" },
   { module: "@/lib/signed-forms/worker", names: "all", why: "the worker's call into all of the above" },
   { module: "@/lib/signed-forms/rules", names: "all", why: "the staff words and rules of the signed forms pages; parents read src/lib/forms/states.ts" },
+  { module: "@/lib/volunteer/staff-credit", names: "all", why: "it reads staff notes and removal reasons, and loads every family for the credit pages" },
+  { module: "@/lib/volunteer/reminders", names: "all", why: "the worker's reminders read every family's sign-ups and standings" },
+  { module: "@/lib/volunteer/moved-student", names: "all", why: "it is a roster write's, and reads the sign-up list of staff" },
 ];
 
 describe("every page guards itself", () => {
@@ -346,6 +349,9 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/volunteer/notices.ts",
   "src/lib/volunteer/calendar.ts",
   "src/lib/volunteer/settings.ts",
+  "src/lib/volunteer/credit.ts",
+  "src/lib/volunteer/allocation.ts",
+  "src/lib/volunteer/check-in.ts",
   "src/app/components/parent-frame.tsx",
   "src/app/not-found.tsx",
 ];

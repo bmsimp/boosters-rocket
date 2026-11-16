@@ -4,7 +4,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { guardian, parent, qboCustomer, requirement, season, seasonStep, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { guardian, parent, qboCustomer, requirement, season, seasonStep, staffUser, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { isCalendarDate } from "@/lib/seasons/progress";
 import { clubToday, getClubSettings } from "@/lib/settings/club";
@@ -41,9 +41,13 @@ export async function listEvents(): Promise<{ upcoming: EventSummary[]; past: Ev
   return { upcoming: all.filter((e) => e.onDate >= today), past: all.filter((e) => e.onDate < today).reverse(), today };
 }
 
-export type StaffSignup = { id: string; fillerName: string; fillerKind: "guardian" | "student"; familyName: string; signedUpByName: string; signedUpAt: string };
+/** A sign-up's live check-in, when it has one: by the guardian with the code, or added by staff (with who). */
+export type StaffCheckIn = { creditId: string; kind: "checkin" | "staff_checkin"; at: string; byStaff: string | null };
+export type StaffSignup = { id: string; fillerName: string; fillerKind: "guardian" | "student"; familyName: string; familyQboId: string; signedUpByName: string; signedUpAt: string; checkIn: StaffCheckIn | null };
 export type StaffShift = {
   id: string; startsAt: string; endsAt: string; minutes: number; places: number; role: string | null; cancelled: boolean;
+  /** Its start or end has passed by the club's clock: a missed check-in can be added once it has started. */
+  started: boolean; ended: boolean;
   requirementIds: string[]; signups: StaffSignup[];
 };
 export type EventSetup = {
@@ -51,8 +55,8 @@ export type EventSetup = {
   copiedFrom: { id: string; name: string; onDate: string } | null; shifts: StaffShift[];
 };
 
-/** One event with its shifts, in order of their start, and each shift's sign-ups with names. Null when there is none. */
-export async function getEventSetup(eventId: string): Promise<EventSetup | null> {
+/** One event with its shifts, in order of their start, and each shift's sign-ups with names and check-ins. Null when there is none. */
+export async function getEventSetup(eventId: string, now: Date = new Date()): Promise<EventSetup | null> {
   const [e] = await db.select().from(volunteerEvent).where(eq(volunteerEvent.id, eventId));
   if (!e) return null;
   const [shifts, zone, [from]] = await Promise.all([
@@ -61,23 +65,35 @@ export async function getEventSetup(eventId: string): Promise<EventSetup | null>
     e.copiedFrom ? db.select({ id: volunteerEvent.id, name: volunteerEvent.name, onDate: volunteerEvent.onDate }).from(volunteerEvent).where(eq(volunteerEvent.id, e.copiedFrom)) : Promise.resolve([]),
   ]);
   const ids = shifts.map((s) => s.id);
-  const [links, signups] = ids.length === 0 ? [[], []] : await Promise.all([
+  const [links, signups, credits] = ids.length === 0 ? [[], [], []] : await Promise.all([
     db.select().from(volunteerShiftRequirement).where(inArray(volunteerShiftRequirement.shiftId, ids)),
     db.select({ s: volunteerSignup, familyName: qboCustomer.displayName, signerName: parent.name }).from(volunteerSignup)
       .leftJoin(qboCustomer, eq(qboCustomer.qboId, volunteerSignup.familyQboId))
       .leftJoin(parent, eq(parent.id, volunteerSignup.signedUpBy))
       .where(and(inArray(volunteerSignup.shiftId, ids), isNull(volunteerSignup.cancelledAt))).orderBy(asc(volunteerSignup.createdAt)),
+    db.select({ c: volunteerCredit, staffName: staffUser.name }).from(volunteerCredit).innerJoin(volunteerSignup, eq(volunteerSignup.id, volunteerCredit.signupId))
+      .leftJoin(staffUser, eq(staffUser.id, volunteerCredit.createdBy))
+      .where(and(inArray(volunteerSignup.shiftId, ids), isNull(volunteerCredit.removedAt))),
   ]);
+  const checkInOf = (signupId: string): StaffCheckIn | null => {
+    const found = credits.find((x) => x.c.signupId === signupId);
+    if (!found || found.c.kind === "outside") return null;
+    return { creditId: found.c.id, kind: found.c.kind, at: found.c.createdAt.toISOString(), byStaff: found.c.kind === "staff_checkin" ? found.staffName ?? "A staff member no longer in the portal" : null };
+  };
   return {
     id: e.id, name: e.name, onDate: e.onDate, location: e.location, description: e.description, contactName: e.contactName, contactEmail: e.contactEmail,
     cancelled: e.cancelledAt !== null, copiedFrom: from ?? null,
-    shifts: shifts.map((s) => ({
-      id: s.id, startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), minutes: shiftMinutes(shiftInstants(e.onDate, s.startsAt, s.endsAt, zone)),
-      places: s.places, role: s.role, cancelled: s.cancelledAt !== null,
-      requirementIds: links.filter((l) => l.shiftId === s.id).map((l) => l.requirementId),
-      signups: signups.filter((x) => x.s.shiftId === s.id).map((x) => ({ id: x.s.id, fillerName: x.s.fillerName, fillerKind: x.s.fillerKind,
-        familyName: x.familyName ?? "A family no longer on the roster", signedUpByName: x.signerName ?? "A parent no longer in the portal", signedUpAt: x.s.createdAt.toISOString() })),
-    })),
+    shifts: shifts.map((s) => {
+      const when = shiftInstants(e.onDate, s.startsAt, s.endsAt, zone);
+      return {
+        id: s.id, startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), minutes: shiftMinutes(when),
+        places: s.places, role: s.role, cancelled: s.cancelledAt !== null, started: when.start.getTime() <= now.getTime(), ended: when.end.getTime() <= now.getTime(),
+        requirementIds: links.filter((l) => l.shiftId === s.id).map((l) => l.requirementId),
+        signups: signups.filter((x) => x.s.shiftId === s.id).map((x) => ({ id: x.s.id, fillerName: x.s.fillerName, fillerKind: x.s.fillerKind, familyQboId: x.s.familyQboId,
+          familyName: x.familyName ?? "A family no longer on the roster", signedUpByName: x.signerName ?? "A parent no longer in the portal", signedUpAt: x.s.createdAt.toISOString(),
+          checkIn: checkInOf(x.s.id) })),
+      };
+    }),
   };
 }
 
@@ -147,7 +163,7 @@ async function checkShift(input: ShiftInput, tx: Tx): Promise<{ ok: true; value:
 
 type EventRow = typeof volunteerEvent.$inferSelect;
 type ShiftRow = typeof volunteerShift.$inferSelect;
-const factsOf = (e: Pick<EventRow, "name" | "onDate" | "location" | "description" | "contactName" | "contactEmail">, s: Pick<ShiftRow, "startsAt" | "endsAt" | "role" | "revision">): ShiftFacts => ({
+export const factsOf = (e: Pick<EventRow, "name" | "onDate" | "location" | "description" | "contactName" | "contactEmail">, s: Pick<ShiftRow, "startsAt" | "endsAt" | "role" | "revision">): ShiftFacts => ({
   event: { name: e.name, onDate: e.onDate, location: e.location, description: e.description, contactName: e.contactName, contactEmail: e.contactEmail },
   shift: { startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), role: s.role, revision: s.revision },
 });
@@ -157,7 +173,7 @@ const factsOf = (e: Pick<EventRow, "name" | "onDate" | "location" | "description
  * while that guardian may still see the family (their link to it isn't closed and they aren't blocked). Someone the
  * club has cut off from a family is never told where and when its student will be.
  */
-async function signupsOn(shiftIds: string[], tx: Tx): Promise<(SignupFacts & { shiftId: string })[]> {
+export async function signupsOn(shiftIds: string[], tx: Tx): Promise<(SignupFacts & { shiftId: string })[]> {
   if (shiftIds.length === 0) return [];
   const rows = await tx.select({ id: volunteerSignup.id, shiftId: volunteerSignup.shiftId, fillerKind: volunteerSignup.fillerKind, fillerName: volunteerSignup.fillerName,
     fillerParentId: volunteerSignup.fillerParentId, signedUpBy: volunteerSignup.signedUpBy, email: parent.email })

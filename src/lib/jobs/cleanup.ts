@@ -45,6 +45,8 @@ export const KEPT_TABLES: Record<string, string> = {
   requirement_progress: "ticks and waivers: a season's record",
   volunteer_event: "volunteer history: what happened stays readable", volunteer_shift: "volunteer history", volunteer_shift_requirement: "volunteer history",
   volunteer_signup: "who volunteered: emptied on a change of company, otherwise kept",
+  volunteer_credit: "volunteering done, the record a requirement is met by: emptied on a change of company, otherwise kept",
+  volunteer_reminder: "one row per reminder email, so none goes twice: emptied on a change of company, otherwise kept",
   signature_request: "a form's record of signing: evidence, never expires", signature_consent: "a guardian's consent to sign electronically: evidence, never expires",
   signed_form_evidence: "a signed form's evidence: the club's record, never deleted, kept even after a change of company",
   signed_form_file: "the files of a signed form's evidence: never deleted", signed_form_copy: "the copies of a signed form sent to guardians: part of its record",

@@ -4,7 +4,7 @@ import "server-only";
 import { env } from "@/env";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { sendMail, currentBrand } from "@/lib/mail/send";
-import { volunteerCancelMessage, volunteerChangeMessage, volunteerSignupMessage, type VolunteerShiftWords, type VolunteerWho } from "@/lib/mail/messages";
+import { volunteerCancelMessage, volunteerChangeMessage, volunteerRemovedMessage, volunteerSignupMessage, type VolunteerShiftWords, type VolunteerWho } from "@/lib/mail/messages";
 import type { MailMessage } from "@/lib/mail/types";
 import { calendarFile } from "./calendar";
 import { beforeCutoff, dateWords, instantWords, shiftInstants, shiftTimeWords } from "./clock";
@@ -22,7 +22,7 @@ export const shiftWords = (f: ShiftFacts): VolunteerShiftWords => ({
   event: f.event.name, role: f.shift.role, location: f.event.location,
   when: `${dateWords(f.event.onDate)}, ${shiftTimeWords(f.shift.startsAt, f.shift.endsAt)}`,
 });
-const volunteerLink = () => `${env.APP_URL.replace(/\/+$/, "")}/volunteer`;
+export const volunteerLink = () => `${env.APP_URL.replace(/\/+$/, "")}/volunteer`;
 
 /**
  * The calendar file for one sign-up on a shift as it is now. `cancelled`: the file that takes it out of the reader's
@@ -43,7 +43,9 @@ export async function signupConfirmation(s: SignupFacts, f: ShiftFacts, o: { zon
     cancelUntil: beforeCutoff(start, o.cutoffHours, o.now) ? instantWords(cutoff, o.zone) : null, link: volunteerLink(), calendar: calendarFor(s.signupId, f, o.zone, o.now) });
 }
 
-export type Notice = { kind: "change"; signup: SignupFacts; before: ShiftFacts; after: ShiftFacts } | { kind: "cancel"; signup: SignupFacts; facts: ShiftFacts; whole: "event" | "shift" };
+export type Notice = { kind: "change"; signup: SignupFacts; before: ShiftFacts; after: ShiftFacts } | { kind: "cancel"; signup: SignupFacts; facts: ShiftFacts; whole: "event" | "shift" }
+  /** One place given up by the club: staff removed it (`staff`), or its student is no longer under the family (`moved`). */
+  | { kind: "removed"; signup: SignupFacts; facts: ShiftFacts; why: "staff" | "moved" };
 
 const NOTICE_ACTOR: Actor = { door: "system", id: null, label: "volunteer notices" };
 
@@ -51,7 +53,7 @@ const NOTICE_ACTOR: Actor = { door: "system", id: null, label: "volunteer notice
  * Sends the notices a staff change or cancellation calls for, one email to each sign-up's guardian, after the change
  * is committed. A failed send is audited by sendMail() without its body; the counts are audited here.
  */
-export async function sendNotices(notices: readonly Notice[], o: { zone: string; now?: Date; actor?: Actor; ip?: string | null; targetId?: string }): Promise<{ sent: number; failed: number }> {
+export async function sendNotices(notices: readonly Notice[], o: { zone: string; now?: Date; actor?: Actor; ip?: string | null; targetId?: string; targetType?: string }): Promise<{ sent: number; failed: number }> {
   if (notices.length === 0) return { sent: 0, failed: 0 };
   const brand = await currentBrand(), now = o.now ?? new Date();
   let sent = 0, failed = 0;
@@ -59,12 +61,15 @@ export async function sendNotices(notices: readonly Notice[], o: { zone: string;
     const m = n.kind === "change"
       ? volunteerChangeMessage(brand, n.signup.to, { who: n.signup.who, before: shiftWords(n.before), after: shiftWords(n.after), contact: contactWords(n.after.event), link: volunteerLink(),
           calendar: calendarFor(n.signup.signupId, n.after, o.zone, now) })
-      : volunteerCancelMessage(brand, n.signup.to, { who: n.signup.who, shift: shiftWords(n.facts), whole: n.whole, contact: contactWords(n.facts.event),
-          calendar: calendarFor(n.signup.signupId, n.facts, o.zone, now, true) });
+      : n.kind === "cancel"
+        ? volunteerCancelMessage(brand, n.signup.to, { who: n.signup.who, shift: shiftWords(n.facts), whole: n.whole, contact: contactWords(n.facts.event),
+            calendar: calendarFor(n.signup.signupId, n.facts, o.zone, now, true) })
+        : volunteerRemovedMessage(brand, n.signup.to, { who: n.signup.who, shift: shiftWords(n.facts), why: n.why, contact: contactWords(n.facts.event), link: volunteerLink(),
+            calendar: calendarFor(n.signup.signupId, n.facts, o.zone, now, true) });
     const r = await sendMail(m, { purpose: "volunteer_notice", actor: o.actor ?? NOTICE_ACTOR, ip: o.ip ?? null });
     if (r.ok) sent++; else failed++;
   }
-  await writeAudit({ actor: o.actor ?? NOTICE_ACTOR, action: "volunteer.notice.sent", targetType: "volunteer_event", targetId: o.targetId, ip: o.ip ?? null,
+  await writeAudit({ actor: o.actor ?? NOTICE_ACTOR, action: "volunteer.notice.sent", targetType: o.targetType ?? "volunteer_event", targetId: o.targetId, ip: o.ip ?? null,
     after: { kind: notices[0]!.kind, signups: notices.map((n) => n.signup.signupId), sent, failed } });
   return { sent, failed };
 }

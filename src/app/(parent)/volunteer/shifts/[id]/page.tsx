@@ -40,7 +40,7 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
           <dt>Contact</dt><dd>{event.contact}</dd>
         </dl>
         {event.description && <p className="volunteer-about">{event.description}</p>}
-        {view.mine.length > 0 && <p className="help">Signed up from your family: {view.mine.map((m) => (m.who === "You" ? "you" : m.who)).join(", ")}.</p>}
+        {view.mine.length > 0 && <p className="help">Signed up from your family: {view.mine.map((m) => `${m.who === "You" ? "you" : m.who}${m.checkedIn ? " (checked in)" : ""}`).join(", ")}.</p>}
       </section>
 
       <section className="box" aria-labelledby="signup-h"><h2 id="signup-h">Sign up</h2>

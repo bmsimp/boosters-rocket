@@ -45,3 +45,14 @@ export const whoMustWords = (requirement: Pick<Requirement, "appliesTo">, studen
 
 /** "3 of 5 places filled": the one thing about other families a parent is told, and never who. */
 export const placesWords = (s: { filled: number; places: number }): string => `${s.filled} of ${s.places} ${s.places === 1 ? "place" : "places"} filled`;
+
+/** One of the moved student's live places, as the rule reads it. */
+export type MovedPlace = { id: string; start: Date; cancelled: boolean; checkedIn: boolean };
+
+/**
+ * The places to give up when a student moves: those on shifts that haven't started yet (and that the club hasn't
+ * cancelled, whose volunteers were told already), not checked in. A shift under way or over, and a place checked in
+ * (which can happen in the half hour before a shift starts), are kept: that is volunteering done, or being done.
+ */
+export const placesToGiveUp = (places: readonly MovedPlace[], now: Date): string[] =>
+  places.filter((p) => !p.cancelled && !p.checkedIn && p.start.getTime() > now.getTime()).map((p) => p.id);

@@ -42,6 +42,8 @@ const isDynamic = (route: string) => route.includes("[");
 const PARAMS: Record<string, (family: SeededParent) => Record<string, string | string[]>> = {
   // The shift both families are signed up for: the page shows its count and the viewer's own sign-up, never the other's.
   "/volunteer/shifts/[id]": (family) => ({ id: family.volunteer!.shiftId }),
+  // The check-in code of the shift both families are on: the page shows the family's own people on it, never the other's.
+  "/volunteer/check-in/[code]": (family) => ({ code: family.volunteer!.code }),
   // The family's own request for a form that is signed and finished: its page shows what is stored, and asks Documenso nothing.
   "/forms/[id]": (family) => ({ id: family.forms!.ids.complete }),
 };
@@ -64,6 +66,8 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // The event both families signed up for, the one count every family sees, and the family's own sign-up.
   "/volunteer": (family) => [family.spec.family.name, ...family.volunteer!.page],
   "/volunteer/shifts/[id]": () => ["2 of 4 places filled", "Rinse crew"],
+  // The shift, the family's name, and its own person on it, checked in or not.
+  "/volunteer/check-in/[code]": (family) => ["Rinse crew", family.spec.family.name, ...family.volunteer!.checkIn],
   // Every form the season asks of the family and of each student, each with its state in words.
   "/forms": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.forms!.page],
   // One form: its title, the student it is for, and that it is signed.

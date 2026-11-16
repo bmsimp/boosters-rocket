@@ -25,6 +25,7 @@ function EventList({ events }: { events: EventSummary[] }) {
 export default async function VolunteerEventsPage() {
   const ctx = await requireStaffPage("Volunteer.Event.Read");
   const canChange = can(ctx.effective, "Volunteer.Event.ReadWrite");
+  const canCredit = can(ctx.effective, "Volunteer.Credit.ReadWrite");
   const [{ upcoming, past }, { cutoffHours }] = await Promise.all([listEvents(), getVolunteerSettings()]);
   return (
     <main className="wrap single">
@@ -34,6 +35,12 @@ export default async function VolunteerEventsPage() {
       <section className="box" aria-labelledby="upcoming-h"><h2 id="upcoming-h">Coming up</h2>
         {upcoming.length === 0 ? <p>No events coming up.{canChange ? " Add one below." : ""}</p> : <EventList events={upcoming} />}
       </section>
+
+      {canCredit && (
+        <section className="box" aria-labelledby="credit-h"><h2 id="credit-h">Credit</h2>
+          <p>Check-ins count as volunteering done. See each family&apos;s credit, and credit volunteering done outside the portal, under <Link href="/staff/volunteer/credit">Volunteer credit</Link>.</p>
+        </section>
+      )}
 
       {canChange && (
         <section className="box" aria-labelledby="new-h"><h2 id="new-h">Add an event</h2>

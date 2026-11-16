@@ -26,7 +26,9 @@ test("a parent signs up for a shift, sees the count and their own sign-up, gets 
   expect(res?.status()).toBe(200);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Volunteer");
   await expect(page.getByRole("heading", { name: "Pancake breakfast" })).toBeVisible();
-  await expect(page.getByText("Nobody in your family is signed up for a shift yet.")).toBeVisible();
+  // Zelda's only place still to come is on tonight's concession stand (scripts/seed-e2e.ts, for the check-in spec).
+  const mine = page.locator("section", { has: page.getByRole("heading", { name: "Your sign-ups" }) });
+  await expect(mine).not.toContainText("Pancake breakfast");
   await expect(griddle(page)).toContainText("1 of 4 places filled");
   // Another family has a place on the griddle; the page says how many, never who.
   await expect(page.locator("main")).not.toContainText("Rivera");
@@ -52,7 +54,6 @@ test("a parent signs up for a shift, sees the count and their own sign-up, gets 
 
   await page.goto("/volunteer");
   await expect(griddle(page)).toContainText("2 of 4 places filled");
-  const mine = page.locator("section", { has: page.getByRole("heading", { name: "Your sign-ups" }) });
   await expect(mine).toContainText("Pancake breakfast, Griddle");
   await expect(mine).toContainText("You're doing this one");
   await expect(mine).toContainText("You can cancel here until");
@@ -60,11 +61,11 @@ test("a parent signs up for a shift, sees the count and their own sign-up, gets 
   await mine.getByRole("button", { name: "Cancel my sign-up" }).click();
   await mine.getByRole("button", { name: "Yes, cancel it" }).click();
   // The page is drawn again with the place given back: the sign-up is gone from the list and the count is down.
-  await expect(mine).toContainText("Nobody in your family is signed up for a shift yet.");
+  await expect(mine).not.toContainText("Pancake breakfast");
   await expect(griddle(page)).toContainText("1 of 4 places filled");
   await page.reload();
   await expect(griddle(page)).toContainText("1 of 4 places filled");
-  await expect(page.getByText("Nobody in your family is signed up for a shift yet.")).toBeVisible();
+  await expect(mine).not.toContainText("Pancake breakfast");
 });
 
 test("staff see the shift's sign-ups by name", async ({ context, page }) => {

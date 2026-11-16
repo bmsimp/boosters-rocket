@@ -49,7 +49,7 @@ describe("database rate limits", () => {
     // 3 codes to one address; 60 requests and 180 checks from one IP address, which a school's shared Wi-Fi needs on a
     // registration night (spec §1 Rate limits). All in 15 minutes.
     const window = { windowMs: 15 * 60 * 1000 };
-    const { contact_save_parent, contact_open_parent, form_open_parent, ...signIn } = RATE_LIMITS;
+    const { contact_save_parent, contact_open_parent, form_open_parent, volunteer_checkin_parent, ...signIn } = RATE_LIMITS;
     expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window } });
     // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
     // hour, each a write to the club's QuickBooks, and the reads the edit page makes as it opens.
@@ -58,5 +58,8 @@ describe("database rate limits", () => {
     // Opening a form to sign and checking how it stands (src/lib/forms/signing.ts), counted per person: each asks the
     // club's Documenso once. A family signing a dozen forms in a sitting stays well under it.
     expect(form_open_parent).toEqual({ max: 120, ...window });
+    // Checking in at a volunteer shift (src/lib/volunteer/check-in.ts), counted per person: a press for each person a
+    // guardian checks in, a family's busiest evening well under it.
+    expect(volunteer_checkin_parent).toEqual({ max: 30, ...window });
   });
 });

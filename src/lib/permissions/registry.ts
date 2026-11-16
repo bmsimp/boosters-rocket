@@ -28,6 +28,7 @@ export const PERMISSIONS = [
   "Volunteer.Event.ReadWrite",     // create, change, copy and cancel events and shifts, and set the cancelling cut-off
   "Forms.Signature.Read",          // see who has signed each form, and open and download signed forms with their evidence (the Earlier company archive too)
   "Forms.Signature.ReadWrite",     // remind guardians to sign, set a form's reminder schedule, and start a form that isn't finished again
+  "Volunteer.Credit.ReadWrite",    // see a family's volunteer credit, add a missed check-in, remove one, credit volunteering done outside the portal
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
