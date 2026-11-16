@@ -32,6 +32,20 @@ describe("roles", () => {
     expect((await db.select().from(auditLog)).map((a) => a.action)).toContain("role.save");
   });
 
+  it("saves a role that names Roster.Read and Parents.ReadWrite exactly", async () => {
+    const r = await saveRole({ name: "Roster reader", include: ["Roster.Read", "Parents.ReadWrite"], exclude: [] }, actor, null);
+    expect(r.ok).toBe(true);
+    expect((await listRoles()).find((x) => x.name === "Roster reader")?.include).toEqual(["Roster.Read", "Parents.ReadWrite"]);
+  });
+
+  it("refuses a role that names an Admin-only permission, and stores nothing", async () => {
+    for (const pattern of ["Audit.Log.Read", "Admin.Health.Read", "Settings.Mail.ReadWrite", "Admin.*"]) {
+      const r = await saveRole({ name: "Sneaky", include: [pattern], exclude: [] }, actor, null);
+      expect(r).toEqual({ ok: false, errors: [`“${pattern}” only matches Admin permissions, which can't be given to a role.`] });
+    }
+    expect((await listRoles()).map((x) => x.name)).not.toContain("Sneaky");
+  });
+
   it("rejects bad patterns with plain messages", async () => {
     const r = await saveRole({ name: "Bad", include: ["Roster..Read"], exclude: [] }, actor, null);
     expect(r.ok).toBe(false);

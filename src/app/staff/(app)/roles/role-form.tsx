@@ -12,7 +12,7 @@ export function RoleForm({ role }: { role?: R }) {
     <form action={action} className="stack">
       {role && <input type="hidden" name="id" value={role.id} />}
       <label className="field"><span>Name</span><input name="name" defaultValue={role?.name} required /></label>
-      <label className="field"><span>Include (one pattern per line, e.g. Roster.*)</span>
+      <label className="field"><span>Include (one per line: a permission&apos;s name, like Roster.Read, or a pattern, like Settings.*)</span>
         <textarea name="include" rows={3} defaultValue={role?.include.join("\n")} /></label>
       <label className="field"><span>Exclude (one per line)</span>
         <textarea name="exclude" rows={2} defaultValue={role?.exclude.join("\n")} /></label>
