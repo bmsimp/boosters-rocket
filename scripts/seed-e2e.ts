@@ -120,13 +120,16 @@ async function main() {
   const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
   // Each invoice names the customer it was raised on (the family itself, or a student under it in the cache above): a
   // stored invoice of a customer who is not the family's is not shown.
-  const invoice = (qboId: string, number: string, customerQboId: string, forName: string | null, cents: number, o: { due?: number; paid?: boolean; payLink?: string } = {}) => ({
-    qboId, number, customerQboId, forName, date: day(-30), dueDate: o.due === undefined ? null : day(o.due), totalCents: cents, balanceCents: o.paid ? 0 : cents, currency: "USD", payLink: o.payLink ?? null });
+  // `items` are the QuickBooks products and services its lines carry: what a payment requirement is met by.
+  const invoice = (qboId: string, number: string, customerQboId: string, forName: string | null, cents: number, o: { due?: number; paid?: boolean; payLink?: string; items?: string[] } = {}) => ({
+    qboId, number, customerQboId, forName, date: day(-30), dueDate: o.due === undefined ? null : day(o.due), totalCents: cents, balanceCents: o.paid ? 0 : cents, currency: "USD", payLink: o.payLink ?? null,
+    itemQboIds: o.items ?? [] });
+  const BAND_FEE_ITEM = "4101";
   const families = [
     { id: "E2E-FAMILY", total: 18500, invoices: [
       invoice("902", "QZ-1042", "E2E-FAMILY", null, 10000, { due: -20 }), // soonest due first, as a read from QuickBooks stores them
       invoice("901", "QZ-1041", "E2E-S1", "Xochitl Quetzalcoatl", 8500, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-quetzalcoatl-1041" }),
-      invoice("903", "QZ-1017", "E2E-FAMILY", null, 15000, { paid: true }) ] },
+      invoice("903", "QZ-1017", "E2E-FAMILY", null, 15000, { paid: true, items: [BAND_FEE_ITEM] }) ] }, // the band fee, paid
     { id: "E2E-FAMILY-2", total: 37666, invoices: [
       invoice("911", "SF-2051", "E2E-S3", "Wolfgang Secondborn", 31247, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-second-2051" }),
       invoice("912", "SF-2052", "E2E-FAMILY-2", null, 6419, { due: 40 }),
@@ -139,6 +142,16 @@ async function main() {
     await sql`INSERT INTO family_money (family_qbo_id, realm_id, read_at, invoices, total_cents, balance_with_jobs_cents, currency)
             VALUES (${f.id}, '9130000000000001', now(), ${sql.json(f.invoices)}, ${f.total}, ${f.total}, 'USD')`;
   }
+  // The worker's last check of each customer's balance in QuickBooks (src/lib/money/sweep.ts): the second family's
+  // student owes $50.00 more there than his open invoices, so staff see the family under "Worth a look"
+  // (tests/e2e/balances.spec.ts). Its amount is in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts).
+  const checks = [
+    { customerQboId: "E2E-FAMILY-2", name: null, balanceCents: 6419, invoicesCents: 6419, currency: "USD" },
+    { customerQboId: "E2E-P2", name: "Zelda Quetzalcoatl", balanceCents: 0, invoicesCents: 0, currency: "USD" },
+    { customerQboId: "E2E-S3", name: "Wolfgang Secondborn", balanceCents: 36247, invoicesCents: 31247, currency: "USD" },
+  ];
+  await sql`UPDATE family_money SET checked_at = now(), customer_checks = ${sql.json(checks)} WHERE family_qbo_id = 'E2E-FAMILY-2'`;
+  await sql`DELETE FROM setting WHERE key = 'money.run'`;
   // The club's current season (v1 spec §10): four steps with no dates, so each family is on the first step it hasn't
   // finished. The Quetzalcoatl family has done Join; in Uniforms, Xochitl has been ticked off and Yaretzi has not
   // (tests/e2e/season.spec.ts ticks her, and unticks her again). Two requirements are asked of other families alone,
@@ -149,7 +162,7 @@ async function main() {
     const [step] = await sql`INSERT INTO season_step (season_id, name, position) VALUES (${fall!.id}, ${name}, ${position}) RETURNING id`;
     stepIds[name] = step!.id as string;
   }
-  type SeedRequirement = { step: string; title: string; appliesTo: "family" | "student"; required?: boolean; due?: number; chosen?: string[]; ticked?: string[]; waived?: Record<string, string> };
+  type SeedRequirement = { step: string; title: string; appliesTo: "family" | "student"; required?: boolean; due?: number; chosen?: string[]; ticked?: string[]; waived?: Record<string, string>; item?: string };
   const requirements: SeedRequirement[] = [
     { step: "Join", title: "Handbook read", appliesTo: "family", ticked: ["E2E-FAMILY", "10"] },
     { step: "Join", title: "Tuba locker key returned", appliesTo: "family", chosen: ["10"] },
@@ -157,10 +170,12 @@ async function main() {
     { step: "Uniforms", title: "Marching shoes sized", appliesTo: "student", required: false },
     { step: "Uniforms", title: "Percussion truck crew sign-off", appliesTo: "student", chosen: ["E2E-S3"], waived: { "E2E-S3": "Cast on his arm until December" } },
     { step: "Wrap-up", title: "Banquet RSVP", appliesTo: "family", due: 30 },
+    // A payment, met by the band fee on the Quetzalcoatl family's paid invoice: it reads "Paid" (tests/e2e/balances.spec.ts).
+    { step: "Wrap-up", title: "Band fee", appliesTo: "family", required: false, item: BAND_FEE_ITEM },
   ];
   for (const [position, r] of requirements.entries()) {
-    const [row] = await sql`INSERT INTO requirement (step_id, kind, title, required, applies_to, due_on, covers, position)
-            VALUES (${stepIds[r.step]!}, 'checklist', ${r.title}, ${r.required ?? true}, ${r.appliesTo}, ${r.due === undefined ? null : day(r.due)}, ${r.chosen ? "chosen" : "everyone"}, ${position}) RETURNING id`;
+    const [row] = await sql`INSERT INTO requirement (step_id, kind, item_qbo_id, title, required, applies_to, due_on, covers, position)
+            VALUES (${stepIds[r.step]!}, ${r.item ? "payment" : "checklist"}, ${r.item ?? null}, ${r.title}, ${r.required ?? true}, ${r.appliesTo}, ${r.due === undefined ? null : day(r.due)}, ${r.chosen ? "chosen" : "everyone"}, ${position}) RETURNING id`;
     for (const subject of r.chosen ?? []) await sql`INSERT INTO requirement_cover (requirement_id, subject_qbo_id) VALUES (${row!.id}, ${subject})`;
     for (const subject of r.ticked ?? []) await sql`INSERT INTO requirement_progress (requirement_id, subject_qbo_id, met_at) VALUES (${row!.id}, ${subject}, now())`;
     for (const [subject, reason] of Object.entries(r.waived ?? {})) {
