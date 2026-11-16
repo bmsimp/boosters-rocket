@@ -1,5 +1,6 @@
 import { requireParentPage } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
+import { canChangeMyEmail } from "@/lib/parents/email-change";
 import { firstName } from "@/lib/parents/first-name";
 import { getClubSettings } from "@/lib/settings/club";
 import { loadMySeason } from "@/lib/seasons/my-season";
@@ -20,7 +21,7 @@ export const metadata = { title: "Home" };
  */
 export default async function ParentHome() {
   const ctx = await requireParentPage();
-  const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
+  const [family, club, ownEmail] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx)]);
   // The family's money first: a read that brings stale figures up to date is made before the season's payment lines
   // are worked out from the same row, so the money box and those lines never disagree on one page.
   const money = family ? await loadFamilyMoney(ctx.familyQboId) : null;
@@ -40,7 +41,7 @@ export default async function ParentHome() {
             {/* Only for a family the roster may show: when it may not, nothing of it is shown, money included. */}
             {money && <MoneySection money={money} more />}
             {family.students ? <StudentsBox students={family.students} season={season} /> : season && <FamilyStepBox season={season} />}
-            <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} />
+            <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "family"} />
             <RosterAsOf family={family} />
           </>
         ) : <NotSetUpBox treasurerEmail={club.treasurerEmail} />}

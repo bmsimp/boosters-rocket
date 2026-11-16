@@ -158,9 +158,9 @@ describe("Your details, on Family and on Home", () => {
   it("links to the edit page for a parent with a QuickBooks record of their own, with no id in the link", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
-    // Family says the sign-in email is theirs to change too, and offers it in the box below; Home keeps it short.
+    // Both say the sign-in email is theirs to change too: Family offers it in the box below, Home sends them to Family.
     const words = new Map([[FamilyPage, "You can change your phone and mailing address yourself, and your sign-in email below. The club changes your name for you."],
-      [ParentHome, "You can change your phone and mailing address yourself. The club changes your name and email for you."]]);
+      [ParentHome, "You can change your phone and mailing address yourself, and your sign-in email on your Family page. The club changes your name for you."]]);
     for (const [page, said] of words) {
       const html = await renderPage(page);
       expect(html).toContain(`<p class="help">${said} Ask the club and they&#x27;ll update it.</p><div class="box-foot">${LINK}</div></section>`);

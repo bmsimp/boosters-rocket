@@ -16,7 +16,7 @@ export default async function FamilyPage() {
       {family ? (
         <>
           {family.students && <StudentsBox students={family.students} />}
-          <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail} />
+          <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "below"} />
         </>
       ) : <NotSetUpBox treasurerEmail={club.treasurerEmail} />}
       {ctx.families.length > 1 && (

@@ -70,9 +70,10 @@ function AskTheClub({ treasurerEmail }: { treasurerEmail: string | null }) {
  * The person's own name, email and phone as QuickBooks has them, or as the portal knows them when their sign-in has no
  * QuickBooks record. A QuickBooks record (`who.edits`, set by loadMyFamily) gets the way to the page where its phone
  * and address are changed; the link carries no id, because that page takes the record from the session.
- * `ownEmail`: the person may change their sign-in email themselves (canChangeMyEmail), and the words say so.
+ * `ownEmail`: the person may change their sign-in email themselves (canChangeMyEmail), and the words say where: in the
+ * box below (Family, which offers it) or on the Family page (Home).
  */
-export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyContact; treasurerEmail: string | null; ownEmail?: boolean }) {
+export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyContact; treasurerEmail: string | null; ownEmail?: false | "below" | "family" }) {
   return (
     <section className="box details-box" aria-labelledby="det-h">
       <h2 id="det-h">Your details</h2>
@@ -85,7 +86,7 @@ export function DetailsBox({ who, treasurerEmail, ownEmail = false }: { who: MyC
       {who.edits ? (
         <>
           <p className="help">{ownEmail
-            ? <>You can change your phone and mailing address yourself, and your sign-in email below. The club changes your name for you. <AskTheClub treasurerEmail={treasurerEmail} /></>
+            ? <>You can change your phone and mailing address yourself, and your sign-in email {ownEmail === "below" ? "below" : "on your Family page"}. The club changes your name for you. <AskTheClub treasurerEmail={treasurerEmail} /></>
             : <>You can change your phone and mailing address yourself. The club changes your name and email for you. <AskTheClub treasurerEmail={treasurerEmail} /></>}</p>
           <div className="box-foot"><a className="btn btn-line" href="/family/details">Update my details</a></div>
         </>
