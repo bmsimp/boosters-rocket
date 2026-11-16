@@ -459,6 +459,11 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
   .bar, .checkin-tools { display: none; }
   .checkin-sheet .box { border: 0; box-shadow: none; }
 }
+/* Paying instead of volunteering: the amount said once, large, then what happens when the guardian confirms. */
+.buyout-amount { font-size: 2rem; font-weight: 700; margin-top: var(--s2); }
+.buyout-points { margin: var(--s2) 0 0 var(--s4); }
+.buyout-points li + li { margin-top: var(--s1); }
+.buyout-next { margin-top: var(--s2); font-weight: 400; }
 /* ---- End of Volunteer ---- */
 
 /* ---- Forms: the parent's Forms pages and the signing frame. Keep new rules for them inside this block. ---- */
