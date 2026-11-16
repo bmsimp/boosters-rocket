@@ -587,6 +587,9 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
   .btn:disabled, .field :disabled { border-style: dashed; color: GrayText; }
 }
 
+/* A heading over one of several tables in a box. */
+.box h3.table-head { font: 700 1.1875rem/1.45 var(--read); margin-top: var(--s4); }
+
 /* Page heads: the way back sits on its own line under the title, big enough to tap. */
 .back { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; font-size: 0.9375rem; }
 

@@ -22,6 +22,7 @@ import { resetDb } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { connectRoster, REALM, seedQueued, staffWith } from "../helpers/roster-writes";
+import { rowNamed } from "../helpers/table";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -219,7 +220,7 @@ describe("the Reconciliation page (Roster.Read)", () => {
     expect(html).toContain("Try again now");
     expect(html).toContain("Give up");
     expect(html).toContain("Money worth a look");
-    expect(html).toContain("Leo Rivera: QuickBooks says $50.00, its open invoices add up to $0.00");
+    expect(rowNamed(html, "Leo Rivera")).toEqual([expect.any(String), "Leo Rivera", "$50.00", "$0.00", expect.stringMatching(/UTC$/)]);
     expect(html).toContain('href="/staff/balances/10"');
   });
 });

@@ -59,11 +59,11 @@ test.describe("staff", () => {
     const writes = page.getByRole("region", { name: "Changes waiting to reach QuickBooks" });
     await expect(writes.getByRole("heading", { name: "Stuck (1)" })).toBeVisible();
     await expect(writes.getByRole("heading", { name: "Waiting (1)" })).toBeVisible();
-    const stuck = writes.getByRole("listitem").filter({ hasText: "Add the student “Pat Lee” to Lee Family" });
+    const stuck = writes.getByRole("row").filter({ hasText: "Add the student “Pat Lee” to Lee Family" });
     await expect(stuck).toContainText("Stuck: it won't be tried again until someone asks");
     await expect(stuck).toContainText("QuickBooks asked the portal to slow down (http_429)");
     await expect(stuck.getByRole("button", { name: "Try again now" })).toBeVisible(); // not selected: the worker would take it up
-    const waitingOne = writes.getByRole("listitem").filter({ hasText: "Rename the parent “Sam Okafor” to “Samuel Okafor”" });
+    const waitingOne = writes.getByRole("row").filter({ hasText: "Rename the parent “Sam Okafor” to “Samuel Okafor”" });
     await expect(waitingOne).toContainText("e2e-admin@example.org");
     await expect(waitingOne).toContainText("QuickBooks didn't answer in time (timeout)");
     await expect(page.getByRole("region", { name: /^Needs attention in the roster/ })).toBeVisible();

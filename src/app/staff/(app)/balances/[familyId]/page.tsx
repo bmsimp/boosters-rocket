@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/money/cents";
 import { loadFamilyBalance } from "@/lib/money/balances";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
+import { Notice } from "@/app/components/notice";
 
 export const metadata = { title: "Balances" };
 export const dynamic = "force-dynamic";
@@ -50,7 +51,7 @@ export default async function FamilyBalancePage({ params }: { params: Promise<{ 
       </p>
 
       <section className="box" aria-labelledby="owed-h"><h2 id="owed-h">Owed now</h2>
-        {f === null ? <p role="status">Nothing has been read from QuickBooks for this family yet, or its students have changed since. The next read of every family will show it.</p> : (
+        {f === null ? <Notice tone="info">Nothing has been read from QuickBooks for this family yet, or its students have changed since. The next read of every family will show it.</Notice> : (
           <>
             <div className="owed">
               {total !== null && <div className="amt num">{total}</div>}
@@ -66,7 +67,7 @@ export default async function FamilyBalancePage({ params }: { params: Promise<{ 
             {f.credit && <p className="help">QuickBooks&apos; own balance for the family is lower than its invoices: it may hold a credit or a payment not yet applied.</p>}
           </>
         )}
-        {family.failed && <p className="hint">The last try to read this family didn&apos;t work (<LocalTime iso={family.failed.at} />{family.failed.code ? `, ${family.failed.code}` : ""}). These are the last figures QuickBooks gave.</p>}
+        {family.failed && <Notice tone="warning" live="none">The last try to read this family didn&apos;t work (<LocalTime iso={family.failed.at} />{family.failed.code ? `, ${family.failed.code}` : ""}). These are the last figures QuickBooks gave.</Notice>}
       </section>
 
       {f !== null && (
