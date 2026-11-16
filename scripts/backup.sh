@@ -95,8 +95,10 @@ if ! pg pg_dump "${CONN[@]}" -d "$BR_DB_NAME" --format=custom > "$partial"; then
   die 4 "The backup failed. Nothing was kept, and no older backup was removed."
 fi
 [ -s "$partial" ] || die 4 "The backup came out empty. Nothing was kept, and no older backup was removed."
-# Read it back before trusting it.
-if ! pg_in pg_restore --list < "$partial" >/dev/null 2>&1; then
+# Read all of it back before trusting it. Listing the archive (pg_restore --list) reads only the table of contents at
+# the start of the file, which a dump cut short still has. Writing the whole restore script out, to nowhere, reads
+# every table's data to the end, and needs no database.
+if ! pg_in pg_restore -f /dev/null < "$partial" >/dev/null 2>&1; then
   die 4 "The backup that was written can't be read back. It was not kept, and no older backup was removed."
 fi
 mv "$partial" "$final"

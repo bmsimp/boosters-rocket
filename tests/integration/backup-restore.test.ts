@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, readdirSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -198,6 +198,40 @@ describe("backup and restore, really done", { timeout: 180_000 }, () => {
     expect(left[0]).toBe("booster-rocket-20220101T000000Z.dump");
     expect(left).toContain(first);
     expect(readdirSync(dir)).toEqual(expect.arrayContaining(["booster-rocket-before-the-big-change.dump", "notes.txt"]));
+  });
+
+  it("a dump that comes out cut short is not kept, and no older backup is removed for it", async () => {
+    // The tool the script dumps with (docker, or pg_dump on this machine) is stood in for by one that does the same,
+    // except that a dump loses its last 100 bytes and still reports success: a disk that filled, or a pipe that broke,
+    // with nothing to say so. The table of contents at the start of the file is whole; the last table's data is not.
+    const tool = via.BR_DB_CONTAINER ? "docker" : "pg_dump";
+    const real = spawnSync("bash", ["-c", `command -v ${tool}`], { encoding: "utf8" }).stdout.trim();
+    expect(real, `${tool} is not on the PATH`).not.toBe("");
+    const bin = path.join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, tool), [
+      "#!/usr/bin/env bash",
+      `real=${JSON.stringify(real)}`,
+      'case "$(basename "$0") $*" in',
+      '  *pg_dump*) whole="$(mktemp)"; "$real" "$@" > "$whole" || exit $?; head -c "$(( $(wc -c < "$whole") - 100 ))" "$whole"; echo cut >> "$BR_TEST_CUTS"; rm -f "$whole" ;;',
+      '  *) exec "$real" "$@" ;;',
+      "esac", ""].join("\n"));
+    chmodSync(path.join(bin, tool), 0o755);
+    const cuts = path.join(dir, "cuts.log");
+    const had = readdirSync(dir).filter((f) => f !== "bin").sort();
+    expect(dumps().length).toBeGreaterThanOrEqual(3);
+    const [recorded] = await db.select().from(setting).where(eq(setting.key, BACKUP_KEY));
+
+    const r = run(BACKUP, [dir, "--keep", "1"], { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, BR_TEST_CUTS: cuts });
+    expect(readFileSync(cuts, "utf8"), "the stand-in tool was not the one the script ran").toBe("cut\n");
+    expect(r.status, r.stdout + r.stderr).toBe(4);
+    expect(r.stderr).toContain("The backup that was written can't be read back. It was not kept, and no older backup was removed.");
+    expect(r.stdout).not.toContain("Backup written");
+    // Nothing new in the folder, nothing left half-written, and every backup that was there is still there, though
+    // only one was to be kept. The Health page still names the last backup that was good.
+    expect(readdirSync(dir).filter((f) => f !== "bin" && f !== "cuts.log").sort()).toEqual(had);
+    expect((await db.select().from(setting).where(eq(setting.key, BACKUP_KEY)))[0]?.value).toEqual(recorded?.value);
+    rmSync(bin, { recursive: true }); rmSync(cuts);
   });
 
   it("a backup that fails keeps nothing, removes nothing, and says so with its own exit code", () => {
