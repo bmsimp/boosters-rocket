@@ -12,9 +12,10 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, buyout, familyMoney, writeQueue } from "@/lib/db/schema";
-import { BUYOUT_COPY, confirmMyBuyout, switchMyBuyoutBack } from "@/lib/buyouts/writes";
+import { BUYOUT_COPY, confirmMyBuyout } from "@/lib/buyouts/writes";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
+import { loadFamilyMoney } from "@/lib/money/family-money";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { describeWrite } from "@/lib/roster/queue";
 import { confirmBuyoutAction, switchBackAction } from "@/app/(parent)/volunteer/pay-instead/actions";
@@ -71,6 +72,10 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     // The family's figures are behind QuickBooks now, so its next page load reads it.
     const [money] = await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, FAMILY));
     expect(money!.staleAt).not.toBeNull();
+    // It does: the invoice is then among the family's open invoices, with its own Pay button.
+    const after = await loadFamilyMoney(FAMILY);
+    expect(after.figures?.current).toBe(true);
+    expect(after.figures?.open.map((i) => [i.qboId, i.totalCents, i.payLink])).toEqual([["5001", 5000, "https://connect.intuit.com/t/scs-v1-stub-5001"]]);
     // Audited: the choice, with what was asked for, and the invoice made.
     const [chosen] = await audits("volunteer.buyout.chosen");
     expect(chosen!.after).toMatchObject({ customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000 });
@@ -123,6 +128,17 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     await db.update(requirement).set({ buyoutUnitCents: 5000 }).where(eq(requirement.id, req));
     await seedOutsideCredit({ familyQboId: FAMILY, requirementId: req, shifts: 2 });
     expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
+    expect(posts()).toEqual([]);
+  });
+
+  it("is rate-limited per parent, and audits the first refusal once", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    asParent(p.identity);
+    for (let i = 0; i < 10; i++) expect(await confirmBuyoutAction(req, "family", "a-stamp-that-is-wrong")).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$100.00")] });
+    expect(await confirmBuyoutAction(req, "family", "a-stamp-that-is-wrong")).toEqual({ ok: false, errors: [BUYOUT_COPY.rateLimited] });
+    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.rateLimited] });
+    expect(await audits("volunteer.buyout.limit")).toHaveLength(1);
     expect(posts()).toEqual([]);
   });
 
