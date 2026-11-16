@@ -20,7 +20,7 @@ import { addToCache, fam } from "../helpers/roster-cache";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, writeQueue: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -198,7 +198,7 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, writeQueue: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
   });
 });

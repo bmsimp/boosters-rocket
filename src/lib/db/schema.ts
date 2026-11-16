@@ -297,6 +297,49 @@ export const jobRun = pgTable("job_run", {
   startedBy: text("started_by").notNull(),           // "worker" or a staff_user.id
 }, (t) => [index("job_run_job_ix").on(t.job, t.startedAt)]);
 
+/** Who a roster write is about, in the membership shape's words: a family (layered), a student or parent under one, or a member (flat). */
+export type RosterRole = "family" | "student" | "parent" | "member";
+/**
+ * One staff change to the roster, as it is sent to QuickBooks (src/lib/roster/writes.ts), kept in `write_queue.request`.
+ * Every id is a QuickBooks id of the company the queue row names; a create holds the customer type it was given.
+ */
+export type RosterWrite =
+  | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null }
+  | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string }
+  | { op: "move"; role: "student"; qboId: string; syncToken: string; fromFamilyQboId: string; toFamilyQboId: string }
+  | { op: "deactivate"; role: RosterRole; qboId: string; syncToken: string };
+
+/**
+ * Staff roster writes that QuickBooks didn't take at the time and may take later (v1 spec §4, §8.4): it was busy, it
+ * throttled, or it couldn't be reached or didn't answer. `sent` says whether QuickBooks may have acted on the last try:
+ * such an item is never simply sent again (src/lib/roster/queue.ts looks in a fresh roster first). A done or given-up
+ * item is kept 30 days (the daily clean-up); every item goes when a different company is connected.
+ */
+export const writeQueue = pgTable("write_queue", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  realmId: text("realm_id").notNull(),               // the company it is for: never sent to another
+  request: jsonb("request").$type<RosterWrite>().notNull(),
+  targetQboId: text("target_qbo_id"),                // the customer it changes; null for a create
+  familyQboId: text("family_qbo_id"),                // the family it is under or about, for the family's page
+  state: text("state", { enum: ["waiting", "stuck", "done", "given_up"] }).notNull().default("waiting"),
+  sent: boolean("sent").notNull(),                    // QuickBooks may have acted on the last try
+  tries: integer("tries").notNull().default(1),
+  lastCode: text("last_code"),                        // the last short code, never QuickBooks' words
+  lastTriedAt: timestamp("last_tried_at", { withTimezone: true }).notNull().defaultNow(),
+  nextTryAt: timestamp("next_try_at", { withTimezone: true }),
+  askedBy: uuid("asked_by"),                          // staff_user.id
+  askedByLabel: text("asked_by_label"),
+  resultQboId: text("result_qbo_id"),                 // the customer QuickBooks made or changed, once done
+  note: text("note"),                                 // why staff gave up: staff only
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [
+  index("write_queue_state_ix").on(t.state, t.nextTryAt),
+  index("write_queue_target_ix").on(t.targetQboId),
+  index("write_queue_family_ix").on(t.familyQboId),
+]);
+
 /* ---- Seasons, steps and requirements (v1 spec §10). Calendar dates are `date` columns read as YYYY-MM-DD, in the club's own time zone. ---- */
 
 export type RequirementKind = "form" | "payment" | "volunteer" | "checklist";

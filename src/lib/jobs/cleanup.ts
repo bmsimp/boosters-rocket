@@ -1,6 +1,6 @@
-import { and, eq, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession } from "@/lib/db/schema";
+import { familyMoney, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -8,17 +8,20 @@ import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
 export const CLEANUP_JOB = "cleanup.daily";
 /** Job history is kept this long. The newest run of each job, and its newest run that worked, are kept whatever their age. */
 export const JOB_HISTORY_DAYS = 90;
+/** A staff roster write that went through, or that staff gave up, is kept this long for the Reconciliation page's story. */
+export const FINISHED_WRITES_DAYS = 30;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; rateLimitEvents: number;
-  emailChanges: number; familyMoney: number; jobRuns: number;
+  emailChanges: number; familyMoney: number; jobRuns: number; writeQueue: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
   signinCodes: ["sign-in code", "sign-in codes"], rateLimitEvents: ["rate-limit record", "rate-limit records"],
   emailChanges: ["expired email change", "expired email changes"], familyMoney: ["set of figures for a family no longer in the roster", "sets of figures for families no longer in the roster"],
   jobRuns: ["old job record", "old job records"],
+  writeQueue: ["finished change to QuickBooks", "finished changes to QuickBooks"],
 };
 
 /**
@@ -26,7 +29,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * leaves alone, with why. A new table must join one list (tests/integration/cleanup.test.ts fails until it does); one
  * whose rows expire gets its delete below and a boundary test.
  */
-export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run"] as const;
+export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run", "write_queue"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts", staff_auth_verification: "Better Auth's own, short-lived and kept by it",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts", parent_auth_verification: "Better Auth's own, short-lived and kept by it",
@@ -69,6 +72,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   while the cache holds no customers at all, which says the roster is missing, not that every family left.
  * - Job history older than JOB_HISTORY_DAYS, except each job's newest run and its newest run that worked: the health
  *   page and the "is it due" check read those.
+ * - Staff roster writes that went through or were given up more than FINISHED_WRITES_DAYS ago. Waiting and stuck ones
+ *   stay until they finish.
  *
  * The audit log is never touched: it is append-only.
  */
@@ -101,7 +106,10 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
     sql`${jobRun.id} <> (select max(j.id) from job_run j where j.job = ${jobRun.job})`,
     sql`${jobRun.id} is distinct from (select max(j.id) from job_run j where j.job = ${jobRun.job} and j.outcome = 'ok')`)).returning({ id: jobRun.id }));
 
-  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns };
+  const writes = n(await tx.delete(writeQueue).where(and(inArray(writeQueue.state, ["done", "given_up"]),
+    lt(writeQueue.finishedAt, new Date(now.getTime() - FINISHED_WRITES_DAYS * 86_400_000)))).returning({ id: writeQueue.id }));
+
+  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, writeQueue: writes };
 }
 
 /**

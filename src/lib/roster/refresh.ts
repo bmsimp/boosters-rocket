@@ -29,7 +29,8 @@ type CustomerRowIn = NonNullable<ReturnType<typeof customerRow>>;
 /** The answer held no customers while the cache, read from the same company, holds some. Thrown inside the save, so nothing of it is kept. */
 class NoCustomersInAnswer extends Error {}
 
-function customerRow(c: Raw, named: Set<string>, now: Date) {
+/** One customer of a QuickBooks answer as the cache holds it (spec §2): contact details only for a customer the shape names. Null without an Id. */
+export function customerRow(c: Raw, named: Set<string>, now: Date) {
   const qboId = text(c.Id, 64);
   if (!qboId) return null;
   const typeQboId = ref(c.CustomerTypeRef);

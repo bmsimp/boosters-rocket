@@ -17,6 +17,7 @@ export const PERMISSIONS = [
   "Settings.QuickBooks.ReadWrite", // admin-only: connect QuickBooks and choose the membership shape; it reaches the club's books
   "Settings.Forms.ReadWrite",      // admin-only: connect the club's Documenso; its API token can read every signed form
   "Roster.Read",                   // see families, students and parents (or members) as QuickBooks lists them
+  "Roster.Family.ReadWrite",       // create, rename, move and make inactive families, students and parents (or members) in QuickBooks, and retry or give up a waiting write
   "Settings.Parents.ReadWrite",    // admin-only: switch parent sign-ins and welcome emails on, and review company matches
   "Parents.ReadWrite",             // decide held addresses, block and unblock a parent, resend a welcome email
   "Season.Steps.Read",             // see the seasons, their steps and the requirements in them
