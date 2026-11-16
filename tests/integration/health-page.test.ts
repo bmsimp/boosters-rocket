@@ -18,7 +18,7 @@ import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/pag
 import { writeAudit } from "@/lib/audit/log";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { GET as liveness } from "@/app/api/health/route";
-import { healthReport, BACKUP_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
+import { healthReport, BACKUP_OLD_MS, MONEY_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
 import { env } from "@/env";
 import { BACKUP_KEY } from "@/lib/health/backup";
 import { BUILD_VERSION } from "@/lib/health/version";
@@ -27,6 +27,7 @@ import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import { patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
 import { noteApiOk } from "@/lib/forms/settings";
+import { MONEY_JOB } from "@/lib/money/run-keys";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -61,13 +62,14 @@ describe("the health page", () => {
   it("on a portal that was just installed, says in plain words what isn't set up yet", async () => {
     await admin();
     const lines = await healthReport(NOW);
-    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "mail", "forms", "parents", "backup", "version"]);
+    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "mail", "forms", "parents", "backup", "version"]);
     expect(line(lines, "forms")).toMatchObject({ state: "off", word: "Not set up" });
     expect(line(lines, "database")).toMatchObject({ state: "ok", word: "Working" });
     expect(line(lines, "worker")).toMatchObject({ state: "attention", times: [{ label: "Last woke", at: null }] });
     expect(line(lines, "worker").says).toMatch(/has never checked in/);
     expect(line(lines, "cleanup")).toMatchObject({ state: "off", word: "Not yet run" });
     expect(line(lines, "quickbooks")).toMatchObject({ state: "off", word: "Not set up" });
+    expect(line(lines, "money")).toMatchObject({ state: "off", word: "Not running" });
     expect(line(lines, "mail")).toMatchObject({ state: "attention", word: "Not set up" });
     expect(line(lines, "parents")).toMatchObject({ state: "off", word: "Off" });
     expect(line(lines, "backup")).toMatchObject({ state: "attention", word: "None recorded" });
@@ -95,6 +97,8 @@ describe("the health page", () => {
     await connectForms({ origin: "https://sign.club.example", token: "api_made_up_for_the_health_page" });
     await noteApiOk();
     await runDueJobs(); // a wake: the clean-up, the token refresh and the roster read all run
+    // The read of every family's invoices needs a membership shape, which this company has none of: one is recorded as done.
+    await db.insert(jobRun).values({ job: MONEY_JOB, finishedAt: new Date(), outcome: "ok", startedBy: "worker" });
     const lines = await healthReport();
     for (const l of lines) expect(l.state, `${l.key}: ${l.says} ${l.notes.join(" ")}`).toBe("ok");
     expect(line(lines, "worker").says).toBe("Waking every minute to run the scheduled jobs.");
@@ -114,6 +118,23 @@ describe("the health page", () => {
     // Nothing of the connection but its name: no client id, no token, no company id.
     const [conn] = await db.select().from(qboConnection);
     for (const hidden of [conn!.clientId, conn!.realmId!, conn!.accessTokenCiphertext!, conn!.refreshTokenCiphertext!]) expect(html).not.toContain(hidden);
+  });
+
+  it("says how the daily read of every family's invoices stands: never run, stopped part way, too old, working", async () => {
+    await seedConnected(stub);
+    const money = async () => line(await healthReport(NOW), "money");
+    expect(await money()).toMatchObject({ state: "off", word: "Not yet run", fix: null });
+    const finished = (ms: number, outcome: "ok" | "failed", detail: string | null = null) =>
+      db.insert(jobRun).values({ job: MONEY_JOB, startedAt: new Date(Date.parse(ago(ms)) - 60_000), finishedAt: new Date(ago(ms)), outcome, detail, startedBy: "worker" });
+    await finished(MONEY_OLD_MS - 1000, "ok");
+    expect(await money()).toMatchObject({ state: "ok", word: "Working", times: [{ label: "Last finished", at: ago(MONEY_OLD_MS - 1000) }, { label: "Last stopped", at: null }] });
+    await db.delete(jobRun).where(eq(jobRun.job, MONEY_JOB));
+    await finished(MONEY_OLD_MS + 1000, "ok");
+    expect(await money()).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/balances" } });
+    await finished(60_000, "failed", "Read 3 families of 9, then stopped: QuickBooks didn't answer. The next run carries on from there.");
+    const stopped = await money();
+    expect(stopped).toMatchObject({ state: "attention", word: "Needs attention", notes: ["Read 3 families of 9, then stopped: QuickBooks didn't answer. The next run carries on from there."] });
+    expect(stopped.says).toMatch(/stopped part way/);
   });
 
   it("warns when the worker has not woken for too long: a second inside the limit is fine, a second past it is not", async () => {

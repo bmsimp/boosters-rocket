@@ -11,6 +11,7 @@ import { mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 import { formsSummary } from "@/lib/forms/settings";
 import { formsWaiting } from "@/lib/forms/job";
+import { moneyRunView } from "@/lib/money/sweep";
 import { lastBackup } from "./backup";
 import { BUILD_VERSION } from "./version";
 import { env } from "@/env";
@@ -24,7 +25,7 @@ import { env } from "@/env";
  */
 export type HealthState = "ok" | "attention" | "off";
 export type HealthLine = {
-  key: "database" | "worker" | "cleanup" | "quickbooks" | "mail" | "forms" | "parents" | "backup" | "version";
+  key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "backup" | "version";
   title: string;
   /** "ok": working. "attention": something a person should look at. "off": not set up or switched off, which may be by choice. */
   state: HealthState;
@@ -42,6 +43,9 @@ export const WORKER_LATE_MS = 5 * 60_000;
 /** How far back the parent line looks for sign-ins, to tell whether the portal learns visitors' addresses. */
 export const SIGNIN_ADDRESS_LOOKBACK_MS = 14 * 24 * 3_600_000;
 
+/** The read of every family's invoices is daily. Two days without one finishing means runs are failing or not starting. */
+export const MONEY_OLD_MS = 48 * 3_600_000;
+
 /** Backups are meant to be nightly. Two days without one means a night was missed and nobody noticed. */
 export const BACKUP_OLD_MS = 48 * 3_600_000;
 
@@ -50,7 +54,7 @@ const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
   // The database first, on its own: if it can't answer, nothing below can be read, and the page says so.
   await db.execute(sql`select 1`);
-  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, signins, forms, waiting, untemplated] = await Promise.all([
+  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, signins, forms, waiting, untemplated, moneyRun] = await Promise.all([
     lastWake(),
     db.select().from(jobRun).where(eq(jobRun.job, CLEANUP_JOB)).orderBy(desc(jobRun.id)).limit(1),
     // The one thing the portal writes to QuickBooks leaves an audit row each time: the newest is when it last worked.
@@ -64,6 +68,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     // Form requirements of the current season that have no template: parents read "not ready" for them.
     db.select({ id: requirement.id }).from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).innerJoin(season, eq(seasonStep.seasonId, season.id))
       .where(and(eq(season.isCurrent, true), eq(requirement.kind, "form"), isNull(requirement.form))),
+    moneyRunView(),
   ]);
   const lines: HealthLine[] = [];
 
@@ -101,6 +106,20 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}.`,
     });
   }
+
+  // The worker's daily read of every family's invoices (src/lib/money/sweep.ts), which the Balances page shows.
+  const moneyTimes = [{ label: "Last finished", at: moneyRun.last?.ok ? moneyRun.last.finishedAt : null },
+    { label: "Last stopped", at: moneyRun.last && !moneyRun.last.ok ? moneyRun.last.finishedAt : null }];
+  const moneyFix = { href: "/staff/balances", label: "Open Balances" };
+  const moneyAge = moneyRun.last ? now.getTime() - Date.parse(moneyRun.last.finishedAt) : null;
+  const money: Verdict = !conn.connected || conn.needsAdmin ? { state: "off", word: "Not running", says: "Reads every family's invoices once a day while QuickBooks is connected. It waits until QuickBooks is connected again." }
+    : moneyRun.running ? { state: "ok", word: "Reading", says: `Reading every family's invoices now: ${moneyRun.running.read} read so far.` }
+      : !moneyRun.last ? { state: "off", word: "Not yet run", says: "Hasn't run yet. The worker reads every family's invoices once a day, one family at a time, so Balances shows what each family owes." }
+        : !moneyRun.last.ok ? { state: "attention", word: "Needs attention", says: "The last read of every family's invoices stopped part way. The worker carries on from there 15 minutes later." }
+          : moneyAge !== null && moneyAge > MONEY_OLD_MS ? { state: "attention", word: "Needs attention", says: "The last read of every family's invoices finished more than 2 days ago. It should run once a day." }
+            : { state: "ok", word: "Working", says: "Once a day, reads every family's invoices from QuickBooks, one family at a time, for the Balances page and the parents' pages." };
+  lines.push({ key: "money", title: "Every family's invoices", ...money, times: moneyTimes, fix: money.state === "attention" ? moneyFix : null,
+    notes: [...(moneyRun.last && !moneyRun.last.ok && moneyRun.last.detail ? [moneyRun.last.detail] : []), ...(moneyRun.asked ? ["A staff member asked for a read; the worker starts it within a minute."] : [])] });
 
   const mailTimes = [{ label: "Last sent", at: mail.status.lastSuccessAt }, { label: "Last failure", at: mail.status.lastFailureAt }];
   const mailFix = { href: "/staff/settings/mail", label: "Open mail settings" };
