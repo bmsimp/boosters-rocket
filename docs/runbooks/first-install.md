@@ -75,7 +75,8 @@ There are two ways. Both run the same portal.
   is built and checked by the project, and an update is a pull. In `.env`, set
   `BOOSTER_ROCKET_IMAGE=ghcr.io/<owner>/booster-rocket:stable`, where `<owner>` is the GitHub account in the
   repository's address, in lower case. (`stable` follows each new release; put a version such as `1.0.0` instead to
-  stay on one until you change it.)
+  stay on one until you change it.) Left empty, a start without `compose.build.yml` stops with "invalid reference
+  format" and the words `SET-BOOSTER_ROCKET_IMAGE-IN-ENV`: the image hasn't been named.
 - **A build from this checkout.** Use it until a release has been published, or to run a change that hasn't been
   released yet. Leave `BOOSTER_ROCKET_IMAGE` empty. Every command below then names two files,
   `-f compose.yml -f compose.build.yml`, and the first start builds the image here (ten minutes or more).
@@ -173,6 +174,17 @@ change it in Postgres, and the portal (or Documenso) then can't connect. To chan
 
 1. `docker compose exec db psql -U postgres -c "alter role booster password '<the new password>'"` (or `documenso`).
 2. Put the same password in `.env`, then `docker compose up -d`.
+
+## When no Admin can sign in
+
+If staff sign-in stops working for everyone (for example, the Microsoft or Google app was deleted), reopen the setup
+page. Saved settings are kept, and Admins stay Admins:
+
+```bash
+docker compose run --rm migrate node tools/scripts/setup-code.mjs --reopen
+```
+
+It prints a new setup code. Open the portal's address, enter it, and fix Step 1.
 
 ## Stopping and starting
 

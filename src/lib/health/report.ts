@@ -197,7 +197,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     : backup.documenso === "none"
       ? [forms.origin !== null
         ? "Documenso's database wasn't part of this backup, though forms are signed in Documenso. Its templates and unfinished forms are only in its own database: back that up too."
-        : "Documenso's database wasn't part of this backup: the server it ran on had none."]
+        : "Documenso's database wasn't part of this backup."]
       : [`Documenso's database too: ${backup.documenso.file}${backup.documenso.bytes !== null ? `, ${bytesWords(backup.documenso.bytes)}` : ""}`];
   lines.push({
     key: "backup", title: "Last backup", ...backedUp, times: [{ label: "Last backup", at: backup?.at ?? null }], fix: null,

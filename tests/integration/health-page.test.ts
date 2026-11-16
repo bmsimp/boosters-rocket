@@ -162,7 +162,7 @@ describe("the health page", () => {
     await put(BACKUP_KEY, { at: at1, file: "booster-rocket-x.dump", bytes: 2048, documenso: { file: "documenso-x.dump", bytes: 3 * 1024 * 1024 } });
     expect(line(await healthReport(NOW), "backup")).toMatchObject({ state: "ok", notes: ["booster-rocket-x.dump, 2 KB", "Documenso's database too: documenso-x.dump, 3.0 MB"] });
     await put(BACKUP_KEY, { at: at1, file: "booster-rocket-x.dump", bytes: 2048, documenso: null });
-    expect(line(await healthReport(NOW), "backup").notes).toEqual(["booster-rocket-x.dump, 2 KB", "Documenso's database wasn't part of this backup: the server it ran on had none."]);
+    expect(line(await healthReport(NOW), "backup").notes).toEqual(["booster-rocket-x.dump, 2 KB", "Documenso's database wasn't part of this backup."]);
     // With forms signed in Documenso, a backup without its database is said plainly; the state is still the backup's age.
     await connectForms({ origin: "https://sign.club.example", token: "api_made_up_for_the_health_page" });
     const withForms = line(await healthReport(NOW), "backup");

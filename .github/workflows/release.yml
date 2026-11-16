@@ -66,7 +66,6 @@ jobs:
             --label "org.opencontainers.image.source=${SOURCE}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.version=${VERSION}" \
-            --label "org.opencontainers.image.licenses=AGPL-3.0-only" \
             -t "$LOCAL_IMAGE" .
 
       - name: Smoke-test the image
