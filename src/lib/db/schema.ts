@@ -118,10 +118,19 @@ export const rateLimitEvent = pgTable("rate_limit_event", {
   refusalAudited: boolean("refusal_audited").notNull().default(false),
 }, (t) => [index("rate_limit_event_ix").on(t.kind, t.subject, t.at)]);
 
-/** A parent's own email change waiting for the confirm link (spec §2 Email changes). The token is stored hashed. */
+/**
+ * A parent's own change of sign-in address, waiting for the link mailed to the new address (src/lib/parents/email-change.ts).
+ * The token is stored hashed. A request belongs to the person, the link and family it was asked under and the
+ * QuickBooks record it would change; it is confirmed only by that person, signed in to that family through that link,
+ * while that is still their record. The three were added after the table (0016): a row without them is never confirmed.
+ * The record's id names a customer of the connected company: a change of company deletes every row.
+ */
 export const parentEmailChange = pgTable("parent_email_change", {
   id: uuid("id").primaryKey().defaultRandom(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  guardianId: uuid("guardian_id").references(() => guardian.id, { onDelete: "cascade" }),
+  familyQboId: text("family_qbo_id"),
+  recordQboId: text("record_qbo_id"),
   newEmail: text("new_email").notNull(),
   tokenHash: text("token_hash").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
