@@ -29,7 +29,7 @@ test("staff open the matrix, filter it, open one signed form's evidence and down
   await noSidewaysScroll(page);
 
   // Filter: one form, the signed ones.
-  await page.getByLabel("Form").selectOption({ label: "Travel consent" });
+  await page.getByLabel("Form", { exact: true }).selectOption({ label: "Travel consent" });
   await page.getByLabel("Where it stands").selectOption({ label: "Signed" });
   await page.getByRole("button", { name: "Show" }).click();
   await expect(page).toHaveURL(/\/staff\/forms\?form=[0-9a-f-]{36}&state=signed&q=$/);
