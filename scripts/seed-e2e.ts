@@ -189,11 +189,27 @@ async function main() {
   // and cancels again, so both passes of the run find the same count.
   await sql`INSERT INTO volunteer_event (id, name, on_date, location, description, contact_name, contact_email)
           VALUES (${E2E_VOLUNTEER.event}, 'Pancake breakfast', ${day(20)}, 'School cafeteria', 'Flipping pancakes before the spring concert.', 'Pat Organizer', 'pat@e2e.example.org')`;
-  await sql`INSERT INTO volunteer_shift (id, event_id, starts_at, ends_at, places, role) VALUES
-          (${E2E_VOLUNTEER.griddle}, ${E2E_VOLUNTEER.event}, '07:00', '09:00', 4, 'Griddle'),
-          (${E2E_VOLUNTEER.cleanup}, ${E2E_VOLUNTEER.event}, '09:00', '11:00', 2, 'Cleanup')`;
+  await sql`INSERT INTO volunteer_shift (id, event_id, starts_at, ends_at, places, role, checkin_code) VALUES
+          (${E2E_VOLUNTEER.griddle}, ${E2E_VOLUNTEER.event}, '07:00', '09:00', 4, 'Griddle', ${E2E_VOLUNTEER.griddleCode}),
+          (${E2E_VOLUNTEER.cleanup}, ${E2E_VOLUNTEER.event}, '09:00', '11:00', 2, 'Cleanup', DEFAULT)`;
   await sql`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, student_qbo_id, filler_name)
           VALUES (${E2E_VOLUNTEER.griddle}, '10', ${crypto.randomUUID()}, 'student', '12', 'Leo Rivera')`;
+  // Checking in (v1 spec §11.4, tests/e2e/check-in.spec.ts): a shift whose window is open whenever the browser run
+  // happens, worked out from the club's clock (UTC here) now, and one that is over. Zelda has a place on each; the
+  // spec checks her in on the first, and passes whether she is checked in already or not, as both passes of a run read
+  // this one seed. The closed one ended yesterday, so neither is in the Volunteer spec's list of places still to come
+  // but the open one, which can no longer be cancelled.
+  const clock = (d: Date) => d.toISOString().slice(11, 16);
+  const opened = new Date(Date.now() - 60 * 60_000), closes = new Date(Date.now() + 4 * 60 * 60_000);
+  await sql`INSERT INTO volunteer_event (id, name, on_date, location, contact_name) VALUES
+          (${E2E_VOLUNTEER.openEvent}, 'Concession stand', ${opened.toISOString().slice(0, 10)}, 'Stadium gate', 'Pat Organizer'),
+          (${E2E_VOLUNTEER.closedEvent}, 'Car wash', ${day(-1)}, 'Bandroom parking lot', 'Pat Organizer')`;
+  await sql`INSERT INTO volunteer_shift (id, event_id, starts_at, ends_at, places, role, checkin_code) VALUES
+          (${E2E_VOLUNTEER.openShift}, ${E2E_VOLUNTEER.openEvent}, ${clock(opened)}, ${clock(closes)}, 6, 'Popcorn', ${E2E_VOLUNTEER.openCode}),
+          (${E2E_VOLUNTEER.closedShift}, ${E2E_VOLUNTEER.closedEvent}, '10:00', '11:00', 6, 'Rinse crew', ${E2E_VOLUNTEER.closedCode})`;
+  await sql`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, filler_parent_id, filler_name) VALUES
+          (${E2E_VOLUNTEER.openShift}, 'E2E-FAMILY', ${p!.id}, 'guardian', ${p!.id}, 'Zelda Quetzalcoatl'),
+          (${E2E_VOLUNTEER.closedShift}, 'E2E-FAMILY', ${p!.id}, 'guardian', ${p!.id}, 'Zelda Quetzalcoatl')`;
 
   // Forms (v1 spec §9). Forms are NOT set up: no Documenso address or token is stored, so nothing in the e2e run can
   // call a Documenso, and the pages show what is stored. Three optional form requirements in Join, which the
