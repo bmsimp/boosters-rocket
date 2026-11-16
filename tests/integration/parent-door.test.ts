@@ -319,7 +319,7 @@ describe("the parent door", () => {
     expect(o.session?.expiresIn).toBe(90 * 24 * 60 * 60);
     // Not declared at all in our config, so the type has no such key; read it loosely.
     expect((o.session as { cookieCache?: { enabled?: boolean } } | undefined)?.cookieCache?.enabled ?? false).toBe(false);
-    expect(o.advanced?.ipAddress?.ipAddressHeaders).toEqual(["cf-connecting-ip"]);
+    expect(o.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-booster-client-ip"]); // written by the portal itself: tests/integration/client-address.test.ts
     expect(o.emailAndPassword?.enabled).toBe(false);
     // In front of the database limits, an in-memory cap per IP on the two code routes (on when NODE_ENV is production).
     // A minute of it allows what the database allows in 15, so it is never the first limit a full room meets.

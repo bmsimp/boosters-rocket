@@ -38,10 +38,11 @@ describe("sign-in audit", () => {
     expect(row).toMatchObject({ door: "staff", action: "signin", actorLabel: "sam@club.org", targetType: "staff_auth_user", targetId: "s1", ip: "203.0.113.7" });
   });
 
-  it("is wired to staff session creation, trusting only cf-connecting-ip for the IP", () => {
+  it("is wired to staff session creation, and takes the address from the portal's own reading of it", () => {
     for (const a of [staffAuth]) {
       expect(typeof a.options.databaseHooks?.session?.create?.after).toBe("function");
-      expect(a.options.advanced?.ipAddress?.ipAddressHeaders).toEqual(["cf-connecting-ip"]);
+      // Never a header a deployment or a client names: the one the portal writes itself (tests/integration/client-address.test.ts).
+      expect(a.options.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-booster-client-ip"]);
     }
   });
 
