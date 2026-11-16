@@ -9,6 +9,7 @@ import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { sendReviewNotice } from "@/lib/parents/review-notice";
 import { expirePreviousCompany } from "@/lib/parents/company-change";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
+import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -79,6 +80,15 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   if (await due(ROSTER_JOB, now)) {
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
     if (r.ok || r.reason === "failed") ran.push({ job: ROSTER_JOB, ok: r.ok });
+  }
+  // Every family's invoices, once a day or when staff ask (src/lib/money/sweep.ts): after the roster, so it reads the
+  // families as QuickBooks lists them now. A run too long for one wake carries on at the next; it is in this wake's
+  // answer only when it ended.
+  try {
+    const r = await runMoneyJob({ now });
+    if (r.ran && r.finished) ran.push({ job: MONEY_JOB, ok: r.ok });
+  } catch {
+    ran.push({ job: MONEY_JOB, ok: false });
   }
   return { ran };
 }

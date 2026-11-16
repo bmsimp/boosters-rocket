@@ -6,9 +6,13 @@ import { isUuid } from "@/lib/seasons/ids";
 import { describeRequirement, getRequirementSetup } from "@/lib/seasons/setup";
 import { candidatesFor, loadSubjects } from "@/lib/seasons/subjects";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
+import { listItems, itemsReadAt, requirementItem } from "@/lib/money/items";
 import { CalendarDate } from "@/app/components/calendar-date";
+import { LocalTime } from "@/app/components/local-time";
 import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
 import { removeRequirementAction, setCoverageAction, updateRequirementAction } from "../../../actions";
+import { PaymentItemForm } from "../../../payment-item";
+import { chooseItemAction, readItemsAction } from "../../../payment-actions";
 
 export const metadata = { title: "Requirement" };
 export const dynamic = "force-dynamic";
@@ -27,6 +31,7 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
   const candidates = families ? candidatesFor(r.appliesTo, families) : [];
   const onRoster = new Set(candidates.map((c) => c.qboId));
   const noun = r.appliesTo === "family" ? "families" : "students";
+  const [item, items, itemsAt] = r.kind === "payment" ? await Promise.all([requirementItem(r.id), listItems(), itemsReadAt()]) : [null, [], null];
   const back = `/staff/seasons/${season.id}`;
   return (
     <main className="wrap single">
@@ -43,6 +48,25 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
           </>
         )}
       </section>
+
+      {r.kind === "payment" && (
+        <section className="box" aria-labelledby="item-h"><h2 id="item-h">Paid by</h2>
+          <p>{item
+            ? <>Met for {r.appliesTo === "family" ? "a family when its invoices" : "a student when the invoices raised on that student"} carrying <b>{item.name ?? `the QuickBooks product or service numbered ${item.qboId}`}</b> are all paid. Parents read &ldquo;Paid&rdquo;, &ldquo;Not paid yet&rdquo; with what is left to pay, or &ldquo;No invoice yet&rdquo;.</>
+            : <>No product or service is chosen yet, so it reads &ldquo;No invoice yet&rdquo; for everyone.</>}</p>
+          {item && !item.active && <p className="hint">It isn&apos;t an active product or service in the list last read from QuickBooks.</p>}
+          {canChange && (
+            <>
+              {items.length === 0
+                ? <p className="hint">No list of products and services has been read from QuickBooks yet.</p>
+                : <PaymentItemForm chosen={item?.qboId ?? null} save={chooseItemAction.bind(null, r.id, rosterTag)}
+                    items={items.filter((i) => i.active || i.qboId === item?.qboId).map((i) => ({ qboId: i.qboId, label: i.active ? i.name : `${i.name} (inactive)` }))} />}
+              {itemsAt && <p className="hint">The list was read from QuickBooks <LocalTime iso={itemsAt} />.</p>}
+              <OneButton label="Read the list from QuickBooks" pendingLabel="Reading…" act={readItemsAction} />
+            </>
+          )}
+        </section>
+      )}
 
       <section className="box" aria-labelledby="cover-h"><h2 id="cover-h">Who it is asked of</h2>
         <p>{r.covers === "everyone" ? `Everyone: every ${r.appliesTo === "family" ? "family" : "student"} on the roster.`

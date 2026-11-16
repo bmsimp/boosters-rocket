@@ -230,6 +230,24 @@ export type StoredInvoice = {
   balanceCents: number;             // what is still due; 0 on a paid invoice
   currency: string;
   payLink: string | null;           // QuickBooks' hosted payment page, only when it passed src/lib/money/pay-link.ts
+  /**
+   * The products and services on its lines (each line's ItemRef id, src/lib/money/invoices.ts), which is what a payment
+   * requirement is met by. Missing on a row stored before the portal read them: such a row is read again, never guessed at.
+   */
+  itemQboIds?: string[];
+};
+
+/**
+ * QuickBooks' own balance for one customer whose invoices a family is shown, beside the sum of that customer's open
+ * invoices as read at the same moment (the cross-check, v1 spec §8.3). They differ when the customer has a credit, an
+ * unapplied payment or a charge that isn't an invoice: worth a look for the treasurer, never shown to a parent.
+ */
+export type CustomerCheck = {
+  customerQboId: string;
+  name: string | null;              // the student or parent it is; null for the family customer itself
+  balanceCents: number;             // QuickBooks' Customer.Balance (sub-customers not included)
+  invoicesCents: number;            // the sum of the open invoices raised on this customer
+  currency: string;
 };
 
 /**
@@ -247,9 +265,25 @@ export const familyMoney = pgTable("family_money", {
   balanceWithJobsCents: bigint("balance_with_jobs_cents", { mode: "number" }), // QuickBooks' own figure, a cross-check only; null when it would count customers the total leaves out
   currency: text("currency"),                                        // null when the open invoices are in more than one
   mismatchAuditedAt: timestamp("mismatch_audited_at", { withTimezone: true }), // the last time a differing cross-check was audited
+  checkedAt: timestamp("checked_at", { withTimezone: true }),         // when the worker last compared each customer's balance with its invoices
+  customerChecks: jsonb("customer_checks").$type<CustomerCheck[]>(), // what that comparison found, one entry per customer compared
   failedAt: timestamp("failed_at", { withTimezone: true }),
   failedCode: text("failed_code"),                                   // a short code, never a response body
   updatedAt: updated(),
+});
+
+/**
+ * QuickBooks' products and services, as the worker or a staff member last read them (`select * from Item`), for staff to
+ * choose what a payment requirement is met by. Never a source of truth. The ids belong to the company in `realm_id`; a
+ * company change deletes every row, and each read replaces them all.
+ */
+export const qboItem = pgTable("qbo_item", {
+  qboId: text("qbo_id").primaryKey(),
+  name: text("name").notNull(),                       // QuickBooks text: shown as text only
+  type: text("type"),                                 // Service, NonInventory, Inventory, Group, ...
+  active: boolean("active").notNull(),
+  realmId: text("realm_id").notNull(),
+  readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 /** One row per run of a scheduled or hand-started job (spec §4). `outcome` is null while it runs. */
@@ -304,6 +338,7 @@ export const requirement = pgTable("requirement", {
   amountUnit: text("amount_unit", { enum: ["shifts", "hours"] }),
   dueOn: date("due_on", { mode: "string" }),
   covers: text("covers", { enum: ["everyone", "chosen"] }).notNull().default("everyone"),
+  itemQboId: text("item_qbo_id"),                      // payment only: the QuickBooks product or service it is met by (src/lib/money/payment-rule.ts)
   position: integer("position").notNull(),
   createdAt: created(),
   updatedAt: updated(),
