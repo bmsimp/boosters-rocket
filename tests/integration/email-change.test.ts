@@ -452,7 +452,7 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
   }, 30_000);
 
   it("the company changed between the write and the cache: the cache is left alone", async () => {
-    const { r, token } = await asked();
+    const { token } = await asked();
     stub.onApiRequest = async (call) => {
       if (call.method === "POST") await db.execute(sql`update setting set value = ${JSON.stringify({ realmId: "9130000000000999" })}::jsonb where key = ${SOURCE_KEY}`);
     };

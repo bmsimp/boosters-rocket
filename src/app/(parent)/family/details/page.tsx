@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
 import { loadMyContact } from "@/lib/parents/contact-edits";
 import { canChangeMyEmail } from "@/lib/parents/email-change";
@@ -44,7 +45,7 @@ export default async function FamilyDetailsPage() {
                   ? <>Email the treasurer at <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a> and they&apos;ll update yours.</>
                   : <>Ask the club and they&apos;ll update yours.</>}</p>
                 {/* No id in the link: the page takes whose address it is from the session. */}
-                <div className="box-foot"><a className="btn btn-line" href="/family/email">Change my sign-in email</a></div>
+                <div className="box-foot"><Link className="btn btn-line" href="/family/email">Change my sign-in email</Link></div>
               </>
             ) : (
               <p className="help">The club changes names and email addresses. {club.treasurerEmail

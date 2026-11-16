@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
 import { canChangeMyEmail } from "@/lib/parents/email-change";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -35,7 +36,7 @@ export default async function FamilyPage() {
         </dl>
         <p className="help">We email a sign-in code to this address each time you sign in.</p>
         {/* No id in the link: the page takes whose address it is from the session. */}
-        {ownEmail && <div className="box-foot"><a className="btn btn-line" href="/family/email">Change my sign-in email</a></div>}
+        {ownEmail && <div className="box-foot"><Link className="btn btn-line" href="/family/email">Change my sign-in email</Link></div>}
       </section>
       {family && <RosterAsOf family={family} />}
     </main>

@@ -22,6 +22,7 @@ import { resetDb } from "../helpers/db";
 import { CHENOWETH, RIVERA } from "../helpers/money";
 import { seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { seedParentSettings } from "../helpers/roster-cache";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -46,7 +47,9 @@ describe("the page where a parent changes their phone and address", () => {
     expect(html).toContain('<h1 class="page-title">Update your details</h1>');
     expect(html).toContain("Your phone and mailing address, as the club&#x27;s books have them. A change here goes straight to the club.");
     expect(html).toContain(`<dt>Name</dt><dd>${RIVERA.parent.name}</dd><dt>Email</dt><dd>${RIVERA.parent.email}</dd></dl>`);
-    expect(html).toContain("The club changes names and email addresses. Ask the club and they&#x27;ll update them.");
+    // Their sign-in email is theirs to change too (tests/integration/email-change.test.ts), from its own page.
+    expect(html).toContain("You can change the email you sign in with yourself. The club changes names. Ask the club and they&#x27;ll update yours.");
+    expect(html).toContain(`<a class="btn btn-line" href="/family/email">Change my sign-in email</a>`);
     expect(html).toMatch(field("phone", "512-555-0777"));
     expect(html).toMatch(field("line1", "12 Heron Lane"));
     expect(html).toMatch(field("line2", ""));
@@ -73,6 +76,9 @@ describe("the page where a parent changes their phone and address", () => {
     const { r } = await seedContactFamilies(stub);
     await db.insert(setting).values({ key: "club", value: { name: "Test Boosters", shortName: "TB", color: "#5b2a86", treasurerEmail: "treasurer@club.example" } });
     asParent(r.identity);
+    expect(await renderPage(FamilyDetailsPage)).toContain(`The club changes names. Email the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a> and they&#x27;ll update yours.`);
+    // While parent sign-ins are off, the email is the club's to change as well.
+    await seedParentSettings({ signin: false });
     expect(await renderPage(FamilyDetailsPage)).toContain(`The club changes names and email addresses. Email the treasurer at <a href="mailto:treasurer@club.example">treasurer@club.example</a> and they&#x27;ll update them.`);
   });
 
@@ -152,9 +158,12 @@ describe("Your details, on Family and on Home", () => {
   it("links to the edit page for a parent with a QuickBooks record of their own, with no id in the link", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
-    for (const page of [FamilyPage, ParentHome]) {
+    // Family says the sign-in email is theirs to change too, and offers it in the box below; Home keeps it short.
+    const words = new Map([[FamilyPage, "You can change your phone and mailing address yourself, and your sign-in email below. The club changes your name for you."],
+      [ParentHome, "You can change your phone and mailing address yourself. The club changes your name and email for you."]]);
+    for (const [page, said] of words) {
       const html = await renderPage(page);
-      expect(html).toContain(`<p class="help">You can change your phone and mailing address yourself. The club changes your name and email for you. Ask the club and they&#x27;ll update it.</p><div class="box-foot">${LINK}</div></section>`);
+      expect(html).toContain(`<p class="help">${said} Ask the club and they&#x27;ll update it.</p><div class="box-foot">${LINK}</div></section>`);
       expect(html).not.toContain(BY_THE_CLUB);
     }
   });

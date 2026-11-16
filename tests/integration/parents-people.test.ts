@@ -6,9 +6,8 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, parentAuthUser, parentAuthSession, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
 import { blockPerson, unblockPerson } from "@/lib/parents/people";
-import { enabledGuardianRows } from "@/lib/parents/sessions";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { resetDb, seedParent, seedGuardian, seedParentSession, seedWorkingMail } from "../helpers/db";
 
