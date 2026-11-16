@@ -26,6 +26,18 @@ test("the seeded parent's QuickBooks record has an id that is never sent to Intu
   expect(links[0]!.source_qbo_id).not.toMatch(/^\d+$/);
 });
 
+test("no seeded customer or customer type has an id that is digits, so no staff change in this run can reach Intuit", async () => {
+  // A staff change to the roster names a customer, or for a new one its customer type and its family; each is refused
+  // before anything is sent unless it is digits (isQboId in src/lib/quickbooks/client.ts). If this fails, don't change
+  // it: give the seeded row an id that isn't a number (scripts/seed-e2e.ts), or this run's made-up tokens go to Intuit.
+  const customers = await sql`SELECT qbo_id FROM qbo_customer`, types = await sql`SELECT qbo_id FROM qbo_customer_type`;
+  expect(customers.length).toBeGreaterThan(10);
+  expect(types.length).toBeGreaterThan(2);
+  expect([...customers, ...types].map((r) => r.qbo_id as string).filter((id) => /^\d+$/.test(id))).toEqual([]);
+  const [shape] = await sql`SELECT value FROM setting WHERE key = 'membership.shape'`;
+  expect(Object.values(shape!.value as Record<string, unknown>).filter((v) => typeof v === "string" && /^\d+$/.test(v))).toEqual([]);
+});
+
 test("an anonymous visitor is sent to sign in, with this page to come back to", async ({ page }) => {
   await page.goto("/family/details");
   await expect(page).toHaveURL(/\/sign-in\?next=%2Ffamily%2Fdetails$/);

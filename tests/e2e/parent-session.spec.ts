@@ -64,7 +64,9 @@ const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerr
   // What the season asks of other families alone, and why one of them was let off.
   "Tuba locker key", "Percussion truck crew", "Cast on his arm",
   // Forms: the one asked of the second family alone, and the second family's own request: its document and its other guardian.
-  "Trailer towing", "envelope_e2esecond", "Wilhelmina", "wilhelmina@second.example"];
+  "Trailer towing", "envelope_e2esecond", "Wilhelmina", "wilhelmina@second.example",
+  // Staff changes to other families waiting to reach QuickBooks (the write queue): a new student's name.
+  "Pat Lee"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);

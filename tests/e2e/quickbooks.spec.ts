@@ -69,7 +69,7 @@ test("the three steps open in order, and a shape is previewed with the controls 
   const type = (name: string) => page.getByRole("checkbox", { name, exact: true });
   const family = page.getByLabel("A family is a customer of this type"), student = page.getByLabel("A student is a sub-customer of this type"), parent = page.getByLabel("A parent is a sub-customer of this type");
   await expect(layered).toBeChecked();
-  await expect(family).toHaveValue("1");
+  await expect(family).toHaveValue("E2E-T1");
 
   // The saved layered shape, previewed: the kind and each select still hold the choice afterward.
   await page.getByRole("button", { name: "Preview" }).click();
@@ -78,9 +78,9 @@ test("the three steps open in order, and a shape is previewed with the controls 
   await expect(page.getByText(/^5 parents/)).toBeVisible();
   await expect(page.getByText("1 customers outside the portal")).toBeVisible();
   await expect(layered).toBeChecked();
-  await expect(family).toHaveValue("1");
-  await expect(student).toHaveValue("3");
-  await expect(parent).toHaveValue("2");
+  await expect(family).toHaveValue("E2E-T1");
+  await expect(student).toHaveValue("E2E-T3");
+  await expect(parent).toHaveValue("E2E-T2");
 
   // A layered choice that differs from the saved shape (no student type): a control that went back to its starting
   // value after Preview would show Student again here.
@@ -90,9 +90,9 @@ test("the three steps open in order, and a shape is previewed with the controls 
   await expect(page.getByText(/^0 students/)).toBeVisible();
   await expect(page.getByText("5 customers outside the portal")).toBeVisible();
   await expect(layered).toBeChecked();
-  await expect(family).toHaveValue("1");
+  await expect(family).toHaveValue("E2E-T1");
   await expect(student).toHaveValue("");
-  await expect(parent).toHaveValue("2");
+  await expect(parent).toHaveValue("E2E-T2");
 
   // Switch to flat and choose Student: the layered preview no longer applies.
   await flat.check();
@@ -137,7 +137,7 @@ test("staff open a family from the roster, hostile names stay text, and the visi
   await page.getByLabel("Find a family").fill("river");
   await page.getByRole("button", { name: "Find" }).click();
   await expect(families.getByRole("link", { name: "Rivera Family" })).toBeVisible();
-  await expect(families.locator("a[href='/staff/roster/20']")).toHaveCount(0);
+  await expect(families.locator("a[href='/staff/roster/E2E-20']")).toHaveCount(0);
   // Only rows written from here on count: an earlier run, or the other project, leaves the same action behind.
   const [mark] = await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`;
   await families.getByRole("link", { name: "Rivera Family" }).click();
@@ -145,7 +145,7 @@ test("staff open a family from the roster, hostile names stay text, and the visi
   await expect(page.getByText("ana@example.com · 555-0101")).toBeVisible();
   await expect(page.getByText("Leo Rivera")).toBeVisible();
   const reads = await sql`SELECT target_id, actor_label FROM audit_log WHERE id > ${mark!.id} AND action = 'roster.family.read'`;
-  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "10", actor_label: "e2e-admin@example.org" }]); // one visit, one row
+  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "E2E-10", actor_label: "e2e-admin@example.org" }]); // one visit, one row
   await page.goto("/staff/audit");
   await expect(page.getByText("roster.family.read").first()).toBeVisible();
 });
