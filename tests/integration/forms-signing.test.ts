@@ -9,6 +9,9 @@ import { loadMySeason } from "@/lib/seasons/my-season";
 import { CONSENT_VERSION } from "@/lib/forms/consent";
 import { findMyForm, loadMyForms } from "@/lib/forms/my-forms";
 import { agreeToSign, checkMyForm, openMyForm, startMyFormAgain, type FormView } from "@/lib/forms/signing";
+import { checkOpenForms } from "@/lib/forms/job";
+import { getFormsStatus } from "@/lib/forms/settings";
+import { hearWebhook } from "@/lib/forms/webhook";
 import { resetDb } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement } from "../helpers/forms";
@@ -440,6 +443,104 @@ describe("signing a form", () => {
     expect((await checkMyForm(ctx, id)).ok).toBe(false);
     expect(stub.calls).toEqual([]);
     expect(await audits("form.open.refused")).toHaveLength(1);
+  });
+});
+
+describe("a form's document is never lost track of", () => {
+  beforeEach(async () => { await resetDb(); stub.reset(); });
+  const SECRET = "the-right-secret-0123456789abcdef";
+
+  it("a webhook that arrives while the document is still being made leaves it alone: the open hands out the token", async () => {
+    const { ctx } = await scene({ signers: "any", roles: 2, connect: false }); // two signers, one guardian: the three-call recipe
+    await connectForms(stub, { webhookSecret: SECRET });
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    const heard: string[] = [];
+    // Documenso's DOCUMENT_CREATED message comes after `use`, while the portal is still deleting the unused signer.
+    stub.beforeAnswer = { path: "/envelope/recipient/delete", run: async () => { heard.push(await hearWebhook(SECRET, JSON.stringify({ event: "DOCUMENT_CREATED", payload: { externalId: id } }))); } };
+    const view = await agreeAndOpen(ctx, id);
+    expect(heard).toEqual(["not_read"]);
+    const document = stub.documentFor(id)!;
+    expect(tokenIn(view)).toBe(document.recipients[0]!.token);
+    expect(await requestNow(id)).toMatchObject({ state: "waiting", envelopeId: document.id, preparingAt: null });
+    expect(stub.documents().map((d) => d.status)).toEqual(["PENDING"]);
+  });
+
+  it("keeps a half-signed form when Documenso answers 'not found' for it, says so on the Health page, and carries on once it answers again", async () => {
+    const { ctx } = await scene({ signers: "every", roles: 2 });
+    const other = await secondGuardian();
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    expect((await agreeToSign(other, id, null)).ok).toBe(true);
+    const document = stub.documentFor(id)!;
+    stub.sign(document.id, FAMILY_A.parent.email);
+    expect((await checkMyForm(ctx, id)).state).toBe("waiting");
+    const before = await requestNow(id);
+
+    // A wrong address or a token of another team: every document answers 404.
+    stub.envelopes.delete(document.id);
+    const later = new Date(Date.now() + 10 * 60_000);
+    expect(await checkOpenForms(later)).toMatchObject({ asked: 1, failed: 1 });
+    expect((await open(other, id)).step).toEqual({ kind: "unavailable" });
+    expect(await requestNow(id)).toMatchObject({ state: "waiting", envelopeId: document.id, signers: before.signers });
+    expect((await getFormsStatus()).lastApiError).toBe("not_found");
+    expect(await audits("form.state.change")).toEqual([]);
+
+    // Put right: the other guardian signs the same document, and the worker still asks about it.
+    stub.envelopes.set(document.id, document);
+    expect(tokenIn(await open(other, id))).toBe(document.recipients.find((r) => r.email === "astrid.alderquist@family-a.example")!.token);
+    stub.sign(document.id, "astrid.alderquist@family-a.example");
+    expect(await checkOpenForms(new Date(Date.now() + 20 * 60_000))).toMatchObject({ completed: 1 });
+    expect((await requestNow(id)).state).toBe("complete");
+  });
+
+  it("keeps a form every guardian signed that is still being sealed when Documenso answers 'not found' for it", async () => {
+    const { ctx } = await scene({ signers: "any", roles: 1 });
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    stub.sealing = "held";
+    const document = stub.documentFor(id)!;
+    stub.sign(document.id, FAMILY_A.parent.email);
+    expect((await checkMyForm(ctx, id)).state).toBe("signed");
+    stub.envelopes.delete(document.id);
+    expect((await checkMyForm(ctx, id)).ok).toBe(false);
+    expect(await requestNow(id)).toMatchObject({ state: "signed", envelopeId: document.id });
+  });
+
+  it("takes up again a signed document the request lost track of, instead of refusing every open", async () => {
+    const { ctx } = await scene({ signers: "every", roles: 2 });
+    const other = await secondGuardian();
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    expect((await agreeToSign(other, id, null)).ok).toBe(true);
+    const document = stub.documentFor(id)!;
+    stub.sign(document.id, FAMILY_A.parent.email);
+    // What an earlier version did on a 404: the request was set back to not opened, the document still out.
+    await db.update(signatureRequest).set({ state: "not_opened", envelopeId: null, envelopeStatus: null, signers: [] }).where(eq(signatureRequest.id, id));
+
+    const theirs = await open(other, id);
+    expect(tokenIn(theirs)).toBe(document.recipients.find((r) => r.email === "astrid.alderquist@family-a.example")!.token);
+    expect(stub.documents()).toHaveLength(1); // nothing new was made, nothing deleted
+    const row = await requestNow(id);
+    expect(row).toMatchObject({ state: "waiting", envelopeId: document.id });
+    expect(row.signers.map((s) => [s.parentId, s.signedAt !== null])).toEqual([[ctx.parentId, true], [other.parentId, false]]);
+    expect(theirs.words).toBe("Waiting for the other guardian");
+    const [recovered] = await audits("form.document.recover");
+    expect(recovered).toMatchObject({ door: "parent", actorId: other.parentId, targetId: id });
+
+    stub.sign(document.id, "astrid.alderquist@family-a.example");
+    expect((await checkMyForm(other, id)).state).toBe("complete");
+  });
+
+  it("takes up a completed document the request lost track of, and the form reads signed", async () => {
+    const { ctx } = await scene({ signers: "any", roles: 1 });
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    const document = stub.documentFor(id)!;
+    stub.sign(document.id, FAMILY_A.parent.email);
+    await db.update(signatureRequest).set({ state: "not_opened", envelopeId: null, envelopeStatus: null, signers: [] }).where(eq(signatureRequest.id, id));
+    expect((await open(ctx, id)).step).toEqual({ kind: "complete" });
+    expect(await requestNow(id)).toMatchObject({ state: "complete", envelopeId: document.id, evidenceOwed: true });
+    expect(stub.documents()).toHaveLength(1);
   });
 });
 

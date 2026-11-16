@@ -14,6 +14,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "cleanup.run": "Daily clean-up removed expired records",
   "form.consent.agree": "A guardian agreed to sign a form electronically",
   "form.document.create": "A form was made in Documenso for a guardian to sign",
+  "form.document.recover": "A signed form Documenso still held was taken up again",
   "form.document.restart": "A declined form was started again",
   "form.document.withdraw": "An unsigned form was withdrawn, to be made again",
   "form.open.refused": "Opening a form refused: opened too often",

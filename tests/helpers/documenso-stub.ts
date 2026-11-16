@@ -67,6 +67,8 @@ export type DocumensoStub = {
   delayMs: number;
   /** Fail the call with this path (such as "/envelope/distribute") once, with HTTP 500: a crash in the middle of the recipe. */
   failPathOnce: string | null;
+  /** Runs, and is waited for, before the API call with this path (such as "/envelope/recipient/delete") is answered: something that happens in the middle of the recipe. */
+  beforeAnswer: { path: string; run: () => Promise<unknown> | unknown } | null;
   addTemplate(spec?: TemplateSpec): StubEnvelope;
   /** The documents made, newest last (templates left out), and the one for a request by its externalId. */
   documents(): StubEnvelope[];
@@ -103,7 +105,7 @@ function matches(query: string, value: string | null): boolean {
 export async function startDocumensoStub(): Promise<DocumensoStub> {
   let nextRecipient = 100, nextField = 1000;
   const stub = { token: `api_${randomBytes(12).toString("hex")}`, calls: [], envelopes: new Map(), sealing: "auto", sealWhenAsked: true, sealAsks: 0, healthy: true,
-    failNext: 0, rateLimitNext: 0, drop: false, delayMs: 0, failPathOnce: null } as unknown as DocumensoStub;
+    failNext: 0, rateLimitNext: 0, drop: false, delayMs: 0, failPathOnce: null, beforeAnswer: null } as unknown as DocumensoStub;
   const now = () => new Date().toISOString();
   const recipientOf = (envelope: StubEnvelope, who: string | number) => {
     const r = envelope.recipients.find((x) => (typeof who === "number" ? x.id === who : x.email.toLowerCase() === who.toLowerCase()));
@@ -167,7 +169,7 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
   stub.apiCalls = (path) => stub.calls.filter((c) => c.path.startsWith("/api/v2") && (path === undefined || c.path === `/api/v2${path}`));
   stub.reset = () => {
     stub.calls.length = 0; stub.envelopes.clear(); stub.sealing = "auto"; stub.sealWhenAsked = true; stub.sealAsks = 0; stub.healthy = true;
-    stub.failNext = 0; stub.rateLimitNext = 0; stub.drop = false; stub.delayMs = 0; stub.failPathOnce = null;
+    stub.failNext = 0; stub.rateLimitNext = 0; stub.drop = false; stub.delayMs = 0; stub.failPathOnce = null; stub.beforeAnswer = null;
   };
 
   const server: Server = createServer((req, res) => {
@@ -191,6 +193,7 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
       if (stub.failNext > 0) { stub.failNext--; return refused(500, "Internal error"); }
       const path = url.pathname.slice("/api/v2".length);
       if (stub.failPathOnce === path) { stub.failPathOnce = null; return refused(500, "Internal error"); }
+      if (stub.beforeAnswer?.path === path) await stub.beforeAnswer.run();
       const input = (body ?? {}) as Record<string, unknown>;
 
       if (req.method === "GET" && path === "/envelope") {

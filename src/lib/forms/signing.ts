@@ -6,7 +6,7 @@
 // only to the signed-in guardian whose recipient it is, after their consent (v1 spec §12, invariant 5). It imports no
 // staff-only module: tests/integration/page-guards.test.ts scans this folder.
 import "server-only";
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { guardian, parent, signatureRequest, type FormSetting, type RequestSigner } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
@@ -20,7 +20,7 @@ import {
 } from "@/lib/documenso/client";
 import { hasConsent, recordConsent } from "./consent";
 import { findMyForm, type MyForm } from "./my-forms";
-import { NO_DOCUMENT, asking, claim, readAndStore, release, whenReleased, type RequestRow } from "./requests";
+import { NO_DOCUMENT, asking, claim, isHeld, readAndStore, release, whenReleased, type RequestRow } from "./requests";
 import { getFormsConfig } from "./settings";
 import { readDocument, signersFor, stillRight, wordsFor, type SignerIdentity } from "./states";
 import { checkTemplate, type TemplatePlan } from "./template";
@@ -91,7 +91,8 @@ async function makeDocument(ctx: ParentCtx, config: DocumensoConfig, form: MyFor
   const chosen = signers.slice(0, plan.signers.length);
 
   // A document an earlier try left behind under this request's id (a crash between calls; Documenso's `use` can't be
-  // repeated safely). One with a signature on it, or completed, is taken up again; an unsigned one is deleted.
+  // repeated safely), or one the request lost track of. One with a signature on it, or completed, is taken up again;
+  // an unsigned one is deleted. One deleted in Documenso is left as it is.
   const left = await asking(() => findDocumentsByExternalId(config, row.id, PAGE));
   if (!left.ok) return { ok: false, reason: "documenso" };
   for (const old of left.value.filter((e) => e.status === "PENDING" || e.status === "DRAFT" || e.status === "COMPLETED")) {
@@ -99,7 +100,8 @@ async function makeDocument(ctx: ParentCtx, config: DocumensoConfig, form: MyFor
     if (!full.ok) { if (full.code === "not_found") continue; return { ok: false, reason: "documenso" }; }
     if (full.value.externalId !== row.id) continue;
     const reading = readDocument(full.value);
-    if (reading.state === "complete" || reading.anySigned) return { ok: false, reason: "documenso" }; // not ours to replace: left for staff, and never handed out
+    if (reading.anySigned && reading.state === "gone") continue;
+    if (reading.state === "complete" || reading.anySigned) return takeUp(ctx, form, full.value);
     const gone = await asking(() => deleteEnvelope(config, old.id, PAGE));
     if (!gone.ok && gone.code !== "not_found") return { ok: false, reason: "documenso" };
   }
@@ -141,15 +143,41 @@ async function makeDocument(ctx: ParentCtx, config: DocumensoConfig, form: MyFor
 
   const made: RequestSigner[] = chosen.map((s, i) => ({ parentId: s.parentId, recipientId: ours[i]!.id, name: s.name, email: s.email, signedAt: null }));
   const now = new Date();
-  await db.transaction(async (tx) => {
-    await tx.update(signatureRequest).set({ state: "waiting", envelopeStatus: "PENDING", templateId: plan.templateId, templateUpdatedAt: new Date(plan.updatedAt), signersMode: setting.signers,
+  const stored = await db.transaction(async (tx) => {
+    // The document's id is written again, and only while this open still holds the request: a request is never left waiting with no document.
+    const [kept] = await tx.update(signatureRequest).set({ state: "waiting", envelopeId, envelopeStatus: "PENDING", templateId: plan.templateId, templateUpdatedAt: new Date(plan.updatedAt), signersMode: setting.signers,
       subjectName: form.subject.name, signers: made, documentCreatedAt: now, checkedAt: now, allSignedAt: null, sealAskedAt: null, completedAt: null, declinedAt: null, updatedAt: now })
-      .where(eq(signatureRequest.id, row.id));
+      .where(and(eq(signatureRequest.id, row.id), isNotNull(signatureRequest.preparingAt))).returning({ id: signatureRequest.id });
+    if (!kept) return false;
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.document.create", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
       after: { envelopeId, templateId: plan.templateId, templateUpdatedAt: plan.updatedAt, signers: setting.signers, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId,
         subjectName: form.subject.name, madeFor: made.map((s) => ({ parentId: s.parentId, name: s.name, email: s.email })) } }, tx);
+    return true;
   });
-  return { ok: true };
+  return stored ? { ok: true } : undo();
+}
+
+/**
+ * Takes up a document of this request that holds a signature, or is complete, which the request no longer points at
+ * (it was reset while Documenso could not be read properly). Its recipients are matched to portal people by address,
+ * as the portal made them; the state is then read from Documenso like at any other open. The caller holds the request.
+ */
+async function takeUp(ctx: ParentCtx, form: MyForm, envelope: Envelope): Promise<Made> {
+  const { row } = form;
+  const recipients = envelope.recipients.filter((r) => r.role === "SIGNER");
+  const emails = recipients.map((r) => r.email.toLowerCase());
+  const people = emails.length === 0 ? [] : await db.select({ id: parent.id, email: parent.email }).from(parent).where(inArray(parent.email, emails));
+  const signers: RequestSigner[] = recipients.map((r) => ({ parentId: people.find((p) => p.email === r.email.toLowerCase())?.id ?? "", recipientId: r.id, name: r.name, email: r.email, signedAt: null }));
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const [kept] = await tx.update(signatureRequest).set({ ...NO_DOCUMENT, state: "waiting", envelopeId: envelope.id, envelopeStatus: envelope.status, subjectName: form.subject.name, signers,
+      documentCreatedAt: now, checkedAt: null, updatedAt: now })
+      .where(and(eq(signatureRequest.id, row.id), isNull(signatureRequest.envelopeId), isNotNull(signatureRequest.preparingAt))).returning({ id: signatureRequest.id });
+    if (!kept) return { ok: false, reason: "documenso" } as const;
+    await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.document.recover", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
+      after: { envelopeId: envelope.id, documensoStatus: envelope.status, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId, madeFor: signers.map((s) => ({ parentId: s.parentId || null, name: s.name, email: s.email })) } }, tx);
+    return { ok: true } as const;
+  });
 }
 
 /** Which of the new document's recipients is each guardian: by address (no two people share one in the portal), else by place. Null when it can't be told. */
@@ -228,7 +256,7 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   let envelope: Envelope | null = null;
   if (row.envelopeId !== null) {
     const read = await readAndStore(row, config, { ...actor, ...PAGE });
-    if (!read.ok) return viewOf(ctx, row, { kind: "unavailable" });
+    if (!read.ok) return isHeld(read.row) ? afterTheHold(ctx, form, row, mayWait) : viewOf(ctx, row, { kind: "unavailable" });
     row = read.row; envelope = read.envelope;
     // Once anyone has signed, the document is left alone, whoever is on it and whatever has changed since.
     if (row.envelopeId !== null && (read.reading?.anySigned || row.state !== "waiting")) return viewOf(ctx, row, stepFor(ctx, config, row, envelope));
@@ -239,12 +267,7 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   }
 
   // No document, or one nobody has signed that is no longer the right one: withdraw it and make it again.
-  if (!(await claim(row.id))) {
-    // Another open is making this document right now (the page drawn twice, or the other guardian at the same
-    // moment). When it has finished, this open reads what it made; it never makes a second one.
-    const settled = mayWait ? await whenReleased(row.id) : null;
-    return settled ? open(ctx, { ...form, row: settled }, false) : viewOf(ctx, row, { kind: "unavailable" });
-  }
+  if (!(await claim(row.id))) return afterTheHold(ctx, form, row, mayWait);
   try {
     if (row.envelopeId !== null) {
       const why = row.signers.some((s) => s.parentId === ctx.parentId) ? "The names, the guardians or the template changed before anyone signed" : "Another guardian opened it before anyone signed";
@@ -263,7 +286,16 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   return viewOf(ctx, read.row, stepFor(ctx, config, read.row, read.envelope));
 }
 
-export type FormActionResult = { ok: true; message: string } | { ok: false; errors: string[] };
+/**
+ * Another open is making this document right now (the page drawn twice, or the other guardian at the same moment).
+ * When it has finished, this open reads what it made; it never makes a second one.
+ */
+async function afterTheHold(ctx: ParentCtx, form: MyForm, row: RequestRow, mayWait: boolean): Promise<FormView> {
+  const settled = mayWait ? await whenReleased(row.id) : null;
+  return settled ? open(ctx, { ...form, row: settled }, false) : viewOf(ctx, row, { kind: "unavailable" });
+}
+
+export type FormActionResult ={ ok: true; message: string } | { ok: false; errors: string[] };
 /** One refusal for an id that isn't the family's own form, whatever the reason: it never says another family's form exists. */
 export const NOT_YOUR_FORM: FormActionResult = { ok: false, errors: ["That form isn't here. Go back to Forms and open it again."] };
 const CANT_ASK = "We couldn't check this form just now. Please try again in a few minutes.";

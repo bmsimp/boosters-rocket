@@ -18,16 +18,20 @@ export type FormsFailure = DocumensoErrorCode | "unexpected";
 export const DOCUMENSO_ACTOR: Actor = { door: "system", id: null, label: "documenso" };
 export const FORMS_WORKER: Actor = { door: "system", id: null, label: "worker" };
 
-/** One call to Documenso, with its outcome noted for the Health page. The error keeps its short code and nothing else. */
-export async function asking<T>(call: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; code: FormsFailure }> {
+/**
+ * One call to Documenso, with its outcome noted for the Health page. The error keeps its short code and nothing else.
+ * "Nothing with that id" is usually an answer, not an outage: Documenso was reached and replied. But a document the
+ * portal made and recorded should be there, so a call for one passes `missingIsFailure` and its 404 is noted as a
+ * failure: a token of another team, or the wrong address, answers 404 for every document.
+ */
+export async function asking<T>(call: () => Promise<T>, o: { missingIsFailure?: boolean } = {}): Promise<{ ok: true; value: T } | { ok: false; code: FormsFailure }> {
   try {
     const value = await call();
     await noteApiOk();
     return { ok: true, value };
   } catch (e) {
     const code = documensoCode(e);
-    // "Nothing with that id" is an answer, not an outage: Documenso was reached and replied.
-    if (code === "not_found") await noteApiOk(); else await noteApiFailure(code);
+    if (code === "not_found" && !o.missingIsFailure) await noteApiOk(); else await noteApiFailure(code);
     return { ok: false, code };
   }
 }
@@ -38,18 +42,31 @@ export const NO_DOCUMENT = {
   signers: [] as RequestSigner[], documentCreatedAt: null, allSignedAt: null, sealAskedAt: null, completedAt: null, declinedAt: null,
 } as const;
 
+/** True while an open is making or replacing the request's document (claim()). A hold older than CLAIM_MS was left by a crash. */
+export const isHeld = (row: Pick<RequestRow, "preparingAt">, at: Date = new Date()): boolean => row.preparingAt !== null && row.preparingAt.getTime() > at.getTime() - CLAIM_MS;
+/** True when the request holds a signature: a guardian signed its document, or everyone did and it is being sealed. */
+export const holdsSignature = (row: Pick<RequestRow, "state" | "signers">): boolean => row.state === "signed" || row.signers.some((s) => s.signedAt !== null);
+
 /**
  * Stores what a document's own record says, for a request that still points at that document. A request that is
  * complete or declined is left as it is, whatever is read later: a signed form stays signed even if someone deletes
- * the document in Documenso. A change of state is audited in the transaction that makes it; a request that becomes
- * complete is marked as owing its evidence (the sealed PDF and the audit record), for the job that fetches it.
+ * the document in Documenso. A request whose document an open is making right now is left alone too: until that
+ * open has sent it, Documenso reads the document as a draft, which would look like a document gone. And a document
+ * that seems gone is forgotten only while nobody has signed it: a request that holds a signature is kept as it is
+ * (only `checkedAt` moves), since a wrong address or a token of another team answers "not found" for every document.
+ * A change of state is audited in the transaction that makes it; a request that becomes complete is marked as owing
+ * its evidence (the sealed PDF and the audit record), for the job that fetches it.
  */
 export async function storeReading(row: RequestRow, reading: DocumentReading, o: { actor: Actor; ip: string | null }, at: Date = new Date()): Promise<RequestRow> {
   if (row.state === "complete" || row.state === "declined" || row.envelopeId === null) return row;
   return db.transaction(async (tx) => {
     const [current] = await tx.select().from(signatureRequest).where(eq(signatureRequest.id, row.id)).for("update");
-    // The document was replaced, or the request finished, while this reading was on its way: nothing to store.
-    if (!current || current.envelopeId !== row.envelopeId || current.state === "complete" || current.state === "declined") return current ?? row;
+    // The document was replaced, the request finished, or an open is making it, while this reading was on its way: nothing to store.
+    if (!current || current.envelopeId !== row.envelopeId || current.state === "complete" || current.state === "declined" || isHeld(current, at)) return current ?? row;
+    if (reading.state === "gone" && holdsSignature(current)) {
+      const [kept] = await tx.update(signatureRequest).set({ checkedAt: at }).where(eq(signatureRequest.id, current.id)).returning();
+      return kept!;
+    }
     const next = reading.state === "gone" ? { ...NO_DOCUMENT, signers: [] as RequestSigner[], checkedAt: at, updatedAt: at } : {
       state: reading.state, envelopeStatus: reading.status, checkedAt: at, updatedAt: at,
       signers: current.signers.map((s) => ({ ...s, signedAt: reading.signedAt.get(s.recipientId) ?? null })),
@@ -76,16 +93,20 @@ export type Read = { ok: true; row: RequestRow; envelope: Envelope | null; readi
 /**
  * Reads a request's document from Documenso and stores what it says. A document Documenso no longer has (404), or
  * one that doesn't carry this request's id as its externalId, counts as gone. `envelope` comes back for the caller
- * that needs a recipient's signing token; it is never stored.
+ * that needs a recipient's signing token; it is never stored. When the reading could not be stored as it was (an
+ * open is making the document, or the request holds a signature and its document seems gone), the answer is a
+ * failure: the page says it can't show the form just now, and the worker asks again later.
  */
 export async function readAndStore(row: RequestRow, config: DocumensoConfig, o: { actor: Actor; ip: string | null } & CallOptions): Promise<Read> {
   if (row.envelopeId === null) return { ok: true, row, envelope: null, reading: null };
-  const got = await asking(() => getEnvelope(config, row.envelopeId!, { timeoutMs: o.timeoutMs }));
+  const got = await asking(() => getEnvelope(config, row.envelopeId!, { timeoutMs: o.timeoutMs }), { missingIsFailure: true });
   if (!got.ok && got.code !== "not_found") return { ok: false, code: got.code, row };
   const envelope = got.ok && got.value.externalId === row.id ? got.value : null;
   const reading: DocumentReading = envelope ? readDocument(envelope)
     : { state: "gone", status: got.ok ? "NOT_OURS" : "NOT_FOUND", signedAt: new Map(), anySigned: false, completedAt: null };
   const stored = await storeReading(row, reading, o);
+  const unstored = stored.envelopeId !== null && stored.envelopeId === row.envelopeId && stored.state !== "complete" && stored.state !== "declined" && (reading.state === "gone" || isHeld(stored));
+  if (unstored) return { ok: false, code: reading.state === "gone" ? "not_found" : "unexpected", row: stored };
   return { ok: true, row: stored, envelope: reading.state === "gone" ? null : envelope, reading };
 }
 
