@@ -44,15 +44,28 @@ export async function requestIp(): Promise<string | null> {
  */
 export const CLIENT_IP_STAMP = "x-booster-client-ip";
 
-/** A copy of a request's headers for Better Auth: the stamp says what clientIpFrom() found, or is absent when it found nothing. */
-export function stampClientIp(h: Headers): Headers {
-  const out = new Headers(h);
+/**
+ * A copy of a request's headers for Better Auth: the stamp says what clientIpFrom() found, or is absent when it found
+ * nothing. Copied entry by entry: the headers Next.js gives a page or a handler are a wrapper around the real ones.
+ */
+export function stampClientIp(h: Pick<Headers, "get" | "forEach">): Headers {
+  const out = new Headers();
+  h.forEach((value, name) => { out.append(name, value); });
   const ip = clientIpFrom(h);
   if (ip) out.set(CLIENT_IP_STAMP, ip); else out.delete(CLIENT_IP_STAMP);
   return out;
 }
 
-/** The same for a whole request, for Better Auth's handler. */
+/**
+ * The same for a whole request, for Better Auth's handler. The copy is built from the request's parts, never with
+ * `new Request(req)`: the request Next.js hands a route handler is a wrapper, which the Request constructor takes for
+ * an address and refuses (every sign-in route then answers 500; tests/e2e/setup.spec.ts and parent-sign-in.spec.ts).
+ */
 export function withClientIp(req: Request): Request {
-  return new Request(req, { headers: stampClientIp(req.headers) });
+  const init: RequestInit & { duplex?: "half" } = { method: req.method, headers: stampClientIp(req.headers), signal: req.signal };
+  if (req.method !== "GET" && req.method !== "HEAD" && req.body !== null) {
+    init.body = req.body;
+    init.duplex = "half"; // a body that is still arriving has to be passed on this way
+  }
+  return new Request(req.url, init);
 }

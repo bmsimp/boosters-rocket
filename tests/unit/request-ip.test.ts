@@ -90,4 +90,36 @@ describe("the address handed to Better Auth", () => {
     expect(out.headers.get(CLIENT_IP_STAMP)).toBe("203.0.113.7");
     expect(await out.json()).toEqual({ email: "ana@example.com" });
   });
+
+  // Next.js hands a route handler a wrapper around the request, and a page a wrapper around the headers. The Request
+  // constructor takes such a wrapper for an address ("Failed to parse URL from [object Request]"), so neither copy may
+  // be made by handing the wrapper to a constructor.
+  const wrapped = <T extends object>(target: T): T => new Proxy(target, {
+    get(t, p) { const v = Reflect.get(t, p, t) as unknown; return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v; },
+  });
+
+  it("copies a request that arrives wrapped, as Next.js hands it over: with a body and without one", async () => {
+    expect(() => new Request(wrapped(new Request("https://portal.example.org/")))).toThrow(); // why the copy is made from parts
+    const post = wrapped(new Request("https://portal.example.org/api/auth/parent/portal-code/verify", {
+      method: "POST", body: JSON.stringify({ email: "ana@example.com", code: "123456" }),
+      headers: { "content-type": "application/json", cookie: "br_parent.session_token=abc", "cf-connecting-ip": "203.0.113.7", [CLIENT_IP_STAMP]: "6.6.6.6" },
+    }));
+    const out = withClientIp(post);
+    expect(out.url).toBe("https://portal.example.org/api/auth/parent/portal-code/verify");
+    expect(out.method).toBe("POST");
+    expect(out.headers.get("cookie")).toBe("br_parent.session_token=abc");
+    expect(out.headers.get(CLIENT_IP_STAMP)).toBe("203.0.113.7");
+    expect(await out.json()).toEqual({ email: "ana@example.com", code: "123456" });
+
+    const get = withClientIp(wrapped(new Request("https://portal.example.org/api/auth/staff/ok?x=1", { headers: { [CLIENT_IP_STAMP]: "6.6.6.6" } })));
+    expect(get.url).toBe("https://portal.example.org/api/auth/staff/ok?x=1");
+    expect(get.method).toBe("GET");
+    expect(get.body).toBeNull();
+    expect(get.headers.has(CLIENT_IP_STAMP)).toBe(false);
+  });
+
+  it("copies headers that arrive wrapped, keeping every one", () => {
+    const out = stampClientIp(wrapped(h({ cookie: "a=b; c=d", "user-agent": "Phone", "cf-connecting-ip": "203.0.113.7" })));
+    expect(Object.fromEntries(out.entries())).toEqual({ cookie: "a=b; c=d", "user-agent": "Phone", "cf-connecting-ip": "203.0.113.7", [CLIENT_IP_STAMP]: "203.0.113.7" });
+  });
 });

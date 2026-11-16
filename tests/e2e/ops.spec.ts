@@ -91,7 +91,7 @@ test("the audit log pages, filters by who and by day, and exports what was found
   expect(lines).toHaveLength(31);
   expect(lines[0]).toContain('"When (UTC)","Door","Who"');
   for (const l of lines.slice(1)) { expect(l).toContain(`"${who}"`); expect(l).toContain('"Signed in","signin"'); }
-  const exported = await sql`SELECT actor_label, permission, after FROM audit_log WHERE action = 'audit.export' AND after->>'who' = ${who}`;
+  const exported = await sql`SELECT actor_label, permission, after FROM audit_log WHERE action = 'audit.export' AND lower(after->>'who') = ${who}`;
   expect(exported.map((r) => ({ ...r, after: { rows: r.after.rows, action: r.after.action } })))
     .toEqual([{ actor_label: "e2e-admin@example.org", permission: "Audit.Log.Read", after: { rows: 30, action: "signin" } }]);
 
