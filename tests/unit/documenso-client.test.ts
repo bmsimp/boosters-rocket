@@ -99,13 +99,13 @@ describe("the Documenso client", () => {
   });
 
   it("puts only an envelope id into an address, and finds one in what staff paste", async () => {
-    expect(isEnvelopeId("envelope_aekhcnavzwwefdhb")).toBe(true);
+    expect(isEnvelopeId("envelope_qwmtrsbnzkoplaxe")).toBe(true);
     for (const bad of ["", "envelope_", "envelope_../../x", "template_1", "envelope_abc/def", 7, null]) expect(isEnvelopeId(bad)).toBe(false);
     expect(await codeOf(getEnvelope(config(), "../../api/health"))).toBe("not_found");
     expect(await codeOf(deleteEnvelope(config(), "envelope_x?y=1"))).toBe("not_found");
     expect(stub.calls).toEqual([]); // refused before anything was sent
-    expect(envelopeIdIn("https://sign.club.example/t/personal_abc/templates/envelope_aekhcnavzwwefdhb/edit")).toBe("envelope_aekhcnavzwwefdhb");
-    expect(envelopeIdIn("  envelope_aekhcnavzwwefdhb ")).toBe("envelope_aekhcnavzwwefdhb");
+    expect(envelopeIdIn("https://sign.club.example/t/personal_abc/templates/envelope_qwmtrsbnzkoplaxe/edit")).toBe("envelope_qwmtrsbnzkoplaxe");
+    expect(envelopeIdIn("  envelope_qwmtrsbnzkoplaxe ")).toBe("envelope_qwmtrsbnzkoplaxe");
     expect(envelopeIdIn("the consent form")).toBeNull();
   });
 

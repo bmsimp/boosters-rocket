@@ -37,18 +37,19 @@ describe("loadMySeason: the current season for the session's family alone", () =
     expect(forA.name).toBe(TWO_FAMILY_SEASON);
     expect(forA.steps.map((s) => [s.name, s.done])).toEqual([["Sign-up", false], ["Uniforms", false], ["Wrap-up", true]]);
     expect(forA.currentIndex).toBe(0);
-    expect(forA.steps[0]!.family.map((l) => [l.title, l.words])).toEqual([["Handbook read", "Done"], ["Carpool pledge QA71", "Not done yet"]]);
+    // The optional forms seedTwoFamilies() adds (tests/helpers/forms.ts) are on the lines too, each in its own words.
+    expect(forA.steps[0]!.family.map((l) => [l.title, l.words])).toEqual([["Handbook read", "Done"], ["Carpool pledge QA71", "Not done yet"], ["Travel consent", "Not signed yet"], ["Bus waiver QA74", "Not ready yet"]]);
     expect(forA.steps[1]!.students.map((s) => [s.name, s.done, s.lines.map((l) => [l.title, l.words])])).toEqual([
-      [AURELIO!.name, true, [["Uniform fitting attended", "Done"]]],
-      [AZALEA!.name, false, [["Uniform fitting attended", "Not done yet"], ["Piccolo loan agreement QA72", "Waived"]]],
+      [AURELIO!.name, true, [["Uniform fitting attended", "Done"], ["Uniform agreement", "Signed, being finished"], ["Photo release", "Declined"]]],
+      [AZALEA!.name, false, [["Uniform fitting attended", "Not done yet"], ["Piccolo loan agreement QA72", "Waived"], ["Uniform agreement", "Signed"], ["Photo release", "Waiting for the other guardian"]]],
     ]);
 
     expect(forB.steps.map((s) => [s.name, s.done])).toEqual([["Sign-up", true], ["Uniforms", false], ["Wrap-up", true]]);
     expect(forB.currentIndex).toBe(1);
-    expect(forB.steps[0]!.family.map((l) => [l.title, l.words])).toEqual([["Handbook read", "Done"], ["Trailer key returned QB82", "Waived"]]);
+    expect(forB.steps[0]!.family.map((l) => [l.title, l.words])).toEqual([["Handbook read", "Done"], ["Trailer key returned QB82", "Waived"], ["Travel consent", "Not signed yet"], ["Field trip waiver QB85", "Not ready yet"]]);
     expect(forB.steps[1]!.students.map((s) => [s.name, s.done, s.lines.map((l) => [l.title, l.words])])).toEqual([
-      [BARNABY!.name, false, [["Uniform fitting attended", "Not done yet"], ["Sousaphone harness check QB83", "Done"]]],
-      [BRISEIS!.name, true, [["Uniform fitting attended", "Done"]]],
+      [BARNABY!.name, false, [["Uniform fitting attended", "Not done yet"], ["Sousaphone harness check QB83", "Done"], ["Uniform agreement", "Signed, being finished"], ["Photo release", "Declined"]]],
+      [BRISEIS!.name, true, [["Uniform fitting attended", "Done"], ["Uniform agreement", "Signed"], ["Photo release", "Waiting for the other guardian"]]],
     ]);
   });
 
@@ -259,8 +260,9 @@ describe("the Season page", () => {
     asParent(b.identity);
     const text = textOf(await renderPage(SeasonPage));
     expect(text).toContain(`${TWO_FAMILY_SEASON} Every set of the season for ${FAMILY_B.family.name}, and what's done so far.`);
-    expect(text).toContain("1. Sign-up Done Your family Handbook read Done Trailer key returned QB82 Waived");
-    expect(text).toContain(`2. Uniforms The current set 1 thing left to do ${BARNABY!.name} Uniform fitting attended Not done yet Sousaphone harness check QB83 Done ${BRISEIS!.name} Uniform fitting attended Done`);
+    expect(text).toContain("1. Sign-up Done Your family Handbook read Done Trailer key returned QB82 Waived Travel consent (optional) Not signed yet Field trip waiver QB85 (optional) Not ready yet");
+    expect(text).toContain(`2. Uniforms The current set 1 thing left to do ${BARNABY!.name} Uniform fitting attended Not done yet Sousaphone harness check QB83 Done `
+      + `Uniform agreement (optional) Signed, being finished Photo release (optional) Declined ${BRISEIS!.name} Uniform fitting attended Done Uniform agreement (optional) Signed Photo release (optional) Waiting for the other guardian`);
     expect(text).toContain("3. Wrap-up Nothing is asked of your family in this set.");
   });
 

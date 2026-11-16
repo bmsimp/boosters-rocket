@@ -275,11 +275,11 @@ describe("steps", () => {
 });
 
 describe("requirements", () => {
-  it("adds a checklist item with the settings of spec 10.1, and lists the other kinds as coming later", async () => {
+  it("adds a checklist item with the settings of spec 10.1, and lists the kinds not built yet as coming later", async () => {
     const fall = await seedFall();
     const page = await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } });
     expect(page).toContain(`<option value="checklist" selected="">Checklist item</option>`);
-    for (const later of ["Form", "Payment", "Volunteering"]) expect(page).toMatch(new RegExp(`<option value="[a-z]+" disabled="">${later} \\(coming later\\)</option>`));
+    for (const later of ["Payment", "Volunteering"]) expect(page).toMatch(new RegExp(`<option value="[a-z]+" disabled="">${later} \\(coming later\\)</option>`));
 
     expect(await addRequirementAction(fall.stepIds["Wrap-up"]!, "checklist", "family", { title: " Trophy  returned ", required: false, amount: null, amountUnit: null, dueOn: "2026-11-30" }))
       .toEqual({ ok: true, message: "Added. It is asked of everyone until you choose a list." });
@@ -302,7 +302,7 @@ describe("requirements", () => {
     }
   });
 
-  it.each(["form", "payment", "volunteer"])("won't make a %s requirement yet: its rule isn't built", async (kind) => {
+  it.each(["payment", "volunteer"])("won't make a %s requirement yet: its rule isn't built", async (kind) => {
     const fall = await seedFall();
     const fields = kind === "volunteer" ? { ...FIELDS, amount: 2, amountUnit: "shifts" as const } : FIELDS;
     expect(await addRequirementAction(fall.stepIds.Uniforms!, kind, "family", fields)).toEqual({ ok: false, errors: ["That kind of requirement is coming later. For now, add a checklist item."] });
