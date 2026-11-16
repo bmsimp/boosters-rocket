@@ -316,7 +316,7 @@ describe("starting a form again", () => {
 describe("a student moved to another family", () => {
   it("takes a complete form along with its evidence, and resets the others under the new family, queuing their documents to withdraw", async () => {
     await seedConsent(a.forms!.ids.signed, { parentId: a.identity.parentId, name: FAMILY_A.parent.name, email: FAMILY_A.parent.email });
-    const [s1, s2] = FAMILY_A.students as [{ qboId: string }, { qboId: string }];
+    const [s1, s2] = [FAMILY_A.students[0]!, FAMILY_A.students[1]!];
     const result = await db.transaction(async (tx) => {
       const first = await formsForMovedStudent(tx, { studentQboId: s1.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId });
       const second = await formsForMovedStudent(tx, { studentQboId: s2.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId });
