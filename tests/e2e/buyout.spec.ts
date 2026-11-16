@@ -41,7 +41,7 @@ test("a parent opens a buy-out, sees the amount and what will happen, confirms, 
   expect(box!.height, "a tap target at least 44px tall").toBeGreaterThanOrEqual(44);
 
   await confirm.click();
-  await expect(page.getByRole("alert")).toHaveText("Sorry, the club's invoice couldn't be set up, so nothing has been billed. Please ask the club about paying instead.");
+  await expect(cost.getByRole("alert")).toHaveText("Sorry, the club's invoice couldn't be set up, so nothing has been billed. Please ask the club about paying instead.");
   // Refused before anything was sent: the buy-out is recorded as refused and the queue holds nothing waiting for it.
   const rows = await sql`SELECT state, last_code FROM buyout WHERE requirement_id = ${E2E_BUYOUT.offered} ORDER BY created_at DESC LIMIT 1`;
   expect(rows[0]).toMatchObject({ state: "refused", last_code: "bad_id" });

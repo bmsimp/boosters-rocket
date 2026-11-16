@@ -162,7 +162,8 @@ test("staff see the season's set-up: its steps, what each asks, and every kind o
   const listed = page.getByRole("region", { name: "Seasons", exact: true }).getByRole("listitem");
   await expect(listed).toHaveCount(1);
   await expect(listed).toContainText("Fall 2026");
-  await expect(listed).toContainText("Current season: parents see it · 4 steps · 10 requirements");
+  // 10 requirements, and the three volunteer ones with a buy-out (tests/e2e/buyout-seed.ts).
+  await expect(listed).toContainText("Current season: parents see it · 4 steps · 13 requirements");
   await page.getByRole("link", { name: "Fall 2026" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Fall 2026");
   await expect(page.getByRole("heading", { level: 2, name: /^\d\. / })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);
