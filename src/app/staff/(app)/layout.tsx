@@ -10,6 +10,9 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     { href: "/staff", label: "Home" },
     ...(can(e, "Roster.Read") ? [{ href: "/staff/roster", label: "Roster" }] : []),
     ...(can(e, "Parents.ReadWrite") ? [{ href: "/staff/parents", label: "Parents" }] : []),
+    // Two entries: someone who only ticks names off (Season.Progress.*) can't open the set-up pages.
+    ...(can(e, "Season.Steps.Read") ? [{ href: "/staff/seasons", label: "Seasons" }] : []),
+    ...(can(e, "Season.Progress.Read") ? [{ href: "/staff/seasons/progress", label: "Progress" }] : []),
     ...(can(e, "Staff.Users.Read") ? [{ href: "/staff/people", label: "Staff" }] : []),
     ...(can(e, "Admin.Roles.ReadWrite") ? [{ href: "/staff/roles", label: "Roles" }] : []),
     ...(can(e, "Settings.Club.Read") ? [{ href: "/staff/settings/club", label: "Club" }] : []),
@@ -18,6 +21,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     ...(can(e, "Settings.QuickBooks.ReadWrite") ? [{ href: "/staff/settings/quickbooks", label: "QuickBooks" }] : []),
     ...(can(e, "Settings.Parents.ReadWrite") ? [{ href: "/staff/settings/parents", label: "Parent sign-ins" }] : []),
     ...(can(e, "Audit.Log.Read") ? [{ href: "/staff/audit", label: "Audit" }] : []),
+    ...(can(e, "Admin.Health.Read") ? [{ href: "/staff/health", label: "Health" }] : []),
   ];
   return (
     <>
