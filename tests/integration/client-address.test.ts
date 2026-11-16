@@ -10,6 +10,9 @@ import { createHmac } from "node:crypto";
 import { getIP } from "better-auth/api";
 import { db } from "@/lib/db/client";
 import { withClientIp } from "@/lib/request";
+import { clientAddress } from "@/lib/auth/client-address";
+import { requestSigninCode, verifySigninCode } from "@/lib/parents/signin-codes";
+import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { auditLog, parentAuthSession, rateLimitEvent, staffAuthSession, staffAuthUser } from "@/lib/db/schema";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getStaffAuth } from "@/lib/auth/staff-auth";
@@ -89,7 +92,8 @@ describe("the address a client comes from", () => {
     await signIn("ana@example.com", { "x-forwarded-for": "6.6.6.6", ...LIES });
     const stored = await addressesStored();
     expect(new Set(stored.audit)).toEqual(new Set([null]));
-    expect(new Set(stored.limits)).toEqual(new Set(["unknown"]));
+    // No address, no count per address: all visitors would share one (signin-codes.ts).
+    expect(stored.limits).toEqual([]);
     // Better Auth writes its own placeholder on a session when it is told no address; never one of the client's.
     expect(JSON.stringify(stored)).not.toContain("6.6.6.");
   });
@@ -99,8 +103,30 @@ describe("the address a client comes from", () => {
     await signIn("ana@example.com", { "cf-connecting-ip": "6.6.6.8", "x-forwarded-for": "6.6.6.6", none: "6.6.6.9", ...LIES });
     const stored = await addressesStored();
     expect(new Set(stored.audit)).toEqual(new Set([null]));
-    expect(new Set(stored.limits)).toEqual(new Set(["unknown"]));
+    expect(stored.limits).toEqual([]);
     expect(JSON.stringify(stored)).not.toContain("6.6.6.");
+  });
+
+  it("with no address, one visitor's flood doesn't close the door to every other parent", async () => {
+    // Past the per-IP cap, from visitors the portal can't tell apart, for addresses that aren't on file.
+    for (let i = 0; i <= RATE_LIMITS.code_send_ip.max; i++) await requestSigninCode(`nobody${i}@example.com`, null);
+    for (let i = 0; i <= RATE_LIMITS.code_check_ip.max; i++) await verifySigninCode(`nobody${i % 50}@example.com`, "000000", null);
+    const sent = outbox.length;
+    await (await requestSigninCode("ana@example.com", null)).delivery;
+    expect(outbox.length).toBe(sent + 1);
+    const code = /sign-in code: (\d{6})/.exec(outbox.at(-1)!.subject)![1]!;
+    expect(await verifySigninCode("ana@example.com", code, null)).toMatchObject({ ok: true });
+    expect((await db.select().from(auditLog)).filter((r) => r.action === "signin.code_refused").map((r) => (r.after as { reason?: string }).reason))
+      .not.toContain("rate_limited");
+  }, 60_000);
+
+  it("with the setting none, Better Auth is told there is no address, so its limiter doesn't put everyone in one bucket", () => {
+    env.CLIENT_IP_HEADER = "none";
+    const options = { advanced: { ipAddress: clientAddress() } };
+    expect(options.advanced.ipAddress).toMatchObject({ disableIpTracking: true });
+    expect(getIP(withClientIp(new Request(`${env.APP_URL}/api/auth/staff/sign-in/social`, { headers: { "cf-connecting-ip": TRUE } })), options)).toBeNull();
+    env.CLIENT_IP_HEADER = "cf-connecting-ip";
+    expect(clientAddress()).not.toHaveProperty("disableIpTracking");
   });
 
   it("can't be forged in a page request either: a refusal is audited with the trusted header's address", async () => {

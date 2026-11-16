@@ -6,7 +6,7 @@ import { staffAuthUser, staffAuthSession, staffAuthAccount, staffAuthVerificatio
 import { env } from "@/env";
 import { loadProviders, type LoadedProviders } from "./providers";
 import { createEntraAssertionGetter } from "./client-assertion";
-import { CLIENT_ADDRESS, stampingHandler } from "./client-address";
+import { clientAddress, stampingHandler } from "./client-address";
 
 function buildStaffAuth(p: LoadedProviders) {
   return betterAuth({
@@ -21,7 +21,7 @@ function buildStaffAuth(p: LoadedProviders) {
     emailAndPassword: { enabled: false },
     account: { accountLinking: { enabled: false } },
     // The visitor's address comes from the portal's one reading of it (client-address.ts), not from a header named here.
-    advanced: { cookiePrefix: "br_staff", ipAddress: CLIENT_ADDRESS },
+    advanced: { cookiePrefix: "br_staff", ipAddress: clientAddress() },
     databaseHooks: { session: {
       create: { after: (session, ctx) => recordSignin("staff", session, ctx) },
       delete: { after: (session, ctx) => recordSignout("staff", session, ctx) },

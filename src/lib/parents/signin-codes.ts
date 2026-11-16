@@ -23,7 +23,13 @@ export const hashSigninCode = (parentId: string, code: string) =>
 
 type Refusal = "unknown_email" | "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off";
 const anon = (label: string): Actor => ({ door: "parent", id: null, label });
-const subjectIp = (ip: string | null) => ip ?? "unknown";
+/**
+ * The per-IP limit, or "taken" when the visitor's address is unknown. With no address (CLIENT_IP_HEADER is none, or the
+ * proxy doesn't send the header) every visitor would share one count, and one visitor could use up the whole club's
+ * sign-ins. The limits per email address and per code still hold.
+ */
+const takeIpLimit = (kind: "code_send_ip" | "code_check_ip", ip: string | null, now: Date): Promise<RateLimitTake> =>
+  ip === null ? Promise.resolve("taken") : takeRateLimit(kind, ip, now);
 const DONE: { delivery: Promise<void> } = { delivery: Promise.resolve() };
 
 async function refuse(reason: Refusal, label: string, who: { id: string; email: string } | null, ip: string | null, extra: Record<string, unknown> = {}) {
@@ -44,7 +50,7 @@ export async function requestSigninCode(rawEmail: string, ip: string | null, now
   const email = normalizeEmail(rawEmail);
   const label = email ?? rawEmail.trim().toLowerCase().slice(0, 254);
   // The IP limit comes first, so no refusal below it (mail not working included) can be repeated without limit.
-  const byIp = await takeRateLimit("code_send_ip", subjectIp(ip), now);
+  const byIp = await takeIpLimit("code_send_ip", ip, now);
   if (byIp !== "taken") { await refuseOverLimit(byIp, label, ip, { limit: "ip" }); return DONE; }
   if (!(await mailWorking())) { await refuse("mail_failed", label, null, ip, { detail: "mail_not_working" }); return DONE; }
   if (parentDoorClosed(await getParentSettings())) { await refuse("signins_off", label, null, ip); return DONE; }
@@ -99,7 +105,7 @@ const REJECTED: VerifyResult = { ok: false, reason: "rejected" };
 export async function verifySigninCode(rawEmail: string, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
   const email = normalizeEmail(rawEmail);
   const label = email ?? rawEmail.trim().toLowerCase().slice(0, 254);
-  const byIp = await takeRateLimit("code_check_ip", subjectIp(ip), now);
+  const byIp = await takeIpLimit("code_check_ip", ip, now);
   if (byIp !== "taken") {
     await refuseOverLimit(byIp, label, ip, { limit: "check_ip" });
     return { ok: false, reason: "rate_limited" };

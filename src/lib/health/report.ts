@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, jobRun } from "@/lib/db/schema";
 import { lastWake } from "@/lib/jobs/runner";
@@ -11,6 +11,7 @@ import { mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 import { lastBackup } from "./backup";
 import { BUILD_VERSION } from "./version";
+import { env } from "@/env";
 
 /**
  * What the staff Health page shows (v1 spec §14): one line per part of the portal, in plain words, each with when it
@@ -36,6 +37,9 @@ export type HealthLine = {
 
 /** The worker wakes every minute (scripts/worker.mjs). Five minutes without a wake is a worker that has stopped. */
 export const WORKER_LATE_MS = 5 * 60_000;
+/** How far back the parent line looks for sign-ins, to tell whether the portal learns visitors' addresses. */
+export const SIGNIN_ADDRESS_LOOKBACK_MS = 14 * 24 * 3_600_000;
+
 /** Backups are meant to be nightly. Two days without one means a night was missed and nobody noticed. */
 export const BACKUP_OLD_MS = 48 * 3_600_000;
 
@@ -44,12 +48,16 @@ const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
   // The database first, on its own: if it can't answer, nothing below can be read, and the page says so.
   await db.execute(sql`select 1`);
-  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup] = await Promise.all([
+  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, signins] = await Promise.all([
     lastWake(),
     db.select().from(jobRun).where(eq(jobRun.job, CLEANUP_JOB)).orderBy(desc(jobRun.id)).limit(1),
     // The one thing the portal writes to QuickBooks leaves an audit row each time: the newest is when it last worked.
     db.select({ at: auditLog.at }).from(auditLog).where(eq(auditLog.action, QUICKBOOKS_WRITE_ACTION)).orderBy(desc(auditLog.id)).limit(1),
     connectionView(), quickbooksProblems(now), loadRosterPage(), mailSummary(), getParentSettings(), lastBackup(),
+    // The newest sign-ins: if none of them has an address, the header CLIENT_IP_HEADER names isn't reaching the portal.
+    db.select({ ip: auditLog.ip }).from(auditLog)
+      .where(and(inArray(auditLog.action, ["signin.code_sent", "signin"]), gte(auditLog.at, new Date(now.getTime() - SIGNIN_ADDRESS_LOOKBACK_MS))))
+      .orderBy(desc(auditLog.id)).limit(20),
   ]);
   const lines: HealthLine[] = [];
 
@@ -104,8 +112,16 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
 
   // Forms adds its line here: Documenso's API and its webhook, each with when it last worked (v1 spec §14).
 
+  // Without a visitor's address the audit log can't say where a sign-in came from, and the flood limit per address
+  // can't apply (signin-codes.ts). Chosen (none), that is said; not chosen, it is a header the proxy doesn't send.
+  const noAddresses = signins.length > 0 && signins.every((r) => r.ip === null);
+  const addressNote = !noAddresses ? null : env.CLIENT_IP_HEADER === "none"
+    ? "Visitors' addresses aren't recorded, because CLIENT_IP_HEADER is none: the audit log shows no address, and sign-ins have no limit per address."
+    : `The latest sign-ins have no address: the proxy in front of the portal doesn't send the header ${env.CLIENT_IP_HEADER}. Set CLIENT_IP_HEADER in the server's env file to the header it does send (.env.example lists them).`;
   lines.push(parents.signin
-    ? { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: [], fix: null }
+    ? addressNote && env.CLIENT_IP_HEADER !== "none"
+      ? { key: "parents", title: "Parent sign-ins", state: "attention", word: "Needs attention", says: "On. Parents sign in with a code sent to their email.", times: [], notes: [addressNote], fix: null }
+      : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
     : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
       says: parents.everEnabled ? "Switched off. No parent can sign in right now." : "Not switched on yet. No parent can sign in until an Admin switches them on." });
 

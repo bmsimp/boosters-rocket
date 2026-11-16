@@ -18,7 +18,8 @@ import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/pag
 import { writeAudit } from "@/lib/audit/log";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { GET as liveness } from "@/app/api/health/route";
-import { healthReport, BACKUP_OLD_MS, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
+import { healthReport, BACKUP_OLD_MS, SIGNIN_ADDRESS_LOOKBACK_MS, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
+import { env } from "@/env";
 import { BACKUP_KEY } from "@/lib/health/backup";
 import { BUILD_VERSION } from "@/lib/health/version";
 import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
@@ -187,6 +188,29 @@ describe("the health page", () => {
   it("says when the last clean-up failed", async () => {
     await db.insert(jobRun).values({ job: CLEANUP_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "failed", detail: "The clean-up couldn't finish. Nothing was removed. (unexpected)" });
     expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", times: [{ label: "Last tried" }] });
+  });
+
+  it("says when the latest sign-ins came with no address, and that it is the header when one is named", async () => {
+    const setting = env.CLIENT_IP_HEADER;
+    try {
+      await seedParentSettings(SIGNINS_ON);
+      const signin = (ip: string | null, atMs: number) => db.insert(auditLog).values({ at: new Date(NOW.getTime() - atMs), door: "parent", actorLabel: "ana@example.com", action: "signin.code_sent", ip });
+      // No sign-ins yet: nothing to go on.
+      expect(line(await healthReport(NOW), "parents")).toMatchObject({ state: "ok", notes: [] });
+      // An address, then none since: not yet a sign that the header is missing.
+      await signin("203.0.113.7", 3_600_000); await signin(null, 60_000);
+      expect(line(await healthReport(NOW), "parents")).toMatchObject({ state: "ok", notes: [] });
+      // Only sign-ins with no address in the last two weeks: the proxy doesn't send the header the portal reads.
+      await db.delete(auditLog); await signin("203.0.113.7", SIGNIN_ADDRESS_LOOKBACK_MS + 60_000); await signin(null, 60_000);
+      const missing = line(await healthReport(NOW), "parents");
+      expect(missing).toMatchObject({ state: "attention", word: "Needs attention" });
+      expect(missing.notes.join(" ")).toMatch(/doesn't send the header cf-connecting-ip\. Set CLIENT_IP_HEADER/);
+      // Chosen: said, not a fault.
+      env.CLIENT_IP_HEADER = "none";
+      const chosen = line(await healthReport(NOW), "parents");
+      expect(chosen).toMatchObject({ state: "ok", word: "On" });
+      expect(chosen.notes.join(" ")).toMatch(/addresses aren't recorded, because CLIENT_IP_HEADER is none/);
+    } finally { env.CLIENT_IP_HEADER = setting; }
   });
 
   it("leaves /api/health a bare liveness check that says nothing else", async () => {

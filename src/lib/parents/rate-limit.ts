@@ -7,7 +7,8 @@ const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
  * per-IP limits only stop a flood: on a registration night a whole room of parents shares the school's one address, so
- * they sit well above what a full room asks for (spec §1 Rate limits).
+ * they sit well above what a full room asks for (spec §1 Rate limits). With no address they are not applied at all
+ * (signin-codes.ts): every visitor would share one count.
  */
 export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number }> = {
   code_send_email: { max: 3, windowMs: WINDOW_MS },
