@@ -16,6 +16,7 @@ import type { ParentIdentity } from "@/lib/auth/resolve";
 import { CONTACT_COPY, loadMyContact } from "@/lib/parents/contact-edits";
 import { NOT_THE_FORM, type ContactValues } from "@/lib/parents/contact-fields";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
+import { QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { saveDetailsAction } from "@/app/(parent)/family/details/actions";
 import FamilyPage from "@/app/(parent)/family/page";
 import FamilyDetailsPage from "@/app/(parent)/family/details/page";
@@ -69,6 +70,7 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
 
     const log = await audits();
     expect(log).toHaveLength(1);
+    expect(log[0]!.action).toBe(QUICKBOOKS_WRITE_ACTION); // the action the Health page reads for "Last change by a parent"
     expect(log[0]).toMatchObject({ door: "parent", actorId: r.identity.parentId, actorLabel: RIVERA.parent.email, action: "parent.contact.save",
       targetType: "qbo_customer", targetId: R_PARENT, before: { phone: RIVERA.parent.phone }, after: { phone: NEW_PHONE }, ip: "203.0.113.77" });
     // The pages that show these details: the browser's router drops its copies of them.

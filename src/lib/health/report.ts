@@ -1,10 +1,11 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { jobRun } from "@/lib/db/schema";
+import { auditLog, jobRun } from "@/lib/db/schema";
 import { lastWake } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
+import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
@@ -43,9 +44,11 @@ const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
   // The database first, on its own: if it can't answer, nothing below can be read, and the page says so.
   await db.execute(sql`select 1`);
-  const [wake, [cleanup], conn, problems, roster, mail, parents, backup] = await Promise.all([
+  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup] = await Promise.all([
     lastWake(),
     db.select().from(jobRun).where(eq(jobRun.job, CLEANUP_JOB)).orderBy(desc(jobRun.id)).limit(1),
+    // The one thing the portal writes to QuickBooks leaves an audit row each time: the newest is when it last worked.
+    db.select({ at: auditLog.at }).from(auditLog).where(eq(auditLog.action, QUICKBOOKS_WRITE_ACTION)).orderBy(desc(auditLog.id)).limit(1),
     connectionView(), quickbooksProblems(now), loadRosterPage(), mailSummary(), getParentSettings(), lastBackup(),
   ]);
   const lines: HealthLine[] = [];
@@ -68,16 +71,19 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     times: [{ label: cleanup && cleanup.outcome !== "ok" ? "Last tried" : "Last ran", at: cleanup ? (cleanup.finishedAt ?? cleanup.startedAt).toISOString() : null }],
   });
 
-  const rosterTimes = [{ label: "Last token refresh", at: conn.lastTokenRefreshAt }, { label: "Last roster read", at: roster.lastOkAt }];
+  const rosterTimes = [{ label: "Last token refresh", at: conn.lastTokenRefreshAt }, { label: "Last roster read", at: roster.lastOkAt },
+    { label: "Last change by a parent", at: lastWrite?.at.toISOString() ?? null }];
+  // What the portal reads and what it changes, in the words the QuickBooks settings page uses.
+  const use = `${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`;
   const qboFix = { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" };
   if (!conn.configured) {
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "off", word: "Not set up", says: "Not set up. Families, students and what they owe come from QuickBooks, so parents see none of it yet.", times: [], notes: [], fix: qboFix });
   } else if (!conn.connected) {
-    lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe until an Admin connects.",
-      times: rosterTimes, notes: [], fix: qboFix });
+    lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe, and parents can't change their phone or address, until an Admin connects.",
+      times: rosterTimes, notes: [use], fix: qboFix });
   } else {
     lines.push({
-      key: "quickbooks", title: "QuickBooks", state: problems.length ? "attention" : "ok", word: problems.length ? "Needs attention" : "Connected", times: rosterTimes, notes: problems.map((p) => p.text), fix: problems.length ? qboFix : null,
+      key: "quickbooks", title: "QuickBooks", state: problems.length ? "attention" : "ok", word: problems.length ? "Needs attention" : "Connected", times: rosterTimes, notes: [...problems.map((p) => p.text), use], fix: problems.length ? qboFix : null,
       says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}.`,
     });
   }

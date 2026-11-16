@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { connectionView, qboRedirectUri } from "@/lib/quickbooks/connection";
+import { QUICKBOOKS_USE } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
 import { AppKeysForm, ShapeForm } from "../forms";
@@ -58,7 +59,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
 
       {step === "connect" && (
         <section className="box" aria-labelledby="qbo-connect-h"><h2 id="qbo-connect-h">Step 2: Sign in to Intuit</h2>
-          <p>This sends you to Intuit to choose the club&apos;s QuickBooks company and approve access, then brings you back here. Sign in as someone who is an admin of that company. The portal reads from QuickBooks. The one thing it changes there is a parent&apos;s own phone and mailing address, when that parent edits them in the portal.</p>
+          <p>This sends you to Intuit to choose the club&apos;s QuickBooks company and approve access, then brings you back here. Sign in as someone who is an admin of that company. {QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes}</p>
           {conn.connected && <p className="hint">QuickBooks is connected to <b>{conn.companyName ?? "a company"}</b>. Signing in again renews the connection to the same company.</p>}
           <form action={beginConnectAction}><button className="btn">Sign in to Intuit</button></form>
           <p className="box-foot"><a href={`${SETUP}?step=app`}>Back to step 1</a>{conn.connected && <> · <a href={`${SETUP}?step=shape`}>Skip to step 3</a></>}</p>

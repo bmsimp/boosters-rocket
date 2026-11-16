@@ -13,6 +13,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboConnection, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/health/page";
+import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
+import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
+import { writeAudit } from "@/lib/audit/log";
+import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { GET as liveness } from "@/app/api/health/route";
 import { healthReport, BACKUP_OLD_MS, WORKER_LATE_MS, type HealthLine } from "@/lib/health/report";
 import { BACKUP_KEY } from "@/lib/health/backup";
@@ -144,6 +148,40 @@ describe("the health page", () => {
     expect(broken.notes.join(" ")).toContain("Intuit refused the refresh. (invalid_grant)");
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, accessTokenCiphertext: null, lastError: null });
     expect(line(await healthReport(), "quickbooks")).toMatchObject({ state: "attention", word: "Not connected" });
+  });
+
+  it("says what the portal reads and what it changes in QuickBooks, in the words the QuickBooks settings pages use", async () => {
+    await admin();
+    await seedConnected(stub);
+    const connected = line(await healthReport(), "quickbooks");
+    expect(connected.notes).toContain(`${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`);
+    // The one write has never been made here.
+    expect(connected.times).toContainEqual({ label: "Last change by a parent", at: null });
+    const health = await renderPage(HealthPage);
+    const settings = await renderPage(QuickBooksSettingsPage);
+    const setup = await renderPage(QuickBooksSetupPage, { searchParams: { step: "connect" } });
+    const said = (words: string) => words.replaceAll("'", "&#x27;");
+    for (const html of [health, settings, setup]) {
+      expect(html).toContain(said(QUICKBOOKS_USE.reads));
+      expect(html).toContain(said(QUICKBOOKS_USE.writes));
+      expect(html).not.toMatch(/changes nothing (there|in QuickBooks)|only reads/);
+    }
+    expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
+    expect(QUICKBOOKS_USE.writes).toMatch(/one thing.*phone and mailing address/);
+    expect(health).toContain("Last change by a parent: never");
+
+    // A parent's save is audited under that action (tests/integration/contact-edits.test.ts): the newest one is the time shown.
+    const actor = { door: "parent" as const, id: "p-1", label: "ana@example.com" };
+    await writeAudit({ actor, action: QUICKBOOKS_WRITE_ACTION, targetType: "qbo_customer", targetId: "11" });
+    await writeAudit({ actor, action: "parent.contact.save.failed", targetType: "qbo_customer", targetId: "11", after: { code: "timeout" } });
+    const [saved] = (await db.select().from(auditLog)).filter((a) => a.action === QUICKBOOKS_WRITE_ACTION);
+    expect(at(line(await healthReport(), "quickbooks"), "Last change by a parent")).toBe(saved!.at.toISOString());
+
+    // Not connected: the page says what parents can't do meanwhile, too.
+    await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, accessTokenCiphertext: null });
+    const off = line(await healthReport(), "quickbooks");
+    expect(off.says).toMatch(/can't read the roster or what families owe, and parents can't change their phone or address/);
+    expect(off.notes).toEqual([`${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`]);
   });
 
   it("says when the last clean-up failed", async () => {
