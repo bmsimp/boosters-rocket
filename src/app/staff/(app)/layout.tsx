@@ -9,12 +9,15 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   const nav = [
     { href: "/staff", label: "Home" },
     ...(can(e, "Roster.Read") ? [{ href: "/staff/roster", label: "Roster" }] : []),
+    ...(can(e, "Roster.Read") ? [{ href: "/staff/reconciliation", label: "Reconciliation" }] : []),
     ...(can(e, "Parents.ReadWrite") ? [{ href: "/staff/parents", label: "Parents" }] : []),
     // Two entries: someone who only ticks names off (Season.Progress.*) can't open the set-up pages.
     ...(can(e, "Season.Steps.Read") ? [{ href: "/staff/seasons", label: "Seasons" }] : []),
     ...(can(e, "Season.Progress.Read") ? [{ href: "/staff/seasons/progress", label: "Progress" }] : []),
     ...(can(e, "Finance.Balance.Read") ? [{ href: "/staff/balances", label: "Balances" }] : []),
     ...(can(e, "Volunteer.Event.Read") ? [{ href: "/staff/volunteer", label: "Volunteering" }] : []),
+    ...(can(e, "Volunteer.Credit.ReadWrite") ? [{ href: "/staff/volunteer/credit", label: "Volunteer credit" }] : []),
+    ...(can(e, "Forms.Signature.Read") ? [{ href: "/staff/forms", label: "Signed forms" }] : []),
     ...(can(e, "Staff.Users.Read") ? [{ href: "/staff/people", label: "Staff" }] : []),
     ...(can(e, "Admin.Roles.ReadWrite") ? [{ href: "/staff/roles", label: "Roles" }] : []),
     ...(can(e, "Settings.Club.Read") ? [{ href: "/staff/settings/club", label: "Club" }] : []),

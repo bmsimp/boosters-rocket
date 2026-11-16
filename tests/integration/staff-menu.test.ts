@@ -10,6 +10,8 @@ import { resetDb, seedStaff } from "../helpers/db";
 const SEASONS = 'href="/staff/seasons"', PROGRESS = 'href="/staff/seasons/progress"', HEALTH = 'href="/staff/health"';
 /** Step 4's entries: Balances, Volunteering and the Forms settings. */
 const BALANCES = 'href="/staff/balances"', VOLUNTEERING = 'href="/staff/volunteer"', FORMS = 'href="/staff/settings/forms"';
+/** Step 5's entries: Reconciliation, the volunteer credit pages and the signed forms' matrix. */
+const RECONCILIATION = 'href="/staff/reconciliation"', CREDIT = 'href="/staff/volunteer/credit"', SIGNED = 'href="/staff/forms"';
 
 async function staffWith(...patterns: string[]) {
   const s = await seedStaff({ email: "helper@club.org", name: "Hal Helper" });
@@ -116,7 +118,52 @@ describe("the staff menu", () => {
   it("shows none of them to someone with no season permission", async () => {
     await staffWith("Roster.Read");
     const html = await menu();
-    for (const entry of [SEASONS, PROGRESS, HEALTH, BALANCES, VOLUNTEERING, FORMS]) expect(html).not.toContain(entry);
+    for (const entry of [SEASONS, PROGRESS, HEALTH, BALANCES, VOLUNTEERING, FORMS, CREDIT, SIGNED]) expect(html).not.toContain(entry);
     expect(html).toContain('href="/staff/roster"');
+  });
+
+  it("shows an Admin Reconciliation, Volunteer credit and Signed forms", async () => {
+    asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const html = await menu();
+    for (const entry of [RECONCILIATION, CREDIT, SIGNED]) expect(html).toContain(entry);
+  });
+
+  it("shows Reconciliation with the roster, to anyone who may read it", async () => {
+    await staffWith("Roster.Read");
+    expect(await menu()).toContain(RECONCILIATION);
+  });
+
+  it("shows Volunteer credit only to someone who may change credit, even without the events", async () => {
+    await staffWith("Volunteer.Credit.ReadWrite");
+    const html = await menu();
+    expect(html).toContain(CREDIT);
+    for (const entry of [VOLUNTEERING, RECONCILIATION, SIGNED]) expect(html).not.toContain(entry);
+    await resetDb();
+    await staffWith("Volunteer.Event.ReadWrite");
+    expect(await menu()).not.toContain(CREDIT);
+  });
+
+  it("shows Signed forms to someone who may read them, or remind and start again, and never the Forms settings", async () => {
+    for (const permission of ["Forms.Signature.Read", "Forms.Signature.ReadWrite"]) {
+      await resetDb();
+      await staffWith(permission);
+      const html = await menu();
+      expect(html).toContain(SIGNED);
+      for (const entry of [FORMS, CREDIT, RECONCILIATION]) expect(html).not.toContain(entry);
+    }
+  });
+
+  it("marks Volunteer credit, not Volunteering, current on the credit pages, and Signed forms on the matrix's pages", async () => {
+    asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const current = async (path: string) => {
+      atPath(path);
+      const nav = /<nav class="top-nav"[^>]*>(.*?)<\/nav>/.exec(await menu())![1]!;
+      return [...nav.matchAll(/<a\b[^>]*>/g)].filter((a) => a[0].includes('aria-current="page"')).map((a) => /href="([^"]*)"/.exec(a[0])![1]);
+    };
+    expect(await current("/staff/volunteer/credit/10")).toEqual(["/staff/volunteer/credit"]);
+    expect(await current("/staff/volunteer")).toEqual(["/staff/volunteer"]);
+    expect(await current("/staff/forms/evidence/0b0f2a8e-0000-4000-8000-000000000001")).toEqual(["/staff/forms"]);
+    expect(await current("/staff/settings/forms")).toEqual(["/staff/settings/forms"]);
+    expect(await current("/staff/reconciliation")).toEqual(["/staff/reconciliation"]);
   });
 });
