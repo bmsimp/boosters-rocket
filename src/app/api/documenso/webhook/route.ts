@@ -1,4 +1,5 @@
 import { WEBHOOK_BODY_MAX, hearWebhook } from "@/lib/forms/webhook";
+import { isWebhookSecret } from "@/lib/forms/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,8 @@ export async function POST(req: Request): Promise<Response> {
   const secret = req.headers.get("x-documenso-secret");
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (!secret || !Number.isFinite(declared) || declared > WEBHOOK_BODY_MAX) return answer(404, '{"ok":false}');
+  // The secret is checked before the body is read, so a caller without it can't make the portal read a body at all.
+  if (!(await isWebhookSecret(secret))) return answer(404, '{"ok":false}');
   let body: string;
   try { body = await req.text(); } catch { return answer(404, '{"ok":false}'); }
   if (body.length > WEBHOOK_BODY_MAX) return answer(404, '{"ok":false}');
