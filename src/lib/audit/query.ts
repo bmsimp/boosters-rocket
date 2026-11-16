@@ -51,14 +51,14 @@ function instant(text: string, endOfDay: boolean): Date | null {
 /** The filters in an address. Unknown or malformed values are dropped, never guessed at. */
 export function parseAuditFilters(params: Params): AuditFilters {
   const get = reader(params);
-  const record = get("record");
+  const record = get("record").replace(/^:+|:+$/g, "").trim();
   const cut = record.indexOf(":");
   return {
     action: get("action") || null,
     who: get("who") || null,
     from: instant(get("from"), false),
     to: instant(get("to"), true),
-    record: !record ? null : cut > 0 && cut < record.length - 1 ? { type: record.slice(0, cut).trim(), id: record.slice(cut + 1).trim() } : { either: record.replace(/^:|:$/g, "") },
+    record: !record ? null : cut > 0 && cut < record.length - 1 ? { type: record.slice(0, cut).trim(), id: record.slice(cut + 1).trim() } : { either: record },
   };
 }
 

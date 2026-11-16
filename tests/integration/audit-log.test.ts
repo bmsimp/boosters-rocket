@@ -167,6 +167,7 @@ describe("the audit log page", () => {
     expect(parseAuditFilters({ record: "p-1" }).record).toEqual({ either: "p-1" });
     expect(parseAuditFilters({ record: ":p-1" }).record).toEqual({ either: "p-1" });
     expect(parseAuditFilters({ record: "a:b:c" }).record).toEqual({ type: "a", id: "b:c" });
+    for (const empty of [":", "::", " : ", " "]) expect(parseAuditFilters({ record: empty }).record, empty).toBeNull();
     // A day is that day in UTC, both ends included; an instant is itself.
     expect(parseAuditFilters({ from: "2026-11-15", to: "2026-11-15" })).toMatchObject({ from: new Date("2026-11-15T00:00:00Z"), to: new Date("2026-11-16T00:00:00Z") });
     expect(parseAuditFilters({ from: "2026-11-15T06:00:00.000Z", to: "2026-11-16T06:00:00.000Z" })).toMatchObject({ from: new Date("2026-11-15T06:00:00Z"), to: new Date("2026-11-16T06:00:00Z") });

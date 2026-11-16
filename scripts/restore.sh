@@ -57,7 +57,8 @@ fi
 
 # One answer from the server, asked through its own "postgres" database.
 ask() { pg psql "${CONN[@]}" -d postgres -v ON_ERROR_STOP=1 -Atqc "$1"; }
-run() { pg psql "${CONN[@]}" -d postgres -v ON_ERROR_STOP=1 -qc "$1" >/dev/null; }
+# Notices ("does not exist, skipping") are kept off the screen; errors are not.
+run() { pg psql "${CONN[@]}" -d postgres -v ON_ERROR_STOP=1 -q -c 'set client_min_messages = warning' -c "$1" >/dev/null; }
 
 ask 'select 1' >/dev/null 2>&1 || die 3 "The database server didn't answer. Nothing was changed."
 pg_in pg_restore --list < "$FILE" >/dev/null 2>&1 || die 2 "$FILE isn't a backup made by scripts/backup.sh, or it is damaged. Nothing was changed."
