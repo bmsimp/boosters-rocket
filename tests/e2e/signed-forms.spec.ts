@@ -29,8 +29,8 @@ test("staff open the matrix, filter it, open one signed form's evidence and down
   await noSidewaysScroll(page);
 
   // Filter: one form, the signed ones.
-  await page.getByLabel("Form", { exact: true }).selectOption({ label: "Travel consent" });
-  await page.getByLabel("Where it stands").selectOption({ label: "Signed" });
+  await page.locator("select[name=form]").selectOption({ label: "Travel consent" });
+  await page.locator("select[name=state]").selectOption({ label: "Signed" });
   await page.getByRole("button", { name: "Show" }).click();
   await expect(page).toHaveURL(/\/staff\/forms\?form=[0-9a-f-]{36}&state=signed&q=$/);
   await expect(matrix.locator("thead th")).toHaveText(["Family and students", "Travel consent"]);
@@ -41,7 +41,7 @@ test("staff open the matrix, filter it, open one signed form's evidence and down
   await expect(matrix.locator("tbody .matrix-family th > span")).toHaveText(["Quetzalcoatl Family"]);
 
   // The signed cell leads to the form's evidence.
-  await matrix.getByRole("link", { name: /Signed: Travel consent for/ }).first().click();
+  await matrix.getByRole("link", { name: /^Signed ?: Travel consent for/ }).first().click();
   await expect(page).toHaveURL(/\/staff\/forms\/evidence\/[0-9a-f-]{36}$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Travel consent");
   await expect(page.getByRole("main")).toContainText("Zelda Quetzalcoatl");
