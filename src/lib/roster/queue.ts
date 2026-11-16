@@ -24,9 +24,12 @@ export const NOTE_MAX = 500;
 type Item = typeof writeQueue.$inferSelect;
 type Step = "done" | "stuck" | "waiting" | "skipped";
 
-/** When the last roster refresh that worked finished, or null. */
+/**
+ * When the last roster refresh that worked started, or null. Its start, not its end: a refresh that began before a try
+ * may have read QuickBooks before that try's change landed there.
+ */
 async function lastGoodRefresh(): Promise<Date | null> {
-  const [r] = await db.select({ at: jobRun.finishedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
+  const [r] = await db.select({ at: jobRun.startedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
   return r?.at ?? null;
 }
 

@@ -4,11 +4,11 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser } from "@/lib/db/schema";
+import { auditLog, familyMoney, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
-import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, JOB_HISTORY_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, FINISHED_WRITES_DAYS, JOB_HISTORY_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -145,6 +145,20 @@ describe("the daily clean-up deletes only what is past use", () => {
     const left = await ids(db.select({ id: jobRun.id }).from(jobRun));
     expect(left).toEqual([lastOk, newestFailed, onTheEdge, inside, only].sort());
     for (const gone of [goneOk, goneFailed, oneSecondOver]) expect(left).not.toContain(gone);
+  });
+
+  it("staff roster writes: one that went through or was given up more than 30 days ago goes; one a second inside stays, and waiting and stuck ones always stay", async () => {
+    const w = { op: "deactivate" as const, role: "student" as const, qboId: "12", syncToken: "0" };
+    const item = async (state: "waiting" | "stuck" | "done" | "given_up", finishedAt: Date | null) => String((await db.insert(writeQueue)
+      .values({ realmId: "1", request: w, targetQboId: "12", state, sent: false, finishedAt, createdAt: at(-400 * DAY), lastTriedAt: at(-400 * DAY) }).returning({ id: writeQueue.id }))[0]!.id);
+    const over = at(-FINISHED_WRITES_DAYS * DAY - SEC), edge = at(-FINISHED_WRITES_DAYS * DAY), inside = at(-FINISHED_WRITES_DAYS * DAY + SEC);
+    const goneDone = await item("done", over), goneGivenUp = await item("given_up", over);
+    const kept = [await item("done", edge), await item("given_up", inside), await item("waiting", null), await item("stuck", null)];
+    expect(await clean()).toEqual({ ...NOTHING, writeQueue: 2 });
+    const left = await ids(db.select({ id: writeQueue.id }).from(writeQueue));
+    expect(left).toEqual(kept.sort());
+    for (const gone of [goneDone, goneGivenUp]) expect(left).not.toContain(gone);
+    expect(describeCleanup({ ...NOTHING, writeQueue: 2 })).toBe("Removed 2 finished changes to QuickBooks.");
   });
 
   it("never touches the audit log, however old", async () => {
