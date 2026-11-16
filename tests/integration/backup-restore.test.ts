@@ -192,7 +192,7 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
     let present: boolean;
     try { present = (await admin<{ n: number }[]>`select count(*)::int as n from pg_database where datname = 'documenso'`)[0]!.n === 1; } finally { await admin.end({ timeout: 5 }); }
-    const env: Record<string, string | undefined> = { ...process.env, ...via, BR_DB_NAME: SOURCE, BR_DB_WAIT: "20" };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...via, BR_DB_NAME: SOURCE, BR_DB_WAIT: "20" };
     delete env.BR_DOCUMENSO_DB_NAME;
     const elsewhere = mkdtempSync(path.join(tmpdir(), "br-backup-unset-"));
     try {
