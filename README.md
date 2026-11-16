@@ -60,20 +60,25 @@ Postgres) and `pnpm e2e` (browser tests; see `AGENTS.md` for how to run them).
 
 ## Run it for a club
 
-The portal runs as a Docker image beside its own Postgres, behind a reverse proxy or tunnel that
-gives it an https address. The scripts in `scripts/poc/` set up and update a server that uses
-`docker-compose.poc.yml`:
+The portal runs on any machine with Docker, at addresses the club chooses. `deploy/` holds the
+installation: the portal and its worker, Postgres with the portal's and Documenso's databases,
+Documenso, a nightly backup of both, and an optional reverse proxy. It pulls the published image,
+or builds one from the checkout with `deploy/compose.build.yml`.
 
-```bash
-scripts/poc/setup.sh https://portal.yourclub.org   # once: makes a private .env.poc with fresh secrets
-scripts/poc/deploy.sh                              # build, back up the database, migrate, start; prints a setup code
-```
+The runbooks, written for a club volunteer:
 
-`scripts/backup.sh <folder>` backs up the database and `scripts/restore.sh <file> <database>` loads
-a backup; each explains itself at the top of the file. Keep `.env.poc` with the backups: without
-its encryption key, a backup can't bring back the QuickBooks connection or the sign-in settings.
+- [A first installation](docs/runbooks/first-install.md): from an empty machine to a signed-in Admin
+  and a first backup
+- [Intuit](docs/runbooks/intuit.md): registering the portal with Intuit, and its production assessment
+- [Outgoing mail](docs/runbooks/mail.md): Microsoft 365 or SMTP, for the portal and for Documenso
+- [Documenso](docs/runbooks/documenso.md): the signing certificate, the first account, connecting it
+- [Backups](docs/runbooks/backups.md): the nightly schedule, what else to keep, copying them away
+- [Updates](docs/runbooks/updates.md): a new release, and how to go back
+- [Restore](docs/runbooks/restore.md): onto the same machine or a new one
+- [Reconnecting QuickBooks](docs/runbooks/quickbooks-reconnect.md): the same company, or a different one
+- [When the Health page warns](docs/runbooks/health-warnings.md): one entry for each of its lines
 
-[The proof-of-concept runbook](docs/runbooks/poc-linuxdev.md) is a full walk-through of one
-installation. Runbooks written for any club, and a published image, are still to come.
+[The proof-of-concept runbook](docs/runbooks/poc-linuxdev.md) is the record of the first
+installation, made with `docker-compose.poc.yml` and the scripts in `scripts/poc/`.
 
 Licensed under [AGPL-3.0](LICENSE).
