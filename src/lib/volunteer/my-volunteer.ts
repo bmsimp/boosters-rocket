@@ -5,7 +5,7 @@
 // module (./setup.ts, src/lib/roster/queries.ts, the seasons' set-up and progress modules):
 // tests/integration/page-guards.test.ts scans this file.
 import "server-only";
-import { and, asc, count, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { qboCustomer, requirement, season, seasonStep, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
@@ -76,9 +76,12 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
     .innerJoin(volunteerShift, eq(volunteerShift.id, volunteerSignup.shiftId)).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
     .where(and(eq(volunteerSignup.familyQboId, ctx.familyQboId), isNull(volunteerSignup.cancelledAt), gte(volunteerEvent.onDate, from)))
     .orderBy(asc(volunteerEvent.onDate), asc(volunteerShift.startsAt), asc(volunteerSignup.createdAt));
+  // A student who has moved to another family, or is no longer active, takes their sign-ups with them: the family
+  // they were signed up from no longer sees or cancels them.
+  const stillOurs = await studentsStillUnder(ctx.familyQboId, mine.flatMap(({ s }) => (s.studentQboId ? [s.studentQboId] : [])));
   const signups = mine.flatMap(({ s, shift, event }) => {
     const { start, end } = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
-    if (end.getTime() <= now.getTime()) return [];
+    if (end.getTime() <= now.getTime() || (s.studentQboId !== null && !stillOurs.has(s.studentQboId))) return [];
     const cancelled = shift.cancelledAt !== null || event.cancelledAt !== null, open = !cancelled && beforeCutoff(start, cutoffHours, now);
     return [{ id: s.id, shiftId: shift.id, eventName: event.name, dateWords: dateWords(event.onDate), timeWords: shiftTimeWords(clockOf(shift.startsAt), clockOf(shift.endsAt)),
       role: shift.role, location: event.location, contact: contactWords(event), who: whoWords(ctx, s),
@@ -115,14 +118,28 @@ export async function loadShiftForMe(ctx: Pick<ParentCtx, "familyQboId" | "paren
   const minutes = shiftMinutes(shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone));
 
   const students = await myStudents(ctx, family);
-  const taken = await db.select().from(volunteerSignup)
-    .where(and(eq(volunteerSignup.shiftId, shift.id), eq(volunteerSignup.familyQboId, ctx.familyQboId), isNull(volunteerSignup.cancelledAt))).orderBy(asc(volunteerSignup.createdAt));
+  const studentIds = students.map((s) => s.qboId);
+  // The family's own places, and any place one of its students holds now: a student who moved in may already hold one
+  // taken from their old family, which can't be taken twice. Of such a place nothing but that is said.
+  const onShift = await db.select().from(volunteerSignup)
+    .where(and(eq(volunteerSignup.shiftId, shift.id), isNull(volunteerSignup.cancelledAt),
+      studentIds.length > 0 ? or(eq(volunteerSignup.familyQboId, ctx.familyQboId), inArray(volunteerSignup.studentQboId, studentIds)) : eq(volunteerSignup.familyQboId, ctx.familyQboId)))
+    .orderBy(asc(volunteerSignup.createdAt));
+  const ours = onShift.filter((t) => t.familyQboId === ctx.familyQboId && (t.studentQboId === null || studentIds.includes(t.studentQboId)));
   const counted = await countsTowardFor(ctx.familyQboId, students, shift.id, minutes);
   const choices: FillChoice[] = [
-    { value: "me", label: `Me (${ctx.name})`, taken: taken.some((t) => t.fillerKind === "guardian" && t.fillerParentId === ctx.parentId), countsToward: counted("me") },
-    ...students.map((s) => ({ value: s.qboId, label: s.name, taken: taken.some((t) => t.fillerKind === "student" && t.studentQboId === s.qboId), countsToward: counted(s.qboId) })),
+    { value: "me", label: `Me (${ctx.name})`, taken: ours.some((t) => t.fillerKind === "guardian" && t.fillerParentId === ctx.parentId), countsToward: counted("me") },
+    ...students.map((s) => ({ value: s.qboId, label: s.name, taken: onShift.some((t) => t.fillerKind === "student" && t.studentQboId === s.qboId), countsToward: counted(s.qboId) })),
   ];
-  return { event: myEvent(event, [view]), shift: view, minutes, mine: taken.map((t) => ({ who: whoWords(ctx, t) })), choices };
+  return { event: myEvent(event, [view]), shift: view, minutes, mine: ours.map((t) => ({ who: whoWords(ctx, t) })), choices };
+}
+
+/** Of these students, the ones the roster cache holds active and directly under the family now. */
+async function studentsStillUnder(familyQboId: string, qboIds: string[], tx?: Tx): Promise<Set<string>> {
+  if (qboIds.length === 0) return new Set();
+  const under = await (tx ?? db).select({ qboId: qboCustomer.qboId }).from(qboCustomer)
+    .where(and(eq(qboCustomer.parentQboId, familyQboId), eq(qboCustomer.active, true), inArray(qboCustomer.qboId, qboIds)));
+  return new Set(under.map((u) => u.qboId));
 }
 
 /** The family's active students as loadMyFamily() gave them, kept only where the roster cache holds them directly under the session's family. */
@@ -181,7 +198,7 @@ export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "stu
   const student = who === "me" ? null : (await myStudents(ctx, family)).find((s) => s.qboId === who) ?? null;
   if (who !== "me" && !student) return no(NOT_FROM_PAGE);
   const [{ timeZone: zone }, { cutoffHours }] = await Promise.all([getClubSettings(), getVolunteerSettings()]);
-  const done = await db.transaction(async (tx) => {
+  const done = await takePlace(async (tx) => {
     // Beside the roster's writers, never between them: a refresh or a change of company holds this lock alone.
     await tx.execute(sql`set local lock_timeout = '10s'`);
     await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
@@ -207,12 +224,29 @@ export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "stu
       after: { familyQboId: ctx.familyQboId, shiftId: shift.id, event: event.name, onDate: event.onDate, startsAt: clockOf(shift.startsAt), filler: student ? { studentQboId: student.qboId, name: student.name } : { parentId: ctx.parentId, name: ctx.name } } }, tx);
     return { r: { ok: true as const, message: "" }, signupId: made!.id, event, shift };
   });
+  if (done === "busy") return no(ROSTER_BUSY);
   if (!done.r.ok || !("signupId" in done)) return done.r;
   const mail = await signupConfirmation({ signupId: done.signupId!, to: ctx.email, who: student ? { self: false, name: student.name } : { self: true } },
     { event: done.event!, shift: { startsAt: clockOf(done.shift!.startsAt), endsAt: clockOf(done.shift!.endsAt), role: done.shift!.role, revision: done.shift!.revision } }, { zone, cutoffHours, now });
   const sent = await sendMail(mail, { purpose: "volunteer_confirm", actor: { door: "parent", id: ctx.parentId, label: ctx.email }, ip: ctx.ip });
   const whoDone = student ? `${student.name} is signed up` : "You're signed up";
   return { ok: true, message: sent.ok ? `${whoDone}. Thank you! We've emailed you the details, with a calendar file.` : `${whoDone}. Thank you! We couldn't send the email with the details just now; they're on this page.` };
+}
+
+const ROSTER_BUSY = "The club's list of families is being brought up to date just now. Please try again in a minute.";
+/** Postgres could not take a lock in time (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
+const lockNotAvailable = (e: unknown): boolean => {
+  const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
+  return code(e) === "55P03" || code((e as { cause?: unknown } | null)?.cause) === "55P03";
+};
+/** The sign-up's transaction, or "busy" when the roster lock wasn't free in time: a refresh of the roster is reading QuickBooks. */
+async function takePlace<T>(work: (tx: Tx) => Promise<T>): Promise<T | "busy"> {
+  try {
+    return await db.transaction(work);
+  } catch (e) {
+    if (lockNotAvailable(e)) return "busy";
+    throw e;
+  }
 }
 
 /**
@@ -226,7 +260,7 @@ export async function cancelMySignup(ctx: ParentCtx, family: Pick<MyFamily, "stu
   return db.transaction(async (tx) => {
     const [s] = await tx.select().from(volunteerSignup)
       .where(and(eq(volunteerSignup.id, signupId), eq(volunteerSignup.familyQboId, ctx.familyQboId), isNull(volunteerSignup.cancelledAt))).for("update");
-    if (!s) return no("That sign-up isn't there any more. Reload the page.");
+    if (!s || (s.studentQboId !== null && !(await studentsStillUnder(ctx.familyQboId, [s.studentQboId], tx)).has(s.studentQboId))) return no("That sign-up isn't there any more. Reload the page.");
     const [row] = await tx.select({ shift: volunteerShift, event: volunteerEvent }).from(volunteerShift).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId)).where(eq(volunteerShift.id, s.shiftId));
     const { shift, event } = row!;
     if (shift.cancelledAt || event.cancelledAt) return no("The club has cancelled this shift, so there's nothing to cancel.");

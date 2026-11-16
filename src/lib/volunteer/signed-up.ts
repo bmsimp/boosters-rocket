@@ -3,7 +3,7 @@
 // the families and students it is asked about, and gives back amounts, never who else is on a shift. It imports no
 // staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import type { Requirement } from "@/lib/seasons/progress";
@@ -14,8 +14,8 @@ import { countsFor, shiftCredit, type Filler } from "./rules";
 /**
  * How much each family or student is signed up for toward each of these volunteer requirements, keyed by `pairKey`
  * (src/lib/seasons/kinds.ts passes its own in): every place they hold, on a shift and an event still on, that counts
- * toward the requirement for them. With `subjectQboIds` (a parent's own family and students) only sign-ups of those
- * are read; null is everyone, for staff.
+ * toward the requirement for them. With `subjectQboIds` (a parent's own family and students) only sign-ups made from
+ * that family are read; null is everyone, for staff.
  */
 export async function signedUpAmounts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string): Promise<Map<string, number>> {
   const amounts = new Map<string, number>();
@@ -30,7 +30,8 @@ export async function signedUpAmounts(requirements: readonly Requirement[], subj
     .where(and(
       inArray(volunteerShiftRequirement.requirementId, requirements.map((r) => r.id)),
       isNull(volunteerShift.cancelledAt), isNull(volunteerEvent.cancelledAt), isNull(volunteerSignup.cancelledAt),
-      subjectQboIds ? or(inArray(volunteerSignup.familyQboId, [...subjectQboIds]), inArray(volunteerSignup.studentQboId, [...subjectQboIds])) : undefined,
+      // A parent's own family's sign-ups alone: a place another family took for a student who has since moved in is theirs, not this family's.
+      subjectQboIds ? inArray(volunteerSignup.familyQboId, [...subjectQboIds]) : undefined,
     ));
   if (rows.length === 0) return amounts;
   const zone = (await getClubSettings()).timeZone;

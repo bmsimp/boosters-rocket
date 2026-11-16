@@ -5,13 +5,14 @@ type Msg = { to: string; subject: string; text: string; html: string; attachment
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { mail.outbox.push(m); } }));
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, qboCustomer, requirement, setting, volunteerSignup } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import { cancelMySignup, loadMyVolunteering, loadShiftForMe, signUpForShift } from "@/lib/volunteer/my-volunteer";
 import { VOLUNTEER_SETTINGS_KEY } from "@/lib/volunteer/settings";
@@ -141,6 +142,35 @@ describe("signing up", () => {
     const again = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
     expect(again.choices.map((c) => c.taken)).toEqual([false, true, false]);
     expect(again.mine).toEqual([{ who: AURELIO!.name }]);
+  });
+
+  it("a place another family took for a student who has since moved in is not counted or listed for the new family, and can't be taken twice", async () => {
+    const a = await seedSignedInParent(FAMILY_A), b = await seedSignedInParent(FAMILY_B);
+    const seeded = await seedSeason({ name: "Fall", steps: [{ name: "Volunteer" }] });
+    const [hours] = await db.insert(requirement).values({ stepId: Object.values(seeded.stepIds)[0]!, kind: "volunteer", title: "Student hours", appliesTo: "student", amount: 6, amountUnit: "hours", position: 0 }).returning();
+    const { shifts: [shift] } = await seedEvent({ shifts: [{ startsAt: "09:00", endsAt: "12:00", requirementIds: [hours!.id] }] });
+    await seedSignup({ shiftId: shift!.id, familyQboId: FAMILY_B.family.qboId, signedUpBy: b.identity.parentId, student: BARNABY! });
+    await db.update(qboCustomer).set({ parentQboId: FAMILY_A.family.qboId }).where(eq(qboCustomer.qboId, BARNABY!.qboId));
+    const season = (await loadMySeason(ctxOf(a.identity), (await famOf(a)).students))!;
+    expect(season.steps[0]!.students.find((s) => s.name === BARNABY!.name)!.lines.map((l) => l.words)).toEqual(["0 of 6 hours done"]);
+    const view = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
+    expect(view.mine).toEqual([]);
+    expect(view.choices.find((c) => c.value === BARNABY!.qboId)!.taken).toBe(true);
+    expect((await loadShiftForMe(ctxOf(b.identity), await famOf(b), shift!.id))!.mine).toEqual([]);
+  });
+
+  it("says the club's list is being updated when a roster refresh holds the lock, rather than failing", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { shifts: [shift] } = await seedEvent({ shifts: [{}] });
+    const family = await famOf(a);
+    let taken!: () => void, letGo!: () => void;
+    const holding = new Promise<void>((r) => { taken = r; }), until = new Promise<void>((r) => { letGo = r; });
+    const refresh = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`); taken(); await until; });
+    await holding;
+    try {
+      expect(await signUpForShift(ctxOf(a.identity), family, shift!.id, "me")).toEqual({ ok: false, errors: ["The club's list of families is being brought up to date just now. Please try again in a minute."] });
+    } finally { letGo(); await refresh; }
+    expect(await live()).toEqual([]);
   });
 
   it("never counts a place on a cancelled shift, a cancelled event or a cancelled sign-up", async () => {
@@ -276,6 +306,21 @@ describe("cancelling", () => {
     const [row] = await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, theirs.id));
     expect(row!.cancelledAt).toBeNull();
     expect(await audits("volunteer.signup.cancel")).toEqual([]);
+  });
+
+  it("a student moved to another family takes their sign-up along: the old family no longer sees it or can cancel it", async () => {
+    const { a, mine } = await seedOwn();
+    const early = new Date("2027-03-01T12:00:00Z");
+    expect((await loadMyVolunteering(ctxOf(a.identity), early)).signups.map((s) => s.id)).toEqual([mine.id]);
+    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, AURELIO!.qboId));
+    const view = await loadMyVolunteering(ctxOf(a.identity), early);
+    expect(view.signups).toEqual([]);
+    expect(JSON.stringify(view)).not.toContain(AURELIO!.name);
+    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, early)).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
+    expect((await live()).map((s) => s.id)).toContain(mine.id);
+    // The same for a student made inactive.
+    await db.update(qboCustomer).set({ parentQboId: FAMILY_A.family.qboId, active: false }).where(eq(qboCustomer.qboId, AURELIO!.qboId));
+    expect((await loadMyVolunteering(ctxOf(a.identity), early)).signups).toEqual([]);
   });
 
   it("says when the club has cancelled the shift, and has nothing to cancel", async () => {
