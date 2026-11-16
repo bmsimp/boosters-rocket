@@ -61,7 +61,7 @@ for (const width of [390, 1280]) {
       const where = await open(page, visit);
       await expect(page.getByRole("heading", { level: 1 }), where).toBeVisible();
       // Open every folded section, so the controls inside are drawn and named too.
-      for (const d of await page.locator("main details:not([open]) > summary").all()) await d.click();
+      await page.locator("main").evaluate((main) => main.querySelectorAll("details").forEach((d) => { d.open = true; }));
       const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(sideways, `${where} scrolls sideways at ${width}px`).toBeLessThanOrEqual(0);
       const tree = await page.locator("body").ariaSnapshot();

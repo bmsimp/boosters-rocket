@@ -17,7 +17,7 @@ export default async function StaffHome() {
   return (
     <main className="wrap single staff-home">
       <h1 className="page-title">Hi, {ctx.name.split(/[ @]/)[0]}</h1>
-      <p className="lede">{e.isAdmin ? "You're an admin. The menu above has every part of the portal; Club, under the menu, sets the club's name and color." : "The menu above has the parts of the portal you have access to."}</p>
+      <p className="lede">{e.isAdmin ? "You're an admin, so the menu above has every part of the portal. Club, in the menu, sets the club's name and color." : "The menu above has the parts of the portal you have access to."}</p>
       <TodayBox reviews={can(e, "Parents.ReadWrite")} writes={can(e, "Roster.Read")} forms={can(e, "Forms.Signature.Read")} shifts={can(e, "Volunteer.Event.Read")} />
       {seesMailWarning(e) && <MailWarning canFix={can(e, "Settings.Mail.ReadWrite")} />}
       {can(e, "Settings.SignIn.ReadWrite") && <SecretExpiryWarning />}

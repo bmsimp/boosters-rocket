@@ -71,7 +71,7 @@ test("an Admin previews, then switches parent sign-ins on (and finds them on the
 
 test("the staff home and the Parents page show the held address; a refusal keeps the note; deciding and reversing work", async ({ page }) => {
   await page.goto("/staff");
-  await expect(page.getByText("1 address to review.")).toBeVisible();
+  await expect(page.getByText("1 address to review", { exact: true })).toBeVisible();
   await page.goto("/staff/parents");
   await expect(page.getByRole("heading", { name: "To review (1)" })).toBeVisible();
   const waiting = page.getByRole("region", { name: /^To review/ });
