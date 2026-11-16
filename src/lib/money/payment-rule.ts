@@ -17,16 +17,17 @@ export const NO_INVOICE_YET: Standing = { met: false, words: "No invoice yet" };
  * `invoices` is undefined when nothing can be said for them (no figures that may be shown): that, no item chosen yet,
  * and no invoice carrying the item all read "No invoice yet". An invoice paid by a credit has no balance left, and is
  * paid. A credit the family holds that hasn't been applied pays nothing: the invoice is still open in QuickBooks.
+ * With `amount` false the words leave out how much is left to pay.
  */
-export function paymentStanding(itemQboId: string | null, invoices: readonly StoredInvoice[] | undefined): Standing {
+export function paymentStanding(itemQboId: string | null, invoices: readonly StoredInvoice[] | undefined, o: { amount: boolean } = { amount: true }): Standing {
   if (itemQboId === null || invoices === undefined) return NO_INVOICE_YET;
   const carrying = invoices.filter((i) => i.itemQboIds?.includes(itemQboId));
   if (carrying.length === 0) return NO_INVOICE_YET;
   const open = carrying.filter((i) => i.balanceCents > 0);
   if (open.length === 0) return PAID;
   const currencies = new Set(open.map((i) => i.currency));
-  // Invoices in two currencies have no one amount to say.
-  if (currencies.size > 1) return { met: false, words: "Not paid yet" };
+  // Invoices in two currencies have no one amount to say; and the amount is said only to whoever may read it, from figures that are current.
+  if (currencies.size > 1 || !o.amount) return { met: false, words: "Not paid yet" };
   return { met: false, words: `Not paid yet (${formatMoney(open.reduce((sum, i) => sum + i.balanceCents, 0), open[0]!.currency)} left to pay)` };
 }
 

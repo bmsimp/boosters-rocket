@@ -38,6 +38,6 @@ export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId">, students
   const mine = new Set(under.map((c) => c.qboId));
   const family: FamilyRoster = { familyQboId, students: (students ?? []).filter((s) => mine.has(s.qboId)).map((s) => ({ qboId: s.qboId, name: s.name })) };
   // The waiver reasons that come back with the standing are for staff, and stop here.
-  const { today, standing } = await loadFamilyStanding(current.id, family);
+  const { today, standing } = await loadFamilyStanding(current.id, family, "fresh");
   return { name: current.name, today, ...standing };
 }

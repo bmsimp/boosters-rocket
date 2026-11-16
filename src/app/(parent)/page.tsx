@@ -4,7 +4,8 @@ import { firstName } from "@/lib/parents/first-name";
 import { getClubSettings } from "@/lib/settings/club";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import { DetailsBox, FamilyStepBox, NotSetUpBox, RosterAsOf, StudentsBox } from "./family-boxes";
-import { MoneyBox } from "./money-box";
+import { loadFamilyMoney } from "@/lib/money/family-money";
+import { MoneySection } from "./money-box";
 import { SeasonRuler } from "./season-parts";
 
 export const metadata = { title: "Home" };
@@ -20,6 +21,9 @@ export const metadata = { title: "Home" };
 export default async function ParentHome() {
   const ctx = await requireParentPage();
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
+  // The family's money first: a read that brings stale figures up to date is made before the season's payment lines
+  // are worked out from the same row, so the money box and those lines never disagree on one page.
+  const money = family ? await loadFamilyMoney(ctx.familyQboId) : null;
   // The club's current season as it stands for this family: only for a family the roster may show, and null when no
   // season is current. With none there is no ruler, and nothing in its place.
   const season = family ? await loadMySeason(ctx, family.students) : null;
@@ -34,7 +38,7 @@ export default async function ParentHome() {
         {family ? (
           <>
             {/* Only for a family the roster may show: when it may not, nothing of it is shown, money included. */}
-            <MoneyBox ctx={ctx} />
+            {money && <MoneySection money={money} more />}
             {family.students ? <StudentsBox students={family.students} season={season} /> : season && <FamilyStepBox season={season} />}
             <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} />
             <RosterAsOf family={family} />

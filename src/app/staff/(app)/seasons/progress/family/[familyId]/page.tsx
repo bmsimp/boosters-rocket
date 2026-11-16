@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
 import { isUuid } from "@/lib/seasons/ids";
 import { pairKey } from "@/lib/seasons/kinds";
@@ -49,7 +50,7 @@ export default async function FamilyProgressPage({ params, searchParams }: {
   const asked = typeof sp.season === "string" ? sp.season : null;
   if (qboId.length === 0 || qboId.length > 64 || (asked !== null && !isUuid(asked))) notFound();
   const seasonId = asked ?? await defaultProgressSeasonId();
-  const progress = seasonId ? await loadFamilyProgress(qboId, seasonId) : null;
+  const progress = seasonId ? await loadFamilyProgress(qboId, seasonId, can(ctx.effective, "Finance.Balance.Read") ? "all" : "none") : null;
   if (!progress) notFound();
   // A staff read of one family's data (spec §5): recorded before anything is shown.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "season.progress.family.read", permission: "Season.Progress.Read",

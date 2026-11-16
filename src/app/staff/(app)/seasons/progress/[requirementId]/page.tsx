@@ -30,7 +30,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
 }) {
   const ctx = await requireStaffPage("Season.Progress.Read");
   const [{ requirementId }, sp] = await Promise.all([params, searchParams]);
-  const progress = isUuid(requirementId) ? await loadRequirementProgress(requirementId) : null;
+  const progress = isUuid(requirementId) ? await loadRequirementProgress(requirementId, can(ctx.effective, "Finance.Balance.Read") ? "all" : "none") : null;
   if (!progress) notFound();
   const { requirement: r, step, season, rows, left, counts, ticked, rosterTag } = progress;
   const canChange = can(ctx.effective, "Season.Progress.ReadWrite");

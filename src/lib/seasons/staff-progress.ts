@@ -50,13 +50,17 @@ async function staffNames(ids: (string | null)[]): Promise<Map<string, string>> 
   return new Map((await db.select({ id: staffUser.id, name: staffUser.name }).from(staffUser).where(inArray(staffUser.id, wanted))).map((s) => [s.id, s.name]));
 }
 
-/** One requirement and how it stands for everyone it is asked of; null when there is no such requirement. */
-export async function loadRequirementProgress(requirementId: string): Promise<RequirementProgress | null> {
+/**
+ * One requirement and how it stands for everyone it is asked of; null when there is no such requirement. `amounts`
+ * is "all" for staff who may read what families owe (Finance.Balance.Read), else "none": a payment then reads "Not
+ * paid yet" with no amount.
+ */
+export async function loadRequirementProgress(requirementId: string, amounts: "all" | "none"): Promise<RequirementProgress | null> {
   const setup = await getRequirementSetup(requirementId);
   if (!setup) return null;
   // Read before the roster: a change of company in between makes the tag the older one, and a write is refused.
   const rosterTag = await currentRosterTag();
-  const [families, { facts, recorded }] = await Promise.all([loadSubjects(), loadFacts([setup.requirement], null)]);
+  const [families, { facts, recorded }] = await Promise.all([loadSubjects(), loadFacts([setup.requirement], null, amounts)]);
   const who = await staffNames(recorded.flatMap((r) => [r.metBy, r.waivedBy]));
   const by = new Map(recorded.map((r) => [r.subjectQboId, r]));
   const covered = families ? coveredBy(setup.requirement, families) : null;
@@ -90,7 +94,7 @@ export async function loadProgressOverview(seasonId: string): Promise<ProgressOv
   const rows = steps.length ? await db.select().from(requirement).where(inArray(requirement.stepId, steps.map((x) => x.id))).orderBy(asc(requirement.position), asc(requirement.createdAt)) : [];
   const covers = await loadCovers(rows.map((r) => r.id), null);
   const requirements = rows.map((r) => ({ stepId: r.stepId, requirement: toRequirement(r, covers.get(r.id) ?? []) }));
-  const [families, { facts }] = await Promise.all([loadSubjects(), loadFacts(requirements.map((r) => r.requirement), null)]);
+  const [families, { facts }] = await Promise.all([loadSubjects(), loadFacts(requirements.map((r) => r.requirement), null, "none")]);
   return {
     season: { id: s.id, name: s.name, isCurrent: s.isCurrent }, roster: families !== null,
     steps: steps.map((x) => ({ id: x.id, name: x.name, requirements: requirements.filter((r) => r.stepId === x.id).map(({ requirement: r }) => ({
@@ -122,11 +126,11 @@ export type FamilyProgress = SeasonStanding & {
  * student's id, a parent's, a family QuickBooks has made inactive). Only that family's records are read. The page that
  * shows this audits the read.
  */
-export async function loadFamilyProgress(familyQboId: string, seasonId: string): Promise<FamilyProgress | null> {
+export async function loadFamilyProgress(familyQboId: string, seasonId: string, amounts: "all" | "none"): Promise<FamilyProgress | null> {
   const [families, [s]] = await Promise.all([loadSubjects(), db.select().from(season).where(eq(season.id, seasonId))]);
   const family = families?.find((f) => f.qboId === familyQboId);
   if (!family || !s) return null;
-  const { today, standing, recorded } = await loadFamilyStanding(s.id, { familyQboId: family.qboId, students: family.students });
+  const { today, standing, recorded } = await loadFamilyStanding(s.id, { familyQboId: family.qboId, students: family.students }, amounts);
   const who = await staffNames(recorded.map((r) => r.waivedBy));
   const waivers = new Map(recorded.filter((r) => r.waivedAt !== null).map((r) => [pairKey(r.requirementId, r.subjectQboId),
     { reason: r.waivedReason ?? "", at: r.waivedAt!.toISOString(), by: r.waivedBy ? who.get(r.waivedBy) ?? null : null }]));

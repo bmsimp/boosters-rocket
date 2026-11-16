@@ -36,7 +36,7 @@ describe("the kinds of requirement", () => {
     const rule = KIND_RULES.checklist!;
     expect(rule.ticked).toBe(true);
     expect(rule.nothingYet(item)).toEqual({ met: false, words: "Not done yet" });
-    const standings = await rule.standings({ requirements: [item], subjectQboIds: null, recorded: [
+    const standings = await rule.standings({ requirements: [item], subjectQboIds: null, amounts: "none", recorded: [
       row({ subjectQboId: "LEO", metAt: new Date() }),
       row({ subjectQboId: "MAYA", waivedAt: new Date(), waivedReason: "borrowed one" }),
       row({ subjectQboId: "NICO", metAt: new Date(), waivedAt: new Date(), waivedReason: "both" }),

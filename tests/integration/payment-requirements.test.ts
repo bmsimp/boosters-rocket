@@ -17,13 +17,15 @@ import { runMoneyJob } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { loadMySeason } from "@/lib/seasons/my-season";
-import { loadRequirementProgress } from "@/lib/seasons/staff-progress";
+import { loadFamilyProgress, loadRequirementProgress } from "@/lib/seasons/staff-progress";
+import HomePage from "@/app/(parent)/page";
+import RequirementProgressPage from "@/app/staff/(app)/seasons/progress/[requirementId]/page";
 import SeasonPage from "@/app/(parent)/season/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
 import { addRequirementAction, createSeasonAction, setTicksAction } from "@/app/staff/(app)/seasons/actions";
 import { chooseItemAction, readItemsAction } from "@/app/staff/(app)/seasons/payment-actions";
 import { resetDb, seedStaff } from "../helpers/db";
-import { connectCompany, invoiceQueries, RIVERA, stubInvoice as inv } from "../helpers/money";
+import { ageMoney, connectCompany, invoiceQueries, RIVERA, stubInvoice as inv } from "../helpers/money";
 import { MONEY_REALM, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, stu } from "../helpers/roster-cache";
@@ -117,7 +119,7 @@ describe("what a parent reads for a payment requirement", () => {
     const fall = await seeded();
     invoices();
     await runMoneyJob({ paceMs: 0 });
-    const uniform = (await loadRequirementProgress(fall.requirementIds["Uniform fee"]!))!;
+    const uniform = (await loadRequirementProgress(fall.requirementIds["Uniform fee"]!, "all"))!;
     expect(uniform.ticked).toBe(false);
     expect(uniform.rows!.map((r) => [r.name, r.words])).toEqual([[RAFFERTY.name, "Not paid yet ($40.50 left to pay)"], [ROMILLY.name, "No invoice yet"]]);
     expect(uniform.counts).toEqual({ asked: 2, done: 0, waived: 0, todo: 2 });
@@ -128,6 +130,38 @@ describe("what a parent reads for a payment requirement", () => {
     // The parent's own query agrees with the staff page.
     const mine = await loadMySeason(rivera.identity, (await loadMyFamily({ ...rivera.identity, ip: null }))!.students);
     expect(mine!.steps[0]!.family.map((l) => [l.title, l.state])).toEqual([["Band fee", "done"], ["Trip deposit", "todo"]]);
+  });
+});
+
+describe("how much is left to pay is said only from current figures, and only to whoever may read it", () => {
+  it("a parent's Season page leaves the amount out of figures that are not current, and Home brings them up to date before its lines", async () => {
+    await seeded();
+    invoices();
+    await runMoneyJob({ paceMs: 0 });
+    await ageMoney(FAMILY, 2 * 86_400_000); // read two days ago
+    const stale = await seasonText();
+    expect(stale).toContain(`${RAFFERTY.name} Uniform fee Not paid yet`);
+    expect(stale).not.toContain("$40.50");
+    // Paid since: QuickBooks says so, and Home reads it before it works out the season's lines.
+    stub.invoices = [stub.invoices[0]!, { ...line("2", [sale(UNIFORM, 100)], { TotalAmt: 100, Balance: 0 }), CustomerRef: { value: RAFFERTY.qboId } }];
+    asParent(rivera.identity);
+    const home = textOf(await renderPage(HomePage));
+    expect(home).not.toContain("$40.50");
+    expect(home).toContain("Uniform fee Paid");
+  });
+
+  it("staff read the amount on the progress pages only with Finance.Balance.Read", async () => {
+    const fall = await seeded();
+    invoices();
+    await runMoneyJob({ paceMs: 0 });
+    const params = { params: { requirementId: fall.requirementIds["Uniform fee"]! } };
+    asStaff(await withRole("ticker@club.org", ["Season.Progress.Read"]));
+    const without = textOf(await renderPage(RequirementProgressPage, params));
+    expect(without).toContain("Not paid yet");
+    expect(without).not.toContain("$40.50");
+    expect(JSON.stringify(await loadFamilyProgress(FAMILY, fall.seasonId, "none"))).not.toContain("$40.50");
+    asStaff(await withRole("treasurer@club.org", ["Season.Progress.Read", "Finance.Balance.Read"]));
+    expect(textOf(await renderPage(RequirementProgressPage, params))).toContain("Not paid yet ($40.50 left to pay)");
   });
 });
 

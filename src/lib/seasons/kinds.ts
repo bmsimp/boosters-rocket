@@ -5,7 +5,7 @@
  */
 import type { RequirementKind } from "@/lib/db/schema";
 import { NO_INVOICE_YET } from "@/lib/money/payment-rule";
-import { paymentStandings } from "@/lib/money/payment-standings";
+import { paymentStandings, type AmountsShown } from "@/lib/money/payment-standings";
 import { volunteerStanding } from "@/lib/volunteer/rules";
 import { signedUpAmounts } from "@/lib/volunteer/signed-up";
 import { formRule } from "@/lib/forms/kind";
@@ -26,9 +26,9 @@ export type KindRule = {
    * How things stand for these requirements (all of this kind) and these families or students, keyed by pairKey().
    * `subjectQboIds` is null when staff ask about everyone. `recorded` is what requirement_progress holds for them; a
    * kind judged from its own records (invoices, signatures, volunteer credit) reads those here instead. A pair left
-   * out stands as `nothingYet`.
+   * out stands as `nothingYet`. `amounts` says whether a payment's words may say how much is left to pay.
    */
-  standings(ask: { requirements: readonly Requirement[]; subjectQboIds: readonly string[] | null; recorded: readonly Recorded[] }): Promise<Map<string, Standing>>;
+  standings(ask: { requirements: readonly Requirement[]; subjectQboIds: readonly string[] | null; recorded: readonly Recorded[]; amounts: AmountsShown }): Promise<Map<string, Standing>>;
   /** How a requirement stands for a family or student with nothing to show for it yet. */
   nothingYet(requirement: Requirement): Standing;
   /** True when staff meet it by hand, with a tick (requirement_progress.met_at). */
@@ -45,8 +45,8 @@ const checklist: KindRule = {
 const payment: KindRule = {
   // Met when invoices carrying its QuickBooks product or service exist for the family or student and none of them is
   // still open (src/lib/money/payment-rule.ts), judged from the figures QuickBooks last gave the family.
-  standings: async ({ requirements, subjectQboIds }) =>
-    new Map((await paymentStandings(requirements, subjectQboIds)).map((s) => [pairKey(s.requirementId, s.subjectQboId), s.standing])),
+  standings: async ({ requirements, subjectQboIds, amounts }) =>
+    new Map((await paymentStandings(requirements, subjectQboIds, amounts)).map((s) => [pairKey(s.requirementId, s.subjectQboId), s.standing])),
   nothingYet: () => NO_INVOICE_YET,
   ticked: false,
 };
