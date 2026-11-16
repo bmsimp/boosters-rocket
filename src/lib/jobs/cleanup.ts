@@ -16,14 +16,14 @@ export type CleanupCounts = {
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
-  signinCodes: ["sign-in code", "sign-in codes"], rateLimitEvents: ["sign-in limit record", "sign-in limit records"],
+  signinCodes: ["sign-in code", "sign-in codes"], rateLimitEvents: ["rate-limit record", "rate-limit records"],
   emailChanges: ["expired email change", "expired email changes"], familyMoney: ["set of figures for a family no longer in the roster", "sets of figures for families no longer in the roster"],
   jobRuns: ["old job record", "old job records"],
 };
 
 export const removedInAll = (c: CleanupCounts): number => Object.values(c).reduce((a, b) => a + b, 0);
 
-/** The counts as a sentence for the job history, e.g. "Removed 3 expired parent sessions and 12 sign-in limit records." */
+/** The counts as a sentence for the job history, e.g. "Removed 3 expired parent sessions and 12 rate-limit records." */
 export function describeCleanup(c: CleanupCounts): string {
   const parts = (Object.keys(WORDS) as (keyof CleanupCounts)[]).filter((k) => c[k] > 0).map((k) => `${c[k]} ${WORDS[k][c[k] === 1 ? 0 : 1]}`);
   if (parts.length === 0) return "Nothing to remove.";
@@ -38,7 +38,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   renewed by use (sessions.ts), so one that has run out was not used for 90 days.
  * - Sign-in codes that are used or have expired, once they are older than the wait between two sends: until then the
  *   newest code, used or not, is what holds back the next one (signin-codes.ts).
- * - Sign-in limit records older than their kind's window (rate-limit.ts counts only those inside it).
+ * - Rate-limit records older than their kind's window (rate-limit.ts counts only those inside it): the sign-in limits
+ *   and the limits on a parent's own contact edits, each kind by its own window.
  * - Email changes whose link has expired, confirmed or not.
  * - Money figures for a family the roster cache no longer holds: nobody can be shown them (family-money.ts). Skipped
  *   while the cache holds no customers at all, which says the roster is missing, not that every family left.

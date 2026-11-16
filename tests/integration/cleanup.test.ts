@@ -69,7 +69,7 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(left).not.toContain(expiredGone); expect(left).not.toContain(usedOld);
   });
 
-  it("sign-in limit records: only those outside their kind's window, an unknown kind after the longest window", async () => {
+  it("rate-limit records: only those outside their kind's window, an unknown kind after the longest window", async () => {
     const w = RATE_LIMITS.code_send_email.windowMs;
     const longest = Math.max(...Object.values(RATE_LIMITS).map((l) => l.windowMs));
     const rows = await db.insert(rateLimitEvent).values([
@@ -80,9 +80,15 @@ describe("the daily clean-up deletes only what is past use", () => {
       { kind: "code_check_ip", subject: "203.0.113.7", at: at(-RATE_LIMITS.code_check_ip.windowMs + SEC) }, // stays
       { kind: "from_a_later_version", subject: "x", at: at(-longest - SEC) },      // gone
       { kind: "from_a_later_version", subject: "x", at: at(-longest + SEC) },      // stays
+      // A parent's own contact edits are counted in the same table, a save over an hour: each kind goes by its own window.
+      { kind: "contact_save_parent", subject: "p-1", at: at(-w - SEC) },           // past the sign-in window, inside its own: stays
+      { kind: "contact_save_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_save_parent.windowMs - SEC) }, // gone
+      { kind: "contact_open_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_open_parent.windowMs + SEC) }, // stays
+      { kind: "contact_open_parent", subject: "p-1", at: at(-RATE_LIMITS.contact_open_parent.windowMs - SEC) }, // gone
     ]).returning({ id: rateLimitEvent.id });
-    expect(await clean()).toEqual({ ...NOTHING, rateLimitEvents: 3 });
-    expect(await ids(db.select({ id: rateLimitEvent.id }).from(rateLimitEvent))).toEqual([rows[1], rows[2], rows[4], rows[6]].map((r) => String(r!.id)).sort());
+    expect(RATE_LIMITS.contact_save_parent.windowMs).toBeGreaterThan(w);
+    expect(await clean()).toEqual({ ...NOTHING, rateLimitEvents: 5 });
+    expect(await ids(db.select({ id: rateLimitEvent.id }).from(rateLimitEvent))).toEqual([rows[1], rows[2], rows[4], rows[6], rows[7], rows[9]].map((r) => String(r!.id)).sort());
   });
 
   it("email changes: an expired link goes, confirmed or not; one with a second left stays", async () => {
@@ -149,7 +155,7 @@ describe("a run of the clean-up", () => {
     const r = await runCleanup();
     expect(r).toEqual({ ok: true, counts: { ...NOTHING, parentSessions: 2, rateLimitEvents: 1 } });
     const [run] = await runs();
-    expect(run).toMatchObject({ outcome: "ok", startedBy: "worker", detail: "Removed 2 expired parent sessions and 1 sign-in limit record." });
+    expect(run).toMatchObject({ outcome: "ok", startedBy: "worker", detail: "Removed 2 expired parent sessions and 1 rate-limit record." });
     const rows = await audits();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ door: "system", actorLabel: "worker", targetType: "job_run", targetId: String(run!.id), after: { ...NOTHING, parentSessions: 2, rateLimitEvents: 1 }, ip: null });
@@ -181,6 +187,6 @@ describe("a run of the clean-up", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
     expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5 }))
-      .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 sign-in limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
+      .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
   });
 });
