@@ -342,9 +342,9 @@ The club's own header. 56px, `club` fill, `club-on` text: monogram (34px circle,
 
 ### Season set ruler (signature)
 The club's season steps drawn as yard-line cells. Not a control.
-- **Heading:** Label style, "Fall season · **Set 2 of 5**", current part in `ink`. On phones (<760px) the current set's name is always appended in the heading ("Set 2 of 5: Forms"), so a hidden cell label loses nothing; at 760px+ it is dropped from the heading.
+- **Heading:** Label style, "Fall season · **Set 2 of 5**", current part in `ink`. On phones (<760px) the current set's name is always appended in the heading ("Set 2 of 5: Forms"), so a hidden cell label loses nothing; at 760px+ it is dropped from the heading. On Home it is a labelled line (`p.season-title`), not a second page heading: Home's `h1` is the greeting. Beside it sits the way to the Season page ("See the whole season", `club-text` bold, 44px tall); it wraps under the heading when there is no room. When every set is done the heading says so ("All 5 sets done").
 - **Cells:** equal columns (`--count` = number of sets), 2px `ink` left rules with a closing right rule, min 60px tall; hash ticks along the foot (2px ink at 25% intervals, 45% opacity, 6px tall; full opacity in high contrast).
-- **States:** done sets show a tick and number in `done` plus hidden ", done"; the current set (`aria-current="step"`) fills with `club`, its number, label and ticks in `club-on`, plus hidden ", current set"; future sets in `ink-2`.
+- **States:** done sets show a tick and number in `done` plus hidden ", done"; the current set (`aria-current="step"`) fills with `club`, its number, label and ticks in `club-on`, plus hidden ", current set"; future sets in `ink-2`. The ruler reads left to right: only a set behind the current one is ticked, and one the family left unfinished there has no tick and hidden ", not finished". A set ahead is drawn as still to come, even when it asks nothing of the family.
 - **Labels that don't fit:** each cell is a size container; under 76px wide (narrow phone, larger text, zoom) its label hides and the number stays. Labels clamp to two lines otherwise.
 - **Students on set:** one 20px dot per student under the current set, initial in Barlow 700 0.75rem. Finished: `done` fill, paper initial. Still to do: paper fill, `due` 2px inset ring and initial. On the club-filled current set every dot gets a 2px `club-on` outline and the dots spread to an 8px gap, so each keeps an edge whatever the club color. Dots are decoration; the same facts are stated in words in the students box.
 - **Many sets:** with more than 6 sets on a phone (<760px) every label hides and cells show numbers only. At 760px+ labels return.
@@ -355,7 +355,7 @@ The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px
 
 ### Money lines and total
 - One row per open invoice: what ("Fall uniform fee, Maya"), a meta date line, and the amount right-aligned in tabular figures.
-- **Urgency ramp, on the date line only:** due later `ink-2` ("Due Nov 22"); due soon `due` bold with the distance ("Due Nov 15, in 8 days"); past due `late` bold ("Was due Oct 30"). Amounts never change color. Paid rows show "Paid Aug 28" and a `done` "Paid" under the amount.
+- **Urgency ramp, on the date line only:** due later `ink-2` ("Due Nov 22"); due soon `due` bold with the distance ("Due Nov 15, in 8 days"); past due `late` bold ("Was due Oct 30"). Amounts never change color. Paid rows show "Paid Aug 28" and a `done` "Paid" under the amount. "Soon" and "past" are counted from the club's own date, in the club's time zone, for an invoice and for a season requirement alike, so every parent of a club reads the same words on the same day.
 - **Total:** one amount column that sums to a 2px `ink` rule and a bold "Total". The big Display figure above equals the Total.
 - **One Pay per invoice:** QuickBooks pays one invoice at a time. The soonest-due invoice gets the filled black Pay with an arrow; others get outlined Pay. Each Pay's accessible name states the amount and invoice.
 - **As of:** the owed figure always carries its source and time ("Owed now. From QuickBooks, as of 2:14 pm.").
@@ -381,7 +381,7 @@ A set of radio buttons drawn as ruled options; the Display page is built from th
 Account / Display, reached from the account control. One box of four choice groups, in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger, each option name previewed at its own size), **Motion** (Match my device, Reduce motion). "Match my device" is always first and is the default. Changes apply at once; a closing `ink-2` note says the choice is saved on this device only.
 
 ### State line
-One vocabulary across the product: **to do, waiting, done, closed**. Each is an icon plus words in Atkinson 700 0.9375rem. Built so far: to do = `due` alert-circle plus "2 forms to sign"; done = `done` tick plus "All forms signed". Waiting and closed must follow the same icon-plus-words pattern; their icon and color are not yet drawn. Counts beside a person ("1 of 3 signed") are Barlow 600 1rem, `ink-2`, right-aligned.
+One vocabulary across the product: **to do, waiting, done, closed**. Each is an icon plus words in Atkinson 700 0.9375rem. Built so far: to do = `due` alert-circle plus "2 forms to sign"; done = `done` tick plus "All forms signed"; and a third, waived = `ink-2` struck circle plus "Waived", for a requirement the club has let a family or student off (the reason is never shown to the family). Waiting and closed must follow the same icon-plus-words pattern; their icon and color are not yet drawn. Counts beside a person ("1 of 3 signed") are Barlow 600 1rem, `ink-2`, right-aligned.
 
 ### Details list
 Two-column definition list: Label-style terms in `ink-2`, values in Body row.
@@ -389,6 +389,7 @@ Two-column definition list: Label-style terms in `ink-2`, values in Body row.
 ### Navigation
 - **Phone:** fixed bottom tab bar, 2px `ink` top rule, one 64px tab of equal width for each parent page that exists (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labeled ("2 to sign").
 - **Desktop (760px+):** tabs hide; links move into the club bar in Barlow 600 1.125rem, `club-on`, active marked by a 3px inset underline.
+- **Staff menu (760px+):** a staff member's menu can hold more links than one row has room for (fourteen for an Admin). On staff pages the links wrap onto further rows inside the bar, right-aligned, and the bar grows to hold them; a link's own words never break, and the club's name keeps at most two fifths of the row. With few links the bar is one 56px row, as for parents. The parent bar never wraps: it is always 56px, which the season ruler's grid counts on. Below 760px staff get the Menu button. Grouping the staff menu is still to be designed (`docs/ui-backlog.md`).
 
 ### Focus
 `:focus-visible` everywhere: `club-text` outline, 3px (4px in high contrast), 2px offset; `club-on` inside the club bar. High contrast also thickens link underlines to 2px.
