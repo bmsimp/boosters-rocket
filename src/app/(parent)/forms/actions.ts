@@ -6,7 +6,10 @@ import { NOT_YOUR_FORM, agreeToSign, checkMyForm, startMyFormAgain, type FormAct
 
 /**
  * What a guardian does on a form's page (v1 spec §9.2). Each action takes the id of the request from the page's
- * address. It comes from the browser, whatever its type says: it is checked here for type and size, and the library
+ * address. After an action that worked, the pages that show the form are revalidated, and Next.js draws the page the
+ * guardian is on again in the same answer: the page never asks for itself a second time (two draws at once would
+ * both try to make the form's document).
+ * The id comes from the browser, whatever its type says: it is checked here for type and size, and the library
  * looks it up within the session's family (findMyForm), so an id that is another family's, or nobody's, gets the same
  * refusal and changes nothing. Whose signature this is comes from the session alone.
  */
@@ -36,6 +39,7 @@ export const checkFormAction = parentAction(async (ctx, requestId: string): Prom
   if (!id) return NOT_YOUR_FORM;
   const { state, ...result } = await checkMyForm(ctx, id);
   if (!result.ok) return result;
+  // Drawn again whatever the answer: the webhook or the worker may have stored it a moment before this asked.
   shown();
   return { ...result, settled: state !== "signed" };
 });

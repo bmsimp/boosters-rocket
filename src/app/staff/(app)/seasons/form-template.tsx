@@ -30,7 +30,9 @@ export async function FormTemplateBox({ requirementId, appliesTo, canChange }: {
       ) : <p>No template is attached yet, so parents read that this form isn&apos;t ready.</p>}
       {!ready && <p role="status">Forms aren&apos;t set up yet. An Admin connects the club&apos;s Documenso under <a href="/staff/settings/forms">Forms settings</a>; then a template can be attached.</p>}
       {canChange && ready && (
-        <details className="more" open={!setting}><summary>{setting ? "Attach another template, or change who signs" : "Attach a template"}</summary>
+        // Folded like the page's other forms, and left to the browser to open and close: drawn again after a
+        // template is attached, it stays open, with what the action said still on the screen.
+        <details className="more"><summary>{setting ? "Attach another template, or change who signs" : "Attach a template"}</summary>
           <p className="hint">Make the form as a template in Documenso first. The portal fills in names, so the template needs: one or two signers;
             {appliesTo === "student" ? <> a text field labelled <b>{SUBJECT_LABEL.student}</b> for the first signer;</> : <> if the family is named on it, a text field labelled <b>{SUBJECT_LABEL.family}</b> for the first signer;</>}
             {" "}a text field labelled <b>{guardianLabel(1)}</b> for the first signer (and <b>{guardianLabel(2)}</b> for the second); a signature field for each signer.

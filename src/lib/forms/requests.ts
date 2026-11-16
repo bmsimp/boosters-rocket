@@ -99,6 +99,19 @@ export async function claim(requestId: string, at: Date = new Date()): Promise<b
   return Array.from(rows as ArrayLike<{ id: string }>).length > 0;
 }
 export const CLAIM_MS = 60_000;
+/**
+ * Waits, briefly, for whoever holds the request to finish making its document: two draws of one page, or two
+ * guardians at the same moment. The row as it stands when the hold is gone, or null when it is still held.
+ */
+export async function whenReleased(requestId: string, waitMs = 8_000): Promise<RequestRow | null> {
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const [row] = await db.select().from(signatureRequest).where(eq(signatureRequest.id, requestId));
+    if (!row || row.preparingAt === null) return row ?? null;
+    if (Date.now() >= until) return null;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
 export async function release(requestId: string): Promise<void> {
   await db.update(signatureRequest).set({ preparingAt: null }).where(eq(signatureRequest.id, requestId));
 }

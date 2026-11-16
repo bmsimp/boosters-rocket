@@ -372,6 +372,19 @@ describe("signing a form", () => {
     expect(stub.documentFor(id)!.status).toBe("PENDING");
   });
 
+  it("makes one document when the form is opened twice at the same moment: the second open waits and reads the first's", async () => {
+    const { ctx } = await scene({ signers: "any", roles: 2 });
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    await agreeToSign(ctx, id, null);
+    stub.delayMs = 120; // each call to Documenso takes a moment, as a real one does
+    const [first, second, third] = await Promise.all([open(ctx, id), open(ctx, id), open(ctx, id)]);
+    expect(stub.documents()).toHaveLength(1);
+    expect(stub.apiCalls("/envelope/use")).toHaveLength(1);
+    const token = stub.documentFor(id)!.recipients[0]!.token;
+    for (const view of [first, second, third]) expect(tokenIn(view)).toBe(token);
+    expect((await requestNow(id)).preparingAt).toBeNull();
+  });
+
   it("does not make a document from a template whose name fields are no longer read-only", async () => {
     const { ctx, template } = await scene({ signers: "any", roles: 1 });
     const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);

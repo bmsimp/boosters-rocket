@@ -85,7 +85,7 @@ test("an Admin finds Forms settings not set up, with the webhook address on the 
   const res = await page.goto("/staff/settings/forms");
   expect(res?.status()).toBe(200);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Forms");
-  await expect(page.getByRole("region", { name: "Connection" })).toContainText("Forms aren't set up yet.");
+  await expect(page.getByRole("region", { name: "Connection", exact: true })).toContainText("Forms aren't set up yet.");
   await expect(page.getByLabel("Webhook URL")).toHaveValue(`${baseURL}/api/documenso/webhook`);
   // Checking a connection that isn't saved calls nothing and says what to do first.
   await page.getByRole("button", { name: "Check the connection" }).click();

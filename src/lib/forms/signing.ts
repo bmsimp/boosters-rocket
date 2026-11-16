@@ -20,7 +20,7 @@ import {
 } from "@/lib/documenso/client";
 import { hasConsent, recordConsent } from "./consent";
 import { findMyForm, type MyForm } from "./my-forms";
-import { NO_DOCUMENT, asking, claim, readAndStore, release, type RequestRow } from "./requests";
+import { NO_DOCUMENT, asking, claim, readAndStore, release, whenReleased, type RequestRow } from "./requests";
 import { getFormsConfig } from "./settings";
 import { readDocument, signersFor, stillRight, wordsFor, type SignerIdentity } from "./states";
 import { checkTemplate, type TemplatePlan } from "./template";
@@ -207,6 +207,10 @@ function stepFor(ctx: ParentCtx, config: DocumensoConfig, row: RequestRow, envel
  * when it is this guardian's turn the answer holds the address of the signing frame with their own token.
  */
 export async function openMyForm(ctx: ParentCtx, form: MyForm): Promise<FormView> {
+  return open(ctx, form, true);
+}
+
+async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<FormView> {
   let { row } = form;
   // Finished one way or the other: what the portal last stored is all there is to say, and Documenso isn't asked.
   if (row.state === "complete") return viewOf(ctx, row, { kind: "complete" });
@@ -235,7 +239,12 @@ export async function openMyForm(ctx: ParentCtx, form: MyForm): Promise<FormView
   }
 
   // No document, or one nobody has signed that is no longer the right one: withdraw it and make it again.
-  if (!(await claim(row.id))) return viewOf(ctx, row, { kind: "unavailable" });
+  if (!(await claim(row.id))) {
+    // Another open is making this document right now (the page drawn twice, or the other guardian at the same
+    // moment). When it has finished, this open reads what it made; it never makes a second one.
+    const settled = mayWait ? await whenReleased(row.id) : null;
+    return settled ? open(ctx, { ...form, row: settled }, false) : viewOf(ctx, row, { kind: "unavailable" });
+  }
   try {
     if (row.envelopeId !== null) {
       const why = row.signers.some((s) => s.parentId === ctx.parentId) ? "The names, the guardians or the template changed before anyone signed" : "Another guardian opened it before anyone signed";

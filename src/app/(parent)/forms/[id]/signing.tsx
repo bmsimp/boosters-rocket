@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { agreeToSignAction, checkFormAction, startFormAgainAction } from "../actions";
 
 // The parts of a form's page that act (v1 spec §9.2). Each is given only what it shows or sends: the id of the
 // request, which is in the page's address already, and for the frame its address and where its messages come from.
+// None of them asks for the page again: an action that worked revalidates it, and Next.js draws it again with the
+// action's answer. Asking as well would draw the page twice at once.
 type Result = { ok: true; message: string; settled?: boolean } | { ok: false; errors: string[] };
 const failed: Result = { ok: false, errors: [ACTION_FAILED] };
 
@@ -14,16 +15,14 @@ function Outcome({ result }: { result: Result | null }) {
   return result.ok ? <p role="status">{result.message}</p> : <ul role="alert" className="errors">{result.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
 }
 
-/** One button that runs an action for this form and then draws the page again with what the server now says. */
+/** One button that runs an action for this form; the page then comes back drawn with what the server now says. */
 function ActButton({ label, pendingLabel, act, primary = true }: { label: string; pendingLabel: string; act: () => Promise<Result>; primary?: boolean }) {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const press = async () => {
     setPending(true);
     const r = await safely(act, failed);
     setResult(r.ok ? null : r);
-    if (r.ok) router.refresh();
     setPending(false);
   };
   return (
@@ -51,15 +50,13 @@ const WAITS_MS = [3_000, 6_000, 12_000, 24_000];
  * a few times, further apart each time, and draws itself again as soon as the answer is that it is done.
  */
 export function FinishingNote({ requestId }: { requestId: string }) {
-  const router = useRouter();
   const [tries, setTries] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
   const ask = useCallback(async () => {
     const r = await safely(() => checkFormAction(requestId), failed);
     setResult(r.ok ? null : r);
-    if (r.ok && r.settled) router.refresh();
     setTries((n) => n + 1);
-  }, [requestId, router]);
+  }, [requestId]);
   useEffect(() => {
     if (tries >= WAITS_MS.length) return;
     const timer = setTimeout(() => { void ask(); }, WAITS_MS[tries]);
@@ -89,7 +86,6 @@ function actionOf(data: unknown): string | null {
  * the server to read the document from Documenso, and shows what that says.
  */
 export function SigningFrame({ requestId, frameUrl, origin, title }: { requestId: string; frameUrl: string; origin: string; title: string }) {
-  const router = useRouter();
   const frame = useRef<HTMLIFrameElement>(null);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -97,9 +93,8 @@ export function SigningFrame({ requestId, frameUrl, origin, title }: { requestId
     setChecking(true);
     const r = await safely(() => checkFormAction(requestId), failed);
     setResult(r);
-    if (r.ok) router.refresh();
     setChecking(false);
-  }, [requestId, router]);
+  }, [requestId]);
   useEffect(() => {
     const heard = (event: MessageEvent) => {
       // Only Documenso's own frame, at Documenso's own address, is listened to.
