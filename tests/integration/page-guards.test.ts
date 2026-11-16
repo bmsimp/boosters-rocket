@@ -103,6 +103,7 @@ const OTHER_PAGES: Record<string, string> = {
 const ROUTE_HANDLERS: Record<string, string> = {
   "src/app/api/auth/parent/[...all]/route.ts": "Better Auth's own handler for the parent door; the routes a parent doesn't need answer 404 (PARENT_DISABLED_PATHS in src/lib/auth/parent-auth.ts, tests/integration/parent-door.test.ts).",
   "src/app/api/auth/staff/[...all]/route.ts": "Better Auth's own handler for the staff door (src/lib/auth/staff-auth.ts).",
+  "src/app/api/documenso/webhook/route.ts": "The secret Documenso sends in X-Documenso-Secret, compared in constant time; without it, a bare 404. A message is only a hint: the handler stores what Documenso's API says about the portal's own request, never what the body says, and answers with no data (tests/integration/forms-webhook.test.ts).",
   "src/app/api/health/route.ts": "Public on purpose: answers only {ok: true} or {ok: false} (tests/integration/health.test.ts).",
   "src/app/api/internal/worker/route.ts": "The worker's token (isWorkerRequest); without it, a bare 404 (tests/integration/jobs-runner.test.ts).",
   "src/app/api/quickbooks/callback/route.ts": "A staff session with Settings.QuickBooks.ReadWrite, checked in the handler, and the state value from the connect step (tests/integration/quickbooks-connection.test.ts).",
@@ -332,7 +333,7 @@ const PARENT_CODE_ELSEWHERE = [
  * Parent-facing folders under src/lib/: code that parent pages call to read one family's data. The scan reads every
  * file in them as it reads the pages, so none can reach a staff-only query either.
  */
-const PARENT_FACING_LIB = ["src/lib/money"];
+const PARENT_FACING_LIB = ["src/lib/money", "src/lib/forms", "src/lib/documenso"];
 
 describe("parent code never imports the staff-only queries", () => {
   const isSource = (f: string) => /\.(tsx?|jsx?|mjs|cjs)$/.test(f);
@@ -345,6 +346,7 @@ describe("parent code never imports the staff-only queries", () => {
   it("finds the parent code on disk", () => {
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/page.tsx", "src/app/(parent)/layout.tsx", "src/app/(parent)/display/display-settings.tsx"]));
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/payments/page.tsx", "src/app/(parent)/money-box.tsx", "src/lib/money/family-money.ts"]));
+    expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/forms/[id]/page.tsx", "src/app/(parent)/forms/actions.ts", "src/lib/forms/my-forms.ts", "src/lib/forms/signing.ts", "src/lib/documenso/client.ts"]));
     // read() throws for a file that is gone, so a module renamed or removed can't stay listed and unscanned.
     for (const file of PARENT_CODE_ELSEWHERE) expect(read(file).length, file).toBeGreaterThan(0);
   });

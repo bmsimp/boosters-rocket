@@ -32,6 +32,8 @@ export async function hearWebhook(secret: string | null, body: string): Promise<
   const [row] = await db.select().from(signatureRequest).where(eq(signatureRequest.id, externalId));
   // The document read is the one the portal itself recorded for the request, never one the message names.
   if (!row || row.envelopeId === null) return "ignored";
+  // A request that is finished stays as it is whatever is read later, so Documenso isn't asked.
+  if (row.state === "complete" || row.state === "declined") return "ignored";
   const config = await getFormsConfig();
   if (!config) return "not_read";
   const read = await readAndStore(row, config, { actor: DOCUMENSO_ACTOR, ip: null });

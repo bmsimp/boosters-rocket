@@ -13,13 +13,20 @@ describe("the kinds of requirement", () => {
     expect(KIND_LABELS.checklist).toBe("Checklist item");
   });
 
-  it("lets staff create only the kinds whose rule exists: today, checklist items", () => {
-    expect(availableKinds()).toEqual(["checklist"]);
+  it("lets staff create only the kinds whose rule exists: today, checklist items and forms", () => {
+    expect(availableKinds()).toEqual(["checklist", "form"]);
     expect(isAvailableKind("checklist")).toBe(true);
-    for (const kind of ["form", "payment", "volunteer", "raffle", "", null, 7]) expect(isAvailableKind(kind)).toBe(false);
-    // The other three have their place in the registry, empty until their slice fills it.
-    expect([KIND_RULES.form, KIND_RULES.payment, KIND_RULES.volunteer]).toEqual([null, null, null]);
+    expect(isAvailableKind("form")).toBe(true);
+    for (const kind of ["payment", "volunteer", "raffle", "", null, 7]) expect(isAvailableKind(kind)).toBe(false);
+    // The other two have their place in the registry, empty until their slice fills it.
+    expect([KIND_RULES.payment, KIND_RULES.volunteer]).toEqual([null, null]);
     expect(NO_RULE_YET.met).toBe(false);
+  });
+
+  it("meets a form only by its signed document, never by a staff tick", () => {
+    const rule = KIND_RULES.form!;
+    expect(rule.ticked).toBe(false);
+    expect(rule.nothingYet({ ...item, kind: "form" })).toEqual({ met: false, words: "Not signed yet" });
   });
 
   it("meets a checklist item with a staff tick, for that family or student alone; a waiver is not a tick", async () => {
