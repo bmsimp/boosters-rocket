@@ -19,7 +19,7 @@ jobs:
         with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh scripts/backup.sh scripts/restore.sh
+      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh scripts/backup.sh scripts/restore.sh scripts/backup-schedule.sh
       - name: PowerShell lint
         shell: pwsh
         run: |
