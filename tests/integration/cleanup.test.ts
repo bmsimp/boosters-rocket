@@ -5,7 +5,10 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, familyMoney, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser } from "@/lib/db/schema";
-import { cleanUp, runCleanup, describeCleanup, CLEANUP_JOB, JOB_HISTORY_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import * as schema from "@/lib/db/schema";
+import { getTableName, is } from "drizzle-orm";
+import { PgTable } from "drizzle-orm/pg-core";
+import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, JOB_HISTORY_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -25,6 +28,15 @@ async function staffSession(id: string, expiresAt: Date) {
   await db.insert(staffAuthSession).values({ id, token: `t-${id}`, userId: "s1", expiresAt });
 }
 const ids = async <T extends { id: unknown }>(rows: Promise<T[]>) => (await rows).map((r) => String(r.id)).sort();
+
+describe("the daily clean-up knows every table", () => {
+  it("names each table of the schema once: cleaned, or kept with a reason", () => {
+    const tables = Object.values(schema).filter((v) => is(v, PgTable)).map((t) => getTableName(t as PgTable)).sort();
+    const named = [...CLEANED_TABLES, ...Object.keys(KEPT_TABLES)].sort();
+    expect(named).toEqual(tables);
+    for (const why of Object.values(KEPT_TABLES)) expect(why.length).toBeGreaterThan(0);
+  });
+});
 
 describe("the daily clean-up deletes only what is past use", () => {
   beforeEach(async () => { await resetDb(); });

@@ -21,6 +21,30 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   jobRuns: ["old job record", "old job records"],
 };
 
+/**
+ * Every table of src/lib/db/schema.ts is named here once: the ones cleanUp() deletes expired rows from, and the ones it
+ * leaves alone, with why. A new table must join one list (tests/integration/cleanup.test.ts fails until it does); one
+ * whose rows expire gets its delete below and a boundary test.
+ */
+export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run"] as const;
+export const KEPT_TABLES: Record<string, string> = {
+  staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts", staff_auth_verification: "Better Auth's own, short-lived and kept by it",
+  parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts", parent_auth_verification: "Better Auth's own, short-lived and kept by it",
+  setting: "the portal's settings, replaced in place",
+  auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
+  staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
+  parent: "parents, kept from QuickBooks by the roster refresh", guardian: "links from parents to families, kept by the roster refresh",
+  held_address: "addresses held for staff to decide", family_match: "staff decisions about families",
+  qbo_connection: "the one QuickBooks connection", qbo_customer_type: "the roster cache, replaced by each refresh", qbo_customer: "the roster cache, replaced by each refresh",
+  qbo_item: "QuickBooks' products and services, replaced each time staff read the list; emptied on a change of company",
+  season: "seasons are history", season_step: "seasons are history", requirement: "seasons are history", requirement_cover: "seasons are history",
+  requirement_progress: "ticks and waivers: a season's record",
+  volunteer_event: "volunteer history: what happened stays readable", volunteer_shift: "volunteer history", volunteer_shift_requirement: "volunteer history",
+  volunteer_signup: "who volunteered: emptied on a change of company, otherwise kept",
+  signature_request: "a form's record of signing: evidence, never expires", signature_consent: "a guardian's consent to sign electronically: evidence, never expires",
+  audit_log: "append-only",
+};
+
 export const removedInAll = (c: CleanupCounts): number => Object.values(c).reduce((a, b) => a + b, 0);
 
 /** The counts as a sentence for the job history, e.g. "Removed 3 expired parent sessions and 12 rate-limit records." */
