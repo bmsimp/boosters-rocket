@@ -1,9 +1,8 @@
 import { test, expect } from "@playwright/test";
 import postgres from "postgres";
 import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
-import { addressOf, isDynamic, paramsProblems, parentRoutes, type DynamicRouteParams } from "./parent-routes";
-import { E2E_VOLUNTEER } from "./volunteer-seed";
-import { E2E_EMAIL } from "./email-seed";
+import { addressOf, isDynamic, paramsProblems, parentRoutes } from "./parent-routes";
+import { PARAMS } from "./parent-params";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -40,22 +39,8 @@ test("a cookie signed with another secret, or for a session that doesn't exist, 
 // Every parent page, found on disk: a new page is covered without being listed here.
 const routes = parentRoutes();
 
-/**
- * For a page with a dynamic segment: the params to ask for it with, ids from scripts/seed-e2e.ts. `own` is something of
- * the Quetzalcoatl family (E2E-FAMILY), `other` the same kind of thing in another family.
- *   "/students/[id]": { own: { id: "E2E-S1" }, other: { id: "E2E-S3" } },
- */
-const PARAMS: Record<string, DynamicRouteParams> = {
-  // A shift is the club's, not a family's: `own` is one the Quetzalcoatl family can sign up for, `other` the one the
-  // Rivera family has a place on. Neither may send anything of the Riveras' but the count.
-  "/volunteer/shifts/[id]": { own: { id: E2E_VOLUNTEER.cleanup }, other: { id: E2E_VOLUNTEER.griddle } },
-  // A check-in code: `own` opens the shift Zelda has a place on, `other` the griddle, where only the Riveras have one.
-  "/volunteer/check-in/[code]": { own: { code: E2E_VOLUNTEER.openCode }, other: { code: E2E_VOLUNTEER.griddleCode } },
-  // The Quetzalcoatl family's signed Travel consent, and the second family's unsigned one (fixed ids in scripts/seed-e2e.ts).
-  "/forms/[id]": { own: { id: "e2e00000-0000-4000-8000-000000000001" }, other: { id: "e2e00000-0000-4000-8000-000000000002" } },
-  // Zelda's change of sign-in address asked under the Quetzalcoatl family, and the one asked under her second family.
-  "/family/email/[token]": { own: { token: E2E_EMAIL.own.token }, other: { token: E2E_EMAIL.other.token } },
-};
+// The params each parent page with a dynamic segment is asked for with: PARAMS, in tests/e2e/parent-params.ts, which
+// tests/e2e/parent-a11y.spec.ts reads too (a spec can't import another spec).
 
 // Everything scripts/seed-e2e.ts gives a family that is not the Quetzalcoatl family, Zelda's second family included:
 // strings that would give that family away, in the HTML or in the data sent with it. When the seed gives another
