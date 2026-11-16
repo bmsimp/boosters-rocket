@@ -1,7 +1,7 @@
 # Booster Rocket v1 — Design
 
 **Date:** 2026-11-06
-**Status:** Draft for review
+**Status:** Being built. The roadmap (docs/superpowers/plans/2026-11-07-v1-roadmap.md) says what is done. Later specs in this folder override the parts of this one that they name.
 **Revised in part:** parent sign-in, people and outgoing mail. See docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md (it lists the sections it changes).
 **First deployment:** FZN Band Boosters (`portal.fznband.org`)
 

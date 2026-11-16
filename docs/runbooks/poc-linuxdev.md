@@ -39,9 +39,10 @@ Do this over SSH as user `brian`.
 2. Run the setup script. It creates the Docker network `booster-rocket-edge` and a private `.env.poc`
    file with freshly generated `BETTER_AUTH_SECRET`, `DB_PASSWORD` and `SETTINGS_ENCRYPTION_KEY`:
    ```bash
-   scripts/poc/setup.sh
+   scripts/poc/setup.sh https://portaltest.rhinoautomator.com
    ```
-   It is safe to run again; it never overwrites an existing `.env.poc`. (If an older `.env.poc` has no
+   The address is the one people will use for the portal; the script writes it into `.env.poc` as `APP_URL`.
+   It is safe to run again, with or without the address; it never overwrites an existing `.env.poc`. (If an older `.env.poc` has no
    `SETTINGS_ENCRYPTION_KEY`, it adds one and leaves everything else alone.) `.env.poc` holds no
    Microsoft or Google values; those are entered on the setup page and stored encrypted in the
    database. **Back up `.env.poc` along with the database**: `SETTINGS_ENCRYPTION_KEY` is needed to read
