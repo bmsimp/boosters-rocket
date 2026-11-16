@@ -50,7 +50,14 @@ export type QboStub = {
   updateFault: string | null;   // answer every customer update with HTTP 400 and this Fault code ("6000": a validation failure; "5010": a stale object)
   beforeUpdate: ((customer: Record<string, unknown>) => void) | null; // run on the stored customer as an update for it arrives, before its SyncToken is checked: someone editing in QuickBooks at that moment
   loseUpdateAnswer: boolean;    // make a customer update, then close the connection without answering: the change is in QuickBooks and the portal never hears
+  /**
+   * Make a customer update, then answer it with this HTTP status (a 5xx) and a SystemFault that carries this code: a
+   * server error after the change was made. QuickBooks sends its system errors as a 500 or 503 with a Fault in them.
+   */
+  updateServerFault: { status: number; code: string } | null;
   dropApi: boolean;             // close the connection on every API request without answering: QuickBooks can't be reached
+  dropToken: boolean;           // close the connection on every token request without answering: Intuit can't be reached
+  onApiRequest: ((call: StubCall) => void) | null; // run as each API request arrives, before anything about it is checked: a token revoked at that moment, say
   revokeDelayMs: number;
   tokenDelayMs: number; queryDelayMs: number; companyInfoDelayMs: number; refreshExpiresIn: number;
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
@@ -69,7 +76,7 @@ export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0, answering = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
     invoices: [], refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
-    updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, dropApi: false,
+    updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, updateServerFault: null, dropApi: false, dropToken: false, onApiRequest: null,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
@@ -85,6 +92,7 @@ export async function startQboStub(): Promise<QboStub> {
       const keys = /^Basic (.+)$/.exec(call.auth)?.[1];
       const hasAppKeys = keys !== undefined && /^[^:]+:.+$/.test(Buffer.from(keys, "base64").toString("utf8"));
       if (url.pathname === "/token") {
+        if (stub.dropToken) { req.socket.destroy(); return; }
         if (stub.tokenDelayMs) await new Promise((r) => setTimeout(r, stub.tokenDelayMs));
         const form = new URLSearchParams(body);
         if (!hasAppKeys) return json(401, { error: "invalid_client" });
@@ -108,6 +116,7 @@ export async function startQboStub(): Promise<QboStub> {
         return json(200, {});
       }
       if (!url.pathname.startsWith("/v3/company/")) return json(404, {});
+      stub.onApiRequest?.(call);
       if (stub.dropApi) { req.socket.destroy(); return; }
       if (!stub.accessTokens.has(call.auth.replace(/^Bearer /, ""))) return json(401, { fault: { error: [{ code: "3200" }] } });
       answering++; stub.peakApi = Math.max(stub.peakApi, answering);
@@ -136,6 +145,7 @@ export async function startQboStub(): Promise<QboStub> {
         updated.MetaData = { ...(stored.MetaData as object | undefined), LastUpdatedTime: new Date().toISOString() };
         stub.customers[at] = updated;
         if (stub.loseUpdateAnswer) { req.socket.destroy(); return; }
+        if (stub.updateServerFault) return json(stub.updateServerFault.status, { ...fault(stub.updateServerFault.code), Fault: { ...fault(stub.updateServerFault.code).Fault, type: "SystemFault" } });
         return json(200, { Customer: updated, time: new Date().toISOString() });
       }
       const byId = /\/customer\/([^/]+)$/.exec(url.pathname)?.[1];
@@ -193,7 +203,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.tokenCalls = () => stub.calls.filter((c) => c.path === "/token");
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.reset = () => {
-    stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.dropApi = false;
+    stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.updateServerFault = null; stub.dropApi = false; stub.dropToken = false; stub.onApiRequest = null;
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
     stub.invoices = []; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;

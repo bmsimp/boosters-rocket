@@ -419,6 +419,54 @@ describe("when QuickBooks can't be reached or refuses, nothing is changed and th
     expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", form: { values: { phone: NEW_PHONE }, version: "1" } });
   });
 
+  it.each([[500, "10000"], [503, "6000"], [500, "5010"]])("QuickBooks answers the write with a server error (%i) that carries a Fault code (%s): the portal can't tell, and doesn't say nothing changed", async (status, code) => {
+    const { r } = await seedContactFamilies(stub);
+    stub.updateServerFault = { status, code };
+    asParent(r.identity);
+    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toEqual({ ok: false, errors: [CONTACT_COPY.unsure] });
+    expect(await failure()).toBe(`http_${status}_fault_${code}`);
+    expect(calls()).toEqual([`GET /customer/${R_PARENT}`, "POST /customer"]); // not sent again, and not read again as if it were stale
+    // QuickBooks did make the change. The cache waits for the roster, and the page shows what QuickBooks has.
+    expect(inQuickBooks(stub, R_PARENT)).toMatchObject({ PrimaryPhone: { FreeFormNumber: NEW_PHONE }, SyncToken: "1" });
+    expect(await cached(R_PARENT)).toMatchObject({ phone: RIVERA.parent.phone, syncToken: "0" });
+    stub.updateServerFault = null;
+    expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", form: { values: { phone: NEW_PHONE }, version: "1" } });
+  });
+
+  it("Intuit can't be reached for a new token as the write is refused unread: nothing was changed, and the parent is told so", async () => {
+    const { r } = await seedContactFamilies(stub);
+    // The read goes through. As the write arrives its token is no longer good, and a new one can't be had.
+    stub.onApiRequest = (call) => { if (call.method === "POST") { stub.accessTokens.clear(); stub.dropToken = true; } };
+    asParent(r.identity);
+    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toEqual({ ok: false, errors: [CONTACT_COPY.tryLater] });
+    // The connection records its failed refresh; the save records that it never got a token, which is not a lost answer.
+    expect((await audits()).map((a) => [a.action, a.after])).toEqual([
+      ["quickbooks.token_refresh.failed", { code: "unreachable" }], ["parent.contact.save.failed", { code: "token_unreachable" }]]);
+    expect(posts()).toHaveLength(1);
+    await unchanged();
+  });
+
+  it("QuickBooks makes the change and answers with a record that is no longer theirs: the save is audited as one, with what was sent", async () => {
+    const { r } = await seedContactFamilies(stub);
+    // The treasurer moves the record to another family in the moment the update arrives. Its version has not moved, so the update goes through.
+    stub.beforeUpdate = (customer) => { customer.ParentRef = { value: C_FAMILY }; };
+    asParent(r.identity);
+    fromIp("203.0.113.78");
+    expect(await save({ ...SHOWN, phone: NEW_PHONE, city: "Buda" })).toEqual({ ok: false, errors: [CONTACT_COPY.unsure] });
+    expect(posts()).toHaveLength(1);
+    expect(inQuickBooks(stub, R_PARENT)).toMatchObject({ PrimaryPhone: { FreeFormNumber: NEW_PHONE }, BillAddr: { City: "Buda" }, SyncToken: "1" });
+    // The club's books changed, so the log says so: a save, before and after, and why the portal couldn't confirm it.
+    const { line1, line2, region, postalCode, country } = SHOWN;
+    const log = await audits();
+    expect(log.map((a) => a.action)).toEqual([QUICKBOOKS_WRITE_ACTION]);
+    expect(log[0]).toMatchObject({ door: "parent", actorId: r.identity.parentId, targetType: "qbo_customer", targetId: R_PARENT, ip: "203.0.113.78",
+      before: { phone: RIVERA.parent.phone, address: { line1, line2, city: SHOWN.city, region, postalCode, country } },
+      after: { phone: NEW_PHONE, address: { line1, line2, city: "Buda", region, postalCode, country }, code: "answer_moved" } });
+    // The cache is left for the roster: the record it holds may not be this person's any more.
+    expect(await cached(R_PARENT)).toMatchObject({ phone: RIVERA.parent.phone, syncToken: "0" });
+    expect(revalidatedPaths()).toEqual([]);
+  });
+
   it("the record was moved to another family, or made inactive, in QuickBooks since the roster was read: it is not theirs to change", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);

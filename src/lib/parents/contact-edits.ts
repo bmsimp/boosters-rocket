@@ -148,8 +148,13 @@ const auditValues = (v: ContactValues, change: CustomerContactChange) => ({
   ...(change.phone !== undefined ? { phone: v.phone } : {}),
   ...(change.address !== undefined ? { address: { line1: v.line1, line2: v.line2, city: v.city, region: v.region, postalCode: v.postalCode, country: v.country } } : {}),
 });
-/** After these the portal can't know whether QuickBooks made the change. Every other failure means it did not. */
-const mayHaveSaved = (code: string): boolean => code === "timeout" || code === "unreachable" || code === "bad_answer" || /^http_5\d\d$/.test(code);
+/**
+ * After these the portal can't know whether QuickBooks made the change: the update went, and what came back was
+ * nothing, or nothing to rely on. A server error is one of them whatever Fault code it carries
+ * (`http_500_fault_10000`). Every other failure means the change was not made: QuickBooks refused it (a 4xx), or it
+ * was never sent (a token that couldn't be had is `token_...`, which none of these match).
+ */
+const mayHaveSaved = (code: string): boolean => code === "timeout" || code === "unreachable" || code === "bad_answer" || /^http_5\d\d(_|$)/.test(code);
 
 /**
  * Saves the signed-in parent's phone and address to QuickBooks. `input` is what the browser sent, untrusted: it is
@@ -169,6 +174,8 @@ const mayHaveSaved = (code: string): boolean => code === "timeout" || code === "
  *
  * A save is audited with the before and after values, in the transaction that brings the roster cache's phone and
  * SyncToken up to date from QuickBooks' answer. A save that was refused or failed is audited with its short code.
+ * A save QuickBooks made but answered with a record the portal can't take for this person's is audited as a save too,
+ * with what was sent and that code, and the cache is left as it was.
  */
 export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeoutMs?: number } = {}): Promise<SaveContactResult> {
   const refuse = async (code: string, errors: string[], record?: MyRecord, current?: ContactForm): Promise<SaveContactResult> => {
@@ -222,8 +229,14 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
   }
 
   const after = formOf(answer, mine);
-  // QuickBooks said yes and sent something the portal can't read back: the change was probably made.
-  if (!after.ok) return refuse(after.code === "bad_answer" ? "bad_answer" : `answer_${after.code}`, [CONTACT_COPY.unsure], record);
+  if (!after.ok) {
+    // QuickBooks said yes, and the record it sent back is not one the portal can show this person: it was moved, made
+    // inactive or given to someone else in that moment, or it can't be read. The change was made, so it is audited as
+    // a save, with what was there before, what was sent, and why the answer wasn't taken. The cache is left alone.
+    await writeAudit({ actor: actorOf(ctx), action: "parent.contact.save", targetType: "qbo_customer", targetId: record.qboId, before: auditValues(before.form.values, change),
+      after: { ...auditValues(values, change), code: (after.code === "bad_answer" ? "bad_answer" : `answer_${after.code}`).slice(0, 40) }, ip: ctx.ip });
+    return { ok: false, errors: [CONTACT_COPY.unsure] };
+  }
   const updatedAt = isRow(answer.MetaData) && typeof answer.MetaData.LastUpdatedTime === "string" ? Date.parse(answer.MetaData.LastUpdatedTime) : NaN;
   await db.transaction(async (tx) => {
     // The cache row is brought up to date only while the cache is still this company's: after a change of company the

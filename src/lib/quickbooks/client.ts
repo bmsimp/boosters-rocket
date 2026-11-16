@@ -369,17 +369,38 @@ export const CUSTOMER_UPDATE = {
   faults: { stale: "5010", duplicateName: "6240", validation: /^(2\d{3}|6000)$/ },
 } as const;
 
-/** The code QuickBooks gave a refused write (`e.code` is `fault_<code>`), or null when the failure was something else. */
+/**
+ * The code QuickBooks gave a write it refused (`e.code` is `fault_<code>`), or null when the failure was something
+ * else: a server error is never one, whatever code came with it (refusalCode).
+ */
 export const faultCodeOf = (e: QboError): string | null => /^fault_(\d{1,6})$/.exec(e.code)?.[1] ?? null;
 
-/** QuickBooks' own code for a refusal, and none of its words: `fault_<code>` from `Fault.Error[0].code`, else `http_<status>`. */
+/**
+ * What a write that didn't get a 2xx is called: QuickBooks' own code, and none of its words.
+ *
+ * A 4xx is a refusal: QuickBooks read the request and changed nothing. It is `fault_<code>` from
+ * `Fault.Error[0].code`, else `http_<status>`. A 5xx is not a refusal, whatever is in it. QuickBooks sends its system
+ * errors as a 500 or a 503 with a Fault inside, and after one nobody can say the change wasn't made. So the status
+ * comes first there, `http_<status>` or `http_<status>_fault_<code>`, and no caller reads that Fault code as "stale"
+ * or "a value it won't take", or tells a parent that nothing was changed.
+ */
 async function refusalCode(res: Response): Promise<string> {
   const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   const fault = (body?.Fault ?? body?.fault) as Record<string, unknown> | undefined;
   const errors = fault?.Error ?? fault?.error;
   const first = (Array.isArray(errors) ? errors[0] : undefined) as { code?: unknown } | null | undefined;
-  return typeof first?.code === "string" && /^\d{1,6}$/.test(first.code) ? `fault_${first.code}` : `http_${res.status}`;
+  const code = typeof first?.code === "string" && /^\d{1,6}$/.test(first.code) ? first.code : null;
+  if (res.status >= 400 && res.status < 500) return code === null ? `http_${res.status}` : `fault_${code}`;
+  return code === null ? `http_${res.status}` : `http_${res.status}_fault_${code}`;
 }
+
+/**
+ * What a failure to get an access token for the write is called: its own code with this in front (`token_busy`,
+ * `token_unreachable`, `token_timeout`, `token_http_503`). The token comes before anything is sent, or after
+ * QuickBooks refused what was sent without reading it (a 401), so such a failure always means nothing was changed.
+ * Without the mark, Intuit's token endpoint being down would read like a write whose answer was lost.
+ */
+export const NO_TOKEN = "token_";
 
 export type QboWriteOptions = {
   /** The company the caller means to change, as the roster cache names it. When another company is connected, nothing is sent. */
@@ -402,6 +423,10 @@ export type QboWriteOptions = {
  * refused to authenticate. Nothing else is tried twice: after a timeout or a 5xx the portal can't know whether the
  * change was made, and sending it again could only meet its own new SyncToken.
  *
+ * How it fails is in the error's code, which is what its caller tells a parent by. A failure to get a token is marked
+ * NO_TOKEN (nothing was changed); a 4xx is QuickBooks' refusal (nothing was changed); a timeout, a lost connection, an
+ * unreadable answer and any 5xx came after the request went, and the change may have been made (refusalCode).
+ *
  * `customerId` is the caller's to get right: it comes from the session's own roster record, never from a request.
  */
 export async function qboUpdateCustomerContact(customerId: string, syncToken: string, change: CustomerContactChange, o: QboWriteOptions): Promise<Record<string, unknown>> {
@@ -411,7 +436,7 @@ export async function qboUpdateCustomerContact(customerId: string, syncToken: st
   const body = JSON.stringify(CUSTOMER_UPDATE.body(customerId, syncToken, change));
   let force = false, refreshed = false;
   for (;;) {
-    const a = await within(accessTokenForPage(force), o.signal);
+    const a = await within(accessTokenForPage(force), o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
     force = false;
     if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${CUSTOMER_UPDATE.path}`);

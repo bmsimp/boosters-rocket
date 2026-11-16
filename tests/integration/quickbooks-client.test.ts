@@ -445,6 +445,42 @@ describe("the one write: a customer's phone and billing address", () => {
     expect(stub.customers[0]).toEqual(ana());
   });
 
+  it("keeps the status first when a server error carries a Fault code: after a 5xx nobody can say the change wasn't made", async () => {
+    await seedConnected(stub);
+    for (const [status, code] of [[500, "10000"], [503, "6000"], [500, "5010"]] as const) {
+      stub.customers = [ana()];
+      stub.updateServerFault = { status, code };
+      const failed = await errorOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO));
+      expect(failed.code).toBe(`http_${status}_fault_${code}`);
+      // Not a refusal QuickBooks made: no caller reads its code as "stale" or "a value it won't take".
+      expect(faultCodeOf(failed)).toBeNull();
+      expect(`${failed.message} ${failed.code}`).not.toMatch(/must never store/);
+      expect(stub.customers[0]).toMatchObject({ SyncToken: "4", PrimaryPhone: { FreeFormNumber: "512-555-0199" } }); // and it was made
+    }
+    expect(posts()).toHaveLength(3); // each sent once
+  });
+
+  it("marks a failure to get a token as one: nothing was sent, or what was sent was refused unread", async () => {
+    await seedConnected(stub, { accessExpiresInMs: -1000 }); // the token must be refreshed before anything is sent
+    stub.customers = [ana()];
+    stub.dropToken = true;
+    expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO))).toBe("token_unreachable");
+    expect(stub.apiCalls()).toHaveLength(0);
+    stub.dropToken = false;
+    stub.tokenDelayMs = 2000;
+    expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, { ...TO, signal: AbortSignal.timeout(200) }))).toBe("token_timeout");
+    expect(stub.apiCalls()).toHaveLength(0);
+    expect(stub.customers[0]).toEqual(ana());
+    await new Promise((r) => setTimeout(r, 2200)); // the slow refresh finishes and is saved
+    stub.tokenDelayMs = 0;
+    // A token QuickBooks no longer takes, and Intuit unreachable for a new one: the update went once, and was refused unread.
+    stub.accessTokens.clear();
+    stub.dropToken = true;
+    expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO))).toBe("token_unreachable");
+    expect(posts()).toHaveLength(1);
+    expect(stub.customers[0]).toEqual(ana());
+  });
+
   it("refreshes once and sends it again when QuickBooks says the token is no good, and the change is made once", async () => {
     await seedConnected(stub);
     stub.customers = [ana()];
@@ -501,7 +537,7 @@ describe("the one write: a customer's phone and billing address", () => {
     await locked;
     try {
       const started = Date.now();
-      expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO))).toBe("busy");
+      expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO))).toBe("token_busy");
       expect(Date.now() - started).toBeLessThan(1000);
       expect(stub.calls).toHaveLength(0);
       expect(stub.customers[0]).toEqual(ana());
