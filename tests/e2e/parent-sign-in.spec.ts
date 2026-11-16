@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
 import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
@@ -21,10 +22,21 @@ test.beforeEach(async () => {
   await sql`DELETE FROM rate_limit_event`;
 });
 
+// A code is mailed after the answer to "Send code" (src/lib/parents/signin-codes.ts), so an earlier test's email can
+// reach the sink after this test emptied it. The code to use is the newest one the database still holds unused, found
+// the way the portal stores it (hashSigninCode(): an HMAC keyed with the server secret).
+const codeHash = (parentId: string, code: string) => createHmac("sha256", process.env.BETTER_AUTH_SECRET!).update(`signin-code:${parentId}:${code}`).digest("hex");
 async function codeFor(email: string): Promise<string> {
-  await expect.poll(() => sink.messages.filter((m) => m.to.includes(email)).length, { timeout: 15_000 }).toBeGreaterThan(0);
-  const raw = sink.messages.filter((m) => m.to.includes(email)).at(-1)!.raw;
-  return /^Subject: .*sign-in code: (\d{6})/m.exec(raw)![1]!;
+  let found = "";
+  await expect.poll(async () => {
+    const live = await sql`SELECT c.parent_id, c.code_hash FROM signin_code c JOIN parent p ON p.id = c.parent_id WHERE p.email = ${email} AND c.used_at IS NULL`;
+    for (const m of sink.messages.filter((x) => x.to.includes(email)).reverse()) {
+      const code = /^Subject: .*sign-in code: (\d{6})/m.exec(m.raw)?.[1];
+      if (code && live.some((r) => r.code_hash === codeHash(r.parent_id as string, code))) { found = code; return true; }
+    }
+    return false;
+  }, { timeout: 15_000 }).toBe(true);
+  return found;
 }
 
 test("a parent signs in with an emailed code, switches family, and signs out", async ({ page, baseURL }) => {
