@@ -20,6 +20,7 @@ import {
 } from "@/lib/documenso/client";
 import { getRosterSource } from "@/lib/roster/source";
 import { FORMS_WORKER, type FormsFailure } from "@/lib/forms/requests";
+import { readDocument } from "@/lib/forms/states";
 import { getFormsConfig, noteApiFailure, noteApiOk } from "@/lib/forms/settings";
 import { sendOwedCopies } from "./copies";
 import { EVIDENCE_LATE_MS, nextEvidenceTry } from "./rules";
@@ -170,24 +171,37 @@ export async function runEvidenceJob(now: Date = new Date()): Promise<EvidenceRu
   return run;
 }
 
-/** Withdraws the documents a moved student's forms left behind (formsForMovedStudent): deleted when unsigned, cancelled when signed. */
+/**
+ * Withdraws the documents a moved student's forms left behind (formsForMovedStudent). Each is read first, since the
+ * move planned from what the portal last stored: one Documenso has sealed since is never deleted or cancelled (it is
+ * left in Documenso and audited for staff, form.document.withdraw.kept); one that can't be signed any more needs
+ * nothing; otherwise it is deleted while nobody has signed it and cancelled once anyone has. A withdrawal that still
+ * fails after ten wakes is audited as failed, with its code, and dropped: never recorded as done.
+ */
 async function withdrawLeftDocuments(config: DocumensoConfig): Promise<number> {
   const rows = await db.select().from(formWithdrawal).orderBy(asc(formWithdrawal.createdAt)).limit(EVIDENCE_PER_WAKE);
   let done = 0;
   for (const w of rows) {
+    let how: "cancel" | "delete" | "already_gone" | "kept_complete";
+    let failure: string | null = null;
     try {
-      if (w.anySigned) await cancelEnvelope(config, w.envelopeId, "Started again for another family");
-      else await deleteEnvelope(config, w.envelopeId);
+      const reading = readDocument(await getEnvelope(config, w.envelopeId));
+      how = reading.state === "complete" ? "kept_complete" : reading.state === "gone" || reading.state === "declined" ? "already_gone" : w.anySigned || reading.anySigned ? "cancel" : "delete";
+      if (how === "cancel") await cancelEnvelope(config, w.envelopeId, "Started again for another family");
+      if (how === "delete") await deleteEnvelope(config, w.envelopeId);
     } catch (e) {
       const code = documensoCode(e);
-      // Already gone, or finished in a way that can't be withdrawn: nothing is left to do. Anything else is tried again later, a few times.
-      if (code !== "not_found" && code !== "refused" && w.tries < 10) { await db.update(formWithdrawal).set({ tries: w.tries + 1 }).where(eq(formWithdrawal.envelopeId, w.envelopeId)); continue; }
+      how = "already_gone";
+      if (code !== "not_found") failure = code;
     }
+    if (failure !== null && w.tries < 10) { await db.update(formWithdrawal).set({ tries: w.tries + 1 }).where(eq(formWithdrawal.envelopeId, w.envelopeId)); continue; }
     await db.transaction(async (tx) => {
       await tx.delete(formWithdrawal).where(eq(formWithdrawal.envelopeId, w.envelopeId));
-      await writeAudit({ actor: FORMS_WORKER, action: "form.document.withdraw", targetType: "envelope", targetId: w.envelopeId, after: { reason: "student_moved", how: w.anySigned ? "cancel" : "delete" } }, tx);
+      const action = failure !== null ? "form.document.withdraw.failed" : how === "kept_complete" ? "form.document.withdraw.kept" : "form.document.withdraw";
+      await writeAudit({ actor: FORMS_WORKER, action, targetType: "envelope", targetId: w.envelopeId,
+        after: failure !== null ? { reason: "student_moved", error: failure, tries: w.tries + 1 } : { reason: "student_moved", how } }, tx);
     });
-    done++;
+    if (failure === null) done++;
   }
   return done;
 }

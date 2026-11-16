@@ -8,7 +8,7 @@ import { db } from "@/lib/db/client";
 import { signatureRequest } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { cancelEnvelope, deleteEnvelope } from "@/lib/documenso/client";
-import { NO_DOCUMENT, asking, claim, release } from "@/lib/forms/requests";
+import { NO_DOCUMENT, asking, claim, readAndStore, release } from "@/lib/forms/requests";
 import { getFormsConfig } from "@/lib/forms/settings";
 import { isUuid } from "@/lib/seasons/ids";
 import { RESTART_REASONS, restartPlan, type RestartReason } from "./rules";
@@ -23,12 +23,20 @@ export async function startRequestAgain(requestId: unknown, reason: unknown, raw
   if (typeof reason !== "string" || !Object.hasOwn(RESTART_REASONS, reason)) return { ok: false, errors: ["Choose why it is being started again."] };
   const note = typeof rawNote === "string" ? rawNote.trim() : "";
   if (note.length > NOTE_MAX) return { ok: false, errors: [`Keep the note under ${NOTE_MAX} characters.`] };
-  const [row] = await db.select().from(signatureRequest).where(eq(signatureRequest.id, requestId));
-  if (!row) return { ok: false, errors: [GONE] };
-  const plan = restartPlan(row, reason as RestartReason, now);
-  if (!plan.ok) return { ok: false, errors: [plan.why] };
+  const [stored] = await db.select().from(signatureRequest).where(eq(signatureRequest.id, requestId));
+  if (!stored) return { ok: false, errors: [GONE] };
+  const first = restartPlan(stored, reason as RestartReason, now);
+  if (!first.ok) return { ok: false, errors: [first.why] };
   const config = await getFormsConfig();
   if (!config) return { ok: false, errors: ["Forms aren't set up, so the document in Documenso can't be withdrawn. An Admin can connect Documenso under Forms settings."] };
+  // What Documenso says now, not what the portal last stored: a guardian may have signed, or the form been sealed,
+  // since the last read. A form found complete is stored as such (its evidence is then owed) and never withdrawn.
+  // Read before the claim: a held request is left alone by every reader, this one included.
+  const read = await readAndStore(stored, config, { actor: op.actor, ip: op.ip });
+  if (!read.ok && read.code !== "not_found") return { ok: false, errors: ["Documenso couldn't be reached just now, so nothing was changed. Please try again in a few minutes."] };
+  const row = read.row;
+  const plan = restartPlan(row, reason as RestartReason, now);
+  if (!plan.ok) return { ok: false, errors: [plan.why] };
   // Held while the document is withdrawn: no parent's open can make or read it in the meantime.
   if (!(await claim(row.id, now))) return { ok: false, errors: ["Someone is opening this form right now. Try again in a minute."] };
   try {

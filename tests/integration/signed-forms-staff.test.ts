@@ -8,7 +8,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  auditLog, formReminderClaim, formReminderRound, formWithdrawal, parent, requirement, requirementProgress, role, roleAssignment, roleRule, setting, signatureConsent, signatureRequest,
+  auditLog, formReminderClaim, formReminderRound, formWithdrawal, parent, qboCustomer, requirement, requirementProgress, role, roleAssignment, roleRule, setting, signatureConsent, signatureRequest,
   signedFormEvidence, signedFormFile,
 } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
@@ -17,9 +17,11 @@ import SignedFormsPage from "@/app/staff/(app)/forms/page";
 import EvidencePage from "@/app/staff/(app)/forms/evidence/[id]/page";
 import FormRequestPage from "@/app/staff/(app)/forms/requests/[id]/page";
 import FormsPage from "@/app/(parent)/forms/page";
+import FormPage from "@/app/(parent)/forms/[id]/page";
+import { GET as parentDownload } from "@/app/(parent)/forms/[id]/signed/route";
 import { remindFamilyAction, remindFormAction, remindRequestAction, saveScheduleAction, startAgainAction } from "@/app/staff/(app)/forms/actions";
 import { GET as staffDownload } from "@/app/staff/(app)/forms/evidence/[id]/[file]/route";
-import { findMySignedPdf } from "@/lib/forms/my-evidence";
+import { findMySignedPdf, mySignedDownloads } from "@/lib/forms/my-evidence";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 import { runEvidenceJob } from "@/lib/signed-forms/evidence-job";
@@ -311,6 +313,28 @@ describe("starting a form again", () => {
     expect(await startAgainAction(a.forms!.ids.declined, "declined", "")).toMatchObject({ ok: true });
     expect((await audits("forms.request.restart"))[0]!.after).toMatchObject({ withdrawn: "already_gone" });
   });
+
+  it("reads Documenso first: a form sealed since the portal last read it is kept, never deleted, and one signed since is cancelled, not deleted", async () => {
+    const sealed = await signedInStub(stub, { requirementId, templateId, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.students[0]!.qboId, guardians: [guardian(a)], sign: false });
+    stub.sign(sealed.envelopeId, FAMILY_A.parent.email);
+    expect(stub.envelopes.get(sealed.envelopeId)!.status).toBe("COMPLETED");
+    expect((await requestNow(sealed.id)).state).toBe("waiting");
+    expect(await startAgainAction(sealed.id, "lost_access", "")).toEqual({ ok: false, errors: [expect.stringContaining("never started again")] });
+    expect(stub.apiCalls("/envelope/delete")).toEqual([]);
+    expect(stub.envelopes.get(sealed.envelopeId)!.deletedAt).toBeNull();
+    expect(await requestNow(sealed.id)).toMatchObject({ state: "complete", evidenceOwed: true, envelopeId: sealed.envelopeId });
+    expect(await audits("forms.request.restart")).toEqual([]);
+
+    const twoReq = await seedFormRequirement({ stepId: (await db.select({ stepId: requirement.stepId }).from(requirement).where(eq(requirement.id, requirementId)))[0]!.stepId,
+      title: "Trip form", appliesTo: "student", form: formSetting({ id: twoTemplateId }, { signers: "every" }) });
+    const half = await signedInStub(stub, { requirementId: twoReq, templateId: twoTemplateId, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.students[1]!.qboId,
+      guardians: [guardian(a), { parentId: crypto.randomUUID(), name: "Other Guardian", email: "other.a@example.com" }], sign: false });
+    stub.sign(half.envelopeId, FAMILY_A.parent.email);
+    expect(await startAgainAction(half.id, "lost_access", "")).toMatchObject({ ok: true });
+    expect(stub.apiCalls("/envelope/delete")).toEqual([]);
+    expect(stub.envelopes.get(half.envelopeId)!.status).toBe("CANCELLED");
+    expect((await audits("forms.request.restart"))[0]!.after).toMatchObject({ withdrawn: "cancel" });
+  });
 });
 
 describe("a student moved to another family", () => {
@@ -336,7 +360,56 @@ describe("a student moved to another family", () => {
     await connectForms(stub);
     await runEvidenceJob();
     expect(await db.select().from(formWithdrawal)).toEqual([]);
-    expect(await audits("form.document.withdraw")).toHaveLength(3);
+    expect((await audits("form.document.withdraw")).map((r) => r.after)).toEqual(Array(3).fill({ reason: "student_moved", how: "already_gone" }));
+  });
+
+  it("gives the new family nothing of who signed a form it brought along: no names, no download, no PDF", async () => {
+    const s2 = FAMILY_A.students[1]!;
+    await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: s2.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
+    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, s2.qboId));
+    const bCtx = { ...b.identity, ip: null };
+    expect(await findMySignedPdf(bCtx, a.forms!.ids.complete)).toBeNull();
+    expect(await mySignedDownloads(bCtx, [a.forms!.ids.complete])).toEqual(new Map());
+    asParent(b.identity);
+    const page = await renderPage(FormPage, { params: { id: a.forms!.ids.complete } });
+    expect(textOf(page)).toContain("This form is signed");
+    expect(page).not.toContain(FAMILY_A.parent.name);
+    expect(page).not.toContain("Download the signed form");
+    expect(page).not.toContain(`/forms/${a.forms!.ids.complete}/signed`);
+    const list = await renderPage(FormsPage);
+    expect(textOf(list)).not.toContain(FAMILY_A.parent.name);
+    expect(list).not.toContain(`/forms/${a.forms!.ids.complete}/signed`);
+    const answer = await parentDownload(new Request(`http://portal.test/forms/${a.forms!.ids.complete}/signed`), { params: Promise.resolve({ id: a.forms!.ids.complete }) });
+    expect(answer.status).toBe(404);
+    // B's own complete form, signed by B's guardian, is still B's to download.
+    expect(await findMySignedPdf(bCtx, b.forms!.ids.complete)).not.toBeNull();
+  });
+
+  it("never deletes a document Documenso sealed after the portal last read it, and audits a withdrawal that keeps failing as failed", async () => {
+    await connectForms(stub);
+    const template = stub.addTemplate({ signers: 1 });
+    const requirementId = await seedFormRequirement({ stepId: (await db.select({ stepId: requirement.stepId }).from(requirement).where(eq(requirement.title, "Travel consent")))[0]!.stepId,
+      title: "Medical release", appliesTo: "student", form: formSetting({ id: template.id }) });
+    const who = { parentId: a.identity.parentId, name: FAMILY_A.parent.name, email: FAMILY_A.parent.email };
+    const sealed = await signedInStub(stub, { requirementId, templateId: template.id, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.students[0]!.qboId, guardians: [who], sign: false });
+    stub.sign(sealed.envelopeId, FAMILY_A.parent.email);
+    await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: FAMILY_A.students[0]!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
+    expect(await db.select().from(formWithdrawal).where(eq(formWithdrawal.envelopeId, sealed.envelopeId))).toMatchObject([{ anySigned: false }]);
+    await runEvidenceJob(); await runEvidenceJob();
+    expect(stub.apiCalls("/envelope/delete")).toEqual([]);
+    expect(stub.envelopes.get(sealed.envelopeId)).toMatchObject({ status: "COMPLETED", deletedAt: null });
+    expect((await audits("form.document.withdraw.kept")).map((r) => r.targetId)).toEqual([sealed.envelopeId]);
+
+    // A document Documenso won't answer about: tried ten times, then audited as failed, never as withdrawn.
+    const open = await signedInStub(stub, { requirementId, templateId: template.id, familyQboId: FAMILY_B.family.qboId, subjectQboId: FAMILY_B.students[0]!.qboId, guardians: [who], sign: false });
+    await db.insert(formWithdrawal).values({ envelopeId: open.envelopeId, anySigned: false, tries: 10 });
+    stub.failNext = 50;
+    await runEvidenceJob();
+    stub.failNext = 0;
+    expect(await db.select().from(formWithdrawal)).toEqual([]);
+    expect((await audits("form.document.withdraw.failed")).map((r) => [r.targetId, (r.after as { error: string }).error])).toEqual([[open.envelopeId, expect.any(String)]]);
+    expect((await audits("form.document.withdraw")).map((r) => r.targetId)).not.toContain(open.envelopeId);
+    expect(stub.envelopes.get(open.envelopeId)!.deletedAt).toBeNull();
   });
 });
 

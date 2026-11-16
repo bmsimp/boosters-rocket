@@ -17,6 +17,8 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "form.document.recover": "A signed form Documenso still held was taken up again",
   "form.document.restart": "A declined form was started again",
   "form.document.withdraw": "An unsigned form was withdrawn, to be made again",
+  "form.document.withdraw.failed": "A moved student's form couldn't be withdrawn in Documenso and is still there",
+  "form.document.withdraw.kept": "A moved student's form had been signed and sealed in Documenso, so it was left there",
   "form.open.refused": "Opening a form refused: opened too often",
   "form.records.cleared": "Forms and consents cleared after a company change",
   "form.seal.ask": "Documenso asked again to finish a signed form",
