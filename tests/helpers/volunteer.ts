@@ -102,3 +102,14 @@ export async function seedTwoFamilyVolunteering(a: { spec: ParentFamilySpec; par
       checkIn: ["You", "Not checked in yet"], staffOnly: outside ? [note] : [] },
   };
 }
+
+/**
+ * A shift's date and clock times in a zone, so that it starts `startsAgo` minutes before `at` and ends `endsIn`
+ * minutes after: for a check-in window that is open (or not) whenever the test runs. Minutes are cut, never rounded
+ * up, so the shift never starts later or ends later than asked. An end past midnight is the next morning.
+ */
+export function shiftAround(at: Date, startsAgo: number, endsIn: number, zone = "UTC"): { onDate: string; startsAt: string; endsAt: string } {
+  const clock = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeZone: zone, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).format(d);
+  const start = new Date(at.getTime() - startsAgo * 60_000), end = new Date(at.getTime() + endsIn * 60_000);
+  return { onDate: calendarDayIn(zone, start), startsAt: clock(start), endsAt: clock(end) };
+}
