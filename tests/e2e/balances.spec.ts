@@ -71,8 +71,7 @@ test.describe("staff", () => {
     await page.goto("/staff/balances");
     const run = page.getByRole("region", { name: "Reading from QuickBooks" });
     await run.getByRole("button", { name: "Read every family now" }).click();
-    await expect(run.getByRole("status")).toContainText("Asked. The worker starts within a minute");
-    await page.reload();
+    // The page is drawn again with the ask in it: the button gives way to the words.
     await expect(run).toContainText("A read of every family is asked for.");
     await expect(run.getByRole("button", { name: "Read every family now" })).toHaveCount(0);
   });

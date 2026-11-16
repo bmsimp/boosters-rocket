@@ -25,6 +25,10 @@ import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers
  * a time at a gentle pace, into the rows the parent pages show; a run that stops part way says how far it got and the
  * next one carries on; one audit row per run; nothing read from the wrong company or with no connection.
  */
+// Each test reads several families through the stub, one request at a time: on a loaded machine that takes more than
+// vitest's 5 seconds.
+vi.setConfig({ testTimeout: 30_000 });
+
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
 afterAll(() => stub.close());
@@ -89,7 +93,7 @@ describe("the worker's read of every family", () => {
     expect(ran).toContainEqual({ job: MONEY_JOB, ok: true });
     expect(ran.findIndex((r) => r.job === MONEY_JOB)).toBe(ran.length - 1);
     expect((await moneyRow("10"))!.readAt).not.toBeNull();
-  }, 30_000); // a whole wake of the worker: the token, the clean-up and every family
+  });
 
   it("stops part way when QuickBooks fails, says how far it got, and the next run carries on from there", async () => {
     await threeFamilies();
@@ -151,6 +155,16 @@ describe("the worker's read of every family", () => {
     await db.delete(qboConnection); // disconnected
     expect(await runMoneyJob({ paceMs: 0 })).toEqual({ ran: true, finished: true, ok: false });
     expect((await runs())[0]).toMatchObject({ outcome: "failed", detail: "Read 0 families of 3, then stopped: QuickBooks isn't connected (not_connected). The next run carries on from there." });
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("ends a run under way from the worker's wake once QuickBooks needs an Admin, asking it nothing", async () => {
+    await threeFamilies();
+    await runMoneyJob({ paceMs: 0, budgetMs: 0 });
+    await db.update(qboConnection).set({ lastError: "Intuit no longer accepts this connection. Connect QuickBooks again. (invalid_grant)" });
+    stub.calls.length = 0;
+    expect((await runDueJobs()).ran).toContainEqual({ job: MONEY_JOB, ok: false });
+    expect((await runs())[0]).toMatchObject({ outcome: "failed", detail: expect.stringContaining("then stopped: QuickBooks needs an Admin to connect it again (needs_admin)") });
     expect(stub.apiCalls()).toEqual([]);
   });
 

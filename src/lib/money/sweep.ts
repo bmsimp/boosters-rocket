@@ -87,6 +87,7 @@ export function pacer(gapMs: number): () => Promise<void> {
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const STOP_WORDS: Record<string, string> = {
   not_connected: "QuickBooks isn't connected",
+  needs_admin: "QuickBooks needs an Admin to connect it again",
   other_company: "the roster was read from another QuickBooks company than the connected one",
 };
 
@@ -123,6 +124,9 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
       await saveState(state);
     }
     const runId = state.runId!;
+    // A run under way whose connection has gone, or needs an Admin to connect again, ends here without asking QuickBooks.
+    const conn = await connectionView();
+    const unusable = !conn.connected ? "not_connected" : conn.needsAdmin ? "needs_admin" : null;
     const requestedBy = state.requested;
     const families = await familiesInOrder();
     const total = families.length;
@@ -138,6 +142,10 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
     };
     const done = () => `Read ${plural(state.read, "family", "families")}${state.failed ? `; ${plural(state.failed, "family", "families")} couldn't be read` : ""}`;
 
+    if (unusable) {
+      await finish("failed", `${done()} of ${total}, then stopped: ${STOP_WORDS[unusable]} (${unusable}). The next run carries on from there.`, state.after, unusable);
+      return { ran: true, finished: true, ok: false };
+    }
     const pace = pacer(o.paceMs ?? PACE_MS);
     const deadline = Date.now() + (o.budgetMs ?? WAKE_BUDGET_MS);
     for (const familyQboId of families.filter((id) => isAfter(id, state.after))) {
