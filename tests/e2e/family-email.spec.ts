@@ -42,7 +42,7 @@ test.describe("a parent changes their sign-in email", () => {
   test.beforeAll(async () => {
     const p = await zelda();
     saved = {
-      setting: await sql`SELECT value FROM setting WHERE key = 'parents.settings'`,
+      setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`],
       link: (await sql`SELECT status, disabled_reason, status_before_disable FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`)[0] as typeof saved.link,
     };
     const on = { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false, reviewEmails: false };
