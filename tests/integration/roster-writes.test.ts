@@ -299,6 +299,16 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     await db.update(writeQueue).set({ state: "done" });
     expect((await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).ok).toBe(true);
   });
+
+  it("nobody is added to, or moved into, a family whose own change is still waiting", async () => {
+    tag = await connectRoster(stub);
+    await seedQueued({ op: "deactivate", role: "family", qboId: "20", syncToken: "0" });
+    expect(await askRosterWrite({ op: "create", role: "parent", name: "Wen Chen", familyQboId: "20", email: "wen@example.com", typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(posts()).toEqual([]);
+    await db.update(writeQueue).set({ state: "given_up" });
+    expect((await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).ok).toBe(true);
+  });
 });
 
 describe("every id the page sends is looked up on the roster, in the role the change needs", () => {

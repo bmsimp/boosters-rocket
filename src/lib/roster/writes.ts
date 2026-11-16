@@ -100,7 +100,8 @@ type Prepared = { ok: true; write: RosterWrite; realmId: string; familyQboId: st
 /**
  * Everything checked before anything is sent, under the roster lock (lockRosterAs): the page was shown this company's
  * roster, QuickBooks is connected to that company, the shape offers the change, every id is on the roster in the role
- * the change needs, nothing is waiting for the same record, and the name is free. Returns the write as it will be sent.
+ * the change needs, nothing is waiting for the same record (nor for the family a new record or a move goes into), and the
+ * name is free. Returns the write as it will be sent.
  */
 async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
   const no = (error: string): Prepared => ({ ok: false, result: refuse(error) });
@@ -115,6 +116,10 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
     const byId = new Map(cache.map((c) => [c.qboId, c]));
     const allowed = (op: RosterOperation) => offers(shape, op);
     const done = (write: RosterWrite, familyQboId: string | null): Prepared => ({ ok: true, write, realmId: source, familyQboId, tag: rosterTag });
+    // A change still waiting or stuck for this record: a family's too, before anyone is added to it or moved into it
+    // (a waiting "make inactive" would land after them).
+    const waitingFor = async (qboId: string) => (await tx.select({ id: writeQueue.id }).from(writeQueue)
+      .where(and(eq(writeQueue.targetQboId, qboId), inArray(writeQueue.state, ["waiting", "stuck"]))).limit(1)).length > 0;
 
     if (ask.op === "create") {
       const op: RosterOperation = ask.role === "family" ? "create_family" : ask.role === "member" ? "create_member" : ask.role === "student" ? "add_student" : "add_parent";
@@ -126,6 +131,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
         const family = ask.familyQboId === null ? null : roleIn(roster, ask.familyQboId);
         if (!family || family.role !== "family") return no(WRITE_COPY.gone);
         if (!byId.get(ask.familyQboId!)!.active) return no("This family is inactive in QuickBooks, so nobody can be added to it.");
+        if (await waitingFor(ask.familyQboId!)) return no(WRITE_COPY.waiting);
         familyQboId = ask.familyQboId;
       }
       let email: string | null = null;
@@ -143,9 +149,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
     const record = byId.get(ask.qboId);
     const where = record ? roleIn(roster, record.qboId) : null;
     if (!record || !where) return no(WRITE_COPY.gone);
-    const [open] = await tx.select({ id: writeQueue.id }).from(writeQueue)
-      .where(and(eq(writeQueue.targetQboId, record.qboId), inArray(writeQueue.state, ["waiting", "stuck"]))).limit(1);
-    if (open) return no(WRITE_COPY.waiting);
+    if (await waitingFor(record.qboId)) return no(WRITE_COPY.waiting);
 
     if (ask.op === "rename") {
       if (!allowed(renameOf(where.role))) return no(WRITE_COPY.notOffered);
@@ -162,6 +166,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       if (!to || to.role !== "family") return no(WRITE_COPY.gone);
       if (ask.toFamilyQboId === where.familyQboId) return no("The student is in that family already, so there was nothing to change.");
       if (!byId.get(ask.toFamilyQboId)!.active) return no("That family is inactive in QuickBooks, so nobody can be moved to it.");
+      if (await waitingFor(ask.toFamilyQboId)) return no(WRITE_COPY.waiting);
       return done({ op: "move", role: "student", qboId: record.qboId, syncToken: ask.syncToken, fromFamilyQboId: where.familyQboId!, toFamilyQboId: ask.toFamilyQboId }, where.familyQboId);
     }
     if (!allowed(deactivateOf(where.role))) return no(WRITE_COPY.notOffered);
