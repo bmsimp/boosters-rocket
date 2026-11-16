@@ -54,7 +54,7 @@ describe("the Documenso client", () => {
     expect(await codeOf(documensoHealth(stub.origin))).toBe("server");
     stub.healthy = true;
     await expect(documensoHealth(stub.origin)).resolves.toBeUndefined();
-    expect(Object.keys(DOCUMENSO_ERRORS).sort()).toEqual(["bad_answer", "not_found", "rate_limited", "refused", "server", "timeout", "unauthorized", "unreachable"]);
+    expect(Object.keys(DOCUMENSO_ERRORS).sort()).toEqual(["bad_answer", "not_found", "rate_limited", "refused", "server", "timeout", "too_large", "unauthorized", "unreachable"]);
     expect(documensoCode(new Error("anything else"))).toBe("unexpected");
   });
 

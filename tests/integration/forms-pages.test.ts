@@ -49,7 +49,8 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     expect(text).toMatch(/Photo release \(optional\) Uniforms Waiting for the other guardian/);
     // A way to each form that has something behind it, by the family's own request ids; none for the one that isn't ready.
     const ids = a.forms!.ids;
-    expect(linksIn(html).sort()).toEqual([ids.waiting, ids.signed, ids.complete, ids.declined, ids.waitingOther].map((id) => `/forms/${id}`).sort());
+    // and the download of the signed one, whose evidence is kept (src/lib/forms/my-evidence.ts).
+    expect(linksIn(html).sort()).toEqual([...[ids.waiting, ids.signed, ids.complete, ids.declined, ids.waitingOther].map((id) => `/forms/${id}`), `/forms/${ids.complete}/signed`].sort());
     expect(html).not.toContain(ids.not_opened);
     for (const theirs of Object.values(b.forms!.ids)) expect(html).not.toContain(theirs);
     expect(html).toContain('Sign<span class="visually-hidden">: Travel consent</span>'); // the link names what it opens, for a screen reader

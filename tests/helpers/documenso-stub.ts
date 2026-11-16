@@ -17,7 +17,12 @@ import { randomBytes } from "node:crypto";
  *    email, with `_` and `%` as wildcards: it finds more than the exact id;
  *  - a document every signer has signed is sealed (COMPLETED) by a separate step, which a test can hold back;
  *    `distribute` on such a document queues the sealing again;
- *  - deleting an unsigned document makes it answer 404; a completed one is only marked deleted.
+ *  - deleting an unsigned document makes it answer 404; a completed one is only marked deleted; cancelling one makes it
+ *    CANCELLED (with a completedAt, as the real one does);
+ *  - a document's items, its sealed and original PDFs, its certificate and audit log as PDFs, and its audit log as JSON
+ *    in pages, as the evidence calls read them (verification, section 6, "When status is COMPLETED"). The sealed PDF of
+ *    an item is the same bytes at every download (Documenso stores it); the certificate and the audit log PDF are made
+ *    afresh at each one, as Documenso renders them on request.
  *
  * Nothing here is a real signature: `sign()` and `reject()` do what a guardian does in the signing frame.
  */
@@ -27,9 +32,11 @@ export type StubRecipient = {
 };
 export type StubField = { id: number; type: string; recipientId: number; inserted: boolean; customText: string; fieldMeta: { label?: string; readOnly?: boolean; type?: string } | null };
 export type StubEnvelope = {
-  id: string; type: "TEMPLATE" | "DOCUMENT"; status: "DRAFT" | "PENDING" | "COMPLETED" | "REJECTED"; externalId: string | null; title: string;
+  id: string; type: "TEMPLATE" | "DOCUMENT"; status: "DRAFT" | "PENDING" | "COMPLETED" | "REJECTED" | "CANCELLED"; externalId: string | null; title: string;
   createdAt: string; updatedAt: string; completedAt: string | null; deletedAt: string | null; templateId: string | null;
   recipients: StubRecipient[]; fields: StubField[];
+  /** How many items (PDFs) the document has: 1 unless a test says otherwise. */
+  items?: number;
   /** What the document was made with: the override sent with `use`, laid over the template's own settings. */
   documentMeta: { distributionMethod: string; emailSettings: Record<string, boolean>; timezone: string | null; dateFormat: string | null; envelopeExpirationPeriod: unknown };
 };
@@ -69,6 +76,17 @@ export type DocumensoStub = {
   failPathOnce: string | null;
   /** Runs, and is waited for, before the API call with this path (such as "/envelope/recipient/delete") is answered: something that happens in the middle of the recipe. */
   beforeAnswer: { path: string; run: () => Promise<unknown> | unknown } | null;
+  /** A download whose address (path and query) contains this text sends half the file and then breaks the connection, once. */
+  breakDownloadOnce: string | null;
+  /** How large each sealed PDF is, in bytes (at least the few bytes of a PDF's header). */
+  sealedSize: number;
+  /** How many entries a document's audit log has; it is read 100 to a page. */
+  auditEntries: number;
+  /** Documents whose sealed PDFs come out different from the next download on: a stored file that changed. */
+  alterSealed: Set<string>;
+  /** The bytes a download of this item's sealed PDF gives now, for a test to hash. */
+  sealedBytes(envelopeId: string, position?: number): Buffer;
+  originalBytes(envelopeId: string, position?: number): Buffer;
   addTemplate(spec?: TemplateSpec): StubEnvelope;
   /** The documents made, newest last (templates left out), and the one for a request by its externalId. */
   documents(): StubEnvelope[];
@@ -105,7 +123,8 @@ function matches(query: string, value: string | null): boolean {
 export async function startDocumensoStub(): Promise<DocumensoStub> {
   let nextRecipient = 100, nextField = 1000;
   const stub = { token: `api_${randomBytes(12).toString("hex")}`, calls: [], envelopes: new Map(), sealing: "auto", sealWhenAsked: true, sealAsks: 0, healthy: true,
-    failNext: 0, rateLimitNext: 0, drop: false, delayMs: 0, failPathOnce: null, beforeAnswer: null } as unknown as DocumensoStub;
+    failNext: 0, rateLimitNext: 0, drop: false, delayMs: 0, failPathOnce: null, beforeAnswer: null,
+    breakDownloadOnce: null, sealedSize: 2048, auditEntries: 12, alterSealed: new Set<string>() } as unknown as DocumensoStub;
   const now = () => new Date().toISOString();
   const recipientOf = (envelope: StubEnvelope, who: string | number) => {
     const r = envelope.recipients.find((x) => (typeof who === "number" ? x.id === who : x.email.toLowerCase() === who.toLowerCase()));
@@ -170,7 +189,19 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
   stub.reset = () => {
     stub.calls.length = 0; stub.envelopes.clear(); stub.sealing = "auto"; stub.sealWhenAsked = true; stub.sealAsks = 0; stub.healthy = true;
     stub.failNext = 0; stub.rateLimitNext = 0; stub.drop = false; stub.delayMs = 0; stub.failPathOnce = null; stub.beforeAnswer = null;
+    stub.breakDownloadOnce = null; stub.sealedSize = 2048; stub.auditEntries = 12; stub.alterSealed.clear(); renders = 0;
   };
+  // Made-up PDFs: a PDF's header, then bytes that follow from the document and the item, padded to the size asked for.
+  const pdf = (seed: string, size: number) => {
+    const head = Buffer.from(`%PDF-1.7\n% ${seed}\n`, "latin1");
+    const body = Buffer.alloc(Math.max(0, size - head.length));
+    for (let i = 0; i < body.length; i++) body[i] = (seed.charCodeAt(i % seed.length) + i) & 0xff;
+    return Buffer.concat([head, body]);
+  };
+  const itemsOf = (e: StubEnvelope) => Array.from({ length: e.items ?? 1 }, (_, i) => ({ id: `envelope_item_${e.id.slice(-8)}${i + 1}x`, title: `form-${i + 1}.pdf`, order: i + 1 }));
+  stub.sealedBytes = (envelopeId, position = 1) => pdf(`sealed ${envelopeId} ${position}${stub.alterSealed.has(envelopeId) ? " altered" : ""}`, stub.sealedSize);
+  stub.originalBytes = (envelopeId, position = 1) => pdf(`original ${need(envelopeId).templateId} ${position}`, 1585);
+  let renders = 0;
 
   const server: Server = createServer((req, res) => {
     let raw = "";
@@ -206,7 +237,44 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
       const one = /^\/envelope\/(envelope_[A-Za-z0-9]+)$/.exec(path);
       if (req.method === "GET" && one) {
         const e = stub.envelopes.get(one[1]!);
-        return e ? send(200, { ...e, envelopeItems: [{ id: `envelope_item_${e.id.slice(-8)}`, title: "form.pdf", order: 1 }] }) : refused(404, "Envelope not found");
+        return e ? send(200, { ...e, envelopeItems: itemsOf(e) }) : refused(404, "Envelope not found");
+      }
+      // The evidence downloads. A file is sent as Documenso sends it: application/pdf, with its length.
+      const file = (bytes: Buffer) => {
+        if (stub.breakDownloadOnce !== null && req.url!.includes(stub.breakDownloadOnce)) {
+          stub.breakDownloadOnce = null;
+          res.writeHead(200, { "content-type": "application/pdf", "content-length": String(bytes.length) });
+          res.write(bytes.subarray(0, Math.floor(bytes.length / 2)), () => req.socket.destroy());
+          return;
+        }
+        res.writeHead(200, { "content-type": "application/pdf", "content-length": String(bytes.length), "content-disposition": "attachment; filename=\"form_signed.pdf\"" });
+        res.end(bytes);
+      };
+      const item = /^\/envelope\/item\/(envelope_item_[A-Za-z0-9]+)\/download$/.exec(path);
+      if (req.method === "GET" && item) {
+        const owner = [...stub.envelopes.values()].find((e) => e.type === "DOCUMENT" && itemsOf(e).some((i) => i.id === item[1]));
+        if (!owner) return refused(404, "Envelope item not found");
+        const position = itemsOf(owner).findIndex((i) => i.id === item[1]) + 1;
+        const version = url.searchParams.get("version");
+        if (version === "signed") return owner.status === "COMPLETED" ? file(stub.sealedBytes(owner.id, position)) : refused(400, "Document is not completed");
+        if (version === "original") return file(stub.originalBytes(owner.id, position));
+        return refused(400, "Bad version");
+      }
+      const rendered = /^\/envelope\/(envelope_[A-Za-z0-9]+)\/(certificate|audit-log)\/download$/.exec(path);
+      if (req.method === "GET" && rendered) {
+        const e = stub.envelopes.get(rendered[1]!);
+        if (!e || e.type !== "DOCUMENT") return refused(404, "Envelope not found");
+        return file(pdf(`${rendered[2]} ${e.id} rendered ${++renders}`, 4096)); // made afresh at each download
+      }
+      const log = /^\/envelope\/(envelope_[A-Za-z0-9]+)\/audit-log$/.exec(path);
+      if (req.method === "GET" && log) {
+        const e = stub.envelopes.get(log[1]!);
+        if (!e || e.type !== "DOCUMENT") return refused(404, "Envelope not found");
+        const perPage = Number(url.searchParams.get("perPage") ?? "10"), page = Number(url.searchParams.get("page") ?? "1");
+        const all = Array.from({ length: stub.auditEntries }, (_, i) => ({ id: `audit_${e.id.slice(-6)}_${i + 1}`, createdAt: new Date(Date.parse(e.createdAt) + i * 1000).toISOString(),
+          envelopeId: e.id, type: i === 0 ? "DOCUMENT_CREATED" : i === stub.auditEntries - 1 ? "DOCUMENT_COMPLETED" : "DOCUMENT_VIEWED", name: "Personal Team", email: null, userAgent: "node", ipAddress: null, data: { n: i + 1 } }));
+        const ordered = url.searchParams.get("orderByDirection") === "asc" ? all : [...all].reverse();
+        return send(200, { data: ordered.slice((page - 1) * perPage, page * perPage), count: all.length, currentPage: page, perPage, totalPages: Math.ceil(all.length / perPage) });
       }
       if (req.method !== "POST") return refused(404, "Not found");
 
@@ -269,6 +337,11 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
         if (envelope.status === "DRAFT") { envelope.status = "PENDING"; envelope.updatedAt = now(); }
         else if (envelope.status === "PENDING" && allSigned(envelope)) { stub.sealAsks++; if (stub.sealWhenAsked) stub.seal(envelope.id); }
         return send(200, { success: true, id: envelope.id, recipients: envelope.recipients.map(shown) });
+      }
+      if (path === "/envelope/cancel") {
+        if (envelope.status === "COMPLETED") return refused(400, "Cannot cancel a completed document");
+        envelope.status = "CANCELLED"; envelope.completedAt = now(); envelope.updatedAt = now(); // a cancelled document has a completedAt too
+        return send(200, { success: true });
       }
       if (path === "/envelope/delete") {
         if (envelope.status === "COMPLETED") envelope.deletedAt = now(); // a soft delete: it still answers, marked deleted

@@ -109,6 +109,8 @@ const ROUTE_HANDLERS: Record<string, string> = {
   "src/app/api/quickbooks/callback/route.ts": "A staff session with Settings.QuickBooks.ReadWrite, checked in the handler, and the state value from the connect step (tests/integration/quickbooks-connection.test.ts).",
   "src/app/icons/[name]/route.ts": "Public on purpose: the club's app icons, which a phone fetches before anyone signs in. It answers a fixed list of names with a picture of the club's short name on the club's color, and reads no family data (tests/integration/pwa-icons.test.ts).",
   "src/app/staff/(app)/audit/export/route.ts": "A staff session with Audit.Log.Read, which only an Admin holds, checked in the handler before anything is read; anyone else is redirected with no rows. Each export is audited and sent no-store (tests/integration/audit-log.test.ts).",
+  "src/app/(parent)/forms/[id]/signed/route.ts": "The parent session, checked first in the handler by requireParentPage() (signed out: to sign-in and back; refused: /refused). The request id is looked up within the session's family and its evidence by request and by the company connected now (findMySignedPdf); an id that isn't a uuid, nobody's, another family's or one with no kept evidence all answer the same 404 with no bytes. Sent no-store with a fixed file name (tests/integration/signed-forms-downloads.test.ts).",
+  "src/app/staff/(app)/forms/evidence/[id]/[file]/route.ts": "A staff session with Forms.Signature.Read, checked in the handler before anything is read; anyone else is redirected with no bytes. Each download is audited (forms.evidence.download) before a byte is sent, no-store, with a fixed file name (tests/integration/signed-forms-downloads.test.ts).",
   "src/app/setup/certificates/[name]/route.ts": "downloadAccess(): the setup session while setup is open, or an Admin afterward; otherwise 404 (tests/integration/setup-certificates-route.test.ts).",
   "src/app/setup/finish/route.ts": "Setup open, the setup session cookie, and the named Admin signed in; otherwise a redirect that changes nothing (tests/integration/setup-finish.test.ts).",
   "src/app/setup/scripts/[name]/route.ts": "downloadAccess(), as the certificate download; otherwise 404 (tests/integration/setup-scripts-route.test.ts).",
@@ -128,6 +130,14 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/money/sweep", names: "all", why: "the worker's run reads every family's invoices" },
   { module: "@/lib/money/items", names: "all", why: "it is the staff choice of what a payment requirement is met by" },
   { module: "@/lib/volunteer/setup", names: "all", why: "a shift's sign-up list names people of every family" },
+  { module: "@/lib/signed-forms/matrix", names: "all", why: "the matrix lists every family's forms and who has signed them" },
+  { module: "@/lib/signed-forms/evidence", names: "all", why: "it opens any family's signed form, its evidence and the earlier company's archive" },
+  { module: "@/lib/signed-forms/evidence-job", names: "all", why: "the worker fetches every family's completed forms" },
+  { module: "@/lib/signed-forms/copies", names: "all", why: "it reads every family's kept forms to send their copies" },
+  { module: "@/lib/signed-forms/reminders", names: "all", why: "the reminder sweep reads every family's forms and guardians" },
+  { module: "@/lib/signed-forms/start-again", names: "all", why: "it starts any family's form again, by its id" },
+  { module: "@/lib/signed-forms/worker", names: "all", why: "the worker's call into all of the above" },
+  { module: "@/lib/signed-forms/rules", names: "all", why: "the staff words and rules of the signed forms pages; parents read src/lib/forms/states.ts" },
 ];
 
 describe("every page guards itself", () => {

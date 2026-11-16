@@ -11,6 +11,7 @@ import { expirePreviousCompany } from "@/lib/parents/company-change";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
 import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
+import { runSignedFormsJobs } from "@/lib/signed-forms/worker";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -71,6 +72,9 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   } catch {
     ran.push({ job: FORMS_JOB, ok: false });
   }
+  // Signed forms (src/lib/signed-forms/worker.ts): the evidence of completed forms fetched and kept, the guardians'
+  // copies, and the scheduled reminders. Guarded like the steps above; in this wake's answer only when it did something.
+  ran.push(...(await runSignedFormsJobs(now)));
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record,
   // except that a read of every family under way is ended, saying how far it got.

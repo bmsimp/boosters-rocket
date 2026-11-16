@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -8,17 +8,20 @@ import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
 export const CLEANUP_JOB = "cleanup.daily";
 /** Job history is kept this long. The newest run of each job, and its newest run that worked, are kept whatever their age. */
 export const JOB_HISTORY_DAYS = 90;
+/** Reminder claims (who was reminded of which form on which day) are kept this long: long past the one-a-day rule they serve. */
+export const REMINDER_CLAIM_DAYS = 365;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; rateLimitEvents: number;
-  emailChanges: number; familyMoney: number; jobRuns: number;
+  emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
   signinCodes: ["sign-in code", "sign-in codes"], rateLimitEvents: ["rate-limit record", "rate-limit records"],
   emailChanges: ["expired email change", "expired email changes"], familyMoney: ["set of figures for a family no longer in the roster", "sets of figures for families no longer in the roster"],
   jobRuns: ["old job record", "old job records"],
+  reminderClaims: ["reminder record older than a year", "reminder records older than a year"],
 };
 
 /**
@@ -26,7 +29,8 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * leaves alone, with why. A new table must join one list (tests/integration/cleanup.test.ts fails until it does); one
  * whose rows expire gets its delete below and a boundary test.
  */
-export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run"] as const;
+export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run",
+  "form_reminder_claim", "form_reminder_round"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts", staff_auth_verification: "Better Auth's own, short-lived and kept by it",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts", parent_auth_verification: "Better Auth's own, short-lived and kept by it",
@@ -42,6 +46,9 @@ export const KEPT_TABLES: Record<string, string> = {
   volunteer_event: "volunteer history: what happened stays readable", volunteer_shift: "volunteer history", volunteer_shift_requirement: "volunteer history",
   volunteer_signup: "who volunteered: emptied on a change of company, otherwise kept",
   signature_request: "a form's record of signing: evidence, never expires", signature_consent: "a guardian's consent to sign electronically: evidence, never expires",
+  signed_form_evidence: "a signed form's evidence: the club's record, never deleted, kept even after a change of company",
+  signed_form_file: "the files of a signed form's evidence: never deleted", signed_form_copy: "the copies of a signed form sent to guardians: part of its record",
+  form_withdrawal: "documents waiting to be withdrawn in Documenso: the worker removes each once it is done",
   audit_log: "append-only",
 };
 
@@ -69,6 +76,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   while the cache holds no customers at all, which says the roster is missing, not that every family left.
  * - Job history older than JOB_HISTORY_DAYS, except each job's newest run and its newest run that worked: the health
  *   page and the "is it due" check read those.
+ * - Reminder claims and scheduled rounds older than REMINDER_CLAIM_DAYS: they only stop a second reminder the same day.
+ *   A signed form's evidence is never deleted.
  *
  * The audit log is never touched: it is append-only.
  */
@@ -101,7 +110,11 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
     sql`${jobRun.id} <> (select max(j.id) from job_run j where j.job = ${jobRun.job})`,
     sql`${jobRun.id} is distinct from (select max(j.id) from job_run j where j.job = ${jobRun.job} and j.outcome = 'ok')`)).returning({ id: jobRun.id }));
 
-  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns };
+  const yearAgo = new Date(now.getTime() - REMINDER_CLAIM_DAYS * 86_400_000);
+  const reminderClaims = n(await tx.delete(formReminderClaim).where(lt(formReminderClaim.createdAt, yearAgo)).returning({ id: formReminderClaim.id }))
+    + n(await tx.delete(formReminderRound).where(lt(formReminderRound.createdAt, yearAgo)).returning({ id: formReminderRound.id }));
+
+  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims };
 }
 
 /**

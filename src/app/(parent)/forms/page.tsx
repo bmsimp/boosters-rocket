@@ -2,6 +2,7 @@ import { requireParentPage } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { firstName } from "@/lib/parents/first-name";
 import { loadMyForms, type MyFormGroup, type MyFormLine } from "@/lib/forms/my-forms";
+import { mySignedDownloads } from "@/lib/forms/my-evidence";
 import { STATE_WORDS } from "@/lib/forms/states";
 import { dueState } from "@/lib/money/due";
 import { getClubSettings } from "@/lib/settings/club";
@@ -21,7 +22,7 @@ function linkWords(group: MyFormGroup, form: MyFormLine): string {
 }
 
 /** One form: its title and the set it belongs to, its state in words, when it is due, and the way to it. */
-function FormLine({ group, form, today }: { group: MyFormGroup; form: MyFormLine; today: string }) {
+function FormLine({ group, form, today, download }: { group: MyFormGroup; form: MyFormLine; today: string; download: boolean }) {
   const { line } = form;
   const due = line.dueOn ? dueState(line.dueOn, today) : null;
   // A form that can't be opened yet has no link: there is nothing behind it. An address of a form never holds a
@@ -35,6 +36,7 @@ function FormLine({ group, form, today }: { group: MyFormGroup; form: MyFormLine
       <StateWords state={line.state} words={line.words} />
       {due && <span className={TONE[due.tone]}>{due.lead} <CalendarDate iso={line.dueOn!} />{due.tail}</span>}
       {canOpen && <a className="btn btn-club form-open" href={`/forms/${form.requestId}`}>{linkWords(group, form)}<span className="visually-hidden">: {line.title}</span></a>}
+      {download && <a className="btn btn-line form-open" href={`/forms/${form.requestId}/signed`} download="signed-form.pdf">Download<span className="visually-hidden">: the signed {line.title}</span></a>}
     </li>
   );
 }
@@ -48,6 +50,8 @@ export default async function FormsPage() {
   const ctx = await requireParentPage("/forms");
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
   const forms = family ? await loadMyForms(ctx, family) : null;
+  // The signed copies the club has kept, of this family's own forms only.
+  const downloads = forms ? await mySignedDownloads(ctx, forms.groups.flatMap((g) => g.forms.map((f) => f.requestId).filter((id): id is string => id !== null))) : new Map<string, number>();
   return (
     <main className="wrap single forms-page">
       <h1 className="page-title">Forms</h1>
@@ -61,7 +65,7 @@ export default async function FormsPage() {
               <section className="box" key={group.subjectQboId} aria-labelledby={`forms-${i}`}>
                 <h2 id={`forms-${i}`}>{group.who === "family" ? "Your family" : group.name}</h2>
                 {group.who === "family" && <p>Signed once for {group.name}</p>}
-                <ul className="reqs">{group.forms.map((form) => <FormLine key={form.line.requirementId} group={group} form={form} today={forms.today} />)}</ul>
+                <ul className="reqs">{group.forms.map((form) => <FormLine key={form.line.requirementId} group={group} form={form} today={forms.today} download={form.requestId !== null && (downloads.get(form.requestId) ?? 0) > 0} />)}</ul>
               </section>
             ))}
           </>

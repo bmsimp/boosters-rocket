@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import postgres from "postgres";
 import { createSecretBox } from "../src/lib/crypto/secret-box";
 import { mailConfigHash } from "../src/lib/mail/config-hash";
 import { runMigrations } from "../src/lib/db/migrate";
 import { assertE2eDatabase, e2eMailPort } from "../tests/e2e/run-config";
 import { E2E_VOLUNTEER } from "../tests/e2e/volunteer-seed";
+import { E2E_SIGNED_PDF } from "../tests/e2e/signed-forms-seed";
 
 /**
  * This script empties the database and seeds it again: test databases only, and in a git worktree never the database
@@ -218,7 +220,26 @@ async function main() {
   await sql`INSERT INTO signature_request (id, requirement_id, family_qbo_id, subject_qbo_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
               document_created_at, checked_at, all_signed_at, completed_at, evidence_owed)
             VALUES ('e2e00000-0000-4000-8000-000000000001', ${formIds["Travel consent"]!}, 'E2E-FAMILY', 'E2E-FAMILY', 'complete', 'envelope_e2equetzalcoatl', 'COMPLETED', ${template.templateId}, ${template.templateUpdatedAt},
-              'any', 'Quetzalcoatl Family', ${sql.json(zeldaSigned)}, now(), now(), now(), now(), true)`;
+              'any', 'Quetzalcoatl Family', ${sql.json(zeldaSigned)}, now(), now(), now(), now(), false)`;
+  // Its evidence, as the worker would have kept it (src/lib/signed-forms/evidence-job.ts), with made-up PDF bytes: the
+  // staff matrix leads to it, and both the staff and the parent downloads send its sealed PDF
+  // (tests/e2e/signed-forms.spec.ts, which reads E2E_SIGNED_PDF). Its copy counts as sent, so nothing is emailed.
+  const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+  const files = [
+    { kind: "sealed_pdf", itemId: "envelope_item_e2equetzalcoatl1", bytes: Buffer.from(E2E_SIGNED_PDF, "latin1") },
+    { kind: "certificate_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e signing certificate\n%%EOF\n", "latin1") },
+    { kind: "audit_log_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e audit log\n%%EOF\n", "latin1") },
+    { kind: "audit_log_json", itemId: null, bytes: Buffer.from(JSON.stringify({ envelopeId: "envelope_e2equetzalcoatl", count: 1, entries: [{ type: "DOCUMENT_COMPLETED" }] })) },
+  ];
+  const [evidence] = await sql`INSERT INTO signed_form_evidence (request_id, realm_id, requirement_id, family_qbo_id, subject_qbo_id, subject_kind, form_title, family_name, subject_name, season_name,
+              envelope_id, template_id, template_updated_at, signers, consents, originals, completed_at, copies_done_at)
+            VALUES ('e2e00000-0000-4000-8000-000000000001', '9130000000000001', ${formIds["Travel consent"]!}, 'E2E-FAMILY', 'E2E-FAMILY', 'family', 'Travel consent', 'Quetzalcoatl Family',
+              'Quetzalcoatl Family', 'Fall 2026', 'envelope_e2equetzalcoatl', ${template.templateId}, ${template.templateUpdatedAt}, ${sql.json(zeldaSigned.map((s) => ({ parentId: s.parentId, name: s.name, email: s.email, signedAt: s.signedAt })))},
+              ${sql.json([{ parentId: p!.id, name: "Zelda Quetzalcoatl", email: "zelda@example.com", textVersion: "2026-11-16", agreedAt: "2026-11-10T14:58:00.000Z", ip: "203.0.113.50", userAgent: null }])},
+              ${sql.json([{ itemId: "envelope_item_e2equetzalcoatl1", sha256: sha(Buffer.from("%PDF-1.4 original", "latin1")), size: 17 }])}, now(), now()) RETURNING id`;
+  for (const f of files) {
+    await sql`INSERT INTO signed_form_file (evidence_id, kind, position, item_id, bytes, size, sha256) VALUES (${evidence!.id}, ${f.kind}, 1, ${f.itemId}, ${f.bytes}, ${f.bytes.length}, ${sha(f.bytes)})`;
+  }
   const secondWaiting = [{ parentId: crypto.randomUUID(), recipientId: 2, name: "Wilhelmina Secondborn", email: "wilhelmina@second.example", signedAt: null }];
   await sql`INSERT INTO signature_request (id, requirement_id, family_qbo_id, subject_qbo_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
               document_created_at, checked_at)

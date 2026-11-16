@@ -11,7 +11,7 @@ export type DocumensoConfig = {
   token: string;
 };
 
-export type DocumensoErrorCode = "timeout" | "unreachable" | "unauthorized" | "not_found" | "rate_limited" | "refused" | "server" | "bad_answer";
+export type DocumensoErrorCode = "timeout" | "unreachable" | "unauthorized" | "not_found" | "rate_limited" | "refused" | "server" | "bad_answer" | "too_large";
 /** What staff read for each code. Never the response body: Documenso answers even a 400 with a stack trace. */
 export const DOCUMENSO_ERRORS: Record<DocumensoErrorCode, string> = {
   timeout: "Documenso took too long to answer.",
@@ -22,6 +22,7 @@ export const DOCUMENSO_ERRORS: Record<DocumensoErrorCode, string> = {
   refused: "Documenso refused the request.",
   server: "Documenso had an error of its own.",
   bad_answer: "Documenso answered in a way the portal doesn't understand.",
+  too_large: "Documenso sent a file larger than the portal keeps.",
 };
 export class DocumensoError extends Error {
   constructor(readonly code: DocumensoErrorCode) { super(DOCUMENSO_ERRORS[code]); this.name = "DocumensoError"; }
@@ -56,6 +57,7 @@ const envelopeSchema = z.object({
   id: z.string(), type: z.string(), status: z.string(), externalId: z.string().nullable().optional().default(null), title: z.string().optional().default(""),
   updatedAt: z.string(), completedAt: z.string().nullable().optional().default(null), deletedAt: z.string().nullable().optional().default(null),
   recipients: z.array(recipientSchema), fields: z.array(fieldSchema).optional().default([]),
+  envelopeItems: z.array(z.object({ id: z.string(), order: z.number().nullable().optional().default(null) })).optional().default([]),
 });
 const listSchema = z.object({ data: z.array(z.object({
   id: z.string(), type: z.string().optional().default(""), status: z.string().optional().default(""), externalId: z.string().nullable().optional().default(null),
@@ -67,7 +69,8 @@ const distributedSchema = z.object({ recipients: z.array(recipientSchema) });
 
 export type EnvelopeRecipient = z.infer<typeof recipientSchema>;
 export type EnvelopeField = { id: number; type: string; recipientId: number; label: string | null; readOnly: boolean };
-export type Envelope = Omit<z.infer<typeof envelopeSchema>, "fields"> & { fields: EnvelopeField[] };
+/** An envelope as the portal reads it. `envelopeItems` (its PDFs) is always read from Documenso; a test's made-up envelope may leave it out. */
+export type Envelope = Omit<z.infer<typeof envelopeSchema>, "fields" | "envelopeItems"> & { fields: EnvelopeField[]; envelopeItems?: { id: string; order: number | null }[] };
 export type EnvelopeSummary = z.infer<typeof listSchema>["data"][number];
 
 function codeFor(status: number): DocumensoErrorCode {
@@ -189,4 +192,105 @@ export async function deleteEnvelope(config: DocumensoConfig, envelopeId: string
 export function signingFrameUrl(origin: string, token: string, name: string): string {
   const options = Buffer.from(encodeURIComponent(JSON.stringify({ name, lockName: true })), "utf8").toString("base64");
   return `${origin}/embed/sign/${encodeURIComponent(token)}#${options}`;
+}
+
+/* ---- Evidence of a completed document, and withdrawing one (verification, section 6: "When status is COMPLETED", "Withdrawing a document") ---- */
+
+/** The most the portal reads of any one file Documenso sends. A larger answer is refused, and none of it is kept. */
+export const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+/** A download may take longer than a page load; it is only ever made by the worker or a staff action. */
+export const DOWNLOAD_TIMEOUT_MS = 60_000;
+/** The audit log as JSON is read this many entries a page, every page in order, and no more pages than this. */
+export const AUDIT_PAGE_SIZE = 100;
+export const AUDIT_MAX_PAGES = 50;
+
+const ITEM_ID = /^envelope_item_[A-Za-z0-9]{6,64}$/;
+/** True for an id in the form Documenso gives the items (the PDFs) of an envelope. Only such an id goes into an address. */
+export const isEnvelopeItemId = (value: unknown): value is string => typeof value === "string" && ITEM_ID.test(value);
+
+/** The body, read to its end but never past `limit` bytes: a longer one is refused as soon as it passes the limit. */
+async function readCapped(res: Response, limit: number): Promise<Buffer> {
+  const declared = Number(res.headers.get("content-length") ?? "NaN");
+  if (Number.isFinite(declared) && declared > limit) { await res.body?.cancel().catch(() => undefined); throw new DocumensoError("too_large"); }
+  if (!res.body) return Buffer.alloc(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) { await reader.cancel().catch(() => undefined); throw new DocumensoError("too_large"); }
+      chunks.push(value);
+    }
+  } catch (e) {
+    if (e instanceof DocumensoError) throw e;
+    // The connection broke, or the time ran out, half way through the file: nothing of it is used.
+    throw new DocumensoError((e as { name?: string } | null)?.name === "TimeoutError" ? "timeout" : "unreachable");
+  }
+  return Buffer.concat(chunks);
+}
+
+/** One file. It must be a PDF (its first bytes say so): anything else Documenso sends here is refused, not kept. */
+async function downloadPdf(config: DocumensoConfig, path: string, o: CallOptions): Promise<Buffer> {
+  const res = await send(`${config.origin}/api/v2${path}`, { method: "GET", headers: { authorization: config.token, accept: "application/pdf" } }, o.timeoutMs ?? DOWNLOAD_TIMEOUT_MS);
+  const bytes = await readCapped(res, MAX_DOWNLOAD_BYTES);
+  if (bytes.subarray(0, 5).toString("latin1") !== "%PDF-") throw new DocumensoError("bad_answer");
+  return bytes;
+}
+
+/** One item of a document as a PDF: `signed` is the sealed copy (the evidence), `original` the PDF the template was made from. */
+export async function downloadItem(config: DocumensoConfig, itemId: string, version: "signed" | "original", o: CallOptions = {}): Promise<Buffer> {
+  if (!isEnvelopeItemId(itemId)) throw new DocumensoError("not_found");
+  return downloadPdf(config, `/envelope/item/${itemId}/download?version=${version}`, o);
+}
+
+/** The signing certificate as its own PDF. Documenso renders it on request; it is not signed. */
+export async function downloadCertificate(config: DocumensoConfig, envelopeId: string, o: CallOptions = {}): Promise<Buffer> {
+  return downloadPdf(config, `/envelope/${withId(envelopeId)}/certificate/download`, o);
+}
+
+/** The audit log as a PDF. Documenso renders it on request; it is not signed. */
+export async function downloadAuditLogPdf(config: DocumensoConfig, envelopeId: string, o: CallOptions = {}): Promise<Buffer> {
+  return downloadPdf(config, `/envelope/${withId(envelopeId)}/audit-log/download`, o);
+}
+
+const auditPageSchema = z.object({
+  data: z.array(z.record(z.string(), z.unknown())), count: z.number().int().nonnegative(),
+  currentPage: z.number().int().positive(), perPage: z.number().int().positive(), totalPages: z.number().int().nonnegative(),
+});
+
+/**
+ * The audit log as JSON: every page, oldest entry first, as Documenso gave them (each entry's createdAt, type, name,
+ * email, userAgent, ipAddress and data). The result is the entries in order and the bytes as the portal keeps them. A
+ * log with more pages than AUDIT_MAX_PAGES, or whose pages don't add up to its count, is refused.
+ */
+export async function auditLogEntries(config: DocumensoConfig, envelopeId: string, o: CallOptions = {}): Promise<{ entries: Record<string, unknown>[]; json: Buffer }> {
+  const entries: Record<string, unknown>[] = [];
+  let total = 0;
+  for (let page = 1; ; page++) {
+    const res = await send(`${config.origin}/api/v2/envelope/${withId(envelopeId)}/audit-log?page=${page}&perPage=${AUDIT_PAGE_SIZE}&orderByDirection=asc`,
+      { method: "GET", headers: { authorization: config.token, accept: "application/json" } }, o.timeoutMs ?? DOWNLOAD_TIMEOUT_MS);
+    let json: unknown;
+    try { json = JSON.parse((await readCapped(res, MAX_DOWNLOAD_BYTES)).toString("utf8")); } catch (e) { if (e instanceof DocumensoError) throw e; throw new DocumensoError("bad_answer"); }
+    const parsed = auditPageSchema.safeParse(json);
+    if (!parsed.success || parsed.data.currentPage !== page) throw new DocumensoError("bad_answer");
+    entries.push(...parsed.data.data);
+    total = parsed.data.count;
+    if (page >= parsed.data.totalPages || parsed.data.data.length === 0) break;
+    if (page >= AUDIT_MAX_PAGES) throw new DocumensoError("too_large");
+  }
+  if (entries.length !== total) throw new DocumensoError("bad_answer");
+  const json = Buffer.from(JSON.stringify({ envelopeId, count: total, entries }, null, 2), "utf8");
+  if (json.byteLength > MAX_DOWNLOAD_BYTES) throw new DocumensoError("too_large");
+  return { entries, json };
+}
+
+/**
+ * Withdraws a document someone has signed: Documenso marks it CANCELLED and sends no mail (the document was made with
+ * its emails off). Never for a completed one. `reason` is the club's own sentence, without names.
+ */
+export async function cancelEnvelope(config: DocumensoConfig, envelopeId: string, reason: string, o: CallOptions = {}): Promise<void> {
+  await api(config, "POST", "/envelope/cancel", null, { envelopeId: withId(envelopeId), reason: reason.slice(0, 200) }, o);
 }

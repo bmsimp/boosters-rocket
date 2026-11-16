@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check, date, time } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check, date, time, customType } from "drizzle-orm/pg-core";
 import type { PgColumnBuilderBase } from "drizzle-orm/pg-core";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -355,6 +355,7 @@ export const requirement = pgTable("requirement", {
   itemQboId: text("item_qbo_id"),                      // payment only: the QuickBooks product or service it is met by (src/lib/money/payment-rule.ts)
   position: integer("position").notNull(),
   form: jsonb("form").$type<FormSetting>(),              // the form kind only: the Documenso template and who must sign; null until staff attach one
+  formReminders: jsonb("form_reminders").$type<FormReminders>(), // the form kind only: when reminders go (staff Forms page); null for none
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [index("requirement_step_ix").on(t.stepId, t.position)]);
@@ -513,6 +514,10 @@ export const signatureRequest = pgTable("signature_request", {
   completedAt: timestamp("completed_at", { withTimezone: true }),  // Documenso's completion time
   declinedAt: timestamp("declined_at", { withTimezone: true }),
   evidenceOwed: boolean("evidence_owed").notNull().default(false),
+  // The worker's tries at fetching the evidence (src/lib/signed-forms/evidence-job.ts): how many failed, the last short code, and when to try again.
+  evidenceTries: integer("evidence_tries").notNull().default(0),
+  evidenceError: text("evidence_error"),
+  evidenceNextAt: timestamp("evidence_next_at", { withTimezone: true }),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
@@ -539,6 +544,125 @@ export const signatureConsent = pgTable("signature_consent", {
   ip: inet("ip"),
   userAgent: text("user_agent"),
 }, (t) => [uniqueIndex("signature_consent_uq").on(t.requestId, t.parentId, t.textVersion)]);
+
+/* ---- Signed forms kept (v1 spec §9.4): the evidence of each completed form, the copies sent, and reminders ---- */
+
+/** Bytes, as Postgres keeps them. postgres.js reads a bytea as a Buffer and writes a Buffer as one. */
+const bytes = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+/** A signer of a kept form, as the request recorded them when the evidence was stored. */
+export type EvidenceSigner = { parentId: string | null; name: string; email: string; signedAt: string | null };
+/** A guardian's consent to sign electronically, copied from signature_consent as it was when the evidence was stored. */
+export type EvidenceConsent = { parentId: string; name: string; email: string; textVersion: string; agreedAt: string; ip: string | null; userAgent: string | null };
+/** The original PDF of each item of the document: Documenso keeps it with every document. Only its hash is kept. */
+export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
+
+/**
+ * The evidence of one signed form (v1 spec §9.4, as the Documenso verification changed it): one row per completed
+ * request, stored once every file of it is in signed_form_file. It is the club's record and outlives everything it came
+ * from: it has no foreign key to the request, the requirement or the consents, and nothing in the portal deletes it.
+ * The names, signers and consents are copies as they were. `realm_id` is the QuickBooks company the family belonged to
+ * (the roster cache's company then); when a different company is connected the row is kept, `request_id` is cut
+ * (`earlier_company_at` is set), and from then on it is shown only in the staff archive: its QuickBooks ids may name
+ * another family in the new company. `mismatch_at` is set when a later fetch gave a stored file a different hash.
+ */
+export const signedFormEvidence = pgTable("signed_form_evidence", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requestId: uuid("request_id"),                           // signature_request.id, with no foreign key; null once its company is an earlier one
+  realmId: text("realm_id"),                               // the QuickBooks company the request's family belonged to
+  earlierCompanyAt: timestamp("earlier_company_at", { withTimezone: true }),
+  requirementId: uuid("requirement_id"),                   // requirement.id, with no foreign key
+  familyQboId: text("family_qbo_id").notNull(),
+  subjectQboId: text("subject_qbo_id").notNull(),
+  subjectKind: text("subject_kind", { enum: ["family", "student"] }).notNull(),
+  formTitle: text("form_title").notNull(),                 // the names as they were
+  familyName: text("family_name"),
+  subjectName: text("subject_name"),
+  seasonName: text("season_name"),
+  envelopeId: text("envelope_id").notNull(),
+  templateId: text("template_id"),
+  templateUpdatedAt: timestamp("template_updated_at", { withTimezone: true }),
+  signers: jsonb("signers").$type<EvidenceSigner[]>().notNull(),
+  consents: jsonb("consents").$type<EvidenceConsent[]>().notNull(),
+  originals: jsonb("originals").$type<EvidenceOriginal[]>().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),   // Documenso's completion time
+  copiesDoneAt: timestamp("copies_done_at", { withTimezone: true }), // when the guardians' copies were all dealt with
+  mismatchAt: timestamp("mismatch_at", { withTimezone: true }),
+  storedAt: timestamp("stored_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("signed_form_evidence_request_uq").on(t.requestId).where(sql`request_id is not null`),
+  index("signed_form_evidence_family_ix").on(t.familyQboId),
+  index("signed_form_evidence_earlier_ix").on(t.earlierCompanyAt),
+]);
+
+/**
+ * One file of a signed form's evidence, its bytes kept in the portal's database: each item's sealed PDF, the signing
+ * certificate and the audit log as PDFs, and the audit log as JSON (every page, in order). The certificate and the
+ * audit log are kept as their own files whether or not Documenso also put them inside the sealed PDF. Never deleted.
+ */
+export const signedFormFile = pgTable("signed_form_file", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  evidenceId: uuid("evidence_id").notNull().references(() => signedFormEvidence.id, { onDelete: "restrict" }),
+  kind: text("kind", { enum: ["sealed_pdf", "certificate_pdf", "audit_log_pdf", "audit_log_json"] }).notNull(),
+  position: integer("position").notNull().default(1),     // the item's place, for a document of several items
+  itemId: text("item_id"),                                 // Documenso's envelope item, for a sealed PDF
+  bytes: bytes("bytes").notNull(),
+  size: integer("size").notNull(),
+  sha256: text("sha256").notNull(),
+  createdAt: created(),
+}, (t) => [uniqueIndex("signed_form_file_uq").on(t.evidenceId, t.kind, t.position)]);
+
+/**
+ * The copy of a signed form each guardian who signed it is sent, once: the row is the claim, made in one statement
+ * before the send, so two wakes can't send twice. Kept with the evidence.
+ */
+export const signedFormCopy = pgTable("signed_form_copy", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  evidenceId: uuid("evidence_id").notNull().references(() => signedFormEvidence.id, { onDelete: "restrict" }),
+  parentId: uuid("parent_id").notNull(),                   // parent.id, with no foreign key
+  outcome: text("outcome", { enum: ["sending", "sent", "failed", "skipped"] }).notNull().default("sending"),
+  how: text("how", { enum: ["attached", "link"] }),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull().defaultNow(),
+  doneAt: timestamp("done_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("signed_form_copy_uq").on(t.evidenceId, t.parentId)]);
+
+/**
+ * When a form's reminders go (v1 spec §9.3), set on the staff Forms page: on any of these days before the
+ * requirement's due date, and, optionally, once a week after it, at most four times.
+ */
+export type FormReminders = { before: (14 | 7 | 3 | 1)[]; weeklyAfter: boolean };
+
+/**
+ * One reminder to one guardian about one form on one day of the club's calendar: the claim, made before the send. At
+ * most one per guardian per form a day, whatever is pressed. Deleted after a year by the daily clean-up, and on a
+ * change of company.
+ */
+export const formReminderClaim = pgTable("form_reminder_claim", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requirementId: uuid("requirement_id").notNull(),
+  parentId: uuid("parent_id").notNull(),
+  onDate: date("on_date", { mode: "string" }).notNull(),   // the club's date
+  createdAt: created(),
+}, (t) => [uniqueIndex("form_reminder_claim_uq").on(t.requirementId, t.parentId, t.onDate), index("form_reminder_claim_created_ix").on(t.createdAt)]);
+
+/** A scheduled round of reminders for one form on one club day: claimed before it is sent, so each goes once. Cleaned like the claims. */
+export const formReminderRound = pgTable("form_reminder_round", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requirementId: uuid("requirement_id").notNull(),
+  onDate: date("on_date", { mode: "string" }).notNull(),
+  createdAt: created(),
+}, (t) => [uniqueIndex("form_reminder_round_uq").on(t.requirementId, t.onDate), index("form_reminder_round_created_ix").on(t.createdAt)]);
+
+/**
+ * A document to withdraw in Documenso after a transaction that could not call it (a student moved to another family):
+ * deleted when nobody had signed it, cancelled when someone had. The worker does it and removes the row.
+ */
+export const formWithdrawal = pgTable("form_withdrawal", {
+  envelopeId: text("envelope_id").primaryKey(),
+  anySigned: boolean("any_signed").notNull(),
+  tries: integer("tries").notNull().default(0),
+  createdAt: created(),
+});
 
 /** Roles. The built-in Admin role has key 'admin' and builtin=true. */
 export const role = pgTable("role", {

@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { requirement, requirementCover, setting, signatureConsent, signatureRequest, type FormSetting, type RequestSigner, type SignatureRequestState } from "@/lib/db/schema";
+import { requirement, requirementCover, setting, signatureConsent, signatureRequest, signedFormEvidence, signedFormFile, type FormSetting, type RequestSigner, type SignatureRequestState } from "@/lib/db/schema";
+import { getRosterSource } from "@/lib/roster/source";
 import { secretBox } from "@/lib/crypto/secret-box";
 import { CONSENT_VERSION } from "@/lib/forms/consent";
 import { FORMS_AAD, FORMS_KEY } from "@/lib/forms/settings";
@@ -64,6 +66,64 @@ export async function seedConsent(requestId: string, who: { parentId: string; na
   await db.insert(signatureConsent).values({ requestId, parentId: who.parentId, parentName: who.name, parentEmail: who.email, textVersion, ip: "203.0.113.50" });
 }
 
+/** Made-up PDF bytes that say what they are: enough for a download test to recognize, and nothing a reader would open. */
+export const fakePdf = (text: string): Buffer => Buffer.from(`%PDF-1.7\n% ${text}\n%%EOF\n`, "latin1");
+const hash = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+
+export type SeededEvidence = { id: string; sealed: Buffer; sealedSha256: string; files: { kind: string; sha256: string }[] };
+/**
+ * The evidence the worker would have kept for a complete request (src/lib/signed-forms/evidence-job.ts): the row with
+ * the names as they were, and its four files, with made-up PDF bytes. The company is the roster cache's, unless given.
+ * Clears the request's `evidence_owed`, as storing does.
+ */
+export async function seedEvidence(requestId: string, o: { tag: string; formTitle?: string; familyName?: string; subjectName?: string; realmId?: string | null; earlierCompanyAt?: Date | null;
+  consents?: { parentId: string; name: string; email: string }[]; copiesDone?: boolean } = { tag: "seeded" }): Promise<SeededEvidence> {
+  const row = await requestNow(requestId);
+  const sealed = fakePdf(`sealed ${o.tag}`);
+  const files = [
+    { kind: "sealed_pdf" as const, itemId: `envelope_item_${o.tag.replace(/\W/g, "").slice(0, 20)}1x`, bytes: sealed },
+    { kind: "certificate_pdf" as const, itemId: null, bytes: fakePdf(`certificate ${o.tag}`) },
+    { kind: "audit_log_pdf" as const, itemId: null, bytes: fakePdf(`audit log ${o.tag}`) },
+    { kind: "audit_log_json" as const, itemId: null, bytes: Buffer.from(JSON.stringify({ envelopeId: row.envelopeId, count: 1, entries: [{ type: "DOCUMENT_COMPLETED", tag: o.tag }] })) },
+  ];
+  const [evidence] = await db.insert(signedFormEvidence).values({
+    requestId: o.earlierCompanyAt ? null : requestId, realmId: o.realmId === undefined ? await getRosterSource() : o.realmId, earlierCompanyAt: o.earlierCompanyAt ?? null,
+    requirementId: row.requirementId, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId, subjectKind: row.subjectQboId === row.familyQboId ? "family" : "student",
+    formTitle: o.formTitle ?? "Seeded form", familyName: o.familyName ?? null, subjectName: o.subjectName ?? row.subjectName, seasonName: null,
+    envelopeId: row.envelopeId ?? `envelope_seed${o.tag.replace(/\W/g, "")}`, templateId: row.templateId, templateUpdatedAt: row.templateUpdatedAt,
+    signers: row.signers.map((s) => ({ parentId: s.parentId, name: s.name, email: s.email, signedAt: s.signedAt })),
+    consents: (o.consents ?? []).map((c) => ({ ...c, textVersion: CONSENT_VERSION, agreedAt: "2026-11-10T14:00:00.000Z", ip: "203.0.113.50", userAgent: null })),
+    originals: [{ itemId: files[0]!.itemId!, sha256: hash(fakePdf(`original ${o.tag}`)), size: 64 }],
+    completedAt: row.completedAt, copiesDoneAt: o.copiesDone === false ? null : new Date(),
+  }).returning({ id: signedFormEvidence.id });
+  await db.insert(signedFormFile).values(files.map((f) => ({ evidenceId: evidence!.id, kind: f.kind, position: 1, itemId: f.itemId, bytes: f.bytes, size: f.bytes.byteLength, sha256: hash(f.bytes) })));
+  await db.update(signatureRequest).set({ evidenceOwed: false }).where(eq(signatureRequest.id, requestId));
+  return { id: evidence!.id, sealed, sealedSha256: hash(sealed), files: files.map((f) => ({ kind: f.kind, sha256: hash(f.bytes) })) };
+}
+
+/**
+ * A request whose document is real in the Documenso stub and signed by everyone on it: made from `templateId` with
+ * this request's id as externalId, each guardian a recipient, then signed (and sealed, unless the stub holds sealing
+ * back). The request is stored as the portal would have left it: complete (or signed), `evidence_owed` set.
+ */
+export async function signedInStub(stub: { origin: string; token: string; envelopes: Map<string, { recipients: { id: number; email: string }[] }>; sign(envelopeId: string, who: string): void },
+  o: { requirementId: string; templateId: string; familyQboId: string; subjectQboId: string; subjectName?: string; guardians: { parentId: string; name: string; email: string }[]; items?: number; sign?: boolean }): Promise<{ id: string; envelopeId: string }> {
+  const id = await seedRequest({ requirementId: o.requirementId, familyQboId: o.familyQboId, subjectQboId: o.subjectQboId, state: "waiting", envelopeId: `envelope_pending${Math.random().toString(36).slice(2, 10)}`, subjectName: o.subjectName });
+  const template = stub.envelopes.get(o.templateId)!;
+  const made = await (await fetch(`${stub.origin}/api/v2/envelope/use`, { method: "POST", headers: { authorization: stub.token, "content-type": "application/json" },
+    body: JSON.stringify({ envelopeId: o.templateId, externalId: id, distributeDocument: true, recipients: o.guardians.map((g, i) => ({ id: template.recipients[i]!.id, email: g.email, name: g.name })) }) })).json() as { id: string; recipients: { id: number; email: string }[] };
+  const doc = stub.envelopes.get(made.id) as unknown as { items?: number; recipients: { id: number; email: string }[]; status: string };
+  if (o.items) doc.items = o.items;
+  const at = new Date().toISOString();
+  if (o.sign !== false) for (const g of o.guardians) stub.sign(made.id, g.email);
+  const done = doc.status === "COMPLETED";
+  await db.update(signatureRequest).set({
+    envelopeId: made.id, envelopeStatus: doc.status, state: o.sign === false ? "waiting" : done ? "complete" : "signed", completedAt: done ? new Date() : null, allSignedAt: o.sign === false ? null : new Date(),
+    evidenceOwed: done, signers: o.guardians.map((g) => ({ parentId: g.parentId, name: g.name, email: g.email, recipientId: doc.recipients.find((r) => r.email === g.email)!.id, signedAt: o.sign === false ? null : at })),
+  }).where(eq(signatureRequest.id, id));
+  return { id, envelopeId: made.id };
+}
+
 export const requestNow = async (id: string) => (await db.select().from(signatureRequest).where(eq(signatureRequest.id, id)))[0]!;
 
 const signer = (parentId: string, name: string, email: string, recipientId: number, signedAt: string | null = null): RequestSigner => ({ parentId, recipientId, name, email, signedAt });
@@ -75,6 +135,8 @@ export type FamilyForms = {
   page: string[];
   /** The family's request in each state, by state; `waitingOther` is the one the family's parent has signed and its other guardian has not. */
   ids: Record<SignatureRequestState | "waitingOther", string>;
+  /** The kept evidence of the family's complete request: its id and the sealed PDF's bytes and hash. */
+  evidence: SeededEvidence;
 };
 
 /**
@@ -107,9 +169,13 @@ export async function seedTwoFamilyForms(a: { spec: ParentFamilySpec; parentId: 
       waitingOther: await seedRequest({ ...base, requirementId: photo, subjectQboId: s2.qboId, state: "waiting", envelopeId: `envelope_${tag}other`, subjectName: s2.name, form: every,
         signers: [me(signedAt), signer(crypto.randomUUID(), own.otherGuardian, `${tag}.other.guardian@forms.example`, 2)] }),
     };
+    // The complete one's evidence, as the worker would have kept it: the sealed PDF's bytes say whose it is.
+    const evidence = await seedEvidence(ids.complete, { tag: `${tag} signed form`, formTitle: "Uniform agreement", familyName: spec.family.name, subjectName: s2.name,
+      consents: [{ parentId, name: spec.parent.name, email: spec.parent.email }] });
     return {
-      ids,
-      markers: [...Object.values(ids), ...["waiting", "signed", "complete", "declined", "other"].map((s) => `envelope_${tag}${s}`), own.title, ownRequirement, own.otherGuardian, `${tag}.other.guardian@forms.example`],
+      ids, evidence,
+      markers: [...Object.values(ids), ...["waiting", "signed", "complete", "declined", "other"].map((s) => `envelope_${tag}${s}`), own.title, ownRequirement, own.otherGuardian, `${tag}.other.guardian@forms.example`,
+        evidence.id, evidence.sealedSha256, `sealed ${tag} signed form`],
       page: ["Travel consent", own.title, "Uniform agreement", "Photo release", "Not signed yet", "Waiting for the other guardian", "Signed, being finished", "Signed", "Declined"],
     };
   };

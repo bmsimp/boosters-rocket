@@ -108,6 +108,35 @@ export function volunteerCancelMessage(b: Brand, to: string, o: { who: Volunteer
   return { to, subject: `Cancelled: ${o.shift.event}`, text: text(lines), html: html(b, lines), attachments: [calendarFile(o.calendar, "CANCEL")] };
 }
 
+/* ---- Signed forms (v1 spec §9.2 step 6, §9.3). Each goes to one guardian of the family, about that family's own form:
+   its title and who it is for. Nothing about any other family. ---- */
+
+/**
+ * A signed form's copy, to a guardian who signed it, once it is sealed and the portal has kept it. The sealed PDF goes
+ * with it when there is one and it is small enough to attach; otherwise `link` is the signed-in download.
+ */
+export function signedFormCopyMessage(b: Brand, to: string, o: { formTitle: string; forName: string; pdf: Buffer | null; link: string }): MailMessage {
+  const lines = [
+    `Thank you for signing ${o.formTitle} for ${o.forName}. Everyone who needed to sign it has, and the club has kept the signed copy.`,
+    o.pdf ? "The signed form is attached to this email, for your own records." : `You can download the signed form here, after signing in: ${o.link}`,
+    "There's nothing more you need to do.",
+  ];
+  return { to, subject: `Signed: ${o.formTitle}`, text: text(lines), html: html(b, lines),
+    ...(o.pdf ? { attachments: [{ filename: "signed-form.pdf", contentType: "application/pdf", content: o.pdf }] } : {}) };
+}
+
+/** A reminder that a form still needs this guardian's signature: the form, who it is for, when it is due, and the way to it. */
+export function formReminderMessage(b: Brand, to: string, o: { formTitle: string; forNames: string[]; due: string | null; link: string }): MailMessage {
+  const names = o.forNames.length <= 1 ? o.forNames.join("") : `${o.forNames.slice(0, -1).join(", ")} and ${o.forNames.at(-1)}`;
+  const lines = [
+    `A friendly reminder: ${o.formTitle} for ${names} still needs your signature.`,
+    ...(o.due ? [`It's due ${o.due}.`] : []),
+    `You can read and sign it here: ${o.link}`,
+    "If you've signed it in the last day or so, thank you, and you can ignore this email.",
+  ];
+  return { to, subject: `Please sign: ${o.formTitle}`, text: text(lines), html: html(b, lines) };
+}
+
 export function testMessage(b: Brand, to: string): MailMessage {
   const lines = [`This is a test from the ${b.clubName} portal. Outgoing mail works.`];
   return { to, subject: `Test email from ${b.clubName}`, text: text(lines), html: html(b, lines) };

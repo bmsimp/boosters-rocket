@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { MailSendError, type MailSender, type SmtpSecurity } from "./types";
+import { MailSendError, attachmentBytes, type MailSender, type SmtpSecurity } from "./types";
 
 /** A fixed sentence and the error code only: nodemailer's own message can quote the server's reply. */
 function smtpError(e: unknown): string {
@@ -26,7 +26,7 @@ export function createSmtpSender(o: {
     });
     try {
       await transport.sendMail({ from: { name: o.fromName, address: o.from }, to: m.to, subject: m.subject, text: m.text, html: m.html,
-        ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, contentType: a.contentType, content: Buffer.from(a.content, "utf8") })) } : {}) });
+        ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, contentType: a.contentType, content: attachmentBytes(a) })) } : {}) });
     } catch (e) {
       throw new MailSendError(smtpError(e));
     } finally {
