@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { asParent, renderPage } from "../helpers/signed-in";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, qboCustomer, requirementProgress, season, setting } from "@/lib/db/schema";
+import { auditLog, qboCustomer, requirement, requirementProgress, season, setting } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -186,7 +186,7 @@ describe("Home: the season ruler and the current step's requirements", () => {
     expect(textOf(await renderPage(SeasonPage))).toContain("The club hasn't set up a season here yet.");
   });
 
-  it("ticks every step and thanks the family once nothing is left, and says nothing when the season asks nothing of it", async () => {
+  it("ticks every step and thanks the family once nothing is left; a season that asks nothing of it is not called done", async () => {
     const a = await seedSignedInParent();
     await seedSeason({ name: "Fall", steps: [
       { name: "Join", requirements: [{ title: "Handbook read", appliesTo: "family", ticked: [FAMILY_A.family.qboId] }] },
@@ -200,10 +200,23 @@ describe("Home: the season ruler and the current step's requirements", () => {
     expect(textOf(html)).toContain("You've finished every set of Fall. Thank you!");
 
     await db.delete(requirementProgress); await db.delete(season);
-    await seedSeason({ name: "Bare", steps: [{ name: "Join" }, { name: "Wrap-up" }] });
+    // Staff have made the season current and not yet said what it asks: nothing is done, because nothing was to do.
+    const bareSeason = await seedSeason({ name: "Bare", steps: [{ name: "Join" }, { name: "Wrap-up" }] });
     const bare = await renderPage(ParentHome);
-    expect(bare).toContain("<b>All 2 sets done</b>");
+    expect(bare).toContain("Bare · <b>Nothing to do yet</b>");
+    expect(bare).not.toMatch(/sets? (is )?done/);
+    expect(bare).not.toContain(`<li class="done">`);
+    expect(bare).not.toContain("aria-current=\"step\"");
     expect(textOf(bare)).not.toContain("Thank you");
+    expect(textOf(bare)).toContain("1 Join 2 Wrap-up"); // the sets are still drawn, with nothing said of them
+    // The same for a family that every requirement's chosen list leaves out.
+    await db.insert(requirement).values({ stepId: bareSeason.stepIds.Join!, kind: "checklist", title: "Asked of another family", appliesTo: "family", covers: "chosen", position: 0 });
+    expect(await renderPage(ParentHome)).toContain("Bare · <b>Nothing to do yet</b>");
+    // Once something is asked of it, the ruler is on that set.
+    await db.insert(requirement).values({ stepId: bareSeason.stepIds.Join!, kind: "checklist", title: "Handbook read", appliesTo: "family", covers: "everyone", position: 1 });
+    const asked = await renderPage(ParentHome);
+    expect(asked).toContain("<b>Set 1 of 2<span class=\"current-name\">: Join</span></b>");
+    expect(asked).not.toContain("Nothing to do yet");
   });
 
   it("says a due date in words on the club's day, and only while something is left", async () => {
@@ -313,7 +326,8 @@ describe("a club that lists no students", () => {
     await seedSeason({ name: "Members' year", steps: [{ name: "Join", requirements: [{ title: "A per-student item", appliesTo: "student" }] }] });
     asParent(p.identity);
     const html = await renderPage(ParentHome);
-    expect(html).toContain("The one set is done");
+    expect(html).toContain("Nothing to do yet");
+    expect(html).not.toContain("The one set is done");
     expect(html).not.toContain("students-box");
   });
 });

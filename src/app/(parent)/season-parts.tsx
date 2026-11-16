@@ -21,17 +21,23 @@ const first = (name: string) => name.trim().split(/\s+/)[0] || name;
  * one ticked, the current one filled with the club's color, and a dot for each student on it. Not a control. The dots are decoration: the same
  * facts are in words in the students box. Nothing is drawn for a season with no steps. To a parent a step is a "set",
  * the word the ruler's design uses; staff, who build the season, call it a step.
+ *
+ * A season that asks nothing of this family, in any set, is not called done. With no dates every set of it counts as
+ * finished, and the ruler would tick them all and say so, until the day staff add the first requirement. Its sets are
+ * drawn with no ticks, and the heading says there is nothing to do yet.
  */
 export function SeasonRuler({ season }: { season: MySeason }) {
   const { steps, currentIndex } = season;
   if (steps.length === 0) return null;
   const current = currentIndex === null ? null : steps[currentIndex]!;
+  const nothingAsked = currentIndex === null && !asksAnything(season);
   return (
     <section className="season" aria-labelledby="season-h">
       <div className="wrap">
         <div className="season-head">
           <p id="season-h" className="season-title">{season.name} · <b>{current
             ? <>Set {currentIndex! + 1} of {steps.length}<span className="current-name">: {current.name}</span></>
+            : nothingAsked ? <>Nothing to do yet</>
             : steps.length === 1 ? <>The one set is done</> : <>All {steps.length} sets done</>}</b></p>
           <a href="/season">See the whole season</a>
         </div>
@@ -41,7 +47,7 @@ export function SeasonRuler({ season }: { season: MySeason }) {
             // The ruler reads from left to right: only a set behind the current one is ticked. One still ahead is
             // drawn as still to come, even when it asks nothing of this family and so is done already.
             const behind = currentIndex === null || i < currentIndex;
-            const ticked = behind && step.done;
+            const ticked = behind && step.done && !nothingAsked;
             return (
               <li key={step.id} className={ticked ? "done" : undefined} aria-current={isCurrent ? "step" : undefined}>
                 <span className="n">
@@ -49,7 +55,7 @@ export function SeasonRuler({ season }: { season: MySeason }) {
                   {i + 1}
                 </span>
                 <span className="label">{step.name}</span>
-                <span className="visually-hidden">{isCurrent ? ", current set" : ticked ? ", done" : behind ? ", not finished" : ""}</span>
+                <span className="visually-hidden">{isCurrent ? ", current set" : ticked ? ", done" : behind && !nothingAsked ? ", not finished" : ""}</span>
                 {isCurrent && step.students.length > 0 && (
                   <span className="on-set" aria-hidden="true">
                     {step.students.map((s) => <i key={s.qboId} className={s.done ? "done" : undefined} title={s.done ? `${first(s.name)} is done` : `${first(s.name)} has more to do`}>{initial(s.name)}</i>)}
