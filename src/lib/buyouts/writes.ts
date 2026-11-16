@@ -65,12 +65,12 @@ export type BuyoutStep = "done" | "waiting" | "stuck" | "refused" | "kept";
 export const isBuyoutWrite = (w: QueuedWrite): w is BuyoutWrite => w.op === "invoice_create" || w.op === "invoice_void";
 
 /** An invoice as the portal reads one back: its id, version, customer, amounts in cents, and its private note. */
-type Invoice = { qboId: string; syncToken: string; customerQboId: string | null; totalCents: number; balanceCents: number; note: string };
+type Invoice = { qboId: string; syncToken: string | null; customerQboId: string | null; totalCents: number; balanceCents: number; note: string };
 function invoiceOf(raw: Record<string, unknown>): Invoice | null {
   const qboId = typeof raw.Id === "string" && isQboId(raw.Id) ? raw.Id : null;
   const syncToken = typeof raw.SyncToken === "string" && /^\d{1,20}$/.test(raw.SyncToken) ? raw.SyncToken : null;
   const totalCents = toCents(raw.TotalAmt), balanceCents = toCents(raw.Balance);
-  if (qboId === null || syncToken === null || totalCents === null || balanceCents === null) return null;
+  if (qboId === null || totalCents === null || balanceCents === null) return null;
   const customer = (raw.CustomerRef as { value?: unknown } | null | undefined)?.value;
   return { qboId, syncToken, customerQboId: typeof customer === "string" ? customer : null, totalCents, balanceCents, note: typeof raw.PrivateNote === "string" ? raw.PrivateNote : "" };
 }
@@ -248,6 +248,8 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
   if (inv.balanceCents < inv.totalCents) {
     return voidKept(item, b, { state: inv.balanceCents <= 0 ? "paid" : "invoiced", flag: w.why === "student_moved" ? "student_moved" : "paid_before_void", code: "paid" }, actor);
   }
+  // A void is sent from the version just read; an invoice read without one is read again at the next try.
+  if (inv.syncToken === null) return tryFailed(item, b, "check_bad_answer", item.sent, now, actor);
   try {
     await qboVoidInvoice(inv.qboId, inv.syncToken, sendOptions(item.realmId, o.mayWait));
   } catch (e) {
