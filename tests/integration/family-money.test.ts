@@ -605,9 +605,11 @@ describe("never the wrong company", () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    stub.apiDelayMs = 300;
+    stub.apiDelayMs = 1000; // well inside the read's limit, and long enough for the change below on a loaded machine
+    const asked = stub.apiCalls().length;
     const loading = loadFamilyMoney("10");
-    await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 500 && stub.apiCalls().length === asked; i++) await new Promise((r) => setTimeout(r, 10)); // QuickBooks has the question
+    expect(stub.apiCalls().length).toBeGreaterThan(asked);
     await db.transaction((tx) => setRosterSource(tx, "2222"));
     expect((await loading).figures).toBeNull();
     expect(await moneyRow("10")).toMatchObject({ readAt: null, invoices: null, failedCode: "other_company" });

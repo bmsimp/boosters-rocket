@@ -3,7 +3,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import postgres from "postgres";
 import { adminDatabaseUrl, scratchDatabase } from "../setup/database-url";
 
-// On the run's own server, named after the run's database, so two runs never drop each other's scratch database.
+// On the run's own server, named after this file's database (the run's, or its worker's), so two runs, or two workers
+// of one run, never drop each other's scratch database.
 const ADMIN_URL = adminDatabaseUrl();
 const { name: FRESH, url: FRESH_URL } = scratchDatabase("migrate_script");
 

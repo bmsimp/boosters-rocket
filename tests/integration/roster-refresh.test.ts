@@ -12,7 +12,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { refreshRoster, ROSTER_JOB, ROSTER_LOCK } from "@/lib/roster/refresh";
 import { saveShape, getShape, SHAPE_KEY } from "@/lib/roster/shape";
-import { resetDb } from "../helpers/db";
+import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 
 let stub: QboStub;
@@ -252,7 +252,7 @@ describe("the roster refresh", () => {
     await db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
       save = saveShape(FZN_SHAPE, staffOp);
-      await new Promise((r) => setTimeout(r, 400));
+      await untilALockIsAwaited();
       expect(await getShape()).toBeNull();
     });
     await save;

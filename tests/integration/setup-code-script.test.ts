@@ -6,7 +6,8 @@ import { verifySetupCode, resetSetupCodeLimiter } from "@/lib/setup/code";
 import { getSetupState, updateSetupState } from "@/lib/setup/state";
 import { resetDb } from "../helpers/db";
 
-// The script writes to the database this run uses (vitest.config.mts sets DATABASE_URL), where the app code below reads.
+// The script writes to this file's database (DATABASE_URL: the run's, or its worker's, tests/setup/worker.ts), where the
+// app code below reads.
 const DB = process.env.DATABASE_URL!;
 const run = (...args: string[]) => spawnSync("node", ["scripts/setup-code.mjs", ...args], {
   encoding: "utf8", env: { ...process.env, DATABASE_URL: DB, APP_URL: "https://portal.example.org" },

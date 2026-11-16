@@ -4,7 +4,8 @@ import { db } from "@/lib/db/client";
 import { guardian, parent, parentAuthUser, auditLog } from "@/lib/db/schema";
 import { resetDb } from "../helpers/db";
 
-// The script writes to the database this run uses (vitest.config.mts sets DATABASE_URL), where the assertions below read.
+// The script writes to this file's database (DATABASE_URL: the run's, or its worker's, tests/setup/worker.ts), where the
+// assertions below read.
 const TEST_URL = process.env.DATABASE_URL!;
 /** The portal's environment says whether it is a proof of concept; no host name decides it. */
 const POC = { BR_PROOF_OF_CONCEPT: "yes" };

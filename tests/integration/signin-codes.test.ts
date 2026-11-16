@@ -19,7 +19,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, parent, setting, signinCode } from "@/lib/db/schema";
 import { requestSigninCode, verifySigninCode, signinStands, hashSigninCode, CODE_TTL_MS } from "@/lib/parents/signin-codes";
-import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { seedParentSettings } from "../helpers/roster-cache";
 
 const T0 = new Date("2026-11-10T12:00:00Z");
@@ -305,7 +305,7 @@ describe("checking a code", () => {
     await written;
     let answer: boolean | null = null;
     const checking = signinStands(p.id, "ana@example.com", IP).then((r) => { answer = r; });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await untilALockIsAwaited();
     expect(answer).toBeNull();                       // still waiting: the change has not been committed
     commit();
     await changing; await checking;

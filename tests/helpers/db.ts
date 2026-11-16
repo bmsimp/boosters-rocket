@@ -81,6 +81,23 @@ export async function resetDb() {
   invalidateProviders();
 }
 
+/**
+ * Resolves once another session on this file's database is waiting for a lock (a row, a table, an advisory lock): for a
+ * test that proves one piece of work waits for another. A sleep guesses how long the second takes to reach the lock,
+ * and on a loaded machine guesses short; this asks Postgres. Only this file uses its database, so the waiter is the
+ * test's own.
+ */
+export async function untilALockIsAwaited(timeoutMs = 15_000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const [row] = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`);
+    if (row!.n > 0) return;
+    if (Date.now() > until) throw new Error(`Nothing was waiting for a lock after ${timeoutMs} ms.`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
 export async function adminRoleId(): Promise<string> {
   const [r] = await db.select().from(role).where(eq(role.key, "admin"));
   if (!r) throw new Error("admin role missing — migrations not applied");

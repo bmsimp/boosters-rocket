@@ -468,7 +468,7 @@ describe("the one write: a customer's phone and billing address", () => {
     expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, { ...TO, signal: AbortSignal.timeout(200) }))).toBe("timeout");
     expect(Date.now() - started).toBeLessThan(2500);
     stub.apiDelayMs = 0;
-    await new Promise((r) => setTimeout(r, 3100)); // the two slow requests reach the stub's switches and are refused there
+    await stub.idle(); // the two slow requests reach the stub's switches and are refused there
     stub.customers = [ana()];
     stub.loseUpdateAnswer = true;
     expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO))).toBe("unreachable");

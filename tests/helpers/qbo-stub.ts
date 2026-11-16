@@ -54,6 +54,11 @@ export type QboStub = {
   revokeDelayMs: number;
   tokenDelayMs: number; queryDelayMs: number; companyInfoDelayMs: number; refreshExpiresIn: number;
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
+  /**
+   * Resolves once every request the stub has received has been answered, or dropped, and its delay is over: for a test
+   * that left a slow request running (the portal gave up on it) and must not let it reach the next test's switches.
+   */
+  idle(): Promise<void>;
 };
 
 /** A value as a customer update stores it: an empty string clears, in an object too, and an object left with nothing is gone. */
@@ -66,7 +71,12 @@ function withoutEmpty(value: unknown): unknown {
 
 /** Intuit's token and revoke endpoints and the QuickBooks query API, enough for the portal's real client to talk to. */
 export async function startQboStub(): Promise<QboStub> {
-  let issued = 0, queries = 0, answering = 0;
+  let issued = 0, queries = 0, answering = 0, open = 0;
+  const waitingForIdle: (() => void)[] = [];
+  const settle = (answer: () => Promise<unknown>) => {
+    open++;
+    void answer().finally(() => { if (--open === 0) for (const wake of waitingForIdle.splice(0)) wake(); });
+  };
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
     invoices: [], refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, dropApi: false,
@@ -74,7 +84,7 @@ export async function startQboStub(): Promise<QboStub> {
   const server: Server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
-    req.on("end", async () => {
+    req.on("end", () => settle(async () => {
       const url = new URL(req.url!, "http://stub");
       const call: StubCall = { method: req.method!, path: url.pathname, query: url.searchParams, auth: req.headers.authorization ?? "", body };
       stub.calls.push(call);
@@ -186,12 +196,13 @@ export async function startQboStub(): Promise<QboStub> {
         return json(200, { QueryResponse: page.length ? { [entity]: page, startPosition: start, maxResults: page.length } : {} });
       }
       return json(404, {});
-    });
+    }));
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   stub.base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   stub.tokenCalls = () => stub.calls.filter((c) => c.path === "/token");
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
+  stub.idle = () => (open === 0 ? Promise.resolve() : new Promise<void>((r) => waitingForIdle.push(r)));
   stub.reset = () => {
     stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.dropApi = false;
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
