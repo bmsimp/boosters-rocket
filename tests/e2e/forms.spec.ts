@@ -89,7 +89,7 @@ test("an Admin finds Forms settings not set up, with the webhook address on the 
   await expect(page.getByLabel("Webhook URL")).toHaveValue(`${baseURL}/api/documenso/webhook`);
   // Checking a connection that isn't saved calls nothing and says what to do first.
   await page.getByRole("button", { name: "Check the connection" }).click();
-  await expect(page.getByRole("alert")).toContainText("Save Documenso's address and API token first.");
+  await expect(page.getByRole("region", { name: "2. Check the connection" }).getByRole("alert")).toContainText("Save Documenso's address and API token first.");
   await noSidewaysScroll(page);
   // The Health page says the same, and leads here.
   await page.goto("/staff/health");
