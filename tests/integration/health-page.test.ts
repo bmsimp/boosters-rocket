@@ -196,7 +196,7 @@ describe("the health page", () => {
       expect(html).not.toMatch(/changes nothing (there|in QuickBooks)|only reads/);
     }
     expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
-    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address.*new families, students, parents and members.*inactive.*never deletes/);
+    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address.*email address they sign in with.*new families, students, parents and members.*inactive.*never deletes/);
     expect(health).toContain("Last change made in QuickBooks: never");
 
     // A parent's save, and a staff change to the roster, are audited under these actions (tests/integration/contact-edits.test.ts,
@@ -210,7 +210,7 @@ describe("the health page", () => {
     await writeAudit({ actor: staff, action: "roster.customer.rename", targetType: "qbo_customer", targetId: "12" });
     await writeAudit({ actor: staff, action: "roster.write.refused", targetType: "qbo_customer", targetId: "12", after: { code: "fault_6240" } });
     const [renamed] = (await db.select().from(auditLog)).filter((a) => a.action === "roster.customer.rename");
-    expect(QUICKBOOKS_WRITE_ACTION).toEqual(expect.arrayContaining(["parent.contact.save", "roster.customer.create", "roster.customer.rename", "roster.student.move", "roster.customer.deactivate"]));
+    expect(QUICKBOOKS_WRITE_ACTION).toEqual(expect.arrayContaining(["parent.contact.save", "parent.email.save", "roster.customer.create", "roster.customer.rename", "roster.student.move", "roster.customer.deactivate"]));
     expect(at(line(await healthReport(), "quickbooks"), "Last change made in QuickBooks")).toBe(renamed!.at.toISOString());
 
     // Not connected: the page says what parents can't do meanwhile, too.
