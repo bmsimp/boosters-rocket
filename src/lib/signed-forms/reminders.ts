@@ -25,6 +25,7 @@ import { REMINDER_HOUR, clubHour, isReminderDay, parseSchedule, whoStillHasToSig
 
 export type ReminderScope = { kind: "form"; requirementId: string } | { kind: "family"; familyQboId: string } | { kind: "request"; requestId: string };
 export type ReminderCounts = { emailed: number; failed: number; alreadyToday: number };
+type Totals = ReminderCounts & { guardians: Set<string> };
 type Op = { actor: Actor; ip: string | null; permission?: string };
 type Done<T = object> = ({ ok: true } & T) | { ok: false; errors: string[] };
 
@@ -92,8 +93,8 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
  * Sends the reminders owed, each guardian once per form: claimed first, all in one statement for the day, so a second
  * press (or the schedule) the same club day sends nothing more. Audited per form with the counts.
  */
-async function sendOwed(o: { owed: Owed[]; forms: { id: string; title: string; dueOn: string | null }[] }, how: { kind: "now" | "scheduled"; scope: string; today: string }, op: Op): Promise<ReminderCounts> {
-  const total: ReminderCounts = { emailed: 0, failed: 0, alreadyToday: 0 };
+async function sendOwed(o: { owed: Owed[]; forms: { id: string; title: string; dueOn: string | null }[] }, how: { kind: "now" | "scheduled"; scope: string; today: string }, op: Op): Promise<Totals> {
+  const total: Totals = { emailed: 0, failed: 0, alreadyToday: 0, guardians: new Set() };
   for (const form of o.forms) {
     const mine = o.owed.filter((x) => x.requirementId === form.id);
     if (mine.length === 0) continue;
@@ -109,7 +110,7 @@ async function sendOwed(o: { owed: Owed[]; forms: { id: string; title: string; d
       const only = x.requestIds.length === 1 ? x.requestIds[0] : null;
       const sent = await sendMail(formReminderMessage(brand, to.email, { formTitle: form.title, forNames: [...new Set(x.names)], due: form.dueOn ? dateWords(form.dueOn) : null,
         link: only ? `${base()}/forms/${only}` : `${base()}/forms` }), { purpose: "form_reminder", actor: op.actor, ip: op.ip });
-      if (sent.ok) counts.emailed++; else counts.failed++;
+      if (sent.ok) { counts.emailed++; total.guardians.add(x.parentId); } else counts.failed++;
     }
     await writeAudit({ actor: op.actor, action: "forms.reminder.sent", permission: op.permission, targetType: "requirement", targetId: form.id, ip: op.ip,
       after: { kind: how.kind, scope: how.scope, clubDate: how.today, guardiansOwed: mine.length, ...counts } });
@@ -122,7 +123,7 @@ async function sendOwed(o: { owed: Owed[]; forms: { id: string; title: string; d
  * "Remind now", for a form, a family or one request. Needs parent sign-ins on (families must be able to open the
  * forms), forms set up and outgoing mail. Says how many guardians were emailed.
  */
-export async function remindNow(scope: ReminderScope, op: Op): Promise<Done<{ message: string; counts: ReminderCounts }>> {
+export async function remindNow(scope: ReminderScope, op: Op): Promise<Done<{ message: string; counts: ReminderCounts & { guardians: number } }>> {
   const id = scope.kind === "form" ? scope.requirementId : scope.kind === "request" ? scope.requestId : scope.familyQboId;
   if (scope.kind !== "family" && !isUuid(id)) return { ok: false, errors: ["That form isn't there any more. Reload the page."] };
   if (scope.kind === "family" && (typeof id !== "string" || id.length === 0 || id.length > 64)) return { ok: false, errors: ["That family isn't there any more. Reload the page."] };
@@ -132,12 +133,14 @@ export async function remindNow(scope: ReminderScope, op: Op): Promise<Done<{ me
   const owed = await owedReminders(scope, null);
   if (!owed) return { ok: false, errors: ["There is no current season, so there are no forms to remind anyone about."] };
   const today = calendarDayIn((await getClubSettings()).timeZone);
-  const counts = await sendOwed(owed, { kind: "now", scope: scope.kind, today }, op);
+  const { guardians, ...counts } = await sendOwed(owed, { kind: "now", scope: scope.kind, today }, op);
   const people = (n: number) => (n === 1 ? "1 guardian" : `${n} guardians`);
+  // One email per guardian per form: a family's guardian may get one for each of its forms.
+  const emailed = counts.emailed === guardians.size ? `Emailed ${people(guardians.size)}.` : `Emailed ${people(guardians.size)}, ${counts.emailed} reminders in all.`;
   const message = counts.emailed + counts.failed + counts.alreadyToday === 0 ? "Nobody needs a reminder: everyone has signed, or the form was waived."
-    : [`Emailed ${people(counts.emailed)}.`, counts.alreadyToday ? `${people(counts.alreadyToday)} already had a reminder about this form today.` : "",
+    : [emailed, counts.alreadyToday ? `${counts.alreadyToday === 1 ? "1 reminder" : `${counts.alreadyToday} reminders`} had already gone today, so ${counts.alreadyToday === 1 ? "it wasn't" : "they weren't"} sent again.` : "",
       counts.failed ? `${counts.failed === 1 ? "1 email" : `${counts.failed} emails`} couldn't be sent: see Mail settings.` : ""].filter(Boolean).join(" ");
-  return { ok: true, message, counts };
+  return { ok: true, message, counts: { ...counts, guardians: guardians.size } };
 }
 
 /**

@@ -360,7 +360,8 @@ describe("a different QuickBooks company", () => {
     expect(await db.select().from(signatureConsent)).toEqual([]);
     expect((await db.select().from(requirement).where(eq(requirement.id, requirementId)))[0]!.form).toEqual(form);
     expect(await audits("form.records.cleared")).toEqual([expect.objectContaining({ door: "system", targetType: "signature_request", before: { realmId: "1111" },
-      after: { reason: "different_company", realmId: "2222", requests: 3, complete: 1, documentsLeftInDocumenso: 2, requirementsKeepingTheirTemplate: 1 } })]);
+      after: { reason: "different_company", realmId: "2222", requests: 3, complete: 1, documentsLeftInDocumenso: 2, requirementsKeepingTheirTemplate: 1,
+        evidenceKeptAsEarlierCompany: 0, completeWithEvidenceNotYetKept: 1, reminderRecordsCleared: 0 } })]);
     // Nothing to clear, nothing recorded.
     expect(await clearRosterOfOtherCompany("3333", SYSTEM)).toBe(true);
     expect(await audits("form.records.cleared")).toHaveLength(1);
