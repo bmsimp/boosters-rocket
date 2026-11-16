@@ -8,6 +8,7 @@ import { formatMoney } from "@/lib/money/cents";
 import { LocalTime } from "@/app/components/local-time";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, tryAgainAction } from "../roster/write-actions";
+import { BuyoutsToLook } from "./buyouts";
 
 export const metadata = { title: "Reconciliation" };
 export const dynamic = "force-dynamic";
@@ -74,6 +75,8 @@ export default async function ReconciliationPage() {
           </>
         )}
       </section>
+
+      <BuyoutsToLook showAmounts={money} />
 
       <section className="box" aria-labelledby="attention-h"><h2 id="attention-h">Needs attention in the roster{roster.attention.length ? ` (${roster.attention.length})` : ""}</h2>
         {!roster.roster ? <p>The roster can&apos;t be shown right now. <Link href="/staff/roster">Open the roster</Link> to see why.</p>

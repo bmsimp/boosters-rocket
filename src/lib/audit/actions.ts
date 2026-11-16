@@ -107,6 +107,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "season.records.cleared": "Season ticks, waivers and chosen lists cleared after a company change",
   "season.rename": "Season renamed",
   "season.requirement.add": "Requirement added",
+  "season.requirement.buyout": "A volunteer requirement's buy-out offered, changed or switched off",
   "season.requirement.form.attach": "Documenso template attached to a form requirement",
   "season.requirement.cover": "Who a requirement covers changed",
   "season.requirement.item": "A payment requirement's product or service chosen",
@@ -174,6 +175,17 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "volunteer.signup.cancel": "A parent cancelled a volunteer sign-up",
   "volunteer.signup.create": "A parent signed up for a volunteer shift",
   "volunteer.signups.cleared": "Volunteer sign-ups cleared after a company change",
+  "volunteer.buyout.chosen": "A parent chose to pay instead of volunteering",
+  "volunteer.buyout.invoiced": "A buy-out's invoice made in QuickBooks",
+  "volunteer.buyout.refused": "QuickBooks refused a buy-out's invoice: nothing was billed",
+  "volunteer.buyout.stuck": "A buy-out's change to QuickBooks is stuck: staff must look at it",
+  "volunteer.buyout.switch_back": "A parent switched back from paying to volunteering",
+  "volunteer.buyout.moved": "A moved student's buy-out invoice set to be voided",
+  "volunteer.buyout.voided": "A buy-out's invoice voided in QuickBooks",
+  "volunteer.buyout.kept": "A buy-out's invoice not voided: something was paid on it, or it is gone",
+  "volunteer.buyout.paid": "A buy-out's invoice paid in QuickBooks",
+  "volunteer.buyout.flagged": "A buy-out flagged for staff to look at",
+  "volunteer.buyout.limit": "Buy-out choices refused: too many in a short time",
 };
 
 /** The words for an action, or null when it has none yet. */

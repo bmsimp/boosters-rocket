@@ -16,6 +16,7 @@ import { removeRequirementAction, setCoverageAction, updateRequirementAction } f
 import { PaymentItemForm } from "../../../payment-item";
 import { chooseItemAction, readItemsAction } from "../../../payment-actions";
 import { FormTemplateBox } from "../../../form-template";
+import { BuyoutBox } from "../../../buyout";
 
 export const metadata = { title: "Requirement" };
 export const dynamic = "force-dynamic";
@@ -103,6 +104,8 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
           <p className="hint">A shift counts {r.amountUnit === "hours" ? "its length in hours" : "as one shift"}. Until check-in is built, nothing is confirmed: families see how much they are signed up for.</p>
         </section>
       )}
+
+      {r.kind === "volunteer" && <BuyoutBox requirementId={r.id} unit={r.amountUnit} rosterTag={rosterTag} canChange={canChange} />}
 
       {canChange && (
         <section className="box" aria-labelledby="remove-h"><h2 id="remove-h">Remove</h2>

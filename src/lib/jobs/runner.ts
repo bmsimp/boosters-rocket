@@ -15,6 +15,7 @@ import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
 import { runSignedFormsJobs } from "@/lib/signed-forms/worker";
 import { REMINDERS_JOB, sendVolunteerReminders } from "@/lib/volunteer/reminders";
 import { WRITE_QUEUE_JOB, runWriteQueue } from "@/lib/roster/queue";
+import { BUYOUT_CHECK_JOB, checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -114,7 +115,11 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   // Every family's invoices, once a day or when staff ask (src/lib/money/sweep.ts): after the roster, so it reads the
   // families as QuickBooks lists them now. A run too long for one wake carries on at the next; it is in this wake's
   // answer only when it ended.
-  return { ran: [...ran, ...(await moneyJob(now))] };
+  ran.push(...(await moneyJob(now)));
+  // Buy-out invoices (src/lib/buyouts/daily-check.ts), once after each run that read every family: compared with the
+  // figures it stored. Guarded like the steps above; in this wake's answer only when it marked or flagged something.
+  try { const b = await checkBuyoutInvoices(); if (b.paid + b.flagged > 0) ran.push({ job: BUYOUT_CHECK_JOB, ok: true }); } catch { ran.push({ job: BUYOUT_CHECK_JOB, ok: false }); }
+  return { ran };
 }
 
 /** The money job's share of a wake: in its answer only when a run ended. A throw is recorded as a failure, with none of its text. */
