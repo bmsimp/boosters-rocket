@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
 import { loadMyContact } from "@/lib/parents/contact-edits";
+import { canChangeMyEmail } from "@/lib/parents/email-change";
 import { getClubSettings } from "@/lib/settings/club";
 import { DetailsBox } from "../../family-boxes";
 import { DetailsEditor } from "./details-form";
@@ -17,7 +19,7 @@ export const metadata = { title: "Update your details" };
  */
 export default async function FamilyDetailsPage() {
   const ctx = await requireParentPage("/family/details");
-  const [view, club] = await Promise.all([loadMyContact(ctx), getClubSettings()]);
+  const [view, club, ownEmail] = await Promise.all([loadMyContact(ctx), getClubSettings(), canChangeMyEmail(ctx)]);
   return (
     <main className="wrap single family-page">
       <h1 className="page-title">Update your details</h1>
@@ -37,9 +39,19 @@ export default async function FamilyDetailsPage() {
               {view.me.email && <><dt>Email</dt><dd>{view.me.email}</dd></>}
               {view.state === "unavailable" && view.me.phone && <><dt>Phone</dt><dd className="num">{view.me.phone}</dd></>}
             </dl>
-            <p className="help">The club changes names and email addresses. {club.treasurerEmail
-              ? <>Email the treasurer at <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a> and they&apos;ll update them.</>
-              : <>Ask the club and they&apos;ll update them.</>}</p>
+            {ownEmail ? (
+              <>
+                <p className="help">You can change the email you sign in with yourself. The club changes names. {club.treasurerEmail
+                  ? <>Email the treasurer at <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a> and they&apos;ll update yours.</>
+                  : <>Ask the club and they&apos;ll update yours.</>}</p>
+                {/* No id in the link: the page takes whose address it is from the session. */}
+                <div className="box-foot"><Link className="btn btn-line" href="/family/email">Change my sign-in email</Link></div>
+              </>
+            ) : (
+              <p className="help">The club changes names and email addresses. {club.treasurerEmail
+                ? <>Email the treasurer at <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a> and they&apos;ll update them.</>
+                : <>Ask the club and they&apos;ll update them.</>}</p>
+            )}
           </section>
           <section className="box" aria-labelledby="edit-h">
             <h2 id="edit-h">Phone and mailing address</h2>

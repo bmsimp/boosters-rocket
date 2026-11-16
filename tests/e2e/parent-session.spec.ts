@@ -3,6 +3,7 @@ import postgres from "postgres";
 import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, paramsProblems, parentRoutes, type DynamicRouteParams } from "./parent-routes";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
+import { E2E_EMAIL } from "./email-seed";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -52,6 +53,8 @@ const PARAMS: Record<string, DynamicRouteParams> = {
   "/volunteer/check-in/[code]": { own: { code: E2E_VOLUNTEER.openCode }, other: { code: E2E_VOLUNTEER.griddleCode } },
   // The Quetzalcoatl family's signed Travel consent, and the second family's unsigned one (fixed ids in scripts/seed-e2e.ts).
   "/forms/[id]": { own: { id: "e2e00000-0000-4000-8000-000000000001" }, other: { id: "e2e00000-0000-4000-8000-000000000002" } },
+  // Zelda's change of sign-in address asked under the Quetzalcoatl family, and the one asked under her second family.
+  "/family/email/[token]": { own: { token: E2E_EMAIL.own.token }, other: { token: E2E_EMAIL.other.token } },
 };
 
 // Everything scripts/seed-e2e.ts gives a family that is not the Quetzalcoatl family, Zelda's second family included:
@@ -66,7 +69,9 @@ const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerr
   // What the season asks of other families alone, and why one of them was let off.
   "Tuba locker key", "Percussion truck crew", "Cast on his arm",
   // Forms: the one asked of the second family alone, and the second family's own request: its document and its other guardian.
-  "Trailer towing", "envelope_e2esecond", "Wilhelmina", "wilhelmina@second.example"];
+  "Trailer towing", "envelope_e2esecond", "Wilhelmina", "wilhelmina@second.example",
+  // The address Zelda asked to change to under her second family.
+  "second-moving.example"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);

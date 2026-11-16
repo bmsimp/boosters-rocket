@@ -8,6 +8,7 @@ import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { sendReviewNotice } from "@/lib/parents/review-notice";
 import { expirePreviousCompany } from "@/lib/parents/company-change";
+import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
 import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
@@ -101,7 +102,8 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
       ran.push({ job: TOKEN_JOB, ok: false });
     }
   }
-  if (await due(ROSTER_JOB, now)) {
+  // Daily, or sooner when a parent's change of sign-in address went to QuickBooks while the roster was busy (refresh-ask.ts).
+  if ((await due(ROSTER_JOB, now)) || (await rosterRefreshAsked(now))) {
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
     if (r.ok || r.reason === "failed") ran.push({ job: ROSTER_JOB, ok: r.ok });
   }

@@ -338,6 +338,8 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/my-family.ts",
   "src/lib/parents/contact-edits.ts",
   "src/lib/parents/contact-fields.ts",
+  "src/lib/parents/email-change.ts",
+  "src/lib/parents/email-field.ts",
   "src/lib/seasons/my-season.ts",
   "src/lib/seasons/recorded.ts",
   "src/lib/seasons/kinds.ts",

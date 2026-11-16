@@ -33,6 +33,21 @@ const MAY_SAVE = [CONTACT_EDITS, "src/app/(parent)/family/details/actions.ts"];
 const CONTACT_EDITS_EXPORTS = ["CONTACT_COPY", "ContactView", "SaveContactResult", "loadMyContact", SAVE];
 
 /**
+ * The second write, decided in the slice brief of 2026-11-16 (roadmap step 5): a parent's own sign-in email, a sparse
+ * update of one customer's email field. It is held to the same rules as the first, in lists of its own.
+ */
+const EMAIL_CHANGE = "src/lib/parents/email-change.ts";
+const EMAIL_WRITE = "qboUpdateCustomerEmail";
+/** The only modules that may name the email write: where it is written, and the parent's own email change that calls it. */
+const MAY_SEND_THE_EMAIL_WRITE = [CLIENT, EMAIL_CHANGE];
+/** What reaches the email change's confirmation from a browser: the parent's own server action, and nothing else. */
+const CONFIRM = "confirmMyEmailChange";
+const MAY_CONFIRM = [EMAIL_CHANGE, "src/app/(parent)/family/email/actions.ts"];
+/** Everything the email change may export. A second exported function is a second way to the write. */
+const EMAIL_CHANGE_EXPORTS = ["EMAIL_CHANGE_TTL_MS", "EMAIL_COPY", "EmailResult", "ConfirmResult", "emailChangeLink", "canChangeMyEmail",
+  "requestMyEmailChange", "EmailLinkView", "findMyEmailChange", CONFIRM];
+
+/**
  * Every place the word `method` stands in the code. `is` is the request method when it is written out as a plain key
  * with one of the two the portal uses, `method: "GET"` or `method: "POST"`, and null for anything else: a shorthand
  * (`{ method }`), a computed or quoted key (`["method"]: ...`), a property set later (`init.method = ...`), a value
@@ -133,6 +148,50 @@ function writerProblems(source: string): string[] {
   return problems;
 }
 
+/**
+ * What is wrong with how the email change reaches its write; nothing when the write is imported under its own name,
+ * called once, inside the confirmation, for the record loadMyRecord(ctx) found for the session, and the module exports
+ * nothing but its list. The checks of writerProblems(), for the second write.
+ */
+function emailWriterProblems(source: string): string[] {
+  const text = code(source), problems: string[] = [];
+  const named = [...text.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\b`, "g"))].length;
+  const imports = [...text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']@\/lib\/quickbooks\/client["']/g)].flatMap((m) => m[1]!.split(",").map((s) => s.trim()));
+  if (!imports.includes(EMAIL_WRITE)) problems.push(`${EMAIL_WRITE} is not imported under its own name`);
+  const confirm = exportedFunction(source, CONFIRM);
+  const calls = [...confirm.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\s*\\(\\s*([^,)]*)`, "g"))].map((m) => m[1]!.trim());
+  if (calls.length !== 1) problems.push(`${CONFIRM} calls ${EMAIL_WRITE} ${calls.length} times, not once`);
+  else if (calls[0] !== "record.qboId") problems.push(`${EMAIL_WRITE} is called for ${calls[0]}, not for record.qboId`);
+  if (named !== 2) problems.push(`${EMAIL_WRITE} is named ${named} times: once to import it and once to call it is all`);
+  const OWN = "const record = await loadMyRecord(ctx);";
+  if (confirm.split(OWN).length !== 2) problems.push(`${CONFIRM} does not get its record from loadMyRecord(ctx), once`);
+  if (/\b(?:const|let|var)\s+record\b|\brecord\s*=[^=>]|\brecord\.qboId\s*=[^=]/.test(confirm.replace(OWN, ""))) problems.push(`${CONFIRM} gives record another value`);
+  if (!confirm.startsWith(`export async function ${CONFIRM}(ctx: ParentCtx, `)) problems.push(`${CONFIRM} does not take the session's ParentCtx first`);
+  const exported = [...text.matchAll(/^export\s+(?:declare\s+)?(?:async\s+)?(?:function\*?|const|let|var|class|type|interface|enum)\s+(\w+)/gm)].map((m) => m[1]!);
+  if ([...exported].sort().join() !== [...EMAIL_CHANGE_EXPORTS].sort().join()) problems.push(`exports ${exported.join(", ")}`);
+  if ([...text.matchAll(/^export\b/gm)].length !== exported.length) problems.push("an export this scan can't read (a re-export, a default, a list)");
+  return problems;
+}
+
+/** `export const EMAIL_UPDATE = { ... } as const;` as written in the client. */
+function emailUpdateConstant(clientSource: string): string {
+  const text = code(clientSource), at = text.indexOf("export const EMAIL_UPDATE = {");
+  return at < 0 ? "" : text.slice(at, text.indexOf("\n} as const;", at));
+}
+/** The fields the email update's body carries, in order: nothing is left out, and nothing spread in. */
+const EMAIL_BODY_FIELDS = ["Id", "SyncToken", "PrimaryEmailAddr", "Address"];
+function emailBodyProblems(constant: string): string[] {
+  const problems: string[] = [];
+  if (!constant.includes(`path: "customer",`)) problems.push("the path is not the customer endpoint");
+  if (!constant.includes("body: (customerId: string, syncToken: string, field: string) => ({")) problems.push("the body is not built from an id, a version and the field alone");
+  const fields = [...constant.matchAll(/(?:^|[{\s])["'`]?([A-Z]\w*)["'`]?\]?\s*:/g)].map((m) => m[1]!);
+  if (fields.join() !== EMAIL_BODY_FIELDS.join()) problems.push(`the body carries ${fields.join(", ")}`);
+  if (!constant.includes("Id: customerId, SyncToken: syncToken, sparse: true, PrimaryEmailAddr: { Address: field },")) problems.push("the update is not sparse, or not of the customer, version and field it was given");
+  if (constant.includes("...")) problems.push("the body spreads something in");
+  if (/\[[^\]]*\]\s*:/.test(constant.replace(/\/\^.*?\$\//g, ""))) problems.push("the body has a computed key");
+  return problems;
+}
+
 /** `export const CUSTOMER_UPDATE = { ... } as const;` as written in the client. */
 function updateConstant(clientSource: string): string {
   const text = code(clientSource), at = text.indexOf("export const CUSTOMER_UPDATE = {");
@@ -160,10 +219,11 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
   // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts reads and changes a parent's own
   // record: scanned with the rest, on purpose. A new folder that calls QuickBooks is found by the test below.
   const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs"), ...read("src/lib/money"),
-    ...everything.filter((s) => s.file === CONTACT_EDITS)];
+    ...everything.filter((s) => s.file === CONTACT_EDITS || s.file === EMAIL_CHANGE)];
   const clientSource = sources.find((s) => s.file === CLIENT)!.text;
   const client = code(clientSource);
   const contactEdits = sources.find((s) => s.file === CONTACT_EDITS)!.text;
+  const emailChange = sources.find((s) => s.file === EMAIL_CHANGE)!.text;
   const bodyOf = (name: string) => {
     const body = exportedFunction(clientSource, name);
     expect(body, `${CLIENT} has no exported function ${name}`).not.toBe("");
@@ -172,7 +232,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
 
   it("finds the QuickBooks code", () => {
     expect(sources.length).toBeGreaterThan(2);
-    expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining([CLIENT, "src/lib/money/family-money.ts", CONTACT_EDITS]));
+    expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining([CLIENT, "src/lib/money/family-money.ts", CONTACT_EDITS, EMAIL_CHANGE]));
   });
 
   it("scans every module that calls the QuickBooks client", () => {
@@ -198,15 +258,16 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
 
   it("sends nothing but GET, except to Intuit's token and revoke endpoints and the one customer update", () => {
     const posts = sources.flatMap((s) => Array.from({ length: postsIn(s.text) }, () => s.file));
-    // The token request and the customer update in the client; the revoke in the connection.
-    expect(posts.sort()).toEqual([CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
+    // The token request, the customer update and the email update in the client; the revoke in the connection.
+    expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
     const methods = (text: string) => methodsIn(text).map((m) => m.is);
     expect(methods(bodyOf("tokenRequest"))).toEqual(["POST"]);
     expect(bodyOf("tokenRequest")).toContain("qboEndpoints().token");
     expect(methods(bodyOf(WRITE))).toEqual(["POST"]);
     // Everything else in the client that reaches the API is a GET: qboGet, and what is built on it.
     expect(methods(bodyOf("qboGet"))).toEqual(["GET"]);
-    expect(methods(clientSource)).toEqual(["POST", "GET", "POST"]);
+    expect(methods(bodyOf(EMAIL_WRITE))).toEqual(["POST"]);
+    expect(methods(clientSource)).toEqual(["POST", "GET", "POST", "POST"]);
   });
 
   it("can send the update to the customer endpoint only, with nothing in it but an Id, a SyncToken, the phone and the billing address", () => {
@@ -235,6 +296,23 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     expect(writerProblems(contactEdits)).toEqual([]);
     // The client itself only defines the write: nothing in it calls it.
     expect([...client.matchAll(new RegExp(`\\b${WRITE}\\b`, "g"))]).toHaveLength(1);
+  });
+
+  it("can send the email update to the customer endpoint only, with nothing in it but an Id, a SyncToken and the email field", () => {
+    const write = bodyOf(EMAIL_WRITE);
+    expect(write).toContain("/${EMAIL_UPDATE.path}`");
+    expect(/export async function \w+\(([^)]*)\)/.exec(write)![1]).not.toMatch(/\bpath\b|\burl\b|\bbody\b/);
+    expect(write).toContain("JSON.stringify(EMAIL_UPDATE.body(customerId, syncToken, field))");
+    expect(emailBodyProblems(emailUpdateConstant(clientSource))).toEqual([]);
+  });
+
+  it("lets only the parent's own email change send the email write, and only the parent's own action confirm through it", () => {
+    const naming = (name: string) => everything.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
+    expect(naming(EMAIL_WRITE), `${EMAIL_WRITE} is the portal's second write to QuickBooks. A new caller is a decision for a slice brief, not a fix made in passing.`).toEqual([...MAY_SEND_THE_EMAIL_WRITE].sort());
+    expect(naming(CONFIRM)).toEqual([...MAY_CONFIRM].sort());
+    // Called once, in the confirmation, for the session's own record, and the module is no second way to it.
+    expect(emailWriterProblems(emailChange)).toEqual([]);
+    expect([...client.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\b`, "g"))]).toHaveLength(1);
   });
 
   describe("and these checks refuse what would get past a careless scan", () => {
@@ -266,7 +344,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     it("a fetch call is read whole, through strings and templates with brackets in them", () => {
       const call = "fetch(`${base}/v3/company/${encodeURIComponent(realm)}/customer`, { method: \"POST\", headers: { authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString(\"base64\")}` }, body: \")\" })";
       expect(fetchCalls(`const res = await ${call};\nconst next = 1;`)).toEqual([call]);
-      expect(fetchCalls(clientSource)).toHaveLength(3);
+      expect(fetchCalls(clientSource)).toHaveLength(4);
     });
 
     it("a second way to the write through the contact edits", () => {
@@ -301,6 +379,46 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       for (const source of refused) {
         expect(source, "the case didn't change the module").not.toBe(contactEdits);
         expect(writerProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
+      }
+    });
+
+    it("a second way to the email write through the email change", () => {
+      const added = (more: string) => `${emailChange}\n${more}\n`;
+      const cut = emailChange.indexOf(`export async function ${CONFIRM}(`);
+      const inConfirm = (from: string, to: string) => emailChange.slice(0, cut) + emailChange.slice(cut).replace(from, to);
+      const OWN = "const record = await loadMyRecord(ctx);";
+      const refused = [
+        added(`export async function staffSetEmail(qboId: string, version: string, field: string) { return qboUpdateCustomerEmail(qboId, version, field, { realmId: "1" }); }`),
+        added(`async function alsoSend(qboId: string) { return qboUpdateCustomerEmail(qboId, "0", "a@b.org", { realmId: "1" }); }`),
+        added(`export const sendEmail = qboUpdateCustomerEmail;`),
+        added(`export { qboUpdateCustomerEmail };`),
+        added(`export * from "@/lib/quickbooks/client";`),
+        added(`export async function confirmFor(ctx: ParentCtx, qboId: string) { return qboId; }`),
+        emailChange.replace("qboUpdateCustomerEmail(record.qboId,", "qboUpdateCustomerEmail(row.recordQboId!,"),
+        inConfirm(OWN, `${OWN}\n  record.qboId = String(token);`),
+        inConfirm(OWN, "const record = await recordFor(token);"),
+        emailChange.replace("qboUpdateCustomerEmail } from", "qboUpdateCustomerEmail as send } from").replace("await qboUpdateCustomerEmail(record.qboId,", "await send(record.qboId,"),
+      ];
+      for (const source of refused) {
+        expect(source, "the case didn't change the module").not.toBe(emailChange);
+        expect(emailWriterProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
+      }
+    });
+
+    it("an email body that could carry another field", () => {
+      const constant = emailUpdateConstant(clientSource);
+      expect(emailBodyProblems(constant)).toEqual([]);
+      const refused = [
+        constant.replace("sparse: true,", "sparse: true, ...extra,"),
+        constant.replace("sparse: true,", "sparse: false,"),
+        constant.replace("PrimaryEmailAddr: { Address: field },", "PrimaryEmailAddr: { Address: field }, DisplayName: field,"),
+        constant.replace("PrimaryEmailAddr: { Address: field },", `PrimaryEmailAddr: { Address: field }, ["Notes"]: field,`),
+        constant.replace("field: string) => ({", "field: string, extra: object) => ({"),
+        constant.replace(`path: "customer",`, `path: "invoice",`),
+      ];
+      for (const source of refused) {
+        expect(source, "the case didn't change the constant").not.toBe(constant);
+        expect(emailBodyProblems(source), source).not.toEqual([]);
       }
     });
 

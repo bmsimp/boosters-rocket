@@ -53,6 +53,8 @@ export type QboStub = {
    * Each top-level field sent replaces the stored one; an empty string clears (a part of the address, or the phone); what
    * isn't sent stays, unless the request left out `sparse: true`, in which case it is gone, as in a full update. The
    * token goes up by one and the answer is `{ Customer }` as now stored. An Id the stub doesn't hold answers code 610.
+   * The email update (EMAIL_UPDATE: `PrimaryEmailAddr: { Address }` alone, the whole field as it is to be) is the same
+   * request to the same address and is answered the same way, with the same switches below; nor has it been checked.
    */
   updateFault: string | null;   // answer every customer update with HTTP 400 and this Fault code ("6000": a validation failure; "5010": a stale object)
   beforeUpdate: ((customer: Record<string, unknown>) => void) | null; // run on the stored customer as an update for it arrives, before its SyncToken is checked: someone editing in QuickBooks at that moment

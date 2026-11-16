@@ -46,6 +46,8 @@ const PARAMS: Record<string, (family: SeededParent) => Record<string, string | s
   "/volunteer/check-in/[code]": (family) => ({ code: family.volunteer!.code }),
   // The family's own request for a form that is signed and finished: its page shows what is stored, and asks Documenso nothing.
   "/forms/[id]": (family) => ({ id: family.forms!.ids.complete }),
+  // The link mailed to the address the parent asked to change to: their own pending request. Opening it changes nothing.
+  "/family/email/[token]": (family) => ({ token: family.emailChange!.token }),
 };
 
 /** Pages that show nothing about the family, and why. Everything else must show at least one of its own family's markers. */
@@ -71,6 +73,9 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // Every form the season asks of the family and of each student, each with its state in words.
   "/forms": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.forms!.page],
   // One form: its title, the student it is for, and that it is signed.
+  // The question a link puts, with the address it would change to, and the address the parent signs in with now.
+  "/family/email/[token]": (family) => [`Use ${family.emailChange!.newEmail} to sign in from now on?`, family.spec.parent.email],
+  "/family/email": (family) => [family.spec.parent.email, "Send me a link"],
   "/forms/[id]": (family) => ["Uniform agreement", family.spec.students[1]!.name, "This form is signed. Thank you!", `${family.spec.parent.name} (you)`],
 };
 /** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */

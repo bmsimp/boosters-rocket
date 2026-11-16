@@ -9,6 +9,7 @@ import { SIGNINS_ON, addToCache, fam, par, seedParentSettings, seedShape, stu } 
 import { TRIP_DEPOSIT_ITEM, seedTwoFamilySeason, type FamilySeason } from "./season";
 import { seedTwoFamilyVolunteering, type FamilyVolunteer } from "./volunteer";
 import { seedTwoFamilyForms, type FamilyForms } from "./forms";
+import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -45,6 +46,8 @@ export type SeededParent = {
   volunteer?: FamilyVolunteer;
   /** With seedTwoFamilies(): this family's forms, a request in every state, and the words its Forms page must show (tests/helpers/forms.ts). */
   forms?: FamilyForms;
+  /** With seedTwoFamilies(): this parent's pending change of sign-in address, its link's token and the new address (tests/helpers/email-change.ts). */
+  emailChange?: FamilyEmailChange;
 };
 
 /**
@@ -172,6 +175,10 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const forms = await seedTwoFamilyForms({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
   a.forms = forms.a; a.markers.push(...forms.a.markers);
   b.forms = forms.b; b.markers.push(...forms.b.markers);
+  // Each parent has asked to change their sign-in address: the new address and the link's token are their markers.
+  const emails = await seedTwoFamilyEmailChanges(a, b);
+  a.emailChange = emails.a; a.markers.push(...emails.a.markers);
+  b.emailChange = emails.b; b.markers.push(...emails.b.markers);
   return { a, b };
 }
 

@@ -184,7 +184,7 @@ async function refuseWhenOnlyAnAdminCanFixIt(): Promise<void> {
 /**
  * GET one QuickBooks API path. Every read goes through here. The one thing this module can change in QuickBooks is a
  * customer's phone and billing address, through qboUpdateCustomerContact() at the foot of the file and nothing else
- * (tests/unit/quickbooks-writes.test.ts).
+ * (tests/unit/quickbooks-writes.test.ts), and since the second write, its email field (qboUpdateCustomerEmail, below it).
  */
 export async function qboGet(path: string, params: Record<string, string> = {}, o: QboGetOptions = {}): Promise<unknown> {
   if (o.failFast) await refuseWhenOnlyAnAdminCanFixIt();
@@ -465,6 +465,88 @@ export async function qboUpdateCustomerContact(customerId: string, syncToken: st
     force = false;
     if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${CUSTOMER_UPDATE.path}`);
+    url.searchParams.set("minorversion", QBO_MINOR_VERSION);
+    const timeout = AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS);
+    const gaveUp = () => timeout.aborted || o.signal?.aborted === true;
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "POST", body, headers: { authorization: `Bearer ${a.token}`, accept: "application/json", "content-type": "application/json" },
+        signal: o.signal ? AbortSignal.any([timeout, o.signal]) : timeout, redirect: "error" });
+    } catch {
+      throw gaveUp() ? timedOut() : new QboError("Couldn't reach QuickBooks.", "unreachable");
+    }
+    if (res.status === 401 && !refreshed) { // the token was revoked or replaced: refresh once and send it again
+      refreshed = true; force = true;
+      await res.body?.cancel().catch(() => {});
+      continue;
+    }
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    let customer: unknown;
+    try { customer = ((await res.json()) as { Customer?: unknown } | null)?.Customer; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
+    if (typeof customer !== "object" || customer === null || Array.isArray(customer)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
+    return customer as Record<string, unknown>;
+  }
+}
+
+/* ---- The second write: a parent's own sign-in email (src/lib/parents/email-change.ts). ----
+   QuickBooks is the only home of a sign-in address (parents spec, decision 6), so a parent's change of address is
+   written there first, and the portal follows from QuickBooks' answer. Everything above is the first write's and is
+   left as it was; this block adds the second beside it. */
+
+/**
+ * The email update, exactly as it is sent, and the Fault codes its caller relies on. NOT YET TRIED AGAINST A REAL
+ * QUICKBOOKS COMPANY, like CUSTOMER_UPDATE: it follows Intuit's documentation as remembered. The owner's sandbox
+ * check must confirm, with `minorversion` 75:
+ *   1. `POST /v3/company/<realm>/customer` with `{ Id, SyncToken, sparse: true, PrimaryEmailAddr: { Address } }`
+ *      answers 200 with `{ Customer: {...} }` and raises SyncToken;
+ *   2. that it changes the email field and nothing else: DisplayName, the phone, BillAddr, ParentRef, CustomerTypeRef
+ *      and Active are as they were, and on a customer with sub-customers, theirs are untouched (QuickBooks copies a
+ *      family's details onto new sub-customers in its own screens: an update must not);
+ *   3. that a field holding several addresses (`a@x.org, b@x.org`, with commas, semicolons or spaces) is kept exactly
+ *      as sent, and read back the same way;
+ *   4. HOW LONG A FIELD QUICKBOOKS TAKES. Intuit's documentation gives 100 characters; the portal sends no field
+ *      longer than `maxLength` until the check says otherwise, and the parent is asked to go to the club. If QuickBooks
+ *      takes more, raise `maxLength` here and EMAIL_FIELD_MAX in src/lib/parents/email-field.ts together; if a longer
+ *      one is refused, note the code it gives;
+ *   5. an update with an old SyncToken answers HTTP 400 with `Fault.Error[0].code` "5010" (`faults.stale`) and
+ *      changes nothing;
+ *   6. a value QuickBooks will not take (a field that isn't addresses, say `not an address`) answers HTTP 400 with a
+ *      code that `faults.validation` matches (2xxx, or 6000), and changes nothing.
+ * Don't change the body without trying the new one in the sandbox first, and tests/helpers/qbo-stub.ts with it.
+ */
+export const EMAIL_UPDATE = {
+  /** The same address as CUSTOMER_UPDATE: `sparse: true` with an Id and a SyncToken makes it an update of the one field sent. */
+  path: "customer",
+  body: (customerId: string, syncToken: string, field: string) => ({
+    Id: customerId, SyncToken: syncToken, sparse: true, PrimaryEmailAddr: { Address: field },
+  }),
+  faults: { stale: "5010", validation: /^(2\d{3}|6000)$/ },
+  /** The longest field sent (point 4 above). */
+  maxLength: 100,
+} as const;
+
+/**
+ * Changes one customer's email field to `field`, the whole field as it is to be, the other addresses in it included:
+ * the only other request this module sends to the QuickBooks API that is not a GET. Built as qboUpdateCustomerContact
+ * is, for the same reasons: `syncToken` is the version just read, so a record that has moved on since is refused
+ * (`fault_5010`) and nothing is overwritten; it refuses at once when only an Admin can fix the connection, sends nothing
+ * to a company other than `o.realmId`, never waits in line for the connection row (accessTokenForPage), and is sent
+ * once more only after a 401. After a timeout or a 5xx the change may have been made, and is never sent again here.
+ * A failure to get a token is marked NO_TOKEN (nothing was changed); a 4xx is QuickBooks' refusal (nothing was changed).
+ *
+ * `customerId` is the caller's to get right: it comes from the session's own roster record, never from a request.
+ */
+export async function qboUpdateCustomerEmail(customerId: string, syncToken: string, field: string, o: QboWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(customerId) || !/^\d{1,20}$/.test(syncToken)) throw new QboError("That isn't a QuickBooks customer.", "bad_id");
+  if (typeof field !== "string" || !field.trim() || field.length > EMAIL_UPDATE.maxLength) throw new QboError("That email field can't be sent.", "bad_field");
+  await refuseWhenOnlyAnAdminCanFixIt();
+  const body = JSON.stringify(EMAIL_UPDATE.body(customerId, syncToken, field));
+  let force = false, refreshed = false;
+  for (;;) {
+    const a = await within(accessTokenForPage(force), o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
+    force = false;
+    if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
+    const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${EMAIL_UPDATE.path}`);
     url.searchParams.set("minorversion", QBO_MINOR_VERSION);
     const timeout = AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS);
     const gaveUp = () => timeout.aborted || o.signal?.aborted === true;
