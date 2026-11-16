@@ -8,7 +8,7 @@ import { auditLog, familyMoney, jobRun, parentAuthSession, parentEmailChange, ra
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
-import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, JOB_HISTORY_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, JOB_HISTORY_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -20,7 +20,7 @@ import { addToCache, fam } from "../helpers/roster-cache";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -147,6 +147,23 @@ describe("the daily clean-up deletes only what is past use", () => {
     for (const gone of [goneOk, goneFailed, oneSecondOver]) expect(left).not.toContain(gone);
   });
 
+  it("reminder records: claims and rounds older than a year go, one a second inside it stays; signed forms' evidence never goes", async () => {
+    const year = REMINDER_CLAIM_DAYS * DAY, requirementId = crypto.randomUUID(), parentId = crypto.randomUUID();
+    const [old] = await db.insert(schema.formReminderClaim).values({ requirementId, parentId, onDate: "2025-11-01", createdAt: at(-year - SEC) }).returning();
+    const [edge] = await db.insert(schema.formReminderClaim).values({ requirementId, parentId, onDate: "2025-11-02", createdAt: at(-year + SEC) }).returning();
+    await db.insert(schema.formReminderRound).values({ requirementId, onDate: "2025-11-01", createdAt: at(-year - SEC) });
+    const [round] = await db.insert(schema.formReminderRound).values({ requirementId, onDate: "2025-11-02", createdAt: at(-year + SEC) }).returning();
+    const [evidence] = await db.insert(schema.signedFormEvidence).values({ familyQboId: "F", subjectQboId: "F", subjectKind: "family", formTitle: "Old form", envelopeId: "envelope_oldoldold",
+      signers: [], consents: [], originals: [], storedAt: at(-10 * year) }).returning();
+    await db.insert(schema.signedFormFile).values({ evidenceId: evidence!.id, kind: "sealed_pdf", bytes: Buffer.from("%PDF-1.7 old"), size: 12, sha256: "x", createdAt: at(-10 * year) });
+    expect(await clean()).toEqual({ ...NOTHING, reminderClaims: 2 });
+    expect(await ids(db.select({ id: schema.formReminderClaim.id }).from(schema.formReminderClaim))).toEqual([edge!.id]);
+    expect(await ids(db.select({ id: schema.formReminderRound.id }).from(schema.formReminderRound))).toEqual([round!.id]);
+    expect(old).toBeTruthy();
+    expect(await db.select().from(schema.signedFormEvidence)).toHaveLength(1);
+    expect(await db.select().from(schema.signedFormFile)).toHaveLength(1);
+  });
+
   it("never touches the audit log, however old", async () => {
     await db.insert(auditLog).values({ at: at(-3650 * DAY), door: "system", action: "signin" });
     expect(await clean()).toEqual(NOTHING);
@@ -198,7 +215,8 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
+    expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
   });
 });

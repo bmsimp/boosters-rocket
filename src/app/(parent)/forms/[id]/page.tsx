@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireParentPage } from "@/lib/guards";
 import { CONSENT_TEXT } from "@/lib/forms/consent";
 import { findMyForm } from "@/lib/forms/my-forms";
+import { mySignedDownloads } from "@/lib/forms/my-evidence";
 import { openMyForm, type FormView } from "@/lib/forms/signing";
 import { STATE_WORDS } from "@/lib/forms/states";
 import { dueState } from "@/lib/money/due";
@@ -43,6 +44,8 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
   if (!form) notFound();
   const view = await openMyForm(ctx, form);
   const { step } = view;
+  // The signed copy the club kept, once it is kept: the download is the family's own, found by the same rule.
+  const parts = step.kind === "complete" ? (await mySignedDownloads(ctx, [form.row.id])).get(form.row.id) ?? 0 : 0;
   // A waiver is the club's word on the requirement; the form's own state is said beside it only when it was signed.
   const waived = form.line.state === "waived" && step.kind !== "complete";
   // The same words as the Forms list: "not ready" only for a form nothing has been made for yet.
@@ -85,7 +88,16 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
         )}
 
         {step.kind === "complete" && (
-          <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>This form is signed. Thank you!</p>
+          <>
+            <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>This form is signed. Thank you!</p>
+            {parts > 0 ? (
+              <div className="box-foot">{Array.from({ length: parts }, (_, i) => (
+                <a key={i} className="btn btn-line" href={`/forms/${form.row.id}/signed${i === 0 ? "" : `?part=${i + 1}`}`} download="signed-form.pdf">
+                  Download the signed form{parts > 1 ? ` (part ${i + 1})` : ""}
+                </a>))}
+              </div>
+            ) : <p className="help">The club is filing the signed copy. You&apos;ll be able to download it here soon.</p>}
+          </>
         )}
 
         {step.kind === "declined" && (

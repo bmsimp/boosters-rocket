@@ -11,6 +11,7 @@ import { mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 import { formsSummary } from "@/lib/forms/settings";
 import { formsWaiting } from "@/lib/forms/job";
+import { evidenceHealth } from "@/lib/signed-forms/evidence-job";
 import { moneyRunView } from "@/lib/money/sweep";
 import { lastBackup } from "./backup";
 import { BUILD_VERSION } from "./version";
@@ -139,7 +140,14 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   // portal). Documenso can't be asked whether its webhook is set up, so the line shows when one last arrived.
   const formsFix = { href: "/staff/settings/forms", label: "Open Forms settings" };
   const formsTimes = [{ label: "Last answered", at: forms.status.lastApiOkAt }, { label: "Last webhook", at: forms.status.lastWebhookAt }, { label: "Last asked about open forms", at: forms.status.lastAskedAt }];
-  if (forms.origin === null) {
+  // Signed forms whose evidence (the sealed PDF, the certificate, the audit log) isn't kept yet, and any kept file a later fetch gave a different hash.
+  const evidence = await evidenceHealth(now);
+  const evidenceNotes = [
+    ...(evidence.waiting > 0 ? [`Evidence waiting: ${evidence.waiting === 1 ? "1 signed form hasn't" : `${evidence.waiting} signed forms haven't`} had the signed copy and its record kept yet. The worker fetches them from Documenso a few at a time.`] : []),
+    ...(evidence.late > 0 ? [`${evidence.late === 1 ? "1 signed form has" : `${evidence.late} signed forms have`} waited more than an hour for the signed copy to be kept. Check that Documenso answers, and the forms line above.`] : []),
+    ...(evidence.mismatches > 0 ? [`${evidence.mismatches === 1 ? "1 signed form" : `${evidence.mismatches} signed forms`} came back from Documenso with a different file than the one kept. The first copy is kept; the audit log has the details (forms.evidence.mismatch).`] : []),
+  ];
+  if (forms.origin === null && evidence.waiting + evidence.mismatches === 0) {
     lines.push({ key: "forms", title: "Forms (Documenso)", state: "off", word: "Not set up", says: "Not set up. Parents read that forms aren't ready to sign yet; nothing else changes for them.", times: [], notes: [], fix: formsFix });
   } else {
     const apiFailing = Boolean(forms.status.lastApiFailureAt && (!forms.status.lastApiOkAt || forms.status.lastApiFailureAt > forms.status.lastApiOkAt));
@@ -147,10 +155,13 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     if (waiting.open > 0) notes.push(`${waiting.open === 1 ? "1 form is" : `${waiting.open} forms are`} out for signing and not finished. The worker asks Documenso about each every few minutes.`);
     if (waiting.sealingLate > 0) notes.push(`${waiting.sealingLate === 1 ? "1 form was" : `${waiting.sealingLate} forms were`} signed by everyone more than an hour ago and Documenso still hasn't finished the signed copy. Check Documenso on its server: its signing certificate, and its timestamp service if one is set.`);
     if (!forms.webhookSecretSaved) notes.push("No webhook secret is made, so Documenso can't tell the portal when a form is signed. The portal still asks every few minutes.");
+    notes.push(...evidenceNotes);
     if (untemplated.length > 0) notes.push(`${untemplated.length === 1 ? "1 form requirement" : `${untemplated.length} form requirements`} of the current season ${untemplated.length === 1 ? "has" : "have"} no template attached, so parents read that ${untemplated.length === 1 ? "it isn't" : "they aren't"} ready.`);
-    const verdict: Verdict = !forms.tokenReadable ? { state: "attention", word: "Needs attention", says: "The saved API token can't be opened with this server's encryption key. Enter it again in Forms settings." }
+    const verdict: Verdict = forms.origin === null ? { state: "attention", word: "Needs attention", says: "Forms aren't set up any more, but signed forms still wait to have their evidence kept, or a kept file was found changed." }
+      : !forms.tokenReadable ? { state: "attention", word: "Needs attention", says: "The saved API token can't be opened with this server's encryption key. Enter it again in Forms settings." }
       : apiFailing ? { state: "attention", word: "Needs attention", says: "The last call to Documenso failed. Parents can't open a form to sign until it answers again." }
         : waiting.sealingLate > 0 ? { state: "attention", word: "Needs attention", says: `Connected to Documenso at ${forms.origin}, but signed forms are waiting too long to be finished.` }
+          : evidence.late > 0 || evidence.mismatches > 0 ? { state: "attention", word: "Needs attention", says: `Connected to Documenso at ${forms.origin}, but ${evidence.mismatches > 0 ? "a signed form's file came back different from the one kept" : "signed forms are waiting too long for their evidence to be kept"}.` }
           : !forms.status.lastApiOkAt ? { state: "attention", word: "Not checked", says: `Set up for Documenso at ${forms.origin}, but no call has worked yet. Check the connection in Forms settings.` }
             : { state: "ok", word: "Connected", says: `Connected to Documenso at ${forms.origin}.` };
     lines.push({ key: "forms", title: "Forms (Documenso)", ...verdict, times: formsTimes, fix: verdict.state === "attention" ? formsFix : null,

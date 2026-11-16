@@ -1,0 +1,203 @@
+// Staff only (it reads every family's completed forms): the worker's part in keeping signed forms (v1 spec §9.2 step 6
+// and §9.4, as the Documenso verification changed them). A request that becomes complete is marked `evidence_owed`;
+// a few of them each wake, oldest first, have their evidence fetched from Documenso and kept in the portal's database:
+// every item's sealed PDF, the certificate and the audit log as PDFs, the audit log as JSON, and the hash of each
+// original PDF. Nothing is assumed about what the sealed PDF holds: the certificate and the audit log are kept as their
+// own files whatever Documenso put inside it (verification, 1a point 4). Never imported by parent code
+// (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
+import "server-only";
+import { createHash } from "node:crypto";
+import { and, asc, count, eq, isNotNull, isNull, lte, min, or, sql } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import {
+  formWithdrawal, qboCustomer, requirement, season, seasonStep, signatureConsent, signatureRequest, signedFormEvidence, signedFormFile,
+  type EvidenceConsent, type EvidenceOriginal, type EvidenceSigner,
+} from "@/lib/db/schema";
+import { writeAudit } from "@/lib/audit/log";
+import {
+  auditLogEntries, cancelEnvelope, deleteEnvelope, documensoCode, downloadAuditLogPdf, downloadCertificate, downloadItem, getEnvelope, isEnvelopeItemId,
+  type DocumensoConfig,
+} from "@/lib/documenso/client";
+import { getRosterSource } from "@/lib/roster/source";
+import { FORMS_WORKER, type FormsFailure } from "@/lib/forms/requests";
+import { getFormsConfig, noteApiFailure, noteApiOk } from "@/lib/forms/settings";
+import { sendOwedCopies } from "./copies";
+import { EVIDENCE_LATE_MS, nextEvidenceTry } from "./rules";
+
+export const EVIDENCE_JOB = "forms.evidence";
+/** One wake fetches the evidence of this many forms at most, the longest waiting first. */
+export const EVIDENCE_PER_WAKE = 5;
+
+export const sha256 = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+
+type FileKind = (typeof signedFormFile.$inferInsert)["kind"];
+type Fetched = { kind: FileKind; position: number; itemId: string | null; bytes: Buffer; sha256: string };
+type Evidence = { files: Fetched[]; originals: EvidenceOriginal[]; completedAt: Date | null };
+type RequestRow = typeof signatureRequest.$inferSelect;
+
+/** Everything Documenso holds as the evidence of one completed document, fetched in full or not at all. */
+async function fetchEvidence(config: DocumensoConfig, row: RequestRow): Promise<{ ok: true; evidence: Evidence } | { ok: false; code: FormsFailure | "not_complete" }> {
+  try {
+    const envelope = await getEnvelope(config, row.envelopeId!);
+    // The document must still be this request's, and sealed: only a COMPLETED document has a sealed PDF.
+    if (envelope.externalId !== row.id) return { ok: false, code: "not_found" };
+    if (envelope.status !== "COMPLETED") return { ok: false, code: "not_complete" };
+    const items = [...(envelope.envelopeItems ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    if (items.length === 0 || items.some((i) => !isEnvelopeItemId(i.id))) return { ok: false, code: "bad_answer" };
+    const files: Fetched[] = [];
+    const originals: EvidenceOriginal[] = [];
+    const keep = (kind: FileKind, position: number, itemId: string | null, bytes: Buffer) => files.push({ kind, position, itemId, bytes, sha256: sha256(bytes) });
+    for (const [i, item] of items.entries()) {
+      keep("sealed_pdf", i + 1, item.id, await downloadItem(config, item.id, "signed"));
+      const original = await downloadItem(config, item.id, "original");
+      originals.push({ itemId: item.id, sha256: sha256(original), size: original.byteLength });
+    }
+    keep("certificate_pdf", 1, null, await downloadCertificate(config, row.envelopeId!));
+    keep("audit_log_pdf", 1, null, await downloadAuditLogPdf(config, row.envelopeId!));
+    keep("audit_log_json", 1, null, (await auditLogEntries(config, row.envelopeId!)).json);
+    const completedAt = envelope.completedAt ? new Date(envelope.completedAt) : null;
+    return { ok: true, evidence: { files, originals, completedAt: completedAt && !Number.isNaN(completedAt.getTime()) ? completedAt : null } };
+  } catch (e) {
+    return { ok: false, code: documensoCode(e) };
+  }
+}
+
+/** The names as they are now, kept with the evidence as they were: the form's title, its season, the family. */
+async function namesOf(row: RequestRow): Promise<{ formTitle: string; seasonName: string | null; familyName: string | null; subjectKind: "family" | "student" }> {
+  const [r] = await db.select({ title: requirement.title, appliesTo: requirement.appliesTo, seasonName: season.name }).from(requirement)
+    .innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId)).where(eq(requirement.id, row.requirementId));
+  const [family] = await db.select({ name: qboCustomer.displayName }).from(qboCustomer).where(eq(qboCustomer.qboId, row.familyQboId));
+  return { formTitle: r?.title ?? "Form", seasonName: r?.seasonName ?? null, familyName: family?.name ?? null, subjectKind: r?.appliesTo ?? (row.subjectQboId === row.familyQboId ? "family" : "student") };
+}
+
+const shown = (f: Pick<Fetched, "kind" | "position" | "sha256"> & { size: number }) => ({ kind: f.kind, position: f.position, sha256: f.sha256, size: f.size });
+
+export type StoreOutcome = "stored" | "same" | "mismatch" | "gone";
+
+/**
+ * Keeps what was fetched, in one transaction with the audit row, and only then clears `evidence_owed`. A request that
+ * already has its evidence (two wakes fetched it at once, or it was fetched again) keeps the first copy: the sealed
+ * PDFs and the originals are compared by hash, and one that differs is audited as a mismatch and shown on the Health
+ * page. The certificate and the audit log PDF are made afresh by Documenso at each download, so theirs are not compared.
+ */
+export async function storeEvidence(row: RequestRow, got: Evidence, at: Date = new Date()): Promise<StoreOutcome> {
+  const names = await namesOf(row);
+  const consents = await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, row.id)).orderBy(asc(signatureConsent.agreedAt));
+  const realmId = await getRosterSource();
+  return db.transaction(async (tx): Promise<StoreOutcome> => {
+    const [current] = await tx.select().from(signatureRequest).where(eq(signatureRequest.id, row.id)).for("update");
+    if (!current || current.state !== "complete" || current.envelopeId !== row.envelopeId) return "gone";
+    const clear = () => tx.update(signatureRequest).set({ evidenceOwed: false, evidenceTries: 0, evidenceError: null, evidenceNextAt: null, updatedAt: at }).where(eq(signatureRequest.id, row.id));
+    const [kept] = await tx.select().from(signedFormEvidence).where(eq(signedFormEvidence.requestId, row.id));
+    if (kept) {
+      const stored = await tx.select({ kind: signedFormFile.kind, position: signedFormFile.position, sha256: signedFormFile.sha256, size: signedFormFile.size }).from(signedFormFile).where(eq(signedFormFile.evidenceId, kept.id));
+      const differs = [
+        ...got.files.filter((f) => f.kind === "sealed_pdf").filter((f) => stored.find((s) => s.kind === "sealed_pdf" && s.position === f.position)?.sha256 !== f.sha256)
+          .map((f) => ({ kind: f.kind, position: f.position, kept: stored.find((s) => s.kind === "sealed_pdf" && s.position === f.position)?.sha256 ?? null, fetched: f.sha256 })),
+        ...got.originals.filter((o) => kept.originals.find((k) => k.itemId === o.itemId)?.sha256 !== o.sha256)
+          .map((o) => ({ kind: "original_pdf", itemId: o.itemId, kept: kept.originals.find((k) => k.itemId === o.itemId)?.sha256 ?? null, fetched: o.sha256 })),
+      ];
+      await clear();
+      if (differs.length === 0) return "same";
+      await tx.update(signedFormEvidence).set({ mismatchAt: kept.mismatchAt ?? at }).where(eq(signedFormEvidence.id, kept.id));
+      await writeAudit({ actor: FORMS_WORKER, action: "forms.evidence.mismatch", targetType: "signed_form_evidence", targetId: kept.id,
+        after: { requestId: row.id, envelopeId: row.envelopeId, differs, keptFirst: true } }, tx);
+      return "mismatch";
+    }
+    const signers: EvidenceSigner[] = current.signers.map((s) => ({ parentId: s.parentId || null, name: s.name, email: s.email, signedAt: s.signedAt }));
+    const consent: EvidenceConsent[] = consents.map((c) => ({ parentId: c.parentId, name: c.parentName, email: c.parentEmail, textVersion: c.textVersion,
+      agreedAt: c.agreedAt.toISOString(), ip: c.ip, userAgent: c.userAgent }));
+    const [evidence] = await tx.insert(signedFormEvidence).values({
+      requestId: row.id, realmId, requirementId: row.requirementId, familyQboId: current.familyQboId, subjectQboId: current.subjectQboId, subjectKind: names.subjectKind,
+      formTitle: names.formTitle, familyName: names.familyName, subjectName: current.subjectName, seasonName: names.seasonName,
+      envelopeId: current.envelopeId!, templateId: current.templateId, templateUpdatedAt: current.templateUpdatedAt, signers, consents: consent, originals: got.originals,
+      completedAt: got.completedAt ?? current.completedAt, storedAt: at,
+    }).returning({ id: signedFormEvidence.id });
+    await tx.insert(signedFormFile).values(got.files.map((f) => ({ evidenceId: evidence!.id, kind: f.kind, position: f.position, itemId: f.itemId, bytes: f.bytes, size: f.bytes.byteLength, sha256: f.sha256 })));
+    await clear();
+    await writeAudit({ actor: FORMS_WORKER, action: "forms.evidence.stored", targetType: "signed_form_evidence", targetId: evidence!.id,
+      after: { requestId: row.id, envelopeId: row.envelopeId, realmId, familyQboId: current.familyQboId, subjectQboId: current.subjectQboId,
+        files: got.files.map((f) => shown({ ...f, size: f.bytes.byteLength })), originals: got.originals } }, tx);
+    return "stored";
+  });
+}
+
+/** A failed try: nothing is kept, `evidence_owed` stays, and the next try waits 5 minutes, then 30, then 3 hours. */
+async function noteFailure(row: RequestRow, code: string, at: Date): Promise<void> {
+  const tries = row.evidenceTries + 1;
+  await db.update(signatureRequest).set({ evidenceTries: tries, evidenceError: code, evidenceNextAt: nextEvidenceTry(tries, at), updatedAt: at })
+    .where(and(eq(signatureRequest.id, row.id), eq(signatureRequest.evidenceOwed, true)));
+}
+
+export type EvidenceRun = { fetched: number; stored: number; failed: number; mismatches: number; copies: { sent: number; failed: number; skipped: number }; withdrawn: number };
+
+/**
+ * One wake's share: nothing while forms aren't set up. The evidence of up to EVIDENCE_PER_WAKE forms, the longest
+ * waiting first; then the guardians' copies owed for evidence already kept; then any document a moved student left to
+ * withdraw. A Documenso that can't be reached, or refuses the token, ends the fetching for this wake.
+ */
+export async function runEvidenceJob(now: Date = new Date()): Promise<EvidenceRun> {
+  const run: EvidenceRun = { fetched: 0, stored: 0, failed: 0, mismatches: 0, copies: { sent: 0, failed: 0, skipped: 0 }, withdrawn: 0 };
+  const config = await getFormsConfig();
+  if (config) {
+    const due = await db.select().from(signatureRequest)
+      .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete"), isNotNull(signatureRequest.envelopeId),
+        or(isNull(signatureRequest.evidenceNextAt), lte(signatureRequest.evidenceNextAt, now))))
+      .orderBy(sql`${signatureRequest.completedAt} asc nulls first`, asc(signatureRequest.id)).limit(EVIDENCE_PER_WAKE);
+    for (const row of due) {
+      run.fetched++;
+      const got = await fetchEvidence(config, row);
+      if (!got.ok) {
+        run.failed++;
+        await noteFailure(row, got.code, now);
+        if (got.code !== "not_complete" && got.code !== "not_found") await noteApiFailure(got.code); else await noteApiOk();
+        if (got.code === "unreachable" || got.code === "timeout" || got.code === "unauthorized") break;
+        continue;
+      }
+      await noteApiOk();
+      try {
+        const outcome = await storeEvidence(row, got.evidence, now);
+        if (outcome === "stored") run.stored++;
+        if (outcome === "mismatch") run.mismatches++;
+      } catch {
+        run.failed++;
+        await noteFailure(row, "unexpected", now);
+      }
+    }
+    run.withdrawn = await withdrawLeftDocuments(config);
+  }
+  run.copies = await sendOwedCopies();
+  return run;
+}
+
+/** Withdraws the documents a moved student's forms left behind (formsForMovedStudent): deleted when unsigned, cancelled when signed. */
+async function withdrawLeftDocuments(config: DocumensoConfig): Promise<number> {
+  const rows = await db.select().from(formWithdrawal).orderBy(asc(formWithdrawal.createdAt)).limit(EVIDENCE_PER_WAKE);
+  let done = 0;
+  for (const w of rows) {
+    try {
+      if (w.anySigned) await cancelEnvelope(config, w.envelopeId, "Started again for another family");
+      else await deleteEnvelope(config, w.envelopeId);
+    } catch (e) {
+      const code = documensoCode(e);
+      // Already gone, or finished in a way that can't be withdrawn: nothing is left to do. Anything else is tried again later, a few times.
+      if (code !== "not_found" && code !== "refused" && w.tries < 10) { await db.update(formWithdrawal).set({ tries: w.tries + 1 }).where(eq(formWithdrawal.envelopeId, w.envelopeId)); continue; }
+    }
+    await db.transaction(async (tx) => {
+      await tx.delete(formWithdrawal).where(eq(formWithdrawal.envelopeId, w.envelopeId));
+      await writeAudit({ actor: FORMS_WORKER, action: "form.document.withdraw", targetType: "envelope", targetId: w.envelopeId, after: { reason: "student_moved", how: w.anySigned ? "cancel" : "delete" } }, tx);
+    });
+    done++;
+  }
+  return done;
+}
+
+/** For the Health page: complete forms whose evidence isn't kept yet, how many waited more than an hour, and any hash mismatch. */
+export async function evidenceHealth(now: Date = new Date()): Promise<{ waiting: number; late: number; oldestCompletedAt: Date | null; mismatches: number }> {
+  const [owed] = await db.select({ n: count(), oldest: min(signatureRequest.completedAt) }).from(signatureRequest)
+    .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete")));
+  const [late] = await db.select({ n: count() }).from(signatureRequest)
+    .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete"), lte(signatureRequest.completedAt, new Date(now.getTime() - EVIDENCE_LATE_MS))));
+  const [mismatched] = await db.select({ n: count() }).from(signedFormEvidence).where(isNotNull(signedFormEvidence.mismatchAt));
+  return { waiting: owed?.n ?? 0, late: late?.n ?? 0, oldestCompletedAt: owed?.oldest ?? null, mismatches: mismatched?.n ?? 0 };
+}
