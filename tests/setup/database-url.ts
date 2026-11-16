@@ -106,7 +106,7 @@ export function adminDatabaseUrl(runUrl?: string): string {
  * What the tests make scratch databases for. A test that needs a new one adds its purpose here: when a run ends it
  * drops the scratch databases of these purposes that its tests left behind (tests/setup/worker-databases.ts).
  */
-export const SCRATCH_PURPOSES = ["migrate_script", "migrate_parents", "restore"] as const;
+export const SCRATCH_PURPOSES = ["migrate_script", "migrate_parents", "restore", "workers"] as const;
 export type ScratchPurpose = (typeof SCRATCH_PURPOSES)[number];
 
 /**

@@ -102,7 +102,7 @@ export async function prepareWorkerDatabase(runUrl: string, poolId: number): Pro
   if (url === runUrl) return url;
   const mark = workerMark(runUrl), wanted = migrationsInFolder();
   await withAdmin(runUrl, async (admin) => {
-    // One at a time: a worker that is still closing its last file and the one starting the next share this database.
+    // One at a time, should two files ever start in one worker together: the second waits and finds the database ready.
     await admin`select pg_advisory_lock(hashtext(${`booster-rocket worker database ${name}`}))`;
     const { exists, comment } = await commentOn(admin, name);
     if (exists && comment !== mark) {
@@ -124,16 +124,21 @@ export async function prepareWorkerDatabase(runUrl: string, poolId: number): Pro
 
 /**
  * Drops what this run made: the worker databases that carry its comment, and the scratch databases its tests make
- * (named after the run's database and each worker's, tests/setup/database-url.ts). Returns the names it dropped.
+ * (named after the run's database and each worker's, tests/setup/database-url.ts), with the worker databases a test
+ * made for a scratch database of its own (tests/integration/worker-databases.test.ts). Returns the names it dropped.
  */
 export async function dropWorkerDatabases(runUrl: string): Promise<string[]> {
-  const mark = workerMark(runUrl);
   return withAdmin(runUrl, async (admin) => {
-    const workers = (await admin<{ name: string }[]>`select datname as name from pg_database where shobj_description(oid, 'pg_database') = ${mark} order by datname`).map((r) => r.name);
     const urlOf = (name: string) => { const u = new URL(runUrl); u.pathname = `/${name}`; return u.toString(); };
+    const workersOf = async (urls: string[]) => {
+      const marks = urls.map(workerMark);
+      if (marks.length === 0) return [];
+      return (await admin<{ name: string }[]>`select datname as name from pg_database where shobj_description(oid, 'pg_database') in ${admin(marks)} order by datname`).map((r) => r.name);
+    };
+    const workers = await workersOf([runUrl]);
     const scratch = [runUrl, ...workers.map(urlOf)].flatMap((url) => SCRATCH_PURPOSES.flatMap((purpose) => scratchNames(purpose, url)));
     const dropped: string[] = [];
-    for (const name of [...scratch, ...workers]) {
+    for (const name of [...await workersOf(scratch.map(urlOf)), ...scratch, ...workers]) {
       const [was] = await admin<{ n: number }[]>`select count(*)::int as n from pg_database where datname = ${name}`;
       if (!was!.n) continue;
       await admin.unsafe(`DROP DATABASE IF EXISTS ${ident(name)} WITH (FORCE)`);

@@ -1,7 +1,17 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { TestProject } from "vitest/node";
 import { runMigrations } from "../../src/lib/db/migrate";
 import { assertOwnDatabaseInWorktree, assertTestDatabase } from "./database-url";
 import { assertNotAWorkerDatabase, dropWorkerDatabases, holdRunLock } from "./worker-databases";
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    /** A folder that lasts as long as the run: tests/setup/worker.ts notes there which worker databases are ready. */
+    testRunFolder: string;
+  }
+}
 
 /**
  * Once per run, before any test file: checks and migrates the run's database, the DATABASE_URL vitest.config.mts
@@ -17,8 +27,16 @@ export default async function setup(project: TestProject) {
   assertOwnDatabaseInWorktree(project.config.root, url);
   await assertNotAWorkerDatabase(url);
   const release = await holdRunLock(url);
-  try { await runMigrations(url); } catch (e) { await release(); throw e; }
+  let folder = "";
+  try {
+    await runMigrations(url);
+    folder = mkdtempSync(path.join(tmpdir(), "br-test-run-"));
+    project.provide("testRunFolder", folder);
+  } catch (e) { await release(); throw e; }
   return async () => {
-    try { await dropWorkerDatabases(url); } finally { await release(); }
+    try {
+      rmSync(folder, { recursive: true, force: true });
+      await dropWorkerDatabases(url);
+    } finally { await release(); }
   };
 }
