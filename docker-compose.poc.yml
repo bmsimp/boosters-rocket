@@ -20,7 +20,11 @@ services:
       retries: 10
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # The commit being built, so the Health page can say which version is running (deploy.sh sets it).
+        APP_COMMIT: ${APP_COMMIT:-}
     image: booster-rocket-app:current
     container_name: booster-rocket-app
     restart: unless-stopped

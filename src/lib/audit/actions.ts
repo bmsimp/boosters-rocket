@@ -18,7 +18,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.access.cleared": "Parent access cleared after a company change",
   "parent.access.ended": "A parent's access to a family ended",
   "parent.access.granted": "A parent was given access to a family",
-  "parent.access.moved": "A parent's access moved to another address",
+  "parent.access.moved": "A parent's access now comes from another QuickBooks record",
   "parent.block": "Parent blocked",
   "parent.email_change": "Parent's email address changed",
   "parent.email_change.quickbooks_failed": "Email change couldn't be written to QuickBooks",

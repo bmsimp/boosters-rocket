@@ -92,7 +92,8 @@ if docker image inspect "$APP_IMAGE:current" >/dev/null 2>&1   && docker image t
   candidate="yes"
   trap 'docker image rm "$APP_IMAGE:rollback-candidate" >/dev/null 2>&1 || true' EXIT
 fi
-"${COMPOSE[@]}" build app || die 7 "The build failed. The running app was not touched."
+# The commit goes into the build so the portal's Health page can say which version is running.
+APP_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)" "${COMPOSE[@]}" build app || die 7 "The build failed. The running app was not touched."
 backup_database
 "${COMPOSE[@]}" run --rm migrate || die 3 "Migrations failed. The running app was not touched."
 running="$(docker inspect --format '{{.Image}}' booster-rocket-app 2>/dev/null || true)"
