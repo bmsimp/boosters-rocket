@@ -39,7 +39,10 @@ const isDynamic = (route: string) => route.includes("[");
  * page with the viewer's own params (it must show the family's data) and with the other family's (it must not).
  *   "/students/[id]": (family) => ({ id: family.spec.students[0]!.qboId }),
  */
-const PARAMS: Record<string, (family: SeededParent) => Record<string, string | string[]>> = {};
+const PARAMS: Record<string, (family: SeededParent) => Record<string, string | string[]>> = {
+  // The shift both families are signed up for: the page shows its count and the viewer's own sign-up, never the other's.
+  "/volunteer/shifts/[id]": (family) => ({ id: family.volunteer!.shiftId }),
+};
 
 /** Pages that show nothing about the family, and why. Everything else must show at least one of its own family's markers. */
 const NO_FAMILY_DATA: Record<string, string> = {
@@ -56,6 +59,9 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   "/payments": (family) => [family.spec.family.name, ...moneyMarkers(family.spec)],
   // Every step of the current season, the family's own requirements among them, and its students by name.
   "/season": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.season!.page],
+  // The event both families signed up for, the one count every family sees, and the family's own sign-up.
+  "/volunteer": (family) => [family.spec.family.name, ...family.volunteer!.page],
+  "/volunteer/shifts/[id]": () => ["2 of 4 places filled", "Rinse crew"],
 };
 /** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */
 function rosterOf(family: SeededParent): string[] {

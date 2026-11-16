@@ -7,6 +7,7 @@ import { getRosterSource, SOURCE_KEY } from "@/lib/roster/source";
 import { seedGuardian, seedParent, seedParentSession } from "./db";
 import { SIGNINS_ON, addToCache, fam, par, seedParentSettings, seedShape, stu } from "./roster-cache";
 import { seedTwoFamilySeason, type FamilySeason } from "./season";
+import { seedTwoFamilyVolunteering, type FamilyVolunteer } from "./volunteer";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -36,6 +37,8 @@ export type SeededParent = {
   markers: string[];
   /** With seedTwoFamilies(): how the current season stands for this family, in the words its pages must show (tests/helpers/season.ts). */
   season?: FamilySeason;
+  /** With seedTwoFamilies(): the volunteer shift both families are signed up for, and this family's sign-up (tests/helpers/volunteer.ts). */
+  volunteer?: FamilyVolunteer;
 };
 
 /**
@@ -140,7 +143,8 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
  * and a total found nowhere else). When a step gives families new data (forms, sign-ups), seed it here for both
  * families and add its recognizable strings to each family's markers, so the gate covers the new pages without being
  * told about them. The club has a current season (seedTwoFamilySeason): each family has its own ticks and a waiver, and
- * a requirement asked of it alone, whose title, id and waiver reason are among its markers.
+ * a requirement asked of it alone, whose title, id and waiver reason are among its markers. And one volunteer shift
+ * that both families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers.
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
   const a = await seedSignedInParent(FAMILY_A);
@@ -151,6 +155,10 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const seasons = await seedTwoFamilySeason(FAMILY_A, FAMILY_B);
   a.season = seasons.a; a.markers.push(...seasons.a.markers);
   b.season = seasons.b; b.markers.push(...seasons.b.markers);
+  // One volunteer shift with a place taken by each family: each parent sees the count and their own sign-up alone.
+  const volunteering = await seedTwoFamilyVolunteering({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId });
+  a.volunteer = volunteering.a; a.markers.push(...volunteering.a.markers);
+  b.volunteer = volunteering.b; b.markers.push(...volunteering.b.markers);
   return { a, b };
 }
 
