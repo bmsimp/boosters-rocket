@@ -14,8 +14,8 @@ describe("QuickBooks' invoices as a parent sees them", () => {
   it("keeps the number, the dates, what is still due in cents, and whose it is", () => {
     const shown = read([inv("1", "10"), inv("2", "12", { TotalAmt: 100, Balance: 40.5, DueDate: undefined })])!;
     expect(shown.invoices).toEqual([
-      { qboId: "1", number: "101", customerQboId: "10", forName: null, date: "2026-11-01", dueDate: "2026-11-22", totalCents: 8500, balanceCents: 8500, currency: "USD", payLink: null },
-      { qboId: "2", number: "102", customerQboId: "12", forName: "Leo Rivera", date: "2026-11-01", dueDate: null, totalCents: 10000, balanceCents: 4050, currency: "USD", payLink: null },
+      { qboId: "1", number: "101", customerQboId: "10", forName: null, date: "2026-11-01", dueDate: "2026-11-22", totalCents: 8500, balanceCents: 8500, currency: "USD", payLink: null , itemQboIds: [] },
+      { qboId: "2", number: "102", customerQboId: "12", forName: "Leo Rivera", date: "2026-11-01", dueDate: null, totalCents: 10000, balanceCents: 4050, currency: "USD", payLink: null , itemQboIds: [] },
     ]);
     expect(shown.totalCents).toBe(12550); // the sum of what is still due, not of the invoices' totals
     expect(shown.currency).toBe("USD");

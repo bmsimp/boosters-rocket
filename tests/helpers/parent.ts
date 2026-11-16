@@ -19,8 +19,11 @@ export type ParentFamilySpec = {
   family: { qboId: string; name: string };
   parent: { qboId: string; name: string; email: string; phone: string };
   students: { qboId: string; name: string }[];
-  /** The family's invoices as QuickBooks last gave them (seedFamilyMoney): open unless `paid`, with a Pay button when `payLink` is set. */
-  invoices?: { number: string; cents: number; paid?: true; payLink?: string }[];
+  /**
+   * The family's invoices as QuickBooks last gave them (seedFamilyMoney): open unless `paid`, with a Pay button when
+   * `payLink` is set, carrying the QuickBooks products and services in `items` (none unless given).
+   */
+  invoices?: { number: string; cents: number; paid?: true; payLink?: string; items?: string[] }[];
 };
 
 export type SeededParent = {
@@ -89,7 +92,7 @@ export async function seedFamilyMoney(spec: ParentFamilySpec, o: { readAt?: Date
   await db.insert(setting).values({ key: SOURCE_KEY, value: { realmId: MONEY_REALM } }).onConflictDoNothing();
   const invoices: StoredInvoice[] = (spec.invoices ?? []).map((i, n) => ({
     qboId: String(9001 + n), number: i.number, customerQboId: spec.family.qboId, forName: null, date: "2026-10-01", dueDate: i.paid ? null : "2026-12-01",
-    totalCents: i.cents, balanceCents: i.paid ? 0 : i.cents, currency: "USD", payLink: i.payLink ?? null,
+    totalCents: i.cents, balanceCents: i.paid ? 0 : i.cents, currency: "USD", payLink: i.payLink ?? null, itemQboIds: i.items ?? [],
   }));
   const row = { realmId: await getRosterSource(), readAt: o.readAt ?? new Date(), invoices, totalCents: owed(spec), currency: "USD",
     balanceWithJobsCents: o.balanceWithJobsCents === undefined ? owed(spec) : o.balanceWithJobsCents };

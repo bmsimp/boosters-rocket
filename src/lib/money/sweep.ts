@@ -8,6 +8,7 @@ import { jobRun, setting } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { connectionView, getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
+import { getShape } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { readFamilyForRun } from "./family-money";
 import { familiesCustomers } from "./stored";
@@ -111,8 +112,11 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
       : (await db.select().from(jobRun).where(and(eq(jobRun.id, state.runId), isNull(jobRun.outcome))))[0];
     if (!open) {
       if (!state.requested && !(await due(now))) return { ran: false };
-      const conn = await connectionView();
-      if (!conn.connected || conn.needsAdmin) return { ran: false }; // nothing to run, nothing to record: as the other QuickBooks jobs
+      // Nothing to run and nothing to record, as for the other QuickBooks jobs: QuickBooks not connected, or connected but
+      // only an Admin connecting again can mend it, or no roster to read families from (no membership shape, or a cache
+      // read from another company than the connected one).
+      const [conn, c, shape, source] = await Promise.all([connectionView(), getConnection(), getShape(), getRosterSource()]);
+      if (!conn.connected || conn.needsAdmin || shape === null || source === null || source !== c?.realmId) return { ran: false };
       const [run] = await db.insert(jobRun).values({ job: MONEY_JOB, startedBy: state.requested?.by ?? "worker" }).returning();
       // A run that stopped part way left `after`: this one carries on from there.
       state = { ...state, runId: run!.id, startedAfter: state.after, read: 0, failed: 0 };
@@ -165,7 +169,7 @@ export async function askForMoneyRun(o: { actor: Actor & { id: string }; ip: str
     await tx.execute(sql`select pg_advisory_xact_lock(${RUN_LOCK + 1})`); // two asks at once: one waits for the other
     const state = await getState(tx);
     const conn = await getConnection(tx);
-    if (!conn?.realmId || !conn.refreshTokenCiphertext || (await getRosterSource(tx)) !== conn.realmId) return { ok: false, reason: "not_connected" };
+    if (!conn?.realmId || !conn.refreshTokenCiphertext || (await getRosterSource(tx)) !== conn.realmId || (await getShape(tx)) === null) return { ok: false, reason: "not_connected" };
     if (state.runId !== null && (await tx.select().from(jobRun).where(and(eq(jobRun.id, state.runId), isNull(jobRun.outcome)))).length) return { ok: false, reason: "running" };
     if (state.requested) return { ok: false, reason: "asked" };
     const [last] = await tx.select().from(jobRun).where(eq(jobRun.job, MONEY_JOB)).orderBy(desc(jobRun.id)).limit(1);
