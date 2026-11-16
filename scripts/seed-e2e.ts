@@ -4,6 +4,7 @@ import { mailConfigHash } from "../src/lib/mail/config-hash";
 import { runMigrations } from "../src/lib/db/migrate";
 import { assertE2eDatabase, e2eMailPort } from "../tests/e2e/run-config";
 import { E2E_VOLUNTEER } from "../tests/e2e/volunteer-seed";
+import { E2E_EMAIL, emailTokenHash } from "../tests/e2e/email-seed";
 
 /**
  * This script empties the database and seeds it again: test databases only, and in a git worktree never the database
@@ -224,6 +225,14 @@ async function main() {
               document_created_at, checked_at)
             VALUES ('e2e00000-0000-4000-8000-000000000002', ${formIds["Travel consent"]!}, 'E2E-FAMILY-2', 'E2E-FAMILY-2', 'waiting', 'envelope_e2esecondfamily', 'PENDING', ${template.templateId}, ${template.templateUpdatedAt},
               'any', 'Second Family', ${sql.json(secondWaiting)}, now(), now())`;
+  // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
+  // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
+  // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).
+  for (const [key, family, record, used] of [["own", "E2E-FAMILY", "E2E-P1", false], ["other", "E2E-FAMILY-2", "E2E-P2", true]] as const) {
+    const [link] = await sql`SELECT id FROM guardian WHERE parent_id = ${p!.id} AND family_qbo_id = ${family}`;
+    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_qbo_id, record_qbo_id, new_email, token_hash, expires_at, used_at)
+            VALUES (${p!.id}, ${link!.id}, ${family}, ${record}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
+  }
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   await sql.end();
