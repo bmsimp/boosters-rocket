@@ -92,7 +92,7 @@ describe("backup and restore, really done", { timeout: 180_000 }, () => {
     await seedRosterRead({ realmId: "9130000000000001" });
     await db.insert(auditLog).values({ door: "staff", actorLabel: "admin@club.org", action: "parent.block", targetType: "parent", targetId: "p1", after: { reason: "a note staff wrote" }, ip: "203.0.113.7" });
   }, 120_000);
-  afterAll(async () => { await dropScratch(); rmSync(dir, { recursive: true, force: true }); }, 60_000);
+  afterAll(async () => { await dropScratch(); rmSync(dir, { recursive: true, force: true }); }, 120_000); // a drop waits for the server's checkpoint
 
   it("backs up the database into the folder, says what else to keep, and prints no secret", async () => {
     before = await everythingIn(RUN_URL);

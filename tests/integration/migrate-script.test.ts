@@ -6,6 +6,9 @@ import { adminDatabaseUrl, scratchDatabase } from "../setup/database-url";
 // On the run's own server, named after this file's database (the run's, or its worker's), so two runs, or two workers
 // of one run, never drop each other's scratch database.
 const ADMIN_URL = adminDatabaseUrl();
+// Making or dropping a database waits for Postgres to write out what every database on the server has changed: with
+// other runs and workers busy, that has taken most of a minute.
+const DATABASE_WORK = 120_000;
 const { name: FRESH, url: FRESH_URL } = scratchDatabase("migrate_script");
 
 describe("scripts/migrate.mjs", { timeout: 30_000 }, () => {
@@ -14,12 +17,12 @@ describe("scripts/migrate.mjs", { timeout: 30_000 }, () => {
     await admin.unsafe(`DROP DATABASE IF EXISTS ${FRESH}`);
     await admin.unsafe(`CREATE DATABASE ${FRESH}`);
     await admin.end();
-  });
+  }, DATABASE_WORK);
   afterAll(async () => {
     const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
     await admin.unsafe(`DROP DATABASE IF EXISTS ${FRESH} WITH (FORCE)`);
     await admin.end();
-  });
+  }, DATABASE_WORK);
 
   it("migrates an empty database, including the built-in Admin role", async () => {
     const out = execFileSync("node", ["scripts/migrate.mjs"], { env: { ...process.env, DATABASE_URL: FRESH_URL }, encoding: "utf8" });

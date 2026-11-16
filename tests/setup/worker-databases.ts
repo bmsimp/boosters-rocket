@@ -72,6 +72,32 @@ function migrationsInFolder(): string[] {
   return readMigrationFiles({ migrationsFolder: "drizzle" }).map((m) => m.hash);
 }
 
+/**
+ * Readies a migrated database for a run: every table starts the run empty in a new file, and Postgres's background
+ * vacuum leaves its tables alone until the run is over.
+ *
+ * resetDb() (tests/helpers/db.ts) deletes rows rather than truncating, and many tests read rows back with no ORDER BY,
+ * taking the first or the last as the one written first or last. They hold only while a table's rows lie in the order
+ * they were written: in a table that started in a new file and whose deleted rows' space is never handed out again.
+ * The background vacuum hands it out; with it off, every row a test writes goes after the rows before it, as it did
+ * when every reset truncated. Tables grow by what a run deletes, a few megabytes, and the next run starts them again.
+ */
+export async function readyTablesForRun(url: string): Promise<void> {
+  const pg = postgres(url, quiet);
+  try {
+    await pg.unsafe(`DO $ready$ DECLARE t regclass; emptied text;
+      BEGIN
+        FOR t IN SELECT c.oid::regclass FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' LOOP
+          EXECUTE format('ALTER TABLE %s SET (autovacuum_enabled = false)', t);
+        END LOOP;
+        SELECT string_agg(c.oid::regclass::text, ', ') INTO emptied FROM pg_class c
+          WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND c.relname <> 'role';
+        IF emptied IS NOT NULL THEN EXECUTE 'TRUNCATE ' || emptied || ' RESTART IDENTITY CASCADE'; END IF;
+        DELETE FROM "role" WHERE "builtin" = false;
+      END $ready$`);
+  } finally { await pg.end({ timeout: 5 }); }
+}
+
 type Standing = "missing" | "ready" | "behind" | "other";
 /** How a worker database stands against drizzle/: migrated to the end, part of the way, or along some other path. */
 async function standing(url: string, wanted: string[]): Promise<Standing> {
@@ -119,6 +145,7 @@ export async function prepareWorkerDatabase(runUrl: string, poolId: number): Pro
     await create(admin, name, mark);
     await runMigrations(url);
   });
+  await readyTablesForRun(url);
   return url;
 }
 

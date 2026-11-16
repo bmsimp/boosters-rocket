@@ -18,7 +18,8 @@ import type { StoredMailConfig } from "@/lib/mail/types";
  * The rows are deleted, not truncated. TRUNCATE gives every table and index a new file on disk, which took most of a
  * second here on each reset, two thousand times a run; deleting a test's few rows takes a couple of milliseconds. The
  * lock is the one TRUNCATE took: the reset waits for anything a test left running to finish its transaction, then
- * removes what it wrote too.
+ * removes what it wrote too. Rows still read back in the order they were written, as many tests expect of a select
+ * with no ORDER BY, because the run turns the background vacuum off (readyTablesForRun, tests/setup/worker-databases.ts).
  */
 let emptying: Promise<string> | null = null;
 function emptyEverything(): Promise<string> {
