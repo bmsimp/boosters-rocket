@@ -429,11 +429,14 @@ export const volunteerShift = pgTable("volunteer_shift", {
   places: integer("places").notNull(),
   role: text("role"),
   revision: integer("revision").notNull().default(0),
+  // The shift's check-in code (v1 spec §11.4): random, never the shift's id, which parents see in addresses. Staff can
+  // make a new one (src/lib/volunteer/check-in-codes.ts); the old one then opens nothing.
+  checkinCode: text("checkin_code").notNull().default(sql`replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')`),
   cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
   cancelledBy: uuid("cancelled_by"),                   // staff_user.id
   createdAt: created(),
   updatedAt: updated(),
-}, (t) => [index("volunteer_shift_event_ix").on(t.eventId), check("volunteer_shift_places", sql`${t.places} >= 1`)]);
+}, (t) => [index("volunteer_shift_event_ix").on(t.eventId), uniqueIndex("volunteer_shift_checkin_code_uq").on(t.checkinCode), check("volunteer_shift_places", sql`${t.places} >= 1`)]);
 
 /** The volunteer requirements a shift can count toward (v1 spec §11.1). The portal's own ids on both sides. */
 export const volunteerShiftRequirement = pgTable("volunteer_shift_requirement", {
@@ -469,6 +472,56 @@ export const volunteerSignup = pgTable("volunteer_signup", {
   uniqueIndex("volunteer_signup_student_uq").on(t.shiftId, t.studentQboId).where(sql`cancelled_at is null and filler_kind = 'student'`),
   check("volunteer_signup_filler", sql`(${t.fillerKind} = 'guardian' and ${t.fillerParentId} is not null and ${t.studentQboId} is null) or (${t.fillerKind} = 'student' and ${t.studentQboId} is not null and ${t.fillerParentId} is null)`),
 ]);
+
+/**
+ * Confirmed volunteer credit (v1 spec §11.4), one row per credit. A check-in (`checkin`, by the guardian with the
+ * shift's code, or `staff_checkin`, added by staff for one that was missed) names the sign-up it came from, and so its
+ * shift, family and filler; it credits the shift's length in minutes as it was then, and one shift. Volunteering done
+ * outside the portal (`outside`) names the family, the student when it is one student's, the one requirement it counts
+ * toward, and the amount in that requirement's unit (`minutes` for hours, `shifts` for shifts); its `note` is for staff
+ * only. How credit fills requirements is src/lib/volunteer/allocation.ts. A removed credit keeps its row, with who and
+ * why (the reason is for staff only), and counts for nothing. A sign-up holds one live credit at most. The family and
+ * the student are QuickBooks ids of the connected company: a company change deletes every row.
+ */
+export const volunteerCredit = pgTable("volunteer_credit", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["checkin", "staff_checkin", "outside"] }).notNull(),
+  signupId: uuid("signup_id").references(() => volunteerSignup.id, { onDelete: "restrict" }),
+  familyQboId: text("family_qbo_id").notNull(),
+  studentQboId: text("student_qbo_id"),                // outside credit for one student; a check-in's filler is its sign-up's
+  requirementId: uuid("requirement_id").references(() => requirement.id, { onDelete: "cascade" }),
+  minutes: integer("minutes").notNull(),
+  shifts: integer("shifts").notNull(),
+  note: text("note"),                                  // staff only
+  createdByDoor: text("created_by_door", { enum: ["parent", "staff"] }).notNull(),
+  createdBy: uuid("created_by").notNull(),             // parent.id or staff_user.id
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  removedBy: uuid("removed_by"),                       // staff_user.id
+  removedReason: text("removed_reason"),               // staff only
+  createdAt: created(),
+}, (t) => [
+  index("volunteer_credit_family_ix").on(t.familyQboId),
+  uniqueIndex("volunteer_credit_signup_uq").on(t.signupId).where(sql`removed_at is null`),
+  check("volunteer_credit_source", sql`(${t.kind} in ('checkin', 'staff_checkin') and ${t.signupId} is not null and ${t.requirementId} is null and ${t.studentQboId} is null) or (${t.kind} = 'outside' and ${t.signupId} is null and ${t.requirementId} is not null)`),
+  check("volunteer_credit_amount", sql`${t.minutes} >= 0 and ${t.shifts} >= 0 and ${t.minutes} + ${t.shifts} > 0`),
+]);
+
+/**
+ * The volunteer reminders the worker sends (v1 spec §11.3), one row per email, claimed before it is sent so two
+ * wakes never send it twice: the day-before reminder of one sign-up (`key` is the sign-up and the shift's date), and a
+ * due-date nudge to one guardian of one family (`key` is the family, the due date, the guardian and which nudge).
+ * `outcome` is null while the send is under way; a failed one may be claimed again after a while. The family is a
+ * QuickBooks id of the connected company: a company change deletes every row.
+ */
+export const volunteerReminder = pgTable("volunteer_reminder", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["day_before", "due_14", "due_3"] }).notNull(),
+  key: text("key").notNull(),
+  familyQboId: text("family_qbo_id").notNull(),
+  triedAt: timestamp("tried_at", { withTimezone: true }).notNull(),
+  outcome: text("outcome", { enum: ["sent", "failed"] }),
+  createdAt: created(),
+}, (t) => [uniqueIndex("volunteer_reminder_kind_key_uq").on(t.kind, t.key)]);
 
 /* ---- Forms signed in Documenso (v1 spec §9; docs/superpowers/specs/2026-11-15-documenso-verification.md) ---- */
 
