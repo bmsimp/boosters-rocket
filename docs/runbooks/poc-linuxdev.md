@@ -39,9 +39,10 @@ Do this over SSH as user `brian`.
 2. Run the setup script. It creates the Docker network `booster-rocket-edge` and a private `.env.poc`
    file with freshly generated `BETTER_AUTH_SECRET`, `DB_PASSWORD` and `SETTINGS_ENCRYPTION_KEY`:
    ```bash
-   scripts/poc/setup.sh
+   scripts/poc/setup.sh https://portaltest.rhinoautomator.com
    ```
-   It is safe to run again; it never overwrites an existing `.env.poc`. (If an older `.env.poc` has no
+   The address is the one people will use for the portal; the script writes it into `.env.poc` as `APP_URL`.
+   It is safe to run again, with or without the address; it never overwrites an existing `.env.poc`. (If an older `.env.poc` has no
    `SETTINGS_ENCRYPTION_KEY`, it adds one and leaves everything else alone.) `.env.poc` holds no
    Microsoft or Google values; those are entered on the setup page and stored encrypted in the
    database. **Back up `.env.poc` along with the database**: `SETTINGS_ENCRYPTION_KEY` is needed to read
@@ -338,7 +339,7 @@ that family.
    cd ~/booster-rocket
    docker compose -f docker-compose.poc.yml --env-file .env.poc run --rm migrate node tools/scripts/seed-poc-guardian.mjs --name "<name>" --email "<email you can read>" --family POC-FAMILY-1
    ```
-   Success prints `seeded guardian <id>`. It refuses unless `APP_URL` contains `portaltest`. Running it again with
+   Success prints `seeded guardian <id>`. It refuses unless the env file holds `BR_PROOF_OF_CONCEPT=yes` (add that line to `.env.poc` on a proof of concept, never on a club's real portal). Running it again with
    the same email and family prints "That person is already a guardian in that family." The same email with
    `--family POC-FAMILY-2` adds a second family to the same person.
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).

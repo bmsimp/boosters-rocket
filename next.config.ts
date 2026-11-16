@@ -1,4 +1,20 @@
 import type { NextConfig } from "next";
+import { execFileSync } from "node:child_process";
+import pkg from "./package.json";
+
+/**
+ * The version the Health page shows (src/lib/health/version.ts), fixed here while the portal is built: the package
+ * version and the commit it was built from. The commit comes from APP_COMMIT when the build is given one (the Docker
+ * build is: its context has no .git), else from git. Neither is a secret, and neither is taken unless it looks like
+ * what it should be.
+ */
+function buildVersion(): string {
+  let commit = (process.env.APP_COMMIT ?? "").trim();
+  if (!commit) {
+    try { commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { commit = ""; }
+  }
+  return /^[0-9a-f]{7,40}$/.test(commit) ? `${pkg.version} (${commit.slice(0, 12)})` : pkg.version;
+}
 
 /**
  * Who may show the portal inside a frame: nobody. A page of the portal inside someone else's page can be dressed up
@@ -16,6 +32,7 @@ const nextConfig: NextConfig = {
   // The Docker image sets NEXT_OUTPUT=standalone; local `pnpm start` and CI e2e keep the default output.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   poweredByHeader: false,
+  env: { BR_BUILD_VERSION: buildVersion() },
   async headers() {
     return [
       {

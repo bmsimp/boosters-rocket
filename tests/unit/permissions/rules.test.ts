@@ -67,3 +67,71 @@ describe("validation", () => {
     expect(validateRules({ include: ["Admin.Roles.ReadWrite"], exclude: [] }).length).toBeGreaterThan(0);
   });
 });
+
+describe("a permission's own name is a pattern", () => {
+  it.each([...PERMISSIONS])("accepts %s as it is written in the registry", (p) => expect(validatePattern(p)).toBeNull());
+
+  it("gives the two-part names by name, and nothing else with them", () => {
+    expect(validateRules({ include: ["Roster.Read", "Parents.ReadWrite"], exclude: [] })).toEqual([]);
+    expect(expandRules({ include: ["Roster.Read"], exclude: [] })).toEqual(new Set(["Roster.Read"]));
+    expect(expandRules({ include: ["Parents.ReadWrite"], exclude: [] })).toEqual(new Set(["Parents.ReadWrite"]));
+  });
+
+  it("does not take in a permission added later, as a wildcard would", () => {
+    const later = [...GRANTABLE, "Roster.Family.ReadWrite", "Roster.ReadWrite", "Parents.Notes.Read"];
+    expect(expandRules({ include: ["Roster.Read", "Parents.ReadWrite"], exclude: [] }, later)).toEqual(new Set(["Roster.Read", "Parents.ReadWrite"]));
+    expect(expandRules({ include: ["Roster.*"], exclude: [] }, later).has("Roster.Family.ReadWrite" as never)).toBe(true);
+  });
+
+  it("can be excluded by name", () => {
+    expect(validateRules({ include: ["*"], exclude: ["Roster.Read"] })).toEqual([]);
+    expect(expandRules({ include: ["*"], exclude: ["Roster.Read"] }).has("Roster.Read")).toBe(false);
+  });
+
+  it.each(["Roster.Reads", "roster.read", "Roster.Write", "Parents.Everything", "Nothing.Here", "Roster", "Read"])(
+    "still rejects %j, which is no permission's name", (p) => expect(validatePattern(p)).not.toBeNull());
+});
+
+describe("an Admin-only permission cannot be given through any pattern", () => {
+  /** Every way of writing a name with stars in place of parts, and the names themselves. */
+  const starred = (name: string): string[] => {
+    const parts = name.split(".");
+    const out: string[] = [];
+    for (let mask = 0; mask < 1 << parts.length; mask++) out.push(parts.map((part, i) => (mask & (1 << i) ? "*" : part)).join("."));
+    return out;
+  };
+  const shapes = [...new Set([
+    "*", "*.*", "*.*.*", "**", "*.Read", "*.ReadWrite", "*.Read*", "*Write", "*.*Write",
+    ...PERMISSIONS.flatMap(starred),
+    ...PERMISSIONS.flatMap((p) => [`${p.split(".")[0]}.*`, `${p}*`, `*${p}`, `${p.slice(0, -1)}*`, `*.${p.split(".").slice(1).join(".")}`]),
+  ])];
+
+  it("tries every name and every starred form of every name", () => {
+    for (const p of ADMIN_ONLY) expect(shapes).toContain(p);
+    expect(shapes).toEqual(expect.arrayContaining(["Admin.*", "Settings.*.ReadWrite", "*.Log.Read", "*.*.Read", "Audit.Log.*", "Admin.Health.Read*"]));
+    expect(shapes.length).toBeGreaterThan(80);
+  });
+
+  it.each(shapes)("%s gives no Admin-only permission, alone or beside others", (pattern) => {
+    for (const universe of [GRANTABLE, PERMISSIONS]) {
+      const alone = expandRules({ include: [pattern], exclude: [] }, universe);
+      const beside = expandRules({ include: ["Roster.Read", pattern, "*"], exclude: [] }, universe);
+      for (const p of ADMIN_ONLY) {
+        expect(alone.has(p), `${pattern} gave ${p}`).toBe(false);
+        expect(beside.has(p), `${pattern} beside others gave ${p}`).toBe(false);
+      }
+    }
+  });
+
+  it.each([...ADMIN_ONLY])("%s by name is refused when a role is saved", (p) => {
+    expect(validatePattern(p)).toBeNull(); // it is a name, so the pattern check passes it; the next check is what refuses it
+    expect(validateRules({ include: [p], exclude: [] })).toContain(`“${p}” only matches Admin permissions, which can't be given to a role.`);
+  });
+
+  it("the audit log and the health page are Admin-only", () => {
+    expect(ADMIN_ONLY).toEqual(expect.arrayContaining(["Audit.Log.Read", "Admin.Health.Read"]));
+    expect(GRANTABLE).not.toContain("Audit.Log.Read");
+    expect(expandRules({ include: ["Audit.*", "*.Read"], exclude: [] }).has("Audit.Log.Read")).toBe(false);
+    expect(validateRules({ include: ["Audit.*"], exclude: [] })).toContain("“Audit.*” only matches Admin permissions, which can't be given to a role.");
+  });
+});

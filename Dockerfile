@@ -12,13 +12,16 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
+# The commit this image is built from, for the version the Health page shows (next.config.ts). Not a secret.
+ARG APP_COMMIT=""
 # Placeholders only so the env schema parses during `next build`. No real secret is ever present here.
 ENV NEXT_OUTPUT=standalone \
     NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL=postgres://build:build@localhost:5432/build \
     APP_URL=https://build.invalid \
     BETTER_AUTH_SECRET=build-placeholder-not-a-secret-0000000000 \
-    SETTINGS_ENCRYPTION_KEY=YnVpbGQtcGxhY2Vob2xkZXItbm90LWEtc2VjcmV0ISE=
+    SETTINGS_ENCRYPTION_KEY=YnVpbGQtcGxhY2Vob2xkZXItbm90LWEtc2VjcmV0ISE= \
+    APP_COMMIT=$APP_COMMIT
 RUN pnpm build
 
 FROM base AS tools

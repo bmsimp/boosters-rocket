@@ -82,6 +82,11 @@ export function asStaff(staff: { id: string; name: string; email: string }): voi
   state.staffSession = true;
 }
 
+/** A browser that holds a staff session the portal refuses (the person was turned off or removed): staff pages send it to /refused. */
+export function asRefusedStaff(): void {
+  state.staff = null; state.staffSession = true;
+}
+
 /** The request's address, as the audit log records it. */
 export function fromIp(ip: string): void { state.ip = ip; }
 /** The path client components see from usePathname(). */

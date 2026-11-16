@@ -1,7 +1,8 @@
 /**
  * The full permission universe. Every staff action declares one of these (see guards.ts).
  * Add new permissions here; wildcard roles pick them up automatically.
- * Format: Area.Object.Level, Level = Read | ReadWrite.
+ * Format: Area.Object.Level, Level = Read | ReadWrite. A few older names have two parts (Roster.Read): a role can be
+ * given any name in this list as it is written (rules.ts).
  */
 export const PERMISSIONS = [
   "Admin.Roles.ReadWrite",      // admin-only: create, change and delete roles
@@ -9,7 +10,8 @@ export const PERMISSIONS = [
   "Staff.Users.ReadWrite",      // admin-only: invite staff, assign roles, turn sign-in on or off
   "Settings.Club.Read",
   "Settings.Club.ReadWrite",
-  "Audit.Log.Read",
+  "Audit.Log.Read",             // admin-only: read and export the audit log; its rows hold staff-only notes (block reasons, held-address notes)
+  "Admin.Health.Read",          // admin-only: the health page (the worker, QuickBooks, mail, backups, the portal's address)
   "Settings.SignIn.ReadWrite",  // admin-only: change how staff and parents sign in (sign-in settings)
   "Settings.Mail.ReadWrite",    // admin-only: change outgoing mail; whoever controls it can read parents' sign-in codes
   "Settings.QuickBooks.ReadWrite", // admin-only: connect QuickBooks and choose the membership shape; it reaches the club's books
@@ -21,7 +23,7 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Never grantable through a custom role; only the built-in Admin holds them. */
-export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite"];
+export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read"];
 
 export const GRANTABLE: readonly Permission[] = PERMISSIONS.filter((p) => !ADMIN_ONLY.includes(p));
 

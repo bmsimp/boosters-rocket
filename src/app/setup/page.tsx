@@ -6,6 +6,7 @@ import { providerSummaries, pendingOnlySummaries, type ProviderKey, type Provide
 import { UnlockForm } from "./unlock-form";
 import { mailSummary, mailWorking } from "@/lib/mail/settings";
 import { StaffStep, MailStep, AdminStep } from "./steps";
+import { PortalAddress } from "../components/portal-address";
 
 export const metadata = { title: "Set up Booster Rocket" };
 export const dynamic = "force-dynamic";
@@ -13,6 +14,11 @@ export const dynamic = "force-dynamic";
 const STEPS: { step: SetupStep; label: string }[] = [
   { step: "staff", label: "1. Staff sign-in" }, { step: "mail", label: "2. Outgoing mail" }, { step: "admin", label: "3. First Admin" },
 ];
+
+/** The address is part of setting the portal up: it is shown at every step, and checked against the one this browser used. */
+function AddressBox() {
+  return <section className="box" aria-labelledby="setup-address-h"><h2 id="setup-address-h">This portal&apos;s address</h2><PortalAddress /></section>;
+}
 
 export default async function SetupPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const state = await getSetupState();
@@ -23,6 +29,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
         <h1 className="page-title">Set up Booster Rocket</h1>
         <p className="lede">Enter the setup code from your server. <code>deploy.sh</code> prints it after a deploy, or run <code>scripts/poc/setup-code.sh</code> for a new one.</p>
         <UnlockForm />
+        <AddressBox />
       </main>
     );
   }
@@ -41,6 +48,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
       {step === "staff" && <StaffStep appUrl={appUrl} byKey={byKey} error={one("error")} />}
       {step === "mail" && <MailStep summary={await mailSummary()} error={one("error")} />}
       {step === "admin" && <AdminStep adminEmail={state.adminEmail} byKey={byKey} error={one("error")} signinFailed={one("signin") === "failed"} />}
+      <AddressBox />
     </main>
   );
 }

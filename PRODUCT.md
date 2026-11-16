@@ -6,7 +6,8 @@
 
 web
 
-Responsive web app. Parents mostly use phones; staff mostly use laptops.
+Responsive web app. Parents mostly use phones; staff mostly use laptops. A parent can also install the
+portal as an app on an iPhone or Android phone, from the browser; it is the same web app.
 
 ## Stack
 
@@ -50,7 +51,7 @@ themselves.
 - Money: invoices are raised in QuickBooks. Parents pay on QuickBooks' own hosted payment page,
   reached from a "Pay" button on each invoice.
 - Signatures: forms are signed inside the portal through embedded Documenso signing.
-- Parents sign in with an emailed one-time code (Entra External ID); staff sign in with Microsoft
+- Parents sign in with a one-time code that the portal emails them; staff sign in with Microsoft
   or Google.
 - The work is seasonal: a heavy burst at the start of each season (forms, new families), then
   occasional balance checks and payments.

@@ -1,21 +1,26 @@
-import { GRANTABLE, ADMIN_ONLY, type Permission } from "./registry";
+import { GRANTABLE, ADMIN_ONLY, isPermission, type Permission } from "./registry";
 
 export type RoleRules = { include: string[]; exclude: string[] };
 
 const SEGMENT = /^(\*|[A-Z][A-Za-z]*)$/;
 const LEVEL = /^(\*|Read|ReadWrite)$/;
 
-/** Returns an error message for a bad pattern, or null if it's fine. */
+/**
+ * Returns an error message for a bad pattern, or null if it's fine. A permission's own name is always a pattern,
+ * whatever its shape (Roster.Read has two parts): without that, the only way to give it was a wildcard, which also takes
+ * in every permission added later. Whether a name may be given at all is settled elsewhere: expandRules() never returns
+ * an Admin-only permission, and validateRules() refuses an include that matches nothing else.
+ */
 export function validatePattern(raw: string): string | null {
   const p = raw.trim();
   if (p === "") return "A pattern can't be empty.";
   if (p !== raw) return `“${raw}” has spaces at the start or end.`;
-  if (p === "*") return null;
+  if (p === "*" || isPermission(p)) return null;
   const parts = p.split(".");
   if (parts.some((s) => s === "")) return `“${p}” has an empty part.`;
   if (parts.length === 2 && parts[1] === "*" && SEGMENT.test(parts[0]!)) return null; // "Roster.*"
   if (parts.length === 2 && parts[0] === "*" && LEVEL.test(parts[1]!) && parts[1] !== "*") return null; // "*.Read"
-  if (parts.length !== 3) return `“${p}” should look like Area.Object.Read or Area.Object.ReadWrite.`;
+  if (parts.length !== 3) return `“${p}” isn't a permission's name, or a pattern like Roster.* or Area.Object.Read. The names are under All permissions.`;
   const [area, obj, level] = parts as [string, string, string];
   if (!SEGMENT.test(area) || !SEGMENT.test(obj)) return `“${p}” has a part that isn't a word or *.`;
   if (!LEVEL.test(level)) return `“${p}” must end in Read, ReadWrite or *.`;

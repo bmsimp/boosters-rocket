@@ -19,7 +19,7 @@
 .EXAMPLE
   ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e
 .EXAMPLE
-  ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e -SetUpMail -Mailbox webmaster@fznband.org
+  ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e -SetUpMail -Mailbox webmaster@yourclub.org
 #>
 [CmdletBinding()]
 param(

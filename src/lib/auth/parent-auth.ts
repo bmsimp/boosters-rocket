@@ -7,6 +7,7 @@ import { PARENT_SESSION_SECONDS } from "@/lib/parents/sessions";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { parentAuthUser, parentAuthSession, parentAuthAccount, parentAuthVerification } from "@/lib/db/schema";
 import { env } from "@/env";
+import { CLIENT_ADDRESS, stampingHandler } from "./client-address";
 
 /**
  * Every Better Auth route a parent doesn't need. Several write (/update-user, the revoke routes, /unlink-account) and
@@ -44,8 +45,8 @@ function buildParentAuth() {
       "/portal-code/verify": { window: 60, max: RATE_LIMITS.code_check_ip.max },
     } },
     account: { accountLinking: { enabled: false } },
-    // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
-    advanced: { cookiePrefix: "br_parent", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
+    // The visitor's address comes from the portal's one reading of it (client-address.ts), not from a header named here.
+    advanced: { cookiePrefix: "br_parent", ipAddress: CLIENT_ADDRESS },
     databaseHooks: {
       // The portal writes the parent `signin` row itself, with the family entered (family-choice.ts).
       session: { delete: { after: (session, ctx) => recordSignout("parent", session, ctx) } },
@@ -71,6 +72,6 @@ let built: ParentAuth | null = null;
 
 /** The parent Better Auth instance. */
 export async function getParentAuth(): Promise<ParentAuth> {
-  built ??= buildParentAuth();
+  built ??= stampingHandler(buildParentAuth());
   return built;
 }
