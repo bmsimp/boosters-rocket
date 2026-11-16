@@ -8,7 +8,9 @@ Volunteers manage the roster, forms and settings from the same app. The club's b
 QuickBooks Online.
 
 - **QuickBooks Online is the source of truth** for invoices, payments and the family roster. The
-  portal reads them and keeps a copy for speed; it never holds its own version of the books.
+  portal reads them and keeps a copy for speed; it never holds its own version of the books. The
+  one thing it writes back is a parent's own phone and mailing address, when that parent changes
+  them.
 - **Commitment forms are signed in [Documenso](https://github.com/documenso/documenso)**, which
   each club hosts alongside the portal.
 - **Each club runs its own copy**, at its own address. There is no shared, multi-club service.
@@ -21,12 +23,18 @@ What works today:
 
 - Staff sign in with Microsoft or Google; parents sign in with a code the portal emails them.
 - A first-run setup page, roles and permissions, and an audit log with filters and a CSV export.
-- A read-only connection to QuickBooks: the family roster, and each family's open invoices with
-  Pay buttons that open QuickBooks' own payment page.
-- Parent pages for Home, Family and Payments, installable as an app on iOS and Android.
+- A connection to QuickBooks: the family roster, and each family's open invoices with Pay buttons
+  that open QuickBooks' own payment page.
+- Parent pages for Home, Family and Payments, installable as an app on iOS and Android. A parent
+  can update their own phone and mailing address, which the portal writes to QuickBooks.
+- Seasons: staff set up a season's steps and what each asks of a family or student, tick checklist
+  items off and waive them; parents see where they stand on Home and on a Season page.
 - For whoever runs it: a Health page, backups with a tested restore, and a daily clean-up.
 
-Still to come before v1: parents editing their own details, season steps, forms, volunteering and
+The invoice queries and the address update have not yet been tried against a real QuickBooks
+company; the roadmap lists what must be checked first.
+
+Still to come before v1: email changes and staff edits to the roster, forms, volunteering and
 staff money pages. [The roadmap](docs/superpowers/plans/2026-11-07-v1-roadmap.md) is the current
 status, and [the v1 design](docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md) says
 what is being built.
