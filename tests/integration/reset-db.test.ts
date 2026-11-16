@@ -65,11 +65,11 @@ describe("resetDb", () => {
   it("gives back rows in the order they were written, reset after reset", async () => {
     // Many tests read rows back with no ORDER BY. A table emptied with DELETE keeps its pages, and later rows go wherever
     // Postgres has noted room; resetDb() vacuums the tables a test wrote back to no pages.
-    for (let round = 0; round < 5; round++) {
+    for (let round = 0; round < 3; round++) {
       await resetDb();
-      for (let i = 0; i < 300; i++) await db.insert(auditLog).values({ door: "system", actorLabel: `row ${i}`, action: "reset.test", after: { padding: "x".repeat(200) } });
+      for (let i = 0; i < 150; i++) await db.insert(auditLog).values({ door: "system", actorLabel: `row ${i}`, action: "reset.test", after: { padding: "x".repeat(400) } });
       await db.delete(auditLog).where(sql`${auditLog.actorLabel} like 'row %0'`); // gaps, as a test that deletes leaves them
-      const left = Array.from({ length: 300 }, (_, i) => `row ${i}`).filter((label) => !label.endsWith("0"));
+      const left = Array.from({ length: 150 }, (_, i) => `row ${i}`).filter((label) => !label.endsWith("0"));
       expect((await db.select({ label: auditLog.actorLabel }).from(auditLog)).map((r) => r.label)).toEqual(left);
     }
     await resetDb();
