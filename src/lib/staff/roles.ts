@@ -137,7 +137,7 @@ export async function listStaff() {
 }
 
 const inviteInput = z.object({
-  name: z.string().trim().min(1, "Enter their name."),
+  name: z.string().trim().min(1, "Enter their name.").max(100, "A name can be 100 characters at most."),
   email: z.string().trim().toLowerCase().email("That email doesn't look right."),
 });
 

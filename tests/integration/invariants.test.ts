@@ -50,7 +50,8 @@ describe("every server action is guarded (spec §7, §12)", () => {
       const g = guardOf(value);
       expect(g, `${file} → ${name} is not wrapped in staffAction`).toBeDefined();
       expect(g?.door, `${file} → ${name}`).toBe("staff");
-      expect(g?.permission, `${file} → ${name} declares no permission`).toBeTruthy();
+      // staffSelfAction: a staff member's own record only (src/lib/guards.ts), in place of a permission.
+      expect(g?.permission ?? g?.self, `${file} → ${name} declares no permission`).toBeTruthy();
     }
   });
 

@@ -347,14 +347,6 @@ p.errors, .sign-out .errors { padding-left: 0; }
 
 .cert-panel code { word-break: break-all; }
 
-/* Roles dropdown: a <details> of checkboxes. */
-.role-picker { position: relative; display: inline-block; }
-.role-picker summary { cursor: pointer; padding: var(--s1) var(--s3); border: var(--rule) solid var(--ink); background: var(--paper); color: var(--ink); }
-.role-picker summary:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
-
-.role-picker-list { display: grid; gap: var(--s1); padding: var(--s2) var(--s3); border: var(--rule) solid var(--ink); border-top: 0; background: var(--paper); color: var(--ink); }
-.role-picker-item { display: flex; align-items: center; gap: var(--s2); }
-
 /* ---- Home and Family (parent pages): the rules added with those pages. Keep new ones for them inside this block. ---- */
 
 /* The account control is filled, like the monogram, while its page (Display) is open. */
