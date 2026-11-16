@@ -26,8 +26,8 @@ export function workerMark(runUrl: string): string {
 const MARK_OF_ANY_RUN = /^booster-rocket tests: a worker database of "([^"]+)"/;
 
 type Sql = ReturnType<typeof postgres>;
-async function withAdmin<T>(runUrl: string, work: (admin: Sql) => Promise<T>): Promise<T> {
-  const admin = postgres(adminDatabaseUrl(runUrl), quiet);
+async function withAdmin<T>(runUrl: string, work: (admin: Sql) => Promise<T>, connections = 1): Promise<T> {
+  const admin = postgres(adminDatabaseUrl(runUrl), { ...quiet, max: connections });
   try { return await work(admin); } finally { await admin.end({ timeout: 5 }); }
 }
 
@@ -137,15 +137,12 @@ export async function dropWorkerDatabases(runUrl: string): Promise<string[]> {
     };
     const workers = await workersOf([runUrl]);
     const scratch = [runUrl, ...workers.map(urlOf)].flatMap((url) => SCRATCH_PURPOSES.flatMap((purpose) => scratchNames(purpose, url)));
-    const dropped: string[] = [];
-    for (const name of [...await workersOf(scratch.map(urlOf)), ...scratch, ...workers]) {
-      const [was] = await admin<{ n: number }[]>`select count(*)::int as n from pg_database where datname = ${name}`;
-      if (!was!.n) continue;
-      await admin.unsafe(`DROP DATABASE IF EXISTS ${ident(name)} WITH (FORCE)`);
-      dropped.push(name);
-    }
+    const candidates = [...await workersOf(scratch.map(urlOf)), ...scratch, ...workers];
+    const dropped = (await admin<{ name: string }[]>`select datname as name from pg_database where datname in ${admin(candidates)} order by datname`).map((r) => r.name);
+    // All at once: each drop waits for a checkpoint of the whole server, and drops that wait together share one.
+    await Promise.all(dropped.map((name) => admin.unsafe(`DROP DATABASE IF EXISTS ${ident(name)} WITH (FORCE)`)));
     return dropped;
-  });
+  }, 8);
 }
 
 /** A scratch database's name, and the one scripts/restore.sh loads a dump into before it renames it in. */
