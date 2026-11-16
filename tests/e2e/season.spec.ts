@@ -156,7 +156,7 @@ test("staff open one family's season from a requirement's list, and the visit is
   expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "E2E-FAMILY", actor_label: "e2e-admin@example.org", permission: "Season.Progress.Read" }]); // one visit, one row
 });
 
-test("staff see the season's set-up: its steps, what each asks, and the kinds that are coming later", async ({ page }) => {
+test("staff see the season's set-up: its steps, what each asks, and every kind offered", async ({ page }) => {
   await page.goto("/staff/seasons");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Seasons");
   const listed = page.getByRole("region", { name: "Seasons", exact: true }).getByRole("listitem");

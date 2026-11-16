@@ -22,8 +22,7 @@ for (const [path, heading] of [["/sign-in", "Sign in"], ["/staff/sign-in", "Staf
   });
 }
 
-test("the parent door promises what a parent finds today: their students and what's owed, and no forms yet", async ({ page }) => {
+test("the parent door promises what a parent finds today: their students, what's owed, forms and volunteer shifts", async ({ page }) => {
   await page.goto("/sign-in");
-  await expect(page.locator("main .lede").first()).toHaveText("Sign in to see your students and what's owed. We'll email you a 6-digit code.");
-  await expect(page.getByRole("main")).not.toContainText(/forms/i);
+  await expect(page.locator("main .lede").first()).toHaveText("Sign in to see your students, what's owed, the forms to sign and the volunteer shifts. We'll email you a 6-digit code.");
 });
