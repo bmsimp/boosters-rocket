@@ -5,9 +5,9 @@ type Msg = { to: string; subject: string; text: string; html: string };
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { mail.outbox.push(m); } }));
 
-import { asc, eq } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, setting, volunteerCredit, volunteerShift } from "@/lib/db/schema";
+import { auditLog, setting, volunteerCredit } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { checkIn, loadCheckInForMe } from "@/lib/volunteer/check-in";
