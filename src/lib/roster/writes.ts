@@ -3,7 +3,7 @@
 // the only module that may call the client's roster writes (tests/unit/quickbooks-writes.test.ts): the staff roster
 // actions and the write queue's job reach QuickBooks through it.
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { qboCustomer, qboCustomerType, writeQueue, type RosterRole, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -63,6 +63,7 @@ export const WRITE_COPY = {
   gone: "That isn't on the roster any more, so nothing was changed. Reload the page.",
   notOffered: "That can't be changed from the portal for this club, so nothing was changed.",
   waiting: "Another change to this is still waiting to reach QuickBooks. Once it has gone through, or been given up on the Reconciliation page, try again.",
+  doneNotShown: "Done in QuickBooks. The roster here will show it after its next read of QuickBooks, usually within a few minutes.",
   queued: "QuickBooks couldn't take this just now, so it is waiting to reach QuickBooks. The portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.",
 } as const;
 
@@ -242,34 +243,55 @@ export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fr
  * stored from the answer (only if newer), a moved student's follow-ups run, a family made inactive asks the worker for
  * a roster refresh (QuickBooks may have changed the customers under it), and the reconcile brings sign-ins in line (a
  * new parent can sign in at once; an inactive family, student or parent ends what the rules say). The write is audited
- * with before and after, whether or not the cache could take it. `inside` runs last, in the same transaction.
+ * with before and after, whether or not the cache could take it. `inside` runs last, in the same transaction. When
+ * that transaction fails, the change is still audited (code cache_failed) and a refresh asked for; `cached` says so.
  */
 export async function applyWritten(w: RosterWrite, answer: Record<string, unknown>, o: { realmId: string; actor: Actor; ip: string | null; permission?: string;
-  queueId?: string; inside?: (tx: Tx) => Promise<void> }): Promise<void> {
+  queueId?: string; inside?: (tx: Tx) => Promise<void> }): Promise<{ cached: boolean }> {
   let tell: (() => Promise<unknown>) | null = null;
-  await db.transaction(async (tx) => {
-    const ours = await lockRosterAs(tx, rosterTagOf(o.realmId));
-    const [cached] = w.op === "create" ? [] : await tx.select().from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
-    const cause = `${AUDIT_ACTION[w.op]}#${w.op === "create" ? nameKey(w.name).slice(0, 40) : w.qboId}`;
-    const fits = answerIsFor(w, answer);
-    let refreshAsked = false;
-    if (ours && fits) {
-      await upsertFromAnswer(tx, answer, await getShape(tx));
-      if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
-      if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
-      await reconcileAccess(tx, { cause });
-    } else if (ours) {
-      await askForRosterRefresh(tx); refreshAsked = true; // the answer wasn't the record asked about: read the roster again rather than guess
-    }
-    await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer",
-      targetId: w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId,
-      before: auditBefore(w, cached), after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), ...(refreshAsked ? { refreshAsked } : {}),
-        ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}) } }, tx);
-    if (o.inside) await o.inside(tx);
-  });
+  try {
+    await db.transaction(async (tx) => {
+      const ours = await lockRosterAs(tx, rosterTagOf(o.realmId));
+      const [cached] = w.op === "create" ? [] : await tx.select().from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
+      const cause = `${AUDIT_ACTION[w.op]}#${w.op === "create" ? nameKey(w.name).slice(0, 40) : w.qboId}`;
+      const fits = answerIsFor(w, answer);
+      let refreshAsked = false;
+      if (ours && fits) {
+        await upsertFromAnswer(tx, answer, await getShape(tx));
+        if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
+        if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
+        await reconcileAccess(tx, { cause });
+      } else if (ours) {
+        await askForRosterRefresh(tx); refreshAsked = true; // the answer wasn't the record asked about: read the roster again rather than guess
+      }
+      await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer",
+        targetId: w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId,
+        before: auditBefore(w, cached), after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), ...(refreshAsked ? { refreshAsked } : {}),
+          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}) } }, tx);
+      if (o.inside) await o.inside(tx);
+    });
+  } catch {
+    // QuickBooks made the change but the cache couldn't take it (a deadlock, a follow-up that failed): nothing of that
+    // transaction is kept, so the change is audited here with its code, the worker is asked for a roster refresh, and
+    // a queued item is marked as possibly made, so it is looked for after that refresh and never simply sent again.
+    tell = null;
+    await db.transaction(async (tx) => {
+      await askForRosterRefresh(tx);
+      await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer",
+        targetId: w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId,
+        before: w.op === "create" ? null : { syncToken: w.syncToken },
+        after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), refreshAsked: true, code: "cache_failed" } }, tx);
+      if (o.queueId) {
+        await tx.update(writeQueue).set({ sent: true, lastCode: "cache_failed", tries: sql`${writeQueue.tries} + 1`, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000), updatedAt: new Date() })
+          .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting")));
+      }
+    });
+    return { cached: false };
+  }
   // The guardians whose places a moved student gave up are told once the move is committed. A mail failure is the
   // notices' own to record; it never undoes the move.
   if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
+  return { cached: true };
 }
 
 /** Puts a write that may go through later on the queue, audited, in one transaction. */
@@ -341,8 +363,8 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
           : failure.kind === "other_company" ? WRITE_COPY.otherCompany : e.code === "bad_id" ? WRITE_COPY.notSent : WRITE_COPY.refused);
     }
   }
-  await applyWritten(p.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission });
-  return { ok: true, message: DONE_WORDS[p.write.op] };
+  const { cached } = await applyWritten(p.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission });
+  return { ok: true, message: cached ? DONE_WORDS[p.write.op] : WRITE_COPY.doneNotShown };
 }
 
 const DONE_WORDS: Record<RosterWrite["op"], string> = {

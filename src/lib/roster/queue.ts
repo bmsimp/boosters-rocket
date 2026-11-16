@@ -11,7 +11,8 @@ import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
-import { applyWritten, REFRESH_ASK_KEY, sendWrite } from "./writes";
+import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
+import { afterStudentMoved, applyWritten, REFRESH_ASK_KEY, sendWrite } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 
 export const WRITE_QUEUE_JOB = "roster.write_queue";
@@ -48,10 +49,13 @@ async function claim(id: string, now: Date): Promise<Item | null> {
 
 const short = (code: string) => code.slice(0, 40);
 
-/** One state change of an item, with its audit row, in one transaction. A row a company change deleted is left gone. */
-async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string; sent: boolean; nextTryAt?: Date }, now: Date): Promise<Step> {
+/**
+ * One state change of an item, with its audit row, in one transaction. A row a company change deleted is left gone.
+ * `triedAt` is when this try sent the write (or looked for it): a refresh that started before it may not show it.
+ */
+async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string; sent: boolean; nextTryAt?: Date }, triedAt: Date): Promise<Step> {
   await db.transaction(async (tx) => {
-    const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), sent: to.sent, tries: item.tries + 1, lastTriedAt: now,
+    const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), sent: to.sent, tries: item.tries + 1, lastTriedAt: triedAt,
       nextTryAt: to.state === "waiting" ? to.nextTryAt! : null, updatedAt: new Date() }).where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: WORKER_ACTOR, action: to.state === "stuck" ? "roster.write.stuck" : "roster.write.retry", targetType: "write_queue", targetId: item.id,
@@ -88,22 +92,42 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     }
     const cache = await db.select().from(qboCustomer);
     const seen = beforeResend(w, cache);
-    if (seen.is === "done") { await markDone(item, "found", seen.qboId, item.tries); return "done"; }
+    if (seen.is === "done") { await foundDone(item, w, seen.qboId); return "done"; }
     if (seen.is === "stuck") return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
   }
   let answer: Record<string, unknown>;
+  // The time of the send itself, not the wake's: the check before a later resend needs a refresh that began after it.
+  const triedAt = new Date();
   try {
     answer = await sendWrite(w, item.realmId, { mayWait: true });
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
-    if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: false }, now);
+    if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: false }, triedAt);
     const next = afterFailedTry(item.tries + 1, item.createdAt, now);
-    return settle(item, { ...next, code: e.code, sent: failure.sent }, now);
+    return settle(item, { ...next, code: e.code, sent: failure.sent }, triedAt);
   }
-  await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id,
+  const { cached } = await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id,
     inside: (tx) => markDone(item, "sent", typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
-  return "done";
+  return cached ? "done" : "waiting";
+}
+
+/**
+ * An item a refresh shows QuickBooks made already, marked done. A move made that way still has its follow-ups (the
+ * student's forms and volunteer places, afterStudentMoved()), run in the same transaction under the roster lock while
+ * the cache is still the item's company; the guardians whose places were given up are told after the commit.
+ */
+async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<void> {
+  if (w.op !== "move") { await markDone(item, "found", qboId, item.tries); return; }
+  let tell: (() => Promise<unknown>) | null = null;
+  await db.transaction(async (tx) => {
+    if (await lockRosterAs(tx, rosterTagOf(item.realmId))) {
+      ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
+        { actor: WORKER_ACTOR, ip: null }));
+    }
+    await markDone(item, "found", qboId, item.tries, tx);
+  });
+  if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
 }
 
 /**
