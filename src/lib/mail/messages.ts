@@ -122,10 +122,12 @@ export function volunteerCancelMessage(b: Brand, to: string, o: { who: Volunteer
  * A signed form's copy, to a guardian who signed it, once it is sealed and the portal has kept it. The sealed PDF goes
  * with it when there is one and it is small enough to attach; otherwise `link` is the signed-in download.
  */
-export function signedFormCopyMessage(b: Brand, to: string, o: { formTitle: string; forName: string; pdf: Buffer | null; link: string }): MailMessage {
+export function signedFormCopyMessage(b: Brand, to: string, o: { formTitle: string; forName: string; pdf: Buffer | null; link: string; parts?: number }): MailMessage {
   const lines = [
     `Thank you for signing ${o.formTitle} for ${o.forName}. Everyone who needed to sign it has, and the club has kept the signed copy.`,
-    o.pdf ? "The signed form is attached to this email, for your own records." : `You can download the signed form here, after signing in: ${o.link}`,
+    o.pdf ? "The signed form is attached to this email, for your own records."
+      : (o.parts ?? 1) > 1 ? `The signed form has ${o.parts} parts. You can download each of them here, after signing in: ${o.link}`
+        : `You can download the signed form here, after signing in: ${o.link}`,
     "There's nothing more you need to do.",
   ];
   return { to, subject: `Signed: ${o.formTitle}`, text: text(lines), html: html(b, lines),
@@ -133,11 +135,11 @@ export function signedFormCopyMessage(b: Brand, to: string, o: { formTitle: stri
 }
 
 /** A reminder that a form still needs this guardian's signature: the form, who it is for, when it is due, and the way to it. */
-export function formReminderMessage(b: Brand, to: string, o: { formTitle: string; forNames: string[]; due: string | null; link: string }): MailMessage {
+export function formReminderMessage(b: Brand, to: string, o: { formTitle: string; forNames: string[]; due: string | null; pastDue?: boolean; link: string }): MailMessage {
   const names = o.forNames.length <= 1 ? o.forNames.join("") : `${o.forNames.slice(0, -1).join(", ")} and ${o.forNames.at(-1)}`;
   const lines = [
     `A friendly reminder: ${o.formTitle} for ${names} still needs your signature.`,
-    ...(o.due ? [`It's due ${o.due}.`] : []),
+    ...(o.due ? [o.pastDue ? `It was due ${o.due}. It's not too late to sign it.` : `It's due ${o.due}.`] : []),
     `You can read and sign it here: ${o.link}`,
     "If you've signed it in the last day or so, thank you, and you can ignore this email.",
   ];

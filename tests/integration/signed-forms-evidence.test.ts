@@ -222,7 +222,7 @@ describe("the guardians' copies", () => {
     expect(await db.select().from(signedFormCopy)).toHaveLength(1);
   });
 
-  it("sends a link to the signed-in download in place of a PDF of 3 MB or more, or of a document of several items", async () => {
+  it("sends a link to the signed-in download in place of a PDF of 3 MB or more, and to the form's page for a document of several items", async () => {
     stub.sealedSize = 3_000_001;
     const big = await signedForA();
     await runEvidenceJob();
@@ -234,7 +234,10 @@ describe("the guardians' copies", () => {
     const several = await signedInStub(stub, { requirementId, templateId, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.students[1]!.qboId, guardians: [guardianOf(a)], items: 2 });
     await runEvidenceJob();
     expect(mail.outbox[0]!.attachments).toBeUndefined();
-    expect(mail.outbox[0]!.text).toContain(`/forms/${several.id}/signed`);
+    // Several parts: the link is the form's own page, which offers each part, not the download of the first alone.
+    expect(mail.outbox[0]!.text).toContain(`The signed form has 2 parts. You can download each of them here, after signing in: http://localhost:3000/forms/${several.id}
+`);
+    expect(mail.outbox[0]!.text).not.toContain(`/forms/${several.id}/signed`);
   });
 
   it("goes only to the guardians recorded as signers: nobody else, nobody blocked, nobody whose link is closed", async () => {

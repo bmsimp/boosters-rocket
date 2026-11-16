@@ -66,6 +66,12 @@ describe("who still has to sign", () => {
     expect(whoStillHasToSign("every", null, guardians)).toEqual(["p1", "p2"]);
     expect(whoStillHasToSign("every", { state: "waiting", signers: [signer("p1", "2026-11-10T10:00:00Z"), signer("p2")] }, guardians)).toEqual(["p2"]);
   });
+  it("every guardian, once anyone has signed: only those its document names, since a guardian it doesn't name can't sign it", () => {
+    const three = [{ parentId: "p1" }, { parentId: "p2" }, { parentId: "p3" }];
+    expect(whoStillHasToSign("every", { state: "waiting", signers: [signer("p1", "2026-11-10T10:00:00Z"), signer("p2")] }, three)).toEqual(["p2"]);
+    // Before anyone signs, a guardian it doesn't name can still open it and have it made again for them.
+    expect(whoStillHasToSign("every", { state: "waiting", signers: [signer("p1"), signer("p2")] }, three)).toEqual(["p1", "p2", "p3"]);
+  });
   it("never names someone who isn't among the guardians given (blocked, or their link closed)", () => {
     expect(whoStillHasToSign("every", { state: "waiting", signers: [signer("p9")] }, [{ parentId: "p1" }])).toEqual(["p1"]);
     expect(whoStillHasToSign("any", null, [])).toEqual([]);

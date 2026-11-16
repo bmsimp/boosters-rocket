@@ -273,6 +273,9 @@ describe("reminders", () => {
     expect((await audits("forms.reminder.sent")).at(-1)!.after).toMatchObject({ kind: "scheduled", clubDate: "2026-12-08", emailed: 2 });
     // Weekly after the due date.
     expect((await runScheduledReminders(new Date("2026-12-22T15:30:00.000Z"))).rounds).toBe(1);
+    // After the due date it says it was due, never that it is.
+    expect(mail.outbox.at(-1)!.text).toContain("It was due Tuesday, December 15, 2026. It's not too late to sign it.");
+    expect(mail.outbox.at(-1)!.text).not.toContain("It's due");
     // Taking the schedule away stops it.
     expect(await saveScheduleAction(travel, [], false)).toEqual({ ok: true, message: "Saved. No reminders will go for this form." });
     expect((await runScheduledReminders(new Date("2026-12-29T15:30:00.000Z"))).rounds).toBe(0);

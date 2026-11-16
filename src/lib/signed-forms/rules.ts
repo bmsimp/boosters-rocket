@@ -61,7 +61,8 @@ export type Remindable = { parentId: string };
 /**
  * The guardians who still have to sign a form, out of those with an open link to the family who are not blocked.
  * Nobody, once everyone has signed (complete, or signed and being sealed). "Any one guardian": every one of them, since
- * any of them can sign it. "Every guardian": those who haven't signed it yet.
+ * any of them can sign it. "Every guardian": those who haven't signed it yet; once anyone has, its document is left as
+ * it is, so only the guardians it names who haven't signed yet: one it doesn't name can't sign it.
  */
 export function whoStillHasToSign(mode: "any" | "every", request: { state: SignatureRequestState; signers: readonly Pick<RequestSigner, "parentId" | "signedAt">[] } | null,
   guardians: readonly Remindable[]): string[] {
@@ -69,8 +70,10 @@ export function whoStillHasToSign(mode: "any" | "every", request: { state: Signa
   if (state === "complete" || state === "signed") return [];
   const ids = [...new Set(guardians.map((g) => g.parentId))];
   if (mode === "any") return ids;
-  const signed = new Set((request?.signers ?? []).filter((s) => s.signedAt !== null).map((s) => s.parentId));
-  return ids.filter((id) => !signed.has(id));
+  const signers = request?.signers ?? [];
+  const signed = new Set(signers.filter((s) => s.signedAt !== null).map((s) => s.parentId));
+  if (signed.size > 0) return ids.filter((id) => !signed.has(id) && signers.some((s) => s.parentId === id));
+  return ids;
 }
 
 export const REMINDER_DAYS_BEFORE = [14, 7, 3, 1] as const;

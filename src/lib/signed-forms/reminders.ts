@@ -108,7 +108,7 @@ async function sendOwed(o: { owed: Owed[]; forms: { id: string; title: string; d
       const to = people.find((p) => p.id === x.parentId);
       if (!to) { counts.failed++; continue; }
       const only = x.requestIds.length === 1 ? x.requestIds[0] : null;
-      const sent = await sendMail(formReminderMessage(brand, to.email, { formTitle: form.title, forNames: [...new Set(x.names)], due: form.dueOn ? dateWords(form.dueOn) : null,
+      const sent = await sendMail(formReminderMessage(brand, to.email, { formTitle: form.title, forNames: [...new Set(x.names)], due: form.dueOn ? dateWords(form.dueOn) : null, pastDue: form.dueOn !== null && form.dueOn < how.today,
         link: only ? `${base()}/forms/${only}` : `${base()}/forms` }), { purpose: "form_reminder", actor: op.actor, ip: op.ip });
       if (sent.ok) { counts.emailed++; total.guardians.add(x.parentId); } else counts.failed++;
     }

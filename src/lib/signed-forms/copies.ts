@@ -18,6 +18,8 @@ export const COPIES_PER_WAKE = 10;
 
 /** Where a guardian downloads their family's signed form, signed in: the parent download (src/app/(parent)/forms/[id]/signed). */
 export const parentDownloadLink = (requestId: string): string => `${env.APP_URL.replace(/\/+$/, "")}/forms/${requestId}/signed`;
+/** The form's own page, which offers each part of a signed form of several parts for download. */
+export const parentFormLink = (requestId: string): string => `${env.APP_URL.replace(/\/+$/, "")}/forms/${requestId}`;
 
 export type CopyCounts = { sent: number; failed: number; skipped: number };
 
@@ -63,7 +65,8 @@ export async function sendOwedCopies(): Promise<CopyCounts> {
         continue;
       }
       const forName = evidence.subjectName ?? evidence.familyName ?? "your family";
-      const message = signedFormCopyMessage(await currentBrand(), to.email, { formTitle: evidence.formTitle, forName, pdf, link: parentDownloadLink(evidence.requestId) });
+      const message = signedFormCopyMessage(await currentBrand(), to.email, { formTitle: evidence.formTitle, forName, pdf, parts: sealed.length,
+        link: sealed.length > 1 ? parentFormLink(evidence.requestId) : parentDownloadLink(evidence.requestId) });
       const sent = await sendMail(message, { purpose: "form_copy", actor: FORMS_WORKER });
       const how = pdf ? "attached" : "link";
       await done(sent.ok ? "sent" : "failed", how);
