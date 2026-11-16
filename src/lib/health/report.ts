@@ -7,6 +7,7 @@ import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
+import { queueCounts } from "@/lib/roster/queue";
 import { mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 import { formsSummary } from "@/lib/forms/settings";
@@ -54,11 +55,11 @@ const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
   // The database first, on its own: if it can't answer, nothing below can be read, and the page says so.
   await db.execute(sql`select 1`);
-  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, signins, forms, waiting, untemplated, moneyRun] = await Promise.all([
+  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, signins, forms, waiting, untemplated, moneyRun, writes] = await Promise.all([
     lastWake(),
     db.select().from(jobRun).where(eq(jobRun.job, CLEANUP_JOB)).orderBy(desc(jobRun.id)).limit(1),
-    // The one thing the portal writes to QuickBooks leaves an audit row each time: the newest is when it last worked.
-    db.select({ at: auditLog.at }).from(auditLog).where(eq(auditLog.action, QUICKBOOKS_WRITE_ACTION)).orderBy(desc(auditLog.id)).limit(1),
+    // Each change the portal makes in QuickBooks leaves an audit row: the newest is when one last worked.
+    db.select({ at: auditLog.at }).from(auditLog).where(inArray(auditLog.action, [...QUICKBOOKS_WRITE_ACTION])).orderBy(desc(auditLog.id)).limit(1),
     connectionView(), quickbooksProblems(now), loadRosterPage(), mailSummary(), getParentSettings(), lastBackup(),
     // The newest sign-ins: if none of them has an address, the header CLIENT_IP_HEADER names isn't reaching the portal.
     db.select({ ip: auditLog.ip }).from(auditLog)
@@ -69,6 +70,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     db.select({ id: requirement.id }).from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).innerJoin(season, eq(seasonStep.seasonId, season.id))
       .where(and(eq(season.isCurrent, true), eq(requirement.kind, "form"), isNull(requirement.form))),
     moneyRunView(),
+    queueCounts(),
   ]);
   const lines: HealthLine[] = [];
 
@@ -91,18 +93,23 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   });
 
   const rosterTimes = [{ label: "Last token refresh", at: conn.lastTokenRefreshAt }, { label: "Last roster read", at: roster.lastOkAt },
-    { label: "Last change by a parent", at: lastWrite?.at.toISOString() ?? null }];
+    { label: "Last change made in QuickBooks", at: lastWrite?.at.toISOString() ?? null }];
   // What the portal reads and what it changes, in the words the QuickBooks settings page uses.
   const use = `${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`;
   const qboFix = { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" };
+  // Staff changes QuickBooks hasn't taken yet (src/lib/roster/queue.ts): a stuck one waits for a person.
+  const queueNote = writes.waiting + writes.stuck === 0 ? [] : [`Staff changes to the roster: ${writes.waiting} waiting to reach QuickBooks, ${writes.stuck} stuck${writes.stuck ? " and waiting for someone to try them again or give them up on the Reconciliation page" : ""}.`];
+  const queueFix = { href: "/staff/reconciliation", label: "Open Reconciliation" };
   if (!conn.configured) {
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "off", word: "Not set up", says: "Not set up. Families, students and what they owe come from QuickBooks, so parents see none of it yet.", times: [], notes: [], fix: qboFix });
   } else if (!conn.connected) {
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe, and parents can't change their phone or address, until an Admin connects.",
-      times: rosterTimes, notes: [use], fix: qboFix });
+      times: rosterTimes, notes: [...queueNote, use], fix: qboFix });
   } else {
+    const attention = problems.length > 0 || writes.stuck > 0;
     lines.push({
-      key: "quickbooks", title: "QuickBooks", state: problems.length ? "attention" : "ok", word: problems.length ? "Needs attention" : "Connected", times: rosterTimes, notes: [...problems.map((p) => p.text), use], fix: problems.length ? qboFix : null,
+      key: "quickbooks", title: "QuickBooks", state: attention ? "attention" : "ok", word: attention ? "Needs attention" : "Connected", times: rosterTimes,
+      notes: [...problems.map((p) => p.text), ...queueNote, use], fix: problems.length ? qboFix : writes.stuck ? queueFix : null,
       says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}.`,
     });
   }

@@ -94,7 +94,7 @@ describe("the staff pages for parents", () => {
     const html = await parentsPage();
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Can sign in (hasn&#x27;t yet)");
-    expect(html).toContain("Names and email addresses are changed in QuickBooks");
+    expect(html).toContain("Email addresses are changed in QuickBooks, not here");
     expect(html).toContain('<span class="when">Never signed in · Not welcomed yet</span>');
     expect(await parentsPage("zzz")).toContain("Nobody matches");
     const [ana] = await db.select().from(parent);

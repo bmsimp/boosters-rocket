@@ -70,7 +70,7 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
 
     const log = await audits();
     expect(log).toHaveLength(1);
-    expect(log[0]!.action).toBe(QUICKBOOKS_WRITE_ACTION); // the action the Health page reads for "Last change by a parent"
+    expect(QUICKBOOKS_WRITE_ACTION).toContain(log[0]!.action); // an action the Health page reads for "Last change made in QuickBooks"
     expect(log[0]).toMatchObject({ door: "parent", actorId: r.identity.parentId, actorLabel: RIVERA.parent.email, action: "parent.contact.save",
       targetType: "qbo_customer", targetId: R_PARENT, before: { phone: RIVERA.parent.phone }, after: { phone: NEW_PHONE }, ip: "203.0.113.77" });
     // The pages that show these details: the browser's router drops its copies of them.
@@ -458,7 +458,7 @@ describe("when QuickBooks can't be reached or refuses, nothing is changed and th
     // The club's books changed, so the log says so: a save, before and after, and why the portal couldn't confirm it.
     const { line1, line2, region, postalCode, country } = SHOWN;
     const log = await audits();
-    expect(log.map((a) => a.action)).toEqual([QUICKBOOKS_WRITE_ACTION]);
+    expect(log.map((a) => a.action)).toEqual(["parent.contact.save"]);
     expect(log[0]).toMatchObject({ door: "parent", actorId: r.identity.parentId, targetType: "qbo_customer", targetId: R_PARENT, ip: "203.0.113.78",
       before: { phone: RIVERA.parent.phone, address: { line1, line2, city: SHOWN.city, region, postalCode, country } },
       after: { phone: NEW_PHONE, address: { line1, line2, city: "Buda", region, postalCode, country }, code: "answer_moved" } });

@@ -38,7 +38,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <dt>Last signed in</dt><dd>{p.lastSigninAt ? <LocalTime iso={p.lastSigninAt} /> : "Never"}</dd>
           <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
         </dl>
-        <p className="hint">The name and email address come from QuickBooks. To change them, change the customer in QuickBooks and refresh the roster.</p>
+        <p className="hint">The name and email address come from QuickBooks. Staff who may change the roster can rename a parent from their family&apos;s page under Roster; an email address is changed in QuickBooks, followed by Refresh now on the roster.</p>
       </section>
 
       <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Welcome email</h2>

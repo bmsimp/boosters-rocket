@@ -128,6 +128,8 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/money/sweep", names: "all", why: "the worker's run reads every family's invoices" },
   { module: "@/lib/money/items", names: "all", why: "it is the staff choice of what a payment requirement is met by" },
   { module: "@/lib/volunteer/setup", names: "all", why: "a shift's sign-up list names people of every family" },
+  { module: "@/lib/roster/writes", names: "all", why: "staff changes to the roster in QuickBooks: it reads every family, and sends writes" },
+  { module: "@/lib/roster/queue", names: "all", why: "the write queue names every family's waiting changes" },
 ];
 
 describe("every page guards itself", () => {
