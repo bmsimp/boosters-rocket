@@ -24,7 +24,7 @@ export default async function ConfirmEmailPage({ params }: { params: Promise<{ t
       <section className="box" aria-labelledby="confirm-h">
         {view.state === "ask" ? (
           <>
-            <h2 id="confirm-h">Use {view.newEmail} to sign in from now on?</h2>
+            <h2 id="confirm-h">{`Use ${view.newEmail} to sign in from now on?`}</h2>
             <p>You sign in with {ctx.email} now. Once you say yes, the club&apos;s books have the new address, and you sign in again with it.</p>
             <ConfirmEmailForm token={token} />
           </>
