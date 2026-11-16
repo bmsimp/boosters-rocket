@@ -61,7 +61,7 @@ describe("invariant 7: each parent sees only a count and their own sign-up", () 
       expect(leaked(page, other.markers)).toEqual([]);
       const shift = textOf(await renderPage(ShiftPage, { params: { id: viewer.volunteer!.shiftId } }));
       expect(shift).toContain("2 of 4 places filled");
-      expect(shift).toContain(`Signed up from your family: ${viewer === a ? AURELIO!.name : "you"}.`);
+      expect(shift).toContain(`Signed up from your family: ${viewer === a ? `${AURELIO!.name} (checked in)` : "you"}.`);
       expect(leaked(shift, other.markers)).toEqual([]);
       // What the pages are given, rendered or not: client components get some of it as props.
       const data = JSON.stringify([await loadMyVolunteering(ctxOf(viewer.identity)), await loadShiftForMe(ctxOf(viewer.identity), await famOf(viewer), viewer.volunteer!.shiftId)]);
@@ -141,7 +141,7 @@ describe("signing up", () => {
     // The shift's page marks Aurelio as on it, and says so.
     const again = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
     expect(again.choices.map((c) => c.taken)).toEqual([false, true, false]);
-    expect(again.mine).toEqual([{ who: AURELIO!.name }]);
+    expect(again.mine).toEqual([{ who: AURELIO!.name, checkedIn: false }]);
   });
 
   it("a place another family took for a student who has since moved in is not counted or listed for the new family, and can't be taken twice", async () => {
@@ -405,6 +405,6 @@ describe("a change of QuickBooks company", () => {
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: { door: "staff", id: null, label: "admin" }, ip: null })).toBe(true);
     expect(await signups()).toEqual([]);
     const [audit] = await audits("volunteer.signups.cleared");
-    expect(audit!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 1 });
+    expect(audit!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 1, credits: 2, removedCredits: 0, reminders: 0 });
   });
 });

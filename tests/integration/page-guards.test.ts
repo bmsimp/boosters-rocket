@@ -128,6 +128,9 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/money/sweep", names: "all", why: "the worker's run reads every family's invoices" },
   { module: "@/lib/money/items", names: "all", why: "it is the staff choice of what a payment requirement is met by" },
   { module: "@/lib/volunteer/setup", names: "all", why: "a shift's sign-up list names people of every family" },
+  { module: "@/lib/volunteer/staff-credit", names: "all", why: "it reads staff notes and removal reasons, and loads every family for the credit pages" },
+  { module: "@/lib/volunteer/reminders", names: "all", why: "the worker's reminders read every family's sign-ups and standings" },
+  { module: "@/lib/volunteer/moved-student", names: "all", why: "it is a roster write's, and reads the sign-up list of staff" },
 ];
 
 describe("every page guards itself", () => {
@@ -336,6 +339,9 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/volunteer/notices.ts",
   "src/lib/volunteer/calendar.ts",
   "src/lib/volunteer/settings.ts",
+  "src/lib/volunteer/credit.ts",
+  "src/lib/volunteer/allocation.ts",
+  "src/lib/volunteer/check-in.ts",
   "src/app/components/parent-frame.tsx",
   "src/app/not-found.tsx",
 ];

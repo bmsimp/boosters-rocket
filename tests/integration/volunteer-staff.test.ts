@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, requirement, role, roleAssignment, roleRule, setting, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { auditLog, guardian, parent, requirement, role, roleAssignment, roleRule, setting, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
 import { loadMyVolunteering } from "@/lib/volunteer/my-volunteer";
@@ -174,7 +174,12 @@ describe("events", () => {
     const copyId = (done as { eventId: string }).eventId;
     const shifts = await db.select().from(volunteerShift).where(eq(volunteerShift.eventId, copyId));
     expect(shifts.map((s) => [s.startsAt, s.endsAt, s.places, s.role, s.revision])).toEqual([["09:00:00", "12:00:00", 4, "Rinse crew", 0]]);
-    expect(await db.select({ r: volunteerShiftRequirement.requirementId }).from(volunteerShiftRequirement).where(eq(volunteerShiftRequirement.shiftId, shifts[0]!.id))).toEqual([{ r: r!.id }]);
+    // With the requirement seedTwoFamilies() links the shift to (TWO_FAMILY_HOURS).
+    const copied = await db.select({ r: volunteerShiftRequirement.requirementId }).from(volunteerShiftRequirement).where(eq(volunteerShiftRequirement.shiftId, shifts[0]!.id));
+    expect(copied).toHaveLength(2);
+    expect(copied).toContainEqual({ r: r!.id });
+    // The copy has a check-in code of its own.
+    expect(shifts[0]!.checkinCode).not.toBe(shift.checkinCode);
     expect(await db.select().from(volunteerSignup).where(eq(volunteerSignup.shiftId, shifts[0]!.id))).toEqual([]);
     expect((await audits("volunteer.event.copy"))[0]).toMatchObject({ targetId: copyId, after: { copiedFrom: { id: eventId }, shifts: 1 } });
   });
@@ -304,11 +309,15 @@ describe("the cut-off and the volunteer kind of requirement", () => {
     const stepId = Object.values(fall.stepIds)[0]!;
     const [r] = await db.insert(requirement).values({ stepId, kind: "volunteer", title: "Concessions, 2 shifts", appliesTo: "family", amount: 2, amountUnit: "shifts", position: 0 }).returning();
     await db.insert(volunteerShiftRequirement).values({ shiftId: shift.id, requirementId: r!.id });
-    const refused = { ok: false, errors: ["Concessions, 2 shifts can't be removed: 2 volunteer places count toward it on shifts still on. Make it optional so it no longer holds the step open, or keep it."] };
+    // B's place, and A's check-in (seedTwoFamilies() checks A's student in).
+    const refused = { ok: false, errors: ["Concessions, 2 shifts can't be removed: 2 volunteer places or credits count toward it. Make it optional so it no longer holds the step open, or keep it."] };
     expect(await removeRequirementAction(r!.id)).toEqual(refused);
     expect(await removeStepAction(stepId)).toEqual({ ok: false, errors: [refused.errors[0]!.replace("Concessions, 2 shifts", "Volunteer")] });
-    expect(await db.select().from(volunteerShiftRequirement)).toHaveLength(1);
+    expect(await db.select().from(volunteerShiftRequirement).where(eq(volunteerShiftRequirement.requirementId, r!.id))).toHaveLength(1);
     await db.update(volunteerSignup).set({ cancelledAt: new Date() });
+    // A check-in is credit earned: it holds the requirement even once its place is cancelled, until staff remove it.
+    expect(await removeRequirementAction(r!.id)).toEqual({ ok: false, errors: [refused.errors[0]!.replace("2 volunteer places or credits count", "a volunteer place or credit counts")] });
+    await db.update(volunteerCredit).set({ removedAt: new Date(), removedReason: "Entered by mistake" });
     expect(await removeRequirementAction(r!.id)).toMatchObject({ ok: true });
     expect((await audits("season.requirement.remove"))[0]!.before).toMatchObject({ shiftIds: [shift.id] });
   });
@@ -325,9 +334,10 @@ describe("the cut-off and the volunteer kind of requirement", () => {
     expect(page).toContain("Marching band car wash");
     expect(page).toContain("9:00 am to noon");
     const progress = textOf(await renderPage(RequirementProgressPage, { params: { requirementId: r!.id } }));
+    // A's student is checked in on the shift (a required requirement is filled before the optional one it also counts toward); B is signed up.
+    expect(progress).toContain("1 of 2 shifts done");
     expect(progress).toContain("0 of 2 shifts done, signed up for 1");
-    // Until check-in is built, staff record that the work is done with a tick, and the family reads it as done.
-    expect(await setTicksAction(r!.id, await currentRosterTag(), [FAMILY_A.family.qboId], true)).toMatchObject({ ok: true });
-    expect(textOf(await renderPage(RequirementProgressPage, { params: { requirementId: r!.id } }))).toMatch(/Done Ticked/);
+    // Credit meets it now, not a tick: staff correct credit instead.
+    expect(await setTicksAction(r!.id, await currentRosterTag(), [FAMILY_A.family.qboId], true)).toEqual({ ok: false, errors: ["This kind of requirement isn't ticked off by hand."] });
   });
 });

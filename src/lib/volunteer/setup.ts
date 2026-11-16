@@ -86,12 +86,12 @@ export async function getEventSetup(eventId: string, now: Date = new Date()): Pr
     shifts: shifts.map((s) => {
       const when = shiftInstants(e.onDate, s.startsAt, s.endsAt, zone);
       return {
-      id: s.id, startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), minutes: shiftMinutes(when),
-      places: s.places, role: s.role, cancelled: s.cancelledAt !== null, started: when.start.getTime() <= now.getTime(), ended: when.end.getTime() <= now.getTime(),
-      requirementIds: links.filter((l) => l.shiftId === s.id).map((l) => l.requirementId),
-      signups: signups.filter((x) => x.s.shiftId === s.id).map((x) => ({ id: x.s.id, fillerName: x.s.fillerName, fillerKind: x.s.fillerKind, familyQboId: x.s.familyQboId,
-        familyName: x.familyName ?? "A family no longer on the roster", signedUpByName: x.signerName ?? "A parent no longer in the portal", signedUpAt: x.s.createdAt.toISOString(),
-        checkIn: checkInOf(x.s.id) })),
+        id: s.id, startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), minutes: shiftMinutes(when),
+        places: s.places, role: s.role, cancelled: s.cancelledAt !== null, started: when.start.getTime() <= now.getTime(), ended: when.end.getTime() <= now.getTime(),
+        requirementIds: links.filter((l) => l.shiftId === s.id).map((l) => l.requirementId),
+        signups: signups.filter((x) => x.s.shiftId === s.id).map((x) => ({ id: x.s.id, fillerName: x.s.fillerName, fillerKind: x.s.fillerKind, familyQboId: x.s.familyQboId,
+          familyName: x.familyName ?? "A family no longer on the roster", signedUpByName: x.signerName ?? "A parent no longer in the portal", signedUpAt: x.s.createdAt.toISOString(),
+          checkIn: checkInOf(x.s.id) })),
       };
     }),
   };

@@ -163,9 +163,10 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   a.season = seasons.a; a.markers.push(...seasons.a.markers);
   b.season = seasons.b; b.markers.push(...seasons.b.markers);
   // One volunteer shift with a place taken by each family: each parent sees the count and their own sign-up alone.
-  const volunteering = await seedTwoFamilyVolunteering({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId });
-  a.volunteer = volunteering.a; a.markers.push(...volunteering.a.markers);
-  b.volunteer = volunteering.b; b.markers.push(...volunteering.b.markers);
+  // A's student is checked in on it; B has credit for volunteering done outside the portal, with a note for staff only.
+  const volunteering = await seedTwoFamilyVolunteering({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
+  a.volunteer = volunteering.a; a.markers.push(...volunteering.a.markers); a.season.staffOnly.push(...volunteering.a.staffOnly);
+  b.volunteer = volunteering.b; b.markers.push(...volunteering.b.markers); b.season.staffOnly.push(...volunteering.b.staffOnly);
   // Forms in that season: one asked of each family alone, and a request in every state for both. Forms are not set up
   // (no Documenso is stored), so the pages show what is stored and nothing calls out.
   const forms = await seedTwoFamilyForms({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
