@@ -157,6 +157,24 @@ describe("the health page", () => {
     }
   });
 
+  it("says whether Documenso's database was part of the last backup, as backup.sh recorded it", async () => {
+    const at1 = ago(3_600_000);
+    await put(BACKUP_KEY, { at: at1, file: "booster-rocket-x.dump", bytes: 2048, documenso: { file: "documenso-x.dump", bytes: 3 * 1024 * 1024 } });
+    expect(line(await healthReport(NOW), "backup")).toMatchObject({ state: "ok", notes: ["booster-rocket-x.dump, 2 KB", "Documenso's database too: documenso-x.dump, 3.0 MB"] });
+    await put(BACKUP_KEY, { at: at1, file: "booster-rocket-x.dump", bytes: 2048, documenso: null });
+    expect(line(await healthReport(NOW), "backup").notes).toEqual(["booster-rocket-x.dump, 2 KB", "Documenso's database wasn't part of this backup: the server it ran on had none."]);
+    // With forms signed in Documenso, a backup without its database is said plainly; the state is still the backup's age.
+    await connectForms({ origin: "https://sign.club.example", token: "api_made_up_for_the_health_page" });
+    const withForms = line(await healthReport(NOW), "backup");
+    expect(withForms.state).toBe("ok");
+    expect(withForms.notes[1]).toMatch(/^Documenso's database wasn't part of this backup, though forms are signed in Documenso\./);
+    // A record from before backup.sh knew of Documenso says nothing about it, and one it can't read is the same.
+    for (const documenso of [undefined, "yes", { bytes: 5 }]) {
+      await put(BACKUP_KEY, { at: at1, file: "booster-rocket-x.dump", bytes: 2048, ...(documenso === undefined ? {} : { documenso }) });
+      expect(line(await healthReport(NOW), "backup").notes, JSON.stringify(documenso)).toEqual(["booster-rocket-x.dump, 2 KB"]);
+    }
+  });
+
   it("says when mail is untested, and when the last send failed", async () => {
     await put("mail", { method: "graph", mailbox: "webmaster@example.org" });
     expect(line(await healthReport(NOW), "mail")).toMatchObject({ state: "attention", word: "Not tested" });
