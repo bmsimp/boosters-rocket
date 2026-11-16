@@ -81,8 +81,8 @@ export function StaffNav({ menu }: { menu: MenuEntry[] }) {
         return (
           <div key={m.label} className="nav-group" onKeyDown={onKey(i)} onBlur={onBlur(i)}>
             <button type="button" ref={(b) => { buttons.current[i] = b; }} className={here ? "nav-group-button here" : "nav-group-button"}
-              aria-expanded={isOpen} aria-controls={groupId(i)} onClick={() => setOpen(isOpen ? null : i)}>
-              {m.label}{here && <span className="visually-hidden">, current section</span>}
+              aria-expanded={isOpen} aria-controls={groupId(i)} aria-label={here ? `${m.label}, current section` : undefined} onClick={() => setOpen(isOpen ? null : i)}>
+              {m.label}
               <svg className="nav-caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="2" /></svg>
             </button>
             <div id={groupId(i)} className="nav-panel" hidden={!isOpen}>

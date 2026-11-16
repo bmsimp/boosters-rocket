@@ -45,7 +45,7 @@ test("an Admin makes a role by ticking what it lets people do, changes it, and d
   await page.goto("/staff/roles");
   await expect(page.locator("main textarea")).toHaveCount(0); // no patterns to type
   const fresh = page.getByRole("region", { name: "New role" });
-  await fresh.getByLabel("Name").fill(name);
+  await fresh.getByLabel("Name", { exact: true }).fill(name);
   await fresh.getByLabel("See the roster: families, students and parents").check();
   await fresh.getByLabel("Change club settings", { exact: true }).check();
   // Change brings See with it, ticked and held.

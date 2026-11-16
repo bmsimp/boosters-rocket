@@ -162,6 +162,7 @@ describe("the staff menu", () => {
     atPath("/staff/volunteer/credit");
     const groups = [...(await menu()).matchAll(/<button\b[^>]*class="([^"]*)"[^>]*>([^<]*)/g)].map((b) => [b[2], b[1]]);
     expect(groups).toEqual([["Families", "nav-group-button"], ["Season", "nav-group-button here"], ["Money", "nav-group-button"], ["Admin", "nav-group-button"]]);
-    expect(await menu()).toContain("Season<span class=\"visually-hidden\">, current section</span>");
+    expect(await menu()).toContain('aria-label="Season, current section"');
+    expect(await menu()).not.toContain('aria-label="Families, current section"');
   });
 });
