@@ -8,6 +8,8 @@ import { loadRequirementProgress, type ProgressRow } from "@/lib/seasons/staff-p
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
 import { StateWords } from "@/app/components/state-words";
+import { DataTable, type Column } from "@/app/components/data-table";
+import { Notice } from "@/app/components/notice";
 import { OneButton, TextAction } from "../../forms";
 import { removeWaiverAction, setTicksAction, waiveAction } from "../../actions";
 
@@ -48,7 +50,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
         {can(ctx.effective, "Season.Steps.Read") && <> · <Link href={`/staff/seasons/${season.id}/requirements/${r.id}`}>Settings</Link></>}</p>
 
       {rows === null ? (
-        <p role="status" className="box">The roster can&apos;t be shown right now, so nobody is listed. Check QuickBooks under Roster.</p>
+        <Notice tone="warning">The roster can&apos;t be shown right now, so nobody is listed. Check QuickBooks under Roster.</Notice>
       ) : (
         <section className="box" aria-labelledby="who-h"><h2 id="who-h">Who has done it</h2>
           <p>{counts.asked === 0 ? `It is asked of no ${noun} on the roster right now.` : `${counts.done} of ${counts.asked} done${counts.waived ? `, ${counts.waived} waived` : ""}, ${counts.todo} still to do.`}</p>
@@ -64,17 +66,15 @@ export default async function RequirementProgressPage({ params, searchParams }: 
               {anyTicked && <OneButton label={`Untick everyone shown (${shown.length})`} pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, shownIds, false)} />}
             </div>
           )}
-          {counts.asked > 0 && shown.length === 0 && <p role="status">Nobody matches &quot;{typed}&quot;.</p>}
-          <ul className="lines progress-rows">{shown.map((row) => (
-            <li key={row.qboId}>
-              <div>
-                <span className="what">{row.name}</span>
-                {r.appliesTo === "student" && <span className="when">{row.familyName}</span>}
-                <Standing row={row} />
-                {/* The family's QuickBooks id is the address; its name is only the link's words. */}
-                <span className="when"><Link href={`/staff/seasons/progress/family/${encodeURIComponent(row.familyQboId)}?season=${season.id}`}>Everything asked of {row.familyName}</Link></span>
-              </div>
-              {canChange && (
+          {counts.asked > 0 && shown.length === 0 && <Notice tone="info">Nobody matches &quot;{typed}&quot;.</Notice>}
+          {shown.length > 0 && <DataTable caption={typed ? `Matching "${typed}"` : `Every ${r.appliesTo === "family" ? "family" : "student"} it is asked of`} captionHidden
+            className="progress-rows" rows={shown} rowKey={(row) => row.qboId} columns={[
+              { key: "name", header: r.appliesTo === "family" ? "Family" : "Student", rowHeader: true, cell: (row) => row.name },
+              ...(r.appliesTo === "student" ? [{ key: "family", header: "Family", cell: (row: ProgressRow) => row.familyName }] : []),
+              { key: "state", header: "Where it stands", cell: (row) => <Standing row={row} /> },
+              // The family's QuickBooks id is the address; its name is only the link's words.
+              { key: "page", header: "The family's page", cell: (row) => <Link href={`/staff/seasons/progress/family/${encodeURIComponent(row.familyQboId)}?season=${season.id}`}>Everything asked of {row.familyName}</Link> },
+              ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (row: ProgressRow) => (
                 <div className="row-actions">
                   {ticked && (row.metAt
                     ? <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.qboId], false)} />
@@ -84,29 +84,25 @@ export default async function RequirementProgressPage({ params, searchParams }: 
                     : <details className="more"><summary>Waive for {row.name}</summary>
                         <TextAction field="Why? (kept in the audit log; the family doesn't see it)" label="Waive" pendingLabel="Waiving…" maxLength={500} multiline act={waiveAction.bind(null, r.id, rosterTag, row.qboId)} />
                       </details>}
-                </div>
-              )}
-            </li>))}</ul>
+                </div>) } satisfies Column<ProgressRow>] : []),
+            ]} />}
         </section>
       )}
 
       {left.length > 0 && (
         <section className="box" aria-labelledby="left-h"><h2 id="left-h">No longer asked</h2>
           <p>Ticks and waivers recorded for someone who has left the roster, or whom the chosen list no longer names. They are kept, and families don&apos;t see them.</p>
-          <ul className="lines progress-rows">{left.map((row) => (
-            <li key={row.subjectQboId}>
-              <div>
-                <span className="what">{row.name ?? `QuickBooks customer ${row.subjectQboId}`}</span>
-                {row.metAt && <span className="when">Ticked <LocalTime iso={row.metAt} /></span>}
-                {row.waivedAt && <span className="when">Waived <LocalTime iso={row.waivedAt} />: {row.waivedReason}</span>}
-              </div>
-              {canChange && (
-                <div className="row-actions">
-                  {row.metAt && <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.subjectQboId], false)} />}
-                  {row.waivedAt && <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, row.subjectQboId)} />}
-                </div>
-              )}
-            </li>))}</ul>
+          <DataTable caption="Ticks and waivers kept for someone no longer asked" captionHidden rows={left} rowKey={(row) => row.subjectQboId} columns={[
+            { key: "name", header: "Who", rowHeader: true, cell: (row) => row.name ?? `QuickBooks customer ${row.subjectQboId}` },
+            { key: "recorded", header: "Recorded", cell: (row) => (
+              <>{row.metAt && <span className="t-line">Ticked <LocalTime iso={row.metAt} /></span>}
+                {row.waivedAt && <span className="t-line">Waived <LocalTime iso={row.waivedAt} />: {row.waivedReason}</span>}</>) },
+            ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (row: (typeof left)[number]) => (
+              <div className="row-actions">
+                {row.metAt && <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.subjectQboId], false)} />}
+                {row.waivedAt && <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, row.subjectQboId)} />}
+              </div>) }] : []),
+          ]} />
         </section>
       )}
     </main>

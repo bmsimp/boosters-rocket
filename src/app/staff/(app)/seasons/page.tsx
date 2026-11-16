@@ -2,13 +2,12 @@ import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { listSeasons, TEMPLATE_STEPS } from "@/lib/seasons/setup";
+import { DataTable } from "@/app/components/data-table";
 import { NewSeasonForm } from "./forms";
 import { createSeasonAction } from "./actions";
 
 export const metadata = { title: "Seasons" };
 export const dynamic = "force-dynamic";
-
-const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 export default async function SeasonsPage() {
   const ctx = await requireStaffPage("Season.Steps.Read");
@@ -22,11 +21,12 @@ export default async function SeasonsPage() {
 
       <section className="box" aria-labelledby="seasons-h"><h2 id="seasons-h">Seasons</h2>
         {seasons.length === 0 ? <p>There are no seasons yet.</p> : (
-          <ul className="lines">{seasons.map((s) => (
-            <li key={s.id}><div>
-              <Link className="what" href={`/staff/seasons/${s.id}`}>{s.name}</Link>
-              <span className="when">{s.isCurrent ? "Current season: parents see it · " : ""}{n(s.steps, "step", "steps")} · {n(s.requirements, "requirement", "requirements")}</span>
-            </div></li>))}</ul>
+          <DataTable caption="The club's seasons, newest first" captionHidden rows={seasons} rowKey={(s) => s.id} columns={[
+            { key: "name", header: "Season", rowHeader: true, cell: (s) => <Link href={`/staff/seasons/${s.id}`}>{s.name}</Link> },
+            { key: "current", header: "Parents see it", cell: (s) => (s.isCurrent ? "Yes, the current season" : "No") },
+            { key: "steps", header: "Steps", numeric: true, cell: (s) => s.steps },
+            { key: "requirements", header: "Requirements", numeric: true, cell: (s) => s.requirements },
+          ]} />
         )}
       </section>
 

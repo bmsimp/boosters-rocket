@@ -8,6 +8,7 @@ import { stepsOutOfOrder } from "@/lib/seasons/progress";
 import { describeRequirement, getSeasonSetup } from "@/lib/seasons/setup";
 import { rosterListsNoStudents } from "@/lib/seasons/subjects";
 import { CalendarDate } from "@/app/components/calendar-date";
+import { Notice } from "@/app/components/notice";
 import { OneButton, RequirementForm, StepForm, TextAction, type KindChoice } from "../forms";
 import {
   addRequirementAction, addStepAction, clearCurrentSeasonAction, moveStepAction, removeStepAction, renameSeasonAction, setCurrentSeasonAction, updateStepAction,
@@ -58,10 +59,10 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
           ? "By date: the first step that hasn't ended. A step ends when its end date has passed or, if it has none, when a later step starts or ends. A step that follows one with no end date needs a start date to be marked in its turn. Dates follow the club's time zone, set under Club."
           : "No step has a date, so each family is on the first step that not everyone in it has finished. Give any step a date and the whole club moves through the steps by date instead."}</p>
         {outOfOrder.length > 0 && (
-          <p role="status">
+          <Notice tone="warning">
             The dates are out of order. {outOfOrder.length === 1 ? <>{outOfOrder[0]} starts or ends</> : <>{outOfOrder.join(", ")} each start or end</>} before a step that comes earlier in this list.
             {" "}The steps are followed in the order shown here, so a step dated out of turn is passed over and is never the current one. Change the dates, or move the step.
-          </p>
+          </Notice>
         )}
       </section>
 

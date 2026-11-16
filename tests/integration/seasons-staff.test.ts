@@ -35,7 +35,8 @@ const BROWSER = { ok: false, errors: ["That didn't go through. Reload the page a
 const NO_SUCH = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e5f";
 const FIELDS = { title: "Uniform fitting attended", required: true, amount: null, amountUnit: null, dueOn: null };
 const audits = async (action?: string) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => !action || r.action === action);
-const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"');
+// The label a table's cell carries on a phone repeats its column's header: left out, so a row reads as its cells.
+const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<span class="t-label"[^>]*>[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"');
 const seasons = () => db.select().from(season).orderBy(asc(season.createdAt), asc(season.name));
 const stepsOf = (seasonId: string) => db.select().from(seasonStep).where(eq(seasonStep.seasonId, seasonId)).orderBy(asc(seasonStep.position));
 const recorded = () => db.select().from(requirementProgress).orderBy(asc(requirementProgress.subjectQboId));
@@ -161,7 +162,7 @@ describe("seasons", () => {
       targetType: "season", targetId: made!.id, ip: "203.0.113.50", before: null,
       after: { name: "Fall 2027", start: "template", steps: ["Join", "Forms", "Volunteer", "Season", "Wrap-up"], requirements: 0 } })]);
     const listed = textOf(await renderPage(SeasonsPage));
-    expect(listed).toContain("Fall 2027 5 steps · 0 requirements");
+    expect(listed).toContain("Fall 2027 No 5 0"); // the season, whether parents see it, its steps and its requirements
     expect(listed).toContain("Copy Fall 2027");
   });
 
@@ -299,13 +300,14 @@ describe("requirements", () => {
 
   it("offers a club whose roster lists no students only requirements for each family", async () => {
     const fall = await seedFall();
-    const offered = async () => (await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } })).match(/<option value="(student|family)"/g) ?? [];
-    expect(await offered()).toEqual(expect.arrayContaining([`<option value="student"`, `<option value="family"`]));
+    // The "Asked of" choices of the forms for a new requirement (the chosen one carries `checked` before its value).
+    const offered = async () => [...(await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } })).matchAll(/name="applies-to"(?: checked="")? value="(student|family)"/g)].map((m) => m[1]);
+    expect(await offered()).toEqual(expect.arrayContaining(["student", "family"]));
     // Members who are their own families, and families with no student type: nobody is a student.
     const shapes: MembershipShape[] = [{ kind: "flat", memberTypeIds: ["M"] }, { kind: "layered", familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }];
     for (const shape of shapes) {
       await seedShape(shape);
-      expect(new Set(await offered())).toEqual(new Set([`<option value="family"`]));
+      expect(new Set(await offered())).toEqual(new Set(["family"]));
     }
   });
 
@@ -518,14 +520,15 @@ describe("ticks and waivers", () => {
     const old = await seedSeason({ name: "Fall 2025", current: false, steps: [{ name: "Old step", requirements: [{ title: "Old item", appliesTo: "family" }] }] });
     const text = textOf(await renderPage(ProgressPage));
     expect(text).toContain("Fall 2026 The current season.");
-    expect(text).toContain("1. Uniforms Uniform fitting attended Required · Each student 1 of 3 done, 1 waived Guard gloves Optional · Each student 0 of 1 done");
-    expect(text).toContain("2. Wrap-up Banquet RSVP Required · Each family 2 of 2 done");
+    expect(text).toContain("Uniform fitting attended Required Each student 1 of 3 done, 1 waived Guard gloves Optional Each student 0 of 1 done");
+    expect(text.indexOf("1. Uniforms")).toBeLessThan(text.indexOf("Uniform fitting attended Required"));
+    expect(text).toContain("Banquet RSVP Required Each family 2 of 2 done");
     expect(text).toContain("3. Empty Nothing is asked in this step.");
-    expect(text).toContain("Other seasons Fall 2025");
+    expect(text).toMatch(/Other seasons .* Fall 2025 No/);
     expect(text).not.toContain("Old item");
     const asked = textOf(await renderPage(ProgressPage, { searchParams: { season: old.seasonId } }));
     expect(asked).toContain("Fall 2025 Not the current season: parents don't see it.");
-    expect(asked).toContain("Old item Required · Each family 0 of 2 done");
+    expect(asked).toContain("Old item Required Each family 0 of 2 done");
     // The season in the address is checked before it is looked up.
     expect(await pageOutcome(ProgressPage, { searchParams: { season: NO_SUCH } })).toEqual({ notFound: true });
     expect(await pageOutcome(ProgressPage, { searchParams: { season: `${fall.seasonId}' or '1'='1` } })).toEqual({ notFound: true });

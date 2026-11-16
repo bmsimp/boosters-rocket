@@ -9,6 +9,7 @@ import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { listItems, itemsReadAt, requirementItem } from "@/lib/money/items";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
+import { Notice } from "@/app/components/notice";
 import { dateWords, shiftTimeWords } from "@/lib/volunteer/clock";
 import { shiftsCountingToward } from "@/lib/volunteer/setup";
 import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
@@ -83,7 +84,7 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
             <li key={c.qboId}><div><span className="what">{c.name}</span>{r.appliesTo === "student" && <span className="when">{c.familyName}</span>}</div></li>))}</ul>
         )}
         {canChange && (families === null
-          ? <p role="status">The roster can&apos;t be shown right now, so a list can&apos;t be chosen. Check QuickBooks under Roster.</p>
+          ? <Notice tone="warning">The roster can&apos;t be shown right now, so a list can&apos;t be chosen. Check QuickBooks under Roster.</Notice>
           : <details className="more"><summary>Change who it is asked of</summary>
               <CoverageForm covers={r.covers} chosen={r.coveredQboIds.filter((q) => onRoster.has(q))} noun={noun}
                 candidates={candidates.map((c) => ({ qboId: c.qboId, label: r.appliesTo === "student" ? `${c.name} (${c.familyName})` : c.name }))}
