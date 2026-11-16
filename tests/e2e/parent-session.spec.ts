@@ -4,6 +4,7 @@ import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, paramsProblems, parentRoutes, type DynamicRouteParams } from "./parent-routes";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
 import { E2E_EMAIL } from "./email-seed";
+import { E2E_BUYOUT } from "./buyout-seed";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -55,6 +56,8 @@ const PARAMS: Record<string, DynamicRouteParams> = {
   "/forms/[id]": { own: { id: "e2e00000-0000-4000-8000-000000000001" }, other: { id: "e2e00000-0000-4000-8000-000000000002" } },
   // Zelda's change of sign-in address asked under the Quetzalcoatl family, and the one asked under her second family.
   "/family/email/[token]": { own: { token: E2E_EMAIL.own.token }, other: { token: E2E_EMAIL.other.token } },
+  // Paying instead: a requirement offered to the Quetzalcoatl family, and one asked of the Rivera family alone.
+  "/volunteer/pay-instead/[requirementId]/[choice]": { own: { requirementId: E2E_BUYOUT.offered, choice: "family" }, other: { requirementId: E2E_BUYOUT.other, choice: "family" } },
 };
 
 // Everything scripts/seed-e2e.ts gives a family that is not the Quetzalcoatl family, Zelda's second family included:

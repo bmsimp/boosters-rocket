@@ -5,6 +5,7 @@ import { mailConfigHash } from "../src/lib/mail/config-hash";
 import { runMigrations } from "../src/lib/db/migrate";
 import { assertE2eDatabase, e2eMailPort } from "../tests/e2e/run-config";
 import { E2E_VOLUNTEER } from "../tests/e2e/volunteer-seed";
+import { E2E_BUYOUT } from "../tests/e2e/buyout-seed";
 import { E2E_SIGNED_PDF } from "../tests/e2e/signed-forms-seed";
 import { E2E_EMAIL, emailTokenHash } from "../tests/e2e/email-seed";
 
@@ -134,9 +135,11 @@ async function main() {
     qboId, number, customerQboId, forName, date: day(-30), dueDate: o.due === undefined ? null : day(o.due), totalCents: cents, balanceCents: o.paid ? 0 : cents, currency: "USD", payLink: o.payLink ?? null,
     itemQboIds: o.items ?? [] });
   const BAND_FEE_ITEM = "4101";
+  const HELP_ITEM = "4102"; // what a volunteer buy-out is billed with (v1 spec §11.5)
   const families = [
     { id: "E2E-FAMILY", total: 18500, invoices: [
-      invoice("902", "QZ-1042", "E2E-FAMILY", null, 10000, { due: -20 }), // soonest due first, as a read from QuickBooks stores them
+      // QZ-1042 is the invoice of the family's volunteer buy-out ("Concession help", below), made by the portal.
+      invoice("902", "QZ-1042", "E2E-FAMILY", null, 10000, { due: -20, items: [HELP_ITEM] }), // soonest due first, as a read from QuickBooks stores them
       invoice("901", "QZ-1041", "E2E-S1", "Xochitl Quetzalcoatl", 8500, { due: 8, payLink: "https://connect.intuit.com/t/scs-v1-e2e-quetzalcoatl-1041" }),
       invoice("903", "QZ-1017", "E2E-FAMILY", null, 15000, { paid: true, items: [BAND_FEE_ITEM] }) ] }, // the band fee, paid
     { id: "E2E-FAMILY-2", total: 37666, invoices: [
@@ -191,6 +194,23 @@ async function main() {
       await sql`INSERT INTO requirement_progress (requirement_id, subject_qbo_id, waived_at, waived_reason) VALUES (${row!.id}, ${subject}, now(), ${reason})`;
     }
   }
+  // Volunteer buy-outs (v1 spec §11.5): three optional volunteer requirements in Wrap-up that offer paying instead,
+  // with fixed ids (tests/e2e/buyout-seed.ts). The Quetzalcoatl family has chosen a buy-out of "Concession help" and
+  // its invoice (QZ-1042, above) is on Payments; "Pit crew hours" is offered to it; "Rivera trailer shifts" is asked of
+  // the Rivera family alone (its title is in OTHER_FAMILIES, tests/e2e/parent-session.spec.ts). No shift counts toward
+  // any of them, so no shift's words change.
+  const buyoutRequirements = [
+    { id: E2E_BUYOUT.offered, title: "Pit crew hours", amount: 2, unit: "hours", unitCents: 1250, chosen: null },
+    { id: E2E_BUYOUT.invoiced, title: "Concession help", amount: 2, unit: "shifts", unitCents: 5000, chosen: null },
+    { id: E2E_BUYOUT.other, title: "Rivera trailer shifts", amount: 1, unit: "shifts", unitCents: 2000, chosen: "E2E-10" },
+  ];
+  for (const [i, r] of buyoutRequirements.entries()) {
+    await sql`INSERT INTO requirement (id, step_id, kind, title, required, applies_to, amount, amount_unit, covers, position, item_qbo_id, buyout_unit_cents)
+            VALUES (${r.id}, ${stepIds["Wrap-up"]!}, 'volunteer', ${r.title}, false, 'family', ${r.amount}, ${r.unit}, ${r.chosen ? "chosen" : "everyone"}, ${requirements.length + i}, ${HELP_ITEM}, ${r.unitCents})`;
+    if (r.chosen) await sql`INSERT INTO requirement_cover (requirement_id, subject_qbo_id) VALUES (${r.id}, ${r.chosen})`;
+  }
+  await sql`INSERT INTO buyout (id, requirement_id, family_qbo_id, subject_qbo_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, invoice_qbo_id, invoice_sync_token, realm_id, chosen_by, chosen_by_label)
+          VALUES (${E2E_BUYOUT.buyout}, ${E2E_BUYOUT.invoiced}, 'E2E-FAMILY', 'E2E-FAMILY', 'E2E-FAMILY', ${HELP_ITEM}, 5000, 2, 10000, 'invoiced', '902', '0', '9130000000000001', ${p!.id}, 'zelda@example.com')`;
   // Volunteering (v1 spec §11): one event 20 days ahead with two shifts, their ids fixed so the specs can ask for them
   // (tests/e2e/volunteer.spec.ts, PARAMS in tests/e2e/parent-session.spec.ts). The Rivera family has signed Leo up for
   // the griddle, so the Quetzalcoatl family sees "1 of 4 places filled" and never who. The volunteer spec signs Zelda up
