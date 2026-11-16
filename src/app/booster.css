@@ -382,6 +382,48 @@ main.wrap.single > .roster-asof { margin-top: var(--s4); max-width: 760px; }
 }
 /* ---- End of Home and Family ---- */
 
+/* ---- Season: the ruler's heading on Home, requirement lines, the Season page, and the staff season pages. Keep new rules for them inside this block. ---- */
+
+/* The ruler's heading is a labelled line, not a second page heading, with the way to the Season page beside it. */
+.season-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: var(--s4); }
+.season-title { font: 600 0.9375rem var(--mark); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); overflow-wrap: anywhere; }
+.season-title b { color: var(--ink); }
+.season-head a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; font-size: 0.9375rem; }
+.season-head + .sets { margin-top: 0; }
+
+/* A waived requirement: its own icon and words, in the secondary ink. */
+.state.waived { color: var(--ink-2); }
+
+/* Requirement lines under a student or the family: the title, the state in words, then the due date while something is left. */
+.reqs { list-style: none; padding: 0; margin-top: var(--s1); grid-column: 1 / -1; }
+.reqs li, .students .reqs li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; align-items: start; padding: var(--s2) 0; border-top: 1px solid var(--hair); }
+.reqs .what { font-size: 1rem; overflow-wrap: anywhere; }
+.reqs .optional { color: var(--ink-2); }
+.reqs .when { display: block; font-size: 0.875rem; color: var(--ink-2); }
+.reqs .when.soon { color: var(--due); font-weight: 700; }
+.reqs .when.late { color: var(--late); font-weight: 700; }
+.family-reqs { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--hair); }
+.family-reqs h3 { font: 700 1.1875rem/1.45 var(--read); overflow-wrap: anywhere; }
+.family-reqs > .state { margin-top: 2px; }
+.season-page .box > .state, .step-none { margin-top: var(--s2); }
+
+/* Staff season pages: dropdowns drawn like the other fields, lists of tick boxes, and forms kept folded until wanted. */
+.field select { font: inherit; color: var(--ink); background: var(--paper); border: var(--rule) solid var(--ink); border-radius: 0;
+  min-height: 44px; padding: var(--s2) var(--s3); width: 100%; min-width: 0; } /* never wider than its column, however long an option is */
+.field select:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+fieldset.checks { border: 0; padding: 0; min-width: 0; }
+.checks legend { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); padding: 0; }
+.checks label { display: flex; align-items: center; gap: var(--s2); min-height: 44px; overflow-wrap: anywhere; }
+.checks input { width: 20px; height: 20px; flex: none; min-height: 0; padding: 0; accent-color: var(--club-text); }
+details.more { margin-top: var(--s3); }
+details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; color: var(--club-text); }
+.one-button { display: grid; gap: var(--s2); justify-items: start; }
+.lines.progress-rows li { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.progress-rows .state { margin-top: 2px; }
+.progress-rows .when a { display: inline-block; padding: var(--s2) 0; } /* room to tap the way to a family's page, above the row's buttons */
+.everyone-shown { margin-top: var(--s3); } /* stands clear of the search above it */
+/* ---- End of Season ---- */
+
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====
    The viewport is "cover" (src/app/layout.tsx), so the page reaches under a notch, rounded corners and the home
    indicator. These rules keep content clear of them. env() is 0 where there is nothing to clear, so an ordinary

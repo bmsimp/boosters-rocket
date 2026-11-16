@@ -1,6 +1,6 @@
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { getClubSettings } from "@/lib/settings/club";
+import { getClubSettings, timeZoneChoices } from "@/lib/settings/club";
 import { MailWarning } from "../../mail-warning";
 import { seesMailWarning } from "../../mail-warning-rule";
 import { ClubForm } from "./club-form";
@@ -15,7 +15,8 @@ export default async function ClubSettingsPage() {
       {!club.storedColorValid && (
         <p role="status" className="box">The saved club color wasn&apos;t valid, so the portal is using the default purple. Pick a color and save to fix it.</p>
       )}
-      <section className="box" aria-labelledby="club-h"><h2 id="club-h">Name and color</h2><ClubForm initial={club} /></section>
+      <section className="box" aria-labelledby="club-h"><h2 id="club-h">Name, color and time zone</h2>
+        <ClubForm initial={{ name: club.name, shortName: club.shortName, color: club.color, treasurerEmail: club.treasurerEmail, timeZone: club.timeZone }} timeZones={timeZoneChoices(club.timeZone)} /></section>
     </main>
   );
 }

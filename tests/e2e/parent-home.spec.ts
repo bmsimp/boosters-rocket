@@ -32,8 +32,9 @@ test("Home greets the parent and shows what the family owes, its students and th
   await expect(money).not.toContainText("QZ-1017"); // what was paid is on the Payments page
   await expect(money.getByRole("link", { name: "See your payments" })).toHaveAttribute("href", "/payments");
 
+  // Each student by name; where each stands in the season is tests/e2e/season.spec.ts.
   const students = page.getByRole("region", { name: "Your students" });
-  await expect(students.getByRole("listitem")).toHaveText(STUDENTS);
+  await expect(students.locator(".who b")).toHaveText(STUDENTS);
   const details = page.getByRole("region", { name: "Your details" });
   await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
   await expect(details).toContainText("You can change your phone and mailing address yourself. The club changes your name and email for you. Ask the club and they'll update it.");
@@ -42,7 +43,7 @@ test("Home greets the parent and shows what the family owes, its students and th
   await expect(page.locator(".roster-asof time")).toBeVisible();
 
   // No placeholder, nothing that has no data yet, and nothing of her second family.
-  await expect(page.getByRole("main")).not.toContainText(/will show here|season|grade|Wolfgang|Second Family/i);
+  await expect(page.getByRole("main")).not.toContainText(/will show here|grade|Wolfgang|Second Family/i);
 
   // On a phone the boxes stack in one column. At 760px and wider they fill two: whichever boxes the page has, one
   // starts at the left edge and one ends at the right, so no column stands empty.
