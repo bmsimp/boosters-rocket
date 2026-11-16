@@ -169,6 +169,6 @@ describe("connecting a different company", () => {
     expect(await db.select().from(buyout)).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
     const [cleared] = await audits("volunteer.signups.cleared");
-    expect(cleared!.after).toMatchObject({ buyouts: 2, liveBuyouts: 2 });
+    expect(cleared!.after).toMatchObject({ buyouts: 2 });
   });
 });

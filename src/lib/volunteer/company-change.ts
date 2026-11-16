@@ -19,10 +19,10 @@ export async function clearVolunteerRecords(tx: Tx, o: { fromRealmId: string; to
   const reminders = await tx.delete(volunteerReminder).returning({ id: volunteerReminder.id });
   const credits = await tx.delete(volunteerCredit).returning({ removedAt: volunteerCredit.removedAt });
   const gone = await tx.delete(volunteerSignup).returning({ cancelledAt: volunteerSignup.cancelledAt });
-  const buyouts = await tx.delete(buyout).returning({ state: buyout.state });
+  const buyouts = await tx.delete(buyout).returning({ id: buyout.id });
   if (gone.length + credits.length + reminders.length + buyouts.length === 0) return;
   await writeAudit({ actor: o.actor, action: "volunteer.signups.cleared", targetType: "volunteer_signup", ip: o.ip, before: { realmId: o.fromRealmId },
     after: { reason: "different_company", realmId: o.toRealmId, signups: gone.filter((s) => s.cancelledAt === null).length, cancelledSignups: gone.filter((s) => s.cancelledAt !== null).length,
       credits: credits.filter((c) => c.removedAt === null).length, removedCredits: credits.filter((c) => c.removedAt !== null).length, reminders: reminders.length,
-      buyouts: buyouts.length, liveBuyouts: buyouts.filter((b) => b.state !== "voided" && b.state !== "refused").length } }, tx);
+      buyouts: buyouts.length } }, tx);
 }
