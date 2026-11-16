@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  currentStepIndex, isCalendarDate, isCovered, lineFor, linesDone, linesLeft, seasonStanding, stepStanding, subjectsOf,
+  currentStepIndex, isCalendarDate, isCovered, lineFor, linesDone, linesLeft, seasonStanding, stepStanding, stepsOutOfOrder, subjectsOf,
   type Facts, type FamilyRoster, type Requirement, type Step,
 } from "@/lib/seasons/progress";
 
@@ -242,6 +242,53 @@ describe("the current step (spec 10.3)", () => {
       expect(at(steps, "2026-09-10")).toBe(0);
       expect(at(steps, "2026-11-05")).toBe(1);
     });
+
+    it("ends a step with no end date once a later step has ended, not only once one has started", () => {
+      // Join has no dates (it is open all year); the steps after it have end dates only.
+      const year = [d(null, null), d(null, "2027-09-30"), d(null, "2027-10-31"), d(null, "2027-12-15"), d(null, "2028-01-31")];
+      expect(at(year, "2027-09-15", [false, false, false, false, false])).toBe(0);
+      expect(at(year, "2027-09-30", [false, false, false, false, false])).toBe(0);
+      // Forms has ended, so Join before it has too: the club is not on Join for the rest of the year.
+      expect(at(year, "2027-10-01", [false, false, false, false, false])).toBe(2);
+      expect(at(year, "2027-11-15", [false, false, false, false, false])).toBe(3);
+      expect(at(year, "2028-03-01", [false, false, false, false, false])).toBe(4); // every step has ended: the last one stays
+      const three = [d(null, null), d(null, "2027-09-30"), d(null, "2027-10-31")];
+      expect(at(three, "2027-11-15")).toBe(2);
+      // A step with a start date and no end, before one with an end date and no start.
+      const two = [d("2027-08-01", null), d(null, "2027-09-30")];
+      expect(at(two, "2027-07-15")).toBe(0);
+      expect(at(two, "2027-09-30")).toBe(0);
+      expect(at(two, "2027-10-15")).toBe(1);
+    });
+  });
+});
+
+describe("steps whose dates run against their order", () => {
+  const d = (startsOn: string | null, endsOn: string | null) => ({ startsOn, endsOn });
+
+  it("finds none where the dates follow the order, meet, overlap or are missing", () => {
+    for (const steps of [
+      [],
+      [d(null, null), d(null, null)],
+      [d("2027-08-01", "2027-08-15"), d("2027-08-16", "2027-08-31"), d("2027-09-01", null)],
+      [d("2027-08-01", null), d("2027-08-15", null), d("2027-09-01", null)],
+      [d(null, "2027-08-15"), d(null, "2027-09-01"), d(null, "2027-11-30")],
+      [d("2027-08-01", "2027-09-15"), d("2027-09-01", "2027-11-30")],          // an overlap: the earlier step stays current until it ends
+      [d("2027-08-01", "2027-08-15"), d(null, null), d("2027-09-01", "2027-11-30")],
+      [d("2027-08-01", "2027-08-01"), d("2027-08-01", "2027-08-01")],          // the same day
+      [d(null, null), d(null, "2027-09-30"), d("2027-10-01", null)],
+    ]) expect(stepsOutOfOrder(steps), JSON.stringify(steps)).toEqual([]);
+  });
+
+  it("names each step that starts or ends before a step that comes before it", () => {
+    // Uniforms (starts Sep 1) was moved ahead of Forms (starts Aug 1): from Aug 1 the ruler is on Forms, and never on Uniforms.
+    expect(stepsOutOfOrder([d("2027-09-01", null), d("2027-08-01", null)])).toEqual([1]);
+    expect(stepsOutOfOrder([d(null, "2027-10-31"), d(null, "2027-09-30")])).toEqual([1]);
+    // Over before the step ahead of it begins.
+    expect(stepsOutOfOrder([d("2027-09-01", null), d(null, "2027-08-31")])).toEqual([1]);
+    expect(stepsOutOfOrder([d("2027-08-01", "2027-08-15"), d("2027-10-01", null), d("2027-09-01", "2027-09-30"), d("2027-11-01", null)])).toEqual([2]);
+    // A step with no dates between them changes nothing.
+    expect(stepsOutOfOrder([d("2027-09-01", null), d(null, null), d("2027-08-01", null), d("2027-07-01", null)])).toEqual([2, 3]);
   });
 });
 
@@ -268,6 +315,15 @@ describe("a whole season for one family", () => {
     // The family's membership item and Maya's fitting; not the optional item, and not what the current step asks.
     expect(view.leftBefore).toBe(2);
     expect(seasonStanding(steps, FAMILY, facts([`${fitting.id}|LEO`, `${fitting.id}|MAYA`], [`${join.id}|FAM`]), TODAY).leftBefore).toBe(0);
+  });
+
+  it("counts what is left in a step that ended while a step with no end date stood before it", () => {
+    const join = req({ appliesTo: "family" }), forms = req(), volunteer = req();
+    const steps = [step("Join", [join]), step("Forms", [forms], { endsOn: "2027-09-30" }), step("Volunteer", [volunteer], { endsOn: "2027-10-31" })];
+    const view = seasonStanding(steps, FAMILY, facts([`${forms.id}|LEO`]), "2027-10-15");
+    expect(view.currentIndex).toBe(2);
+    // Join's item for the family, and Maya's form: both are behind the club now, and both are still to do.
+    expect(view.leftBefore).toBe(2);
   });
 
   it("has no current step when the season has no steps", () => {

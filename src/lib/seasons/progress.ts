@@ -122,10 +122,12 @@ const hasDate = (s: Pick<Step, "startsOn" | "endsOn">) => s.startsOn !== null ||
  * Which step the ruler marks (v1 spec §10.3).
  *
  * When any step has a date, it is the club's current step by date: the first step, in order, that hasn't ended. A step
- * has ended when its end date has passed or, if it has none, when a later step's start date has arrived. So with start
+ * has ended when its end date has passed or, if it has none, when a later step has started or has itself ended: the
+ * steps come in order, so once the club is on a later step, or past it, the ones before it are over. So with start
  * dates only, each step runs until the next one starts; with end dates only, each runs until its end; where two ranges
  * overlap, the earlier step stays current until it ends; in a gap between two steps, the one coming up is current; and
- * once every step has ended, the last one stays. A step with no dates among dated ones runs until the next start.
+ * once every step has ended, the last one stays. A step with no dates among dated ones runs until a later step starts
+ * or ends: a first step left without dates, before steps that have only end dates, gives way when the next one ends.
  *
  * When no step has a date, it is the first step not yet done by everyone in the family, and null once all are done.
  *
@@ -140,10 +142,23 @@ export function currentStepIndex(steps: readonly Pick<Step, "startsOn" | "endsOn
   const ended = (i: number) => {
     const step = steps[i]!;
     if (step.endsOn !== null) return step.endsOn < today;
-    return steps.some((later, j) => j > i && later.startsOn !== null && later.startsOn <= today);
+    return steps.some((later, j) => j > i && ((later.startsOn !== null && later.startsOn <= today) || (later.endsOn !== null && later.endsOn < today)));
   };
   const first = steps.findIndex((_step, i) => !ended(i));
   return first < 0 ? steps.length - 1 : first;
+}
+
+/**
+ * The steps whose dates run against their order, by position: a step that starts before an earlier step starts, ends
+ * before an earlier step ends, or ends before an earlier step starts. The current step follows the order of the steps
+ * (currentStepIndex), so a step dated out of turn counts as over before its own dates come, and is never the current
+ * one. Nothing refuses such dates, since steps are dated and moved one at a time; the staff season page says so
+ * instead. Starting before an earlier step ends is an overlap, which is allowed.
+ */
+export function stepsOutOfOrder(steps: readonly Pick<Step, "startsOn" | "endsOn">[]): number[] {
+  const before = (a: string | null, b: string | null) => a !== null && b !== null && a < b;
+  return steps.flatMap((step, j) =>
+    steps.some((earlier, i) => i < j && (before(step.startsOn, earlier.startsOn) || before(step.endsOn, earlier.endsOn) || before(step.endsOn, earlier.startsOn))) ? [j] : []);
 }
 
 /** A whole season as it stands for one family on the club's `today`. */

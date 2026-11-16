@@ -4,6 +4,7 @@ import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { KIND_LABELS, KIND_RULES, REQUIREMENT_KINDS } from "@/lib/seasons/kinds";
+import { stepsOutOfOrder } from "@/lib/seasons/progress";
 import { describeRequirement, getSeasonSetup } from "@/lib/seasons/setup";
 import { rosterListsNoStudents } from "@/lib/seasons/subjects";
 import { CalendarDate } from "@/app/components/calendar-date";
@@ -31,6 +32,8 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
   const canChange = can(ctx.effective, "Season.Steps.ReadWrite"), seesProgress = can(ctx.effective, "Season.Progress.Read");
   const kinds: KindChoice[] = REQUIREMENT_KINDS.map((k) => ({ value: k, label: KIND_LABELS[k], available: KIND_RULES[k] !== null }));
   const dated = season.steps.some((s) => s.startsOn !== null || s.endsOn !== null);
+  // The current step follows the order of the steps, so one dated out of turn is passed over: staff are told which.
+  const outOfOrder = stepsOutOfOrder(season.steps).map((i) => season.steps[i]!.name);
   // A club whose roster lists no students is offered only requirements for each family: one for each student would be asked of nobody.
   const perStudent = canChange ? !(await rosterListsNoStudents()) : true;
   return (
@@ -52,8 +55,14 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
 
       <section className="box" aria-labelledby="how-h"><h2 id="how-h">Which step is the current one</h2>
         <p>{dated
-          ? "By date: the first step that hasn't ended. A step ends when its end date has passed or, if it has none, when a later step's start date arrives. Dates follow the club's time zone, set under Club."
+          ? "By date: the first step that hasn't ended. A step ends when its end date has passed or, if it has none, when a later step starts or ends. A step that follows one with no end date needs a start date to be marked in its turn. Dates follow the club's time zone, set under Club."
           : "No step has a date, so each family is on the first step that not everyone in it has finished. Give any step a date and the whole club moves through the steps by date instead."}</p>
+        {outOfOrder.length > 0 && (
+          <p role="status">
+            The dates are out of order. {outOfOrder.length === 1 ? <>{outOfOrder[0]} starts or ends</> : <>{outOfOrder.join(", ")} each start or end</>} before a step that comes earlier in this list.
+            {" "}The steps are followed in the order shown here, so a step dated out of turn is passed over and is never the current one. Change the dates, or move the step.
+          </p>
+        )}
       </section>
 
       {season.steps.length === 0 && <section className="box" aria-labelledby="none-h"><h2 id="none-h">No steps yet</h2><p>Add the first step below.</p></section>}
