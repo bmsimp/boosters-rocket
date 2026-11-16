@@ -13,6 +13,7 @@ import { auditLog, familyMoney, qboConnection, qboCustomer, setting } from "@/li
 import { loadFamilyMoney, MAX_LIVE_READS, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
 import { saveShape } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
+import { calendarDayIn } from "@/lib/settings/club";
 import { resetDb } from "../helpers/db";
 import { ageMoney, connectCompany, invoiceQueries, moneyRow, setFreshSeconds, stubInvoice as inv } from "../helpers/money";
 import { FAMILY_A, MONEY_REALM, seedFamilyMoney } from "../helpers/parent";
@@ -38,6 +39,21 @@ async function twoFamilies() {
 const balanceWithJobs = (amount: number) => { stub.customers.find((c) => c.Id === "10")!.BalanceWithJobs = amount; };
 const audits = async (action = "money.balance_mismatch") => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const numbers = (invoices: { number: string | null }[]) => invoices.map((i) => i.number);
+
+describe("the day the due dates are said against", () => {
+  it("is the club's own date, whatever is stored and whatever zone the server is in", async () => {
+    await twoFamilies();
+    // UTC+14 and UTC-11 never share a calendar day: in one the club is a day ahead of the other.
+    const now = new Date();
+    const eastern = calendarDayIn("Pacific/Kiritimati", now), western = calendarDayIn("Pacific/Pago_Pago", now);
+    expect(eastern > western).toBe(true);
+    expect((await loadFamilyMoney("10")).today).toBe(calendarDayIn("UTC", now)); // no zone chosen yet
+    await db.insert(setting).values({ key: "club", value: { timeZone: "Pacific/Pago_Pago" } });
+    expect(await loadFamilyMoney("10")).toMatchObject({ figures: null, today: western });
+    await db.update(setting).set({ value: { timeZone: "Pacific/Kiritimati" } }).where(eq(setting.key, "club"));
+    expect((await loadFamilyMoney("10")).today).toBe(eastern);
+  });
+});
 
 describe("whose invoices are a family's (v1 spec §8.2)", () => {
   it("layered: the family customer and its active students and parents, and nobody else", async () => {
@@ -221,7 +237,7 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.failNext = 2;
-    expect(await loadFamilyMoney("10")).toEqual({ familyName: "Rivera Family", figures: null });
+    expect(await loadFamilyMoney("10")).toEqual({ familyName: "Rivera Family", figures: null, today: calendarDayIn("UTC") });
     expect(await moneyRow("10")).toMatchObject({ readAt: null, invoices: null, totalCents: null, realmId: null, failedCode: "http_500" });
     stub.reset();
     expect((await loadFamilyMoney("10")).figures).toBeNull(); // too soon to ask again
@@ -510,7 +526,7 @@ describe("stored figures are shown only while they are still this family's", () 
     await loadFamilyMoney("10");
     await db.update(qboCustomer).set({ active: false, displayName: "Rivera Family (deleted)" }).where(eq(qboCustomer.qboId, "10"));
     const asked = stub.calls.length;
-    expect(await loadFamilyMoney("10")).toEqual({ familyName: null, figures: null });
+    expect(await loadFamilyMoney("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
     expect((await moneyRow("10"))!.failedCode).toBe("not_a_family");
   });

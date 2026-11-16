@@ -36,7 +36,7 @@ test("a parent sees what the family owes, each open invoice, the total and what 
   await expect(lines.nth(0).locator(".when.late")).toHaveText(/^Was due \S.*\d{4}$/);
   await expect(lines.nth(1)).toContainText("Invoice QZ-1041, Xochitl Quetzalcoatl");
   await expect(lines.nth(1).locator(".amount")).toHaveText("$85.00");
-  await expect(lines.nth(1).locator(".when.soon")).toHaveText(/^Due \S.*, in [789] days$/); // 8, give or take the viewer's time zone
+  await expect(lines.nth(1).locator(".when.soon")).toHaveText(/^Due \S.*, in [78] days$/); // 8 by the club's date (UTC here, as the seed counts), or 7 when the run crosses that midnight
   await expect(lines.nth(1)).toContainText("Invoice date ");
   await expect(owed.locator(".sum")).toHaveText("Total$185.00");
   await expect(owed).toContainText("An invoice with no Pay button can't be paid online. The treasurer can tell you how to pay it.");

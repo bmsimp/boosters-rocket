@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { setRosterSource } from "@/lib/roster/source";
+import { calendarDayIn } from "@/lib/settings/club";
 import PaymentsPage from "@/app/(parent)/payments/page";
 import { MoneyBox } from "@/app/(parent)/money-box";
 import { resetDb } from "../helpers/db";
@@ -59,7 +60,8 @@ describe("the Payments page", () => {
     expect(html).toContain('<span class="amount num">$7,152.09</span>');
     expect(html).toContain('<div class="sum"><span>Total</span><span class="num">$14,283.16</span></div>');
     expect(html).toMatch(/<span class="when">Invoice date <time dateTime="2026-10-01">2026-10-01<\/time><\/span>/);
-    expect(html).toMatch(/<span class="when">Due <time dateTime="2026-12-01">2026-12-01<\/time><\/span>/);
+    // The due date is on the page as it arrives, in words that depend on the club's day (the tests below).
+    expect(html).toMatch(/<span class="when[^"]*">(Due|Was due) <time dateTime="2026-12-01">2026-12-01<\/time>[^<]*<\/span>/);
     // One Pay button: the invoice with a link. The other open invoice has none, and no error.
     const [pay, ...more] = pays(html);
     expect(more).toEqual([]);
@@ -345,6 +347,44 @@ describe("QuickBooks text and links on the Payments page", () => {
     const words = text(await renderPage(PaymentsPage));
     expect(words).not.toMatch(/overdue|past due|delinquent|urgent|immediately|action required|warning|penalt|late fee|!!|\bLATE\b|\bDUE NOW\b/i);
     expect(words).toContain("Need more time? Ask the treasurer. They're happy to work something out.".replace("'", "&#x27;"));
+  });
+});
+
+describe("a due date is said against the club's own day", () => {
+  const dueLine = (html: string, due: string) => new RegExp(`<span class="(when[^"]*)">([^<]*)<time dateTime="${due}">[^<]*</time>([^<]*)</span>`).exec(html)?.slice(1);
+  const setZone = (timeZone: string) => db.insert(setting).values({ key: "club", value: { timeZone } }).onConflictDoUpdate({ target: setting.key, set: { value: { timeZone } } });
+
+  it("at the day boundary: due today in the club's zone, and already past in a club a day ahead", async () => {
+    const r = await riverquills();
+    asParent(r.identity);
+    // UTC+14 and UTC-11 never share a calendar day. The invoice is due on the western club's today.
+    const now = new Date();
+    const eastern = calendarDayIn("Pacific/Kiritimati", now), western = calendarDayIn("Pacific/Pago_Pago", now);
+    expect(eastern > western).toBe(true);
+    stub.invoices = [inv("1", FAMILY, { DueDate: western })];
+
+    await setZone("Pacific/Pago_Pago");
+    expect(dueLine(await renderPage(PaymentsPage), western)).toEqual(["when soon", "Due ", ", today"]);
+    expect(dueLine(await renderPage(() => MoneyBox({ ctx: r.identity })), western)).toEqual(["when soon", "Due ", ", today"]);
+
+    // The same invoice, the same instant, the same server: only the club's zone differs, and there the day has passed.
+    await setZone("Pacific/Kiritimati");
+    expect(dueLine(await renderPage(PaymentsPage), western)).toEqual(["when late", "Was due ", ""]);
+    expect(dueLine(await renderPage(() => MoneyBox({ ctx: r.identity })), western)).toEqual(["when late", "Was due ", ""]);
+  });
+
+  it("due tomorrow, due in 14 days and due in 15, counted from the club's today", async () => {
+    const r = await riverquills();
+    asParent(r.identity);
+    await setZone("Pacific/Kiritimati");
+    const today = calendarDayIn("Pacific/Kiritimati");
+    const plus = (days: number) => new Date(Date.parse(`${today}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+    stub.invoices = [inv("1", FAMILY, { DueDate: plus(1) }), inv("2", FAMILY, { DueDate: plus(14) }), inv("3", STUDENT, { DueDate: plus(15) }), inv("4", PARENT, { DueDate: plus(-1) })];
+    const html = await renderPage(PaymentsPage);
+    expect(dueLine(html, plus(1))).toEqual(["when soon", "Due ", ", tomorrow"]);
+    expect(dueLine(html, plus(14))).toEqual(["when soon", "Due ", ", in 14 days"]);
+    expect(dueLine(html, plus(15))).toEqual(["when", "Due ", ""]);
+    expect(dueLine(html, plus(-1))).toEqual(["when late", "Was due ", ""]);
   });
 });
 

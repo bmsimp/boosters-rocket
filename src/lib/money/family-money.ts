@@ -9,6 +9,7 @@ import { isQboId, qboCustomerById, qboInvoices, type QboGetOptions } from "@/lib
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
+import { clubToday } from "@/lib/settings/club";
 import { toCents } from "./cents";
 import { openInvoices, paidInvoices, shownInvoices, utcDay } from "./invoices";
 import { safePayLink } from "./pay-link";
@@ -50,8 +51,11 @@ export type MoneyFigures = {
   /** QuickBooks' own balance for the family is lower than the invoices add up to: a credit or an unapplied payment. */
   credit: boolean;
 };
-/** `figures` is null when there is nothing to show: no successful read yet for this family in the connected company. */
-export type FamilyMoney = { familyName: string | null; figures: MoneyFigures | null };
+/**
+ * `figures` is null when there is nothing to show: no successful read yet for this family in the connected company.
+ * `today` is the club's own date (YYYY-MM-DD, clubToday()): the day each due date is said against ("in 8 days", "Was due").
+ */
+export type FamilyMoney = { familyName: string | null; figures: MoneyFigures | null; today: string };
 
 type FamilyCustomers = {
   familyName: string;
@@ -248,6 +252,12 @@ function readOnce(familyQboId: string, timeoutMs: number): Promise<boolean> {
  * not hold as an active family.
  */
 export async function loadFamilyMoney(familyQboId: string, o: { timeoutMs?: number } = {}): Promise<FamilyMoney> {
+  const shown = await figuresToShow(familyQboId, o);
+  // The club's day as the page is drawn, after any wait for QuickBooks.
+  return { ...shown, today: await clubToday() };
+}
+
+async function figuresToShow(familyQboId: string, o: { timeoutMs?: number }): Promise<Omit<FamilyMoney, "today">> {
   const load = async () => {
     const [[row], source, family] = await Promise.all([db.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId)), getRosterSource(), familyCustomers(familyQboId)]);
     return { row, source, family, familyName: family?.familyName ?? null };

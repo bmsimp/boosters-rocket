@@ -26,7 +26,7 @@ export async function MoneyBox({ ctx }: { ctx: Pick<ParentCtx, "familyQboId"> })
 const invoiceName = (i: StoredInvoice) => `${i.number ? `Invoice ${i.number}` : "Invoice"}${i.forName ? `, ${i.forName}` : ""}`;
 const payName = (i: StoredInvoice) => `${i.number ? `invoice ${i.number}` : "this invoice"}${i.forName ? ` for ${i.forName}` : ""}`;
 
-function OpenLine({ invoice, current, filled }: { invoice: StoredInvoice; current: boolean; filled: boolean }) {
+function OpenLine({ invoice, today, current, filled }: { invoice: StoredInvoice; today: string; current: boolean; filled: boolean }) {
   const amount = formatMoney(invoice.balanceCents, invoice.currency);
   const style = filled ? "btn pay" : "btn btn-line pay";
   return (
@@ -34,7 +34,7 @@ function OpenLine({ invoice, current, filled }: { invoice: StoredInvoice; curren
       <span>
         <span className="what">{invoiceName(invoice)}</span>
         {invoice.date && <span className="when">Invoice date <CalendarDate iso={invoice.date} /></span>}
-        {invoice.dueDate && <DueLine due={invoice.dueDate} />}
+        {invoice.dueDate && <DueLine due={invoice.dueDate} today={today} />}
       </span>
       <span className="amount num">{amount}</span>
       {invoice.payLink && (current ? (
@@ -49,7 +49,7 @@ function OpenLine({ invoice, current, filled }: { invoice: StoredInvoice; curren
   );
 }
 
-function Figures({ f }: { f: MoneyFigures }) {
+function Figures({ f, today }: { f: MoneyFigures; today: string }) {
   const total = f.currency === null ? null : formatMoney(f.totalCents, f.currency);
   // QuickBooks pays one invoice at a time: the soonest-due one that can be paid gets the filled button.
   const first = f.open.find((i) => i.payLink !== null)?.qboId;
@@ -67,7 +67,7 @@ function Figures({ f }: { f: MoneyFigures }) {
       {f.open.length > 0 ? (
         <>
           <ul className="lines">
-            {f.open.map((i) => <OpenLine key={i.qboId} invoice={i} current={f.current} filled={i.qboId === first} />)}
+            {f.open.map((i) => <OpenLine key={i.qboId} invoice={i} today={today} current={f.current} filled={i.qboId === first} />)}
           </ul>
           {total !== null
             ? <div className="sum"><span>Total</span><span className="num">{total}</span></div>
@@ -92,7 +92,7 @@ export function MoneySection({ money, more = false }: { money: FamilyMoney; more
     <section className="box money" aria-labelledby="money-h">
       <h2 id="money-h">{money.familyName ?? "What you owe"}</h2>
       {money.figures
-        ? <Figures f={money.figures} />
+        ? <Figures f={money.figures} today={money.today} />
         : <p className="help" role="status">We can&apos;t show what you owe right now. Please check back in a little while.</p>}
       {more && <div className="box-foot"><Link className="btn btn-line" href="/payments">See your payments</Link></div>}
     </section>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { monthsBefore, openInvoices, paidInvoices, shownInvoices, utcDay } from "@/lib/money/invoices";
-import { dueState, localDay, SOON_DAYS } from "@/lib/money/due";
+import { dueState, SOON_DAYS } from "@/lib/money/due";
 import { DEFAULT_MONEY_SETTINGS, parseMoneySettings } from "@/lib/money/settings";
 
 const TODAY = "2026-11-15";
@@ -123,11 +123,6 @@ describe("a due date is said in words (DESIGN.md, Money lines)", () => {
       expect(`${lead}${tail}`).not.toMatch(/overdue|late|urgent|immediately|!|[A-Z]{3,}/);
     }
     expect(dueState("soon", TODAY)).toEqual({ tone: "later", lead: "Due", tail: "" });
-  });
-
-  it("takes today from the viewer's own clock", () => {
-    expect(localDay(new Date(2026, 0, 5, 23, 30))).toBe("2026-01-05");
-    expect(localDay(new Date(2026, 11, 31, 0, 0))).toBe("2026-12-31");
   });
 });
 
