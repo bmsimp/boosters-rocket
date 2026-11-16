@@ -255,7 +255,7 @@ export const familyMoney = pgTable("family_money", {
 /** One row per run of a scheduled or hand-started job (spec §4). `outcome` is null while it runs. */
 export const jobRun = pgTable("job_run", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
-  job: text("job").notNull(),                        // "quickbooks.token_refresh" | "roster.refresh"
+  job: text("job").notNull(),                        // "quickbooks.token_refresh" | "roster.refresh" | "cleanup.daily"
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
   outcome: text("outcome", { enum: ["ok", "failed"] }),
@@ -367,7 +367,10 @@ export const roleAssignment = pgTable("role_assignment", {
   createdAt: created(),
 }, (t) => [uniqueIndex("role_assignment_uq").on(t.roleId, t.staffUserId)]);
 
-/** Append-only audit trail (spec §13). */
+/**
+ * Append-only audit trail (spec §13). The audit page reads it newest first, a page at a time by id, filtered by action,
+ * by who acted or by the record acted on (src/lib/audit/query.ts): each of those has an index that ends in the id.
+ */
 export const auditLog = pgTable("audit_log", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
@@ -381,7 +384,12 @@ export const auditLog = pgTable("audit_log", {
   before: jsonb("before"),
   after: jsonb("after"),
   ip: inet("ip"),
-}, (t) => [index("audit_at_ix").on(t.at)]);
+}, (t) => [
+  index("audit_at_ix").on(t.at),
+  index("audit_action_ix").on(t.action, t.id),
+  index("audit_actor_ix").on(t.actorId, t.id),
+  index("audit_target_ix").on(t.targetType, t.targetId, t.id),
+]);
 
 /* ---- Better Auth tables, one set per door (Better Auth core schema) ---- */
 function authTables<
