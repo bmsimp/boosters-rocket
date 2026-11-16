@@ -434,6 +434,19 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .everyone-shown { margin-top: var(--s3); } /* stands clear of the search above it */
 /* ---- End of Season ---- */
 
+/* ---- Volunteer: the parent Volunteer pages and the staff volunteer pages. Keep new rules for them inside this block. ---- */
+
+/* An event's description keeps the lines staff typed. */
+.volunteer-about { white-space: pre-line; overflow-wrap: anywhere; margin-top: var(--s2); }
+.volunteer-page .box > p + p, .volunteer-page .box > dl + p { margin-top: var(--s2); }
+/* Who will fill the place: a choice group, then the one button that signs them up. */
+.volunteer-confirm { margin-top: var(--s4); width: 100%; }
+@media (min-width: 760px) { .volunteer-confirm { width: auto; } }
+.volunteer-done { margin-top: var(--s3); font-weight: 700; }
+.volunteer-cancel { margin-top: var(--s2); }
+.lines li > div > .state { margin-top: 2px; }
+/* ---- End of Volunteer ---- */
+
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====
    The viewport is "cover" (src/app/layout.tsx), so the page reaches under a notch, rounded corners and the home
    indicator. These rules keep content clear of them. env() is 0 where there is nothing to clear, so an ordinary

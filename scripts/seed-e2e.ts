@@ -3,6 +3,7 @@ import { createSecretBox } from "../src/lib/crypto/secret-box";
 import { mailConfigHash } from "../src/lib/mail/config-hash";
 import { runMigrations } from "../src/lib/db/migrate";
 import { assertE2eDatabase, e2eMailPort } from "../tests/e2e/run-config";
+import { E2E_VOLUNTEER } from "../tests/e2e/volunteer-seed";
 
 /**
  * This script empties the database and seeds it again: test databases only, and in a git worktree never the database
@@ -167,6 +168,17 @@ async function main() {
       await sql`INSERT INTO requirement_progress (requirement_id, subject_qbo_id, waived_at, waived_reason) VALUES (${row!.id}, ${subject}, now(), ${reason})`;
     }
   }
+  // Volunteering (v1 spec §11): one event 20 days ahead with two shifts, their ids fixed so the specs can ask for them
+  // (tests/e2e/volunteer.spec.ts, PARAMS in tests/e2e/parent-session.spec.ts). The Rivera family has signed Leo up for
+  // the griddle, so the Quetzalcoatl family sees "1 of 4 places filled" and never who. The volunteer spec signs Zelda up
+  // and cancels again, so both passes of the run find the same count.
+  await sql`INSERT INTO volunteer_event (id, name, on_date, location, description, contact_name, contact_email)
+          VALUES (${E2E_VOLUNTEER.event}, 'Pancake breakfast', ${day(20)}, 'School cafeteria', 'Flipping pancakes before the spring concert.', 'Pat Organizer', 'pat@e2e.example.org')`;
+  await sql`INSERT INTO volunteer_shift (id, event_id, starts_at, ends_at, places, role) VALUES
+          (${E2E_VOLUNTEER.griddle}, ${E2E_VOLUNTEER.event}, '07:00', '09:00', 4, 'Griddle'),
+          (${E2E_VOLUNTEER.cleanup}, ${E2E_VOLUNTEER.event}, '09:00', '11:00', 2, 'Cleanup')`;
+  await sql`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, student_qbo_id, filler_name)
+          VALUES (${E2E_VOLUNTEER.griddle}, '10', ${crypto.randomUUID()}, 'student', '12', 'Leo Rivera')`;
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   await sql.end();

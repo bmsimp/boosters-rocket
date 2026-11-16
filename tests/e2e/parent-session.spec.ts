@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import postgres from "postgres";
 import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, paramsProblems, parentRoutes, type DynamicRouteParams } from "./parent-routes";
+import { E2E_VOLUNTEER } from "./volunteer-seed";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -43,7 +44,11 @@ const routes = parentRoutes();
  * the Quetzalcoatl family (E2E-FAMILY), `other` the same kind of thing in another family.
  *   "/students/[id]": { own: { id: "E2E-S1" }, other: { id: "E2E-S3" } },
  */
-const PARAMS: Record<string, DynamicRouteParams> = {};
+const PARAMS: Record<string, DynamicRouteParams> = {
+  // A shift is the club's, not a family's: `own` is one the Quetzalcoatl family can sign up for, `other` the one the
+  // Rivera family has a place on. Neither may send anything of the Riveras' but the count.
+  "/volunteer/shifts/[id]": { own: { id: E2E_VOLUNTEER.cleanup }, other: { id: E2E_VOLUNTEER.griddle } },
+};
 
 // Everything scripts/seed-e2e.ts gives a family that is not the Quetzalcoatl family, Zelda's second family included:
 // strings that would give that family away, in the HTML or in the data sent with it. When the seed gives another
@@ -100,6 +105,16 @@ test("every requirement and waiver the seed gives another family alone is search
   expect(reasons.length).toBeGreaterThanOrEqual(1);
   const unsearched = [...titles.map((r) => r.title as string), ...reasons.map((r) => r.waived_reason as string)].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)));
   expect(unsearched, `scripts/seed-e2e.ts gives another family these in the season, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
+    + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
+});
+
+test("every volunteer sign-up the seed gives another family is searched for", async () => {
+  // As above, for volunteering: a sign-up of another family must be findable by its family's id or the name of whoever fills it.
+  const rows = await sql`SELECT family_qbo_id, student_qbo_id, filler_name FROM volunteer_signup WHERE family_qbo_id <> ${PARENT_SESSION_FAMILY}`;
+  expect(rows.length).toBeGreaterThanOrEqual(1);
+  const unsearched = rows.filter((r) => !OTHER_FAMILIES.some((s) => (r.filler_name as string).includes(s) || (typeof r.student_qbo_id === "string" && r.student_qbo_id.includes(s))))
+    .map((r) => `${r.filler_name} (a sign-up of ${r.family_qbo_id})`);
+  expect(unsearched, `scripts/seed-e2e.ts gives another family these volunteer sign-ups, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
     + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
 });
 
