@@ -5,7 +5,7 @@
 import "server-only";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import type { Requirement } from "@/lib/seasons/progress";
 import { getClubSettings } from "@/lib/settings/club";
 import { shiftInstants, shiftMinutes } from "./clock";
@@ -14,8 +14,8 @@ import { countsFor, shiftCredit, type Filler } from "./rules";
 /**
  * How much each family or student is signed up for toward each of these volunteer requirements, keyed by `pairKey`
  * (src/lib/seasons/kinds.ts passes its own in): every place they hold, on a shift and an event still on, that counts
- * toward the requirement for them. With `subjectQboIds` (a parent's own family and students) only sign-ups made from
- * that family are read; null is everyone, for staff.
+ * toward the requirement for them and is not checked in yet. With `subjectQboIds` (a parent's own family and
+ * students) only sign-ups made from that family are read; null is everyone, for staff.
  */
 export async function signedUpAmounts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string): Promise<Map<string, number>> {
   const amounts = new Map<string, number>();
@@ -27,7 +27,10 @@ export async function signedUpAmounts(requirements: readonly Requirement[], subj
     .innerJoin(volunteerShift, eq(volunteerShift.id, volunteerShiftRequirement.shiftId))
     .innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
     .innerJoin(volunteerSignup, eq(volunteerSignup.shiftId, volunteerShift.id))
+    // A place already checked in is credit now (./credit.ts), no longer something the family is signed up for.
+    .leftJoin(volunteerCredit, and(eq(volunteerCredit.signupId, volunteerSignup.id), isNull(volunteerCredit.removedAt)))
     .where(and(
+      isNull(volunteerCredit.id),
       inArray(volunteerShiftRequirement.requirementId, requirements.map((r) => r.id)),
       isNull(volunteerShift.cancelledAt), isNull(volunteerEvent.cancelledAt), isNull(volunteerSignup.cancelledAt),
       // A parent's own family's sign-ups alone: a place another family took for a student who has since moved in is theirs, not this family's.

@@ -18,6 +18,7 @@ import { isCovered, type Requirement } from "@/lib/seasons/progress";
 import { loadCovers, loadFacts, toRequirement } from "@/lib/seasons/recorded";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
 import { beforeCutoff, clockOf, dateWords, instantWords, shiftInstants, shiftMinutes, shiftTimeWords } from "./clock";
+import { creditedSignups } from "./credit";
 import { contactWords, signupConfirmation } from "./notices";
 import { amountWords, shiftCredit, whoMustWords } from "./rules";
 import { getVolunteerSettings } from "./settings";
@@ -31,6 +32,8 @@ export type MySignup = {
   who: string;
   /** open: they can cancel here until `cancelUntil`; closed: the cut-off has passed; cancelled: the club cancelled the shift or the event. */
   cancel: "open" | "closed" | "cancelled"; cancelUntil: string | null;
+  /** Checked in with the shift's code, or added by staff: credit now, and no longer cancelled here. */
+  checkedIn: boolean;
 };
 export type MyVolunteering = { events: MyEvent[]; signups: MySignup[]; cutoffHours: number };
 
@@ -79,14 +82,16 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
   // A student who has moved to another family, or is no longer active, takes their sign-ups with them: the family
   // they were signed up from no longer sees or cancels them.
   const stillOurs = await studentsStillUnder(ctx.familyQboId, mine.flatMap(({ s }) => (s.studentQboId ? [s.studentQboId] : [])));
+  const credited = await creditedSignups(mine.map(({ s }) => s.id));
   const signups = mine.flatMap(({ s, shift, event }) => {
     const { start, end } = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (end.getTime() <= now.getTime() || (s.studentQboId !== null && !stillOurs.has(s.studentQboId))) return [];
-    const cancelled = shift.cancelledAt !== null || event.cancelledAt !== null, open = !cancelled && beforeCutoff(start, cutoffHours, now);
+    const checkedIn = credited.has(s.id);
+    const cancelled = shift.cancelledAt !== null || event.cancelledAt !== null, open = !cancelled && !checkedIn && beforeCutoff(start, cutoffHours, now);
     return [{ id: s.id, shiftId: shift.id, eventName: event.name, dateWords: dateWords(event.onDate), timeWords: shiftTimeWords(clockOf(shift.startsAt), clockOf(shift.endsAt)),
       role: shift.role, location: event.location, contact: contactWords(event), who: whoWords(ctx, s),
       cancel: cancelled ? "cancelled" as const : open ? "open" as const : "closed" as const,
-      cancelUntil: open ? instantWords(new Date(start.getTime() - cutoffHours * 3_600_000), zone) : null }];
+      cancelUntil: open ? instantWords(new Date(start.getTime() - cutoffHours * 3_600_000), zone) : null, checkedIn }];
   });
   return { events: listed, signups, cutoffHours };
 }
@@ -97,7 +102,7 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
 export type CountsToward = { title: string; whoMust: string; counts: string; standing: string };
 /** Someone who could fill the place: "me" (the guardian looking) or one of the family's students, by QuickBooks id. */
 export type FillChoice = { value: string; label: string; taken: boolean; countsToward: CountsToward[] };
-export type ShiftForMe = { event: MyEvent; shift: MyShift; minutes: number; mine: { who: string }[]; choices: FillChoice[] };
+export type ShiftForMe = { event: MyEvent; shift: MyShift; minutes: number; mine: { who: string; checkedIn: boolean }[]; choices: FillChoice[] };
 
 /**
  * One shift as the signed-in family sees it before signing up: the event, the places filled, who in the family is
@@ -131,11 +136,12 @@ export async function loadShiftForMe(ctx: Pick<ParentCtx, "familyQboId" | "paren
     { value: "me", label: `Me (${ctx.name})`, taken: ours.some((t) => t.fillerKind === "guardian" && t.fillerParentId === ctx.parentId), countsToward: counted("me") },
     ...students.map((s) => ({ value: s.qboId, label: s.name, taken: onShift.some((t) => t.fillerKind === "student" && t.studentQboId === s.qboId), countsToward: counted(s.qboId) })),
   ];
-  return { event: myEvent(event, [view]), shift: view, minutes, mine: ours.map((t) => ({ who: whoWords(ctx, t) })), choices };
+  const credited = await creditedSignups(ours.map((t) => t.id));
+  return { event: myEvent(event, [view]), shift: view, minutes, mine: ours.map((t) => ({ who: whoWords(ctx, t), checkedIn: credited.has(t.id) })), choices };
 }
 
 /** Of these students, the ones the roster cache holds active and directly under the family now. */
-async function studentsStillUnder(familyQboId: string, qboIds: string[], tx?: Tx): Promise<Set<string>> {
+export async function studentsStillUnder(familyQboId: string, qboIds: string[], tx?: Tx): Promise<Set<string>> {
   if (qboIds.length === 0) return new Set();
   const under = await (tx ?? db).select({ qboId: qboCustomer.qboId }).from(qboCustomer)
     .where(and(eq(qboCustomer.parentQboId, familyQboId), eq(qboCustomer.active, true), inArray(qboCustomer.qboId, qboIds)));
@@ -241,14 +247,14 @@ export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "stu
   return { ok: true, message: sent.ok ? `${whoDone}. Thank you! We've emailed you the details, with a calendar file.` : `${whoDone}. Thank you! We couldn't send the email with the details just now; they're on this page.` };
 }
 
-const ROSTER_BUSY = "The club's list of families is being brought up to date just now. Please try again in a minute.";
+export const ROSTER_BUSY = "The club's list of families is being brought up to date just now. Please try again in a minute.";
 /** Postgres could not take a lock in time (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
 const lockNotAvailable = (e: unknown): boolean => {
   const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
   return code(e) === "55P03" || code((e as { cause?: unknown } | null)?.cause) === "55P03";
 };
 /** The sign-up's transaction, or "busy" when the roster lock wasn't free in time: a refresh of the roster is reading QuickBooks. */
-async function takePlace<T>(work: (tx: Tx) => Promise<T>): Promise<T | "busy"> {
+export async function takePlace<T>(work: (tx: Tx) => Promise<T>): Promise<T | "busy"> {
   try {
     return await db.transaction(work);
   } catch (e) {
@@ -272,6 +278,8 @@ export async function cancelMySignup(ctx: ParentCtx, family: Pick<MyFamily, "stu
     const [row] = await tx.select({ shift: volunteerShift, event: volunteerEvent }).from(volunteerShift).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId)).where(eq(volunteerShift.id, s.shiftId));
     const { shift, event } = row!;
     if (shift.cancelledAt || event.cancelledAt) return no("The club has cancelled this shift, so there's nothing to cancel.");
+    // A place checked in is volunteering done: it isn't given up here.
+    if ((await creditedSignups([s.id], tx)).has(s.id)) return no("This place is checked in already, so it can't be cancelled. Thank you for helping!");
     const { start } = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (!beforeCutoff(start, cutoffHours, now)) {
       return no(`It's too close to the shift to cancel here: the portal takes cancellations until ${cutoffHours} ${cutoffHours === 1 ? "hour" : "hours"} before it starts. Please contact ${contactWords(event)}.`);

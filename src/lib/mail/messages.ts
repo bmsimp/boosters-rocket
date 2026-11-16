@@ -108,6 +108,45 @@ export function volunteerCancelMessage(b: Brand, to: string, o: { who: Volunteer
   return { to, subject: `Cancelled: ${o.shift.event}`, text: text(lines), html: html(b, lines), attachments: [calendarFile(o.calendar, "CANCEL")] };
 }
 
+/** When the club gives up one place: staff removed the sign-up, or its student is no longer listed with the family. The calendar file takes it out again. */
+export function volunteerRemovedMessage(b: Brand, to: string, o: { who: VolunteerWho; shift: VolunteerShiftWords; why: "staff" | "moved"; contact: string; link: string; calendar: string }): MailMessage {
+  const where = `a shift at ${o.shift.event}${o.shift.role ? ` (${o.shift.role})` : ""}`;
+  const lines = [
+    o.why === "staff"
+      ? `The club has taken ${o.who.self ? "your place" : `${o.who.name}'s place`} off ${where}, so ${o.who.self ? "you don't" : `${o.who.name} doesn't`} need to come.`
+      : `${o.who.self ? "Your" : `${o.who.name}'s`} place on ${where} has been freed, because ${o.who.self ? "you're" : `${o.who.name} is`} no longer listed with your family in the club's records.`,
+    `The shift was: ${o.shift.when}, at ${o.shift.location}.`,
+    "If you added it to your calendar, opening the calendar file with this email takes it out again.",
+    `If this is a surprise, please contact ${o.contact}. Your other sign-ups are here: ${o.link}`,
+  ];
+  return { to, subject: `Your place has been freed: ${o.shift.event}`, text: text(lines), html: html(b, lines), attachments: [calendarFile(o.calendar, "CANCEL")] };
+}
+
+/** The day before a shift: where and when, and who to contact. */
+export function volunteerReminderMessage(b: Brand, to: string, o: { who: VolunteerWho; shift: VolunteerShiftWords; contact: string; link: string }): MailMessage {
+  const lines = [
+    `A friendly reminder: ${o.who.self ? "you're" : `${o.who.name} is`} helping at ${o.shift.event}${o.shift.role ? ` (${o.shift.role})` : ""} tomorrow.`,
+    ...shiftLines(o.shift),
+    `When you get there, scan the club's check-in code to be checked in. Questions, or can't make it? Contact ${o.contact}.`,
+    `Your sign-ups are here: ${o.link}`,
+    "Thank you for giving your time!",
+  ];
+  return { to, subject: `Tomorrow: ${o.shift.event}`, text: text(lines), html: html(b, lines) };
+}
+
+/** A volunteer requirement the family hasn't met yet, in a nudge's words: what, for whom, and where it stands. */
+export type VolunteerDueWords = { title: string; whoMust: string; standing: string };
+/** A nudge before a due date: what the family still has to do, kindly, with the date and the link. Nothing about any other family. */
+export function volunteerDueMessage(b: Brand, to: string, o: { dueWords: string; daysLeft: number; items: VolunteerDueWords[]; link: string }): MailMessage {
+  const lines = [
+    `Just a heads-up: some of the volunteering the club asks of your family is due ${o.dueWords}, ${o.daysLeft} days from now.`,
+    ...o.items.map((i) => `${i.title}: ${i.standing}. ${i.whoMust}.`),
+    `You can pick a shift here: ${o.link}`,
+    "Thank you for everything you do for the club!",
+  ];
+  return { to, subject: `Volunteering due ${o.dueWords}`, text: text(lines), html: html(b, lines) };
+}
+
 export function testMessage(b: Brand, to: string): MailMessage {
   const lines = [`This is a test from the ${b.clubName} portal. Outgoing mail works.`];
   return { to, subject: `Test email from ${b.clubName}`, text: text(lines), html: html(b, lines) };

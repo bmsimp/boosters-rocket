@@ -26,6 +26,7 @@ export const PERMISSIONS = [
   "Finance.Balance.Read",          // see what every family owes and each family's invoices, and ask for every family to be read from QuickBooks again
   "Volunteer.Event.Read",          // see volunteer events and shifts, and who has signed up for each shift
   "Volunteer.Event.ReadWrite",     // create, change, copy and cancel events and shifts, and set the cancelling cut-off
+  "Volunteer.Credit.ReadWrite",    // see a family's volunteer credit, add a missed check-in, remove one, credit volunteering done outside the portal
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

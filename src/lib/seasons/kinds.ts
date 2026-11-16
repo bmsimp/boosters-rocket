@@ -8,6 +8,7 @@ import { NO_INVOICE_YET } from "@/lib/money/payment-rule";
 import { paymentStandings, type AmountsShown } from "@/lib/money/payment-standings";
 import { volunteerStanding } from "@/lib/volunteer/rules";
 import { signedUpAmounts } from "@/lib/volunteer/signed-up";
+import { confirmedAmounts } from "@/lib/volunteer/credit";
 import { formRule } from "@/lib/forms/kind";
 import type { Requirement, Standing } from "./progress";
 
@@ -59,26 +60,24 @@ const payment: KindRule = {
 };
 
 /**
- * Volunteering (§11): met when confirmed volunteering reaches the amount, in shifts or hours as the requirement counts.
- * The shifts a requirement can count toward are listed in volunteer_shift_requirement, so it needs no column of its
- * own. Nothing is confirmed until check-in is built: that slice reads its credit here and passes it as `confirmed`
- * (and leaves out of `signedUp` the places it has credited); a buy-out (§11.5) is met the same way. Until then staff
- * record that the work is done with a tick, as for a checklist item, so a requirement can be met without a waiver.
+ * Volunteering (§11): met when confirmed credit reaches the amount, in shifts or hours as the requirement counts. The
+ * shifts a requirement can count toward are listed in volunteer_shift_requirement, so it needs no column of its own.
+ * Credit comes from check-ins and from staff (src/lib/volunteer/credit.ts), spent on the family's requirements by one
+ * rule (src/lib/volunteer/allocation.ts); a place already credited no longer counts as "signed up for". A buy-out
+ * (§11.5, a later slice) will meet a requirement here too. Nothing is ticked by hand: staff correct credit instead.
  */
 const volunteer: KindRule = {
-  standings: async ({ requirements, subjectQboIds, recorded }) => {
-    const signedUp = await signedUpAmounts(requirements, subjectQboIds, pairKey);
-    const confirmed = new Map<string, number>(); // credit from check-ins: none yet
+  standings: async ({ requirements, subjectQboIds }) => {
+    const [signedUp, confirmed] = await Promise.all([signedUpAmounts(requirements, subjectQboIds, pairKey), confirmedAmounts(requirements, subjectQboIds, pairKey)]);
     const standings = new Map<string, Standing>();
     for (const key of new Set([...signedUp.keys(), ...confirmed.keys()])) {
       const r = requirements.find((x) => key.startsWith(`${x.id}|`));
       if (r) standings.set(key, volunteerStanding(r, { confirmed: confirmed.get(key) ?? 0, signedUp: signedUp.get(key) ?? 0 }));
     }
-    for (const r of recorded) if (r.metAt !== null) standings.set(pairKey(r.requirementId, r.subjectQboId), { met: true, words: "Done" });
     return standings;
   },
   nothingYet: (r) => volunteerStanding(r, { confirmed: 0, signedUp: 0 }),
-  ticked: true,
+  ticked: false,
 };
 
 export const KIND_RULES: Record<RequirementKind, KindRule | null> = {
