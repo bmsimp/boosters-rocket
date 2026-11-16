@@ -131,6 +131,21 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(posts()).toEqual([]);
   });
 
+  it("never tells a family that a student who moved in still has the old family's buy-out", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ appliesTo: "student" });
+    // The student was the Chenoweth family's, who chose a buy-out for them; QuickBooks moved them since.
+    await seedBuyout({ requirementId: req, familyQboId: "8010", subjectQboId: STUDENT, chosenBy: p.identity.parentId, invoiceQboId: "9977", unitCents: 4321, units: 1 });
+    const choice = await shown(p, req, "s1");
+    expect(choice).toMatchObject({ buyout: null, may: "choose", standing: "0 of 2 shifts done" });
+    asParent(p.identity);
+    const r = await confirmBuyoutAction(req, "s1", choice.stamp);
+    expect(r).toEqual({ ok: false, errors: [BUYOUT_COPY.cantNow] });
+    expect(JSON.stringify(r)).not.toMatch(/43\.21|8010|9977/);
+    expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
   it("is rate-limited per parent, and audits the first refusal once", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();

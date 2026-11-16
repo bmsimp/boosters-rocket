@@ -335,8 +335,14 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
       requirementId: r.id, familyQboId: ctx.familyQboId, subjectQboId: t.subjectQboId, customerQboId: t.customerQboId, itemQboId: r.itemQboId,
       unitCents: q.unitCents, units: q.units, amountCents: q.amountCents, state: "being_invoiced", realmId: t.realmId, chosenBy: ctx.parentId, chosenByLabel: ctx.email,
     }).onConflictDoNothing().returning();
-    // Another confirm for the same requirement and subject was first (another guardian of the family, or a second press).
-    if (!row) return { r: no(BUYOUT_COPY.already) };
+    if (!row) {
+      // Another confirm for the same requirement and subject was first (another guardian of the family, or a second
+      // press). A live buy-out of another family's (a student who moved here in QuickBooks, still flagged there) is
+      // never told: the guardian reads only that it can't be set up now.
+      const [ours] = await tx.select({ id: buyout.id }).from(buyout).where(and(eq(buyout.requirementId, r.id), eq(buyout.subjectQboId, t.subjectQboId),
+        eq(buyout.familyQboId, ctx.familyQboId), inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));
+      return { r: no(ours ? BUYOUT_COPY.already : BUYOUT_COPY.cantNow) };
+    }
     const item = await queueItem(tx, { op: "invoice_create", buyoutId: row.id, customerQboId: row.customerQboId, itemQboId: row.itemQboId, units: row.units, unitCents: row.unitCents, familyQboId: row.familyQboId },
       { realmId: row.realmId, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS) });
     await writeAudit({ actor, action: "volunteer.buyout.chosen", targetType: "buyout", targetId: row.id, ip: ctx.ip,
