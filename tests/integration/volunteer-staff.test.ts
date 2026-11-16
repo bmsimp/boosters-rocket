@@ -5,9 +5,9 @@ type Msg = { to: string; subject: string; text: string; html: string; attachment
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { mail.outbox.push(m); } }));
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, requirement, role, roleAssignment, roleRule, setting, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { auditLog, guardian, parent, requirement, role, roleAssignment, roleRule, setting, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
 import { loadMyVolunteering } from "@/lib/volunteer/my-volunteer";
@@ -241,6 +241,32 @@ describe("shifts", () => {
     expect((await loadMyVolunteering({ ...a.identity })).events.flatMap((e) => e.shifts.map((s) => s.id))).toEqual([other[0]!.id]);
     expect(await cancelShiftAction(shift.id)).toEqual({ ok: false, errors: ["This shift is cancelled already."] });
     expect(await updateShiftAction(shift.id, SHIFT)).toEqual({ ok: false, errors: ["This shift is cancelled, so it can't be changed."] });
+  });
+
+  it("tells nobody the club has cut off from the family: a guardian whose link is closed, or who is blocked", async () => {
+    const { a, b, shift, eventId } = await shared();
+    await db.update(guardian).set({ status: "disabled" }).where(and(eq(guardian.parentId, a.identity.parentId), eq(guardian.familyQboId, FAMILY_A.family.qboId)));
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, b.identity.parentId));
+    const as = { startsAt: "10:00", endsAt: "12:00", places: 4, role: "Rinse crew", requirementIds: [] };
+    expect(await updateShiftAction(shift.id, as)).toEqual({ ok: true, message: "Saved." });
+    expect(await cancelEventAction(eventId)).toMatchObject({ ok: true });
+    expect(mail.outbox).toEqual([]);
+    expect((await audits("volunteer.event.cancel"))[0]).toMatchObject({ after: { signupsTold: 0 } });
+  });
+
+  it("emails nobody about a shift that is over, saves its edits quietly, and won't cancel it", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { event, shifts: [over] } = await seedEvent({ onDate: dayFromNow(-3), location: "North stand", shifts: [{ startsAt: "09:00", endsAt: "12:00" }] });
+    const [signup] = await db.insert(volunteerSignup).values({ shiftId: over!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, fillerKind: "guardian", fillerParentId: a.identity.parentId, fillerName: FAMILY_A.parent.name }).returning();
+    const as = { name: event.name, onDate: event.onDate, location: "South stand", description: event.description, contactName: event.contactName, contactEmail: event.contactEmail ?? "" };
+    expect(await updateEventAction(event.id, as)).toEqual({ ok: true, message: "Saved." });
+    expect(await updateShiftAction(over!.id, { startsAt: "09:30", endsAt: "12:00", places: over!.places, role: "", requirementIds: [] })).toMatchObject({ ok: true });
+    expect(await cancelShiftAction(over!.id)).toEqual({ ok: false, errors: ["This shift is over, so it can't be cancelled. Its volunteers keep what they signed up for."] });
+    expect(await cancelEventAction(event.id)).toEqual({ ok: false, errors: ["Some of this event's shifts are over, so the event can't be cancelled as a whole. Cancel the shifts still to come one by one."] });
+    expect(mail.outbox).toEqual([]);
+    const [still] = await db.select().from(volunteerShift).where(eq(volunteerShift.id, over!.id));
+    expect(still!.cancelledAt).toBeNull();
+    expect((await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, signup!.id)))[0]!.cancelledAt).toBeNull();
   });
 
   it("tells staff when an email couldn't go", async () => {

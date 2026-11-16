@@ -2,9 +2,9 @@
 // transaction with its audit row; the emails a change calls for go after it is committed (./notices.ts). Never imported
 // by parent code (tests/integration/page-guards.test.ts): a shift's list names people of every family.
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { parent, qboCustomer, requirement, season, seasonStep, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { guardian, parent, qboCustomer, requirement, season, seasonStep, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { isCalendarDate } from "@/lib/seasons/progress";
 import { clubToday, getClubSettings } from "@/lib/settings/club";
@@ -152,16 +152,26 @@ const factsOf = (e: Pick<EventRow, "name" | "onDate" | "location" | "description
   shift: { startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), role: s.role, revision: s.revision },
 });
 
-/** The live sign-ups on these shifts, each with the address of the guardian who took it and whose place it is. */
+/**
+ * The live sign-ups on these shifts, each with the address of the guardian who took it and whose place it is: only
+ * while that guardian may still see the family (their link to it isn't closed and they aren't blocked). Someone the
+ * club has cut off from a family is never told where and when its student will be.
+ */
 async function signupsOn(shiftIds: string[], tx: Tx): Promise<(SignupFacts & { shiftId: string })[]> {
   if (shiftIds.length === 0) return [];
   const rows = await tx.select({ id: volunteerSignup.id, shiftId: volunteerSignup.shiftId, fillerKind: volunteerSignup.fillerKind, fillerName: volunteerSignup.fillerName,
     fillerParentId: volunteerSignup.fillerParentId, signedUpBy: volunteerSignup.signedUpBy, email: parent.email })
     .from(volunteerSignup).innerJoin(parent, eq(parent.id, volunteerSignup.signedUpBy))
-    .where(and(inArray(volunteerSignup.shiftId, shiftIds), isNull(volunteerSignup.cancelledAt)));
+    .innerJoin(guardian, and(eq(guardian.parentId, volunteerSignup.signedUpBy), eq(guardian.familyQboId, volunteerSignup.familyQboId)))
+    .where(and(inArray(volunteerSignup.shiftId, shiftIds), isNull(volunteerSignup.cancelledAt), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
   return rows.map((r) => ({ shiftId: r.shiftId, signupId: r.id, to: r.email,
     who: r.fillerKind === "guardian" && r.fillerParentId === r.signedUpBy ? { self: true as const } : { self: false as const, name: r.fillerName } }));
 }
+
+/** Of these shifts of the event, the ones that haven't ended yet by the club's clock: only their volunteers are told of a change. */
+const stillToEnd = (e: Pick<EventRow, "onDate">, shifts: ShiftRow[], zone: string, now: Date = new Date()): ShiftRow[] =>
+  shifts.filter((s) => shiftInstants(e.onDate, s.startsAt, s.endsAt, zone).end.getTime() > now.getTime());
+const OVER = "This shift is over, so it can't be cancelled. Its volunteers keep what they signed up for.";
 
 const eventFacts = (e: EventRow) => ({ name: e.name, onDate: e.onDate, location: e.location, description: e.description, contactName: e.contactName, contactEmail: e.contactEmail });
 const shiftFacts = (s: ShiftRow) => ({ startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), places: s.places, role: s.role });
@@ -192,6 +202,7 @@ export async function createEvent(input: EventInput, o: VolunteerOp): Promise<Do
 export async function updateEvent(eventId: string, input: EventInput, o: VolunteerOp): Promise<Done<{ told: number; failed: number }>> {
   const checked = checkEvent(input);
   if (!checked.ok) return checked;
+  const zone = (await getClubSettings()).timeZone;
   const r = await db.transaction(async (tx) => {
     const [e] = await tx.select().from(volunteerEvent).where(eq(volunteerEvent.id, eventId)).for("update");
     if (!e) return refuse(GONE);
@@ -203,7 +214,8 @@ export async function updateEvent(eventId: string, input: EventInput, o: Volunte
       const shifts = await tx.select().from(volunteerShift).where(and(eq(volunteerShift.eventId, e.id), isNull(volunteerShift.cancelledAt))).for("update");
       const bumped = shifts.length === 0 ? [] : await tx.update(volunteerShift).set({ revision: sql`${volunteerShift.revision} + 1`, updatedAt: new Date() })
         .where(inArray(volunteerShift.id, shifts.map((s) => s.id))).returning();
-      const signups = await signupsOn(shifts.map((s) => s.id), tx);
+      // Volunteers of a shift that is over (by its old date) are not told: there is nothing left for them to come to.
+      const signups = await signupsOn(stillToEnd(e, shifts, zone).map((s) => s.id), tx);
       notices = signups.map((s) => ({ kind: "change" as const, signup: s, before: factsOf(e, shifts.find((x) => x.id === s.shiftId)!), after: factsOf(after!, bumped.find((x) => x.id === s.shiftId)!) }));
     }
     await writeAudit({ actor: o.actor, action: "volunteer.event.update", permission: o.permission, targetType: "volunteer_event", targetId: e.id, ip: o.ip,
@@ -236,12 +248,17 @@ export async function copyEvent(eventId: string, onDate: string, o: VolunteerOp)
 
 /** Cancels an event and so every shift in it. Everyone signed up is told by email. It stays listed for staff, marked cancelled; parents no longer see it. */
 export async function cancelEvent(eventId: string, o: VolunteerOp): Promise<Done<{ told: number; failed: number }>> {
+  const zone = (await getClubSettings()).timeZone;
   const r = await db.transaction(async (tx) => {
     const [e] = await tx.select().from(volunteerEvent).where(eq(volunteerEvent.id, eventId)).for("update");
     if (!e) return refuse(GONE);
     if (e.cancelledAt) return refuse("This event is cancelled already.");
-    await tx.update(volunteerEvent).set({ cancelledAt: new Date(), cancelledBy: o.actor.id, updatedAt: new Date() }).where(eq(volunteerEvent.id, e.id));
     const shifts = await tx.select().from(volunteerShift).where(and(eq(volunteerShift.eventId, e.id), isNull(volunteerShift.cancelledAt))).for("update");
+    // A shift that is over keeps its volunteers' places: cancelling it would take them off each family's "signed up for".
+    if (stillToEnd(e, shifts, zone).length < shifts.length) {
+      return refuse("Some of this event's shifts are over, so the event can't be cancelled as a whole. Cancel the shifts still to come one by one.");
+    }
+    await tx.update(volunteerEvent).set({ cancelledAt: new Date(), cancelledBy: o.actor.id, updatedAt: new Date() }).where(eq(volunteerEvent.id, e.id));
     const signups = await signupsOn(shifts.map((s) => s.id), tx);
     await writeAudit({ actor: o.actor, action: "volunteer.event.cancel", permission: o.permission, targetType: "volunteer_event", targetId: e.id, ip: o.ip,
       before: { ...eventFacts(e), cancelled: false }, after: { cancelled: true, shiftsOn: shifts.length, signupsTold: signups.length } }, tx);
@@ -277,6 +294,7 @@ export async function addShift(eventId: string, input: ShiftInput, o: VolunteerO
  * never fuller than its places. A new start or end is emailed to everyone signed up for it, once saved.
  */
 export async function updateShift(shiftId: string, input: ShiftInput, o: VolunteerOp): Promise<Done<{ told: number; failed: number }>> {
+  const zone = (await getClubSettings()).timeZone;
   const r = await db.transaction(async (tx) => {
     const [s] = await tx.select().from(volunteerShift).where(eq(volunteerShift.id, shiftId)).for("update");
     if (!s) return refuse(GONE);
@@ -293,7 +311,7 @@ export async function updateShift(shiftId: string, input: ShiftInput, o: Volunte
     const beforeLinks = (await tx.select({ id: volunteerShiftRequirement.requirementId }).from(volunteerShiftRequirement).where(eq(volunteerShiftRequirement.shiftId, s.id))).map((l) => l.id).sort();
     await tx.delete(volunteerShiftRequirement).where(eq(volunteerShiftRequirement.shiftId, s.id));
     if (requirementIds.length) await tx.insert(volunteerShiftRequirement).values(requirementIds.map((requirementId) => ({ shiftId: s.id, requirementId })));
-    const signups = moved ? await signupsOn([s.id], tx) : [];
+    const signups = moved && stillToEnd(e!, [s], zone).length > 0 ? await signupsOn([s.id], tx) : [];
     await writeAudit({ actor: o.actor, action: "volunteer.shift.update", permission: o.permission, targetType: "volunteer_shift", targetId: s.id, ip: o.ip,
       before: { ...shiftFacts(s), requirementIds: beforeLinks }, after: { ...shiftFacts(after!), requirementIds, ...(moved ? { signupsTold: signups.length } : {}) } }, tx);
     const notices: Notice[] = signups.map((x) => ({ kind: "change", signup: x, before: factsOf(e!, s), after: factsOf(e!, after!) }));
@@ -305,12 +323,14 @@ export async function updateShift(shiftId: string, input: ShiftInput, o: Volunte
 
 /** Cancels one shift. Everyone signed up for it is told by email; its places are no longer offered. */
 export async function cancelShift(shiftId: string, o: VolunteerOp): Promise<Done<{ told: number; failed: number }>> {
+  const zone = (await getClubSettings()).timeZone;
   const r = await db.transaction(async (tx) => {
     const [s] = await tx.select().from(volunteerShift).where(eq(volunteerShift.id, shiftId)).for("update");
     if (!s) return refuse(GONE);
     const [e] = await tx.select().from(volunteerEvent).where(eq(volunteerEvent.id, s.eventId));
     if (e!.cancelledAt) return refuse("This event is cancelled already, and its shifts with it.");
     if (s.cancelledAt) return refuse("This shift is cancelled already.");
+    if (stillToEnd(e!, [s], zone).length === 0) return refuse(OVER);
     await tx.update(volunteerShift).set({ cancelledAt: new Date(), cancelledBy: o.actor.id, updatedAt: new Date() }).where(eq(volunteerShift.id, s.id));
     const signups = await signupsOn([s.id], tx);
     await writeAudit({ actor: o.actor, action: "volunteer.shift.cancel", permission: o.permission, targetType: "volunteer_shift", targetId: s.id, ip: o.ip,
