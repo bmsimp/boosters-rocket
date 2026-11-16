@@ -124,6 +124,18 @@ test("every volunteer sign-up the seed gives another family is searched for", as
     + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
 });
 
+test("every form request the seed gives another family is searched for", async () => {
+  // As above, for forms: the form page sends its signers' names to the browser, so each value of another family's
+  // request (its document's id, the name it was made for, each signer's name and address) must be findable.
+  const rows = await sql`SELECT family_qbo_id, envelope_id, subject_name, signers FROM signature_request WHERE family_qbo_id <> ${PARENT_SESSION_FAMILY}`;
+  expect(rows.length).toBeGreaterThanOrEqual(1);
+  const values = rows.flatMap((r) => [r.envelope_id, r.subject_name, ...((r.signers as { name: string; email: string }[]) ?? []).flatMap((s) => [s.name, s.email])]
+    .filter((v): v is string => typeof v === "string" && v.length > 0).map((v) => ({ v, family: r.family_qbo_id as string })));
+  const unsearched = values.filter(({ v }) => !OTHER_FAMILIES.some((s) => v.includes(s))).map(({ v, family }) => `${v} (a form request of ${family})`);
+  expect(unsearched, `scripts/seed-e2e.ts gives another family these in its forms, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
+    + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
+});
+
 test("no parent page sends the browser anything of another family, in the HTML or in the data sent with it", async ({ context, page }) => {
   // tests/integration/parent-isolation.test.ts searches each page's HTML. This reads the whole response, which also
   // carries every prop a server component passes to a client component, rendered or not.
