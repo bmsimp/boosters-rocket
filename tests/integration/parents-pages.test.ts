@@ -32,6 +32,7 @@ import ChooseFamily from "@/app/choose-family/page";
 import { decideHoldAction, reverseHoldAction, blockAction, unblockAction, resendWelcomeAction } from "@/app/staff/(app)/parents/actions";
 import { resetDb, seedGuardian, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
+import { rowNamed } from "../helpers/table";
 
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const thrown = async (p: Promise<unknown>) => (await p.catch((e: { url?: string; notFound?: boolean }) => e)) as { url?: string; notFound?: boolean };
@@ -95,14 +96,15 @@ describe("the staff pages for parents", () => {
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Can sign in (hasn&#x27;t yet)");
     expect(html).toContain("Email addresses are changed in QuickBooks, not here");
-    expect(html).toContain('<span class="when">Never signed in · Not welcomed yet</span>');
+    expect(rowNamed(html, "Ana Rivera")).toEqual(["Ana Rivera", "ana@example.com", "Never", "Not sent yet", "Rivera Family: Can sign in (hasn't yet)"]);
     expect(await parentsPage("zzz")).toContain("Nobody matches");
     const [ana] = await db.select().from(parent);
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") });
     await db.insert(auditLog).values({ door: "parent", actorId: ana!.id, actorLabel: ana!.email, action: "signin", targetType: "parent", targetId: ana!.id, at: new Date("2026-11-05T12:00:00Z") });
     const dated = await parentsPage();
-    expect(dated).toContain('<span class="when">Last signed in <time dateTime="2026-11-05T12:00:00.000Z" title="2026-11-05T12:00:00.000Z">');
-    expect(dated).toContain(' · Welcomed <time dateTime="2026-11-01T12:00:00.000Z" title="2026-11-01T12:00:00.000Z">');
+    expect(dated).toContain('<time dateTime="2026-11-05T12:00:00.000Z" title="2026-11-05T12:00:00.000Z">');
+    expect(dated).toContain('Sent <time dateTime="2026-11-01T12:00:00.000Z" title="2026-11-01T12:00:00.000Z">');
+    expect(rowNamed(dated, "Ana Rivera")!.slice(2, 4)).toEqual([expect.stringMatching(/^2026-11-05/), expect.stringMatching(/^Sent 2026-11-01/)]);
   });
 
   it("deciding and reversing go through the actions, and the page follows", async () => {

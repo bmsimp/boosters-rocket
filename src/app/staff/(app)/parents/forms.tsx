@@ -25,14 +25,17 @@ export function HoldForm({ email, familyQboIds, decide }: {
   const [note, setNote] = useState("");
   const [state, run, pending] = useActionState(async (_: Done | null, decision: Decision) => safely(() => decide(email, decision, familyQboIds, note), failed), null);
   return (
-    <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>How do you know? (staff only)</span>
-        <textarea name="note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
-      <Outcome state={state} />
-      <div className="row-actions">
-        <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run("same_person"))}>Same person</button>
-        <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run("not_same"))}>Not the same person</button>
-      </div>
+    <form onSubmit={noSubmit}>
+      <fieldset className="decide">
+        <legend>Is it one person?</legend>
+        <label className="field"><span>How do you know? (staff only)</span>
+          <textarea name="note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <Outcome state={state} />
+        <div className="row-actions">
+          <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run("same_person"))}>Same person</button>
+          <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run("not_same"))}>Not the same person</button>
+        </div>
+      </fieldset>
     </form>
   );
 }
