@@ -213,31 +213,53 @@ export async function qboGet(path: string, params: Record<string, string> = {}, 
   }
 }
 
-const rowsOf = (body: unknown, entity: string): Record<string, unknown>[] => {
-  const rows = (body as { QueryResponse?: Record<string, unknown> }).QueryResponse?.[entity]; // a null body throws, and is recorded as unexpected
-  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
-};
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const badAnswer = () => new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
+
+/**
+ * The rows of a query answer. Every query the portal sends is read through here, because an answer with no rows is
+ * acted on: no invoices is shown to a parent as "nothing owed", and no customers would be saved as an empty roster,
+ * which ends every parent's access. So "no rows" is taken from one shape only, the one QuickBooks gives: an object
+ * whose QueryResponse is an object holding no rows at all. Anything else with status 200 is refused, never read as an
+ * empty list: a body that isn't an object, a missing QueryResponse, rows that aren't a list, rows of another entity.
+ * A Fault sent with status 200 is a refusal and gets its own code ("fault"); none of its text is kept.
+ */
+function strictRowsOf(body: unknown, entity: string): Record<string, unknown>[] {
+  if (!isPlainObject(body)) throw badAnswer();
+  if ("Fault" in body || "fault" in body) throw new QboError("QuickBooks refused the request.", "fault");
+  const answer = body.QueryResponse;
+  if (!isPlainObject(answer)) throw badAnswer();
+  const rows = answer[entity];
+  if (rows === undefined) {
+    // Only paging numbers may sit beside no rows: a list or an object here is the answer to some other question.
+    if (Object.values(answer).some((v) => typeof v === "object" && v !== null)) throw badAnswer();
+    return [];
+  }
+  if (!Array.isArray(rows)) throw badAnswer();
+  return rows as Record<string, unknown>[];
+}
 
 /**
  * Every customer, a page at a time, in Id order: without an order a customer could be skipped or repeated between
- * pages. `where` is fixed text from this codebase, never anything a person typed.
+ * pages. `where` is fixed text from this codebase, never anything a person typed. Each page is read strictly
+ * (strictRowsOf): a 200 that isn't a query answer fails the whole read, and is never a short last page.
  */
 export async function qboQueryAll(entity: "Customer", where = ""): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
   for (let start = 1; ; start += QBO_PAGE) {
     // With where = "Active in (true, false)" this is the string verified against the sandbox on 2026-11-11 (spec §8),
     // starting at 1. Don't change it without trying the new string there first.
-    const page = rowsOf(await qboGet("query", { query: `select * from ${entity}${where ? ` where ${where}` : ""} orderby Id startposition ${start} maxresults ${QBO_PAGE}` }), entity);
+    const page = strictRowsOf(await qboGet("query", { query: `select * from ${entity}${where ? ` where ${where}` : ""} orderby Id startposition ${start} maxresults ${QBO_PAGE}` }), entity);
     out.push(...page);
     if (page.length < QBO_PAGE) return out;
   }
 }
 
-/** Every customer type, in one request with no paging clause. */
+/** Every customer type, in one request with no paging clause, read strictly like the customers. */
 export async function qboCustomerTypes(): Promise<Record<string, unknown>[]> {
   // The string verified against the sandbox on 2026-11-11 (spec §8). Don't change it (a paging clause, say) without
   // trying the new string there first.
-  return rowsOf(await qboGet("query", { query: "select * from CustomerType" }), "CustomerType");
+  return strictRowsOf(await qboGet("query", { query: "select * from CustomerType" }), "CustomerType");
 }
 
 /** A QuickBooks record id as it may go into query text or a path: digits only. Anything else is never sent. */
@@ -266,31 +288,6 @@ export const INVOICE_INCLUDE = "invoiceLink";
 
 /** True once the in-form was refused (a 400, or a Fault) and the one-customer form then worked: kept for the life of the process. */
 let invoicesOneCustomerAtATime = false;
-
-const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const badAnswer = () => new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
-
-/**
- * The rows of a query answer that a parent is shown, where no rows reads as "nothing owed". So "no rows" is taken from
- * one shape only, the one QuickBooks gives: an object whose QueryResponse is an object holding no rows at all. Anything
- * else with status 200 is refused, never read as an empty list: a body that isn't an object, a missing QueryResponse,
- * rows that aren't a list, rows of another entity. A Fault sent with status 200 is a refusal and gets its own code
- * ("fault"); none of its text is kept.
- */
-function strictRowsOf(body: unknown, entity: string): Record<string, unknown>[] {
-  if (!isPlainObject(body)) throw badAnswer();
-  if ("Fault" in body || "fault" in body) throw new QboError("QuickBooks refused the request.", "fault");
-  const answer = body.QueryResponse;
-  if (!isPlainObject(answer)) throw badAnswer();
-  const rows = answer[entity];
-  if (rows === undefined) {
-    // Only paging numbers may sit beside no rows: a list or an object here is the answer to some other question.
-    if (Object.values(answer).some((v) => typeof v === "object" && v !== null)) throw badAnswer();
-    return [];
-  }
-  if (!Array.isArray(rows)) throw badAnswer();
-  return rows as Record<string, unknown>[];
-}
 
 async function invoicePages(query: (start: number) => string, o: QboGetOptions): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];

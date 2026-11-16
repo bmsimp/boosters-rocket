@@ -134,8 +134,91 @@ describe("the roster refresh", () => {
 
   it("a failure that isn't a QuickBooks error is recorded and keeps the old cache", async () => {
     await refreshRoster(worker);
-    stub.nullQueryBody = true;
-    await expectFailedRun(await refreshRoster(worker), "The roster couldn't be read. (unexpected)", "unexpected");
+    const client = await import("@/lib/quickbooks/client");
+    const spy = vi.spyOn(client, "qboCustomerTypes").mockRejectedValueOnce(new TypeError("Cannot read properties of null"));
+    const r = await refreshRoster(worker);
+    spy.mockRestore();
+    await expectFailedRun(r, "The roster couldn't be read. (unexpected)", "unexpected");
+  });
+
+  // An answer with no customers in it would be saved as an empty roster, and the reconcile would then end every
+  // parent's access. So only a well-formed query answer counts, for the customers and for the types alike.
+  const FAULT = { Fault: { Error: [{ Message: "a message the portal must never store", code: "4000" }], type: "ValidationFault" } };
+  const NOT_AN_ANSWER: [string, unknown][] = [
+    ["null", null],
+    ["a string", "QueryResponse"],
+    ["a list", [{ QueryResponse: {} }]],
+    ["an empty object", {}],
+    ["a QueryResponse that is null", { QueryResponse: null }],
+    ["a QueryResponse that is a list", { QueryResponse: [] }],
+    ["rows that are one object", { QueryResponse: { Customer: { Id: "10" }, CustomerType: { Id: "1" } } }],
+    ["rows that are a number", { QueryResponse: { Customer: 0, CustomerType: 0 } }],
+    ["rows of another entity", { QueryResponse: { Invoice: [{ Id: "1" }] } }],
+  ];
+  const UNREADABLE = "QuickBooks sent an answer the portal couldn't read. (bad_answer)";
+
+  it.each(NOT_AN_ANSWER)("a 200 for the customers that is %s fails the refresh and keeps the old cache", async (_what, body) => {
+    await refreshRoster(worker);
+    stub.oddRosterAnswer = { customers: body };
+    await expectFailedRun(await refreshRoster(worker), UNREADABLE, "bad_answer");
+  });
+
+  it.each(NOT_AN_ANSWER)("a 200 for the customer types that is %s fails the refresh and keeps the old cache", async (_what, body) => {
+    await refreshRoster(worker);
+    stub.oddRosterAnswer = { types: body };
+    await expectFailedRun(await refreshRoster(worker), UNREADABLE, "bad_answer");
+    expect((await db.select().from(qboCustomerType)).map((t) => t.name).sort()).toEqual(["Family", "Parent", "School", "Student", "Vendor"]);
+  });
+
+  it("a Fault sent with status 200 fails the refresh, and none of its text is kept", async () => {
+    await refreshRoster(worker);
+    stub.oddRosterAnswer = { customers: FAULT };
+    await expectFailedRun(await refreshRoster(worker), "QuickBooks refused the request. (fault)", "fault");
+    stub.oddRosterAnswer = { types: FAULT };
+    expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "failed", error: "QuickBooks refused the request. (fault)" });
+    expect(JSON.stringify([await db.select().from(auditLog), await db.select().from(jobRun)])).not.toContain("a message the portal must never store");
+  });
+
+  it("a second page that isn't a query answer fails the whole read, and is never a short last page", { timeout: 30_000 }, async () => {
+    await refreshRoster(worker);
+    const all = Array.from({ length: 1000 }, (_, i) => ({ Id: String(1000 + i), DisplayName: `New ${i}`, Active: true, SyncToken: "0" }));
+    const realFetch = globalThis.fetch;
+    // The first page is full and well formed; the page after it is an empty object.
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const query = new URL(String(input)).searchParams.get("query") ?? "";
+      if (/from Customer .*startposition 1001 /.test(query)) return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      return realFetch(input, init);
+    });
+    stub.customers = all;
+    const r = await refreshRoster(worker);
+    spy.mockRestore();
+    await expectFailedRun(r, UNREADABLE, "bad_answer");
+  });
+
+  const NO_CUSTOMERS = "QuickBooks sent a roster with no customers in it, so the roster was left as it was. (no_customers)";
+
+  it.each([
+    ["an empty QueryResponse", { QueryResponse: {}, time: "2026-11-15T10:00:00.000-08:00" }],
+    ["an empty list of customers", { QueryResponse: { Customer: [], startPosition: 1, maxResults: 0 } }],
+    ["customers that are no rows at all", { QueryResponse: { Customer: [null, "not a customer", { DisplayName: "No Id" }] } }],
+  ])("won't replace a cache that holds customers with %s", async (_what, body) => {
+    await refreshRoster(worker);
+    stub.oddRosterAnswer = { customers: body };
+    await expectFailedRun(await refreshRoster(worker), NO_CUSTOMERS, "no_customers");
+    expect(await db.select().from(qboCustomerType)).toHaveLength(5); // the types are left as they were too
+  });
+
+  it("takes a well-formed answer with no customers for a company that has none yet", async () => {
+    stub.customers = [];
+    expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 0, types: 5 });
+    expect(await lastRun()).toMatchObject({ outcome: "ok", detail: "0 customers, 5 customer types" });
+    // And again: an empty cache is replaced by an empty answer.
+    expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 0, types: 5 });
+  });
+
+  it("takes a well-formed answer with no customer types", async () => {
+    stub.oddRosterAnswer = { types: { QueryResponse: {}, time: "2026-11-15T10:00:00.000-08:00" } };
+    expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 9, types: 0 });
   });
 
   it("skips rows QuickBooks sends that aren't objects, and keeps the real ones", async () => {

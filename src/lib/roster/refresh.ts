@@ -26,6 +26,8 @@ const isActive = (v: unknown) => v === true || v === "true";
 const isRow = (v: unknown): v is Raw => typeof v === "object" && v !== null && !Array.isArray(v);
 type TypeRowIn = { qboId: string; name: string; active: boolean; refreshedAt: Date };
 type CustomerRowIn = NonNullable<ReturnType<typeof customerRow>>;
+/** The answer held no customers while the cache, read from the same company, holds some. Thrown inside the save, so nothing of it is kept. */
+class NoCustomersInAnswer extends Error {}
 
 function customerRow(c: Raw, named: Set<string>, now: Date) {
   const qboId = text(c.Id, 64);
@@ -44,6 +46,11 @@ function customerRow(c: Raw, named: Set<string>, now: Date) {
 /**
  * Replaces the cache from QuickBooks: every customer type and every customer, active and inactive. QuickBooks is read
  * first; the tables change only if all of it arrived, in the same transaction, so a failure leaves the old cache whole.
+ *
+ * An empty roster ends every parent's access (the reconcile below), so it is believed from one answer only: a
+ * well-formed one (the client reads strictly, and anything else is a failed read), and never over a cache of the same
+ * company that holds customers. QuickBooks makes a customer inactive and never deletes one, so a company that had
+ * customers still has them; an answer with none is recorded as a failed run (`no_customers`) and the cache stays.
  */
 export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: string | null; manual?: boolean }): Promise<RefreshResult> {
   const c = await getConnection();
@@ -101,6 +108,9 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         // it now, with that company's parent access, in the same savepoint as the swap. Its shape goes with it, so the
         // rows are stored with no contact details, as with no shape, and the reconcile below does nothing.
         const cleared = await clearRosterOfOtherCompanyLocked(sp, realmId, { actor: o.actor, ip: o.ip, keepRunId: run!.id });
+        // Another company's cache was just cleared, and a new company may truly have no customers yet. Otherwise the
+        // customers in the cache are this company's, and an answer without one of them is not believed.
+        if (!cleared && customerRows.length === 0 && (await sp.select({ qboId: qboCustomer.qboId }).from(qboCustomer).limit(1)).length > 0) throw new NoCustomersInAnswer();
         const rows = cleared ? customerRows.map((r) => ({ ...r, email: null, phone: null })) : customerRows;
         await sp.delete(qboCustomerType);
         await sp.delete(qboCustomer);
@@ -112,7 +122,9 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     } catch (e) {
       return e instanceof ReconcileFailed
         ? fail("The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)", "reconcile_failed")
-        : fail("The roster couldn't be saved. (save_failed)", "save_failed");
+        : e instanceof NoCustomersInAnswer
+          ? fail("QuickBooks sent a roster with no customers in it, so the roster was left as it was. (no_customers)", "no_customers")
+          : fail("The roster couldn't be saved. (save_failed)", "save_failed");
     }
     await tx.update(jobRun).set({ finishedAt: new Date(), outcome: "ok", detail: `${customerRows.length} customers, ${typeRows.length} customer types` }).where(eq(jobRun.id, run!.id));
     await writeAudit({ actor: o.actor, action: "roster.refresh", targetType: "job_run", targetId: String(run!.id), after: { customers: customerRows.length, types: typeRows.length }, ip: o.ip }, tx);

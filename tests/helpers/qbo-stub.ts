@@ -21,6 +21,12 @@ export type QboStub = {
    * empty object, invoices that aren't a list). `inFormOnly` leaves the one-customer form answering as usual.
    */
   oddInvoiceAnswer: { body: unknown; inFormOnly?: boolean } | null;
+  /**
+   * Answer the roster's queries with HTTP 200 and a body of the test's choosing: `customers` for a Customer query, `types`
+   * for the CustomerType query. A key left out answers as usual. For a 200 that is not a query answer (a Fault, an empty
+   * object), and for a well-formed answer that holds no rows (`{ QueryResponse: {} }`) while `customers` holds some.
+   */
+  oddRosterAnswer: { customers?: unknown; types?: unknown } | null;
   rateLimitNext: number;        // answer this many API requests, from the next one, with HTTP 429
   failNext: number;             // answer this many API requests, from the next one, with HTTP 500
   apiDelayMs: number;           // wait this long before answering any API request (a slow QuickBooks)
@@ -62,7 +68,7 @@ function withoutEmpty(value: unknown): unknown {
 export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0, answering = 0;
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
-    invoices: [], refuseInQuery: false, oddInvoiceAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
+    invoices: [], refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, dropApi: false,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
@@ -164,6 +170,9 @@ export async function startQboStub(): Promise<QboStub> {
           matched = stub.invoices.filter((i) => ids.has(String((i.CustomerRef as { value?: unknown } | undefined)?.value)))
             .map((i) => (withLink ? i : Object.fromEntries(Object.entries(i).filter(([field]) => field !== "InvoiceLink"))));
         } else {
+          const odd = stub.oddRosterAnswer ?? {};
+          if (entity === "Customer" && "customers" in odd) return json(200, odd.customers);
+          if (entity === "CustomerType" && "types" in odd) return json(200, odd.types);
           matched = entity === "CustomerType" ? stub.types
             : /active in \(true, ?false\)/i.test(q) ? stub.customers : stub.customers.filter((c) => c.Active !== false);
         }
@@ -186,7 +195,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.reset = () => {
     stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.dropApi = false;
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
-    stub.invoices = []; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
+    stub.invoices = []; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));
