@@ -16,7 +16,11 @@ import { refreshRoster } from "@/lib/roster/refresh";
 import { NOT_HERE } from "@/lib/roster/operations";
 import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { setRosterSource } from "@/lib/roster/source";
-import { resetDb } from "../helpers/db";
+import { formWithdrawal, signedFormEvidence, signedFormFile, volunteerSignup } from "@/lib/db/schema";
+import { resetDb, seedParent } from "../helpers/db";
+import { formSetting, requestNow, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
+import { seedSeason } from "../helpers/season";
+import { seedEvent, seedSignup } from "../helpers/volunteer";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { asOp, auditsOf, connectRoster, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
@@ -100,6 +104,35 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(await cached("12")).toMatchObject({ parentQboId: "20", syncToken: "1" });
     expect((await auditsOf("roster.student.move"))[0]).toMatchObject({ before: { familyQboId: "10" }, after: { familyQboId: "20" } });
     expect((await auditsOf("roster.student.move.followed"))[0]).toMatchObject({ targetId: "12", after: { fromFamilyQboId: "10", toFamilyQboId: "20" } });
+  });
+
+  it("moves a student with an open form, a signed form and a place on a shift to come: the forms and the place follow the move", async () => {
+    const season = await seedSeason({ name: "Moving season", steps: [{ name: "Join" }] });
+    const stepId = season.stepIds["Join"]!;
+    const openReq = await seedFormRequirement({ stepId, title: "Medical release", appliesTo: "student", form: formSetting({ id: "envelope_tmplmedical" }) });
+    const signedReq = await seedFormRequirement({ stepId, title: "Photo consent", appliesTo: "student", form: formSetting({ id: "envelope_tmplphoto" }), position: 60 });
+    const open = await seedRequest({ requirementId: openReq, familyQboId: "10", subjectQboId: "12", state: "waiting", envelopeId: "envelope_movedopen1" });
+    const signed = await seedRequest({ requirementId: signedReq, familyQboId: "10", subjectQboId: "12", state: "complete", envelopeId: "envelope_movedsigned" });
+    const evidence = await seedEvidence(signed, { tag: "moved" });
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    const { shifts: [shift] } = await seedEvent({ inDays: 20 });
+    const place = await seedSignup({ shiftId: shift!.id, familyQboId: "10", signedUpBy: ana.id, student: { qboId: "12", name: "Leo Rivera" } });
+
+    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: true, message: "Moved in QuickBooks." });
+
+    // The open form starts again under the new family, and its document waits for the worker to withdraw it.
+    expect(await requestNow(open)).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
+    expect(await db.select().from(formWithdrawal)).toEqual([expect.objectContaining({ envelopeId: "envelope_movedopen1" })]);
+    // The signed form moves with its evidence, every byte kept.
+    expect(await requestNow(signed)).toMatchObject({ familyQboId: "20", state: "complete", envelopeId: "envelope_movedsigned" });
+    const [kept] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, evidence.id));
+    expect(kept).toMatchObject({ requestId: signed, familyQboId: "20" });
+    expect(await db.select().from(signedFormFile).where(eq(signedFormFile.evidenceId, evidence.id))).toHaveLength(4);
+    // The place on a shift still to come is given up; the old family keeps nothing of the student's there.
+    const [after] = await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, place.id));
+    expect(after!.cancelledAt).not.toBeNull();
+    expect((await auditsOf("roster.student.move.followed"))[0]).toMatchObject({ targetId: "12",
+      after: { fromFamilyQboId: "10", toFamilyQboId: "20", formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1 } });
   });
 
   it("makes a family inactive: its parents' access ends, and the worker is asked to read the roster again", async () => {
