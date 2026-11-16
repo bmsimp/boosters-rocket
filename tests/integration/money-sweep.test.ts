@@ -8,7 +8,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 });
 vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboConnection, setting } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
@@ -188,6 +188,30 @@ describe("the worker's read of every family", () => {
     expect((await runs())[1]!.detail).toBe("Stopped: a different QuickBooks company was connected. (other_company)");
     expect(await db.select().from(setting).where(eq(setting.key, RUN_KEY))).toEqual([]);
     expect((await audits("money.records.cleared"))[0]!.after).toMatchObject({ reason: "different_company", runsEnded: 1 });
+  });
+
+  it("a run ended from outside while it reads (another company connected) writes nothing more: not its place, not 'ok'", async () => {
+    await threeFamilies();
+    let ended = false;
+    // What clearMoneyRecords() does to a run under way, as the first family is being read.
+    stub.onApiRequest = async () => {
+      if (ended) return;
+      ended = true;
+      await db.update(jobRun).set({ finishedAt: new Date(), outcome: "failed", detail: "Stopped: a different QuickBooks company was connected. (other_company)" }).where(isNull(jobRun.outcome));
+      await db.delete(setting).where(eq(setting.key, RUN_KEY));
+    };
+    expect(await runMoneyJob({ paceMs: 0 })).toEqual({ ran: true, finished: true, ok: false });
+    expect((await runs()).map((r) => [r.outcome, r.detail])).toEqual([["failed", "Stopped: a different QuickBooks company was connected. (other_company)"]]);
+    expect(await db.select().from(setting).where(eq(setting.key, RUN_KEY))).toEqual([]);
+    expect(await audits("money.read_all")).toEqual([]);
+  });
+
+  it("refuses a staff ask while only an Admin can mend the connection, rather than promising a run that never starts", async () => {
+    await threeFamilies();
+    await db.update(qboConnection).set({ lastError: "Intuit no longer accepts this connection. Connect QuickBooks again. (invalid_grant)" });
+    expect(await askForMoneyRun({ actor: { door: "staff", id: "5a1e7a2e-0000-4000-8000-000000000001", label: "t@club.org" }, ip: null, permission: "Finance.Balance.Read" }))
+      .toEqual({ ok: false, reason: "not_connected" });
+    expect((await moneyRunView()).asked).toBe(false);
   });
 
   it("starts when staff ask, at the worker's next wake, whatever the day; refuses a second ask and one too soon", async () => {

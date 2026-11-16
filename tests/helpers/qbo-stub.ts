@@ -64,7 +64,7 @@ export type QboStub = {
   updateServerFault: { status: number; code: string } | null;
   dropApi: boolean;             // close the connection on every API request without answering: QuickBooks can't be reached
   dropToken: boolean;           // close the connection on every token request without answering: Intuit can't be reached
-  onApiRequest: ((call: StubCall) => void) | null; // run as each API request arrives, before anything about it is checked: a token revoked at that moment, say
+  onApiRequest: ((call: StubCall) => void | Promise<unknown>) | null; // run, and waited for, as each API request arrives, before anything about it is checked: a token revoked at that moment, say
   revokeDelayMs: number;
   tokenDelayMs: number; queryDelayMs: number; companyInfoDelayMs: number; refreshExpiresIn: number;
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
@@ -133,7 +133,7 @@ export async function startQboStub(): Promise<QboStub> {
         return json(200, {});
       }
       if (!url.pathname.startsWith("/v3/company/")) return json(404, {});
-      stub.onApiRequest?.(call);
+      await stub.onApiRequest?.(call);
       if (stub.dropApi) { req.socket.destroy(); return; }
       if (!stub.accessTokens.has(call.auth.replace(/^Bearer /, ""))) return json(401, { fault: { error: [{ code: "3200" }] } });
       answering++; stub.peakApi = Math.max(stub.peakApi, answering);

@@ -131,9 +131,13 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
     const families = await familiesInOrder();
     const total = families.length;
     const carriedOn = state.startedAfter !== null;
+    // A run can be ended from outside while it reads (a change of QuickBooks company ends it and forgets its place):
+    // then it writes nothing more, neither its place nor its outcome, which would carry the old company's ids over.
+    const stillOpen = async () => (await db.select({ id: jobRun.id }).from(jobRun).where(and(eq(jobRun.id, runId), isNull(jobRun.outcome)))).length > 0;
     const finish = async (outcome: "ok" | "failed", detail: string, after: string | null, code?: string) => {
       await db.transaction(async (tx) => {
-        await tx.update(jobRun).set({ finishedAt: new Date(), outcome, detail }).where(eq(jobRun.id, runId));
+        const ended = await tx.update(jobRun).set({ finishedAt: new Date(), outcome, detail }).where(and(eq(jobRun.id, runId), isNull(jobRun.outcome))).returning({ id: jobRun.id });
+        if (ended.length === 0) return;
         await saveState({ ...EMPTY, after }, tx);
         await writeAudit({ actor: WORKER_ACTOR, action: outcome === "ok" ? "money.read_all" : "money.read_all.failed", targetType: "job_run", targetId: String(runId),
           after: { families: total, read: state.read, couldNotRead: state.failed, ...(carriedOn ? { carriedOnFromAnEarlierRun: true } : {}),
@@ -152,6 +156,7 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
       if (Date.now() >= deadline) return { ran: true, finished: false, ok: true };
       let outcome: Awaited<ReturnType<typeof readFamilyForRun>>;
       try { outcome = await readFamilyForRun(familyQboId, { pace }); } catch { outcome = { ok: false, code: "unexpected" }; }
+      if (!(await stillOpen())) return { ran: true, finished: true, ok: false };
       if (!outcome.ok && !PASS_OVER.has(outcome.code)) {
         const why = STOP_WORDS[outcome.code] ?? "QuickBooks couldn't be read";
         await finish("failed", `${done()} of ${total}, then stopped: ${why} (${outcome.code.slice(0, 40)}). The next run carries on from there.`, state.after, outcome.code.slice(0, 40));
@@ -177,7 +182,8 @@ export async function askForMoneyRun(o: { actor: Actor & { id: string }; ip: str
     await tx.execute(sql`select pg_advisory_xact_lock(${RUN_LOCK + 1})`); // two asks at once: one waits for the other
     const state = await getState(tx);
     const conn = await getConnection(tx);
-    if (!conn?.realmId || !conn.refreshTokenCiphertext || (await getRosterSource(tx)) !== conn.realmId || (await getShape(tx)) === null) return { ok: false, reason: "not_connected" };
+    // Refused, too, while only an Admin connecting again can mend the connection: the worker would never start the run.
+    if (!conn?.realmId || !conn.refreshTokenCiphertext || (await getRosterSource(tx)) !== conn.realmId || (await getShape(tx)) === null || (await connectionView()).needsAdmin) return { ok: false, reason: "not_connected" };
     if (state.runId !== null && (await tx.select().from(jobRun).where(and(eq(jobRun.id, state.runId), isNull(jobRun.outcome)))).length) return { ok: false, reason: "running" };
     if (state.requested) return { ok: false, reason: "asked" };
     const [last] = await tx.select().from(jobRun).where(eq(jobRun.job, MONEY_JOB)).orderBy(desc(jobRun.id)).limit(1);
