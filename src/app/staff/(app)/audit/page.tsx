@@ -4,6 +4,8 @@ import { LocalTime } from "@/app/components/local-time";
 import { formatAuditDetails } from "@/lib/audit/format";
 import { actionName } from "@/lib/audit/actions";
 import { auditActions, auditPage, filtersQuery, hasFilters, parseAuditFilters, parseCursor, recordText } from "@/lib/audit/query";
+import { DataTable } from "@/app/components/data-table";
+import { Notice } from "@/app/components/notice";
 import { AuditFilterForm } from "./filter-form";
 
 export const metadata = { title: "Audit log" };
@@ -30,17 +32,19 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
 
       <section className="box" aria-labelledby="audit-h"><h2 id="audit-h">{filtered ? `${rowsWord(page.total)} found` : rowsWord(page.total)}</h2>
         {(filters.from || filters.to) && <p className="hint">{filters.from ? <>From <LocalTime iso={filters.from.toISOString()} /></> : "From the start"}{filters.to ? <> to <LocalTime iso={filters.to.toISOString()} /></> : " to now"}.</p>}
-        {page.rows.length === 0 ? <p>{page.total > 0 ? "No rows on this page." : filtered ? "Nothing matches. Try fewer filters." : "Nothing has been recorded yet."}</p> : (
-          <ul className="lines">{page.rows.map((r) => {
-            const details = formatAuditDetails(r.before, r.after);
-            return (
-              <li key={r.id}><div><span className="what">{actionName(r.action) ?? r.action}</span>
-                <span className="when"><LocalTime iso={r.at.toISOString()} /> · {r.door} · {r.actorLabel ?? "system"}{r.ip ? ` · ${r.ip}` : ""} · <code>{r.action}</code></span>
-                {details ? <details className="when"><summary>Details</summary><code>{details}</code></details> : null}</div>
-                <span className="amount">{r.targetType
-                  ? (r.targetId ? <Link href={`/staff/audit${filtersQuery({ ...filters, record: { type: r.targetType, id: r.targetId } })}`}>{r.targetType} {r.targetId}</Link> : r.targetType)
-                  : ""}</span></li>);
-          })}</ul>
+        {page.rows.length === 0 ? <Notice tone="info">{page.total > 0 ? "No rows on this page." : filtered ? "Nothing matches. Try fewer filters." : "Nothing has been recorded yet."}</Notice> : (
+          <DataTable caption="Newest first" className="audit-table" rows={page.rows} rowKey={(r) => String(r.id)} columns={[
+            { key: "when", header: "When", sorted: "descending", cell: (r) => <LocalTime iso={r.at.toISOString()} /> },
+            { key: "what", header: "What happened", rowHeader: true, cell: (r) => {
+              const details = formatAuditDetails(r.before, r.after);
+              return (<>{actionName(r.action) ?? r.action}<span className="when"><code>{r.action}</code></span>
+                {details ? <details className="when"><summary>Details</summary><code>{details}</code></details> : null}</>);
+            } },
+            { key: "who", header: "Who", cell: (r) => <>{r.actorLabel ?? "system"}<span className="when">{r.door}{r.ip ? ` · ${r.ip}` : ""}</span></> },
+            { key: "record", header: "Record", cell: (r) => (r.targetType
+              ? (r.targetId ? <Link href={`/staff/audit${filtersQuery({ ...filters, record: { type: r.targetType, id: r.targetId } })}`}>{r.targetType} {r.targetId}</Link> : r.targetType)
+              : "None") },
+          ]} />
         )}
         <div className="row-actions box-foot">
           {page.newer !== null && <Link className="btn btn-line" href={`/staff/audit${filtersQuery(filters, { after: page.newer })}`}>Newer</Link>}

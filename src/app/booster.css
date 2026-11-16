@@ -589,6 +589,10 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
   .btn:disabled, .field :disabled { border-style: dashed; color: GrayText; }
 }
 
+/* The audit log: a row's details open under its words, and a long code or record id breaks where it must. */
+.audit-table code { overflow-wrap: anywhere; font-size: 0.875rem; }
+.audit-table details summary { cursor: pointer; padding: 10px 0; font-weight: 700; color: var(--club-text); }
+
 /* A heading over one of several tables in a box. */
 .box h3.table-head { font: 700 1.1875rem/1.45 var(--read); margin-top: var(--s4); }
 

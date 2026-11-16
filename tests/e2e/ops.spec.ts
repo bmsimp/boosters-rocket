@@ -64,7 +64,7 @@ test("the audit log pages, filters by who and by day, and exports what was found
   await page.getByLabel("Who did it (part of a name or email)").fill(who.toUpperCase());
   await page.getByRole("button", { name: "Show" }).click();
   await expect(page.getByRole("heading", { name: "60 rows found" })).toBeVisible();
-  const rows = page.getByRole("region", { name: "60 rows found" }).locator("ul.lines > li");
+  const rows = page.getByRole("region", { name: "60 rows found" }).locator("table tbody tr");
   await expect(rows).toHaveCount(50);
   await expect(rows.first()).toContainText("Parent blocked"); // the action in words, with its code beside it
   await expect(rows.first()).toContainText("parent.block");
