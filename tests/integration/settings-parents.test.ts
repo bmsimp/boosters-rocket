@@ -36,6 +36,7 @@ import ParentSetupPage from "@/app/staff/(app)/settings/parents/setup/page";
 import MatchesPage from "@/app/staff/(app)/settings/parents/matches/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import StaffLayout from "@/app/staff/(app)/layout";
+import { SETTINGS_SECTIONS } from "@/app/staff/(app)/settings/sections";
 import { setSigninsAction, setWelcomeAction, setRequireStudentsAction, setReviewEmailsAction, decideMatchAction, acceptStrongMatchesAction, deletePreviousCompanyAction } from "@/app/staff/(app)/settings/parents/actions";
 import { resetDb, seedGuardian, seedParent, seedStaff, seedWorkingMail } from "../helpers/db";
 import { seedCache, seedShape, fam, par, stu } from "../helpers/roster-cache";
@@ -83,10 +84,12 @@ describe("the Parent sign-ins settings", () => {
     expect(renderToStaticMarkup(await StaffLayout({ children: null }))).not.toContain('href="/staff/settings/parents"');
   });
 
-  it("the staff menu has Parent sign-ins for an Admin, after QuickBooks", async () => {
+  it("Parent sign-ins is a part of Settings for an Admin, after QuickBooks, and not an entry of the staff menu beside Parents", async () => {
     const html = renderToStaticMarkup(await StaffLayout({ children: null }));
-    expect(html).toContain('href="/staff/settings/parents"');
-    expect(html.indexOf('href="/staff/settings/parents"')).toBeGreaterThan(html.indexOf('href="/staff/settings/quickbooks"'));
+    expect(html).toContain('href="/staff/settings"');
+    expect(html).not.toContain('href="/staff/settings/parents"');
+    const keys = SETTINGS_SECTIONS.map((x) => x.key);
+    expect(keys.indexOf("parents")).toBe(keys.indexOf("quickbooks") + 1);
   });
 
   it("the view shows what is set, plainly, with no inputs", async () => {

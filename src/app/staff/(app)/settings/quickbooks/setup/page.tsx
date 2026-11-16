@@ -15,6 +15,8 @@ export const dynamic = "force-dynamic";
 type Step = "app" | "connect" | "shape";
 const STEPS: { step: Step; label: string }[] = [{ step: "app", label: "1. Intuit app" }, { step: "connect", label: "2. Sign in to Intuit" }, { step: "shape", label: "3. Membership shape" }];
 const SETUP = "/staff/settings/quickbooks/setup";
+/** Where customer types are made: in QuickBooks itself, never in the portal. */
+const MAKE_TYPES = "Customer types are made in QuickBooks, not here: in QuickBooks Online, open the gear menu, then All lists, then Customer types, and make one for each kind of customer the club has (for example Family, Student and Parent). Then give each customer its type on the customer's own page.";
 const REFUSED: Record<string, string> = {
   keys: "Save the Intuit app's keys first.",
   not_configured: "Save the Intuit app's keys first.",
@@ -39,6 +41,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
   const error = Object.hasOwn(REFUSED, key) ? REFUSED[key] : undefined;
   return (
     <main className="wrap single">
+      <p className="back-to-settings"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
       <h1 className="page-title">Set up QuickBooks</h1>
       <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}>{order.indexOf(s.step) <= order.indexOf(reachable) ? <a href={`${SETUP}?step=${s.step}`}>{s.label}</a> : s.label}</li>)}</ol>
       {error && <p role="alert" className="errors">{error}</p>}
@@ -75,8 +78,8 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
             ? <p role="status">{page.lastRun && !page.lastRun.ok
               ? <>The portal couldn&apos;t read QuickBooks just now{page.lastRun.detail ? `: ${page.lastRun.detail}` : "."} Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b> to try again, then come back.</>
               : page.lastRun
-                ? <>QuickBooks has no customer types yet. Create them there first (Sales, Customers, Customer types), then select Refresh now on the Roster page.</>
-                : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types, create them there first (Sales, Customers, Customer types).</>}</p>
+                ? <>QuickBooks has no customer types yet, so there is nothing to choose from. {MAKE_TYPES} Then open <Link href="/staff/roster">Roster</Link>, select <b>Refresh now</b>, and come back.</>
+                : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types: {MAKE_TYPES}</>}</p>
             : <ShapeForm types={page.types} shape={page.shape} preview={previewShapeAction} save={saveShapeAction} />}
           <p className="box-foot"><a href={`${SETUP}?step=connect`}>Back to step 2</a> · <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>

@@ -175,7 +175,7 @@ test("staff see the season's set-up: its steps, what each asks, and every kind o
   expect(await kinds.evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).disabled))).toEqual([false, false, false, false]);
   await noSidewaysScroll(page);
 
-  // The Club page offers the time zone that decides which day it is for a step's dates.
-  await page.goto("/staff/settings/club");
+  // The Club page's change form offers the time zone that decides which day it is for a step's dates.
+  await page.goto("/staff/settings/club/edit");
   await expect(page.getByLabel(/^Time zone/)).toHaveValue("UTC");
 });

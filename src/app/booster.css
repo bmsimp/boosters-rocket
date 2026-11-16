@@ -507,15 +507,17 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .settings-page .box .details { margin-top: var(--s3); }
 .settings-open { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
 .settings-open .btn { display: inline-flex; }
-.back-to-settings { margin-top: var(--s4); }
-.back-to-settings a, .back-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
-@media (min-width: 760px) {
-  .settings-page main.wrap.single, main.wrap.single.settings-page { max-width: 1032px; }
-  .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--cell); align-items: start; }
-  .settings-grid > .box { margin-top: 0; }
-}
-.settings-grid { margin-top: var(--cell); display: grid; gap: var(--cell); max-width: 1032px; }
-.settings-grid > .box { max-width: none; }
+.settings-grid { margin-top: var(--cell); display: grid; gap: var(--cell); }
+@media (min-width: 760px) { .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+/* The way back to Settings (or to a part's own page), above a settings page's title. */
+.back-to-settings { margin-top: var(--s3); }
+.back-to-settings + .page-title { margin-top: var(--s1); }
+.back-to-settings a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
+/* The mail steps: each step's name, a link to it, and whether it is done, in words. */
+.mail-steps { display: grid; gap: var(--s1); margin-top: var(--s4); padding-left: 1.4em; max-width: 760px; }
+.mail-steps li { padding-left: var(--s1); }
+.mail-steps a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; margin-right: var(--s3); }
+.mail-steps .state { display: inline-flex; }
 
 /* A club color picked on the setup's club step or the Club page, shown on a sample of the club bar. */
 .club-preview { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 0 var(--s4); background: var(--club); color: var(--club-on);
@@ -566,8 +568,7 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
   .match-table th, .match-table td { border-top: 0; padding: var(--s1) 0; }
 }
 
-/* A guided set of steps: the progress list marks the step you are on and those that are done in words. */
-.setup-progress .done-step::after { content: " (done)"; }
+main.wrap.single.matches-page > .box { max-width: none; }
 
 @media (forced-colors: active) {
   .nav-group-button.here { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }

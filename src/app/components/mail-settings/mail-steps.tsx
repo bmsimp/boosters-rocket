@@ -17,7 +17,7 @@ export function GraphMailSteps() {
       <li>Make a scope that holds only the mailbox:<CopyField label="Scope" value={`New-ManagementScope -Name "Booster Rocket mail sender" -RecipientRestrictionFilter "PrimarySmtpAddress -eq '<mailbox>'"`} /></li>
       <li>Let the app send as that mailbox only:<CopyField label="Role assignment" value={'New-ManagementRoleAssignment -App <Object ID> -Role "Application Mail.Send" -CustomResourceScope "Booster Rocket mail sender"'} /></li>
       <li>Check it: <code>InScope</code> should say <code>True</code>.<CopyField label="Check" value="Test-ServicePrincipalAuthorization -Identity <Object ID> -Resource <mailbox>" /></li>
-      <li>Microsoft can take from 30 minutes to 2 hours to apply the change. Then send a test email above. (<a href={RBAC} {...ext}>Microsoft&apos;s guide to RBAC for Applications</a>.)</li>
+      <li>Microsoft can take from 30 minutes to 2 hours to apply the change. Then send a test email in the last step. (<a href={RBAC} {...ext}>Microsoft&apos;s guide to RBAC for Applications</a>.)</li>
     </ol>
   );
 }
@@ -55,7 +55,7 @@ export async function MicrosoftMailSetup({ summary }: { summary: MailSummary }) 
           {!mailbox && <p className="hint">Replace <code>&lt;mailbox&gt;</code> with the address the portal should send from, for example <code>webmaster@yourclub.org</code>. It must be a real mailbox in the club&apos;s Microsoft 365.</p>}</li>
         <li><b>Sign in when the Microsoft page opens</b> (it opens twice), as the Exchange administrator. The script is finished when it prints &quot;The app can now send as …, and only as …&quot;. If it stops with a message instead, do what the message says and run it again.</li>
         <li><b>Wait.</b> Microsoft takes from 30 minutes to 2 hours to apply the change. A test email sent sooner can fail with <code>ErrorAccessDenied</code>; that only means it is too soon.</li>
-        <li><b>Come back to this page.</b> Under <b>Send with</b> below, choose <b>Microsoft 365</b>, enter the same mailbox and select <b>Save</b>. Then select <b>Send test email</b>. When the test email arrives, parents can sign in.</li>
+        <li><b>Come back to this page.</b> In the next step, under <b>Send with</b>, choose <b>Microsoft 365</b>, enter the same mailbox and select <b>Save</b>. Then select <b>Send test email</b> in the step after it. When the test email arrives, parents can sign in.</li>
       </ol>
       <details><summary>Do the script&apos;s part by hand instead</summary><GraphMailSteps /></details>
     </>

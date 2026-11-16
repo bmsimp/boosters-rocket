@@ -40,7 +40,10 @@ test("an Admin previews, then switches parent sign-ins on (and finds them on the
   await expect(page.getByRole("heading", { name: "Addresses under more than one family (1)" })).toBeVisible();
   await expect(page.getByText("sam@example.com: Okafor Family, Lee Family")).toBeVisible();
   // Zelda's two sign-ins come from records that are in QuickBooks (scripts/seed-e2e.ts), so the reconcile keeps them: none would end.
-  await expect(page.getByRole("heading", { name: "Sign-ins that would end (0)" })).toBeVisible();
+  // The list is worked out only while sign-ins are off, so on the second pass, with them on, it isn't there at all.
+  const [before] = await sql`SELECT value FROM setting WHERE key = 'parents.settings'`;
+  if ((before?.value as { signin?: boolean } | undefined)?.signin) await expect(page.getByRole("heading", { name: /Sign-ins that would end/ })).toHaveCount(0);
+  else await expect(page.getByRole("heading", { name: "Sign-ins that would end (0)" })).toBeVisible();
 
   const since = await mark();
   await page.goto("/staff/settings/parents/setup?step=signins");

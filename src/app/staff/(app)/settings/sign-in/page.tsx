@@ -1,42 +1,58 @@
 import { requireStaffPage } from "@/lib/guards";
-import { env } from "@/env";
 import { can } from "@/lib/permissions/effective";
-import { providerSummaries, pendingOnlySummaries, PROVIDER_KEYS } from "@/lib/auth/providers";
-import { usesCertificate } from "@/lib/auth/provider-fields";
-import { ProviderForm } from "@/app/components/sign-in-settings/provider-form";
-import { PROVIDER_LABELS, toSummaryView } from "@/app/components/sign-in-settings/labels";
-import { MicrosoftStaffSteps, GoogleStaffSteps, ScriptOption } from "@/app/setup/instructions";
-import { saveSignInProviderAction, removeSignInProviderAction, startCertificateReplacementAction, discardCertificateReplacementAction } from "./actions";
+import { providerSummaries, pendingOnlySummaries, PROVIDER_KEYS, type ProviderSummary } from "@/lib/auth/providers";
+import { PROVIDER_LABELS } from "@/app/components/sign-in-settings/labels";
+import { StateWords } from "@/app/components/state-words";
+import { CalendarDate } from "@/app/components/calendar-date";
+import { LocalTime } from "@/app/components/local-time";
 import { MailWarning } from "../../mail-warning";
 import { seesMailWarning } from "../../mail-warning-rule";
-import { RemoveButton } from "./remove-button";
+import { BackToSettings } from "../back-to-settings";
 
 export const metadata = { title: "Sign-in settings" };
+export const dynamic = "force-dynamic";
 
+/** One way of signing in, in words: whether it works, and what to do next when it doesn't. */
+function state(key: string, s: ProviderSummary | undefined): { state: "done" | "todo"; words: string } {
+  if (!s) return { state: "todo", words: "Not set up" };
+  if (!s.readable && s.pendingCertificate && !s.certificate) return { state: "todo", words: "Started: the certificate is made, and waits for its check" };
+  if (!s.readable) return { state: "todo", words: "Saved, but this server can't read it, so nobody can sign in this way. Open the steps to fix it." };
+  if (key === "staff-microsoft") return { state: "done", words: s.pendingCertificate ? "Working. A replacement certificate waits to be checked." : "Working. Microsoft accepted the certificate." };
+  return { state: "done", words: "Working" };
+}
+
+/** What is set, shown plainly, with no inputs (the pattern the QuickBooks page set). The steps are on their own page. */
 export default async function SignInSettingsPage() {
   const ctx = await requireStaffPage("Settings.SignIn.ReadWrite");
   const saved = await providerSummaries();
   const summaries = [...saved, ...(await pendingOnlySummaries(saved.map((x) => x.key)))];
-  const appUrl = env.APP_URL.replace(/\/+$/, "");
-  const steps = { "staff-microsoft": <MicrosoftStaffSteps appUrl={appUrl} />, "staff-google": <GoogleStaffSteps appUrl={appUrl} /> };
-  const scripts = { "staff-microsoft": "New-BoosterRocketStaffApp.ps1" } as const;
+  const working = saved.some((s) => s.readable);
   return (
     <main className="wrap single">
-      <h1 className="page-title">Sign-in</h1>
+      <BackToSettings />
+      <h1 className="page-title">Staff sign-in</h1>
+      <p className="lede">How board members and directors sign in: with Microsoft, Google, or both. Only Admins can change this.</p>
       {seesMailWarning(ctx.effective) && <MailWarning canFix={can(ctx.effective, "Settings.Mail.ReadWrite")} />}
-      <p className="lede">How staff sign in. Microsoft sign-in uses a certificate Booster Rocket made; Google uses a client secret, which is never shown again once saved.</p>
       {PROVIDER_KEYS.map((key) => {
         const s = summaries.find((x) => x.key === key);
+        const st = state(key, s);
+        const id = s?.config.clientId;
         return (
           <section key={key} className="box" aria-labelledby={`${key}-h`}><h2 id={`${key}-h`}>{PROVIDER_LABELS[key]}</h2>
-            <details><summary>How to set this up or change the app</summary>{steps[key]}</details>
-            {key in scripts && <ScriptOption script={scripts[key as keyof typeof scripts]} example={`./${scripts[key as keyof typeof scripts]} -TenantId <tenant>`} />}
-            <ProviderForm providerKey={key} summary={s ? toSummaryView(s) : null} action={saveSignInProviderAction.bind(null, key)}
-              certificateActions={usesCertificate(key) ? { replace: startCertificateReplacementAction.bind(null, key), discard: discardCertificateReplacementAction.bind(null, key) } : undefined} />
-            {saved.some((x) => x.key === key) && <RemoveButton label={PROVIDER_LABELS[key]} action={removeSignInProviderAction.bind(null, key)} />}
+            <StateWords state={st.state} words={st.words} />
+            {s && (s.readable || s.certificate) && (
+              <dl className="details">
+                {s.config.tenantId && <><dt>Directory (tenant) ID</dt><dd><code>{s.config.tenantId}</code></dd></>}
+                {id && <><dt>{key === "staff-google" ? "Client ID" : "Application (client) ID"}</dt><dd><code>{id}</code></dd></>}
+                {s.certificate && <><dt>Certificate</dt><dd>Thumbprint <code>{s.certificate.thumbprintSha1}</code>, expires <CalendarDate iso={s.certificate.notAfter.toISOString()} /></dd></>}
+                {key === "staff-google" && <><dt>Client secret</dt><dd>Saved <LocalTime iso={s.credentialUpdatedAt.toISOString()} />{s.expiresAt && <>, expires <CalendarDate iso={s.expiresAt.toISOString()} /></>}</dd></>}
+              </dl>
+            )}
+            <p className="settings-open"><a className="btn btn-line" href="/staff/settings/sign-in/setup">{s ? "Change" : "Set up"}<span className="visually-hidden"> {PROVIDER_LABELS[key]}</span></a></p>
           </section>
         );
       })}
+      {!working && <p role="status" className="box">Nobody can sign in as staff until one of these works.</p>}
     </main>
   );
 }

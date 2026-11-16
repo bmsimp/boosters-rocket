@@ -10,6 +10,8 @@ import { disconnectAction } from "./actions";
 import { rosterCounts } from "./roster-counts";
 import { getParentSettings } from "@/lib/parents/settings";
 import { peopleWithAccess } from "@/lib/parents/switches";
+import { BackToSettings } from "../back-to-settings";
+import { StateWords } from "@/app/components/state-words";
 
 export const metadata = { title: "QuickBooks settings" };
 export const dynamic = "force-dynamic";
@@ -22,11 +24,13 @@ export default async function QuickBooksSettingsPage() {
   const warning = settings.signin && people > 0 ? `${people} ${people === 1 ? "person" : "people"} can sign in to the portal now. Connecting a different QuickBooks company afterwards ends all of that access, switches parent sign-ins and welcome emails off, and needs them set up again. Reconnecting this same company changes nothing.` : undefined;
   return (
     <main className="wrap single">
+      <BackToSettings />
       <h1 className="page-title">QuickBooks</h1>
       <p className="lede">{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log. Only Admins can change these settings, because they reach the club&apos;s books.</p>
       {problems.length > 0 && <section className="box" role="status" aria-labelledby="qbo-problems-h"><h2 id="qbo-problems-h">Needs attention</h2><ul>{problems.map((p) => <li key={p.kind}>{p.text}</li>)}</ul></section>}
 
       <section className="box" aria-labelledby="qbo-conn-h"><h2 id="qbo-conn-h">Connection</h2>
+        <StateWords state={conn.connected && problems.length === 0 ? "done" : "todo"} words={!conn.configured ? "Not set up yet" : !conn.connected ? "Not connected" : problems.length ? "Connected, and something needs attention" : "Connected"} />
         {!conn.configured ? <p>QuickBooks isn&apos;t set up yet.</p> : (
           <dl className="details">
             <dt>Status</dt><dd>{conn.connected ? <>Connected to <b>{conn.companyName ?? "a QuickBooks company"}</b></> : "Not connected. The Intuit app's keys are saved."}</dd>
