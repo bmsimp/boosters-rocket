@@ -1,11 +1,13 @@
 /**
  * How each kind of requirement is met (v1 spec §10.2): one entry per kind, and the only place that knows. Checklist
- * items and payments are worked out. Forms and volunteering each get their entry in the slice that builds them: until a
+ * items, payments and volunteering are worked out. Forms get their entry in the slice that builds them: until a
  * kind has one, staff can't create a requirement of it (KIND_RULES[kind] is null), and nothing else has to change.
  */
 import type { RequirementKind } from "@/lib/db/schema";
 import { NO_INVOICE_YET } from "@/lib/money/payment-rule";
 import { paymentStandings } from "@/lib/money/payment-standings";
+import { volunteerStanding } from "@/lib/volunteer/rules";
+import { signedUpAmounts } from "@/lib/volunteer/signed-up";
 import type { Requirement, Standing } from "./progress";
 
 /** What `requirement_progress` holds for one requirement and one family or student. */
@@ -48,11 +50,32 @@ const payment: KindRule = {
   ticked: false,
 };
 
+/**
+ * Volunteering (§11): met when confirmed volunteering reaches the amount, in shifts or hours as the requirement counts.
+ * The shifts a requirement can count toward are listed in volunteer_shift_requirement, so it needs no column of its
+ * own. Nothing is confirmed until check-in is built: that slice reads its credit here and passes it as `confirmed`
+ * (and leaves out of `signedUp` the places it has credited); a buy-out (§11.5) is met the same way.
+ */
+const volunteer: KindRule = {
+  standings: async ({ requirements, subjectQboIds }) => {
+    const signedUp = await signedUpAmounts(requirements, subjectQboIds, pairKey);
+    const confirmed = new Map<string, number>(); // credit from check-ins and staff: none yet
+    const standings = new Map<string, Standing>();
+    for (const key of new Set([...signedUp.keys(), ...confirmed.keys()])) {
+      const r = requirements.find((x) => key.startsWith(`${x.id}|`));
+      if (r) standings.set(key, volunteerStanding(r, { confirmed: confirmed.get(key) ?? 0, signedUp: signedUp.get(key) ?? 0 }));
+    }
+    return standings;
+  },
+  nothingYet: (r) => volunteerStanding(r, { confirmed: 0, signedUp: 0 }),
+  ticked: false,
+};
+
 export const KIND_RULES: Record<RequirementKind, KindRule | null> = {
   checklist,
   form: null,      // Forms with Documenso: met when the document is completed by the required guardians (§9).
   payment,
-  volunteer: null, // Volunteering: met when confirmed credit reaches the amount, or a buy-out is paid (§11).
+  volunteer,
 };
 
 /** What staff call each kind. */

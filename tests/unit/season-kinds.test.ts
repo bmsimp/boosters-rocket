@@ -13,13 +13,12 @@ describe("the kinds of requirement", () => {
     expect(KIND_LABELS.checklist).toBe("Checklist item");
   });
 
-  it("lets staff create only the kinds whose rule exists: today, checklist items and payments", () => {
-    expect(availableKinds()).toEqual(["checklist", "payment"]);
-    expect(isAvailableKind("checklist")).toBe(true);
-    expect(isAvailableKind("payment")).toBe(true);
-    for (const kind of ["form", "volunteer", "raffle", "", null, 7]) expect(isAvailableKind(kind)).toBe(false);
-    // The other two have their place in the registry, empty until their slice fills it.
-    expect([KIND_RULES.form, KIND_RULES.volunteer]).toEqual([null, null]);
+  it("lets staff create only the kinds whose rule exists: today, checklist items, payments and volunteering", () => {
+    expect(availableKinds()).toEqual(["checklist", "payment", "volunteer"]);
+    for (const kind of ["checklist", "payment", "volunteer"]) expect(isAvailableKind(kind)).toBe(true);
+    for (const kind of ["form", "raffle", "", null, 7]) expect(isAvailableKind(kind)).toBe(false);
+    // Forms have their place in the registry, empty until their slice fills it.
+    expect(KIND_RULES.form).toBeNull();
     expect(NO_RULE_YET.met).toBe(false);
   });
 

@@ -23,6 +23,8 @@ export const PERMISSIONS = [
   "Season.Progress.Read",          // see which families and students have met each requirement
   "Season.Progress.ReadWrite",     // tick checklist items off, and waive a requirement for a family or student
   "Finance.Balance.Read",          // see what every family owes and each family's invoices, and ask for every family to be read from QuickBooks again
+  "Volunteer.Event.Read",          // see volunteer events and shifts, and who has signed up for each shift
+  "Volunteer.Event.ReadWrite",     // create, change, copy and cancel events and shifts, and set the cancelling cut-off
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

@@ -171,8 +171,8 @@ test("staff see the season's set-up: its steps, what each asks, and the kinds th
   // Only a kind that can be met today can be added; the others are listed and can't be picked.
   await uniforms.getByText("Add a requirement to Uniforms").click();
   const kinds = uniforms.getByLabel("Kind").locator("option");
-  await expect(kinds).toHaveText(["Checklist item", "Form (coming later)", "Payment", "Volunteering (coming later)"]);
-  expect(await kinds.evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).disabled))).toEqual([false, true, false, true]);
+  await expect(kinds).toHaveText(["Checklist item", "Form (coming later)", "Payment", "Volunteering"]);
+  expect(await kinds.evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).disabled))).toEqual([false, true, false, false]);
   await noSidewaysScroll(page);
 
   // The Club page offers the time zone that decides which day it is for a step's dates.

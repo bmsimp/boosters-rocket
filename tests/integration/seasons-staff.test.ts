@@ -285,7 +285,8 @@ describe("requirements", () => {
     const page = await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } });
     expect(page).toContain(`<option value="checklist" selected="">Checklist item</option>`);
     expect(page).toContain(`<option value="payment">Payment</option>`); // its rule is built: met by a QuickBooks product or service
-    for (const later of ["Form", "Volunteering"]) expect(page).toMatch(new RegExp(`<option value="[a-z]+" disabled="">${later} \\(coming later\\)</option>`));
+    expect(page).toContain(`<option value="volunteer">Volunteering</option>`); // built with volunteer sign-up
+    for (const later of ["Form"]) expect(page).toMatch(new RegExp(`<option value="[a-z]+" disabled="">${later} \(coming later\)</option>`));
 
     expect(await addRequirementAction(fall.stepIds["Wrap-up"]!, "checklist", "family", { title: " Trophy  returned ", required: false, amount: null, amountUnit: null, dueOn: "2026-11-30" }))
       .toEqual({ ok: true, message: "Added. It is asked of everyone until you choose a list." });
@@ -308,10 +309,9 @@ describe("requirements", () => {
     }
   });
 
-  it.each(["form", "volunteer"])("won't make a %s requirement yet: its rule isn't built", async (kind) => {
+  it.each(["form"])("won't make a %s requirement yet: its rule isn't built", async (kind) => {
     const fall = await seedFall();
-    const fields = kind === "volunteer" ? { ...FIELDS, amount: 2, amountUnit: "shifts" as const } : FIELDS;
-    expect(await addRequirementAction(fall.stepIds.Uniforms!, kind, "family", fields)).toEqual({ ok: false, errors: ["That kind of requirement is coming later. For now, add a checklist item."] });
+    expect(await addRequirementAction(fall.stepIds.Uniforms!, kind, "family", FIELDS)).toEqual({ ok: false, errors: ["That kind of requirement is coming later. For now, add a checklist item."] });
     expect(await db.select().from(requirement)).toHaveLength(2);
     expect(await audits()).toEqual([]);
   });
