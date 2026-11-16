@@ -101,6 +101,18 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "staff.invite.refused": "Adding a staff member refused",
   "staff.status": "Staff sign-in turned on or off",
   "staff.status.refused": "Turning staff sign-in on or off refused",
+  "volunteer.event.cancel": "Volunteer event cancelled",
+  "volunteer.event.copy": "Volunteer event copied to another day",
+  "volunteer.event.create": "Volunteer event added",
+  "volunteer.event.update": "Volunteer event changed",
+  "volunteer.notice.sent": "People signed up for a changed or cancelled shift emailed",
+  "volunteer.settings.save": "Volunteer cancelling cut-off saved",
+  "volunteer.shift.add": "Volunteer shift added",
+  "volunteer.shift.cancel": "Volunteer shift cancelled",
+  "volunteer.shift.update": "Volunteer shift changed",
+  "volunteer.signup.cancel": "A parent cancelled a volunteer sign-up",
+  "volunteer.signup.create": "A parent signed up for a volunteer shift",
+  "volunteer.signups.cleared": "Volunteer sign-ups cleared after a company change",
 };
 
 /** The words for an action, or null when it has none yet. */

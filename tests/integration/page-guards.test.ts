@@ -123,6 +123,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/seasons/setup", names: "all", why: "a requirement's chosen list names other families and students" },
   { module: "@/lib/seasons/subjects", names: "all", why: "loadSubjects() loads every family in the club" },
   { module: "@/lib/seasons/staff-progress", names: "all", why: "it reads every family's ticks and waivers, with the reasons" },
+  { module: "@/lib/volunteer/setup", names: "all", why: "a shift's sign-up list names people of every family" },
 ];
 
 describe("every page guards itself", () => {
@@ -324,6 +325,13 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/seasons/recorded.ts",
   "src/lib/seasons/kinds.ts",
   "src/lib/seasons/progress.ts",
+  "src/lib/volunteer/my-volunteer.ts",
+  "src/lib/volunteer/signed-up.ts",
+  "src/lib/volunteer/rules.ts",
+  "src/lib/volunteer/clock.ts",
+  "src/lib/volunteer/notices.ts",
+  "src/lib/volunteer/calendar.ts",
+  "src/lib/volunteer/settings.ts",
   "src/app/components/parent-frame.tsx",
   "src/app/not-found.tsx",
 ];

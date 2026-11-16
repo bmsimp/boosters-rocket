@@ -7,6 +7,8 @@ import { describeRequirement, getRequirementSetup } from "@/lib/seasons/setup";
 import { candidatesFor, loadSubjects } from "@/lib/seasons/subjects";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { CalendarDate } from "@/app/components/calendar-date";
+import { dateWords, shiftTimeWords } from "@/lib/volunteer/clock";
+import { shiftsCountingToward } from "@/lib/volunteer/setup";
 import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
 import { removeRequirementAction, setCoverageAction, updateRequirementAction } from "../../../actions";
 
@@ -27,6 +29,8 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
   const candidates = families ? candidatesFor(r.appliesTo, families) : [];
   const onRoster = new Set(candidates.map((c) => c.qboId));
   const noun = r.appliesTo === "family" ? "families" : "students";
+  const seesVolunteer = can(ctx.effective, "Volunteer.Event.Read");
+  const shifts = r.kind === "volunteer" ? await shiftsCountingToward(r.id) : [];
   const back = `/staff/seasons/${season.id}`;
   return (
     <main className="wrap single">
@@ -59,6 +63,19 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
                 save={setCoverageAction.bind(null, r.id, rosterTag)} />
             </details>)}
       </section>
+
+      {r.kind === "volunteer" && (
+        <section className="box" aria-labelledby="shifts-h"><h2 id="shifts-h">Shifts that count toward it</h2>
+          {shifts.length === 0 ? <p>No shift counts toward it yet. Choose it under &quot;Counts toward&quot; when you add or change a shift{seesVolunteer ? <> on the <Link href="/staff/volunteer">Volunteer</Link> page</> : ""}.</p> : (
+            <ul className="lines">{shifts.map((x, i) => (
+              <li key={i}><div>
+                {seesVolunteer ? <Link className="what" href={`/staff/volunteer/${x.eventId}`}>{x.eventName}</Link> : <span className="what">{x.eventName}</span>}
+                <span className="when">{dateWords(x.onDate)}, {shiftTimeWords(x.startsAt, x.endsAt)}{x.cancelled ? " · Cancelled" : ""}</span>
+              </div></li>))}</ul>
+          )}
+          <p className="hint">A shift counts {r.amountUnit === "hours" ? "its length in hours" : "as one shift"}. Until check-in is built, nothing is confirmed: families see how much they are signed up for.</p>
+        </section>
+      )}
 
       {canChange && (
         <section className="box" aria-labelledby="remove-h"><h2 id="remove-h">Remove</h2>

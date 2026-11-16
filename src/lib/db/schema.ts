@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check, date } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check, date, time } from "drizzle-orm/pg-core";
 import type { PgColumnBuilderBase } from "drizzle-orm/pg-core";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -342,6 +342,82 @@ export const requirementProgress = pgTable("requirement_progress", {
   index("requirement_progress_subject_ix").on(t.subjectQboId),
   check("requirement_progress_records_something", sql`${t.metAt} is not null or ${t.waivedAt} is not null`),
   check("requirement_progress_waiver_reason", sql`(${t.waivedAt} is null) = (${t.waivedReason} is null)`),
+]);
+
+/* ---- Volunteering (v1 spec §11). An event's date and a shift's times are the club's own wall-clock time, read in the club's time zone (src/lib/volunteer/clock.ts). ---- */
+
+/**
+ * A volunteer event (v1 spec §11.1): a name, the day, where, what it is, and who to contact. A cancelled event stays,
+ * with its shifts and sign-ups, so what happened can still be read; parents no longer see it. `copied_from` names the
+ * event it was copied from ("every home game").
+ */
+export const volunteerEvent = pgTable("volunteer_event", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  onDate: date("on_date", { mode: "string" }).notNull(),
+  location: text("location").notNull(),
+  description: text("description").notNull().default(""),
+  contactName: text("contact_name").notNull(),
+  contactEmail: text("contact_email"),                 // stored trimmed + lower-cased
+  copiedFrom: uuid("copied_from"),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  cancelledBy: uuid("cancelled_by"),                   // staff_user.id
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [index("volunteer_event_date_ix").on(t.onDate)]);
+
+/**
+ * One shift of an event: its start and end on the event's day (an end at or before the start is the next morning), the
+ * number of places, and an optional role ("concessions"). `revision` goes up whenever its time or place changes, so a
+ * calendar that holds the shift takes the newer copy. A cancelled shift stays, with its sign-ups.
+ */
+export const volunteerShift = pgTable("volunteer_shift", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  eventId: uuid("event_id").notNull().references(() => volunteerEvent.id, { onDelete: "restrict" }),
+  startsAt: time("starts_at").notNull(),
+  endsAt: time("ends_at").notNull(),
+  places: integer("places").notNull(),
+  role: text("role"),
+  revision: integer("revision").notNull().default(0),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  cancelledBy: uuid("cancelled_by"),                   // staff_user.id
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [index("volunteer_shift_event_ix").on(t.eventId), check("volunteer_shift_places", sql`${t.places} >= 1`)]);
+
+/** The volunteer requirements a shift can count toward (v1 spec §11.1). The portal's own ids on both sides. */
+export const volunteerShiftRequirement = pgTable("volunteer_shift_requirement", {
+  shiftId: uuid("shift_id").notNull().references(() => volunteerShift.id, { onDelete: "cascade" }),
+  requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "cascade" }),
+  createdAt: created(),
+}, (t) => [uniqueIndex("volunteer_shift_requirement_uq").on(t.shiftId, t.requirementId), index("volunteer_shift_requirement_requirement_ix").on(t.requirementId)]);
+
+/**
+ * One place on a shift, taken by a guardian for themselves or for one of their students (v1 spec §11.2). The family
+ * and the student are QuickBooks ids of the connected company: a company change deletes every row. `signed_up_by` is
+ * the guardian who took it (parent.id), and `filler_name` the name of whoever fills it, as it was then. A cancelled
+ * sign-up keeps its row and frees its place. One person holds one place on a shift at most.
+ */
+export const volunteerSignup = pgTable("volunteer_signup", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shiftId: uuid("shift_id").notNull().references(() => volunteerShift.id, { onDelete: "restrict" }),
+  familyQboId: text("family_qbo_id").notNull(),
+  signedUpBy: uuid("signed_up_by").notNull(),          // parent.id
+  fillerKind: text("filler_kind", { enum: ["guardian", "student"] }).notNull(),
+  fillerParentId: uuid("filler_parent_id"),            // parent.id, when a guardian fills it
+  studentQboId: text("student_qbo_id"),                // when a student fills it
+  fillerName: text("filler_name").notNull(),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  cancelledByDoor: text("cancelled_by_door", { enum: ["parent", "staff"] }),
+  cancelledBy: uuid("cancelled_by"),                   // parent.id or staff_user.id
+  createdAt: created(),
+}, (t) => [
+  index("volunteer_signup_shift_ix").on(t.shiftId),
+  index("volunteer_signup_family_ix").on(t.familyQboId),
+  index("volunteer_signup_student_ix").on(t.studentQboId),
+  uniqueIndex("volunteer_signup_guardian_uq").on(t.shiftId, t.fillerParentId).where(sql`cancelled_at is null and filler_kind = 'guardian'`),
+  uniqueIndex("volunteer_signup_student_uq").on(t.shiftId, t.studentQboId).where(sql`cancelled_at is null and filler_kind = 'student'`),
+  check("volunteer_signup_filler", sql`(${t.fillerKind} = 'guardian' and ${t.fillerParentId} is not null and ${t.studentQboId} is null) or (${t.fillerKind} = 'student' and ${t.studentQboId} is not null and ${t.fillerParentId} is null)`),
 ]);
 
 /** Roles. The built-in Admin role has key 'admin' and builtin=true. */

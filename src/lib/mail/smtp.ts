@@ -25,7 +25,8 @@ export function createSmtpSender(o: {
       logger: false, debug: false,
     });
     try {
-      await transport.sendMail({ from: { name: o.fromName, address: o.from }, to: m.to, subject: m.subject, text: m.text, html: m.html });
+      await transport.sendMail({ from: { name: o.fromName, address: o.from }, to: m.to, subject: m.subject, text: m.text, html: m.html,
+        ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, contentType: a.contentType, content: Buffer.from(a.content, "utf8") })) } : {}) });
     } catch (e) {
       throw new MailSendError(smtpError(e));
     } finally {

@@ -4,6 +4,7 @@ import { familyMoney, jobRun, qboCustomer, qboCustomerType, setting } from "@/li
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { clearParentAccess } from "@/lib/parents/company-change";
 import { clearSeasonRecords } from "@/lib/seasons/company-change";
+import { clearVolunteerRecords } from "@/lib/volunteer/company-change";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
 
 export const ROSTER_JOB = "roster.refresh";
@@ -26,7 +27,8 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
  * the membership shape (its type IDs mean nothing in another company), the roster's run history (so the worker reads
  * the new company at once; `keepRunId` spares the run doing this), all parent access (`clearParentAccess`), what
  * each family was last seen to owe (`family_money`: another company's invoices are never shown), and what the seasons
- * record against customers (`clearSeasonRecords`: ticks, waivers and chosen lists). The same company, or a cache that
+ * record against customers (`clearSeasonRecords`: ticks, waivers and chosen lists), and every volunteer sign-up
+ * (`clearVolunteerRecords`). The same company, or a cache that
  * says no company, keeps it all. The caller owns the transaction and holds ROSTER_LOCK.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
@@ -35,6 +37,7 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   // Parent access first: the snapshot it keeps takes the family names from the cache deleted below.
   await clearParentAccess(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomer);
+  await clearVolunteerRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomerType);
   await tx.delete(familyMoney);
   await clearSeasonRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });

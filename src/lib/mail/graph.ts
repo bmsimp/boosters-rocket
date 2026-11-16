@@ -50,6 +50,9 @@ export function createGraphSender(o: { tenantId: string; clientId: string; asser
       message: {
         subject: m.subject, body: { contentType: "HTML", content: m.html },
         toRecipients: [{ emailAddress: { address: m.to } }], from: { emailAddress: { name: o.fromName, address: o.mailbox } },
+        // A file such as a calendar file goes as a file attachment, its bytes in base64 (Graph's sendMail takes up to 3 MB this way).
+        ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ "@odata.type": "#microsoft.graph.fileAttachment", name: a.filename, contentType: a.contentType,
+          contentBytes: Buffer.from(a.content, "utf8").toString("base64") })) } : {}),
       },
       saveToSentItems: false,
     };
