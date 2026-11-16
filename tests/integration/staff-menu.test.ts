@@ -8,6 +8,8 @@ import { resetDb, seedStaff } from "../helpers/db";
 
 /** The staff menu's entries for the pages step 3 added: each is shown only to someone who can open the page it leads to. */
 const SEASONS = 'href="/staff/seasons"', PROGRESS = 'href="/staff/seasons/progress"', HEALTH = 'href="/staff/health"';
+/** Step 4's entries: Balances, Volunteering and the Forms settings. */
+const BALANCES = 'href="/staff/balances"', VOLUNTEERING = 'href="/staff/volunteer"', FORMS = 'href="/staff/settings/forms"';
 
 async function staffWith(...patterns: string[]) {
   const s = await seedStaff({ email: "helper@club.org", name: "Hal Helper" });
@@ -68,10 +70,53 @@ describe("the staff menu", () => {
     expect(await current("/staff/parents/abc")).toEqual(["/staff/parents"]);
   });
 
+  it("shows an Admin Balances, Volunteering and Forms", async () => {
+    asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const html = await menu();
+    for (const entry of [BALANCES, VOLUNTEERING, FORMS]) expect(html).toContain(entry);
+  });
+
+  it("shows Balances only to someone who may read balances", async () => {
+    await staffWith("Finance.Balance.Read");
+    const html = await menu();
+    expect(html).toContain(BALANCES);
+    for (const entry of [VOLUNTEERING, FORMS, SEASONS]) expect(html).not.toContain(entry);
+  });
+
+  it("shows Volunteering to someone who may read the events, and to someone who may change them", async () => {
+    for (const permission of ["Volunteer.Event.Read", "Volunteer.Event.ReadWrite"]) {
+      await resetDb();
+      await staffWith(permission);
+      const html = await menu();
+      expect(html).toContain(VOLUNTEERING);
+      for (const entry of [BALANCES, FORMS]) expect(html).not.toContain(entry);
+    }
+  });
+
+  it("never shows the Forms settings to a custom role, however wide", async () => {
+    await staffWith("*", "Settings.*", "Settings.Forms.ReadWrite");
+    const html = await menu();
+    expect(html).toContain(BALANCES);
+    expect(html).toContain(VOLUNTEERING);
+    expect(html).not.toContain(FORMS);
+  });
+
+  it("marks Balances and Volunteering current on the pages under them", async () => {
+    asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const current = async (path: string) => {
+      atPath(path);
+      const nav = /<nav class="top-nav"[^>]*>(.*?)<\/nav>/.exec(await menu())![1]!;
+      return [...nav.matchAll(/<a\b[^>]*>/g)].filter((a) => a[0].includes('aria-current="page"')).map((a) => /href="([^"]*)"/.exec(a[0])![1]);
+    };
+    expect(await current("/staff/balances/10")).toEqual(["/staff/balances"]);
+    expect(await current("/staff/volunteer/0b0f2a8e-0000-4000-8000-000000000001")).toEqual(["/staff/volunteer"]);
+    expect(await current("/staff/settings/forms")).toEqual(["/staff/settings/forms"]);
+  });
+
   it("shows none of them to someone with no season permission", async () => {
     await staffWith("Roster.Read");
     const html = await menu();
-    for (const entry of [SEASONS, PROGRESS, HEALTH]) expect(html).not.toContain(entry);
+    for (const entry of [SEASONS, PROGRESS, HEALTH, BALANCES, VOLUNTEERING, FORMS]) expect(html).not.toContain(entry);
     expect(html).toContain('href="/staff/roster"');
   });
 });

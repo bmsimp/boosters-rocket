@@ -132,6 +132,25 @@ test("the tab bar has one column for each tab, across the whole screen", async (
   });
 });
 
+test("five tabs fit a 360px-wide phone: every label inside its own column, nothing scrolls sideways", async ({ page }) => {
+  test.skip(!isPhone(page), "the tabs show on phones only");
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto("/");
+  const tabs = await page.locator("nav.tabs a").evaluateAll((all) => all.map((a) => {
+    const box = a.getBoundingClientRect();
+    const range = document.createRange(); range.selectNodeContents(a);
+    const text = range.getBoundingClientRect();
+    return { box: { left: box.left, right: box.right, height: box.height }, text: { left: text.left, right: text.right } };
+  }));
+  expect(tabs).toHaveLength(PARENT_NAV.length);
+  for (const t of tabs) {
+    expect(t.text.left).toBeGreaterThanOrEqual(t.box.left - 0.5);
+    expect(t.text.right).toBeLessThanOrEqual(t.box.right + 0.5);
+    expect(t.box.height).toBeGreaterThanOrEqual(44);
+  }
+  await noSidewaysScroll(page);
+});
+
 test("a signed-in parent who asks for a page that doesn't exist keeps the club bar and the tabs", async ({ page }) => {
   for (const path of ["/forms", "/no-such-page"]) {
     // A tab is only listed once its page is built: if one of these now exists, it is no longer this test's business.

@@ -4,7 +4,7 @@ import { staffSessionCookie } from "./staff-session";
 // The seeded staff member is an Admin, who has every menu entry there is: more than one row of the club bar holds.
 // The entries must all stay inside the bar and readable at every width, and the page must never scroll sideways.
 // Layout is something only a browser can show, so this is checked here and not in vitest.
-const ENTRIES = ["Home", "Roster", "Parents", "Seasons", "Progress", "Staff", "Roles", "Club", "Sign-in", "Mail", "QuickBooks", "Parent sign-ins", "Audit", "Health"];
+const ENTRIES = ["Home", "Roster", "Parents", "Seasons", "Progress", "Balances", "Volunteering", "Staff", "Roles", "Club", "Sign-in", "Mail", "QuickBooks", "Forms", "Parent sign-ins", "Audit", "Health"];
 
 for (const width of [760, 900, 1032, 1440]) {
   test(`an Admin's menu fits the club bar at ${width}px: every entry inside it, on one line of its own, and no sideways scroll`, async ({ browser }) => {
