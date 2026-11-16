@@ -239,7 +239,9 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     await writeAudit({ actor, action: "parent.email.save.failed", ...(target ? { targetType: "qbo_customer", targetId: target } : {}), after: { code: code.slice(0, 40) }, ip: ctx.ip });
     return { ok: false, errors };
   };
-  const spend = (id: string, tx?: Tx) => (tx ?? db).update(parentEmailChange).set({ usedAt: new Date() }).where(and(eq(parentEmailChange.id, id), isNull(parentEmailChange.usedAt)));
+  /** Marks the request used; false when it was no longer there to spend (another confirmation of the same link got to it first). */
+  const spend = async (id: string, tx?: Tx): Promise<boolean> => (await (tx ?? db).update(parentEmailChange).set({ usedAt: new Date() })
+    .where(and(eq(parentEmailChange.id, id), isNull(parentEmailChange.usedAt))).returning({ id: parentEmailChange.id })).length > 0;
 
   // Counted first, so that whatever follows (an audit row for each refusal among it) is bounded per person.
   const take = await takeRateLimit("email_confirm_parent", ctx.parentId);
@@ -278,6 +280,8 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   const oldEmail = ctx.email.trim().toLowerCase(), newEmail = row.newEmail;
   const firstOnly = record.signsInBy === "first";
   let answer: { field: string | null; version: string; updatedAt: Date | null } | null;
+  /** Whether this confirmation sent the write; false when an earlier one had already made the change. */
+  let wrote = false;
   if (fieldHasChange(live.field, oldEmail, newEmail, firstOnly)) {
     answer = { field: live.field, version: live.version, updatedAt: null }; // an earlier try made it: nothing is sent
   } else {
@@ -296,6 +300,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     try {
       const writeMs = o.timeoutMs ?? WRITE_TIMEOUT_MS;
       sent = await qboUpdateCustomerEmail(record.qboId, live.version, change.field, { realmId, timeoutMs: writeMs, signal: AbortSignal.timeout(writeMs * 1.5) });
+      wrote = true;
     } catch (e) {
       if (!(e instanceof QboError)) throw e;
       const fault = faultCodeOf(e);
@@ -319,8 +324,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   const audit = (tx: Tx, after: Record<string, unknown>) => writeAudit({ actor, action: "parent.email.save", targetType: "qbo_customer", targetId: record.qboId,
     before: { email: oldEmail, field: live.field }, after: { email: newEmail, ...after }, ip: ctx.ip }, tx);
   // The cache is left alone, and the worker reads the roster again at its next wake: never a refresh in this request.
+  // A change this call found made, on a request already spent, was finished by the confirmation that spent it: a second
+  // press of the button, say. Nothing more is done or audited for it. A write this call sent is always audited.
   const leaveToTheRefresh = (code: string) => db.transaction(async (tx) => {
-    await spend(row.id, tx);
+    if (!(await spend(row.id, tx)) && !wrote) return;
     await askForRosterRefresh(tx);
     const sessionsEnded = await endOldSignIns(tx, ctx.parentId, oldEmail);
     await audit(tx, { field: answer?.field ?? null, portal: "refresh_asked", code, sessionsEnded });
@@ -337,7 +344,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
         // After a change of company the id names another customer there, or nothing.
         if ((await getRosterSource(tx)) !== realmId) throw new NotThisCompany();
         // Spent before the reconcile, which deletes a person's unused requests when it changes their address.
-        await spend(row.id, tx);
+        if (!(await spend(row.id, tx)) && !wrote) return;
         // As the roster refresh stores an email field: trimmed and lower-cased, at most 320 characters.
         await tx.update(qboCustomer).set({ email: field?.trim().slice(0, 320).toLowerCase() || null, syncToken: version, ...(updatedAt ? { qboUpdatedAt: updatedAt } : {}) })
           .where(eq(qboCustomer.qboId, record.qboId));

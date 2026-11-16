@@ -260,6 +260,19 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect((await audits()).map((a) => a.action)).toContain("parent.email.changed");
   });
 
+  it("two presses of the button at once make one change, audited once", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    await asking(NEW);
+    const token = linkTo(NEW);
+    const results = await Promise.all([confirmEmailChangeAction(token), confirmEmailChangeAction(token)]);
+    // One of them makes it; the other meets the change made, or QuickBooks' refusal of a version that has moved on.
+    expect(results).toContainEqual({ ok: true, message: EMAIL_COPY.done(NEW), signedOut: true });
+    expect(inQuickBooks(stub, R_PARENT)).toMatchObject({ PrimaryEmailAddr: { Address: NEW }, SyncToken: "1" });
+    expect((await audits()).filter((a) => a.action === "parent.email.save")).toHaveLength(1);
+    expect((await person(r.identity.parentId)).email).toBe(NEW);
+  });
+
   it("layered with no parent type: the family's field holds both parents' addresses, and only this parent's changes", async () => {
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
     await addToCache([{ qboId: "7310", displayName: "Noparent Family", typeQboId: "F", email: "home@noparent.example; Work@Noparent.example" }, stu("7311", "Nico Noparent", "7310")]);
