@@ -66,6 +66,26 @@ const ROSTER_BODY_FIELDS = ["DisplayName", "CustomerTypeRef", "ParentRef", "Job"
   "Id", "SyncToken", "DisplayName", "Id", "SyncToken", "ParentRef", "Job", "BillWithParent", "Id", "SyncToken", "Active"];
 
 /**
+ * The buy-out invoice writes (roadmap step 6, v1 spec §11.5): the only invoices the portal ever creates and voids, an
+ * invoice create and an invoice void, each built from INVOICE_WRITES and sent by the client's own private sender for
+ * them, the first writes that go to the invoice endpoint rather than the customer endpoint. Only the buy-out module may
+ * name them; only the parent's own pay-instead actions reach its confirm and switch-back, and only the module itself
+ * and the write queue's job reach its send.
+ */
+const INVOICE_WRITE_FUNCTIONS = ["qboCreateInvoice", "qboVoidInvoice"];
+const BUYOUT_WRITER = "src/lib/buyouts/writes.ts";
+const MAY_SEND_INVOICE_WRITES = [CLIENT, BUYOUT_WRITER];
+const BUYOUT_SEND = "sendBuyoutWrite";
+const MAY_BUYOUT_SEND = [BUYOUT_WRITER, "src/lib/roster/queue.ts"];
+const BUYOUT_ASKS = ["confirmMyBuyout", "switchMyBuyoutBack"];
+const MAY_BUYOUT_ASK = [BUYOUT_WRITER, "src/app/(parent)/volunteer/pay-instead/actions.ts"];
+/** Which body each invoice write sends. */
+const INVOICE_BODY = { qboCreateInvoice: "create", qboVoidInvoice: "void" } as const;
+/** The fields the invoice writes' bodies can carry, in the order INVOICE_WRITES writes them. */
+const INVOICE_BODY_FIELDS = ["CustomerRef", "Line", "DetailType", "Amount", "SalesItemLineDetail", "ItemRef", "Qty", "UnitPrice", "PrivateNote", "AllowOnlineACHPayment", "EmailStatus",
+  "Id", "SyncToken"];
+
+/**
  * Every place the word `method` stands in the code. `is` is the request method when it is written out as a plain key
  * with one of the two the portal uses, `method: "GET"` or `method: "POST"`, and null for anything else: a shorthand
  * (`{ method }`), a computed or quoted key (`["method"]: ...`), a property set later (`init.method = ...`), a value
@@ -233,6 +253,25 @@ function rosterBodyProblems(constant: string): string[] {
   return problems;
 }
 
+/** `export const INVOICE_WRITES = { ... } as const;` as written in the client. */
+function invoiceWritesConstant(clientSource: string): string {
+  const text = code(clientSource), at = text.indexOf("export const INVOICE_WRITES = {");
+  return at < 0 ? "" : text.slice(at, text.indexOf("\n} as const;", at));
+}
+/** What is wrong with the invoice writes' bodies: a field that isn't on the list, any spread, a computed key, another endpoint. */
+function invoiceBodyProblems(constant: string): string[] {
+  const problems: string[] = [];
+  if (!constant.includes(`path: "invoice",`)) problems.push("the path is not the invoice endpoint");
+  if (!constant.includes(`voidOperation: "void",`)) problems.push("the void is not operation=void");
+  const fields = [...constant.matchAll(/(?:^|[{\s(])["'`]?([A-Z]\w*)["'`]?\]?\s*:/g)].map((m) => m[1]!);
+  if (fields.join() !== INVOICE_BODY_FIELDS.join()) problems.push(`the bodies carry ${fields.join(", ")}`);
+  if (constant.includes("...")) problems.push("a body spreads something in");
+  if (/\[[^\]]*\]\s*:/.test(constant)) problems.push("a body has a computed key");
+  if (!constant.includes("create: (c: InvoiceCreate) => ({") || !constant.includes("void: (invoiceId: string, syncToken: string) => ({ Id: invoiceId, SyncToken: syncToken }),")) problems.push("a body is built from something else");
+  if (!constant.includes(`EmailStatus: "NotSet"`)) problems.push("QuickBooks may email the invoice");
+  return problems;
+}
+
 /** The top-level and nested fields the update's body can carry, in order. */
 const BODY_FIELDS = ["Id", "SyncToken", "PrimaryPhone", "FreeFormNumber", "BillAddr", "Line1", "Line2", "Line3", "Line4", "Line5", "City", "CountrySubDivisionCode", "PostalCode", "Country"];
 /** The two parts of the body that are left out when unchanged. Any other spread could carry any field. */
@@ -254,7 +293,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
   const everything = read("src");
   // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts reads and changes a parent's own
   // record: scanned with the rest, on purpose. A new folder that calls QuickBooks is found by the test below.
-  const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs"), ...read("src/lib/money"),
+  const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs"), ...read("src/lib/money"), ...read("src/lib/buyouts"),
     ...everything.filter((s) => s.file === CONTACT_EDITS || s.file === EMAIL_CHANGE)];
   const clientSource = sources.find((s) => s.file === CLIENT)!.text;
   const client = code(clientSource);
@@ -294,8 +333,9 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
 
   it("sends nothing but GET, except to Intuit's token and revoke endpoints and the one customer update", () => {
     const posts = sources.flatMap((s) => Array.from({ length: postsIn(s.text) }, () => s.file));
-    // The token request, the customer update, the email update and the roster writes' sender in the client; the revoke in the connection.
-    expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
+    // The token request, the customer update, the email update, the roster writes' sender and the invoice writes'
+    // sender in the client; the revoke in the connection.
+    expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
     const methods = (text: string) => methodsIn(text).map((m) => m.is);
     expect(methods(bodyOf("tokenRequest"))).toEqual(["POST"]);
     expect(bodyOf("tokenRequest")).toContain("qboEndpoints().token");
@@ -303,7 +343,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     // Everything else in the client that reaches the API is a GET: qboGet, and what is built on it.
     expect(methods(bodyOf("qboGet"))).toEqual(["GET"]);
     expect(methods(bodyOf(EMAIL_WRITE))).toEqual(["POST"]);
-    expect(methods(clientSource)).toEqual(["POST", "GET", "POST", "POST", "POST"]);
+    expect(methods(clientSource)).toEqual(["POST", "GET", "POST", "POST", "POST", "POST"]);
   });
 
   it("can send the update to the customer endpoint only, with nothing in it but an Id, a SyncToken, the phone and the billing address", () => {
@@ -402,6 +442,58 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     });
   });
 
+  describe("and the buy-out invoice writes, the only invoices the portal makes (roadmap step 6)", () => {
+    const naming = (name: string) => everything.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
+    const writer = code(everything.find((s) => s.file === BUYOUT_WRITER)?.text ?? "");
+
+    it("are sent by one private function of the client, a POST to the invoice endpoint", () => {
+      const sender = client.slice(client.indexOf("async function sendInvoiceWrite("), client.indexOf("\nexport async function qboCreateInvoice("));
+      expect(methodsIn(sender).map((m) => m.is)).toEqual(["POST"]);
+      expect(sender).toContain("/${INVOICE_WRITES.path}`");
+      expect(sender).toContain(`url.searchParams.set("operation", INVOICE_WRITES.voidOperation)`);
+      expect([...client.matchAll(/\bsendInvoiceWrite\b/g)]).toHaveLength(1 + INVOICE_WRITE_FUNCTIONS.length);
+      expect(client).not.toMatch(/export\s+(async\s+)?function\s+sendInvoiceWrite|export\s*\{[^}]*sendInvoiceWrite/);
+    });
+
+    it("each build their body from INVOICE_WRITES, refuse an id that isn't one, and carry nothing but their fields", () => {
+      for (const name of INVOICE_WRITE_FUNCTIONS) {
+        const body = bodyOf(name);
+        expect(body, name).toContain(`return sendInvoiceWrite(INVOICE_WRITES.${INVOICE_BODY[name as keyof typeof INVOICE_BODY]}(`);
+        expect(body, name).toMatch(/if \(!isQboId\(/);
+        expect(/export async function \w+\(([^)]*)\)/.exec(body)![1], name).not.toMatch(/\bpath\b|\burl\b|\bbody\b|\bpayload\b/);
+      }
+      expect(invoiceBodyProblems(invoiceWritesConstant(clientSource))).toEqual([]);
+    });
+
+    it("are named by the client and the buy-out module alone, sent from the module and the queue, and asked for from the parent's own actions", () => {
+      for (const name of INVOICE_WRITE_FUNCTIONS) {
+        expect(naming(name), `${name} is a buy-out invoice write. A new caller is a decision for a slice brief, not a fix made in passing.`).toEqual([...MAY_SEND_INVOICE_WRITES].sort());
+        expect([...writer.matchAll(new RegExp(`\\b${name}\\b`, "g"))], name).toHaveLength(2);
+      }
+      expect(naming(BUYOUT_SEND)).toEqual([...MAY_BUYOUT_SEND].sort());
+      for (const ask of BUYOUT_ASKS) expect(naming(ask), ask).toEqual([...MAY_BUYOUT_ASK].sort());
+      // Both writes are called inside the module's send, and nowhere else in it.
+      const send = writer.slice(writer.indexOf(`export async function ${BUYOUT_SEND}(`), writer.indexOf("\nasync function queueItem("));
+      for (const name of INVOICE_WRITE_FUNCTIONS) expect(send, name).toMatch(new RegExp(`\\b${name}\\(`));
+    });
+
+    it("refuse a body that could carry another field, or go elsewhere", () => {
+      const constant = invoiceWritesConstant(clientSource);
+      const refused = [
+        constant.replace("SyncToken: syncToken })", "SyncToken: syncToken, ...extra })"),
+        constant.replace(`EmailStatus: "NotSet",`, `EmailStatus: "NeedToSend",`),
+        constant.replace(`EmailStatus: "NotSet",`, `EmailStatus: "NotSet", BillEmail: { Address: c.email },`),
+        constant.replace(`path: "invoice",`, `path: "customer",`),
+        constant.replace("PrivateNote:", `["PrivateNote"]:`),
+        constant.replace(`voidOperation: "void",`, `voidOperation: "delete",`),
+      ];
+      for (const source of refused) {
+        expect(source, "the case didn't change the constant").not.toBe(constant);
+        expect(invoiceBodyProblems(source), source).not.toEqual([]);
+      }
+    });
+  });
+
   describe("and these checks refuse what would get past a careless scan", () => {
     const fetchWith = (init: string, before = "") => `${before}\nexport async function send(url: string) { return fetch(url, ${init}); }\n`;
 
@@ -431,7 +523,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     it("a fetch call is read whole, through strings and templates with brackets in them", () => {
       const call = "fetch(`${base}/v3/company/${encodeURIComponent(realm)}/customer`, { method: \"POST\", headers: { authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString(\"base64\")}` }, body: \")\" })";
       expect(fetchCalls(`const res = await ${call};\nconst next = 1;`)).toEqual([call]);
-      expect(fetchCalls(clientSource)).toHaveLength(5);
+      expect(fetchCalls(clientSource)).toHaveLength(6);
     });
 
     it("a second way to the write through the contact edits", () => {

@@ -49,7 +49,7 @@ describe("database rate limits", () => {
     // 3 codes to one address; 60 requests and 180 checks from one IP address, which a school's shared Wi-Fi needs on a
     // registration night (spec §1 Rate limits). All in 15 minutes.
     const window = { windowMs: 15 * 60 * 1000 };
-    const { contact_save_parent, contact_open_parent, form_open_parent, volunteer_checkin_parent, email_request_parent, email_confirm_parent, ...signIn } = RATE_LIMITS;
+    const { contact_save_parent, contact_open_parent, form_open_parent, volunteer_checkin_parent, email_request_parent, email_confirm_parent, buyout_parent, ...signIn } = RATE_LIMITS;
     expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window } });
     // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
     // hour, each a write to the club's QuickBooks, and the reads the edit page makes as it opens.
@@ -65,5 +65,8 @@ describe("database rate limits", () => {
     // mails two addresses, and each confirmation reads, and may write, the club's QuickBooks.
     expect(email_request_parent).toEqual({ max: 5, windowMs: 60 * 60 * 1000 });
     expect(email_confirm_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
+    // Paying instead of volunteering, and switching back (src/lib/buyouts/writes.ts), counted per person: each press
+    // may make or void an invoice in the club's QuickBooks.
+    expect(buyout_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
   });
 });
