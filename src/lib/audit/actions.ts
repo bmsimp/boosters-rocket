@@ -1,7 +1,7 @@
 /**
  * Audit actions in plain words, for the audit log page and its export. The log stores the short code (`parent.block`);
  * this is only how it is shown. A code with no entry here is shown as it is stored, so a new action is never hidden:
- * add its words here when you add the action.
+ * add its words here when you add the action (tests/unit/audit-actions.test.ts fails for one written under src/ without them).
  */
 export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "access.refused": "Refused: no permission for that page or action",
@@ -21,12 +21,19 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.access.granted": "A parent was given access to a family",
   "parent.access.moved": "A parent's access now comes from another QuickBooks record",
   "parent.block": "Parent blocked",
+  "parent.contact.read.refused": "Opening the page to update details refused: opened too often",
+  "parent.contact.save": "A parent changed their phone or address, written to QuickBooks",
+  "parent.contact.save.failed": "A parent's phone or address change wasn't saved",
+  "parent.create": "Parent record made from the roster",
+  "parent.email.changed": "A parent's email address changed in QuickBooks",
   "parent.email_change": "Parent's email address changed",
   "parent.email_change.quickbooks_failed": "Email change couldn't be written to QuickBooks",
   "parent.email_change_refused": "Email change refused",
   "parent.email_change_request": "Email change asked for",
   "parent.hold.decided": "Held address decided",
+  "parent.hold.opened": "Address held for staff to review",
   "parent.match.decided": "Family match decided",
+  "parent.name.changed": "A parent's name changed in QuickBooks",
   "parent.read": "A parent's record opened",
   "parent.review.notified": "Staff emailed about addresses to review",
   "parent.seed": "Test parent made by the proof-of-concept script",
@@ -47,6 +54,23 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "roster.family.read": "A family's record opened",
   "roster.refresh": "Roster read from QuickBooks",
   "roster.refresh.failed": "Roster couldn't be read from QuickBooks",
+  "season.create": "Season made",
+  "season.current.set": "Current season chosen or cleared",
+  "season.progress.family.read": "A family's season progress opened",
+  "season.records.cleared": "Season ticks, waivers and chosen lists cleared after a company change",
+  "season.rename": "Season renamed",
+  "season.requirement.add": "Requirement added",
+  "season.requirement.cover": "Who a requirement covers changed",
+  "season.requirement.remove": "Requirement removed",
+  "season.requirement.tick": "Checklist item ticked off",
+  "season.requirement.untick": "Checklist tick removed",
+  "season.requirement.unwaive": "Waiver removed",
+  "season.requirement.update": "Requirement changed",
+  "season.requirement.waive": "Requirement waived",
+  "season.step.add": "Step added",
+  "season.step.move": "Step moved",
+  "season.step.remove": "Step removed",
+  "season.step.update": "Step changed",
   "settings.club.save": "Club settings saved",
   "settings.mail.save": "Mail settings saved",
   "settings.mail.test": "Test email sent",
