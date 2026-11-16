@@ -219,7 +219,7 @@ export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "stu
  * Cancels one of the family's own sign-ups, until the club's cut-off before the shift starts. A sign-up id that isn't
  * the session family's own is answered as one that isn't there, whoever it belongs to.
  */
-export async function cancelMySignup(ctx: ParentCtx, family: unknown, signupId: unknown, now: Date = new Date()): Promise<Result> {
+export async function cancelMySignup(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, signupId: unknown, now: Date = new Date()): Promise<Result> {
   if (!isUuid(signupId)) return no(NOT_FROM_PAGE);
   if (!family) return no("Your family isn't set up in the portal yet. Please ask the club.");
   const [{ timeZone: zone }, { cutoffHours }] = await Promise.all([getClubSettings(), getVolunteerSettings()]);

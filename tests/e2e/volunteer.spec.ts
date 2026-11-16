@@ -59,7 +59,9 @@ test("a parent signs up for a shift, sees the count and their own sign-up, gets 
   await noSidewaysScroll(page);
   await mine.getByRole("button", { name: "Cancel my sign-up" }).click();
   await mine.getByRole("button", { name: "Yes, cancel it" }).click();
-  await expect(mine.getByRole("status")).toContainText("Cancelled. Your place is free for someone else now.");
+  // The page is drawn again with the place given back: the sign-up is gone from the list and the count is down.
+  await expect(mine).toContainText("Nobody in your family is signed up for a shift yet.");
+  await expect(griddle(page)).toContainText("1 of 4 places filled");
   await page.reload();
   await expect(griddle(page)).toContainText("1 of 4 places filled");
   await expect(page.getByText("Nobody in your family is signed up for a shift yet.")).toBeVisible();
