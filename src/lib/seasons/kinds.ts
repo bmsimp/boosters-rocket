@@ -62,21 +62,23 @@ const payment: KindRule = {
  * Volunteering (§11): met when confirmed volunteering reaches the amount, in shifts or hours as the requirement counts.
  * The shifts a requirement can count toward are listed in volunteer_shift_requirement, so it needs no column of its
  * own. Nothing is confirmed until check-in is built: that slice reads its credit here and passes it as `confirmed`
- * (and leaves out of `signedUp` the places it has credited); a buy-out (§11.5) is met the same way.
+ * (and leaves out of `signedUp` the places it has credited); a buy-out (§11.5) is met the same way. Until then staff
+ * record that the work is done with a tick, as for a checklist item, so a requirement can be met without a waiver.
  */
 const volunteer: KindRule = {
-  standings: async ({ requirements, subjectQboIds }) => {
+  standings: async ({ requirements, subjectQboIds, recorded }) => {
     const signedUp = await signedUpAmounts(requirements, subjectQboIds, pairKey);
-    const confirmed = new Map<string, number>(); // credit from check-ins and staff: none yet
+    const confirmed = new Map<string, number>(); // credit from check-ins: none yet
     const standings = new Map<string, Standing>();
     for (const key of new Set([...signedUp.keys(), ...confirmed.keys()])) {
       const r = requirements.find((x) => key.startsWith(`${x.id}|`));
       if (r) standings.set(key, volunteerStanding(r, { confirmed: confirmed.get(key) ?? 0, signedUp: signedUp.get(key) ?? 0 }));
     }
+    for (const r of recorded) if (r.metAt !== null) standings.set(pairKey(r.requirementId, r.subjectQboId), { met: true, words: "Done" });
     return standings;
   },
   nothingYet: (r) => volunteerStanding(r, { confirmed: 0, signedUp: 0 }),
-  ticked: false,
+  ticked: true,
 };
 
 export const KIND_RULES: Record<RequirementKind, KindRule | null> = {

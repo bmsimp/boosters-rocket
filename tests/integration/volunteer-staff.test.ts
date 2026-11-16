@@ -16,7 +16,8 @@ import VolunteerEventsPage from "@/app/staff/(app)/volunteer/page";
 import VolunteerEventPage from "@/app/staff/(app)/volunteer/[id]/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
 import RequirementProgressPage from "@/app/staff/(app)/seasons/progress/[requirementId]/page";
-import { addRequirementAction } from "@/app/staff/(app)/seasons/actions";
+import { addRequirementAction, setTicksAction } from "@/app/staff/(app)/seasons/actions";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import {
   addShiftAction, cancelEventAction, cancelShiftAction, copyEventAction, createEventAction, saveCutoffAction, updateEventAction, updateShiftAction,
 } from "@/app/staff/(app)/volunteer/actions";
@@ -301,5 +302,8 @@ describe("the cut-off and the volunteer kind of requirement", () => {
     expect(page).toContain("9:00 am to noon");
     const progress = textOf(await renderPage(RequirementProgressPage, { params: { requirementId: r!.id } }));
     expect(progress).toContain("0 of 2 shifts done, signed up for 1");
+    // Until check-in is built, staff record that the work is done with a tick, and the family reads it as done.
+    expect(await setTicksAction(r!.id, await currentRosterTag(), [FAMILY_A.family.qboId], true)).toMatchObject({ ok: true });
+    expect(textOf(await renderPage(RequirementProgressPage, { params: { requirementId: r!.id } }))).toMatch(/Done Ticked/);
   });
 });
