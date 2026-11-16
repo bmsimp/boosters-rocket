@@ -10,6 +10,7 @@ import { TRIP_DEPOSIT_ITEM, seedTwoFamilySeason, type FamilySeason } from "./sea
 import { seedTwoFamilyVolunteering, type FamilyVolunteer } from "./volunteer";
 import { seedTwoFamilyForms, type FamilyForms } from "./forms";
 import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
+import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -48,6 +49,8 @@ export type SeededParent = {
   forms?: FamilyForms;
   /** With seedTwoFamilies(): this parent's pending change of sign-in address, its link's token and the new address (tests/helpers/email-change.ts). */
   emailChange?: FamilyEmailChange;
+  /** With seedTwoFamilies(): this family's volunteer requirement with a buy-out, A's invoiced and B's paid (tests/helpers/buyouts.ts). */
+  buyout?: FamilyBuyout;
 };
 
 /**
@@ -179,6 +182,10 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const emails = await seedTwoFamilyEmailChanges(a, b);
   a.emailChange = emails.a; a.markers.push(...emails.a.markers);
   b.emailChange = emails.b; b.markers.push(...emails.b.markers);
+  // A volunteer requirement with a buy-out asked of each family alone: A's is invoiced, B's paid.
+  const buyouts = await seedTwoFamilyBuyouts({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
+  a.buyout = buyouts.a; a.markers.push(...buyouts.a.markers);
+  b.buyout = buyouts.b; b.markers.push(...buyouts.b.markers);
   return { a, b };
 }
 

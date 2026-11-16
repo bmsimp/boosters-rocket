@@ -4,9 +4,11 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { buyout, requirement, requirementCover, season, seasonStep, writeQueue, type BuyoutState } from "@/lib/db/schema";
+import { formatMoney } from "@/lib/money/cents";
 import { connectCompany, RIVERA } from "./money";
 import { MONEY_REALM, seedSignedInParent, type ParentFamilySpec, type SeededParent } from "./parent";
 import type { QboStub } from "./qbo-stub";
+import type { SeededSeason } from "./season";
 
 /** The QuickBooks product or service the test buy-outs are billed with. */
 export const BUYOUT_ITEM = "4343";
@@ -51,3 +53,31 @@ export const buyoutsOf = (familyQboId: string) => db.select().from(buyout).where
 /** The write queue's items for one buy-out, oldest first. */
 export const queueOf = async (buyoutId: string) => (await db.select().from(writeQueue).orderBy(writeQueue.createdAt))
   .filter((r) => "buyoutId" in r.request && r.request.buyoutId === buyoutId);
+
+export type FamilyBuyout = {
+  /** The volunteer requirement asked of this family alone, with a buy-out, and the choice key of its page. */
+  requirementId: string; key: string;
+  /** Strings that belong to this family's buy-out alone: the requirement's title and id, the amount, the state's words, the buy-out's id. */
+  markers: string[];
+  /** What this family's parent must find on the Volunteer page. */
+  page: string[];
+};
+
+/**
+ * A volunteer requirement with a buy-out for family A and one for family B (tests/helpers/parent.ts), each asked of
+ * that family alone and optional, in the season's last step, so no step's count changes: A has chosen its buy-out and
+ * it is invoiced; B's is paid. Neither family's ids are digits, so nothing is ever asked of QuickBooks for them.
+ */
+export async function seedTwoFamilyBuyouts(a: { spec: ParentFamilySpec; parentId: string }, b: { spec: ParentFamilySpec; parentId: string }, season: SeededSeason): Promise<{ a: FamilyBuyout; b: FamilyBuyout }> {
+  const stepId = Object.values(season.stepIds).at(-1)!;
+  const A = { title: "Concession stand shifts QA74", unitCents: 3719, units: 2 }, B = { title: "Parking lot hours QB85", unitCents: 2147, units: 3 };
+  const reqA = await seedBuyoutRequirement({ stepId, title: A.title, required: false, amount: A.units, unit: "shifts", unitCents: A.unitCents, chosen: [a.spec.family.qboId] });
+  const reqB = await seedBuyoutRequirement({ stepId, title: B.title, required: false, amount: B.units, unit: "hours", unitCents: B.unitCents, chosen: [b.spec.family.qboId] });
+  const forA = await seedBuyout({ requirementId: reqA, familyQboId: a.spec.family.qboId, chosenBy: a.parentId, state: "invoiced", unitCents: A.unitCents, units: A.units, invoiceQboId: "9174" });
+  const forB = await seedBuyout({ requirementId: reqB, familyQboId: b.spec.family.qboId, chosenBy: b.parentId, state: "paid", unitCents: B.unitCents, units: B.units, invoiceQboId: "9285" });
+  const amountA = formatMoney(A.unitCents * A.units), amountB = formatMoney(B.unitCents * B.units);
+  return {
+    a: { requirementId: reqA, key: "family", markers: [A.title, reqA, forA.id, amountA, "Buy-out invoiced"], page: [A.title, "Buy-out invoiced"] },
+    b: { requirementId: reqB, key: "family", markers: [B.title, reqB, forB.id, amountB, "Paid instead"], page: [B.title, "Paid instead"] },
+  };
+}
