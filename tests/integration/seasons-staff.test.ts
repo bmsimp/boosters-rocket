@@ -309,9 +309,9 @@ describe("requirements", () => {
     }
   });
 
-  it.each(["raffle", "", "Checklist"])("won't make a requirement of a kind that has no rule (%j)", async (kind) => {
+  it.each(["raffle", "", "Checklist"])("won't make a requirement of a kind the page never offers (%j)", async (kind) => {
     const fall = await seedFall();
-    expect(await addRequirementAction(fall.stepIds.Uniforms!, kind, "family", FIELDS)).toEqual({ ok: false, errors: ["Choose a kind of requirement from the list."] });
+    expect(await addRequirementAction(fall.stepIds.Uniforms!, kind, "family", FIELDS)).toEqual({ ok: false, errors: ["That didn't go through. Reload the page and try again."] });
     expect(await db.select().from(requirement)).toHaveLength(2);
     expect(await audits()).toEqual([]);
   });
