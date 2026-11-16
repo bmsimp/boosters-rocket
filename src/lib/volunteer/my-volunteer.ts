@@ -271,6 +271,6 @@ export async function cancelMySignup(ctx: ParentCtx, family: Pick<MyFamily, "stu
     await tx.update(volunteerSignup).set({ cancelledAt: now, cancelledByDoor: "parent", cancelledBy: ctx.parentId }).where(eq(volunteerSignup.id, s.id));
     await writeAudit({ actor: { door: "parent", id: ctx.parentId, label: ctx.email }, action: "volunteer.signup.cancel", targetType: "volunteer_signup", targetId: s.id, ip: ctx.ip,
       before: { familyQboId: s.familyQboId, shiftId: s.shiftId, event: event.name, onDate: event.onDate, fillerName: s.fillerName }, after: { cancelled: true } }, tx);
-    return { ok: true as const, message: `Cancelled. ${s.fillerKind === "guardian" && s.fillerParentId === ctx.parentId ? "Your" : `${s.fillerName}'s`} place is free for someone else now. Thanks for letting us know.` };
+    return { ok: true as const, message: `Cancelled. ${s.fillerKind === "guardian" && s.fillerParentId === ctx.parentId ? "Your" : `${s.fillerName}'s`} place is free for someone else now. Thanks for letting us know. If you added it to your calendar, you can delete it there.` };
   });
 }

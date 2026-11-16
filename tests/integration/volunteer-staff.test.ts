@@ -238,6 +238,13 @@ describe("shifts", () => {
     const other = await db.insert(volunteerShift).values({ eventId, startsAt: "13:00", endsAt: "15:00", places: 2 }).returning();
     expect(await cancelShiftAction(shift.id)).toEqual({ ok: true, message: "The shift is cancelled. All 2 people signed up have been emailed." });
     expect(mailTo(a)[0]!.text).toContain("The club has cancelled a shift at Marching band car wash");
+    // The calendar file that takes the shift out of the volunteer's calendar: the sign-up's own UID, a later SEQUENCE.
+    const [file] = mailTo(a)[0]!.attachments!;
+    expect(file!.contentType).toContain("method=CANCEL");
+    expect(file!.content).toContain("METHOD:CANCEL");
+    expect(file!.content).toContain("STATUS:CANCELLED");
+    expect(file!.content).toContain(`UID:volunteer-signup-${a.volunteer!.markers[0]}@booster-rocket`);
+    expect(file!.content).toContain(`SEQUENCE:${shift.revision + 1}`);
     expect(mailTo(b)).toHaveLength(1);
     expect((await loadMyVolunteering({ ...a.identity })).events.flatMap((e) => e.shifts.map((s) => s.id))).toEqual([other[0]!.id]);
     expect(await cancelShiftAction(shift.id)).toEqual({ ok: false, errors: ["This shift is cancelled already."] });

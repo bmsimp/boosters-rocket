@@ -70,7 +70,7 @@ export type VolunteerShiftWords = { event: string; role: string | null; when: st
 export type VolunteerWho = { self: true } | { self: false; name: string };
 const helping = (who: VolunteerWho, s: VolunteerShiftWords) => `${who.self ? "You're" : `${who.name} is`} signed up to help at ${s.event}${s.role ? ` (${s.role})` : ""}.`;
 const shiftLines = (s: VolunteerShiftWords) => [`When: ${s.when}`, `Where: ${s.location}`];
-const calendarFile = (content: string) => ({ filename: "volunteer-shift.ics", contentType: "text/calendar; charset=utf-8; method=PUBLISH", content });
+const calendarFile = (content: string, method: "PUBLISH" | "CANCEL" = "PUBLISH") => ({ filename: "volunteer-shift.ics", contentType: `text/calendar; charset=utf-8; method=${method}`, content });
 
 /** On signing up: the shift, until when it can be cancelled on the portal, and a calendar file for it. */
 export function volunteerSignupMessage(b: Brand, to: string, o: { who: VolunteerWho; shift: VolunteerShiftWords; contact: string; cancelUntil: string | null; link: string; calendar: string }): MailMessage {
@@ -98,13 +98,14 @@ export function volunteerChangeMessage(b: Brand, to: string, o: { who: Volunteer
 }
 
 /** When staff cancel a shift or the whole event. Nothing needs doing: the place is simply gone. */
-export function volunteerCancelMessage(b: Brand, to: string, o: { who: VolunteerWho; shift: VolunteerShiftWords; whole: "event" | "shift"; contact: string }): MailMessage {
+export function volunteerCancelMessage(b: Brand, to: string, o: { who: VolunteerWho; shift: VolunteerShiftWords; whole: "event" | "shift"; contact: string; calendar: string }): MailMessage {
   const lines = [
     `The club has cancelled ${o.whole === "event" ? o.shift.event : `a shift at ${o.shift.event}`}, so ${o.who.self ? "you don't" : `${o.who.name} doesn't`} need to come.`,
     `The shift was: ${o.shift.when}${o.shift.role ? `, ${o.shift.role}` : ""}, at ${o.shift.location}.`,
+    "If you added it to your calendar, opening the calendar file with this email takes it out again.",
     `There's nothing you need to do. Questions? Contact ${o.contact}. Thank you for offering your time.`,
   ];
-  return { to, subject: `Cancelled: ${o.shift.event}`, text: text(lines), html: html(b, lines) };
+  return { to, subject: `Cancelled: ${o.shift.event}`, text: text(lines), html: html(b, lines), attachments: [calendarFile(o.calendar, "CANCEL")] };
 }
 
 export function testMessage(b: Brand, to: string): MailMessage {

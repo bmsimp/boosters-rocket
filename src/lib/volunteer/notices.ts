@@ -24,10 +24,13 @@ export const shiftWords = (f: ShiftFacts): VolunteerShiftWords => ({
 });
 const volunteerLink = () => `${env.APP_URL.replace(/\/+$/, "")}/volunteer`;
 
-/** The calendar file for one sign-up on a shift as it is now. */
-export function calendarFor(signupId: string, f: ShiftFacts, zone: string, now: Date): string {
+/**
+ * The calendar file for one sign-up on a shift as it is now. `cancelled`: the file that takes it out of the reader's
+ * calendar again, under the same UID and a later SEQUENCE than any file sent for it before.
+ */
+export function calendarFor(signupId: string, f: ShiftFacts, zone: string, now: Date, cancelled = false): string {
   const { start, end } = shiftInstants(f.event.onDate, f.shift.startsAt, f.shift.endsAt, zone);
-  return calendarFile({ signupId, revision: f.shift.revision, start, end, stamp: now,
+  return calendarFile({ signupId, revision: f.shift.revision + (cancelled ? 1 : 0), start, end, stamp: now, cancelled,
     summary: `Volunteering: ${f.event.name}${f.shift.role ? ` (${f.shift.role})` : ""}`, location: f.event.location,
     description: [f.event.description, `Questions? Contact ${contactWords(f.event)}.`].filter(Boolean).join("\n\n") });
 }
@@ -56,7 +59,8 @@ export async function sendNotices(notices: readonly Notice[], o: { zone: string;
     const m = n.kind === "change"
       ? volunteerChangeMessage(brand, n.signup.to, { who: n.signup.who, before: shiftWords(n.before), after: shiftWords(n.after), contact: contactWords(n.after.event), link: volunteerLink(),
           calendar: calendarFor(n.signup.signupId, n.after, o.zone, now) })
-      : volunteerCancelMessage(brand, n.signup.to, { who: n.signup.who, shift: shiftWords(n.facts), whole: n.whole, contact: contactWords(n.facts.event) });
+      : volunteerCancelMessage(brand, n.signup.to, { who: n.signup.who, shift: shiftWords(n.facts), whole: n.whole, contact: contactWords(n.facts.event),
+          calendar: calendarFor(n.signup.signupId, n.facts, o.zone, now, true) });
     const r = await sendMail(m, { purpose: "volunteer_notice", actor: o.actor ?? NOTICE_ACTOR, ip: o.ip ?? null });
     if (r.ok) sent++; else failed++;
   }

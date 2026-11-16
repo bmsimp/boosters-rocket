@@ -284,7 +284,7 @@ describe("cancelling", () => {
       errors: ["It's too close to the shift to cancel here: the portal takes cancellations until 48 hours before it starts. Please contact Pat Organizer (pat@club.example)."] });
     expect((await live()).map((s) => s.id)).toContain(mine.id);
     expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, new Date(cutoff.getTime() - 1000))).toEqual({ ok: true,
-      message: `Cancelled. ${AURELIO!.name}'s place is free for someone else now. Thanks for letting us know.` });
+      message: `Cancelled. ${AURELIO!.name}'s place is free for someone else now. Thanks for letting us know. If you added it to your calendar, you can delete it there.` });
     const [row] = await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, mine.id));
     expect(row).toMatchObject({ cancelledByDoor: "parent", cancelledBy: a.identity.parentId });
     expect((await audits("volunteer.signup.cancel"))[0]).toMatchObject({ door: "parent", actorId: a.identity.parentId, targetId: mine.id, after: { cancelled: true } });
