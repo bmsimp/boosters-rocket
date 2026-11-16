@@ -11,7 +11,9 @@
 # When:
 #   TZ             the club's time zone, an IANA name such as America/Chicago (required)
 #   BR_BACKUP_AT   the time of day, HH:MM on a 24-hour clock in that zone (default 03:00). Choose a time that exists on
-#                  every day of the year: in most zones the clocks change between 01:00 and 03:00.
+#                  every day of the year: in most zones the clocks change between 01:00 and 03:00. "off" when the
+#                  host's own scheduler runs the backups: it then waits without backing up, and --now still works.
+#   BR_BACKUP_KEEP how many backups of each database to keep, when --keep isn't given (default: backup.sh's, 14)
 #
 # It prints nothing of its own while it waits or runs: what reaches the log is backup.sh's own lines, one run a night.
 # Exit codes: 2 refused (bad arguments or settings, as backup.sh refuses), and with --now whatever backup.sh exits with.
@@ -26,7 +28,7 @@ BR_BACKUP_AT="${BR_BACKUP_AT:-03:00}"
 die() { local code="$1"; shift; printf '%s\n' "$*" >&2; exit "$code"; }
 usage() { die 2 "Usage: scripts/backup-schedule.sh <folder> [--keep <number>] [--now | --next]"; }
 
-DIR="" KEEP="" MODE="loop"
+DIR="" KEEP="${BR_BACKUP_KEEP:-}" MODE="loop"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --keep) [ "$#" -ge 2 ] || usage; KEEP="$2"; shift 2 ;;
@@ -39,7 +41,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$DIR" ] || usage
 [ -z "$KEEP" ] || [[ "$KEEP" =~ ^[1-9][0-9]{0,3}$ ]] || die 2 "--keep takes a number from 1 to 9999: how many backups to keep."
-[[ "$BR_BACKUP_AT" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die 2 "BR_BACKUP_AT must be a time of day like 03:00 (24-hour clock, in the club's time zone)."
+[[ "$BR_BACKUP_AT" =~ ^(([01][0-9]|2[0-3]):[0-5][0-9]|off)$ ]] || die 2 "BR_BACKUP_AT must be a time of day like 03:00 (24-hour clock, in the club's time zone), or off."
 [ -n "${TZ:-}" ] || die 2 "Set TZ to the club's time zone, an IANA name such as America/Chicago, so the backup runs at $BR_BACKUP_AT club time."
 [[ "$TZ" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]] && [ -f "/usr/share/zoneinfo/$TZ" ] \
   || die 2 "TZ is $TZ, which isn't a time zone this machine knows. Use an IANA name such as America/Chicago."
@@ -66,14 +68,19 @@ next_run() {
 case "$MODE" in
   now) exec bash "$BACKUP" "${backup_args[@]}" ;;
   next)
+    if [ "$BR_BACKUP_AT" = "off" ]; then printf 'Nightly backups are off here (BR_BACKUP_AT=off): the host'"'"'s own scheduler runs them.\n'; exit 0; fi
     at="$(next_run)" || die 2 "Couldn't work out when $BR_BACKUP_AT next comes in $TZ."
-    printf 'The next backup is at %s (%s).\n' "$(date -d "@$at" '+%Y-%m-%d %H:%M %Z')" "$TZ"
+    printf 'The next backup is at %s (%s, %s).\n' "$(date -d "@$at" '+%Y-%m-%d %H:%M %Z')" "$TZ" "$(date -u -d "@$at" '+%Y-%m-%dT%H:%M:%SZ')"
     exit 0 ;;
 esac
 
 # Stopped while it sleeps, it stops at once. Stopped while a backup runs, the backup finishes first (give the
 # container time to stop: deploy/compose.yml does).
 trap 'exit 0' TERM INT
+if [ "$BR_BACKUP_AT" = "off" ]; then
+  # Waits to be stopped, so a restart policy doesn't start it again and again.
+  while :; do sleep 3600 & wait $! || true; done
+fi
 while :; do
   at="$(next_run)" || die 2 "Couldn't work out when $BR_BACKUP_AT next comes in $TZ."
   # Short sleeps, each checked against the clock, so a clock that is corrected or a machine that slept doesn't move
