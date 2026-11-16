@@ -12,6 +12,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, parent, setting, signedFormCopy, signedFormEvidence, signedFormFile, signatureRequest } from "@/lib/db/schema";
 import { EVIDENCE_PER_WAKE, evidenceHealth, runEvidenceJob } from "@/lib/signed-forms/evidence-job";
+import { formsForMovedStudent } from "@/lib/forms/moved";
 import { healthReport } from "@/lib/health/report";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import { resetDb, seedWorkingMail } from "../helpers/db";
@@ -251,6 +252,16 @@ describe("the guardians' copies", () => {
     await runEvidenceJob();
     expect(mail.outbox).toEqual([]);
     expect(await audits("forms.copy.skipped")).toHaveLength(2);
+  });
+
+  it("reaches a guardian whose student moved to another family before the evidence was kept, by their link to the family they signed in", async () => {
+    const { id, envelopeId } = await signedForA();
+    await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: FAMILY_A.students[0]!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
+    await runEvidenceJob();
+    expect((await db.select().from(signedFormEvidence))[0]!.familyQboId).toBe(FAMILY_B.family.qboId);
+    expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
+    expect(Buffer.compare(mail.outbox[0]!.attachments![0]!.content as Buffer, stub.sealedBytes(envelopeId))).toBe(0);
+    expect((await audits("forms.copy.sent"))[0]!.after).toEqual({ parentId: a.identity.parentId, requestId: id, how: "attached" });
   });
 
   it("waits while outgoing mail isn't set up, and records a failed send without trying it again", async () => {

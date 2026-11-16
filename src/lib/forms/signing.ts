@@ -20,7 +20,7 @@ import {
 } from "@/lib/documenso/client";
 import { hasConsent, recordConsent } from "./consent";
 import { findMyForm, type MyForm } from "./my-forms";
-import { NO_DOCUMENT, asking, claim, holdsSignature, isHeld, readAndStore, release, whenReleased, type RequestRow } from "./requests";
+import { NO_DOCUMENT, asking, claim, holdsSignature, isHeld, readAndStore, release, signedWithin, whenReleased, type RequestRow } from "./requests";
 import { getFormsConfig } from "./settings";
 import { readDocument, signersFor, stillRight, wordsFor, type SignerIdentity } from "./states";
 import { checkTemplate, type TemplatePlan } from "./template";
@@ -258,7 +258,12 @@ export async function openMyForm(ctx: ParentCtx, form: MyForm): Promise<FormView
 async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<FormView> {
   let { row } = form;
   // Finished one way or the other: what the portal last stored is all there is to say, and Documenso isn't asked.
-  if (row.state === "complete") return viewOf(ctx, row, { kind: "complete" });
+  // A form signed by another family's guardians before its student moved here says only that it is signed: who signed
+  // it is that family's (signedWithin()).
+  if (row.state === "complete") {
+    const view = viewOf(ctx, row, { kind: "complete" });
+    return (await signedWithin(ctx.familyQboId, row.signers)) ? view : { ...view, signers: [] };
+  }
   const config = await getFormsConfig();
   if (row.state === "declined") return viewOf(ctx, row, { kind: "declined", canRestart: config !== null && form.setting !== null });
   if (!config || !form.setting) return viewOf(ctx, row, { kind: "not_ready" });

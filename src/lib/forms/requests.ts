@@ -3,9 +3,9 @@
 // parent's pages, the webhook and the worker's job all come through readAndStore(): none of them stores anything a
 // webhook's body or the signing frame said. Imports no staff-only module (tests/integration/page-guards.test.ts).
 import "server-only";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { signatureRequest, type RequestSigner } from "@/lib/db/schema";
+import { guardian, signatureRequest, type RequestSigner } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { documensoCode, getEnvelope, type CallOptions, type DocumensoConfig, type DocumensoErrorCode, type Envelope } from "@/lib/documenso/client";
 import { noteApiFailure, noteApiOk } from "./settings";
@@ -141,6 +141,21 @@ export async function whenReleased(requestId: string, waitMs = 8_000): Promise<R
 }
 export async function release(requestId: string): Promise<void> {
   await db.update(signatureRequest).set({ preparingAt: null }).where(eq(signatureRequest.id, requestId));
+}
+
+/**
+ * True when every guardian the request's document was made for is a guardian of this family (a link of any status:
+ * one closed since still counts, since they signed as the family's own). A request whose student moved here from
+ * another family keeps the old family's guardians on it (formsForMovedStudent): it counts for the student, but who
+ * signed it and the signed PDF (their names, signatures and what they filled in) are that family's, so a parent page
+ * shows them only when this is true. A signer the portal couldn't match to a guardian (no parentId) makes it false.
+ */
+export async function signedWithin(familyQboId: string, signers: readonly Pick<RequestSigner, "parentId">[]): Promise<boolean> {
+  if (signers.length === 0) return true;
+  if (signers.some((s) => !s.parentId)) return false;
+  const ids = [...new Set(signers.map((s) => s.parentId))];
+  const links = await db.select({ parentId: guardian.parentId }).from(guardian).where(and(eq(guardian.familyQboId, familyQboId), inArray(guardian.parentId, ids)));
+  return ids.every((id) => links.some((l) => l.parentId === id));
 }
 
 /** The family's own request with this id, or nothing. Every parent lookup of a request comes through here. */

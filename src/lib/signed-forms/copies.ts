@@ -7,7 +7,7 @@ import { env } from "@/env";
 import { db } from "@/lib/db/client";
 import { guardian, parent, signedFormCopy, signedFormEvidence, signedFormFile } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { FORMS_WORKER } from "@/lib/forms/requests";
+import { FORMS_WORKER, signedWithin } from "@/lib/forms/requests";
 import { signedFormCopyMessage } from "@/lib/mail/messages";
 import { currentBrand, sendMail } from "@/lib/mail/send";
 import { getStoredMailConfig } from "@/lib/mail/settings";
@@ -23,7 +23,8 @@ export type CopyCounts = { sent: number; failed: number; skipped: number };
 
 /**
  * The copies owed for evidence already kept: to each guardian recorded as a signer on the request, and to nobody
- * else. A guardian who is blocked, or whose link to the family is closed by then, gets nothing. Each send is claimed
+ * else. A guardian who is blocked, or whose link to the family is closed by then, gets nothing (one whose student
+ * moved to another family before the evidence was kept is reached through their link to the family they signed in). Each send is claimed
  * first, in one statement (signed_form_copy), so two wakes can never send one twice, and it is never tried again
  * after a failure. Nothing goes while outgoing mail isn't set up: the copies wait for it. Evidence of an earlier
  * QuickBooks company sends nothing.
@@ -48,8 +49,13 @@ export async function sendOwedCopies(): Promise<CopyCounts> {
       const done = (outcome: "sent" | "failed" | "skipped", how: "attached" | "link" | null) =>
         db.update(signedFormCopy).set({ outcome, how, doneAt: new Date() }).where(eq(signedFormCopy.id, claimed[0]!.id));
       const audit = { targetType: "signed_form_evidence", targetId: evidence.id };
-      const [to] = await db.select({ email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-        .where(and(eq(guardian.parentId, parentId), eq(guardian.familyQboId, evidence.familyQboId), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
+      // Their open link to the family the form is kept under, or, when its student moved to another family before the
+      // evidence was kept (formsForMovedStudent), to the family they signed it in: the one every signer is a guardian
+      // of. The download link is the new family's, so a moved form whose PDF can't go with the email is skipped.
+      const links = await db.select({ email: parent.email, familyQboId: guardian.familyQboId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+        .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
+      let to = links.find((l) => l.familyQboId === evidence.familyQboId);
+      if (!to && pdf) for (const l of links) if (await signedWithin(l.familyQboId, evidence.signers.map((x) => ({ parentId: x.parentId ?? "" })))) { to = l; break; }
       if (!to) {
         await done("skipped", null);
         await writeAudit({ actor: FORMS_WORKER, action: "forms.copy.skipped", ...audit, after: { parentId, requestId: evidence.requestId, reason: "no_open_link" } });

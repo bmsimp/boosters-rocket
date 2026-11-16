@@ -1,6 +1,7 @@
 // When staff move a student to another family (the roster writes slice calls this; nothing in this slice does): what
 // happens to the student's forms. A form signed and sealed is the club's record and goes with the student, its kept
-// evidence too. A form not finished was made for the old family's guardians, so its document is withdrawn (after the
+// evidence too, so it still counts for them; but who signed it and its PDF stay the old family's: a parent of the new
+// family reads only "Signed" (signedWithin(), src/lib/forms/requests.ts). A form not finished was made for the old family's guardians, so its document is withdrawn (after the
 // transaction: the worker does it from form_withdrawal) and the request goes back to not opened under the new family,
 // with the old family's consents taken away. Imports no staff-only module (tests/integration/page-guards.test.ts).
 import "server-only";
