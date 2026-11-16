@@ -101,3 +101,20 @@ export function checkInWindow(when: { start: Date; end: Date }, now: Date): Chec
  * cut-off itself, and after it, they are asked to contact the event's contact instead.
  */
 export const beforeCutoff = (start: Date, cutoffHours: number, now: Date): boolean => now.getTime() < start.getTime() - cutoffHours * 3_600_000;
+
+/** The club's hour from which the day's volunteer reminders go (./reminders.ts): nobody is emailed in the night. */
+export const REMINDER_HOUR = 9;
+/** The calendar date (YYYY-MM-DD) in a zone at an instant. */
+const dayIn = (zone: string, at: Date): string => { const w = wallParts(zone, at.getTime()); return `${w.y}-${String(w.m).padStart(2, "0")}-${String(w.d).padStart(2, "0")}`; };
+/** The club's today and tomorrow when it is 9:00 or later on the club's clock; null before that. Pure. */
+export function reminderDay(zone: string, now: Date): { today: string; tomorrow: string } | null {
+  if (wallParts(zone, now.getTime()).h < REMINDER_HOUR) return null;
+  const today = dayIn(zone, now);
+  return { today, tomorrow: nextDay(today) };
+}
+
+/** The calendar day `days` after `onDate` (YYYY-MM-DD). */
+export function daysAfter(onDate: string, days: number): string {
+  const [y, m, d] = onDate.split("-").map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}

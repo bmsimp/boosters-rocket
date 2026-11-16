@@ -14,8 +14,8 @@ import { getParentSettings } from "@/lib/parents/settings";
 import { isCovered } from "@/lib/seasons/progress";
 import { loadCovers, loadFacts, toRequirement } from "@/lib/seasons/recorded";
 import { loadSubjects } from "@/lib/seasons/subjects";
-import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
-import { dateWords, nextDay } from "./clock";
+import { getClubSettings } from "@/lib/settings/club";
+import { dateWords, daysAfter, reminderDay } from "./clock";
 import { contactWords, shiftWords, volunteerLink } from "./notices";
 import { whoMustWords } from "./rules";
 import { factsOf } from "./setup";
@@ -23,27 +23,11 @@ import { factsOf } from "./setup";
 export const REMINDERS_JOB = "volunteer.reminders";
 /** How many emails of each kind go in one wake: a roster's worth goes out over some minutes, not in one burst. */
 export const REMINDER_BATCH = 5;
-/** The club's hour from which the day's reminders go: nobody is emailed in the night. */
-export const REMINDER_HOUR = 9;
 /** A failed send may be claimed again after this long, while it is still the day to send it. */
 export const REMINDER_RETRY_MS = 15 * 60_000;
 /** The nudges before a due date: how many days before, and what each is called. */
 export const NUDGES = [{ kind: "due_14" as const, days: 14 }, { kind: "due_3" as const, days: 3 }];
 const ACTOR: Actor = { door: "system", id: null, label: "volunteer reminders" };
-
-/** The club's today and tomorrow when it is 9:00 or later on the club's clock; null before that. Pure. */
-export function reminderDay(zone: string, now: Date): { today: string; tomorrow: string } | null {
-  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", hour: "2-digit" }).format(now));
-  if (hour < REMINDER_HOUR) return null;
-  const today = calendarDayIn(zone, now);
-  return { today, tomorrow: nextDay(today) };
-}
-
-/** The calendar day `days` after `onDate` (YYYY-MM-DD). */
-export function daysAfter(onDate: string, days: number): string {
-  const [y, m, d] = onDate.split("-").map(Number) as [number, number, number];
-  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
-}
 
 /**
  * Takes one email for sending, in one statement: it succeeds for one wake only, and again only after a failure that
@@ -52,7 +36,7 @@ export function daysAfter(onDate: string, days: number): string {
 async function claim(kind: "day_before" | "due_14" | "due_3", key: string, familyQboId: string, now: Date): Promise<string | null> {
   const [row] = await db.insert(volunteerReminder).values({ kind, key, familyQboId, triedAt: now })
     .onConflictDoUpdate({ target: [volunteerReminder.kind, volunteerReminder.key], set: { triedAt: now, outcome: null },
-      setWhere: sql`${volunteerReminder.outcome} = 'failed' and ${volunteerReminder.triedAt} < ${new Date(now.getTime() - REMINDER_RETRY_MS)}` })
+      setWhere: sql`${volunteerReminder.outcome} = 'failed' and ${volunteerReminder.triedAt} < ${new Date(now.getTime() - REMINDER_RETRY_MS).toISOString()}::timestamptz` })
     .returning({ id: volunteerReminder.id });
   return row?.id ?? null;
 }
