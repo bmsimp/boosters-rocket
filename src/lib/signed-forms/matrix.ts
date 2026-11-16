@@ -28,6 +28,8 @@ export type Matrix = {
   forms: MatrixForm[];
   /** Null when the roster can't be shown (no membership shape, or a cache read from another company). */
   families: MatrixFamily[] | null;
+  /** The kept evidence the whole matrix leads to, whatever the filter: the page lists the rest of the company's apart. */
+  shownEvidenceIds: string[];
 };
 
 export type MatrixFilter = { formId: string | null; state: CellState | null; search: string };
@@ -114,5 +116,6 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
     const kept = familyMatches || anyStudent ? rows : [];
     return { qboId: fam.qboId, name: fam.name, rows: kept };
   }).filter((fam) => fam.rows.length > 0);
-  return { season: s, allForms, forms: shownIndexes.map((i) => allForms[i]!), families };
+  const shownEvidenceIds = (all ?? []).flatMap((fam) => fam.rows.flatMap((r) => r.cells.flatMap((c) => (c.evidenceId ? [c.evidenceId] : []))));
+  return { season: s, allForms, forms: shownIndexes.map((i) => allForms[i]!), families, shownEvidenceIds };
 }

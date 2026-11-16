@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { loadArchive } from "@/lib/signed-forms/evidence";
+import { loadArchive, loadOtherKept } from "@/lib/signed-forms/evidence";
 import { loadMatrix, parseMatrixFilter, type MatrixCell, type MatrixForm } from "@/lib/signed-forms/matrix";
 import { CELL_WORDS, FILTER_STATES, cellTone } from "@/lib/signed-forms/rules";
 import { CalendarDate } from "../../../components/calendar-date";
@@ -37,6 +37,7 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
   const ctx = await requireStaffPage("Forms.Signature.Read");
   const filter = parseMatrixFilter(await searchParams);
   const [matrix, archive] = await Promise.all([loadMatrix(filter), loadArchive()]);
+  const others = await loadOtherKept(matrix?.shownEvidenceIds ?? [], filter.search);
   const writes = can(ctx.effective, "Forms.Signature.ReadWrite");
   const filtered = filter.formId !== null || filter.state !== null || filter.search !== "";
   return (
@@ -111,6 +112,19 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
           )}
         </>
       )}
+
+      <section className="box" aria-labelledby="others-h">
+        <h2 id="others-h">Other kept signed forms</h2>
+        <p>Signed forms the table above doesn&apos;t lead to: an earlier season&apos;s, or a family&apos;s or student&apos;s no longer on the roster. Each is kept as it was signed.</p>
+        {others.entries.length === 0 ? <p>There are none{filter.search ? " matching the search" : ""}.</p> : (
+          <ul className="lines">{others.entries.map((a) => (
+            <li key={a.id}><div>
+              <Link className="what" href={`/staff/forms/evidence/${a.id}`}>{a.formTitle}</Link>
+              <span className="when">{[a.subjectName, a.familyName, a.seasonName].filter(Boolean).join(" · ")}{a.completedAt && <> · Signed <LocalTime iso={a.completedAt.toISOString()} /></>}</span>
+            </div></li>))}</ul>
+        )}
+        {others.more && <p className="help">Showing the newest {others.entries.length}. Search by a name above to find an older one.</p>}
+      </section>
 
       <section className="box" aria-labelledby="archive-h">
         <h2 id="archive-h">Earlier company</h2>

@@ -8,7 +8,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  auditLog, formReminderClaim, formReminderRound, formWithdrawal, parent, qboCustomer, requirement, requirementProgress, role, roleAssignment, roleRule, setting, signatureConsent, signatureRequest,
+  auditLog, formReminderClaim, formReminderRound, formWithdrawal, parent, qboCustomer, requirement, requirementProgress, role, roleAssignment, roleRule, season, setting, signatureConsent, signatureRequest,
   signedFormEvidence, signedFormFile,
 } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
@@ -137,6 +137,30 @@ describe("the matrix", () => {
     expect(student).toContain(FAMILY_A.family.name);
     // Anything it doesn't know in the address is dropped, not guessed at.
     expect(await pageOutcome(SignedFormsPage, { searchParams: { form: "x'; drop", state: "nope", q: ["a", "b"] } })).toHaveProperty("html");
+  });
+});
+
+describe("kept signed forms the matrix doesn't lead to", () => {
+  it("are listed apart once their season isn't current, or their student has left the roster, and lead to their evidence", async () => {
+    asStaff(reader);
+    const othersOf = (html: string) => html.split("Other kept signed forms")[1]!.split("Earlier company")[0]!;
+    // While the season is current, both families' signed forms are in the table, and nothing is listed apart.
+    expect(othersOf(await renderPage(SignedFormsPage, { searchParams: {} }))).not.toContain("/staff/forms/evidence/");
+    // A's student leaves the roster: A's signed form is listed apart, B's stays in the table.
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, FAMILY_A.students[1]!.qboId));
+    let others = othersOf(await renderPage(SignedFormsPage, { searchParams: {} }));
+    expect(others).toContain(`/staff/forms/evidence/${a.forms!.evidence.id}`);
+    expect(others).not.toContain(`/staff/forms/evidence/${b.forms!.evidence.id}`);
+    // A new season is made current: both are listed apart, and a search narrows them by the names kept with them.
+    await db.update(season).set({ isCurrent: false });
+    await db.insert(season).values({ name: "Spring 2027", isCurrent: true });
+    others = othersOf(await renderPage(SignedFormsPage, { searchParams: {} }));
+    expect(others).toContain(`/staff/forms/evidence/${a.forms!.evidence.id}`);
+    expect(others).toContain(`/staff/forms/evidence/${b.forms!.evidence.id}`);
+    others = othersOf(await renderPage(SignedFormsPage, { searchParams: { q: FAMILY_B.family.name } }));
+    expect(others).not.toContain(`/staff/forms/evidence/${a.forms!.evidence.id}`);
+    expect(others).toContain(`/staff/forms/evidence/${b.forms!.evidence.id}`);
+    expect(await audits()).toEqual([]);
   });
 });
 

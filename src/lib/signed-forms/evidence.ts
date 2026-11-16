@@ -2,7 +2,7 @@
 // as it stands. The pages and downloads that show these audit each read before anything is shown or sent. Never
 // imported by parent code (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import "server-only";
-import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboCustomer, requirement, signatureConsent, signatureRequest, signedFormCopy, signedFormEvidence, signedFormFile } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
@@ -77,6 +77,26 @@ export async function loadArchive(): Promise<ArchiveEntry[]> {
   return db.select({ id: signedFormEvidence.id, formTitle: signedFormEvidence.formTitle, subjectName: signedFormEvidence.subjectName, familyName: signedFormEvidence.familyName,
     seasonName: signedFormEvidence.seasonName, completedAt: signedFormEvidence.completedAt, realmId: signedFormEvidence.realmId, earlierCompanyAt: signedFormEvidence.earlierCompanyAt })
     .from(signedFormEvidence).where(isNotNull(signedFormEvidence.earlierCompanyAt)).orderBy(desc(signedFormEvidence.completedAt), asc(signedFormEvidence.id));
+}
+
+/** At most this many other kept signed forms are listed at once; a search narrows them. */
+export const OTHER_KEPT_LIMIT = 200;
+/**
+ * The company's own kept signed forms the matrix doesn't lead to (`shown` are the ones it does): an earlier season's,
+ * or a family's or student's no longer on the roster. Newest signing first, by the names kept with them, narrowed by
+ * `search` (a form, student, family or season name).
+ */
+export async function loadOtherKept(shown: readonly string[], search: string): Promise<{ entries: ArchiveEntry[]; more: boolean }> {
+  const realmId = await getRosterSource();
+  if (realmId === null) return { entries: [], more: false };
+  const rows = await db.select({ id: signedFormEvidence.id, formTitle: signedFormEvidence.formTitle, subjectName: signedFormEvidence.subjectName, familyName: signedFormEvidence.familyName,
+    seasonName: signedFormEvidence.seasonName, completedAt: signedFormEvidence.completedAt, realmId: signedFormEvidence.realmId, earlierCompanyAt: signedFormEvidence.earlierCompanyAt })
+    .from(signedFormEvidence)
+    .where(and(eq(signedFormEvidence.realmId, realmId), isNull(signedFormEvidence.earlierCompanyAt), shown.length ? notInArray(signedFormEvidence.id, [...shown]) : undefined))
+    .orderBy(desc(signedFormEvidence.completedAt), asc(signedFormEvidence.id));
+  const needle = search.toLowerCase();
+  const found = needle === "" ? rows : rows.filter((r) => [r.formTitle, r.subjectName, r.familyName, r.seasonName].some((t) => t?.toLowerCase().includes(needle)));
+  return { entries: found.slice(0, OTHER_KEPT_LIMIT), more: found.length > OTHER_KEPT_LIMIT };
 }
 
 export type RequestView = {
