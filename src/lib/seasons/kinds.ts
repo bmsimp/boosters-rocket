@@ -1,7 +1,8 @@
 /**
  * How each kind of requirement is met (v1 spec §10.2): one entry per kind, and the only place that knows. All four are
  * built: checklist items (a staff tick), forms (Documenso), payments (invoices carrying an item) and volunteering
- * (signed-up and, later, confirmed shifts). A kind whose entry is null can't be created by staff.
+ * (confirmed credit: check-ins and what staff credit, spent by allocateCredit() in src/lib/volunteer/allocation.ts).
+ * A kind whose entry is null can't be created by staff.
  */
 import type { RequirementKind } from "@/lib/db/schema";
 import { NO_INVOICE_YET } from "@/lib/money/payment-rule";
