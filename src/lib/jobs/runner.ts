@@ -8,6 +8,7 @@ import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { sendReviewNotice } from "@/lib/parents/review-notice";
 import { expirePreviousCompany } from "@/lib/parents/company-change";
+import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -47,6 +48,17 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (await expirePreviousCompany(now)) ran.push({ job: "parents.snapshot_expiry", ok: true });
   } catch {
     ran.push({ job: "parents.snapshot_expiry", ok: false });
+  }
+  // The daily clean-up needs neither mail nor QuickBooks. It is in the job history every day, and in this wake's answer
+  // only when it removed something or failed, so a quiet day stays quiet in the worker's log. What has expired is
+  // decided by the real time, never by `now`.
+  try {
+    if (await due(CLEANUP_JOB, now)) {
+      const r = await runCleanup();
+      if (!r.ok || removedInAll(r.counts!) > 0) ran.push({ job: CLEANUP_JOB, ok: r.ok });
+    }
+  } catch {
+    ran.push({ job: CLEANUP_JOB, ok: false });
   }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record.

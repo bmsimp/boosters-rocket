@@ -42,7 +42,8 @@ describe("scheduled jobs", () => {
     expect(await lastWake()).toBeNull();
     expect(await runDueJobs()).toEqual({ ran: [] });
     expect(Date.parse((await lastWake())!)).toBeGreaterThan(Date.now() - 5000);
-    expect(await db.select().from(jobRun)).toHaveLength(0);
+    // Only the daily clean-up, which needs no QuickBooks (tests/integration/cleanup.test.ts).
+    expect((await db.select().from(jobRun)).map((r) => r.job)).toEqual(["cleanup.daily"]);
   });
 
   it("runs both jobs the first time, and neither again within 24 hours", async () => {
