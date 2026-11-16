@@ -149,8 +149,10 @@ describe("the worker asks Documenso about forms that are out", () => {
     expect((await runDueJobs()).ran).toEqual([]);
     const { id, document } = await outForSigning("STU-1");
     stub.sign(document.id, "stu-1@example.com");
-    expect((await runDueJobs()).ran).toEqual([{ job: FORMS_JOB, ok: true }]);
+    // The same wake keeps the completed form's evidence (src/lib/signed-forms/evidence-job.ts).
+    expect((await runDueJobs()).ran).toEqual([{ job: FORMS_JOB, ok: true }, { job: "forms.evidence", ok: true }]);
     expect((await requestNow(id)).state).toBe("complete");
+    expect((await requestNow(id)).evidenceOwed).toBe(false);
     expect((await runDueJobs()).ran).toEqual([]);
     const second = await outForSigning("STU-2");
     stub.drop = true;
