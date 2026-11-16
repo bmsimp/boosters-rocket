@@ -434,6 +434,17 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .everyone-shown { margin-top: var(--s3); } /* stands clear of the search above it */
 /* ---- End of Season ---- */
 
+/* ---- Forms: the parent's Forms pages and the signing frame. Keep new rules for them inside this block. ---- */
+.forms-page .page-title { overflow-wrap: anywhere; }
+.forms-page .box > .state { margin-top: var(--s2); }
+.form-open { justify-self: start; margin-top: var(--s2); display: inline-flex; align-items: center; text-decoration: none; }
+.consent { margin-top: var(--s3); display: grid; gap: var(--s3); max-width: 60ch; }
+/* Documenso's own page, in a frame: as wide as its box, and tall enough to read and sign a page on a phone. */
+.sign-frame { margin-top: var(--s3); }
+.sign-frame iframe { display: block; width: 100%; height: min(80vh, 900px); min-height: 520px; border: 2px solid var(--ink); background: var(--paper); }
+.signers { margin-top: var(--s4); }
+/* ---- End of Forms ---- */
+
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====
    The viewport is "cover" (src/app/layout.tsx), so the page reaches under a notch, rounded corners and the home
    indicator. These rules keep content clear of them. env() is 0 where there is nothing to clear, so an ordinary

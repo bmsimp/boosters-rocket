@@ -15,7 +15,7 @@ import { parentActor } from "@/lib/parents/sessions";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { getClubSettings } from "@/lib/settings/club";
 import {
-  EMAILS_OFF, PAGE_TIMEOUT_MS, deleteEnvelope, deleteRecipient, distributeEnvelope, findDocumentsByExternalId, getEnvelope, signingFrameUrl, useTemplate,
+  EMAILS_OFF, PAGE_TIMEOUT_MS, deleteEnvelope, deleteRecipient, distributeEnvelope, findDocumentsByExternalId, getEnvelope, signingFrameUrl, documentFromTemplate,
   type DocumensoConfig, type Envelope, type EnvelopeRecipient,
 } from "@/lib/documenso/client";
 import { hasConsent, recordConsent } from "./consent";
@@ -106,7 +106,7 @@ async function makeDocument(ctx: ParentCtx, config: DocumensoConfig, form: MyFor
 
   const club = await getClubSettings();
   const everyRole = chosen.length === plan.signers.length;
-  const used = await asking(() => useTemplate(config, {
+  const used = await asking(() => documentFromTemplate(config, {
     envelopeId: plan.templateId, externalId: row.id, distributeDocument: everyRole,
     recipients: chosen.map((s, i) => ({ id: plan.signers[i]!.recipientId, email: s.email, name: s.name })),
     prefillFields: [

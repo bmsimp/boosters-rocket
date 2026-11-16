@@ -157,7 +157,7 @@ export type UsePayload = {
 };
 
 /** Makes a document from a template. With `distributeDocument` it is sent for signing in the same call. */
-export async function useTemplate(config: DocumensoConfig, payload: UsePayload, o: CallOptions = {}): Promise<{ id: string; recipients: EnvelopeRecipient[] }> {
+export async function documentFromTemplate(config: DocumensoConfig, payload: UsePayload, o: CallOptions = {}): Promise<{ id: string; recipients: EnvelopeRecipient[] }> {
   withId(payload.envelopeId);
   const used = await api(config, "POST", "/envelope/use", usedSchema, payload, { ...o, multipart: true });
   if (!isEnvelopeId(used.id)) throw new DocumensoError("bad_answer");

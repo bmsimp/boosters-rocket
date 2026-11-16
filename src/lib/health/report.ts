@@ -1,6 +1,6 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun } from "@/lib/db/schema";
+import { auditLog, jobRun, requirement, season, seasonStep } from "@/lib/db/schema";
 import { lastWake } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import { connectionView } from "@/lib/quickbooks/connection";
@@ -9,6 +9,8 @@ import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-i
 import { loadRosterPage } from "@/lib/roster/queries";
 import { mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { formsSummary } from "@/lib/forms/settings";
+import { formsWaiting } from "@/lib/forms/job";
 import { lastBackup } from "./backup";
 import { BUILD_VERSION } from "./version";
 
@@ -21,7 +23,7 @@ import { BUILD_VERSION } from "./version";
  */
 export type HealthState = "ok" | "attention" | "off";
 export type HealthLine = {
-  key: "database" | "worker" | "cleanup" | "quickbooks" | "mail" | "parents" | "backup" | "version";
+  key: "database" | "worker" | "cleanup" | "quickbooks" | "mail" | "forms" | "parents" | "backup" | "version";
   title: string;
   /** "ok": working. "attention": something a person should look at. "off": not set up or switched off, which may be by choice. */
   state: HealthState;
@@ -44,12 +46,16 @@ const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
   // The database first, on its own: if it can't answer, nothing below can be read, and the page says so.
   await db.execute(sql`select 1`);
-  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup] = await Promise.all([
+  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, forms, waiting, untemplated] = await Promise.all([
     lastWake(),
     db.select().from(jobRun).where(eq(jobRun.job, CLEANUP_JOB)).orderBy(desc(jobRun.id)).limit(1),
     // The one thing the portal writes to QuickBooks leaves an audit row each time: the newest is when it last worked.
     db.select({ at: auditLog.at }).from(auditLog).where(eq(auditLog.action, QUICKBOOKS_WRITE_ACTION)).orderBy(desc(auditLog.id)).limit(1),
     connectionView(), quickbooksProblems(now), loadRosterPage(), mailSummary(), getParentSettings(), lastBackup(),
+    formsSummary(), formsWaiting(now),
+    // Form requirements of the current season that have no template: parents read "not ready" for them.
+    db.select({ id: requirement.id }).from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).innerJoin(season, eq(seasonStep.seasonId, season.id))
+      .where(and(eq(season.isCurrent, true), eq(requirement.kind, "form"), isNull(requirement.form))),
   ]);
   const lines: HealthLine[] = [];
 
@@ -102,7 +108,27 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     lines.push({ key: "mail", title: "Outgoing mail", state: "ok", word: "Working", says: `Tested and working, sending ${mail.config.method === "graph" ? "through Microsoft 365" : "by SMTP"}.`, times: mailTimes, notes: [], fix: null });
   }
 
-  // Forms adds its line here: Documenso's API and its webhook, each with when it last worked (v1 spec §14).
+  // Forms: the club's Documenso, from what the portal recorded of its own calls (this page calls nothing outside the
+  // portal). Documenso can't be asked whether its webhook is set up, so the line shows when one last arrived.
+  const formsFix = { href: "/staff/settings/forms", label: "Open Forms settings" };
+  const formsTimes = [{ label: "Last answered", at: forms.status.lastApiOkAt }, { label: "Last webhook", at: forms.status.lastWebhookAt }, { label: "Last asked about open forms", at: forms.status.lastAskedAt }];
+  if (forms.origin === null) {
+    lines.push({ key: "forms", title: "Forms (Documenso)", state: "off", word: "Not set up", says: "Not set up. Parents read that forms aren't ready to sign yet; nothing else changes for them.", times: [], notes: [], fix: formsFix });
+  } else {
+    const apiFailing = Boolean(forms.status.lastApiFailureAt && (!forms.status.lastApiOkAt || forms.status.lastApiFailureAt > forms.status.lastApiOkAt));
+    const notes: string[] = [];
+    if (waiting.open > 0) notes.push(`${waiting.open === 1 ? "1 form is" : `${waiting.open} forms are`} out for signing and not finished. The worker asks Documenso about each every few minutes.`);
+    if (waiting.sealingLate > 0) notes.push(`${waiting.sealingLate === 1 ? "1 form was" : `${waiting.sealingLate} forms were`} signed by everyone more than an hour ago and Documenso still hasn't finished the signed copy. Check Documenso on its server: its signing certificate, and its timestamp service if one is set.`);
+    if (!forms.webhookSecretSaved) notes.push("No webhook secret is made, so Documenso can't tell the portal when a form is signed. The portal still asks every few minutes.");
+    if (untemplated.length > 0) notes.push(`${untemplated.length === 1 ? "1 form requirement" : `${untemplated.length} form requirements`} of the current season ${untemplated.length === 1 ? "has" : "have"} no template attached, so parents read that ${untemplated.length === 1 ? "it isn't" : "they aren't"} ready.`);
+    const verdict: Verdict = !forms.tokenReadable ? { state: "attention", word: "Needs attention", says: "The saved API token can't be opened with this server's encryption key. Enter it again in Forms settings." }
+      : apiFailing ? { state: "attention", word: "Needs attention", says: "The last call to Documenso failed. Parents can't open a form to sign until it answers again." }
+        : waiting.sealingLate > 0 ? { state: "attention", word: "Needs attention", says: `Connected to Documenso at ${forms.origin}, but signed forms are waiting too long to be finished.` }
+          : !forms.status.lastApiOkAt ? { state: "attention", word: "Not checked", says: `Set up for Documenso at ${forms.origin}, but no call has worked yet. Check the connection in Forms settings.` }
+            : { state: "ok", word: "Connected", says: `Connected to Documenso at ${forms.origin}.` };
+    lines.push({ key: "forms", title: "Forms (Documenso)", ...verdict, times: formsTimes, fix: verdict.state === "attention" ? formsFix : null,
+      notes: [...(apiFailing && forms.status.lastApiError ? [`The failure: ${forms.status.lastApiError}.`] : []), ...notes] });
+  }
 
   lines.push(parents.signin
     ? { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: [], fix: null }

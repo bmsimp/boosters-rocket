@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { readFileSync, readdirSync } from "node:fs";
 import {
   DOCUMENSO_ERRORS, DocumensoError, EMAILS_OFF, EMAIL_FLAGS, deleteEnvelope, documensoCode, documensoHealth, envelopeIdIn, findDocumentsByExternalId, getEnvelope, isEnvelopeId,
-  listTemplates, signingFrameUrl, useTemplate,
+  listTemplates, signingFrameUrl, documentFromTemplate,
 } from "@/lib/documenso/client";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
 
@@ -111,7 +111,7 @@ describe("the Documenso client", () => {
 
   it("finds a document by its exact externalId, though Documenso's search matches substrings and wildcards", async () => {
     const template = stub.addTemplate();
-    const make = async (externalId: string) => (await useTemplate(config(), { envelopeId: template.id, externalId, distributeDocument: true, recipients: [], prefillFields: [],
+    const make = async (externalId: string) => (await documentFromTemplate(config(), { envelopeId: template.id, externalId, distributeDocument: true, recipients: [], prefillFields: [],
       override: { title: "t", distributionMethod: "NONE", emailSettings: EMAILS_OFF, timezone: "UTC", dateFormat: "MM/dd/yyyy", envelopeExpirationPeriod: { disabled: true } } })).id;
     const exact = await make("req_1"), longer = await make("req_12"), wild = await make("reqX1");
     const all = (await (await fetch(`${stub.origin}/api/v2/envelope?type=DOCUMENT&query=req_1`, { headers: { authorization: stub.token } })).json()) as { data: { id: string }[] };
