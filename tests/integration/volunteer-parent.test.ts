@@ -217,6 +217,21 @@ describe("signing up", () => {
     expect((await live()).length).toBe(4);
   });
 
+  it("refuses one person two places at the same time, at one event or two, and allows back-to-back shifts", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { shifts: [stand1, stand2, later] } = await seedEvent({ shifts: [{ startsAt: "18:00", endsAt: "21:00" }, { startsAt: "18:00", endsAt: "21:00" }, { startsAt: "21:00", endsAt: "22:00" }] });
+    const elsewhere = await seedEvent({ name: "Bake sale", shifts: [{ startsAt: "20:00", endsAt: "23:00" }] });
+    asParent(a.identity);
+    expect(await signUpAction(stand1!.id, AURELIO!.qboId)).toMatchObject({ ok: true });
+    expect(await signUpAction(stand2!.id, AURELIO!.qboId)).toEqual({ ok: false, errors: [`${AURELIO!.name} is signed up for another shift at that time.`] });
+    expect(await signUpAction(elsewhere.shifts[0]!.id, AURELIO!.qboId)).toEqual({ ok: false, errors: [`${AURELIO!.name} is signed up for another shift at that time.`] });
+    expect(await signUpAction(later!.id, AURELIO!.qboId)).toMatchObject({ ok: true }); // starts as the first ends
+    expect(await signUpAction(stand2!.id, AZALEA!.qboId)).toMatchObject({ ok: true }); // someone else may
+    expect(await signUpAction(stand1!.id, "me")).toMatchObject({ ok: true });
+    expect(await signUpAction(stand2!.id, "me")).toEqual({ ok: false, errors: ["You're signed up for another shift at that time."] });
+    expect((await live()).length).toBe(4);
+  });
+
   it("refuses a shift that isn't offered, and anything a page never sends", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     const { shifts: [cancelledShift] } = await seedEvent({ shifts: [{ cancelled: true }] });
@@ -256,8 +271,9 @@ describe("signing up", () => {
       ...FAMILY_A.students.map((s) => () => signUpForShift(ctxOf(a.identity), famA, shiftId, s.qboId)),
       ...FAMILY_B.students.map((s) => () => signUpForShift(ctxOf(b.identity), famB, shiftId, s.qboId)),
     ];
-    for (const places of [1, 1, 1, 2, 3]) {
-      shiftId = (await seedShift((await seedEvent({ shifts: [] })).event.id, { places })).id;
+    for (const [round, places] of [1, 1, 1, 2, 3].entries()) {
+      // Each round on its own day: one person can't hold two places at the same time.
+      shiftId = (await seedShift((await seedEvent({ inDays: 30 + round, shifts: [] })).event.id, { places })).id;
       // Six people from two families, each on their own connection, all at once.
       const results = await Promise.all(people.map((go) => go()));
       expect(results.filter((r) => r.ok)).toHaveLength(places);

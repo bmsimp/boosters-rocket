@@ -216,6 +216,14 @@ export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "stu
     const [already] = await tx.select({ id: volunteerSignup.id }).from(volunteerSignup).where(and(eq(volunteerSignup.shiftId, shift.id), isNull(volunteerSignup.cancelledAt),
       student ? eq(volunteerSignup.studentQboId, student.qboId) : and(eq(volunteerSignup.fillerKind, "guardian"), eq(volunteerSignup.fillerParentId, ctx.parentId))));
     if (already) return { r: no(student ? `${student.name} is signed up for this shift already.` : "You're signed up for this shift already.") };
+    // One person can't be in two places at once: a place on another live shift whose time overlaps this one is refused.
+    const { end } = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
+    const holding = await tx.select({ onDate: volunteerEvent.onDate, startsAt: volunteerShift.startsAt, endsAt: volunteerShift.endsAt }).from(volunteerSignup)
+      .innerJoin(volunteerShift, eq(volunteerShift.id, volunteerSignup.shiftId)).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
+      .where(and(isNull(volunteerSignup.cancelledAt), isNull(volunteerShift.cancelledAt), isNull(volunteerEvent.cancelledAt),
+        student ? eq(volunteerSignup.studentQboId, student.qboId) : and(eq(volunteerSignup.fillerKind, "guardian"), eq(volunteerSignup.fillerParentId, ctx.parentId))));
+    const overlaps = holding.some((h) => { const other = shiftInstants(h.onDate, h.startsAt, h.endsAt, zone); return other.start.getTime() < end.getTime() && start.getTime() < other.end.getTime(); });
+    if (overlaps) return { r: no(student ? `${student.name} is signed up for another shift at that time.` : "You're signed up for another shift at that time.") };
     const [made] = await tx.insert(volunteerSignup).values({
       shiftId: shift.id, familyQboId: ctx.familyQboId, signedUpBy: ctx.parentId, fillerKind: student ? "student" : "guardian",
       fillerParentId: student ? null : ctx.parentId, studentQboId: student?.qboId ?? null, fillerName: student?.name ?? ctx.name,
