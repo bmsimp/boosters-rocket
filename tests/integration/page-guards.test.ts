@@ -143,6 +143,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/volunteer/moved-student", names: "all", why: "it is a roster write's, and reads the sign-up list of staff" },
   { module: "@/lib/roster/writes", names: "all", why: "staff changes to the roster in QuickBooks: it reads every family, and sends writes" },
   { module: "@/lib/roster/queue", names: "all", why: "the write queue names every family's waiting changes" },
+  { module: "@/lib/staff-home/today", names: "all", why: "the staff home's counts read every family's forms and every shift's sign-ups" },
 ];
 
 describe("every page guards itself", () => {

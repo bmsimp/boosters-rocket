@@ -488,6 +488,139 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .hash { overflow-wrap: anywhere; word-break: break-all; }
 /* ---- End of Forms ---- */
 
+/* ---- Staff pages: the staff home, the staff lists and forms, and the primitives they are built from (tables, notices,
+   form controls; DESIGN.md names each with its states). Keep new rules for the staff pages inside this block. ---- */
+
+/* Tables (src/app/components/data-table.tsx). At 760px and up a ruled table: a heavy rule under the header, hairlines
+   between rows, numbers right-aligned. Below 760px each row stacks: a hairline above it, the row's name first, then each
+   cell as label and value side by side. The elements keep their roles, so the stacked rows still read as a table. */
+.table { width: 100%; border-collapse: collapse; margin-top: var(--s3); font-size: 1rem; }
+.table caption { caption-side: top; text-align: left; color: var(--ink-2); font-size: 0.9375rem; padding-bottom: var(--s2); }
+.table th, .table td { text-align: left; vertical-align: top; padding: var(--s2) var(--s3); border-top: 1px solid var(--hair); overflow-wrap: anywhere; }
+.table th:first-child, .table td:first-child { padding-left: 0; }
+.table th:last-child, .table td:last-child { padding-right: 0; }
+.table thead th { font: 600 0.875rem/1.2 var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2);
+  border-top: 0; border-bottom: 2px solid var(--ink); vertical-align: bottom; overflow-wrap: normal; }
+.table tbody th[scope="row"] { font-weight: 700; }
+.table .t-num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }
+.table .t-label { display: none; }
+.table .t-group th { padding-top: var(--s4); font: 700 1.0625rem/1.4 var(--read); border-top: 2px solid var(--ink); }
+.table .t-group th > span { overflow-wrap: anywhere; }
+.table .when { display: block; font-size: 0.875rem; color: var(--ink-2); }
+.table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-end; justify-items: end; }
+.table .row-actions { grid-column: auto; }
+.table details.more { margin-top: var(--s1); }
+.table details.more > summary { padding: 10px 0; }
+.table a:not(.btn):not(.matrix-link) { display: inline-block; padding: 10px 0; margin: -10px 0; } /* a 44px tap target without a taller row */
+@media (max-width: 759.98px) {
+  .table, .table caption, .table tbody, .table tr, .table th, .table td { display: block; }
+  .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .table tbody tr { display: grid; gap: var(--s1); padding: var(--s3) 0; border-top: 1px solid var(--hair); }
+  .table th, .table td { border: 0; padding: 0; }
+  .table td { display: grid; grid-template-columns: minmax(6.5rem, 2fr) minmax(0, 3fr); gap: var(--s3); align-items: baseline; }
+  .table td.t-quiet { display: block; margin-top: var(--s1); }
+  .table .t-num { text-align: left; }
+  .table .t-label { display: block; font: 600 0.8125rem/1.3 var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .table tbody tr.t-group { border-top: 2px solid var(--ink); padding-bottom: 0; }
+  .table .t-group th { padding-top: 0; }
+  .table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-start; justify-items: start; }
+}
+
+/* Notices (src/app/components/notice.tsx): a ruled panel with a heavy rule down its left edge in the tone's ink, the
+   tone's icon, and its word in the label face. Information is ink, needs attention amber, done green, a problem red. */
+.notice { --tone: var(--ink); display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--s3); align-items: start;
+  padding: var(--s3) var(--s4); border: 2px solid var(--ink); border-left: 8px solid var(--tone); background: var(--paper); color: var(--ink); }
+.notice-warning { --tone: var(--due); }
+.notice-done { --tone: var(--done); }
+.notice-problem { --tone: var(--late); }
+.notice > svg { width: 20px; height: 20px; color: var(--tone); margin-top: 3px; }
+.notice-body { min-width: 0; overflow-wrap: anywhere; font-size: 1rem; }
+.notice-body > * + * { margin-top: var(--s2); }
+.notice-word { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--tone); margin-right: var(--s1); }
+.notice-title { font: 700 1.5rem/1.1 var(--mark); letter-spacing: .005em; }
+.notice-list { padding-left: 1.2em; margin-top: var(--s1); }
+.notice .box-foot { margin-top: var(--s3); }
+.notice a:not(.btn) { color: var(--club-text); font-weight: 700; }
+main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
+.box > .notice, .box > form + .notice, .box > p + .notice { margin-top: var(--s3); }
+
+/* Form controls. Text fields, text areas and selects fill their column and never run past their box. A select draws its
+   own arrow in ink. Check boxes are ruled squares and radio marks ruled circles, filled in the club's text color when
+   chosen. Disabled is the button's disabled look (hair fill, secondary ink), dashed in high contrast. */
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), .field textarea, .field select { width: 100%; max-width: 100%; min-width: 0; }
+.field select { appearance: none; -webkit-appearance: none; padding-right: 40px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position: calc(100% - 22px) 52%, calc(100% - 16px) 52%; background-size: 6px 6px; background-repeat: no-repeat; }
+.field textarea { resize: vertical; }
+.checks input[type="checkbox"], .checks input[type="radio"] { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 0;
+  display: inline-grid; place-content: center; border: 2px solid var(--ink); border-radius: 0; background: var(--paper); cursor: pointer; }
+.checks input[type="radio"] { border-radius: 50%; }
+.checks input[type="checkbox"]::before { content: ""; width: 6px; height: 11px; border: solid var(--paper); border-width: 0 3px 3px 0;
+  transform: translateY(-1px) rotate(45deg); visibility: hidden; }
+.checks input[type="radio"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--club-text); visibility: hidden; }
+.checks input:checked::before { visibility: visible; }
+.checks input[type="checkbox"]:checked { background: var(--club-text); border-color: var(--club-text); }
+.checks input[type="radio"]:checked { border-color: var(--club-text); }
+.checks label:hover input:not(:checked):not(:disabled) { background: var(--club-tint); }
+.checks input:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+.checks > p, .checks .hint { margin-top: var(--s1); }
+.stack > .setting { margin-top: 0; } /* a choice group inside a form keeps to the form's own gaps */
+.btn:disabled, .btn:disabled:hover { background: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
+.field input:disabled, .field textarea:disabled, .field select:disabled { background-color: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
+.checks input:disabled { background: var(--hair); border-color: var(--hair); cursor: not-allowed; }
+.checks label:has(input:disabled) { color: var(--ink-2); }
+:root[data-contrast="more"] .btn:disabled, :root[data-contrast="more"] .field :disabled, :root[data-contrast="more"] .checks input:disabled {
+  background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
+@media (prefers-contrast: more) {
+  :root:not([data-contrast="standard"]) .btn:disabled, :root:not([data-contrast="standard"]) .field :disabled, :root:not([data-contrast="standard"]) .checks input:disabled {
+    background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
+}
+@media (forced-colors: active) {
+  .notice { border-left-width: 8px; }
+  .field select { appearance: auto; background-image: none; padding-right: var(--s3); }
+  .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
+  .checks input[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
+  .checks input[type="checkbox"]::before { border-color: HighlightText; }
+  .checks input[type="radio"]:checked { border-color: Highlight; }
+  .checks input[type="radio"]::before { background: Highlight; }
+  .checks input:disabled { border-color: GrayText; }
+  .btn:disabled, .field :disabled { border-style: dashed; color: GrayText; }
+}
+
+/* Page heads: the way back sits on its own line under the title, big enough to tap. */
+.back { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; font-size: 0.9375rem; }
+
+/* The staff home: what needs doing today, one line each, with the way to it. */
+.today { list-style: none; padding: 0; margin-top: var(--s3); }
+.today li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s1) var(--s4);
+  padding: var(--s3) 0; border-top: 1px solid var(--hair); }
+.today li .state { font-size: 1rem; }
+.today .when { display: block; font-size: 0.875rem; color: var(--ink-2); margin-top: 2px; }
+.today li a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
+.today + .hint, .box > .state + .hint { margin-top: var(--s2); }
+.staff-home .box > .state { margin-top: var(--s3); }
+
+/* Parents: each address to review is one block between heavy rules: the address, who and where, then the decision,
+   its note and its two buttons ruled in together. */
+.review-items { list-style: none; padding: 0; margin-top: var(--s4); }
+.review-item { display: grid; gap: var(--s3); padding: var(--s4) 0; border-top: 2px solid var(--ink); }
+.review-item:last-child { padding-bottom: 0; }
+.review-address { font: 700 1.1875rem/1.45 var(--read); overflow-wrap: anywhere; }
+.review-item dl.details { margin-top: 0; }
+.review-families { list-style: none; padding: 0; display: grid; gap: var(--s1); }
+.review-families .state { grid-column: auto; }
+fieldset.decide { border: 1px solid var(--hair); padding: var(--s3) var(--s4) var(--s4); min-width: 0; display: grid; gap: var(--s3); }
+.decide legend { font: 700 1.0625rem var(--read); padding: 0 var(--s1); }
+.decide .row-actions { margin-top: 0; }
+
+/* The forms matrix keeps its wide table inside its box at 760px and up, and stacks like the other tables below. */
+@media (max-width: 759.98px) {
+  .matrix-wrap { overflow-x: visible; }
+  .matrix th, .matrix td { min-width: 0; }
+  .matrix tbody th[scope="row"] { position: static; }
+}
+/* ---- End of Staff pages ---- */
+
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====
    The viewport is "cover" (src/app/layout.tsx), so the page reaches under a notch, rounded corners and the home
    indicator. These rules keep content clear of them. env() is 0 where there is nothing to clear, so an ordinary
