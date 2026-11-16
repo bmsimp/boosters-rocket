@@ -37,7 +37,6 @@ CREATE TABLE "signature_request" (
 --> statement-breakpoint
 ALTER TABLE "requirement" ADD COLUMN "form" jsonb;--> statement-breakpoint
 ALTER TABLE "signature_consent" ADD CONSTRAINT "signature_consent_request_id_signature_request_id_fk" FOREIGN KEY ("request_id") REFERENCES "public"."signature_request"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "signature_consent" ADD CONSTRAINT "signature_consent_parent_id_parent_id_fk" FOREIGN KEY ("parent_id") REFERENCES "public"."parent"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "signature_request" ADD CONSTRAINT "signature_request_requirement_id_requirement_id_fk" FOREIGN KEY ("requirement_id") REFERENCES "public"."requirement"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "signature_consent_uq" ON "signature_consent" USING btree ("request_id","parent_id","text_version");--> statement-breakpoint
 CREATE UNIQUE INDEX "signature_request_subject_uq" ON "signature_request" USING btree ("requirement_id","subject_qbo_id");--> statement-breakpoint

@@ -1,5 +1,5 @@
 {
-  "id": "a6d2e694-c1d8-4ec7-b2f9-24500f152ff1",
+  "id": "1de9c458-dd76-4ebc-ae44-2f82d1d08469",
   "prevId": "54cf6b98-1eca-471e-a595-ac3253a82dba",
   "version": "7",
   "dialect": "postgresql",
@@ -2608,19 +2608,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "signature_consent_parent_id_parent_id_fk": {
-          "name": "signature_consent_parent_id_parent_id_fk",
-          "tableFrom": "signature_consent",
-          "tableTo": "parent",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },

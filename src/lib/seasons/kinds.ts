@@ -4,6 +4,7 @@
  * kind has one, staff can't create a requirement of it (KIND_RULES[kind] is null), and nothing else has to change.
  */
 import type { RequirementKind } from "@/lib/db/schema";
+import { formRule } from "@/lib/forms/kind";
 import type { Requirement, Standing } from "./progress";
 
 /** What `requirement_progress` holds for one requirement and one family or student. */
@@ -39,7 +40,7 @@ const checklist: KindRule = {
 
 export const KIND_RULES: Record<RequirementKind, KindRule | null> = {
   checklist,
-  form: null,      // Forms with Documenso: met when the document is completed by the required guardians (§9).
+  form: formRule,  // Forms with Documenso: met when the document is completed by the required guardians (§9; src/lib/forms/kind.ts).
   payment: null,   // Money for staff and payment requirements: met when invoices carrying its item exist and none is open (§8).
   volunteer: null, // Volunteering: met when confirmed credit reaches the amount, or a buy-out is paid (§11).
 };

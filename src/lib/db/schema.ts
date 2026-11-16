@@ -414,12 +414,13 @@ export const signatureRequest = pgTable("signature_request", {
 /**
  * A guardian's agreement to sign one form electronically (v1 spec §9.2): who, when, from which address, and which
  * version of the consent text they were shown (src/lib/forms/consent.ts). Without a row for the signed-in guardian no
- * document is made and no signing token is handed out. Kept with the request as part of its evidence (§9.4).
+ * document is made and no signing token is handed out. Kept with the request as part of its evidence (§9.4). The
+ * request is the family's (signature_request.family_qbo_id), so a company change deletes these with it.
  */
 export const signatureConsent = pgTable("signature_consent", {
   id: uuid("id").primaryKey().defaultRandom(),
   requestId: uuid("request_id").notNull().references(() => signatureRequest.id, { onDelete: "cascade" }),
-  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
+  parentId: uuid("parent_id").notNull(),                   // parent.id, with no foreign key: the record outlives the person's row
   parentName: text("parent_name").notNull(),               // as the portal knew them then
   parentEmail: text("parent_email").notNull(),
   textVersion: text("text_version").notNull(),

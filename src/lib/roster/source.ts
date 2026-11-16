@@ -4,6 +4,7 @@ import { familyMoney, jobRun, qboCustomer, qboCustomerType, setting } from "@/li
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { clearParentAccess } from "@/lib/parents/company-change";
 import { clearSeasonRecords } from "@/lib/seasons/company-change";
+import { clearFormRecords } from "@/lib/forms/company-change";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
 
 export const ROSTER_JOB = "roster.refresh";
@@ -26,8 +27,9 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
  * the membership shape (its type IDs mean nothing in another company), the roster's run history (so the worker reads
  * the new company at once; `keepRunId` spares the run doing this), all parent access (`clearParentAccess`), what
  * each family was last seen to owe (`family_money`: another company's invoices are never shown), and what the seasons
- * record against customers (`clearSeasonRecords`: ticks, waivers and chosen lists). The same company, or a cache that
- * says no company, keeps it all. The caller owns the transaction and holds ROSTER_LOCK.
+ * record against customers (`clearSeasonRecords`: ticks, waivers and chosen lists), and every form made for a family
+ * to sign (`clearFormRecords`: the requests and the consents with them). The same company, or a cache that says no
+ * company, keeps it all. The caller owns the transaction and holds ROSTER_LOCK.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
   const from = await getRosterSource(tx);
@@ -38,6 +40,7 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   await tx.delete(qboCustomerType);
   await tx.delete(familyMoney);
   await clearSeasonRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
+  await clearFormRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(setting).where(eq(setting.key, SHAPE_KEY));
   await tx.delete(jobRun).where(o.keepRunId === undefined ? eq(jobRun.job, ROSTER_JOB) : and(eq(jobRun.job, ROSTER_JOB), ne(jobRun.id, o.keepRunId)));
   await setRosterSource(tx, realmId);

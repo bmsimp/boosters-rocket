@@ -5,6 +5,7 @@ import { asc, count, desc, eq, inArray } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { requirement, requirementCover, requirementProgress, season, seasonStep, type RequirementKind } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { dropUnopenedForms, formsHolding, formsHoldingWords } from "@/lib/forms/removal";
 import { KIND_LABELS, isAvailableKind } from "./kinds";
 import { isCalendarDate, type AmountUnit, type AppliesTo, type Requirement } from "./progress";
 import { loadCovers, toRequirement, type RequirementRow } from "./recorded";
@@ -213,6 +214,10 @@ export async function removeStep(stepId: string, o: SeasonOp): Promise<Done> {
     const recorded = await recordedFor(rows.map((r) => r.id), tx);
     if (recorded > 0) return refuse(`${s.name} can't be removed: ${recorded === 1 ? "a tick or waiver is" : `${recorded} ticks and waivers are`} recorded on its requirements. `
       + `Clear them first on each requirement's progress page, or rename the step and keep it.`);
+    // A form that was made for a family to sign is history too (src/lib/forms/removal.ts); one nobody opened is not.
+    const held = await formsHolding(rows.map((r) => r.id), tx);
+    if (held > 0) return refuse(formsHoldingWords(s.name, held));
+    await dropUnopenedForms(rows.map((r) => r.id), tx);
     await tx.delete(seasonStep).where(eq(seasonStep.id, s.id)); // its requirements and their chosen lists go with it
     await writeAudit({ actor: o.actor, action: "season.step.remove", permission: o.permission, targetType: "season_step", targetId: s.id, ip: o.ip,
       before: { ...stepFacts(s), position: s.position, requirements: rows.map(requirementFacts) } }, tx);
@@ -310,6 +315,9 @@ export async function removeRequirement(requirementId: string, o: SeasonOp): Pro
     const recorded = await recordedFor([r.id], tx);
     if (recorded > 0) return refuse(`${r.title} can't be removed: ${recorded === 1 ? "a tick or waiver is" : `${recorded} ticks and waivers are`} recorded against it. `
       + `Clear them first on its progress page, or make it optional so it no longer holds the step open.`);
+    const held = await formsHolding([r.id], tx);
+    if (held > 0) return refuse(formsHoldingWords(r.title, held));
+    await dropUnopenedForms([r.id], tx);
     const covered = (await tx.select({ subjectQboId: requirementCover.subjectQboId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id))).map((c) => c.subjectQboId).sort();
     await tx.delete(requirement).where(eq(requirement.id, r.id)); // its chosen list goes with it
     await writeAudit({ actor: o.actor, action: "season.requirement.remove", permission: o.permission, targetType: "requirement", targetId: r.id, ip: o.ip,
