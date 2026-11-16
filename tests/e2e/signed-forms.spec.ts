@@ -38,7 +38,7 @@ test("staff open the matrix, filter it, open one signed form's evidence and down
   await expect(page.getByRole("link", { name: "Show everyone" })).toBeVisible();
   // Search by name.
   await page.goto("/staff/forms?q=quetzal");
-  await expect(matrix.locator("tbody .matrix-family th > span")).toHaveText(["Quetzalcoatl Family"]);
+  await expect(matrix.locator("tbody .t-group th > span")).toHaveText(["Quetzalcoatl Family"]);
 
   // The signed cell leads to the form's evidence.
   await matrix.getByRole("link", { name: /^Signed ?: Travel consent for/ }).first().click();

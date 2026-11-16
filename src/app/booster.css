@@ -619,8 +619,12 @@ fieldset.decide { border: 1px solid var(--hair); padding: var(--s3) var(--s4) va
 .decide legend { font: 700 1.0625rem var(--read); padding: 0 var(--s1); }
 .decide .row-actions { margin-top: 0; }
 
-/* The forms matrix keeps its wide table inside its box at 760px and up, and stacks like the other tables below. */
+/* The forms matrix keeps its wide table inside its box at 760px and up, and stacks like the other tables below. A cell
+   for someone a form doesn't ask is empty on the wide table and says "Not asked" when the rows stack. */
+.matrix .t-group th .one-button { margin-top: var(--s2); }
+.matrix-none { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 759.98px) {
+  .matrix-none { position: static; width: auto; height: auto; overflow: visible; clip: auto; color: var(--ink-2); }
   .matrix-wrap { overflow-x: visible; }
   .matrix th, .matrix td { min-width: 0; }
   .matrix tbody th[scope="row"] { position: static; }
