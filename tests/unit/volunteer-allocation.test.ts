@@ -4,7 +4,7 @@ import { allocateCredit, compareSlots, slotKey, type Credit, type CreditRequirem
 /**
  * How credit fills a family's volunteer requirements (v1 spec §11.4), as the pure rule src/lib/volunteer/allocation.ts
  * states it: required before optional, per student before per family, then the earliest due date, then the season's
- * order; credits in the order they were earned, each spent once, shifts whole and hours by the minute.
+ * order; credits a later requirement needs least first, then in the order they were earned, each spent once, shifts whole and hours by the minute.
  */
 const FAM = "FAM", S1 = "S1", S2 = "S2";
 const req = (id: string, o: Partial<CreditRequirement> = {}): CreditRequirement => ({ id, required: true, appliesTo: "family", amount: 2, amountUnit: "shifts", dueOn: null, order: 0, ...o });
@@ -152,5 +152,21 @@ describe("how credit fills requirements", () => {
     expect(filled(a, none)).toBe(0);
     expect(filled(a, two)).toBe(1);
     expect(filled(allocateCredit(FAM, [slot(two)], []), two)).toBe(0);
+  });
+
+  it("leaves a credit only one requirement can use for that one, so none goes short while credit that could meet it is left", () => {
+    // "Any volunteering" is linked to the concession and car-wash shifts, "Concessions" to the concession shift alone.
+    const any = req("any", { amount: 1, order: 0 }), concessions = req("conc", { amount: 1, order: 1 });
+    const atConcessions = checkIn(["any", "conc"]), atCarWash = checkIn(["any"]);
+    const a = allocateCredit(FAM, [slot(any), slot(concessions)], [atConcessions, atCarWash]);
+    expect(filled(a, any)).toBe(1);
+    expect(filled(a, concessions)).toBe(1);
+    expect(a.given.map((g) => [g.requirementId, g.creditId]).sort()).toEqual([["any", atCarWash.id], ["conc", atConcessions.id]]);
+    // A required per-family requirement and an optional per-student one, the student's check-in earned first.
+    const family = req("fam", { amount: 1 }), own = req("own", { required: false, appliesTo: "student", amount: 1 });
+    const leo = checkIn(["fam", "own"], 180, S1), guardian = checkIn(["fam", "own"]);
+    const b = allocateCredit(FAM, [slot(family), slot(own, S1)], [leo, guardian]);
+    expect(filled(b, family)).toBe(1);
+    expect(filled(b, own, S1)).toBe(1);
   });
 });

@@ -8,9 +8,12 @@
  *  - Requirements are filled in order: required before optional; at each level, per-student before per-family (a
  *    student's own requirement can only be met by that student, while anyone's credit can meet the family's); then the
  *    earliest due date, none last; then the season's own order.
- *  - Credits are spent in the order they were earned. A credit counts only toward requirements it can count toward: a
- *    check-in toward the requirements its shift is linked to whose filler rule it meets (countsFor()), and volunteering
- *    done outside the portal toward its one requirement.
+ *  - A credit counts only toward requirements it can count toward: a check-in toward the requirements its shift is
+ *    linked to whose filler rule it meets (countsFor()), and volunteering done outside the portal toward its one
+ *    requirement. A requirement takes first the credits that could count toward the fewest of the requirements still
+ *    to fill after it (the required ones counted before the optional ones), then in the order they were earned: so a
+ *    credit only one requirement can use is left for it, and no requirement goes short while credit that could have
+ *    met it is left over or spent where another credit would have done.
  *  - A requirement counted in shifts takes whole credits, one shift each, never part of one. A requirement counted in
  *    hours takes minutes, splitting a credit when it needs only part of it, from credits not already given as a shift.
  *  - Nothing goes beyond what a requirement needs; what is left flows on to the next, optional ones included. Each
@@ -75,12 +78,21 @@ export function allocateCredit(familyQboId: string, slots: readonly Slot[], cred
   const state = credits.map((c) => ({ credit: c, minutes: c.minutes, shifts: c.shifts, asMinutes: false, asShift: false }));
   const given: Given[] = [];
   const filled = new Map<string, number>();
-  for (const slot of [...slots].sort(compareSlots)) {
+  const ordered = [...slots].sort(compareSlots);
+  for (const [at, slot] of ordered.entries()) {
     const r = slot.requirement;
     const amount = r.amount ?? 0;
     let have = 0;
     if (amount > 0) {
-      for (const c of state) {
+      // The slots still to fill after this one, and how many of them each credit could count toward.
+      const later = ordered.slice(at + 1).filter((l) => (l.requirement.amount ?? 0) > 0);
+      const demand = (c: (typeof state)[number]) => {
+        const can = later.filter((l) => canCountToward(c.credit, l, familyQboId));
+        return [can.filter((l) => l.requirement.required).length, can.length] as const;
+      };
+      const ranked = state.map((c, earned) => ({ c, earned, d: demand(c) }))
+        .sort((x, y) => x.d[0] - y.d[0] || x.d[1] - y.d[1] || x.earned - y.earned).map((x) => x.c);
+      for (const c of ranked) {
         if (!canCountToward(c.credit, slot, familyQboId)) continue;
         if (r.amountUnit === "hours") {
           const need = amount * 60 - have;
