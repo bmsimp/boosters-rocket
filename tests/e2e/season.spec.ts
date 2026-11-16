@@ -162,17 +162,17 @@ test("staff see the season's set-up: its steps, what each asks, and the kinds th
   const listed = page.getByRole("region", { name: "Seasons", exact: true }).getByRole("listitem");
   await expect(listed).toHaveCount(1);
   await expect(listed).toContainText("Fall 2026");
-  await expect(listed).toContainText("Current season: parents see it · 4 steps · 6 requirements");
+  await expect(listed).toContainText("Current season: parents see it · 4 steps · 9 requirements");
   await page.getByRole("link", { name: "Fall 2026" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Fall 2026");
   await expect(page.getByRole("heading", { level: 2, name: /^\d\. / })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);
   const uniforms = page.getByRole("region", { name: "2. Uniforms" });
   await expect(uniforms).toContainText("Percussion truck crew sign-offChecklist item · Required · Each student · A chosen list of 1");
-  // Only a kind that can be met today can be added; the others are listed and can't be picked.
+  // Only a kind that can be met today can be added (checklist items and forms); the others are listed and can't be picked.
   await uniforms.getByText("Add a requirement to Uniforms").click();
   const kinds = uniforms.getByLabel("Kind").locator("option");
-  await expect(kinds).toHaveText(["Checklist item", "Form (coming later)", "Payment (coming later)", "Volunteering (coming later)"]);
-  expect(await kinds.evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).disabled))).toEqual([false, true, true, true]);
+  await expect(kinds).toHaveText(["Checklist item", "Form", "Payment (coming later)", "Volunteering (coming later)"]);
+  expect(await kinds.evaluateAll((all) => all.map((o) => (o as HTMLOptionElement).disabled))).toEqual([false, false, true, true]);
   await noSidewaysScroll(page);
 
   // The Club page offers the time zone that decides which day it is for a step's dates.

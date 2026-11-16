@@ -43,7 +43,10 @@ const routes = parentRoutes();
  * the Quetzalcoatl family (E2E-FAMILY), `other` the same kind of thing in another family.
  *   "/students/[id]": { own: { id: "E2E-S1" }, other: { id: "E2E-S3" } },
  */
-const PARAMS: Record<string, DynamicRouteParams> = {};
+const PARAMS: Record<string, DynamicRouteParams> = {
+  // The Quetzalcoatl family's signed Travel consent, and the second family's unsigned one (fixed ids in scripts/seed-e2e.ts).
+  "/forms/[id]": { own: { id: "e2e00000-0000-4000-8000-000000000001" }, other: { id: "e2e00000-0000-4000-8000-000000000002" } },
+};
 
 // Everything scripts/seed-e2e.ts gives a family that is not the Quetzalcoatl family, Zelda's second family included:
 // strings that would give that family away, in the HTML or in the data sent with it. When the seed gives another
@@ -53,7 +56,9 @@ const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerr
   // What the second family owes: its invoice numbers, each amount, its total and the address behind its Pay button.
   "SF-2051", "SF-2052", "SF-2009", "$312.47", "$64.19", "$273.58", "$376.66", "scs-v1-e2e-second",
   // What the season asks of other families alone, and why one of them was let off.
-  "Tuba locker key", "Percussion truck crew", "Cast on his arm"];
+  "Tuba locker key", "Percussion truck crew", "Cast on his arm",
+  // Forms: the one asked of the second family alone, and the second family's own request: its document and its other guardian.
+  "Trailer towing", "envelope_e2esecond", "Wilhelmina", "wilhelmina@second.example"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);
@@ -96,7 +101,7 @@ test("every requirement and waiver the seed gives another family alone is search
   const titles = await sql`SELECT r.title FROM requirement r WHERE r.covers = 'chosen'
     AND NOT EXISTS (SELECT 1 FROM requirement_cover c WHERE c.requirement_id = r.id AND c.subject_qbo_id IN (${mine}))`;
   const reasons = await sql`SELECT waived_reason FROM requirement_progress WHERE waived_reason IS NOT NULL AND subject_qbo_id NOT IN (${mine})`;
-  expect(titles.length).toBeGreaterThanOrEqual(2);
+  expect(titles.length).toBeGreaterThanOrEqual(3);
   expect(reasons.length).toBeGreaterThanOrEqual(1);
   const unsearched = [...titles.map((r) => r.title as string), ...reasons.map((r) => r.waived_reason as string)].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)));
   expect(unsearched, `scripts/seed-e2e.ts gives another family these in the season, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
