@@ -88,6 +88,9 @@ async function makeDocument(ctx: ParentCtx, config: DocumensoConfig, form: MyFor
   const check = checkTemplate(template.value, form.appliesTo);
   if (!check.ok) return { ok: false, reason: "template" };
   const plan: TemplatePlan = check.plan;
+  // A template whose signers changed in Documenso since staff attached it is attached again first: a document made from
+  // it could never be the one the attached setting expects, and every open would withdraw it and make it again.
+  if (plan.signers.length !== setting.signerRoles) return { ok: false, reason: "template" };
   const chosen = signers.slice(0, plan.signers.length);
 
   // A document an earlier try left behind under this request's id (a crash between calls; Documenso's `use` can't be

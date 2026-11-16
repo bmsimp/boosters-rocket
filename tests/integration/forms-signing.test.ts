@@ -399,6 +399,18 @@ describe("signing a form", () => {
     expect(await requestNow(id)).toMatchObject({ state: "not_opened", envelopeId: null, preparingAt: null });
   });
 
+  it("says the form isn't ready, and makes nothing, when the template's signers changed in Documenso since staff attached it", async () => {
+    const { ctx, template } = await scene({ signers: "every", roles: 2 });
+    await secondGuardian();
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    const second = template.recipients.pop()!; // staff deleted Signer 2 in Documenso's editor
+    template.fields = template.fields.filter((f) => f.recipientId !== second.id);
+    expect((await agreeAndOpen(ctx, id)).step).toEqual({ kind: "not_ready" });
+    expect((await open(ctx, id)).step).toEqual({ kind: "not_ready" });
+    expect(stub.apiCalls("/envelope/use")).toEqual([]);
+    expect(await audits("form.document.withdraw")).toEqual([]);
+  });
+
   it("hands out no token for a document that does not carry the request's own id, and treats it as gone", async () => {
     const { ctx } = await scene({ signers: "any", roles: 1 });
     const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
