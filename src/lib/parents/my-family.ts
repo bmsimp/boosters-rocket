@@ -34,9 +34,17 @@ export type MyFamily = {
  * The signed-in person's own QuickBooks record, for the code that reads and changes it in QuickBooks
  * (./contact-edits.ts). The id is for the server only: it is never given to a page or a client component.
  */
-export type MyRecord = { qboId: string; parentQboId: string | null; contact: MyContact & { edits: "own" | "family" } };
+export type MyRecord = {
+  qboId: string; parentQboId: string | null; contact: MyContact & { edits: "own" | "family" };
+  /**
+   * Which of the addresses in the record's email field sign in through it (./access-rules.ts): the first alone on a
+   * parent's or a flat member's record; every one on a family's record in a club with no parent type.
+   */
+  signsInBy: "first" | "every";
+};
 
 type Row = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; email: string | null; phone: string | null };
+type Mine = { row: Row; signsInBy: MyRecord["signsInBy"] };
 
 // The order the staff roster lists people in (src/lib/roster/model.ts).
 const byName = (a: Row, b: Row) => a.displayName.localeCompare(b.displayName, "en", { sensitivity: "base" }) || a.qboId.localeCompare(b.qboId, "en", { numeric: true });
@@ -66,10 +74,10 @@ export async function loadMyRecord(ctx: ParentCtx): Promise<MyRecord | null> {
   const got = await read(ctx);
   const edits = got?.family.me?.edits;
   if (!got?.mine || !got.family.me || !edits) return null;
-  return { qboId: got.mine.qboId, parentQboId: got.mine.parentQboId, contact: { ...got.family.me, edits } };
+  return { qboId: got.mine.row.qboId, parentQboId: got.mine.row.parentQboId, contact: { ...got.family.me, edits }, signsInBy: got.mine.signsInBy };
 }
 
-async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Row | null } | null> {
+async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Mine | null } | null> {
   const familyId = ctx.familyQboId;
   const [[conn], source, shape, types, rows, [link], [lastOk]] = await Promise.all([
     // "Connected" as connectionView() means it, without loading the tokens.
@@ -101,7 +109,7 @@ async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Row | nul
     if (family.typeQboId === null || !shape.memberTypeIds.includes(family.typeQboId)) return null;
     // Every address on a member's record signs in through it, so its details are shared like a family's.
     const mine = sourceId === familyId ? family : null;
-    return { family: { name: family.displayName, students: null, me: mine ? contact(mine, "family") : null, rosterReadAt }, mine };
+    return { family: { name: family.displayName, students: null, me: mine ? contact(mine, "family") : null, rosterReadAt }, mine: mine ? { row: mine, signsInBy: "first" } : null };
   }
 
   if (family.typeQboId !== shape.familyTypeId) return null;
@@ -113,5 +121,6 @@ async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Row | nul
   const mine = sourceId === null ? undefined
     : shape.parentTypeId === null ? (sourceId === familyId ? family : undefined)
     : under.find((r) => r.qboId === sourceId && r.typeQboId === shape.parentTypeId);
-  return { family: { name: family.displayName, students, me: mine ? contact(mine, shape.parentTypeId === null ? "family" : "own") : null, rosterReadAt }, mine: mine ?? null };
+  return { family: { name: family.displayName, students, me: mine ? contact(mine, shape.parentTypeId === null ? "family" : "own") : null, rosterReadAt },
+    mine: mine ? { row: mine, signsInBy: shape.parentTypeId === null ? "every" : "first" } : null };
 }

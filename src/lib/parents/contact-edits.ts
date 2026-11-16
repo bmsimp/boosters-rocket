@@ -13,6 +13,7 @@ import { CUSTOMER_UPDATE, faultCodeOf, isQboId, qboCustomerById, qboUpdateCustom
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getRosterSource } from "@/lib/roster/source";
 import { asShown, fieldErrors, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
+import { parseEmailField } from "./emails";
 import { loadMyRecord, type MyContact, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { parentActor } from "./sessions";
@@ -70,26 +71,37 @@ function valuesOf(customer: Record<string, unknown>): ContactValues {
   };
 }
 
+/** Who a record is checked for: the roster's record of it, and the address the signed-in person signed in with. */
+type Mine = { record: MyRecord; email: string };
+
 /**
- * What the form shows of a customer QuickBooks sent, or why not. The record must be the one asked for, still active,
- * and still where the roster cache has it: a record moved to another family since the last refresh is not this
- * person's to change, whatever the cache still says.
+ * What the form shows of a customer QuickBooks sent, or why not. This answer is newer than the roster cache, which is
+ * read once a day, and newer than the sign-in, which was decided from that cache. So the record must be this person's
+ * as QuickBooks has it now, whatever the cache still says: the one asked for, still active, still where the cache has
+ * it (one moved to another family is not theirs to change), and its email field must still hold the address they
+ * signed in with, by the rule that gave them the sign-in (./access-rules.ts): the first address on a parent's own
+ * record, any address on a family's. When the club takes a parent's address off a record, the next roster read ends
+ * that sign-in; until it does, nothing the record holds now is shown to them, and they change none of it.
  */
-function formOf(customer: Record<string, unknown> | null, record: MyRecord): { ok: true; form: ContactForm } | Failed {
+function formOf(customer: Record<string, unknown> | null, { record, email }: Mine): { ok: true; form: ContactForm } | Failed {
   if (!customer || customer.Id !== record.qboId) return failed("bad_answer");
   if (customer.Active !== true && customer.Active !== "true") return failed("inactive");
   const under = isRow(customer.ParentRef) ? str(customer.ParentRef.value) || null : null;
   if (under !== record.parentQboId) return failed("moved");
+  const field = isRow(customer.PrimaryEmailAddr) && typeof customer.PrimaryEmailAddr.Address === "string" ? customer.PrimaryEmailAddr.Address : null;
+  const addresses = parseEmailField(field).usable;
+  if (!(record.signsInBy === "every" ? addresses : addresses.slice(0, 1)).includes(email.trim().toLowerCase())) return failed("not_theirs");
   const version = customer.SyncToken;
   if (typeof version !== "string" || !/^\d{1,20}$/.test(version)) return failed("bad_answer");
   return { ok: true, form: { values: valuesOf(customer), version } };
 }
 
 /** One read of the person's own record from QuickBooks. An id that isn't digits is never sent. */
-async function readLive(record: MyRecord, realmId: string, timeoutMs: number): Promise<{ ok: true; form: ContactForm } | Failed> {
+async function readLive(mine: Mine, realmId: string, timeoutMs: number): Promise<{ ok: true; form: ContactForm } | Failed> {
+  const { record } = mine;
   if (!isQboId(record.qboId)) return failed("bad_id");
   try {
-    return formOf(await qboCustomerById(record.qboId, { timeoutMs, signal: AbortSignal.timeout(timeoutMs * 1.5), retry: true, failFast: true, realmId }), record);
+    return formOf(await qboCustomerById(record.qboId, { timeoutMs, signal: AbortSignal.timeout(timeoutMs * 1.5), retry: true, failFast: true, realmId }), mine);
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
     return failed(e.code);
@@ -119,7 +131,7 @@ export async function loadMyContact(ctx: ParentCtx, o: { timeoutMs?: number } = 
     if (take === "first_refusal") await writeAudit({ actor: actorOf(ctx), action: "parent.contact.read.refused", targetType: "qbo_customer", targetId: record.qboId, after: { code: "rate_limited" }, ip: ctx.ip });
     return unavailable;
   }
-  const live = await readLive(record, company.realmId, o.timeoutMs ?? READ_TIMEOUT_MS);
+  const live = await readLive({ record, email: ctx.email }, company.realmId, o.timeoutMs ?? READ_TIMEOUT_MS);
   return live.ok ? { state: "ok", me: record.contact, form: live.form } : unavailable;
 }
 
@@ -177,7 +189,8 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
   const company = await connectedCompany();
   if (!company.ok) return refuse(company.code, [CONTACT_COPY.tryLater], record);
   const readMs = o.timeoutMs ?? READ_TIMEOUT_MS;
-  const before = await readLive(record, company.realmId, readMs);
+  const mine: Mine = { record, email: ctx.email };
+  const before = await readLive(mine, company.realmId, readMs);
   if (!before.ok) return refuse(before.code, [CONTACT_COPY.tryLater], record);
   if (before.form.version !== version) return refuse("stale", [CONTACT_COPY.changed], record, before.form);
   const errors = fieldErrors(values, before.form.values);
@@ -198,7 +211,7 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
     const fault = faultCodeOf(e);
     if (fault === CUSTOMER_UPDATE.faults.stale) {
       // Someone changed the record between the read above and the write: QuickBooks kept theirs. Read it again to show it.
-      const now = await readLive(record, company.realmId, readMs);
+      const now = await readLive(mine, company.realmId, readMs);
       // If that read fails too, the parent is not told that what they typed is what the books hold.
       return now.ok ? refuse("stale", [CONTACT_COPY.changed], record, now.form) : refuse("stale", [CONTACT_COPY.changedUnseen], record);
     }
@@ -206,7 +219,7 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
     return refuse(e.code, [mayHaveSaved(e.code) ? CONTACT_COPY.unsure : CONTACT_COPY.tryLater], record);
   }
 
-  const after = formOf(answer, record);
+  const after = formOf(answer, mine);
   // QuickBooks said yes and sent something the portal can't read back: the change was probably made.
   if (!after.ok) return refuse(after.code === "bad_answer" ? "bad_answer" : `answer_${after.code}`, [CONTACT_COPY.unsure], record);
   const updatedAt = isRow(answer.MetaData) && typeof answer.MetaData.LastUpdatedTime === "string" ? Date.parse(answer.MetaData.LastUpdatedTime) : NaN;

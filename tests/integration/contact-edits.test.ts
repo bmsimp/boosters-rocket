@@ -139,7 +139,7 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     const m = await seedParentIn({ familyQboId: "7410", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "7410" });
     await connectCompany(stub);
     const other = qbCustomer("7420", "Other Member", { PrimaryPhone: { FreeFormNumber: "512-555-0155" } });
-    stub.customers = [qbCustomer("7410", "Marisol Thackeray", { PrimaryPhone: { FreeFormNumber: "512-555-0144" }, BillAddr: { Line1: "3 Wren Row", City: "Austin" } }), copyOf(other)];
+    stub.customers = [qbCustomer("7410", "Marisol Thackeray", { PrimaryEmailAddr: { Address: "marisol@flat.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0144" }, BillAddr: { Line1: "3 Wren Row", City: "Austin" } }), copyOf(other)];
     asParent(m.identity);
     expect(await save({ phone: "512-555-0144", line1: "3 Wren Row", line2: "", city: "Pflugerville", region: "TX", postalCode: "", country: "" })).toMatchObject({ ok: true, current: { version: "1" } });
     expect(JSON.parse(posts()[0]!.body)).toMatchObject({ Id: "7410", SyncToken: "0", sparse: true, BillAddr: { Line1: "3 Wren Row", City: "Pflugerville", CountrySubDivisionCode: "TX" } });
@@ -516,6 +516,74 @@ describe("what the browser sends is checked, and how often", () => {
     // Counted per person: the other family's parent is not held up.
     asParent(c.identity);
     expect(await save({ ...shownTo(CHENOWETH), phone: NEW_PHONE })).toMatchObject({ ok: true });
+  });
+});
+
+describe("the record must be the signed-in parent's in QuickBooks now, not only in the roster as it was last read", () => {
+  it("its email no longer names them: none of what it holds now is shown, and nothing is written", async () => {
+    const { r } = await seedContactFamilies(stub);
+    // Since the roster was read, the treasurer has given the record to the family's other parent: their address, phone and home.
+    Object.assign(inQuickBooks(stub, R_PARENT), { PrimaryEmailAddr: { Address: "other.parent@family-r.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0999" },
+      BillAddr: { Line1: "99 Private Road", City: "Elsewhere" }, SyncToken: "3" });
+    const theirs = copyOf(stub.customers);
+    const notShown = (text: string) => { for (const secret of ["99 Private Road", "Elsewhere", "512-555-0999", "other.parent@family-r.example"]) expect(text, secret).not.toContain(secret); };
+    asParent(r.identity);
+
+    // The page: what the roster last had, the line that says the club's books can't be reached, and no form.
+    const view = await loadMyContact(ctxOf(r.identity));
+    expect(view).toEqual({ state: "unavailable", me: { name: RIVERA.parent.name, email: RIVERA.parent.email, phone: RIVERA.parent.phone, edits: "own" } });
+    const page = await renderPage(FamilyDetailsPage);
+    notShown(page);
+    expect(page).not.toContain("<form");
+
+    // The save, with the version the form once showed and with the one the record has now: refused, and it gives nothing back.
+    for (const version of ["0", "3"]) {
+      const result = await save({ ...SHOWN, phone: NEW_PHONE, line1: "1 Mine Now" }, version);
+      expect(result, version).toEqual({ ok: false, errors: [CONTACT_COPY.tryLater] });
+      notShown(JSON.stringify(result));
+    }
+    expect(posts()).toHaveLength(0);
+    expect(stub.customers).toEqual(theirs);
+    expect(await cached(R_PARENT)).toMatchObject({ phone: RIVERA.parent.phone, syncToken: "0" });
+    const log = await audits();
+    expect(log.map((a) => [a.action, a.targetId, a.before, a.after])).toEqual(Array.from({ length: 2 }, () => ["parent.contact.save.failed", R_PARENT, null, { code: "not_theirs" }]));
+    notShown(JSON.stringify(log));
+    expect(revalidatedPaths()).toEqual([]);
+  });
+
+  it("a parent's own record signs in by its first address only, however it is written", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    const emailIs = (Address: string | undefined) => { inQuickBooks(stub, R_PARENT).PrimaryEmailAddr = Address === undefined ? undefined : { Address }; };
+    // Theirs: the first address, in other letters, with spaces and a second address after it.
+    emailIs(`  ${RIVERA.parent.email.toUpperCase()} ; second@family-r.example`);
+    expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", form: { values: SHOWN } });
+    // Not theirs: their address moved to second place, or taken off, or the field emptied.
+    for (const field of [`first@family-r.example, ${RIVERA.parent.email}`, "first@family-r.example", "not an address", "", undefined]) {
+      emailIs(field);
+      expect(await loadMyContact(ctxOf(r.identity)), String(field)).toMatchObject({ state: "unavailable" });
+    }
+    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toEqual({ ok: false, errors: [CONTACT_COPY.tryLater] });
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("a family's record, with no parent type, is every parent's whose address is on it, and no longer one's whose address is taken off", async () => {
+    await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
+    await addToCache([{ qboId: "7310", displayName: "Noparent Family", typeQboId: "F", email: "home@noparent.example, work@noparent.example", phone: "512-555-0199" }]);
+    const home = await seedParentIn({ familyQboId: "7310", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "7310" });
+    const work = await seedParentIn({ familyQboId: "7310", name: "Noparent Family", email: "work@noparent.example", sourceQboId: "7310" });
+    await connectCompany(stub);
+    stub.customers = [qbCustomer("7310", "Noparent Family", { PrimaryEmailAddr: { Address: "home@noparent.example, work@noparent.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0199" } })];
+    for (const p of [home, work]) expect(await loadMyContact(ctxOf(p.identity)), p.identity.email).toMatchObject({ state: "ok", me: { edits: "family" } });
+    // The club takes the work address off the record. Until the roster is read again, that sign-in still stands.
+    Object.assign(inQuickBooks(stub, "7310"), { PrimaryEmailAddr: { Address: "home@noparent.example" } });
+    expect(await loadMyContact(ctxOf(home.identity))).toMatchObject({ state: "ok" });
+    expect(await loadMyContact(ctxOf(work.identity))).toMatchObject({ state: "unavailable" });
+    asParent(work.identity);
+    const blank = { line1: "", line2: "", city: "", region: "", postalCode: "", country: "" };
+    expect(await save({ phone: NEW_PHONE, ...blank })).toEqual({ ok: false, errors: [CONTACT_COPY.tryLater] });
+    expect(posts()).toHaveLength(0);
+    expect((await audits()).map((a) => [a.actorId, a.after])).toEqual([[work.identity.parentId, { code: "not_theirs" }]]);
   });
 });
 
