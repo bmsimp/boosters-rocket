@@ -17,7 +17,7 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
   return (
     <main className="wrap single">
       <h1 className="page-title">Parents</h1>
-      <p className="lede">Who can sign in to the portal, and why someone can&apos;t. People come from QuickBooks. Names and email addresses are changed in QuickBooks, not here; a missing parent is added in QuickBooks, then the roster is refreshed.</p>
+      <p className="lede">Who can sign in to the portal, and why someone can&apos;t. People come from QuickBooks. A missing parent is added, and a name changed, from the family&apos;s page under Roster, by staff who may change the roster; it is sent to QuickBooks first. Email addresses are changed in QuickBooks, not here, followed by Refresh now on the roster.</p>
       {!settings.signin && <p role="status">{settings.everEnabled ? "Parent sign-ins are switched off, so nobody can sign in right now." : "Parent sign-ins haven't been switched on yet. An Admin does that under Parent sign-ins."}</p>}
 
       <section className="box" aria-labelledby="review-h"><h2 id="review-h">To review ({review.waiting.length})</h2>

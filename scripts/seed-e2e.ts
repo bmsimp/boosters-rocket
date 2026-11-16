@@ -86,24 +86,29 @@ async function main() {
             ${access.ciphertext}, ${access.keyId}, now() + interval '5 years', ${refresh.ciphertext}, ${refresh.keyId}, now() + interval '5 years', now(), now())`;
   await sql`DELETE FROM qbo_customer_type`;
   await sql`DELETE FROM qbo_customer`;
-  await sql`INSERT INTO qbo_customer_type (qbo_id, name, active) VALUES ('1','Family',true), ('2','Parent',true), ('3','Student',true), ('4','School',true)`;
+  // No id in this roster is a number, a customer type's included, on purpose: QuickBooks is asked about, or sent, only an
+  // id that is digits (isQboId in src/lib/quickbooks/client.ts), and this run's QuickBooks connection holds made-up
+  // tokens. A staff change made in the browser run (tests/e2e/roster-writes.spec.ts) names a customer, or a customer
+  // type and a family, so with these ids every one is refused before anything is sent to Intuit. The run checks it
+  // (tests/e2e/family-details.spec.ts).
+  await sql`INSERT INTO qbo_customer_type (qbo_id, name, active) VALUES ('E2E-T1','Family',true), ('E2E-T2','Parent',true), ('E2E-T3','Student',true), ('E2E-T4','School',true)`;
   await sql`INSERT INTO qbo_customer (qbo_id, display_name, active, parent_qbo_id, type_qbo_id, email, phone, sync_token) VALUES
-          ('10', 'Rivera Family', true, null, '1', null, null, '0'),
-          ('11', 'Ana Rivera', true, '10', '2', 'ana@example.com', '555-0101', '0'),
-          ('12', 'Leo Rivera', true, '10', '3', null, null, '0'),
-          ('20', '<img src=x onerror=alert(1)> Family', true, null, '1', null, null, '0'),
-          ('30', 'Lincoln High', true, null, '4', null, null, '0'),
-          ('E2E-FAMILY', 'Quetzalcoatl Family', true, null, '1', null, null, '0'),
-          ('E2E-P1', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY', '2', 'zelda@example.com', null, '0'),
-          ('E2E-S1', 'Xochitl Quetzalcoatl', true, 'E2E-FAMILY', '3', null, null, '0'),
-          ('E2E-S2', 'Yaretzi Quetzalcoatl', true, 'E2E-FAMILY', '3', null, null, '0'),
-          ('E2E-FAMILY-2', 'Second Family', true, null, '1', null, null, '0'),
-          ('E2E-P2', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY-2', '2', 'zelda@example.com', null, '0'),
-          ('E2E-S3', 'Wolfgang Secondborn', true, 'E2E-FAMILY-2', '3', null, null, '0'),
-          ('40', 'Okafor Family', true, null, '1', null, null, '0'),
-          ('41', 'Sam Okafor', true, '40', '2', 'sam@example.com', null, '0'),
-          ('50', 'Lee Family', true, null, '1', null, null, '0'),
-          ('51', 'Sam Okafor', true, '50', '2', 'sam@example.com', null, '0')`;
+          ('E2E-10', 'Rivera Family', true, null, 'E2E-T1', null, null, '0'),
+          ('E2E-11', 'Ana Rivera', true, 'E2E-10', 'E2E-T2', 'ana@example.com', '555-0101', '0'),
+          ('E2E-12', 'Leo Rivera', true, 'E2E-10', 'E2E-T3', null, null, '0'),
+          ('E2E-20', '<img src=x onerror=alert(1)> Family', true, null, 'E2E-T1', null, null, '0'),
+          ('E2E-30', 'Lincoln High', true, null, 'E2E-T4', null, null, '0'),
+          ('E2E-FAMILY', 'Quetzalcoatl Family', true, null, 'E2E-T1', null, null, '0'),
+          ('E2E-P1', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY', 'E2E-T2', 'zelda@example.com', null, '0'),
+          ('E2E-S1', 'Xochitl Quetzalcoatl', true, 'E2E-FAMILY', 'E2E-T3', null, null, '0'),
+          ('E2E-S2', 'Yaretzi Quetzalcoatl', true, 'E2E-FAMILY', 'E2E-T3', null, null, '0'),
+          ('E2E-FAMILY-2', 'Second Family', true, null, 'E2E-T1', null, null, '0'),
+          ('E2E-P2', 'Zelda Quetzalcoatl', true, 'E2E-FAMILY-2', 'E2E-T2', 'zelda@example.com', null, '0'),
+          ('E2E-S3', 'Wolfgang Secondborn', true, 'E2E-FAMILY-2', 'E2E-T3', null, null, '0'),
+          ('E2E-40', 'Okafor Family', true, null, 'E2E-T1', null, null, '0'),
+          ('E2E-41', 'Sam Okafor', true, 'E2E-40', 'E2E-T2', 'sam@example.com', null, '0'),
+          ('E2E-50', 'Lee Family', true, null, 'E2E-T1', null, null, '0'),
+          ('E2E-51', 'Sam Okafor', true, 'E2E-50', 'E2E-T2', 'sam@example.com', null, '0')`;
   // Zelda is in two families on purpose (the family chooser test), so staff have already said she is one person.
   // Sam's address is under two families and waits for a decision (tests/e2e/parents.spec.ts decides and reverses it).
   // The parents setting is cleared here and nowhere else: tests/e2e/parents.spec.ts switches sign-ins on, and that
@@ -112,7 +117,7 @@ async function main() {
           ON CONFLICT (email) DO UPDATE SET approved_family_qbo_ids = EXCLUDED.approved_family_qbo_ids`;
   await sql`DELETE FROM held_address WHERE email = 'sam@example.com'`;
   await sql`DELETE FROM setting WHERE key IN ('parents.settings', 'parents.review_notice', 'parents.previous_company')`;
-  await sql`INSERT INTO setting (key, value) VALUES ('membership.shape', ${sql.json({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" })})
+  await sql`INSERT INTO setting (key, value) VALUES ('membership.shape', ${sql.json({ kind: "layered", familyTypeId: "E2E-T1", studentTypeId: "E2E-T3", parentTypeId: "E2E-T2" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   // The cache says which company it came from, as a real refresh records it; without this the pages treat it as unread.
   await sql`INSERT INTO setting (key, value) VALUES ('roster.source', ${sql.json({ realmId: "9130000000000001" })})
@@ -168,9 +173,9 @@ async function main() {
   }
   type SeedRequirement = { step: string; title: string; appliesTo: "family" | "student"; required?: boolean; due?: number; chosen?: string[]; ticked?: string[]; waived?: Record<string, string>; item?: string };
   const requirements: SeedRequirement[] = [
-    { step: "Join", title: "Handbook read", appliesTo: "family", ticked: ["E2E-FAMILY", "10"] },
-    { step: "Join", title: "Tuba locker key returned", appliesTo: "family", chosen: ["10"] },
-    { step: "Uniforms", title: "Uniform fitting attended", appliesTo: "student", ticked: ["E2E-S1", "12"] },
+    { step: "Join", title: "Handbook read", appliesTo: "family", ticked: ["E2E-FAMILY", "E2E-10"] },
+    { step: "Join", title: "Tuba locker key returned", appliesTo: "family", chosen: ["E2E-10"] },
+    { step: "Uniforms", title: "Uniform fitting attended", appliesTo: "student", ticked: ["E2E-S1", "E2E-12"] },
     { step: "Uniforms", title: "Marching shoes sized", appliesTo: "student", required: false },
     { step: "Uniforms", title: "Percussion truck crew sign-off", appliesTo: "student", chosen: ["E2E-S3"], waived: { "E2E-S3": "Cast on his arm until December" } },
     { step: "Wrap-up", title: "Banquet RSVP", appliesTo: "family", due: 30 },
@@ -196,7 +201,7 @@ async function main() {
           (${E2E_VOLUNTEER.griddle}, ${E2E_VOLUNTEER.event}, '07:00', '09:00', 4, 'Griddle', ${E2E_VOLUNTEER.griddleCode}),
           (${E2E_VOLUNTEER.cleanup}, ${E2E_VOLUNTEER.event}, '09:00', '11:00', 2, 'Cleanup', DEFAULT)`;
   await sql`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, student_qbo_id, filler_name)
-          VALUES (${E2E_VOLUNTEER.griddle}, '10', ${crypto.randomUUID()}, 'student', '12', 'Leo Rivera')`;
+          VALUES (${E2E_VOLUNTEER.griddle}, 'E2E-10', ${crypto.randomUUID()}, 'student', 'E2E-12', 'Leo Rivera')`;
   // Checking in (v1 spec §11.4, tests/e2e/check-in.spec.ts): a shift whose window is open whenever the browser run
   // happens, worked out from the club's clock (UTC here) now, and one that is over. Zelda has a place on each; the
   // spec checks her in on the first, and passes whether she is checked in already or not, as both passes of a run read
@@ -270,6 +275,14 @@ async function main() {
     await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_qbo_id, record_qbo_id, new_email, token_hash, expires_at, used_at)
             VALUES (${p!.id}, ${link!.id}, ${family}, ${record}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
   }
+  // Staff roster changes waiting to reach QuickBooks, for the Reconciliation page (tests/e2e/roster-writes.spec.ts): one
+  // waiting, one stuck. The worker never runs in this run, and their ids are not numbers, so nothing is ever sent.
+  await sql`DELETE FROM write_queue`;
+  await sql`INSERT INTO write_queue (realm_id, request, target_qbo_id, family_qbo_id, state, sent, tries, last_code, last_tried_at, next_try_at, asked_by_label, created_at) VALUES
+          ('9130000000000001', ${sql.json({ op: "rename", role: "parent", qboId: "E2E-41", syncToken: "0", name: "Samuel Okafor", was: "Sam Okafor" })}, 'E2E-41', 'E2E-40',
+            'waiting', true, 2, 'timeout', now() - interval '3 minutes', now() + interval '2 minutes', 'e2e-admin@example.org', now() - interval '10 minutes'),
+          ('9130000000000001', ${sql.json({ op: "create", role: "student", name: "Pat Lee", typeQboId: "E2E-T3", familyQboId: "E2E-50", email: null })}, null, 'E2E-50',
+            'stuck', false, 8, 'http_429', now() - interval '1 hour', null, 'e2e-admin@example.org', now() - interval '20 hours')`;
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   await sql.end();

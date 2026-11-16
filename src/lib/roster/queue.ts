@@ -1,0 +1,216 @@
+// Staff only: the write queue (v1 spec §4, §8.4). Staff roster writes that QuickBooks didn't take at the time and may
+// take later are tried again here by the worker, carefully: one that QuickBooks may already have made is never simply
+// sent again. Its rules are pure, in ./write-rules.ts; the send and what follows it are ./writes.ts's.
+import "server-only";
+import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { jobRun, qboCustomer, setting, writeQueue, type RosterWrite } from "@/lib/db/schema";
+import { writeAudit, type Actor } from "@/lib/audit/log";
+import { getConnection } from "@/lib/quickbooks/connection";
+import { WORKER_ACTOR } from "@/lib/quickbooks/client";
+import { QboError } from "@/lib/quickbooks/endpoints";
+import { refreshRoster } from "./refresh";
+import { getRosterSource, ROSTER_JOB } from "./source";
+import { applyWritten, REFRESH_ASK_KEY, sendWrite } from "./writes";
+import { afterFailedTry, beforeResend, classify } from "./write-rules";
+
+export const WRITE_QUEUE_JOB = "roster.write_queue";
+/** How long a try may hold an item before another wake may take it: longer than one send takes. */
+const LEASE_MS = 5 * 60_000;
+/** At most this many items are tried in one wake, so a long queue doesn't hold the worker up. */
+const PER_WAKE = 10;
+export const NOTE_MAX = 500;
+
+type Item = typeof writeQueue.$inferSelect;
+type Step = "done" | "stuck" | "waiting" | "skipped";
+
+/**
+ * When the last roster refresh that worked started, or null. Its start, not its end: a refresh that began before a try
+ * may have read QuickBooks before that try's change landed there.
+ */
+async function lastGoodRefresh(): Promise<Date | null> {
+  const [r] = await db.select({ at: jobRun.startedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
+  return r?.at ?? null;
+}
+
+async function refreshAsked(): Promise<Date | null> {
+  const [row] = await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY));
+  const at = (row?.value as { at?: unknown } | undefined)?.at;
+  return typeof at === "string" && !Number.isNaN(Date.parse(at)) ? new Date(at) : null;
+}
+
+/** Takes an item for one try, so an overlapping wake leaves it alone: its next try is pushed past the try's length. */
+async function claim(id: string, now: Date): Promise<Item | null> {
+  const [item] = await db.update(writeQueue).set({ nextTryAt: new Date(now.getTime() + LEASE_MS), updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, id), eq(writeQueue.state, "waiting"), lte(writeQueue.nextTryAt, now))).returning();
+  return item ?? null;
+}
+
+const short = (code: string) => code.slice(0, 40);
+
+/** One state change of an item, with its audit row, in one transaction. A row a company change deleted is left gone. */
+async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string; sent: boolean; nextTryAt?: Date }, now: Date): Promise<Step> {
+  await db.transaction(async (tx) => {
+    const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), sent: to.sent, tries: item.tries + 1, lastTriedAt: now,
+      nextTryAt: to.state === "waiting" ? to.nextTryAt! : null, updatedAt: new Date() }).where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
+    if (!still) return;
+    await writeAudit({ actor: WORKER_ACTOR, action: to.state === "stuck" ? "roster.write.stuck" : "roster.write.retry", targetType: "write_queue", targetId: item.id,
+      before: { state: item.state, tries: item.tries, code: item.lastCode }, after: { state: to.state, tries: item.tries + 1, code: short(to.code), sent: to.sent } }, tx);
+  });
+  return to.state;
+}
+
+/** Marks an item done, audited, in the transaction given (or one of its own). */
+async function markDone(item: Item, how: "sent" | "found", resultQboId: string | null, tries: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0]): Promise<void> {
+  const run = async (t: NonNullable<typeof tx>) => {
+    const [still] = await t.update(writeQueue).set({ state: "done", resultQboId, tries, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+      .where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
+    if (!still) return;
+    await writeAudit({ actor: WORKER_ACTOR, action: "roster.write.done", targetType: "write_queue", targetId: item.id,
+      before: { state: item.state, tries: item.tries }, after: { state: "done", how, tries, ...(resultQboId ? { resultQboId } : {}) } }, t);
+  };
+  if (tx) await run(tx); else await db.transaction(run);
+}
+
+/**
+ * One try of one item. One that QuickBooks may already have made (`sent`) is first looked for in the cache, which a
+ * refresh has read since its last try: there, it is done; an update whose record moved on otherwise is stuck, nothing
+ * overwritten; otherwise it is sent again. What QuickBooks refuses now makes it stuck; what may still go through waits
+ * for its next try, or is stuck once it is old or tried often (afterFailedTry).
+ */
+async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise<Step> {
+  const w = item.request as RosterWrite;
+  if (item.sent) {
+    if (!refreshedAt || refreshedAt <= item.lastTriedAt) {
+      // No roster read since the last try: leave it for the next wake, when one will have run.
+      await db.update(writeQueue).set({ nextTryAt: now, updatedAt: new Date() }).where(eq(writeQueue.id, item.id));
+      return "skipped";
+    }
+    const cache = await db.select().from(qboCustomer);
+    const seen = beforeResend(w, cache);
+    if (seen.is === "done") { await markDone(item, "found", seen.qboId, item.tries); return "done"; }
+    if (seen.is === "stuck") return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
+  }
+  let answer: Record<string, unknown>;
+  try {
+    answer = await sendWrite(w, item.realmId, { mayWait: true });
+  } catch (e) {
+    if (!(e instanceof QboError)) throw e;
+    const failure = classify(e.code);
+    if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: false }, now);
+    const next = afterFailedTry(item.tries + 1, item.createdAt, now);
+    return settle(item, { ...next, code: e.code, sent: failure.sent }, now);
+  }
+  await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id,
+    inside: (tx) => markDone(item, "sent", typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
+  return "done";
+}
+
+/**
+ * The worker's share of the queue at one wake: a roster refresh first when one was asked for (a family made inactive)
+ * or a waiting item needs one before it can be looked for, then up to PER_WAKE items whose time has come. Only items of
+ * the company QuickBooks is connected to, which the cache came from, are tried. In the wake's answer only when it did
+ * something.
+ */
+export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: boolean; ok: boolean }> {
+  const [conn, source] = await Promise.all([getConnection(), getRosterSource()]);
+  if (!conn?.realmId || !conn.refreshTokenCiphertext || source !== conn.realmId) return { ran: false, ok: true };
+  const due = await db.select().from(writeQueue).where(and(eq(writeQueue.state, "waiting"), eq(writeQueue.realmId, source), lte(writeQueue.nextTryAt, now)))
+    .orderBy(asc(writeQueue.nextTryAt)).limit(PER_WAKE);
+  const asked = await refreshAsked();
+  let refreshedAt = await lastGoodRefresh();
+  let ran = false, ok = true;
+  const needsRead = due.some((i) => i.sent && (!refreshedAt || refreshedAt <= i.lastTriedAt));
+  if ((asked && (!refreshedAt || refreshedAt <= asked)) || needsRead) {
+    const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
+    ran = ran || r.ok || r.reason === "failed";
+    if (!r.ok && r.reason === "failed") ok = false;
+    refreshedAt = await lastGoodRefresh();
+  }
+  if (asked && refreshedAt && refreshedAt > asked) await db.delete(setting).where(and(eq(setting.key, REFRESH_ASK_KEY), sql`(${setting.value}->>'at')::timestamptz <= ${refreshedAt.toISOString()}::timestamptz`));
+  for (const row of due) {
+    const item = await claim(row.id, now);
+    if (!item) continue;
+    try {
+      const step = await tryItem(item, now, refreshedAt);
+      if (step !== "skipped") ran = true;
+    } catch {
+      // Nothing of the error is kept. The lease runs out and the item is tried again at a later wake.
+      ran = true; ok = false;
+    }
+  }
+  return { ran, ok };
+}
+
+/** An item as the Reconciliation page and a family's page show it. */
+export type QueueView = {
+  id: string; state: "waiting" | "stuck"; write: RosterWrite; words: string; askedBy: string | null; askedAt: string;
+  lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null; familyQboId: string | null;
+};
+
+/** What a queued write was, in words, with the names the cache has for its ids. Names are QuickBooks text: shown as text only. */
+export function describeWrite(w: RosterWrite, names: Map<string, string>): string {
+  const name = (id: string | null) => (id === null ? "the club" : names.get(id) ?? "a customer no longer on the roster");
+  const who = { family: "the family", student: "the student", parent: "the parent", member: "the member" }[w.role];
+  switch (w.op) {
+    case "create": return w.familyQboId === null ? `Make ${who} “${w.name}”` : `Add ${who} “${w.name}” to ${name(w.familyQboId)}`;
+    case "rename": return `Rename ${who} “${w.was}” to “${w.name}”`;
+    case "move": return `Move the student ${name(w.qboId)} from ${name(w.fromFamilyQboId)} to ${name(w.toFamilyQboId)}`;
+    case "deactivate": return `Make ${who} ${name(w.qboId)} inactive`;
+  }
+}
+
+/** Every waiting and stuck item, newest first; for one family, only the items under or about it (`familyQboId`). */
+export async function loadOpenWrites(o: { familyQboId?: string } = {}): Promise<QueueView[]> {
+  const where = and(inArray(writeQueue.state, ["waiting", "stuck"]), o.familyQboId === undefined ? undefined
+    : sql`(${writeQueue.familyQboId} = ${o.familyQboId} or ${writeQueue.targetQboId} = ${o.familyQboId} or ${writeQueue.request}->>'toFamilyQboId' = ${o.familyQboId})`);
+  const rows = await db.select().from(writeQueue).where(where).orderBy(desc(writeQueue.createdAt));
+  if (!rows.length) return [];
+  const names = new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)).map((c) => [c.qboId, c.name]));
+  return rows.map((r) => ({
+    id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
+    lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode, familyQboId: r.familyQboId,
+  }));
+}
+
+/** How many items are waiting, and how many are stuck, for the Health page. */
+export async function queueCounts(): Promise<{ waiting: number; stuck: number }> {
+  const rows = await db.select({ state: writeQueue.state, n: sql<number>`count(*)::int` }).from(writeQueue).where(inArray(writeQueue.state, ["waiting", "stuck"])).groupBy(writeQueue.state);
+  return { waiting: rows.find((r) => r.state === "waiting")?.n ?? 0, stuck: rows.find((r) => r.state === "stuck")?.n ?? 0 };
+}
+
+export type QueueOp = { actor: Actor; ip: string | null; permission: string };
+type Done = { ok: true; message: string } | { ok: false; errors: string[] };
+const GONE: Done = { ok: false, errors: ["That is no longer waiting: it went through, or was given up. Reload the page."] };
+
+/**
+ * "Try again now": a waiting or stuck item is tried at the worker's next wake, within a minute. A stuck one gets one more
+ * try: if that fails too, it is stuck again. The worker does the try, so a staff member never waits on QuickBooks here.
+ */
+export async function tryAgainNow(id: string, o: QueueOp): Promise<Done> {
+  return db.transaction(async (tx) => {
+    const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
+    if (!item) return GONE;
+    const now = new Date();
+    // Its count of tries and its age are kept, so a stuck item that fails again is stuck again at once.
+    await tx.update(writeQueue).set({ state: "waiting", nextTryAt: now, updatedAt: now }).where(eq(writeQueue.id, id));
+    await writeAudit({ actor: o.actor, action: "roster.write.again", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,
+      before: { state: item.state, tries: item.tries, code: item.lastCode }, after: { state: "waiting" } }, tx);
+    return { ok: true as const, message: "It will be tried again within a minute." };
+  });
+}
+
+/** "Give up": the item is never tried again. The note says why, for staff, and is kept in the audit log. */
+export async function giveUp(id: string, rawNote: string, o: QueueOp): Promise<Done> {
+  const note = rawNote.trim();
+  if (!note) return { ok: false, errors: ["Say why, in a few words. The note is kept in the audit log."] };
+  if (note.length > NOTE_MAX) return { ok: false, errors: [`The note is too long (${NOTE_MAX} characters at most).`] };
+  return db.transaction(async (tx) => {
+    const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
+    if (!item) return GONE;
+    await tx.update(writeQueue).set({ state: "given_up", note, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() }).where(eq(writeQueue.id, id));
+    await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,
+      before: { state: item.state, tries: item.tries, code: item.lastCode, op: item.request.op }, after: { state: "given_up", note } }, tx);
+    return { ok: true as const, message: "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it." };
+  });
+}

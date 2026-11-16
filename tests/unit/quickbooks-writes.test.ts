@@ -48,6 +48,24 @@ const EMAIL_CHANGE_EXPORTS = ["EMAIL_CHANGE_TTL_MS", "EMAIL_COPY", "EmailResult"
   "requestMyEmailChange", "EmailLinkView", "findMyEmailChange", CONFIRM];
 
 /**
+ * The staff roster writes (roadmap step 5, v1 spec §6.1): a customer create and sparse updates of a name, a parent and
+ * Active, each built from CUSTOMER_WRITES and sent by the client's one private sender. Only the roster's write module
+ * may name them; only the staff roster actions and the write queue's job reach that module's send.
+ */
+const ROSTER_WRITES = ["qboCreateCustomer", "qboRenameCustomer", "qboMoveCustomer", "qboSetCustomerActive"];
+const ROSTER_WRITER = "src/lib/roster/writes.ts";
+const MAY_SEND_ROSTER_WRITES = [CLIENT, ROSTER_WRITER];
+/** The write module's way to QuickBooks: its send (used by the module itself and the queue's job) and the staff ask. */
+const ROSTER_SEND = "sendWrite", ROSTER_ASK = "askRosterWrite";
+const MAY_ROSTER_SEND = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
+const MAY_ROSTER_ASK = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
+/** Which body each roster write sends. */
+const ROSTER_BODY = { qboCreateCustomer: "create", qboRenameCustomer: "rename", qboMoveCustomer: "reparent", qboSetCustomerActive: "active" } as const;
+/** The fields the roster writes' bodies can carry, in the order CUSTOMER_WRITES writes them. */
+const ROSTER_BODY_FIELDS = ["DisplayName", "CustomerTypeRef", "ParentRef", "Job", "BillWithParent", "PrimaryEmailAddr", "Address",
+  "Id", "SyncToken", "DisplayName", "Id", "SyncToken", "ParentRef", "Job", "BillWithParent", "Id", "SyncToken", "Active"];
+
+/**
  * Every place the word `method` stands in the code. `is` is the request method when it is written out as a plain key
  * with one of the two the portal uses, `method: "GET"` or `method: "POST"`, and null for anything else: a shorthand
  * (`{ method }`), a computed or quoted key (`["method"]: ...`), a property set later (`init.method = ...`), a value
@@ -197,6 +215,24 @@ function updateConstant(clientSource: string): string {
   const text = code(clientSource), at = text.indexOf("export const CUSTOMER_UPDATE = {");
   return at < 0 ? "" : text.slice(at, text.indexOf("\n} as const;", at));
 }
+/** `export const CUSTOMER_WRITES = { ... } as const;` as written in the client. */
+function rosterWritesConstant(clientSource: string): string {
+  const text = code(clientSource), at = text.indexOf("export const CUSTOMER_WRITES = {");
+  return at < 0 ? "" : text.slice(at, text.indexOf("\n} as const;", at));
+}
+/** What is wrong with the roster writes' bodies: a field that isn't on the list, a spread of anything but its optional parts, a computed key. */
+function rosterBodyProblems(constant: string): string[] {
+  const problems: string[] = [];
+  if (!constant.includes(`path: "customer",`)) problems.push("the path is not the customer endpoint");
+  const fields = [...constant.matchAll(/(?:^|[{\s(])["'`]?([A-Z]\w*)["'`]?\]?\s*:/g)].map((m) => m[1]!);
+  if (fields.join() !== ROSTER_BODY_FIELDS.join()) problems.push(`the bodies carry ${fields.join(", ")}`);
+  const spreads = [...constant.matchAll(/\.\.\./g)].map((m) => constant.slice(m.index, m.index + 40).replace(/\s+/g, " "));
+  if (spreads.length !== 2 || !spreads[0]!.startsWith("...(c.parentQboId !== null ? {") || !spreads[1]!.startsWith("...(c.email !== null ? {")) problems.push(`the bodies spread something else: ${spreads.join(" | ")}`);
+  if ([...constant.matchAll(/sparse: true/g)].length !== 3) problems.push("an update is not sparse");
+  if (/\[[^\]]*\]\s*:/.test(constant)) problems.push("a body has a computed key");
+  return problems;
+}
+
 /** The top-level and nested fields the update's body can carry, in order. */
 const BODY_FIELDS = ["Id", "SyncToken", "PrimaryPhone", "FreeFormNumber", "BillAddr", "Line1", "Line2", "Line3", "Line4", "Line5", "City", "CountrySubDivisionCode", "PostalCode", "Country"];
 /** The two parts of the body that are left out when unchanged. Any other spread could carry any field. */
@@ -258,8 +294,8 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
 
   it("sends nothing but GET, except to Intuit's token and revoke endpoints and the one customer update", () => {
     const posts = sources.flatMap((s) => Array.from({ length: postsIn(s.text) }, () => s.file));
-    // The token request, the customer update and the email update in the client; the revoke in the connection.
-    expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
+    // The token request, the customer update, the email update and the roster writes' sender in the client; the revoke in the connection.
+    expect(posts.sort()).toEqual([CLIENT, CLIENT, CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
     const methods = (text: string) => methodsIn(text).map((m) => m.is);
     expect(methods(bodyOf("tokenRequest"))).toEqual(["POST"]);
     expect(bodyOf("tokenRequest")).toContain("qboEndpoints().token");
@@ -267,7 +303,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     // Everything else in the client that reaches the API is a GET: qboGet, and what is built on it.
     expect(methods(bodyOf("qboGet"))).toEqual(["GET"]);
     expect(methods(bodyOf(EMAIL_WRITE))).toEqual(["POST"]);
-    expect(methods(clientSource)).toEqual(["POST", "GET", "POST", "POST"]);
+    expect(methods(clientSource)).toEqual(["POST", "GET", "POST", "POST", "POST"]);
   });
 
   it("can send the update to the customer endpoint only, with nothing in it but an Id, a SyncToken, the phone and the billing address", () => {
@@ -315,6 +351,57 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     expect([...client.matchAll(new RegExp(`\\b${EMAIL_WRITE}\\b`, "g"))]).toHaveLength(1);
   });
 
+  describe("and the staff roster writes, sent from one place, for the roster's own records (roadmap step 5)", () => {
+    const naming = (name: string) => everything.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
+    const writer = code(everything.find((s) => s.file === ROSTER_WRITER)?.text ?? "");
+
+    it("are sent by one private function of the client, a POST to the customer endpoint", () => {
+      const sender = client.slice(client.indexOf("async function sendRosterWrite("), client.indexOf("\nexport async function qboCreateCustomer("));
+      expect(methodsIn(sender).map((m) => m.is)).toEqual(["POST"]);
+      expect(sender).toContain("/${CUSTOMER_WRITES.path}`");
+      // Defined once, and called once by each of the four writes: nothing else reaches it.
+      expect([...client.matchAll(/\bsendRosterWrite\b/g)]).toHaveLength(1 + ROSTER_WRITES.length);
+      expect(client).not.toMatch(/export\s+(async\s+)?function\s+sendRosterWrite|export\s*\{[^}]*sendRosterWrite/);
+    });
+
+    it("each build their body from CUSTOMER_WRITES, refuse an id that isn't one, and carry nothing but their fields", () => {
+      for (const name of ROSTER_WRITES) {
+        const body = bodyOf(name);
+        expect(body, name).toContain(`return sendRosterWrite(CUSTOMER_WRITES.${ROSTER_BODY[name as keyof typeof ROSTER_BODY]}(`);
+        expect(body, name).toMatch(/if \(!isQboId\(/);
+        expect(/export async function \w+\(([^)]*)\)/.exec(body)![1], name).not.toMatch(/\bpath\b|\burl\b|\bbody\b|\bpayload\b/);
+      }
+      expect(rosterBodyProblems(rosterWritesConstant(clientSource))).toEqual([]);
+    });
+
+    it("are named by the client and the roster's write module alone, and reached only from the staff roster actions and the queue", () => {
+      for (const name of ROSTER_WRITES) {
+        expect(naming(name), `${name} is a roster write. A new caller is a decision for a slice brief, not a fix made in passing.`).toEqual([...MAY_SEND_ROSTER_WRITES].sort());
+        // In the write module: imported once, called once, inside its send.
+        expect([...writer.matchAll(new RegExp(`\\b${name}\\b`, "g"))], name).toHaveLength(2);
+      }
+      const send = writer.slice(writer.indexOf(`export async function ${ROSTER_SEND}(`), writer.indexOf("\nconst AUDIT_ACTION"));
+      for (const name of ROSTER_WRITES) expect(send, name).toMatch(new RegExp(`\\b${name}\\(`));
+      expect(naming(ROSTER_SEND)).toEqual([...MAY_ROSTER_SEND].sort());
+      expect(naming(ROSTER_ASK)).toEqual([...MAY_ROSTER_ASK].sort());
+    });
+
+    it("refuse a body that could carry another field", () => {
+      const constant = rosterWritesConstant(clientSource);
+      const refused = [
+        constant.replace("sparse: true, DisplayName: name", "sparse: true, DisplayName: name, ...extra"),
+        constant.replace("Active: active }", "Active: active, Balance: 0 }"),
+        constant.replace("sparse: true, Active", "sparse: false, Active"),
+        constant.replace(`path: "customer",`, `path: "invoice",`),
+        constant.replace("DisplayName: c.name,", `["DisplayName"]: c.name,`),
+      ];
+      for (const source of refused) {
+        expect(source, "the case didn't change the constant").not.toBe(constant);
+        expect(rosterBodyProblems(source), source).not.toEqual([]);
+      }
+    });
+  });
+
   describe("and these checks refuse what would get past a careless scan", () => {
     const fetchWith = (init: string, before = "") => `${before}\nexport async function send(url: string) { return fetch(url, ${init}); }\n`;
 
@@ -344,7 +431,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     it("a fetch call is read whole, through strings and templates with brackets in them", () => {
       const call = "fetch(`${base}/v3/company/${encodeURIComponent(realm)}/customer`, { method: \"POST\", headers: { authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString(\"base64\")}` }, body: \")\" })";
       expect(fetchCalls(`const res = await ${call};\nconst next = 1;`)).toEqual([call]);
-      expect(fetchCalls(clientSource)).toHaveLength(4);
+      expect(fetchCalls(clientSource)).toHaveLength(5);
     });
 
     it("a second way to the write through the contact edits", () => {

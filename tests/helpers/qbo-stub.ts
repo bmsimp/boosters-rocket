@@ -56,6 +56,15 @@ export type QboStub = {
    * The email update (EMAIL_UPDATE: `PrimaryEmailAddr: { Address }` alone, the whole field as it is to be) is the same
    * request to the same address and is answered the same way, with the same switches below; nor has it been checked.
    */
+  /**
+   * A customer create (POST .../customer with no Id, CUSTOMER_WRITES in src/lib/quickbooks/client.ts) is answered as
+   * QuickBooks is understood to answer one, which has not been checked against a real company either: the next numeric
+   * Id, SyncToken "0", Active, and the fields sent. A DisplayName that any customer has, ignoring case, or that is in
+   * `otherNames` (a vendor's or an employee's), is refused with code 6240, on a create and on an update that sends one.
+   * `updateFault`, `loseUpdateAnswer`, `updateServerFault` and `dropApi` apply to every write, a create too.
+   */
+  otherNames: string[];
+  inactiveTakesChildren: boolean; // a customer made inactive takes the customers under it with it (unconfirmed: CUSTOMER_WRITES check 4)
   updateFault: string | null;   // answer every customer update with HTTP 400 and this Fault code ("6000": a validation failure; "5010": a stale object)
   beforeUpdate: ((customer: Record<string, unknown>) => void) | null; // run on the stored customer as an update for it arrives, before its SyncToken is checked: someone editing in QuickBooks at that moment
   loseUpdateAnswer: boolean;    // make a customer update, then close the connection without answering: the change is in QuickBooks and the portal never hears
@@ -95,7 +104,7 @@ export async function startQboStub(): Promise<QboStub> {
   };
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
     invoices: [], items: [], oddItemAnswer: null, refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
-    updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, updateServerFault: null, dropApi: false, dropToken: false, onApiRequest: null,
+    otherNames: [], inactiveTakesChildren: false, updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, updateServerFault: null, dropApi: false, dropToken: false, onApiRequest: null,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
@@ -144,16 +153,35 @@ export async function startQboStub(): Promise<QboStub> {
       if (stub.rateLimitNext > 0) { stub.rateLimitNext--; return json(429, { Fault: { Error: [{ Message: "a throttling message the portal must never store" }] } }); }
       if (stub.failNext > 0) { stub.failNext--; return json(500, { Fault: { Error: [{ Message: "a message the portal must never store" }] } }); }
       if (call.method === "POST") {
-        // The one write the portal sends. Anything else posted to the API is refused.
+        // The customer writes the portal sends. Anything else posted to the API is refused.
         if (!/\/customer$/.test(url.pathname)) return json(400, fault("2010"));
         if (stub.updateFault) return json(400, fault(stub.updateFault));
         let sent: Record<string, unknown>;
         try { sent = JSON.parse(body) as Record<string, unknown>; } catch { return json(400, fault("2010")); }
+        // A name taken by any customer (other than the one updated), vendor or employee is refused (CUSTOMER_WRITES).
+        const nameTaken = (name: unknown, except: unknown) => typeof name === "string" && [...stub.customers.filter((c) => c.Id !== except).map((c) => c.DisplayName), ...stub.otherNames]
+          .some((n) => typeof n === "string" && n.trim().toLowerCase() === name.trim().toLowerCase());
+        if (sent.Id === undefined) {
+          // A create (CUSTOMER_WRITES.create): the next Id, version 0, active, with the fields sent.
+          if (typeof sent.DisplayName !== "string" || !sent.DisplayName.trim()) return json(400, fault("2020"));
+          if (nameTaken(sent.DisplayName, null)) return json(400, fault("6240"));
+          const parentId = (sent.ParentRef as { value?: unknown } | undefined)?.value;
+          if (parentId !== undefined && !stub.customers.some((c) => c.Id === parentId)) return json(400, fault("2500"));
+          const next = String(Math.max(0, ...stub.customers.map((c) => Number(c.Id)).filter((n) => !Number.isNaN(n))) + 1);
+          const made: Record<string, unknown> = { ...sent, Id: next, SyncToken: "0", Active: true, MetaData: { CreateTime: new Date().toISOString(), LastUpdatedTime: new Date().toISOString() } };
+          stub.customers.push(made);
+          if (stub.loseUpdateAnswer) { req.socket.destroy(); return; }
+          if (stub.updateServerFault) return json(stub.updateServerFault.status, { ...fault(stub.updateServerFault.code), Fault: { ...fault(stub.updateServerFault.code).Fault, type: "SystemFault" } });
+          return json(200, { Customer: made, time: new Date().toISOString() });
+        }
         const at = stub.customers.findIndex((c) => c.Id === sent.Id);
         if (at < 0) return json(400, fault("610"));
         stub.beforeUpdate?.(stub.customers[at]!);
         const stored = stub.customers[at]!;
         if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault("5010"));
+        if ("DisplayName" in sent && nameTaken(sent.DisplayName, stored.Id)) return json(400, fault("6240"));
+        // Making a family inactive makes the customers under it inactive too, when the test says QuickBooks does so.
+        if (sent.Active === false && stub.inactiveTakesChildren) for (const c of stub.customers) if ((c.ParentRef as { value?: unknown } | undefined)?.value === stored.Id) c.Active = false;
         const updated: Record<string, unknown> = sent.sparse === true ? { ...stored } : { Id: stored.Id };
         for (const [field, value] of Object.entries(sent)) {
           if (field === "Id" || field === "SyncToken" || field === "sparse") continue;
@@ -226,7 +254,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.idle = () => (open === 0 ? Promise.resolve() : new Promise<void>((r) => waitingForIdle.push(r)));
   stub.reset = () => {
-    stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.updateServerFault = null; stub.dropApi = false; stub.dropToken = false; stub.onApiRequest = null;
+    stub.otherNames = []; stub.inactiveTakesChildren = false; stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.updateServerFault = null; stub.dropApi = false; stub.dropToken = false; stub.onApiRequest = null;
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
     stub.invoices = []; stub.items = []; stub.oddItemAnswer = null; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;

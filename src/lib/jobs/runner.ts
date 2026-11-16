@@ -14,6 +14,7 @@ import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
 import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
 import { runSignedFormsJobs } from "@/lib/signed-forms/worker";
 import { REMINDERS_JOB, sendVolunteerReminders } from "@/lib/volunteer/reminders";
+import { WRITE_QUEUE_JOB, runWriteQueue } from "@/lib/roster/queue";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -107,6 +108,9 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
     if (r.ok || r.reason === "failed") ran.push({ job: ROSTER_JOB, ok: r.ok });
   }
+  // Staff roster writes waiting to reach QuickBooks (src/lib/roster/queue.ts), after the roster: a write that may already
+  // have been made is looked for in a roster read since its last try. Guarded, so a failure never stops the money job.
+  try { const q = await runWriteQueue(now); if (q.ran) ran.push({ job: WRITE_QUEUE_JOB, ok: q.ok }); } catch { ran.push({ job: WRITE_QUEUE_JOB, ok: false }); }
   // Every family's invoices, once a day or when staff ask (src/lib/money/sweep.ts): after the roster, so it reads the
   // families as QuickBooks lists them now. A run too long for one wake carries on at the next; it is in this wake's
   // answer only when it ended.

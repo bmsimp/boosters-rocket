@@ -569,3 +569,128 @@ export async function qboUpdateCustomerEmail(customerId: string, syncToken: stri
     return customer as Record<string, unknown>;
   }
 }
+
+/* ---- Staff roster writes (v1 spec §6.1): a customer create, and sparse updates of a name, a parent and Active ---- */
+
+/** A new customer as staff ask for it: always a type, and for a student or a parent the family it sits under. */
+export type CustomerCreate = {
+  name: string; typeQboId: string;
+  /** The family a student or parent is made under; null for a family or a flat member. */
+  parentQboId: string | null;
+  /** A student is billed with its family (BillWithParent); a parent is not. */
+  billWithParent: boolean;
+  /** A parent's own address; null for everyone else. */
+  email: string | null;
+};
+
+/**
+ * The roster writes, exactly as they are sent. NOT YET TRIED AGAINST A REAL QUICKBOOKS COMPANY: nobody could reach the
+ * sandbox when they were built, so they follow Intuit's documentation as remembered, like CUSTOMER_UPDATE above. They
+ * share its address: a body with no Id is a create, and one with an Id, a SyncToken and `sparse: true` an update of the
+ * fields sent and nothing else. The owner's sandbox check must confirm, with `minorversion` 75:
+ *   1. `create` with `{ DisplayName, CustomerTypeRef: { value } }` answers 200 with `{ Customer }`, and that the customer
+ *      it made carries that CustomerTypeRef (that QuickBooks takes a type on a create at all); for a student the same with
+ *      `ParentRef`, `Job: true` and `BillWithParent: true`, and for a parent `BillWithParent: false` and
+ *      `PrimaryEmailAddr: { Address }`. Also whether QuickBooks copies the family's contact details onto the new
+ *      sub-customer (parents spec, Guidance for the club), which the parent's own email must then replace;
+ *   2. `rename` (`DisplayName` alone) changes the name and nothing else: not GivenName, FamilyName, the contact details,
+ *      the type, the parent or Active; and what it does to FullyQualifiedName and to the names of the sub-customers of a
+ *      family that is renamed;
+ *   3. `reparent` (`ParentRef`, `Job: true`, `BillWithParent: true`) moves a student under the other family and changes
+ *      nothing else, and what happens to its open invoices;
+ *   4. `active` with `Active: false` makes the customer inactive (QuickBooks has no delete), and what it does to the
+ *      customers under a family made inactive (the portal asks for a roster refresh after one to see), and whether a
+ *      customer with an open balance can be made inactive at all: if QuickBooks refuses it, with which code;
+ *   5. a DisplayName already used by any customer, vendor or employee answers HTTP 400 with `Fault.Error[0].code` "6240"
+ *      (`faults.duplicateName`), and changes nothing;
+ *   6. an update with an old SyncToken answers HTTP 400 with "5010" (`faults.stale`), and changes nothing.
+ * Don't change a body without trying the new one in the sandbox first, and tests/helpers/qbo-stub.ts must follow it.
+ */
+export const CUSTOMER_WRITES = {
+  path: "customer",
+  create: (c: CustomerCreate) => ({
+    DisplayName: c.name, CustomerTypeRef: { value: c.typeQboId },
+    ...(c.parentQboId !== null ? { ParentRef: { value: c.parentQboId }, Job: true, BillWithParent: c.billWithParent } : {}),
+    ...(c.email !== null ? { PrimaryEmailAddr: { Address: c.email } } : {}),
+  }),
+  rename: (customerId: string, syncToken: string, name: string) => ({ Id: customerId, SyncToken: syncToken, sparse: true, DisplayName: name }),
+  reparent: (customerId: string, syncToken: string, parentQboId: string) =>
+    ({ Id: customerId, SyncToken: syncToken, sparse: true, ParentRef: { value: parentQboId }, Job: true, BillWithParent: true }),
+  active: (customerId: string, syncToken: string, active: boolean) => ({ Id: customerId, SyncToken: syncToken, sparse: true, Active: active }),
+  faults: { stale: "5010", duplicateName: "6240" },
+} as const;
+
+export type QboRosterWriteOptions = QboWriteOptions & {
+  /**
+   * The worker may wait its turn for the connection row (accessToken()); a staff member pressing a button never does:
+   * without it the token comes from accessTokenForPage(), which answers "busy" (token_busy) when the row is held.
+   */
+  mayWait?: boolean;
+};
+
+const badRosterId = () => new QboError("That isn't a QuickBooks customer.", "bad_id");
+const isSyncToken = (v: string) => /^\d{1,20}$/.test(v);
+
+/**
+ * Sends one roster write and returns the customer as QuickBooks now has it. The one request of the staff roster writes
+ * that is not a GET; the four functions below build its body from CUSTOMER_WRITES and nothing else. It fails as
+ * qboUpdateCustomerContact() does, with the same codes: NO_TOKEN for a token that couldn't be had (nothing was sent), a
+ * 4xx for a refusal (nothing was changed), and a timeout, a lost connection, an unreadable answer or a 5xx when the
+ * change may have been made. A 401 is answered by one token refresh and one more try; nothing else is tried twice.
+ */
+async function sendRosterWrite(payload: Record<string, unknown>, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  await refuseWhenOnlyAnAdminCanFixIt();
+  const body = JSON.stringify(payload);
+  let force = false, refreshed = false;
+  for (;;) {
+    const token = o.mayWait ? accessToken({ force }) : accessTokenForPage(force);
+    const a = await within(token, o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
+    force = false;
+    if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
+    const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${CUSTOMER_WRITES.path}`);
+    url.searchParams.set("minorversion", QBO_MINOR_VERSION);
+    const timeout = AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS);
+    const gaveUp = () => timeout.aborted || o.signal?.aborted === true;
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "POST", body, headers: { authorization: `Bearer ${a.token}`, accept: "application/json", "content-type": "application/json" },
+        signal: o.signal ? AbortSignal.any([timeout, o.signal]) : timeout, redirect: "error" });
+    } catch {
+      throw gaveUp() ? timedOut() : new QboError("Couldn't reach QuickBooks.", "unreachable");
+    }
+    if (res.status === 401 && !refreshed) {
+      refreshed = true; force = true;
+      await res.body?.cancel().catch(() => {});
+      continue;
+    }
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    let customer: unknown;
+    try { customer = ((await res.json()) as { Customer?: unknown } | null)?.Customer; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
+    if (typeof customer !== "object" || customer === null || Array.isArray(customer)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
+    return customer as Record<string, unknown>;
+  }
+}
+
+/** Makes a customer: a family or member with its type, or a student or parent of that type under its family. */
+export async function qboCreateCustomer(c: CustomerCreate, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(c.typeQboId) || (c.parentQboId !== null && !isQboId(c.parentQboId))) throw badRosterId();
+  return sendRosterWrite(CUSTOMER_WRITES.create(c), o);
+}
+
+/** Changes one customer's DisplayName, from the version the staff member was shown. */
+export async function qboRenameCustomer(customerId: string, syncToken: string, name: string, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(customerId) || !isSyncToken(syncToken)) throw badRosterId();
+  return sendRosterWrite(CUSTOMER_WRITES.rename(customerId, syncToken, name), o);
+}
+
+/** Puts a student under another family, billed with it, from the version the staff member was shown. */
+export async function qboMoveCustomer(customerId: string, syncToken: string, parentQboId: string, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(customerId) || !isQboId(parentQboId) || !isSyncToken(syncToken)) throw badRosterId();
+  return sendRosterWrite(CUSTOMER_WRITES.reparent(customerId, syncToken, parentQboId), o);
+}
+
+/** Makes one customer inactive, or active (QuickBooks has no delete), from the version the staff member was shown. */
+export async function qboSetCustomerActive(customerId: string, syncToken: string, active: boolean, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(customerId) || !isSyncToken(syncToken)) throw badRosterId();
+  return sendRosterWrite(CUSTOMER_WRITES.active(customerId, syncToken, active), o);
+}

@@ -1,6 +1,6 @@
-import { and, eq, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -10,11 +10,13 @@ export const CLEANUP_JOB = "cleanup.daily";
 export const JOB_HISTORY_DAYS = 90;
 /** Reminder claims (who was reminded of which form on which day) are kept this long: long past the one-a-day rule they serve. */
 export const REMINDER_CLAIM_DAYS = 365;
+/** A staff roster write that went through, or that staff gave up, is kept this long for the Reconciliation page's story. */
+export const FINISHED_WRITES_DAYS = 30;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; rateLimitEvents: number;
-  emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number;
+  emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
@@ -22,6 +24,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   emailChanges: ["expired email change", "expired email changes"], familyMoney: ["set of figures for a family no longer in the roster", "sets of figures for families no longer in the roster"],
   jobRuns: ["old job record", "old job records"],
   reminderClaims: ["reminder record older than a year", "reminder records older than a year"],
+  writeQueue: ["finished change to QuickBooks", "finished changes to QuickBooks"],
 };
 
 /**
@@ -30,7 +33,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * whose rows expire gets its delete below and a boundary test.
  */
 export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run",
-  "form_reminder_claim", "form_reminder_round"] as const;
+  "form_reminder_claim", "form_reminder_round", "write_queue"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts", staff_auth_verification: "Better Auth's own, short-lived and kept by it",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts", parent_auth_verification: "Better Auth's own, short-lived and kept by it",
@@ -80,6 +83,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   page and the "is it due" check read those.
  * - Reminder claims and scheduled rounds older than REMINDER_CLAIM_DAYS: they only stop a second reminder the same day.
  *   A signed form's evidence is never deleted.
+ * - Staff roster writes that went through or were given up more than FINISHED_WRITES_DAYS ago. Waiting and stuck ones
+ *   stay until they finish.
  *
  * The audit log is never touched: it is append-only.
  */
@@ -115,8 +120,10 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const yearAgo = new Date(now.getTime() - REMINDER_CLAIM_DAYS * 86_400_000);
   const reminderClaims = n(await tx.delete(formReminderClaim).where(lt(formReminderClaim.createdAt, yearAgo)).returning({ id: formReminderClaim.id }))
     + n(await tx.delete(formReminderRound).where(lt(formReminderRound.createdAt, yearAgo)).returning({ id: formReminderRound.id }));
+  const writes = n(await tx.delete(writeQueue).where(and(inArray(writeQueue.state, ["done", "given_up"]),
+    lt(writeQueue.finishedAt, new Date(now.getTime() - FINISHED_WRITES_DAYS * 86_400_000)))).returning({ id: writeQueue.id }));
 
-  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims };
+  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes };
 }
 
 /**

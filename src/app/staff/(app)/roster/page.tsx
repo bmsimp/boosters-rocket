@@ -1,8 +1,10 @@
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage } from "@/lib/roster/queries";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
 import { DisconnectedNotice, Freshness } from "./freshness";
+import { CreateBox, WhatChanges } from "./changes";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
@@ -14,7 +16,10 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams;
   const typed = (typeof sp.q === "string" ? sp.q : Array.isArray(sp.q) ? sp.q[0] ?? "" : "").trim().slice(0, 100);
   const q = typed.toLowerCase();
+  // The tag first: the roster the page then shows is that company's or a later one, never an earlier one.
+  const rosterTag = await currentRosterTag();
   const page = await loadRosterPage();
+  const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected;
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
   const settings = admin ? <> <a href="/staff/settings/quickbooks">Open QuickBooks settings</a></> : " An Admin can do that under QuickBooks.";
   const matches = (name: string) => !q || name.toLowerCase().includes(q); // a plain substring: nothing typed is a pattern
@@ -29,7 +34,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   return (
     <main className="wrap single">
       <h1 className="page-title">Roster</h1>
-      <p className="lede">The club&apos;s {roster?.kind === "flat" ? "members" : "families"} as QuickBooks lists them. This is a copy for looking at; changes are made in QuickBooks.</p>
+      <p className="lede">The club&apos;s {roster?.kind === "flat" ? "members" : "families"} as QuickBooks lists them. This is a copy of what QuickBooks holds: a change made here is sent to QuickBooks first.</p>
 
       {!roster && (
         <section className="box" role="status" aria-labelledby="roster-none-h"><h2 id="roster-none-h">Nothing to show yet</h2>
@@ -55,9 +60,13 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
         </section>
       )}
 
+      {roster && page.shape && canChange && <CreateBox shape={page.shape} rosterTag={rosterTag}
+        memberTypes={page.shape.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
+      {roster && page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
+
       {roster && page.attention.length > 0 && (
         <section className="box" aria-labelledby="roster-attn-h"><h2 id="roster-attn-h">Needs attention ({page.attention.length})</h2>
-          <p>Things to tidy up in QuickBooks, or in the portal&apos;s sign-ins. The portal changes none of them.</p>
+          <p>Things to tidy up in QuickBooks, or in the portal&apos;s sign-ins. Nothing here is changed by itself: fix each in QuickBooks, or from a family&apos;s page.</p>
           <ul className="lines">{page.attention.map((a, i) => (
             <li key={`${a.rule}-${a.qboId ?? a.name}-${i}`}><div>
               {a.qboId && hasPage.has(a.qboId) ? <a className="what" href={`/staff/roster/${encodeURIComponent(a.qboId)}`}>{a.name}</a> : <span className="what">{a.name}</span>}

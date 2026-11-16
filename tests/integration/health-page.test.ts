@@ -184,8 +184,8 @@ describe("the health page", () => {
     await seedConnected(stub);
     const connected = line(await healthReport(), "quickbooks");
     expect(connected.notes).toContain(`${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`);
-    // The one write has never been made here.
-    expect(connected.times).toContainEqual({ label: "Last change by a parent", at: null });
+    // No change has been made in QuickBooks here.
+    expect(connected.times).toContainEqual({ label: "Last change made in QuickBooks", at: null });
     const health = await renderPage(HealthPage);
     const settings = await renderPage(QuickBooksSettingsPage);
     const setup = await renderPage(QuickBooksSetupPage, { searchParams: { step: "connect" } });
@@ -196,15 +196,22 @@ describe("the health page", () => {
       expect(html).not.toMatch(/changes nothing (there|in QuickBooks)|only reads/);
     }
     expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
-    expect(QUICKBOOKS_USE.writes).toMatch(/one thing.*phone and mailing address/);
-    expect(health).toContain("Last change by a parent: never");
+    expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address.*new families, students, parents and members.*inactive.*never deletes/);
+    expect(health).toContain("Last change made in QuickBooks: never");
 
-    // A parent's save is audited under that action (tests/integration/contact-edits.test.ts): the newest one is the time shown.
+    // A parent's save, and a staff change to the roster, are audited under these actions (tests/integration/contact-edits.test.ts,
+    // roster-writes.test.ts): the newest one is the time shown, and a refusal is not one.
     const actor = { door: "parent" as const, id: "p-1", label: "ana@example.com" };
-    await writeAudit({ actor, action: QUICKBOOKS_WRITE_ACTION, targetType: "qbo_customer", targetId: "11" });
+    await writeAudit({ actor, action: "parent.contact.save", targetType: "qbo_customer", targetId: "11" });
     await writeAudit({ actor, action: "parent.contact.save.failed", targetType: "qbo_customer", targetId: "11", after: { code: "timeout" } });
-    const [saved] = (await db.select().from(auditLog)).filter((a) => a.action === QUICKBOOKS_WRITE_ACTION);
-    expect(at(line(await healthReport(), "quickbooks"), "Last change by a parent")).toBe(saved!.at.toISOString());
+    const [saved] = (await db.select().from(auditLog)).filter((a) => a.action === "parent.contact.save");
+    expect(at(line(await healthReport(), "quickbooks"), "Last change made in QuickBooks")).toBe(saved!.at.toISOString());
+    const staff = { door: "staff" as const, id: null, label: "registrar@club.org" };
+    await writeAudit({ actor: staff, action: "roster.customer.rename", targetType: "qbo_customer", targetId: "12" });
+    await writeAudit({ actor: staff, action: "roster.write.refused", targetType: "qbo_customer", targetId: "12", after: { code: "fault_6240" } });
+    const [renamed] = (await db.select().from(auditLog)).filter((a) => a.action === "roster.customer.rename");
+    expect(QUICKBOOKS_WRITE_ACTION).toEqual(expect.arrayContaining(["parent.contact.save", "roster.customer.create", "roster.customer.rename", "roster.student.move", "roster.customer.deactivate"]));
+    expect(at(line(await healthReport(), "quickbooks"), "Last change made in QuickBooks")).toBe(renamed!.at.toISOString());
 
     // Not connected: the page says what parents can't do meanwhile, too.
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, accessTokenCiphertext: null });

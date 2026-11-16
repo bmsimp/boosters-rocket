@@ -71,7 +71,9 @@ const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerr
   // Forms: the one asked of the second family alone, and the second family's own request: its document and its other guardian.
   "Trailer towing", "envelope_e2esecond", "Wilhelmina", "wilhelmina@second.example",
   // The address Zelda asked to change to under her second family.
-  "second-moving.example"];
+  "second-moving.example",
+  // Staff changes to other families waiting to reach QuickBooks (the write queue): a new student's name.
+  "Pat Lee"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);
