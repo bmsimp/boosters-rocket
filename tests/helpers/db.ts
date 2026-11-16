@@ -18,8 +18,14 @@ import type { StoredMailConfig } from "@/lib/mail/types";
  * The rows are deleted, not truncated. TRUNCATE gives every table and index a new file on disk, which took most of a
  * second here on each reset, two thousand times a run; deleting a test's few rows takes a couple of milliseconds. The
  * lock is the one TRUNCATE took: the reset waits for anything a test left running to finish its transaction, then
- * removes what it wrote too. Rows still read back in the order they were written, as many tests expect of a select
- * with no ORDER BY, because the run turns the background vacuum off (readyTablesForRun, tests/setup/worker-databases.ts).
+ * removes what it wrote too.
+ *
+ * A table emptied by DELETE keeps its pages, though, and Postgres puts later rows wherever it has noted room, not
+ * after the rows before them. Many tests read rows back with no ORDER BY and take the first or the last as the one
+ * written first or last; on a table that keeps its pages they fail now and then. So resetDb() then vacuums the tables
+ * the test wrote, which hands their emptied pages back to the disk: each starts again from no pages, and rows lie in
+ * the order they were written, as after a TRUNCATE. That costs about 10 ms a table the test wrote, against some 40 ms
+ * for TRUNCATE, which also has to empty every table that refers to one it empties.
  */
 let emptying: Promise<string> | null = null;
 function emptyEverything(): Promise<string> {
@@ -28,6 +34,14 @@ function emptyEverything(): Promise<string> {
 }
 
 const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`;
+const literal = (text: string) => `'${text.replaceAll("'", "''")}'`;
+
+/** The tables, but for "role", that have pages on disk: those written since they were last emptied to nothing. */
+async function writtenTables(): Promise<string[]> {
+  const rows = await db.execute<{ name: string }>(sql`SELECT c.oid::regclass::text AS name FROM pg_class c
+    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND c.relname <> 'role' AND pg_relation_size(c.oid) > 0 ORDER BY 1`);
+  return rows.map((t) => t.name);
+}
 
 async function howToEmpty(): Promise<string> {
   const tables = await db.execute<{ id: number; name: string }>(sql`SELECT c.oid::int AS id, c.relname AS name FROM pg_class c
@@ -79,6 +93,16 @@ export async function resetDb() {
   const statements = await emptyEverything();
   // A DO block is one statement and one transaction, whatever protocol the driver speaks.
   await db.execute(sql.raw(`DO $reset$ BEGIN ${statements}; END $reset$`));
+  // Then the tables the test wrote give their pages back (see above). VACUUM can't run inside a transaction, so it is a
+  // statement of its own; it takes the tables one after another, as at once they kept each other's rows from going.
+  let written = await writtenTables();
+  if (written.length) await db.execute(sql.raw(`VACUUM (INDEX_CLEANUP ON, TRUNCATE ON, PROCESS_TOAST OFF, SKIP_DATABASE_STATS) ${written.join(", ")}`));
+  // A transaction left open somewhere can keep the deleted rows from going. Those few tables are truncated instead.
+  if (written.length) written = await writtenTables();
+  if (written.length) {
+    await db.execute(sql.raw(`DO $reset$ BEGIN PERFORM set_config('client_min_messages', 'warning', true);
+      EXECUTE ${literal(`TRUNCATE ${written.join(", ")} CASCADE`)}; END $reset$`));
+  }
   invalidateProviders();
 }
 

@@ -29,9 +29,9 @@ const migratedToTheEnd = (url: string) => inside(url, async (pg) => {
 });
 const hasTable = (url: string, table: string) => inside(url, async (pg) => (await pg`select 1 from information_schema.tables where table_schema = 'public' and table_name = ${table}`).length === 1);
 
-describe("a run's worker databases", { timeout: 120_000 }, () => {
-  beforeAll(dropMine, 60_000);
-  afterAll(async () => { await dropMine(); await admin.end({ timeout: 5 }); }, 60_000);
+describe("a run's worker databases", { timeout: 300_000 }, () => {
+  beforeAll(dropMine, 300_000);
+  afterAll(async () => { await dropMine(); await admin.end({ timeout: 5 }); }, 300_000);
 
   it("gives worker 1 the run's own database and makes nothing for it", async () => {
     expect(await prepareWorkerDatabase(RUN.url, 1)).toBe(RUN.url);

@@ -11,8 +11,8 @@ import { adminDatabaseUrl, scratchDatabase } from "../setup/database-url";
 // of one run, never drop each other's scratch database.
 const ADMIN_URL = adminDatabaseUrl();
 // Making or dropping a database waits for Postgres to write out what every database on the server has changed: with
-// other runs and workers busy, that has taken most of a minute.
-const DATABASE_WORK = 120_000;
+// other runs and workers busy, that has taken two minutes.
+const DATABASE_WORK = 300_000;
 const { name: NAME, url: DB_URL } = scratchDatabase("migrate_parents");
 let oldFolder = "";
 

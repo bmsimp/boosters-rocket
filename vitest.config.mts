@@ -45,6 +45,9 @@ export default defineConfig({
         // Several files at once on a machine other runs share: a test that takes under a second alone has taken five
         // here. A test that truly hangs still fails, a little later.
         testTimeout: 20_000,
+        // When the run ends, its worker databases are dropped (tests/setup/global-setup.ts), and each drop waits for a
+        // checkpoint of the whole server, which has taken a minute here. vitest would end the process after 10 seconds.
+        teardownTimeout: 300_000,
         // Every test file is a new process that loads the app's packages again. These are hundreds of small files each,
         // which took about two seconds a file here; vite bundles each into one file once (node_modules/.vite) and every
         // test file loads that. Delete this line and the tests load the packages as they are, as one worker does.
