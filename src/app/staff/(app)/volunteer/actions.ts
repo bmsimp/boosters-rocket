@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { isUuid } from "@/lib/seasons/ids";
 import { addShift, cancelEvent, cancelShift, copyEvent, createEvent, updateEvent, updateShift, type EventInput, type ShiftInput } from "@/lib/volunteer/setup";
-import { saveVolunteerSettings } from "@/lib/volunteer/settings";
+import { CUTOFF_MAX, saveVolunteerSettings } from "@/lib/volunteer/settings";
 
 // Every volunteer write needs the one permission; reading the events and the lists needs Volunteer.Event.Read.
 const WRITE = "Volunteer.Event.ReadWrite" as const;
@@ -95,9 +95,12 @@ export const cancelShiftAction = staffAction(WRITE, async (ctx, shiftId: string)
   return { ok: true, message: `The shift is cancelled.${toldWords(r)}` };
 });
 
-export const saveCutoffAction = staffAction(WRITE, async (ctx, cutoffHours: number): Promise<Done> => {
-  if (typeof cutoffHours !== "number") return NOT_FROM_PAGE;
-  const r = await saveVolunteerSettings({ cutoffHours }, op(ctx));
+/** The cut-off as typed in the field: a blank field is not 0 hours, and nothing but whole digits is a number of hours. */
+export const saveCutoffAction = staffAction(WRITE, async (ctx, typed: string): Promise<Done> => {
+  if (typeof typed !== "string" || typed.length > 20) return NOT_FROM_PAGE;
+  const text = typed.trim();
+  if (!/^[0-9]{1,6}$/.test(text)) return { ok: false, errors: [`Enter the cut-off as a whole number of hours, from 0 to ${CUTOFF_MAX}.`] };
+  const r = await saveVolunteerSettings({ cutoffHours: Number(text) }, op(ctx));
   if (!r.ok) return r;
   refresh();
   return { ok: true, message: "Saved." };

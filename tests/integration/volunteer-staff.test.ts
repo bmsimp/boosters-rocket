@@ -79,7 +79,7 @@ describe("the volunteer permissions and pages", () => {
     const { shifts: [shift], event } = await seedEvent();
     const pages = [() => pageOutcome(VolunteerEventsPage), () => pageOutcome(VolunteerEventPage, { params: { id: event.id } })];
     const actions = [() => createEventAction(EVENT), () => updateEventAction(event.id, EVENT), () => copyEventAction(event.id, dayFromNow(40)), () => cancelEventAction(event.id),
-      () => addShiftAction(event.id, SHIFT), () => updateShiftAction(shift!.id, SHIFT), () => cancelShiftAction(shift!.id), () => saveCutoffAction(24)];
+      () => addShiftAction(event.id, SHIFT), () => updateShiftAction(shift!.id, SHIFT), () => cancelShiftAction(shift!.id), () => saveCutoffAction("24")];
     const snapshot = async () => JSON.stringify([await db.select().from(volunteerEvent), await db.select().from(volunteerShift), await db.select().from(setting).where(eq(setting.key, VOLUNTEER_SETTINGS_KEY))]);
     const before = await snapshot();
     for (const who of [outsider, reader]) {
@@ -279,10 +279,12 @@ describe("shifts", () => {
 
 describe("the cut-off and the volunteer kind of requirement", () => {
   it("saves the cancelling cut-off, a whole number of hours", async () => {
-    expect(await saveCutoffAction(-1)).toEqual({ ok: false, errors: ["Enter the cut-off as a whole number of hours, from 0 to 720."] });
-    expect(await saveCutoffAction(2.5)).toMatchObject({ ok: false });
-    expect(await saveCutoffAction("24" as never)).toEqual(BROWSER);
-    expect(await saveCutoffAction(24)).toEqual({ ok: true, message: "Saved." });
+    const refused = { ok: false, errors: ["Enter the cut-off as a whole number of hours, from 0 to 720."] };
+    // A field cleared before typing the new number is not 0 hours.
+    for (const typed of ["", "  ", "-1", "2.5", "1e2", "721"]) expect(await saveCutoffAction(typed)).toEqual(refused);
+    expect(await saveCutoffAction(24 as never)).toEqual(BROWSER);
+    expect(await db.select().from(setting).where(eq(setting.key, VOLUNTEER_SETTINGS_KEY))).toEqual([]);
+    expect(await saveCutoffAction(" 24 ")).toEqual({ ok: true, message: "Saved." });
     const [row] = await db.select().from(setting).where(eq(setting.key, VOLUNTEER_SETTINGS_KEY));
     expect(row!.value).toEqual({ cutoffHours: 24 });
     expect((await audits("volunteer.settings.save"))[0]).toMatchObject({ before: { cutoffHours: null }, after: { cutoffHours: 24 } });

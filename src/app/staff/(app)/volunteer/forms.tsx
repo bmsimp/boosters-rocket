@@ -94,9 +94,10 @@ export function CopyForm({ copy }: { copy: (onDate: string) => Promise<Done> }) 
 }
 
 /** How many hours before a shift a guardian can still cancel it themselves. */
-export function CutoffForm({ initial, save }: { initial: number; save: (hours: number) => Promise<Done> }) {
+export function CutoffForm({ initial, save }: { initial: number; save: (hours: string) => Promise<Done> }) {
   const [hours, setHours] = useState(String(initial));
-  const [state, run, pending] = useActionState(async () => safely(() => save(Number(hours)), failed), null);
+  // Sent as typed: the server reads it strictly, so a cleared field is refused rather than saved as 0 hours.
+  const [state, run, pending] = useActionState(async () => safely(() => save(hours), failed), null);
   return (
     <form onSubmit={noSubmit} className="stack">
       <label className="field"><span>Hours before a shift</span><input type="number" min={0} max={720} step={1} value={hours} onChange={(e) => setHours(e.target.value)} /></label>
