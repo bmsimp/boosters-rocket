@@ -17,6 +17,7 @@ import { loadSubjects } from "@/lib/seasons/subjects";
 import { getClubSettings } from "@/lib/settings/club";
 import { dateWords, daysAfter, reminderDay } from "./clock";
 import { contactWords, shiftWords, volunteerLink } from "./notices";
+import { studentsStillUnder } from "./my-volunteer";
 import { whoMustWords } from "./rules";
 import { factsOf } from "./setup";
 
@@ -61,11 +62,19 @@ async function dayBefore(tomorrow: string, now: Date): Promise<{ sent: number; f
     .where(and(eq(volunteerEvent.onDate, tomorrow), isNull(volunteerEvent.cancelledAt), isNull(volunteerShift.cancelledAt), isNull(volunteerSignup.cancelledAt),
       ne(guardian.status, "disabled"), eq(parent.blocked, false)))
     .orderBy(asc(volunteerShift.startsAt), asc(volunteerSignup.createdAt));
+  // A student who has moved to another family, or is no longer active, takes the place out of the old family's list.
+  const moved = new Set<string>();
+  for (const family of new Set(rows.filter((r) => r.s.studentQboId).map((r) => r.s.familyQboId))) {
+    const ids = rows.filter((r) => r.s.familyQboId === family && r.s.studentQboId).map((r) => r.s.studentQboId!);
+    const still = await studentsStillUnder(family, ids);
+    for (const id of ids) if (!still.has(id)) moved.add(`${family}|${id}`);
+  }
+  const current = rows.filter((r) => !r.s.studentQboId || !moved.has(`${r.s.familyQboId}|${r.s.studentQboId}`));
   const keyOf = (r: (typeof rows)[number]) => `${r.s.id}|${r.event.onDate}`;
-  const done = await taken("day_before", rows.map(keyOf), now);
+  const done = await taken("day_before", current.map(keyOf), now);
   let sent = 0, failed = 0;
   const brand = await currentBrand();
-  for (const r of rows.filter((x) => !done.has(keyOf(x))).slice(0, REMINDER_BATCH)) {
+  for (const r of current.filter((x) => !done.has(keyOf(x))).slice(0, REMINDER_BATCH)) {
     const id = await claim("day_before", keyOf(r), r.s.familyQboId, now);
     if (!id) continue;
     const facts = factsOf(r.event, r.shift);

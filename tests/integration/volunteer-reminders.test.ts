@@ -49,7 +49,9 @@ describe("the day-before reminder", () => {
   }
 
   it("goes from 9:00 on the club's clock on the day before, to the guardian who took each live place, about that place alone, and once only", async () => {
-    const { a, b } = await tomorrow();
+    const { a, b, shift } = await tomorrow();
+    // A place family A took for a student who is no longer under it (here, one of B's): it left with the student.
+    await seedSignup({ shiftId: shift.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: BEATRIX! });
     expect(await sendVolunteerReminders(at("2027-03-10T08:59:59Z"))).toEqual({ sent: 0, failed: 0 });
     // The shift's own day is too late, and two days before too early.
     expect(await sendVolunteerReminders(at("2027-03-11T10:00:00Z"))).toEqual({ sent: 0, failed: 0 });
@@ -63,7 +65,8 @@ describe("the day-before reminder", () => {
     expect(forA!.text).toContain("Contact Pat Organizer (pat.organizer@club.example)");
     expect(forB!.text).toContain("A friendly reminder: you're helping at Spring concert ushers (Ushers) tomorrow.");
     // Nothing of the other family, nor of a cancelled place.
-    for (const name of [FAMILY_B.family.name, FAMILY_B.parent.name, BARNABY!.name]) expect(forA!.text).not.toContain(name);
+    expect(to(a)).toHaveLength(1);
+    for (const name of [FAMILY_B.family.name, FAMILY_B.parent.name, BARNABY!.name, BEATRIX!.name]) expect(forA!.text).not.toContain(name);
     for (const name of [FAMILY_A.family.name, AURELIO!.name]) expect(forB!.text).not.toContain(name);
     expect(await sendVolunteerReminders(at("2027-03-10T15:00:00Z"))).toEqual({ sent: 0, failed: 0 });
     expect(mail.outbox).toHaveLength(2);
