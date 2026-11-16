@@ -4,9 +4,9 @@
 // about and reads nothing else, and nothing a staff member wrote (a note, a reason) is read here: the staff pages read
 // those through ./staff-credit.ts. It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { qboCustomer, requirement, requirementCover, season, seasonStep, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { qboCustomer, requirement, requirementCover, requirementProgress, season, seasonStep, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import type { Requirement } from "@/lib/seasons/progress";
 import { allocateCredit, type Allocation, type Credit, type CreditRequirement, type Slot } from "./allocation";
 import { clockOf, dateWords, shiftTimeWords } from "./clock";
@@ -70,7 +70,12 @@ export async function allocateFamilies(familyQboIds: readonly string[] | null, a
     id: x.r.id, title: x.r.title, required: x.r.required, appliesTo: x.r.appliesTo, amount: x.r.amount, amountUnit: x.r.amountUnit, dueOn: x.r.dueOn, order: i,
     covers: x.r.covers, coveredQboIds: covers.filter((c) => c.requirementId === x.r.id).map((c) => c.subjectQboId), seasonId: x.seasonId,
   }));
-  const asked = (r: CreditRequirementRow, subject: string) => r.covers === "everyone" || r.coveredQboIds.includes(subject);
+  // A requirement staff waived for the family or a student needs nothing, so it takes no credit and what it would have
+  // taken flows on to the others, as a buy-out's does (allocation.ts). Only when it was waived is read, never why.
+  const waived = requirements.length === 0 ? [] : await q.select({ requirementId: requirementProgress.requirementId, subjectQboId: requirementProgress.subjectQboId })
+    .from(requirementProgress).where(and(inArray(requirementProgress.requirementId, requirements.map((r) => r.id)), inArray(requirementProgress.subjectQboId, subjects), isNotNull(requirementProgress.waivedAt)));
+  const asked = (r: CreditRequirementRow, subject: string) => (r.covers === "everyone" || r.coveredQboIds.includes(subject))
+    && !waived.some((w) => w.requirementId === r.id && w.subjectQboId === subject);
   for (const family of families) {
     const theirs = students.filter((s) => s.parentQboId === family).map((s) => s.qboId);
     const slots: Slot[] = requirements.flatMap((r) => (r.appliesTo === "family" ? (asked(r, family) ? [{ requirement: r, subjectQboId: family }] : [])

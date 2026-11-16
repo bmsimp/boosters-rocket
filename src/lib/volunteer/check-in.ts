@@ -18,6 +18,7 @@ import { getClubSettings } from "@/lib/settings/club";
 import { checkInWindow, clockOf, dateWords, instantWords, shiftInstants, shiftMinutes, shiftTimeWords } from "./clock";
 import { creditedSignups } from "./credit";
 import { ROSTER_BUSY, studentsStillUnder, takePlace, type Result } from "./my-volunteer";
+import { contactWords } from "./notices";
 
 /** A check-in code: 32 to 64 URL-safe characters. Made by newCheckInCode(), or by the database for a new shift. */
 export const isCheckInCode = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{32,64}$/.test(value);
@@ -26,7 +27,8 @@ export const newCheckInCode = (): string => randomBytes(24).toString("base64url"
 /** The address a shift's code opens, as staff print it: the portal's address, then /volunteer/check-in/ and the code. */
 export const checkInAddress = (appUrl: string, code: string): string => `${appUrl.replace(/\/+$/, "")}/volunteer/check-in/${code}`;
 
-export type CheckInPerson = { signupId: string; who: string; checkedIn: boolean };
+/** `corrected`: staff removed this place's check-in, so the guardian can't check it in again; only staff can. */
+export type CheckInPerson = { signupId: string; who: string; checkedIn: boolean; corrected: boolean };
 /** before / open / closed: the window (30 minutes before the start until the end); cancelled: the club cancelled the shift or its event. */
 export type CheckInState = "before" | "open" | "closed" | "cancelled";
 export type CheckInView = {
@@ -36,6 +38,8 @@ export type CheckInView = {
   opensWords: string | null;
   /** The family's own people on this shift, and nobody else. */
   people: CheckInPerson[];
+  /** Who to tell about a check-in that went wrong: the event's contact, as the club wrote it. */
+  contact: string;
 };
 
 const whoOf = (ctx: Pick<ParentCtx, "parentId">, s: typeof volunteerSignup.$inferSelect) => (s.fillerKind === "guardian" && s.fillerParentId === ctx.parentId ? "You" : s.fillerName);
@@ -65,11 +69,24 @@ export async function loadCheckInForMe(ctx: Pick<ParentCtx, "familyQboId" | "par
   const state: CheckInState = shift.cancelledAt || event.cancelledAt ? "cancelled" : window.state;
   const mine = await ourSignups(ctx, shift.id, null);
   const credited = await creditedSignups(mine.map((s) => s.id));
+  const corrected = await correctedSignups(mine.map((s) => s.id));
   return {
     event: event.name, role: shift.role, dateWords: dateWords(event.onDate), timeWords: shiftTimeWords(clockOf(shift.startsAt), clockOf(shift.endsAt)), location: event.location,
     state, opensWords: state === "before" ? instantWords(window.opensAt, zone) : null,
-    people: mine.map((s) => ({ signupId: s.id, who: whoOf(ctx, s), checkedIn: credited.has(s.id) })),
+    people: mine.map((s) => ({ signupId: s.id, who: whoOf(ctx, s), checkedIn: credited.has(s.id), corrected: !credited.has(s.id) && corrected.has(s.id) })),
+    contact: contactWords(event),
   };
+}
+
+/**
+ * Of these sign-ups, the ones that have ever had a credit, a removed one included. A check-in staff removed (a guardian
+ * checked in who wasn't there, say) is the club's correction: the guardian can't undo it by pressing again. Staff add a
+ * missed check-in themselves (addMissedCheckIn). No reason is read: it is for staff.
+ */
+async function correctedSignups(signupIds: readonly string[], tx?: Tx): Promise<Set<string>> {
+  if (signupIds.length === 0) return new Set();
+  const rows = await (tx ?? db).select({ signupId: volunteerCredit.signupId }).from(volunteerCredit).where(inArray(volunteerCredit.signupId, [...signupIds]));
+  return new Set(rows.flatMap((r) => (r.signupId ? [r.signupId] : [])));
 }
 
 const no = (...errors: string[]): Result => ({ ok: false, errors });
@@ -100,11 +117,20 @@ export async function checkIn(ctx: ParentCtx, code: unknown, which: unknown, now
     const when = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     const window = checkInWindow(when, now);
     if (window.state === "before") return no(`Check-in for this shift opens ${instantWords(window.opensAt, zone)}, half an hour before it starts. Nothing was recorded.`);
-    if (window.state === "closed") return no("Check-in for this shift has closed: it's over. Nothing was recorded. If you helped and weren't checked in, please tell the event's contact.");
-    const ours = await ourSignups(ctx, shift.id, which === "all" ? null : which, tx);
-    if (ours.length === 0) return which === "all" ? no("Nobody in your family is signed up for this shift, so there's no one to check in.") : no(NOT_FROM_PAGE);
-    // One at a time against anyone else checking in the same places, then once each at most (volunteer_credit_signup_uq).
-    await tx.select({ id: volunteerSignup.id }).from(volunteerSignup).where(inArray(volunteerSignup.id, ours.map((s) => s.id))).for("update");
+    if (window.state === "closed") return no(`Check-in for this shift has closed: it's over. Nothing was recorded. If you helped and weren't checked in, please tell ${contactWords(event)}.`);
+    const found = await ourSignups(ctx, shift.id, which === "all" ? null : which, tx);
+    if (found.length === 0) return which === "all" ? no("Nobody in your family is signed up for this shift, so there's no one to check in.") : no(NOT_FROM_PAGE);
+    // One at a time against anyone else checking in the same places, or cancelling them, then once each at most
+    // (volunteer_credit_signup_uq). The locking read is the check: a place cancelled meanwhile is not checked in.
+    const locked = await tx.select({ id: volunteerSignup.id }).from(volunteerSignup)
+      .where(and(inArray(volunteerSignup.id, found.map((s) => s.id)), eq(volunteerSignup.familyQboId, ctx.familyQboId), isNull(volunteerSignup.cancelledAt))).for("update");
+    const live = found.filter((s) => locked.some((l) => l.id === s.id));
+    if (live.length === 0) return which === "all" ? no("Nobody in your family is signed up for this shift, so there's no one to check in.") : no(NOT_FROM_PAGE);
+    // A place whose check-in staff removed stays as the club left it.
+    const credited = await creditedSignups(live.map((s) => s.id), tx);
+    const corrected = await correctedSignups(live.map((s) => s.id), tx);
+    const ours = live.filter((s) => credited.has(s.id) || !corrected.has(s.id));
+    if (ours.length === 0) return no(`The club has updated ${live.length === 1 ? "this check-in" : "these check-ins"}, so ${live.length === 1 ? "it can't" : "they can't"} be checked in again here. If something isn't right, please talk to ${contactWords(event)}.`);
     const minutes = shiftMinutes(when);
     const made = await tx.insert(volunteerCredit).values(ours.map((s) => ({
       kind: "checkin" as const, signupId: s.id, familyQboId: ctx.familyQboId, minutes, shifts: 1, createdByDoor: "parent" as const, createdBy: ctx.parentId,

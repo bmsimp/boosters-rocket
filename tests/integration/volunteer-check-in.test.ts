@@ -141,7 +141,7 @@ describe("the check-in window", () => {
     expect(await checkIn(ctx, code, signupId, new Date("2027-03-10T17:29:59Z"))).toEqual({ ok: false, errors: ["Check-in for this shift opens Wednesday, March 10, 5:30 pm, half an hour before it starts. Nothing was recorded."] });
     expect((await loadCheckInForMe(ctx, code, new Date("2027-03-10T21:00:00Z")))!.state).toBe("closed");
     expect(await checkIn(ctx, code, signupId, new Date("2027-03-10T21:00:00Z"))).toEqual({ ok: false,
-      errors: ["Check-in for this shift has closed: it's over. Nothing was recorded. If you helped and weren't checked in, please tell the event's contact."] });
+      errors: ["Check-in for this shift has closed: it's over. Nothing was recorded. If you helped and weren't checked in, please tell Pat Organizer (pat.organizer@club.example)."] });
     expect(await credits()).toEqual([]);
     expect((await loadCheckInForMe(ctx, code, new Date("2027-03-10T17:30:00Z")))!.state).toBe("open");
     expect(await checkIn(ctx, code, signupId, new Date("2027-03-10T17:30:00Z"))).toMatchObject({ ok: true });

@@ -14,10 +14,11 @@ import { countsFor, shiftCredit, type Filler } from "./rules";
 /**
  * How much each family or student is signed up for toward each of these volunteer requirements, keyed by `pairKey`
  * (src/lib/seasons/kinds.ts passes its own in): every place they hold, on a shift and an event still on, that counts
- * toward the requirement for them and is not checked in yet. With `subjectQboIds` (a parent's own family and
- * students) only sign-ups made from that family are read; null is everyone, for staff.
+ * toward the requirement for them, is not checked in yet and hasn't ended. With `subjectQboIds` (a parent's own
+ * family and students) only sign-ups made from that family are read; null is everyone, for staff.
  */
-export async function signedUpAmounts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string): Promise<Map<string, number>> {
+export async function signedUpAmounts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string,
+  now: Date = new Date()): Promise<Map<string, number>> {
   const amounts = new Map<string, number>();
   if (requirements.length === 0 || subjectQboIds?.length === 0) return amounts;
   const rows = await db.select({
@@ -45,7 +46,11 @@ export async function signedUpAmounts(requirements: readonly Requirement[], subj
     const filler: Filler = row.fillerKind === "student" && row.studentQboId ? { kind: "student", studentQboId: row.studentQboId } : { kind: "guardian" };
     const subject = r.appliesTo === "family" ? row.familyQboId : filler.kind === "student" ? filler.studentQboId : null;
     if (subject === null || (asked && !asked.has(subject)) || !countsFor(r, filler, row.familyQboId, subject)) continue;
-    const minutes = shiftMinutes(shiftInstants(row.onDate, row.startsAt, row.endsAt, zone));
+    const when = shiftInstants(row.onDate, row.startsAt, row.endsAt, zone);
+    // A shift that is over and wasn't checked in can't become credit through the guardian any more (only staff can add
+    // a missed check-in), so it isn't something the family is signed up for: the words and the nudges leave it out.
+    if (when.end.getTime() <= now.getTime()) continue;
+    const minutes = shiftMinutes(when);
     const key = pairKey(r.id, subject);
     amounts.set(key, (amounts.get(key) ?? 0) + shiftCredit(r, minutes));
   }

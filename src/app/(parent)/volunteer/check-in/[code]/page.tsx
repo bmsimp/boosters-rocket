@@ -14,7 +14,7 @@ export const metadata = { title: "Check in" };
 function closedWords(view: CheckInView): string | null {
   if (view.state === "cancelled") return "The club cancelled this shift, so there's nothing to check in for.";
   if (view.state === "before") return `Check-in opens ${view.opensWords}, half an hour before the shift starts. Come back then.`;
-  if (view.state === "closed") return "Check-in for this shift has closed: it's over. If you helped and weren't checked in, please tell the event's contact.";
+  if (view.state === "closed") return `Check-in for this shift has closed: it's over. If you helped and weren't checked in, please tell ${view.contact}.`;
   return null;
 }
 
@@ -34,7 +34,7 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
   const view = await loadCheckInForMe(ctx, code);
   if (!view) notFound();
   const closed = closedWords(view);
-  const waiting = view.people.filter((p) => !p.checkedIn);
+  const waiting = view.people.filter((p) => !p.checkedIn && !p.corrected);
   return (
     <main className="wrap single volunteer-page">
       <h1 className="page-title">Check in</h1>
@@ -50,16 +50,17 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
               <li key={p.signupId}><div>
                 <span className="what">{p.who === "You" ? "You" : p.who}</span>
                 {/* Plain words: the state icons mean done, to do and waived. */}
-                <span className="state">{p.checkedIn ? "Checked in" : "Not checked in yet"}</span>
+                <span className="state">{p.checkedIn ? "Checked in" : p.corrected ? "Updated by the club" : "Not checked in yet"}</span>
               </div>
-                {!p.checkedIn && view.state === "open" && (
+                {p.corrected && <p className="help">The club has updated this check-in. If something isn&apos;t right, please talk to {view.contact}.</p>}
+                {!p.checkedIn && !p.corrected && view.state === "open" && (
                   <CheckInButton label={p.who === "You" ? "Check me in" : `Check in ${p.who}`} act={checkInAction.bind(null, code, p.signupId)} />
                 )}
               </li>))}</ul>
             {view.state === "open" && waiting.length > 1 && (
               <CheckInButton label="Check everyone in" act={checkInAction.bind(null, code, "all")} wide />
             )}
-            {view.state === "open" && waiting.length === 0 && <p className="volunteer-done">Everyone here is checked in. Thank you for helping!</p>}
+            {view.state === "open" && view.people.every((p) => p.checkedIn) && <p className="volunteer-done">Everyone here is checked in. Thank you for helping!</p>}
           </>
         )}
         <p className="help"><Link href="/volunteer">Back to Volunteer</Link></p>
