@@ -338,7 +338,7 @@ that family.
    cd ~/booster-rocket
    docker compose -f docker-compose.poc.yml --env-file .env.poc run --rm migrate node tools/scripts/seed-poc-guardian.mjs --name "<name>" --email "<email you can read>" --family POC-FAMILY-1
    ```
-   Success prints `seeded guardian <id>`. It refuses unless `APP_URL` contains `portaltest`. Running it again with
+   Success prints `seeded guardian <id>`. It refuses unless the env file holds `BR_PROOF_OF_CONCEPT=yes` (add that line to `.env.poc` on a proof of concept, never on a club's real portal). Running it again with
    the same email and family prints "That person is already a guardian in that family." The same email with
    `--family POC-FAMILY-2` adds a second family to the same person.
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).

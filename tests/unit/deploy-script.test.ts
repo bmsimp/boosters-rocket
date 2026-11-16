@@ -27,7 +27,7 @@ beforeEach(() => {
   bin = path.join(dir, "bin"); mkdirSync(bin);
   log = path.join(dir, "calls.log");
   backups = path.join(dir, "backups");
-  writeFileSync(path.join(dir, ".env.poc"), "DB_PASSWORD=x\n"); chmodSync(path.join(dir, ".env.poc"), 0o600);
+  writeFileSync(path.join(dir, ".env.poc"), "APP_URL=https://portal.example.org\nDB_PASSWORD=x\n"); chmodSync(path.join(dir, ".env.poc"), 0o600);
   copyFileSync(path.resolve("docker-compose.poc.yml"), path.join(dir, "docker-compose.poc.yml"));
   stub("git", `case "$1" in status) printf "%s" "\${GIT_DIRTY:-}";; rev-parse) echo abc1234;; *) exit 0;; esac`);
   stub("docker", `
@@ -173,6 +173,16 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toContain(".env.poc is missing");
     expect(calls()).not.toContain("docker");
+  });
+
+  it("refuses when .env.poc doesn't say the portal's address, before touching anything", () => {
+    for (const env of ["DB_PASSWORD=x\n", "APP_URL=\nDB_PASSWORD=x\n", "APP_URL=portal.example.org\n", "# APP_URL=https://portal.example.org\n"]) {
+      writeFileSync(path.join(dir, ".env.poc"), env); chmodSync(path.join(dir, ".env.poc"), 0o600);
+      const r = run();
+      expect(r.status, env).toBe(2);
+      expect(r.stderr).toContain(".env.poc has no APP_URL");
+      expect(calls()).not.toContain("docker");
+    }
   });
 
   it.skipIf(process.platform === "win32")("refuses when .env.poc is readable by others", () => {

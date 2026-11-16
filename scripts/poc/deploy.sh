@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys (or rolls back) the Booster Rocket proof of concept on linuxdev.
+# Deploys (or rolls back) a Booster Rocket server run with docker compose.
 #   scripts/poc/deploy.sh             pull main, build, back up the database, migrate, recreate app and worker, wait healthy
 #   scripts/poc/deploy.sh --rollback  return to the previous image
 # The backup goes to BR_BACKUP_DIR (default ~/booster-rocket-backups, outside this checkout), keeping the newest
@@ -34,6 +34,9 @@ check_env_file() {
     mode="$(stat -c '%a' .env.poc)"
     [ "$mode" = "600" ] || die 2 ".env.poc must be private: run chmod 600 .env.poc (it is $mode)."
   fi
+  # The portal's own address is set by whoever installs it; nothing can work without it.
+  grep -Eq '^APP_URL=https?://[^[:space:]]+$' .env.poc \
+    || die 2 ".env.poc has no APP_URL. Add a line APP_URL=https://... with the address people use for the portal."
 }
 
 wait_healthy() {
