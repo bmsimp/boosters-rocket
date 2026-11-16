@@ -107,6 +107,7 @@ const ROUTE_HANDLERS: Record<string, string> = {
   "src/app/api/internal/worker/route.ts": "The worker's token (isWorkerRequest); without it, a bare 404 (tests/integration/jobs-runner.test.ts).",
   "src/app/api/quickbooks/callback/route.ts": "A staff session with Settings.QuickBooks.ReadWrite, checked in the handler, and the state value from the connect step (tests/integration/quickbooks-connection.test.ts).",
   "src/app/icons/[name]/route.ts": "Public on purpose: the club's app icons, which a phone fetches before anyone signs in. It answers a fixed list of names with a picture of the club's short name on the club's color, and reads no family data (tests/integration/pwa-icons.test.ts).",
+  "src/app/staff/(app)/audit/export/route.ts": "A staff session with Audit.Log.Read, which only an Admin holds, checked in the handler before anything is read; anyone else is redirected with no rows. Each export is audited and sent no-store (tests/integration/audit-log.test.ts).",
   "src/app/setup/certificates/[name]/route.ts": "downloadAccess(): the setup session while setup is open, or an Admin afterward; otherwise 404 (tests/integration/setup-certificates-route.test.ts).",
   "src/app/setup/finish/route.ts": "Setup open, the setup session cookie, and the named Admin signed in; otherwise a redirect that changes nothing (tests/integration/setup-finish.test.ts).",
   "src/app/setup/scripts/[name]/route.ts": "downloadAccess(), as the certificate download; otherwise 404 (tests/integration/setup-scripts-route.test.ts).",
