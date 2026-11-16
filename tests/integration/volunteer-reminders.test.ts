@@ -63,6 +63,8 @@ describe("the day-before reminder", () => {
     expect(forA!.text).toContain("When: Thursday, March 11, 2027, 6:00 pm to 8:00 pm");
     expect(forA!.text).toContain("Where: Auditorium lobby");
     expect(forA!.text).toContain("Contact Pat Organizer (pat.organizer@club.example)");
+    // The code opens the phone's browser, not the installed app: the guardian is told to be signed in there.
+    expect(forA!.text).toContain("Scanning the code opens your phone's web browser.");
     expect(forB!.text).toContain("A friendly reminder: you're helping at Spring concert ushers (Ushers) tomorrow.");
     // Nothing of the other family, nor of a cancelled place.
     expect(to(a)).toHaveLength(1);

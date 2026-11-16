@@ -82,6 +82,12 @@ describe("the page a parent asked for", () => {
       }
     });
 
+    it("tells a parent confirming a new sign-in address to sign in with the one they use now", async () => {
+      const hint = "sign in with the address you use now";
+      expect(await renderPage(ParentSignIn, { searchParams: { next: "/family/email/Abc123-token_x" } })).toContain(hint);
+      expect(await renderPage(ParentSignIn, { searchParams: { next: "/payments" } })).not.toContain(hint);
+    });
+
     it("carries the club bar: the club's name and monogram, and no menu", async () => {
       const html = await renderPage(ParentSignIn);
       expect(html).toContain("<header class=\"bar\"><div class=\"wrap\"><span class=\"monogram\" aria-hidden=\"true\">BR</span><span class=\"club\">Booster Rocket</span>");

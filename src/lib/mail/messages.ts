@@ -53,6 +53,7 @@ export function emailChangeConfirmMessage(b: Brand, to: string, o: { link: strin
   const lines = [
     `Someone asked to use this address to sign in to ${b.clubName}. If it was you, open this link within 24 hours to confirm:`,
     o.link,
+    "You may be asked to sign in first. If you are, use the address you sign in with now, not this one: this one works once the change is confirmed.",
     "If it wasn't you, ignore this email and nothing changes.",
   ];
   return { to, subject: `Confirm your new email for ${b.clubName}`, text: text(lines), html: html(b, lines) };
@@ -163,6 +164,7 @@ export function volunteerReminderMessage(b: Brand, to: string, o: { who: Volunte
     `A friendly reminder: ${o.who.self ? "you're" : `${o.who.name} is`} helping at ${o.shift.event}${o.shift.role ? ` (${o.shift.role})` : ""} tomorrow.`,
     ...shiftLines(o.shift),
     `When you get there, scan the club's check-in code to be checked in. Questions, or can't make it? Contact ${o.contact}.`,
+    "Scanning the code opens your phone's web browser. If you use the portal as an app on your home screen, sign in to the portal in your browser too before you go, so you're ready to check in.",
     `Your sign-ups are here: ${o.link}`,
     "Thank you for giving your time!",
   ];

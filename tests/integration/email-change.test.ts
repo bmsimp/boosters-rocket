@@ -79,6 +79,8 @@ describe("asking for the change", () => {
     expect(outbox.map((m) => m.to).sort()).toEqual([NEW, RIVERA.parent.email].sort());
     const token = linkTo(NEW);
     expect(outbox.find((m) => m.to === NEW)!.text).toContain(`http://localhost:3000/family/email/${token}`);
+    // A parent who opens it signed out is told which address to sign in with: the one they use now.
+    expect(outbox.find((m) => m.to === NEW)!.text).toContain("use the address you sign in with now, not this one");
     const notice = outbox.find((m) => m.to === RIVERA.parent.email)!;
     // The old address hears that a change was asked for: no link, and not where to.
     expect(`${notice.text}${notice.html}`).not.toMatch(/https?:\/\/|family\/email/);
