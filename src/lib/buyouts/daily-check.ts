@@ -11,27 +11,11 @@ import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
+import { judgeInvoice } from "./rules";
 
 export const BUYOUT_CHECK_JOB = "buyouts.check";
 /** The money run the check last followed: `{ runId }`, so each run is followed once. */
 export const CHECKED_KEY = "buyouts.checked";
-
-type Flag = "missing" | "other_customer" | "student_moved";
-
-/**
- * What the figures a run stored say about one invoiced buy-out, pure: `paid` (its balance is 0), `ok` (still there,
- * on its customer, with something to pay), or a flag: the invoice is on another customer than the buy-out's
- * (`other_customer`), or QuickBooks no longer shows it to the family, because it was voided or deleted there
- * (`missing`) or because the student it was billed to has moved to another family (`student_moved`).
- */
-export function judgeInvoice(b: { invoiceQboId: string; customerQboId: string; perStudent: boolean },
-  invoices: readonly { qboId: string; customerQboId: string; totalCents: number; balanceCents: number }[], customerStillTheFamilys: boolean): "paid" | "ok" | Flag {
-  const inv = invoices.find((i) => i.qboId === b.invoiceQboId);
-  if (!inv) return b.perStudent && !customerStillTheFamilys ? "student_moved" : "missing";
-  if (inv.customerQboId !== b.customerQboId) return "other_customer";
-  if (inv.totalCents > 0 && inv.balanceCents <= 0) return "paid";
-  return "ok";
-}
 
 /**
  * Follows the latest money run that read every family, once: each invoiced buy-out of the connected company whose
