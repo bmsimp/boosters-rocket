@@ -230,6 +230,20 @@ function stepFor(ctx: ParentCtx, config: DocumensoConfig, row: RequestRow, envel
 }
 
 /**
+ * The view for a step. Handing a guardian their signing frame gives out a credential, so it is audited each time
+ * (spec §9.4): which signed-in guardian, from which address, was given which recipient of which document. The
+ * certificate says only "Authentication Level: Email"; these rows are what ties a signature to a signed-in guardian.
+ */
+async function shown(ctx: ParentCtx, row: RequestRow, step: FormStep): Promise<FormView> {
+  if (step.kind === "sign") {
+    const mine = row.signers.find((s) => s.parentId === ctx.parentId)!;
+    await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.sign.open", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
+      after: { envelopeId: row.envelopeId, recipientId: mine.recipientId, parentId: ctx.parentId, name: mine.name, email: mine.email, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId } });
+  }
+  return viewOf(ctx, row, step);
+}
+
+/**
  * Opens a form for the signed-in guardian: what the form page shows. Nothing is read from Documenso or made there
  * until this guardian has agreed to sign electronically. Then the document is read (or made, on the first open), and
  * when it is this guardian's turn the answer holds the address of the signing frame with their own token.
@@ -266,11 +280,11 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
     if (!read.ok) return isHeld(read.row) ? afterTheHold(ctx, form, row, mayWait) : viewOf(ctx, row, { kind: "unavailable" });
     row = read.row; envelope = read.envelope;
     // Once anyone has signed, the document is left alone, whoever is on it and whatever has changed since.
-    if (row.envelopeId !== null && (read.reading?.anySigned || row.state !== "waiting")) return viewOf(ctx, row, stepFor(ctx, config, row, envelope));
+    if (row.envelopeId !== null && (read.reading?.anySigned || row.state !== "waiting")) return shown(ctx, row, stepFor(ctx, config, row, envelope));
     const right = row.envelopeId !== null && stillRight(
       { templateId: row.templateId, templateUpdatedAt: row.templateUpdatedAt?.getTime() ?? null, mode: row.signersMode, subjectName: row.subjectName, signers: row.signers },
       { templateId: setting.templateId, templateUpdatedAt: new Date(setting.templateUpdatedAt).getTime(), mode: setting.signers, roles: setting.signerRoles, subjectName: form.subject.name, viewer, guardians });
-    if (right) return viewOf(ctx, row, stepFor(ctx, config, row, envelope));
+    if (right) return shown(ctx, row, stepFor(ctx, config, row, envelope));
   }
 
   // No document, or one nobody has signed that is no longer the right one: withdraw it and make it again.
@@ -290,7 +304,7 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   // The token is read from Documenso like at any other open, not kept from the call that made the document.
   const read = await readAndStore(row, config, { ...actor, ...PAGE });
   if (!read.ok) return viewOf(ctx, row, { kind: "unavailable" });
-  return viewOf(ctx, read.row, stepFor(ctx, config, read.row, read.envelope));
+  return shown(ctx, read.row, stepFor(ctx, config, read.row, read.envelope));
 }
 
 /**

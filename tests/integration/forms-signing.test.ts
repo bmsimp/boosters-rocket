@@ -553,7 +553,7 @@ describe("what each guardian reads", () => {
     const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
     tokenIn(await agreeAndOpen(ctx, id));
     stub.sign(stub.documentFor(id)!.id, FAMILY_A.parent.email);
-    expect((await checkMyForm(ctx, id)).message).toBe("Waiting for the other guardian");
+    expect(await checkMyForm(ctx, id)).toMatchObject({ message: "Waiting for the other guardian" });
     const lineFor = async (who: ParentCtx) => (await loadMyForms(who, (await loadMyFamily(who))!))!.groups.find((g) => g.subjectQboId === FAMILY_A.students[0]!.qboId)!.forms[0]!.line;
     expect((await lineFor(ctx)).words).toBe("Waiting for the other guardian");
     expect((await lineFor(other)).words).toBe("Not signed yet");
@@ -562,6 +562,29 @@ describe("what each guardian reads", () => {
     const theirs = await agreeAndOpen(other, id);
     expect(theirs.words).toBe("Not signed yet");
     tokenIn(theirs);
+  });
+
+  it("audits each time a guardian is given their signing frame, and each signature as the portal first reads it, with the guardian it belongs to", async () => {
+    const { ctx } = await scene({ signers: "every", roles: 2 });
+    const other = await secondGuardian();
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    const document = stub.documentFor(id)!;
+    const recipientOf = (email: string) => document.recipients.find((r) => r.email === email)!.id;
+    tokenIn(await agreeAndOpen(other, id));
+    tokenIn(await open(other, id)); // a second open is a second hand-out
+    const opens = await audits("form.sign.open");
+    expect(opens.map((r) => [r.actorId, r.ip, (r.after as { recipientId: number }).recipientId])).toEqual([
+      [ctx.parentId, "203.0.113.50", recipientOf(FAMILY_A.parent.email)],
+      [other.parentId, "198.51.100.7", recipientOf("astrid.alderquist@family-a.example")],
+      [other.parentId, "198.51.100.7", recipientOf("astrid.alderquist@family-a.example")],
+    ]);
+    stub.sign(document.id, "astrid.alderquist@family-a.example");
+    await checkOpenForms(new Date(Date.now() + 10 * 60_000)); // the worker reads it, not the guardian
+    await checkMyForm(other, id);
+    const signed = await audits("form.signer.signed");
+    expect(signed).toHaveLength(1);
+    expect(signed[0]).toMatchObject({ door: "system", targetId: id, after: { parentId: other.parentId, recipientId: recipientOf("astrid.alderquist@family-a.example"), email: "astrid.alderquist@family-a.example" } });
   });
 
   it("asks no consent of a guardian a signed form doesn't wait for", async () => {

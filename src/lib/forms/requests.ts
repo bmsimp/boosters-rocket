@@ -77,6 +77,12 @@ export async function storeReading(row: RequestRow, reading: DocumentReading, o:
     };
     const [after] = await tx.update(signatureRequest).set(next).where(eq(signatureRequest.id, current.id)).returning();
     if (after!.state !== current.state) await auditState(tx, current, after!, reading.status, o);
+    // Each signature the portal first reads is recorded with the portal guardian whose recipient signed (spec §9.4).
+    for (const s of after!.signers) {
+      if (s.signedAt === null || current.signers.find((c) => c.recipientId === s.recipientId)?.signedAt) continue;
+      await writeAudit({ actor: o.actor, action: "form.signer.signed", targetType: "signature_request", targetId: after!.id, ip: o.ip,
+        after: { envelopeId: after!.envelopeId, recipientId: s.recipientId, parentId: s.parentId || null, name: s.name, email: s.email, signedAt: s.signedAt, familyQboId: after!.familyQboId, subjectQboId: after!.subjectQboId } }, tx);
+    }
     return after!;
   });
 }

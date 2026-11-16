@@ -20,6 +20,8 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "form.open.refused": "Opening a form refused: opened too often",
   "form.records.cleared": "Forms and consents cleared after a company change",
   "form.seal.ask": "Documenso asked again to finish a signed form",
+  "form.sign.open": "A guardian was given their signing frame for a form",
+  "form.signer.signed": "A guardian's signature on a form was read from Documenso",
   "form.state.change": "A form's state changed, as read from Documenso",
   "guardian.seed": "Test parent linked to a family by the proof-of-concept script",
   "guardian.activate": "Parent's family link became active at first sign-in",
