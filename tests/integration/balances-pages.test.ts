@@ -14,6 +14,7 @@ import { FAMILY_A, FAMILY_B, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, stu } from "../helpers/roster-cache";
 import { startQboStub } from "../helpers/qbo-stub";
 import { connectCompany } from "../helpers/money";
+import { rowNamed, tableRows } from "../helpers/table";
 
 /**
  * The staff Balances pages (step 4): every family with what it owes, its oldest due date and when its figures were
@@ -57,14 +58,13 @@ describe("the permission", () => {
 
 describe("the Balances page", () => {
   it("lists every active family with what it owes, its oldest due date and when it was read, audited first", async () => {
-    const text = textOf(await renderPage(BalancesPage));
-    expect(text).toContain(`${FAMILY_A.family.name} 2 open invoices, oldest due 2026-12-01 · Read`);
-    expect(text).toContain(owedBy(FAMILY_A));
-    expect(text).toContain(`${FAMILY_B.family.name} 2 open invoices`);
-    expect(text).toContain(owedBy(FAMILY_B));
-    expect(text).toContain("Chen &lt;b&gt;Family&lt;/b&gt; Not read from QuickBooks yet");
+    const html = await renderPage(BalancesPage), text = textOf(html);
+    // One row per family: its name, what is open, when it was read, and what it owes.
+    expect(rowNamed(html, FAMILY_A.family.name)).toEqual([FAMILY_A.family.name, "2 open invoices, oldest due 2026-12-01", expect.stringMatching(/UTC$/), owedBy(FAMILY_A)]);
+    expect(rowNamed(html, FAMILY_B.family.name)).toEqual([FAMILY_B.family.name, "2 open invoices, oldest due 2026-12-01", expect.stringMatching(/UTC$/), owedBy(FAMILY_B)]);
+    expect(rowNamed(html, "Chen <b>Family</b>")).toEqual(["Chen <b>Family</b>", "Not read from QuickBooks yet", "Never", ""]);
     expect(text).not.toContain("Gone Family");
-    expect(text).toContain("3 families.");
+    expect(text).toContain("3 families, by name.");
     expect((await audits("money.balances.read")).map((r) => [r.actorId, r.permission, r.after])).toEqual([[treasurer.id, "Finance.Balance.Read", { onlyOwing: false, search: null }]]);
   });
 
@@ -81,13 +81,13 @@ describe("the Balances page", () => {
     expect(owing).toContain(FAMILY_A.family.name);
     expect(owing).not.toContain(FAMILY_B.family.name);
     expect(owing).not.toContain("Chen <b>Family</b>");
-    expect(owing).toContain("1 of 3 families.");
+    expect(owing).toContain("1 of 3 families, by name.");
     const found = textOf(await renderPage(BalancesPage, { searchParams: { q: FAMILY_B.students[1]!.name.split(" ")[0]!.toUpperCase() } }));
     expect(found).toContain(FAMILY_B.family.name);
     expect(found).not.toContain(FAMILY_A.family.name);
     expect(textOf(await renderPage(BalancesPage, { searchParams: { q: "nobody-by-this-name" } }))).toContain("No family matches.");
     // A search too long for any name is cut, not refused; an array in the address is ignored.
-    expect(textOf(await renderPage(BalancesPage, { searchParams: { q: ["a", "b"], owing: ["1", "1"] } }))).toContain("3 families.");
+    expect(textOf(await renderPage(BalancesPage, { searchParams: { q: ["a", "b"], owing: ["1", "1"] } }))).toContain("3 families, by name.");
     expect((await audits("money.balances.read")).map((r) => r.after)).toEqual([
       { onlyOwing: true, search: null }, { onlyOwing: false, search: FAMILY_B.students[1]!.name.split(" ")[0]!.toUpperCase() },
       { onlyOwing: false, search: "nobody-by-this-name" }, { onlyOwing: false, search: null },
@@ -99,10 +99,12 @@ describe("the Balances page", () => {
       { customerQboId: FAMILY_B.family.qboId, name: null, balanceCents: 824208 + 826410, invoicesCents: 824208 + 826410, currency: "USD" },
       { customerQboId: FAMILY_B.students[0]!.qboId, name: FAMILY_B.students[0]!.name, balanceCents: 12500, invoicesCents: 0, currency: "USD" },
     ] }).where(eq(familyMoney.familyQboId, FAMILY_B.family.qboId));
-    const text = textOf(await renderPage(BalancesPage));
-    expect(text).toContain(`Worth a look`);
-    expect(text).toContain(`${FAMILY_B.family.name} ${FAMILY_B.students[0]!.name}: QuickBooks says $125.00, its open invoices add up to $0.00 Checked`);
-    expect(text).not.toMatch(new RegExp(`${FAMILY_A.family.name} [^·]*QuickBooks says`));
+    const html = await renderPage(BalancesPage);
+    expect(textOf(html)).toContain(`Worth a look`);
+    // One row per customer that differs, QuickBooks' balance beside what its open invoices add up to.
+    expect(rowNamed(html, FAMILY_B.students[0]!.name)).toEqual([FAMILY_B.family.name, FAMILY_B.students[0]!.name, "$125.00", "$0.00", expect.stringMatching(/UTC$/)]);
+    expect(rowNamed(html, "The family itself")).toBeUndefined(); // the family customer's own balance agrees
+    expect(tableRows(html).filter((r) => r.length === 5).map((r) => r[0])).toEqual([FAMILY_B.family.name]); // Worth a look's rows: not family A
   });
 
   it("asks the worker to read every family, refusing while QuickBooks isn't connected", async () => {

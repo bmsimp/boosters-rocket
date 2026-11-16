@@ -1,6 +1,7 @@
 "use client";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
+import { ActionOutcome } from "@/app/components/notice";
 import type { Done } from "./forms";
 
 const failed: Done = { ok: false, errors: [ACTION_FAILED] };
@@ -8,7 +9,7 @@ const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
-  return state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return <ActionOutcome state={state} />;
 }
 
 /**

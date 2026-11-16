@@ -1,5 +1,6 @@
 import type { RosterPage } from "@/lib/roster/queries";
 import { LocalTime } from "@/app/components/local-time";
+import { Notice } from "@/app/components/notice";
 import { RefreshButton } from "./refresh-button";
 import { refreshRosterAction } from "./actions";
 
@@ -12,7 +13,7 @@ function WhoCanFix({ admin }: { admin: boolean }) {
 export function DisconnectedNotice({ page, admin }: { page: RosterPage; admin: boolean }) {
   if (page.connected) return null;
   return (
-    <p role="status">QuickBooks is disconnected, so this roster is no longer current. {page.lastOkAt ? <>It was last read <LocalTime iso={page.lastOkAt} />.</> : "It has never been read."}<WhoCanFix admin={admin} /></p>
+    <Notice tone="warning">QuickBooks is disconnected, so this roster is no longer current. {page.lastOkAt ? <>It was last read <LocalTime iso={page.lastOkAt} />.</> : "It has never been read."}<WhoCanFix admin={admin} /></Notice>
   );
 }
 
@@ -21,8 +22,8 @@ export function Freshness({ page, admin }: { page: RosterPage; admin: boolean })
   const failed = page.lastRun && !page.lastRun.ok;
   return (
     <section className="box" aria-labelledby="roster-fresh-h"><h2 id="roster-fresh-h">How fresh this is</h2>
-      <p>{page.lastOkAt ? <>Last read from QuickBooks <LocalTime iso={page.lastOkAt} />.</> : "Not read from QuickBooks yet."}
-        {failed ? <> The latest try failed: {page.lastRun!.detail}<WhoCanFix admin={admin} /></> : null}{page.connected ? " The worker reads it again every day." : null}</p>
+      <p>{page.lastOkAt ? <>Last read from QuickBooks <LocalTime iso={page.lastOkAt} />.</> : "Not read from QuickBooks yet."}{page.connected ? " The worker reads it again every day." : null}</p>
+      {failed && <Notice tone="problem" live="none">The latest try failed: {page.lastRun!.detail}<WhoCanFix admin={admin} /></Notice>}
       {page.connected && <RefreshButton refresh={refreshRosterAction} />}
     </section>
   );

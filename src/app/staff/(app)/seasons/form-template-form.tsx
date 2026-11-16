@@ -1,6 +1,8 @@
 "use client";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
+import { ActionOutcome } from "@/app/components/notice";
+import { ChoiceGroup } from "@/app/components/choice-group";
 
 // The form that attaches a Documenso template to a form requirement. State is the source of truth and a
 // type="button" calls the action, as in ./forms.tsx. It is given only what it shows: template names and ids.
@@ -30,12 +32,9 @@ export function FormTemplateForm({ choices, current, signers: savedSigners, save
         <label className="field"><span>The address of the template&apos;s page in Documenso</span>
           <input autoComplete="off" spellCheck={false} maxLength={500} value={template} onChange={(e) => setTemplate(e.target.value)} /></label>
       )}
-      <fieldset className="field checks">
-        <legend>Who must sign</legend>
-        <label><input type="radio" name="signers" checked={signers === "any"} onChange={() => setSigners("any")} /> Any one guardian</label>
-        <label><input type="radio" name="signers" checked={signers === "every"} onChange={() => setSigners("every")} /> Every guardian who has a sign-in, up to the template&apos;s signers</label>
-      </fieldset>
-      {state && (state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>)}
+      <ChoiceGroup name="signers" legend="Who must sign" value={signers} onChange={(v) => setSigners(v === "every" ? "every" : "any")} cols={1}
+        options={[{ value: "any", label: "Any one guardian" }, { value: "every", label: "Every guardian who has a sign-in", hint: "Up to the template's signers." }]} />
+      <ActionOutcome state={state} />
       <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Checking the template…" : current ? "Check and attach again" : "Check and attach"}</button>
     </form>
   );

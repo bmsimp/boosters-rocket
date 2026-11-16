@@ -2,6 +2,7 @@
 import { startTransition, useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
+import { ActionOutcome } from "@/app/components/notice";
 
 // The forms of the staff volunteer pages, built as the season pages' are (../seasons/forms.tsx): state is the source of
 // truth and a type="button" calls the action, so a refusal keeps what was typed. Each is given only what it shows.
@@ -11,7 +12,7 @@ const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
-  return state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return <ActionOutcome state={state} />;
 }
 
 export type EventFields = { name: string; onDate: string; location: string; description: string; contactName: string; contactEmail: string };

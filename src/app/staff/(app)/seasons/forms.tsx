@@ -2,6 +2,8 @@
 import { startTransition, useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
+import { ActionOutcome } from "@/app/components/notice";
+import { ChoiceGroup } from "@/app/components/choice-group";
 
 // The forms of the season pages. No form `action` on a form with a field: React resets a form after one, and what was
 // typed would vanish on a refusal. State is the source of truth; a type="button" calls the action inside
@@ -12,7 +14,7 @@ const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
-  return state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return <ActionOutcome state={state} />;
 }
 
 /** One button, nothing to type. `goTo` is where to go once it has worked, for a page whose subject is then gone. */
@@ -129,20 +131,16 @@ export function RequirementForm({ kinds, kind, initial, perStudent = true, add, 
       )}
       <label className="field"><span>What it is, in your club&apos;s words</span><input maxLength={120} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
       {add && (
-        <label className="field"><span>Asked of</span>
-          <select value={appliesTo} onChange={(e) => setAppliesTo(e.target.value === "family" ? "family" : "student")}>
-            {perStudent && <option value="student">Each student</option>}<option value="family">Each family, once</option>
-          </select></label>
+        <ChoiceGroup name="applies-to" legend="Asked of" value={appliesTo} onChange={(v) => setAppliesTo(v === "family" ? "family" : "student")}
+          options={[...(perStudent ? [{ value: "student", label: "Each student" }] : []), { value: "family", label: "Each family, once" }]} />
       )}
-      <label className="field"><span>Required or optional (an optional one is shown, and never holds the step open)</span>
-        <select value={required ? "required" : "optional"} onChange={(e) => setRequired(e.target.value === "required")}>
-          <option value="required">Required</option><option value="optional">Optional</option>
-        </select></label>
+      <ChoiceGroup name="required" legend="Required or optional" hint="An optional one is shown, and never holds the step open." value={required ? "required" : "optional"}
+        onChange={(v) => setRequired(v === "required")} options={[{ value: "required", label: "Required" }, { value: "optional", label: "Optional" }]} />
       {volunteer && (
         <>
           <label className="field"><span>How much</span><input type="number" min={1} max={1000} step={1} value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
-          <label className="field"><span>Counted in</span>
-            <select value={unit} onChange={(e) => setUnit(e.target.value === "hours" ? "hours" : "shifts")}><option value="shifts">Shifts</option><option value="hours">Hours</option></select></label>
+          <ChoiceGroup name="unit" legend="Counted in" value={unit} onChange={(v) => setUnit(v === "hours" ? "hours" : "shifts")}
+            options={[{ value: "shifts", label: "Shifts" }, { value: "hours", label: "Hours" }]} />
         </>
       )}
       <label className="field"><span>Due date (optional)</span><input type="date" value={dueOn} onChange={(e) => setDueOn(e.target.value)} /></label>
@@ -163,11 +161,8 @@ export function CoverageForm({ covers, chosen, candidates, noun, save }: {
   const toggle = (id: string) => setPicked((old) => { const next = new Set(old); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return (
     <form onSubmit={noSubmit} className="stack">
-      <fieldset className="field checks">
-        <legend>Asked of</legend>
-        <label><input type="radio" name="covers" checked={mode === "everyone"} onChange={() => setMode("everyone")} /> Everyone</label>
-        <label><input type="radio" name="covers" checked={mode === "chosen"} onChange={() => setMode("chosen")} /> Only the {noun} I choose</label>
-      </fieldset>
+      <ChoiceGroup name="covers" legend="Asked of" value={mode} onChange={(v) => setMode(v === "chosen" ? "chosen" : "everyone")}
+        options={[{ value: "everyone", label: "Everyone" }, { value: "chosen", label: `Only the ${noun} I choose` }]} />
       {mode === "chosen" && (
         <fieldset className="field checks">
           <legend>Choose {noun} ({picked.size} chosen)</legend>
