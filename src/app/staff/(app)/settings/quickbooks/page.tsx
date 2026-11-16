@@ -22,7 +22,7 @@ export default async function QuickBooksSettingsPage() {
   return (
     <main className="wrap single">
       <h1 className="page-title">QuickBooks</h1>
-      <p className="lede">The club&apos;s families and members come from QuickBooks. The portal reads them; it changes nothing in QuickBooks. Only Admins can change this, because it reaches the club&apos;s books.</p>
+      <p className="lede">The club&apos;s families and members come from QuickBooks. The portal reads them, and changes one thing there: a parent&apos;s own phone and mailing address, when that parent edits them in the portal. Each change is in the audit log. Only Admins can change these settings, because they reach the club&apos;s books.</p>
       {problems.length > 0 && <section className="box" role="status" aria-labelledby="qbo-problems-h"><h2 id="qbo-problems-h">Needs attention</h2><ul>{problems.map((p) => <li key={p.kind}>{p.text}</li>)}</ul></section>}
 
       <section className="box" aria-labelledby="qbo-conn-h"><h2 id="qbo-conn-h">Connection</h2>

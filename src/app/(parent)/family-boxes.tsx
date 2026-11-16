@@ -26,7 +26,11 @@ function AskTheClub({ treasurerEmail }: { treasurerEmail: string | null }) {
     : <>Ask the club and they&apos;ll update it.</>;
 }
 
-/** The person's own name, email and phone as QuickBooks has them, or as the portal knows them when their sign-in has no QuickBooks record. */
+/**
+ * The person's own name, email and phone as QuickBooks has them, or as the portal knows them when their sign-in has no
+ * QuickBooks record. A QuickBooks record (`who.edits`, set by loadMyFamily) gets the way to the page where its phone
+ * and address are changed; the link carries no id, because that page takes the record from the session.
+ */
 export function DetailsBox({ who, treasurerEmail }: { who: MyContact; treasurerEmail: string | null }) {
   return (
     <section className="box details-box" aria-labelledby="det-h">
@@ -37,7 +41,12 @@ export function DetailsBox({ who, treasurerEmail }: { who: MyContact; treasurerE
         {who.email && <><dt>Email</dt><dd>{who.email}</dd></>}
         {who.phone && <><dt>Phone</dt><dd className="num">{who.phone}</dd></>}
       </dl>
-      <p className="help">For now, the club makes changes for you. <AskTheClub treasurerEmail={treasurerEmail} /></p>
+      {who.edits ? (
+        <>
+          <p className="help">You can change your phone and mailing address yourself. The club changes your name and email for you. <AskTheClub treasurerEmail={treasurerEmail} /></p>
+          <div className="box-foot"><a className="btn btn-line" href="/family/details">Update my details</a></div>
+        </>
+      ) : <p className="help">For now, the club makes changes for you. <AskTheClub treasurerEmail={treasurerEmail} /></p>}
     </section>
   );
 }

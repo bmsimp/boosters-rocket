@@ -11,7 +11,15 @@ import { ROSTER_JOB, getRosterSource } from "@/lib/roster/source";
 
 export type MyStudent = { qboId: string; name: string };
 /** A contact record as QuickBooks has it. The email field is shown as written there; it can hold more than one address. */
-export type MyContact = { name: string; email: string | null; phone: string | null };
+export type MyContact = {
+  name: string; email: string | null; phone: string | null;
+  /**
+   * Set on a QuickBooks record whose phone and address the signed-in person may change from the portal
+   * (./contact-edits.ts): "own" for a parent's own record, "family" for the family's record, which every parent of
+   * that family signs in through and shares. Not set on details the portal made up from the sign-in itself.
+   */
+  edits?: "own" | "family";
+};
 export type MyFamily = {
   /** The family's name in QuickBooks (in a flat club, the member's own name). */
   name: string;
@@ -22,12 +30,17 @@ export type MyFamily = {
   /** When the roster was last read from QuickBooks successfully. */
   rosterReadAt: string | null;
 };
+/**
+ * The signed-in person's own QuickBooks record, for the code that reads and changes it in QuickBooks
+ * (./contact-edits.ts). The id is for the server only: it is never given to a page or a client component.
+ */
+export type MyRecord = { qboId: string; parentQboId: string | null; contact: MyContact & { edits: "own" | "family" } };
 
 type Row = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; email: string | null; phone: string | null };
 
 // The order the staff roster lists people in (src/lib/roster/model.ts).
 const byName = (a: Row, b: Row) => a.displayName.localeCompare(b.displayName, "en", { sensitivity: "base" }) || a.qboId.localeCompare(b.qboId, "en", { numeric: true });
-const contact = (r: Row): MyContact => ({ name: r.displayName, email: r.email, phone: r.phone });
+const contact = (r: Row, edits: "own" | "family"): MyContact & { edits: "own" | "family" } => ({ name: r.displayName, email: r.email, phone: r.phone, edits });
 
 /**
  * The signed-in parent's family from the roster cache, or null when there is nothing the portal may show for it.
@@ -42,6 +55,21 @@ const contact = (r: Row): MyContact => ({ name: r.displayName, email: r.email, p
  * family and is never shown. Inactive records are left out: QuickBooks renames them with " (deleted)".
  */
 export async function loadMyFamily(ctx: ParentCtx): Promise<MyFamily | null> {
+  return (await read(ctx))?.family ?? null;
+}
+
+/**
+ * The record `me` was read from, by the same rules and from the session alone: null when loadMyFamily() shows no
+ * family, or shows one with no `me` (a sign-in made by hand, or a link that names a record that isn't theirs).
+ */
+export async function loadMyRecord(ctx: ParentCtx): Promise<MyRecord | null> {
+  const got = await read(ctx);
+  const edits = got?.family.me?.edits;
+  if (!got?.mine || !got.family.me || !edits) return null;
+  return { qboId: got.mine.qboId, parentQboId: got.mine.parentQboId, contact: { ...got.family.me, edits } };
+}
+
+async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Row | null } | null> {
   const familyId = ctx.familyQboId;
   const [[conn], source, shape, types, rows, [link], [lastOk]] = await Promise.all([
     // "Connected" as connectionView() means it, without loading the tokens.
@@ -71,7 +99,9 @@ export async function loadMyFamily(ctx: ParentCtx): Promise<MyFamily | null> {
   if (shape.kind === "flat") {
     // The member is its own family: its own record and nothing under it.
     if (family.typeQboId === null || !shape.memberTypeIds.includes(family.typeQboId)) return null;
-    return { name: family.displayName, students: null, me: sourceId === familyId ? contact(family) : null, rosterReadAt };
+    // Every address on a member's record signs in through it, so its details are shared like a family's.
+    const mine = sourceId === familyId ? family : null;
+    return { family: { name: family.displayName, students: null, me: mine ? contact(mine, "family") : null, rosterReadAt }, mine };
   }
 
   if (family.typeQboId !== shape.familyTypeId) return null;
@@ -83,5 +113,5 @@ export async function loadMyFamily(ctx: ParentCtx): Promise<MyFamily | null> {
   const mine = sourceId === null ? undefined
     : shape.parentTypeId === null ? (sourceId === familyId ? family : undefined)
     : under.find((r) => r.qboId === sourceId && r.typeQboId === shape.parentTypeId);
-  return { name: family.displayName, students, me: mine ? contact(mine) : null, rosterReadAt };
+  return { family: { name: family.displayName, students, me: mine ? contact(mine, shape.parentTypeId === null ? "family" : "own") : null, rosterReadAt }, mine: mine ?? null };
 }

@@ -28,6 +28,14 @@ Two facts from the owner shape this design:
   needs cleaning up in QuickBooks.
 - The portal writes nothing to QuickBooks in this piece.
 
+> **Revised 2026-11-15:** the portal now writes one thing to QuickBooks. The owner decided on 2026-11-14 that parents
+> edit their own phone and mailing address (v1 spec §6.2, §6.3): a sparse `Customer` update of `PrimaryPhone` and
+> `BillAddr`, sent with the `SyncToken` the parent's form was shown, by one function (`qboUpdateCustomerContact` in
+> `src/lib/quickbooks/client.ts`) that one module may call. Everything else here still only reads. The test that held
+> the portal to reading (§3 Rules for the connection, §7) now holds it to that one write:
+> `tests/unit/quickbooks-writes.test.ts`. The request and the Fault codes it relies on have not been tried against a
+> real company: `CUSTOMER_UPDATE` in the client lists what the owner's sandbox check must confirm (§8 has no row for it).
+
 ## Not in scope
 
 - **Anything a parent sees.** Balances, open invoices and Pay links are the next money piece.
@@ -191,7 +199,7 @@ any step already completed.
 
 - The portal asks Intuit for the accounting scope only. Intuit has no read-only form of it, so the portal is
   trusted not to write: in this piece no code path sends a create, update or delete to QuickBooks, and a test
-  holds that (§7).
+  holds that (§7). *Since 2026-11-15 one update is sent, a parent's own phone and address; see the note under Goals.*
 - The request to Intuit carries a single-use `state` value tied to the Admin who started the connect, and the return
   is refused if it doesn't match, was started by someone else, has been used, or is more than 10 minutes old.
 - The redirect address is `<portal URL>/api/quickbooks/callback`.
@@ -355,7 +363,8 @@ arguments, as the mail tests do):
   is refused the roster pages; the invariants test covers the new server actions; opening a family's page
   writes the read audit row.
 - **Nothing writes to QuickBooks:** a test fails if any request the client sends, other than to Intuit's
-  token and revoke endpoints, uses a method other than GET.
+  token and revoke endpoints, uses a method other than GET. *Since 2026-11-15 the test also allows the one
+  customer update, sent by one function that one module may call; see the note under Goals.*
 - No token, secret or response body reaches a log line or an audit row.
 
 **End-to-end:** an Admin opens the settings view on a site that is already connected, walks the three steps without

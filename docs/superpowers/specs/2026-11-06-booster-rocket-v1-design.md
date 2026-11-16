@@ -213,6 +213,13 @@ offers a suffixed name (for example "Smith Family (2)") instead of failing.
 
 ### 6.2 Parent edits (contact details)
 
+> **Revised 2026-11-15 (phone and address built):** a parent edits the phone and billing address of *their own*
+> QuickBooks record, the one their sign-in came from (`2026-11-11-parents-from-quickbooks-design.md`): a Parent
+> sub-customer, or, where the club has no parent type or a flat shape, the family's or member's own record, which every
+> parent of that family shares, and the page says so. A sign-in made by hand has no record to edit and is told to ask
+> the club. Nothing is kept in the portal: the address is read from QuickBooks when the edit page opens, and the roster
+> cache gets the new phone and `SyncToken` from QuickBooks' answer. Email changes are a later slice.
+
 - **Phone and address:** written straight to QuickBooks and recorded in the audit log. Only the
   primary guardian's details live in QuickBooks; another guardian's edits stay in the portal.
 - **Email:** not changed until confirmed.

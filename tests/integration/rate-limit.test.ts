@@ -49,6 +49,11 @@ describe("database rate limits", () => {
     // 3 codes to one address; 60 requests and 180 checks from one IP address, which a school's shared Wi-Fi needs on a
     // registration night (spec §1 Rate limits). All in 15 minutes.
     const window = { windowMs: 15 * 60 * 1000 };
-    expect(RATE_LIMITS).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window } });
+    const { contact_save_parent, contact_open_parent, ...signIn } = RATE_LIMITS;
+    expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window } });
+    // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
+    // hour, each a write to the club's QuickBooks, and the reads the edit page makes as it opens.
+    expect(contact_save_parent).toEqual({ max: 6, windowMs: 60 * 60 * 1000 });
+    expect(contact_open_parent).toEqual({ max: 30, ...window });
   });
 });

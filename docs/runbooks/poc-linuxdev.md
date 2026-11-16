@@ -261,8 +261,9 @@ Sources: Role Based Access Control for Applications in Exchange Online
 ## 5. QuickBooks (an Intuit sandbox company)
 
 The portal reads the club's families from QuickBooks. For this proof of concept it connects to an Intuit sandbox
-company, a test company that holds no real books. The portal never writes to QuickBooks. A worker container keeps the
-connection alive. These steps were walked through on 2026-11-11 (section 11). Do them after the first deploy (section 8) and after
+company, a test company that holds no real books. The portal writes one thing to QuickBooks: a parent's own phone and
+mailing address, when that parent edits them in the portal (since 2026-11-15; the checks below were made before that,
+when it wrote nothing). A worker container keeps the connection alive. These steps were walked through on 2026-11-11 (section 11). Do them after the first deploy (section 8) and after
 section 3, because they use the staff app. Deploy this version (the one with the worker) first, before step 1.
 
 1. In the Intuit developer app, under **Settings** > **Redirect URIs** > **Development**, add the redirect address
