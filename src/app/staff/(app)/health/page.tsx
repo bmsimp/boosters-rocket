@@ -3,6 +3,7 @@ import { requireStaffPage } from "@/lib/guards";
 import { healthReport, type HealthState } from "@/lib/health/report";
 import { LocalTime } from "@/app/components/local-time";
 import { PortalAddress } from "@/app/components/portal-address";
+import { Notice } from "@/app/components/notice";
 
 export const metadata = { title: "Health" };
 export const dynamic = "force-dynamic";
@@ -32,7 +33,7 @@ export default async function HealthPage() {
     <main className="wrap single">
       <h1 className="page-title">Health</h1>
       <p className="lede">Whether each part of the portal is working, and when it last worked. Look here after an update or a restore. Only Admins see this page.</p>
-      <p role="status">{attention === 0 ? "Everything that is set up is working." : attention === 1 ? "1 thing needs attention." : `${attention} things need attention.`}</p>
+      <Notice tone={attention === 0 ? "done" : "warning"}>{attention === 0 ? "Everything that is set up is working." : attention === 1 ? "1 thing needs attention." : `${attention} things need attention.`}</Notice>
 
       <section className="box" aria-labelledby="health-h"><h2 id="health-h">The portal</h2>
         <ul className="lines">{lines.map((l) => (

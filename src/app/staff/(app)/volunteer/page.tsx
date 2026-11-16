@@ -4,20 +4,23 @@ import { can } from "@/lib/permissions/effective";
 import { listEvents, type EventSummary } from "@/lib/volunteer/setup";
 import { getVolunteerSettings } from "@/lib/volunteer/settings";
 import { dateWords } from "@/lib/volunteer/clock";
+import { DataTable } from "@/app/components/data-table";
 import { createEventAction, saveCutoffAction } from "./actions";
 import { CutoffForm, EventForm } from "./forms";
 
 export const metadata = { title: "Volunteer" };
 export const dynamic = "force-dynamic";
 
-function EventList({ events }: { events: EventSummary[] }) {
+/** Events, a row each: the event, its day, where, and how its places are filling. */
+function EventList({ events, caption }: { events: EventSummary[]; caption: string }) {
   return (
-    <ul className="lines">{events.map((e) => (
-      <li key={e.id}><div>
-        <Link className="what" href={`/staff/volunteer/${e.id}`}>{e.name}</Link>
-        <span className="when">{dateWords(e.onDate)} · {e.location}</span>
-        <span className="when">{e.cancelled ? "Cancelled" : e.shifts === 0 ? "No shifts yet" : `${e.shifts} ${e.shifts === 1 ? "shift" : "shifts"} · ${e.filled} of ${e.places} places filled`}</span>
-      </div></li>))}</ul>
+    <DataTable caption={caption} captionHidden rows={events} rowKey={(e) => e.id} columns={[
+      { key: "name", header: "Event", rowHeader: true, cell: (e) => <Link href={`/staff/volunteer/${e.id}`}>{e.name}</Link> },
+      { key: "date", header: "Date", cell: (e) => dateWords(e.onDate) },
+      { key: "where", header: "Where", cell: (e) => e.location },
+      { key: "places", header: "Shifts and places", cell: (e) => (e.cancelled ? "Cancelled" : e.shifts === 0 ? "No shifts yet"
+        : `${e.shifts} ${e.shifts === 1 ? "shift" : "shifts"} · ${e.filled} of ${e.places} places filled`) },
+    ]} />
   );
 }
 
@@ -33,7 +36,7 @@ export default async function VolunteerEventsPage() {
       <p className="lede">Events with shifts that families sign up for. Parents see each shift and how many places are filled, never who. Dates and times are the club&apos;s own, in the time zone set under Club.</p>
 
       <section className="box" aria-labelledby="upcoming-h"><h2 id="upcoming-h">Coming up</h2>
-        {upcoming.length === 0 ? <p>No events coming up.{canChange ? " Add one below." : ""}</p> : <EventList events={upcoming} />}
+        {upcoming.length === 0 ? <p>No events coming up.{canChange ? " Add one below." : ""}</p> : <EventList events={upcoming} caption="Events coming up, the soonest first" />}
       </section>
 
       {canCredit && (
@@ -54,7 +57,7 @@ export default async function VolunteerEventsPage() {
       </section>
 
       {past.length > 0 && (
-        <section className="box" aria-labelledby="past-h"><h2 id="past-h">Earlier events</h2><EventList events={past} /></section>
+        <section className="box" aria-labelledby="past-h"><h2 id="past-h">Earlier events</h2><EventList events={past} caption="Earlier events, the latest first" /></section>
       )}
     </main>
   );
