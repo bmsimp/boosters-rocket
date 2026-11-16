@@ -3,6 +3,9 @@ import { db } from "@/lib/db/client";
 import { setting } from "@/lib/db/schema";
 import { adminCount } from "@/lib/auth/bootstrap";
 
+/** Where to send someone who reaches the first Admin step before the club has a name. */
+export const CLUB_FIRST_URL = "/setup?step=club&error=club_first";
+
 /** The setting the Club settings are saved under (src/lib/settings/club.ts). */
 const CLUB_KEY = "club";
 

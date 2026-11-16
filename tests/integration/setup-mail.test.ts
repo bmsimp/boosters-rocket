@@ -13,6 +13,7 @@ import { getSetupState } from "@/lib/setup/state";
 import { mailWorking } from "@/lib/mail/settings";
 import { SETUP_SESSION_ENDED } from "@/lib/setup/guard";
 import { resetDb, seedProvider } from "../helpers/db";
+import { saveClubSettings } from "@/lib/settings/club";
 
 const form = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
 const smtp = { method: "smtp", host: "smtp.example.org", port: "587", security: "starttls", username: "u", from: "club@example.org", password: "p" };
@@ -22,6 +23,8 @@ describe("the Outgoing mail setup step", () => {
   beforeEach(async () => {
     await resetDb(); state.setup = true; state.sent = 0;
     await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" });
+    // The club step comes first on a new installation (tests/integration/setup-club.test.ts).
+    await saveClubSettings({ name: "Lakeside Band", shortName: "LB", color: "#225588", treasurerEmail: "", timeZone: "UTC" }, { door: "system", id: null, label: "setup" }, null);
   });
 
   it("saves the settings, and a test send makes them work", async () => {

@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { setupAction, setupUnlockAction, SETUP_SESSION_ENDED } from "@/lib/setup/guard";
 import { verifySetupCode } from "@/lib/setup/code";
 import { startSetupSession } from "@/lib/setup/session";
-import { getSetupState, updateSetupState, MAIL_FIRST_URL, saveAdminEmail, isSetupStep, type SetupStep } from "@/lib/setup/state";
+import { getSetupState, updateSetupState, MAIL_FIRST_URL, saveFirstAdmin, isSetupStep, type SetupStep } from "@/lib/setup/state";
+import { clubStepOwed, CLUB_FIRST_URL } from "@/lib/setup/club-step";
+import { getClubSettings, saveClubSettings } from "@/lib/settings/club";
 import { isProviderKey, parseProviderForm, saveProvider, providerSummaries, type SaveOutcome } from "@/lib/auth/providers";
 import { checkFor } from "@/lib/auth/provider-checks";
 import { isCertificateProvider, startCertificateReplacement, discardPendingCertificate } from "@/lib/auth/certificates";
@@ -72,9 +74,26 @@ export const sendSetupTestMailAction = setupAction(async (form: FormData): Promi
   return r;
 }, { onExpired: () => ({ ok: false as const, error: SETUP_SESSION_ENDED }) });
 
+/**
+ * The club's name, short name, color and time zone, by the Club settings' own rules (saveClubSettings). The treasurer's
+ * email is not asked here and is kept as it is.
+ */
+export const saveSetupClubAction = setupAction(async (fields: unknown): Promise<{ ok: true; message: string } | { ok: false; errors: string[] }> => {
+  const f = (fields ?? {}) as Record<string, unknown>;
+  const text = (k: string) => (typeof f[k] === "string" && (f[k] as string).length <= 200 ? (f[k] as string) : null);
+  const [name, shortName, color, timeZone] = [text("name"), text("shortName"), text("color"), text("timeZone")];
+  if (name === null || shortName === null || color === null || timeZone === null) return { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
+  const { treasurerEmail } = await getClubSettings();
+  const r = await saveClubSettings({ name, shortName, color, timeZone, treasurerEmail: treasurerEmail ?? "" }, SETUP_ACTOR, await requestIp());
+  if (!r.ok) return r;
+  revalidatePath("/", "layout"); // the bar, the page titles and the app's name use it at once
+  return { ok: true, message: "Saved. Go on to staff sign-in when you're ready." };
+}, { onExpired: sessionEnded });
+
 export const goToStepAction = setupAction(async (step: SetupStep): Promise<void> => {
   if (!isSetupStep(step)) redirect("/setup");
-  if (step !== "staff") {
+  if (step === "admin" && (await clubStepOwed())) redirect(CLUB_FIRST_URL);
+  if (step !== "staff" && step !== "club") {
     const staffReady = (await providerSummaries()).some((s) => s.readable);
     if (!staffReady) redirect("/setup?step=staff&error=staff_first");
   }
@@ -83,8 +102,10 @@ export const goToStepAction = setupAction(async (step: SetupStep): Promise<void>
   redirect(`/setup?step=${step}`);
 });
 
-export const saveAdminEmailAction = setupAction(async (_prev: { error: string } | null, form: FormData): Promise<{ error: string } | null> => {
-  const r = await saveAdminEmail(String(form.get("email") ?? ""), await requestIp());
+/** The first Admin's name and email. Not before the club has a name, so the portal never finishes with the default one. */
+export const saveFirstAdminAction = setupAction(async (_prev: { error: string } | null, form: FormData): Promise<{ error: string } | null> => {
+  if (await clubStepOwed()) return { error: "Give the club its name first (step 1)." };
+  const r = await saveFirstAdmin(String(form.get("name") ?? ""), String(form.get("email") ?? ""), await requestIp());
   if (!r.ok) return { error: r.error };
   revalidatePath("/setup");
   return null;
