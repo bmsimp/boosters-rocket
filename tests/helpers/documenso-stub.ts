@@ -76,7 +76,7 @@ export type DocumensoStub = {
   failPathOnce: string | null;
   /** Runs, and is waited for, before the API call with this path (such as "/envelope/recipient/delete") is answered: something that happens in the middle of the recipe. */
   beforeAnswer: { path: string; run: () => Promise<unknown> | unknown } | null;
-  /** A download whose path contains this text sends half the file and then breaks the connection, once. */
+  /** A download whose address (path and query) contains this text sends half the file and then breaks the connection, once. */
   breakDownloadOnce: string | null;
   /** How large each sealed PDF is, in bytes (at least the few bytes of a PDF's header). */
   sealedSize: number;
@@ -241,7 +241,7 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
       }
       // The evidence downloads. A file is sent as Documenso sends it: application/pdf, with its length.
       const file = (bytes: Buffer) => {
-        if (stub.breakDownloadOnce !== null && path.includes(stub.breakDownloadOnce)) {
+        if (stub.breakDownloadOnce !== null && req.url!.includes(stub.breakDownloadOnce)) {
           stub.breakDownloadOnce = null;
           res.writeHead(200, { "content-type": "application/pdf", "content-length": String(bytes.length) });
           res.write(bytes.subarray(0, Math.floor(bytes.length / 2)), () => req.socket.destroy());

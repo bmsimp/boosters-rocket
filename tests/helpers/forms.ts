@@ -101,6 +101,29 @@ export async function seedEvidence(requestId: string, o: { tag: string; formTitl
   return { id: evidence!.id, sealed, sealedSha256: hash(sealed), files: files.map((f) => ({ kind: f.kind, sha256: hash(f.bytes) })) };
 }
 
+/**
+ * A request whose document is real in the Documenso stub and signed by everyone on it: made from `templateId` with
+ * this request's id as externalId, each guardian a recipient, then signed (and sealed, unless the stub holds sealing
+ * back). The request is stored as the portal would have left it: complete (or signed), `evidence_owed` set.
+ */
+export async function signedInStub(stub: { origin: string; token: string; envelopes: Map<string, { recipients: { id: number; email: string }[] }>; sign(envelopeId: string, who: string): void },
+  o: { requirementId: string; templateId: string; familyQboId: string; subjectQboId: string; subjectName?: string; guardians: { parentId: string; name: string; email: string }[]; items?: number; sign?: boolean }): Promise<{ id: string; envelopeId: string }> {
+  const id = await seedRequest({ requirementId: o.requirementId, familyQboId: o.familyQboId, subjectQboId: o.subjectQboId, state: "waiting", envelopeId: `envelope_pending${Math.random().toString(36).slice(2, 10)}`, subjectName: o.subjectName });
+  const template = stub.envelopes.get(o.templateId)!;
+  const made = await (await fetch(`${stub.origin}/api/v2/envelope/use`, { method: "POST", headers: { authorization: stub.token, "content-type": "application/json" },
+    body: JSON.stringify({ envelopeId: o.templateId, externalId: id, distributeDocument: true, recipients: o.guardians.map((g, i) => ({ id: template.recipients[i]!.id, email: g.email, name: g.name })) }) })).json() as { id: string; recipients: { id: number; email: string }[] };
+  const doc = stub.envelopes.get(made.id) as unknown as { items?: number; recipients: { id: number; email: string }[]; status: string };
+  if (o.items) doc.items = o.items;
+  const at = new Date().toISOString();
+  if (o.sign !== false) for (const g of o.guardians) stub.sign(made.id, g.email);
+  const done = doc.status === "COMPLETED";
+  await db.update(signatureRequest).set({
+    envelopeId: made.id, envelopeStatus: doc.status, state: o.sign === false ? "waiting" : done ? "complete" : "signed", completedAt: done ? new Date() : null, allSignedAt: o.sign === false ? null : new Date(),
+    evidenceOwed: done, signers: o.guardians.map((g) => ({ parentId: g.parentId, name: g.name, email: g.email, recipientId: doc.recipients.find((r) => r.email === g.email)!.id, signedAt: o.sign === false ? null : at })),
+  }).where(eq(signatureRequest.id, id));
+  return { id, envelopeId: made.id };
+}
+
 export const requestNow = async (id: string) => (await db.select().from(signatureRequest).where(eq(signatureRequest.id, id)))[0]!;
 
 const signer = (parentId: string, name: string, email: string, recipientId: number, signedAt: string | null = null): RequestSigner => ({ parentId, recipientId, name, email, signedAt });
