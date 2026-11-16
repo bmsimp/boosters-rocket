@@ -20,7 +20,7 @@ import { QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { saveDetailsAction } from "@/app/(parent)/family/details/actions";
 import FamilyPage from "@/app/(parent)/family/page";
 import FamilyDetailsPage from "@/app/(parent)/family/details/page";
-import { contactForm, customersOf, inQuickBooks, qbCustomer, seedContactFamilies, shownTo, under } from "../helpers/contact";
+import { contactForm, customersOf, inQuickBooks, qbCustomer, seedContactFamilies, sentBackUntouched, shownTo, under } from "../helpers/contact";
 import { resetDb, seedStaff } from "../helpers/db";
 import { CHENOWETH, RIVERA, connectCompany } from "../helpers/money";
 import { seedParentIn, seedSignedInParent } from "../helpers/parent";
@@ -184,6 +184,85 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     // A change of address writes what the parent saw and saved, on two lines.
     expect(await save({ ...shown, phone: NEW_PHONE, city: "Buda" }, "1")).toMatchObject({ ok: true, current: { values: { line2: "Building 4, Rear door, Ring twice", city: "Buda" }, version: "2" } });
     expect(inQuickBooks(stub, R_PARENT).BillAddr).toEqual({ Line1: "12 Heron Lane", Line2: "Building 4, Rear door, Ring twice", City: "Buda", CountrySubDivisionCode: "TX", PostalCode: "78745" });
+  });
+});
+
+describe("what QuickBooks holds that the form can't is never rewritten by a save that didn't touch it", () => {
+  const phoneOnly = { Id: R_PARENT, SyncToken: "0", sparse: true, PrimaryPhone: { FreeFormNumber: NEW_PHONE } };
+  /** The form as the page shows it, read as the page reads it. */
+  const shownNow = async (identity: ParentIdentity) => {
+    const view = await loadMyContact(ctxOf(identity));
+    if (view.state !== "ok") throw new Error(`the edit page has no form: ${view.state}`);
+    return view.form.values;
+  };
+
+  it("a line break inside an address line: shown on one line, and a change of phone sends no address", async () => {
+    const { r } = await seedContactFamilies(stub);
+    Object.assign(inQuickBooks(stub, R_PARENT).BillAddr as object, { Line1: "12 Heron Lane\nApt 4", Line2: "Back door\r\nRing twice", Line3: " Rear \n" });
+    const held = copyOf(inQuickBooks(stub, R_PARENT).BillAddr);
+    asParent(r.identity);
+    const shown = await shownNow(r.identity);
+    expect(shown).toEqual({ ...SHOWN, line1: "12 Heron Lane, Apt 4", line2: "Back door, Ring twice, Rear" });
+    expect(await renderPage(FamilyDetailsPage)).toContain(`name="line1" value="12 Heron Lane, Apt 4"`);
+
+    // The parent changes the phone and nothing else. The browser sends the address back as its fields held it.
+    const result = await save({ ...sentBackUntouched(shown), phone: NEW_PHONE });
+    expect(result).toEqual({ ok: true, message: CONTACT_COPY.saved, current: { values: { ...shown, phone: NEW_PHONE }, version: "1" } });
+    expect(posts().map((p) => JSON.parse(p.body))).toEqual([phoneOnly]);
+    expect(inQuickBooks(stub, R_PARENT).BillAddr).toEqual(held);
+    expect((await audits()).map((a) => [a.action, a.before, a.after])).toEqual([["parent.contact.save", { phone: RIVERA.parent.phone }, { phone: NEW_PHONE }]]);
+    // Sent back with nothing changed at all, there is nothing to save.
+    expect(await save({ ...sentBackUntouched(shown), phone: NEW_PHONE }, "1")).toMatchObject({ ok: true, message: CONTACT_COPY.nothingChanged });
+    expect(posts()).toHaveLength(1);
+  });
+
+  it("a tab, or a character that reorders text: shown as the form can hold it, and a change of phone is not refused for it", async () => {
+    const { r } = await seedContactFamilies(stub);
+    Object.assign(inQuickBooks(stub, R_PARENT).BillAddr as object, { City: "Aus\ttin", Country: `US${String.fromCodePoint(0x202e)}A` });
+    const held = copyOf(inQuickBooks(stub, R_PARENT).BillAddr);
+    asParent(r.identity);
+    const shown = await shownNow(r.identity);
+    expect(shown).toEqual({ ...SHOWN, city: "Aus tin", country: "USA" });
+    expect(await save({ ...sentBackUntouched(shown), phone: NEW_PHONE })).toMatchObject({ ok: true, message: CONTACT_COPY.saved });
+    expect(posts().map((p) => JSON.parse(p.body))).toEqual([phoneOnly]);
+    expect(inQuickBooks(stub, R_PARENT).BillAddr).toEqual(held);
+  });
+
+  it("a field longer than the portal lets a parent type: a change of phone is not refused for it, and sends no address", async () => {
+    const { r } = await seedContactFamilies(stub);
+    const [zip, city] = ["9".repeat(25), "C".repeat(150)];
+    Object.assign(inQuickBooks(stub, R_PARENT).BillAddr as object, { City: city, PostalCode: zip, Line2: "a".repeat(120), Line3: "b".repeat(120) });
+    const held = copyOf(inQuickBooks(stub, R_PARENT).BillAddr);
+    asParent(r.identity);
+    const shown = await shownNow(r.identity);
+    expect(shown).toEqual({ ...SHOWN, city, postalCode: zip, line2: `${"a".repeat(120)}, ${"b".repeat(120)}` });
+    expect(await save({ ...sentBackUntouched(shown), phone: NEW_PHONE })).toMatchObject({ ok: true, message: CONTACT_COPY.saved });
+    expect(posts().map((p) => JSON.parse(p.body))).toEqual([phoneOnly]);
+    expect(inQuickBooks(stub, R_PARENT).BillAddr).toEqual(held);
+  });
+
+  it("a field the parent did change is still checked, beside one too long that they left alone", async () => {
+    const { r } = await seedContactFamilies(stub);
+    Object.assign(inQuickBooks(stub, R_PARENT).BillAddr as object, { City: "C".repeat(150) });
+    const before = copyOf(stub.customers);
+    asParent(r.identity);
+    const shown = await shownNow(r.identity);
+    expect(await save({ ...shown, postalCode: "9".repeat(21), phone: "x".repeat(31) })).toEqual({ ok: false, errors: [
+      "Phone can be up to 30 characters. Please shorten it.", "ZIP or postal code can be up to 20 characters. Please shorten it."] });
+    expect(posts()).toHaveLength(0);
+    expect(stub.customers).toEqual(before);
+    expect((await audits()).map((a) => [a.action, a.targetId, a.after])).toEqual([["parent.contact.save.failed", R_PARENT, { code: "invalid" }]]);
+  });
+
+  it("a change to the address sends the whole address as the parent saw it, the part too long included: QuickBooks holds it already", async () => {
+    const { r } = await seedContactFamilies(stub);
+    const city = "C".repeat(150);
+    Object.assign(inQuickBooks(stub, R_PARENT).BillAddr as object, { Line1: "12 Heron Lane\nApt 4", City: city });
+    asParent(r.identity);
+    const shown = await shownNow(r.identity);
+    expect(await save({ ...sentBackUntouched(shown), postalCode: "78746" })).toMatchObject({ ok: true, message: CONTACT_COPY.saved });
+    expect(JSON.parse(posts()[0]!.body)).toEqual({ Id: R_PARENT, SyncToken: "0", sparse: true,
+      BillAddr: { Line1: "12 Heron Lane, Apt 4", Line2: "", Line3: "", Line4: "", Line5: "", City: city, CountrySubDivisionCode: "TX", PostalCode: "78746", Country: "" } });
   });
 });
 
@@ -364,11 +443,22 @@ describe("what the browser sends is checked, and how often", () => {
     ["a control character", { phone: control(7) }, ["Phone has a character that can't be saved. Please type it again."]],
     ["a line break inside a field", { line2: "Unit B\nRing twice" }, ["Address line 2 has a character that can't be saved. Please type it again."]],
     ["a character that reorders the text", { city: control(0x202e) }, ["City has a character that can't be saved. Please type it again."]],
-    ["a field far too long to be a form's", { country: long(5000) }, [NOT_THE_FORM]],
-  ] as [string, Partial<ContactValues>, string[]][])("refuses %s, and asks nothing of QuickBooks", async (_what, bad, errors) => {
+  ] as [string, Partial<ContactValues>, string[]][])("refuses %s in a field the parent changed, and sends nothing to QuickBooks", async (_what, bad, errors) => {
     const { r } = await seedContactFamilies(stub);
+    const before = copyOf(stub.customers);
     asParent(r.identity);
     expect(await save({ ...SHOWN, ...bad })).toEqual({ ok: false, errors });
+    // The record is read, to know which fields the parent changed: those are the ones checked. Nothing is written.
+    expect(calls()).toEqual([`GET /customer/${R_PARENT}`]);
+    expect(stub.customers).toEqual(before);
+    expect((await audits()).map((a) => [a.action, a.targetId, a.after])).toEqual([["parent.contact.save.failed", R_PARENT, { code: "invalid" }]]);
+    expect(revalidatedPaths()).toEqual([]);
+  });
+
+  it("refuses a field far too long to be a form's, and asks nothing of QuickBooks", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    expect(await save({ ...SHOWN, country: long(5000) })).toEqual({ ok: false, errors: [NOT_THE_FORM] });
     expect(stub.calls).toHaveLength(0);
     expect((await audits()).map((a) => [a.action, a.targetId, a.after])).toEqual([["parent.contact.save.failed", null, { code: "invalid" }]]);
   });

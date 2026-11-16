@@ -12,7 +12,7 @@ import type { ParentCtx } from "@/lib/guards";
 import { CUSTOMER_UPDATE, faultCodeOf, isQboId, qboCustomerById, qboUpdateCustomerContact, type CustomerContactChange } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getRosterSource } from "@/lib/roster/source";
-import { parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
+import { asShown, fieldErrors, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
 import { loadMyRecord, type MyContact, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { parentActor } from "./sessions";
@@ -37,6 +37,8 @@ type Failed = { ok: false; code: string };
 const failed = (code: string): Failed => ({ ok: false, code });
 const isRow = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v.normalize("NFC").trim() : "");
+/** One of QuickBooks' values as the form shows it: one line that a browser sends back as it was given (asShown). */
+const shown = (v: unknown): string => (typeof v === "string" ? asShown(v) : "");
 const actorOf = (ctx: ParentCtx) => parentActor({ id: ctx.parentId, email: ctx.email });
 
 /**
@@ -53,13 +55,18 @@ async function connectedCompany(): Promise<{ ok: true; realmId: string } | Faile
   return { ok: true, realmId: connection.realmId };
 }
 
-/** The phone and billing address on a customer as QuickBooks sent it. The form has two address lines: any further ones are shown on the second. */
+/**
+ * The phone and billing address on a customer QuickBooks sent, as the form shows them. The form has two address lines:
+ * any further ones are shown on the second. Each value is written as the one line a form field can hold (asShown).
+ * These are the values a save compares with what came back from the browser, to find what the parent changed: a value
+ * shown here must come back from an untouched field exactly as it is here.
+ */
 function valuesOf(customer: Record<string, unknown>): ContactValues {
-  const phone = isRow(customer.PrimaryPhone) ? str(customer.PrimaryPhone.FreeFormNumber) : "";
+  const phone = isRow(customer.PrimaryPhone) ? shown(customer.PrimaryPhone.FreeFormNumber) : "";
   const a = isRow(customer.BillAddr) ? customer.BillAddr : {};
   return {
-    phone, line1: str(a.Line1), line2: [a.Line2, a.Line3, a.Line4, a.Line5].map(str).filter(Boolean).join(", "),
-    city: str(a.City), region: str(a.CountrySubDivisionCode), postalCode: str(a.PostalCode), country: str(a.Country),
+    phone, line1: shown(a.Line1), line2: [a.Line2, a.Line3, a.Line4, a.Line5].map(shown).filter(Boolean).join(", "),
+    city: shown(a.City), region: shown(a.CountrySubDivisionCode), postalCode: shown(a.PostalCode), country: shown(a.Country),
   };
 }
 
@@ -132,12 +139,19 @@ const mayHaveSaved = (code: string): boolean => code === "timeout" || code === "
 
 /**
  * Saves the signed-in parent's phone and address to QuickBooks. `input` is what the browser sent, untrusted: it is
- * checked whole (parseContactForm) and holds no id. The record changed is the session's own (loadMyRecord).
+ * read whole (parseContactForm) and holds no id. The record changed is the session's own (loadMyRecord).
  *
  * The record is read from QuickBooks first. If its version is not the one the form was shown, nothing is sent: the
  * parent is told it changed and given the values as they stand (v1 spec §6.3). Otherwise only what differs is sent,
  * with that version; if QuickBooks finds the record changed in the moment between, it refuses, and the answer is the
  * same. Nothing is tried twice and nothing is overwritten.
+ *
+ * What differs is found by comparing what the browser sent with the record as the form shows it (valuesOf). The
+ * versions match, so that is what this form was shown, and a field the parent left alone comes back as it went. Only
+ * the fields that differ are checked for length and characters (fieldErrors): QuickBooks can hold a city longer than
+ * the portal lets a parent type, and a parent who changes their phone is not asked to fix it. When any part of the
+ * address differs the whole address is sent as the parent saw it, an untouched part that is too long included;
+ * QuickBooks holds that already, and says so itself if it won't take it.
  *
  * A save is audited with the before and after values, in the transaction that brings the roster cache's phone and
  * SyncToken up to date from QuickBooks' answer. A save that was refused or failed is audited with its short code.
@@ -155,7 +169,7 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
   if (take === "first_refusal") return refuse("rate_limited", [CONTACT_COPY.tooMany]);
 
   const parsed = parseContactForm(input);
-  if (!parsed.ok) return refuse("invalid", parsed.errors);
+  if (!parsed.ok) return refuse("invalid", parsed.errors); // not this form at all: nothing is asked of QuickBooks
   const { values, version } = parsed.form;
 
   const record = await loadMyRecord(ctx);
@@ -166,6 +180,8 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
   const before = await readLive(record, company.realmId, readMs);
   if (!before.ok) return refuse(before.code, [CONTACT_COPY.tryLater], record);
   if (before.form.version !== version) return refuse("stale", [CONTACT_COPY.changed], record, before.form);
+  const errors = fieldErrors(values, before.form.values);
+  if (errors.length) return refuse("invalid", errors, record);
 
   const change: CustomerContactChange = {
     ...(samePhone(values, before.form.values) ? {} : { phone: values.phone }),

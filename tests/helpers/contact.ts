@@ -58,6 +58,14 @@ export function contactForm(values: ContactValues, version: string, extra: Recor
   return form;
 }
 
+/**
+ * What a browser sends back for values the form showed and the parent left alone. Each is in an `<input>`, which holds
+ * one line: the browser drops every line break from the value it is given (HTML's value sanitization) and keeps the
+ * rest, a tab included. A field's `maxLength` cuts nothing the page put there itself.
+ */
+export const sentBackUntouched = (shown: ContactValues): ContactValues =>
+  Object.fromEntries(Object.entries(shown).map(([name, value]) => [name, value.replace(/[\r\n]/g, "")])) as ContactValues;
+
 /** The stub's customer with this id. */
 export const inQuickBooks = (stub: QboStub, id: string): Record<string, unknown> => {
   const customer = stub.customers.find((c) => c.Id === id);
