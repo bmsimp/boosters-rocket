@@ -42,6 +42,8 @@ const isDynamic = (route: string) => route.includes("[");
 const PARAMS: Record<string, (family: SeededParent) => Record<string, string | string[]>> = {
   // The shift both families are signed up for: the page shows its count and the viewer's own sign-up, never the other's.
   "/volunteer/shifts/[id]": (family) => ({ id: family.volunteer!.shiftId }),
+  // The family's own request for a form that is signed and finished: its page shows what is stored, and asks Documenso nothing.
+  "/forms/[id]": (family) => ({ id: family.forms!.ids.complete }),
 };
 
 /** Pages that show nothing about the family, and why. Everything else must show at least one of its own family's markers. */
@@ -62,6 +64,10 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // The event both families signed up for, the one count every family sees, and the family's own sign-up.
   "/volunteer": (family) => [family.spec.family.name, ...family.volunteer!.page],
   "/volunteer/shifts/[id]": () => ["2 of 4 places filled", "Rinse crew"],
+  // Every form the season asks of the family and of each student, each with its state in words.
+  "/forms": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.forms!.page],
+  // One form: its title, the student it is for, and that it is signed.
+  "/forms/[id]": (family) => ["Uniform agreement", family.spec.students[1]!.name, "This form is signed. Thank you!", `${family.spec.parent.name} (you)`],
 };
 /** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */
 function rosterOf(family: SeededParent): string[] {

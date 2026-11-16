@@ -301,6 +301,20 @@ export const jobRun = pgTable("job_run", {
 
 export type RequirementKind = "form" | "payment" | "volunteer" | "checklist";
 
+/**
+ * What a form requirement points at (v1 spec §9.1), kept in `requirement.form`: the Documenso template staff attached,
+ * as it was when the portal read and checked it, and who must sign. Documenso templates have no version: its id and
+ * its last-changed time are what there is.
+ */
+export type FormSetting = {
+  templateId: string;                 // Documenso's envelope id of the template
+  templateTitle: string;              // Documenso's name for it, shown to staff only
+  templateUpdatedAt: string;          // Documenso's last-changed time when staff attached it (ISO)
+  signerRoles: 1 | 2;                 // how many signer roles the template had then
+  signers: "any" | "every";           // any one guardian, or every guardian with a sign-in (up to the template's roles)
+  attachedAt: string;                 // when staff attached it (ISO)
+};
+
 /** A season, such as "Fall 2027". At most one is the current season, the one parents see (`season_current_uq`). */
 export const season = pgTable("season", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -340,6 +354,7 @@ export const requirement = pgTable("requirement", {
   covers: text("covers", { enum: ["everyone", "chosen"] }).notNull().default("everyone"),
   itemQboId: text("item_qbo_id"),                      // payment only: the QuickBooks product or service it is met by (src/lib/money/payment-rule.ts)
   position: integer("position").notNull(),
+  form: jsonb("form").$type<FormSetting>(),              // the form kind only: the Documenso template and who must sign; null until staff attach one
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [index("requirement_step_ix").on(t.stepId, t.position)]);
@@ -454,6 +469,76 @@ export const volunteerSignup = pgTable("volunteer_signup", {
   uniqueIndex("volunteer_signup_student_uq").on(t.shiftId, t.studentQboId).where(sql`cancelled_at is null and filler_kind = 'student'`),
   check("volunteer_signup_filler", sql`(${t.fillerKind} = 'guardian' and ${t.fillerParentId} is not null and ${t.studentQboId} is null) or (${t.fillerKind} = 'student' and ${t.studentQboId} is not null and ${t.fillerParentId} is null)`),
 ]);
+
+/* ---- Forms signed in Documenso (v1 spec §9; docs/superpowers/specs/2026-11-15-documenso-verification.md) ---- */
+
+export type SignatureRequestState = "not_opened" | "waiting" | "signed" | "complete" | "declined";
+/** A guardian the Documenso document was made for. The signing token is never kept: it is read from Documenso at each open. */
+export type RequestSigner = {
+  parentId: string;                   // parent.id: the signed-in person this recipient is
+  recipientId: number;                // Documenso's id of their recipient on this document
+  name: string;                       // as filled into the document
+  email: string;
+  signedAt: string | null;            // Documenso's time, once it says they signed (ISO)
+};
+
+/**
+ * One form to be signed for one family or one student: one row per form requirement and subject, and so per season.
+ * Its id is what Documenso holds as the document's `externalId`. `state` is what the portal last read from
+ * Documenso's API, never what a webhook said: not opened (no document), waiting for a guardian, signed by everyone and
+ * waiting for the sealed copy, complete (Documenso says COMPLETED: the only state that meets the requirement), or
+ * declined. `family_qbo_id` is whose it is: every parent lookup starts from it. The ids belong to the connected
+ * QuickBooks company; a company change deletes every row. `evidence_owed` is set when a request becomes complete and
+ * cleared by whatever stores its sealed PDF and audit record. The row keeps the requirement from being deleted.
+ */
+export const signatureRequest = pgTable("signature_request", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "restrict" }),
+  familyQboId: text("family_qbo_id").notNull(),
+  subjectQboId: text("subject_qbo_id").notNull(),          // the family's id for a per-family form, the student's for a per-student one
+  state: text("state", { enum: ["not_opened", "waiting", "signed", "complete", "declined"] }).notNull().default("not_opened"),
+  // The document in Documenso, and what it was made from. All null while there is none.
+  envelopeId: text("envelope_id"),
+  envelopeStatus: text("envelope_status"),                 // Documenso's own word, as last read
+  templateId: text("template_id"),
+  templateUpdatedAt: timestamp("template_updated_at", { withTimezone: true }), // the template's last-changed time when this document was made
+  signersMode: text("signers_mode", { enum: ["any", "every"] }),
+  subjectName: text("subject_name"),                       // the student's or family's name as filled in
+  signers: jsonb("signers").$type<RequestSigner[]>().notNull().default([]),
+  preparingAt: timestamp("preparing_at", { withTimezone: true }), // set while a document is being made or replaced, so two opens can't make two
+  documentCreatedAt: timestamp("document_created_at", { withTimezone: true }),
+  checkedAt: timestamp("checked_at", { withTimezone: true }),     // when Documenso's API was last read for it
+  allSignedAt: timestamp("all_signed_at", { withTimezone: true }), // when the portal first read that every signer had signed
+  sealAskedAt: timestamp("seal_asked_at", { withTimezone: true }), // when the portal last asked Documenso to seal it again
+  completedAt: timestamp("completed_at", { withTimezone: true }),  // Documenso's completion time
+  declinedAt: timestamp("declined_at", { withTimezone: true }),
+  evidenceOwed: boolean("evidence_owed").notNull().default(false),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [
+  uniqueIndex("signature_request_subject_uq").on(t.requirementId, t.subjectQboId),
+  uniqueIndex("signature_request_envelope_uq").on(t.envelopeId).where(sql`envelope_id is not null`),
+  index("signature_request_family_ix").on(t.familyQboId),
+  index("signature_request_state_ix").on(t.state, t.checkedAt),
+]);
+
+/**
+ * A guardian's agreement to sign one form electronically (v1 spec §9.2): who, when, from which address, and which
+ * version of the consent text they were shown (src/lib/forms/consent.ts). Without a row for the signed-in guardian no
+ * document is made and no signing token is handed out. Kept with the request as part of its evidence (§9.4). The
+ * request is the family's (signature_request.family_qbo_id), so a company change deletes these with it.
+ */
+export const signatureConsent = pgTable("signature_consent", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requestId: uuid("request_id").notNull().references(() => signatureRequest.id, { onDelete: "cascade" }),
+  parentId: uuid("parent_id").notNull(),                   // parent.id, with no foreign key: the record outlives the person's row
+  parentName: text("parent_name").notNull(),               // as the portal knew them then
+  parentEmail: text("parent_email").notNull(),
+  textVersion: text("text_version").notNull(),
+  agreedAt: timestamp("agreed_at", { withTimezone: true }).notNull().defaultNow(),
+  ip: inet("ip"),
+  userAgent: text("user_agent"),
+}, (t) => [uniqueIndex("signature_consent_uq").on(t.requestId, t.parentId, t.textVersion)]);
 
 /** Roles. The built-in Admin role has key 'admin' and builtin=true. */
 export const role = pgTable("role", {

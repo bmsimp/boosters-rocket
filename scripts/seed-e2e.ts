@@ -194,6 +194,36 @@ async function main() {
           (${E2E_VOLUNTEER.cleanup}, ${E2E_VOLUNTEER.event}, '09:00', '11:00', 2, 'Cleanup')`;
   await sql`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, student_qbo_id, filler_name)
           VALUES (${E2E_VOLUNTEER.griddle}, '10', ${crypto.randomUUID()}, 'student', '12', 'Leo Rivera')`;
+
+  // Forms (v1 spec §9). Forms are NOT set up: no Documenso address or token is stored, so nothing in the e2e run can
+  // call a Documenso, and the pages show what is stored. Three optional form requirements in Join, which the
+  // Quetzalcoatl family has finished: one asked of every family, with a signed form stored for the Quetzalcoatl family
+  // and an unsigned one for Zelda's second family; one asked of each student, with no template yet; and one asked of
+  // the second family alone (its title is in OTHER_FAMILIES, tests/e2e/parent-session.spec.ts). The two request ids
+  // are fixed: that spec asks for /forms/<id> with each.
+  const template = { templateId: "envelope_e2etemplate01", templateTitle: "E2E travel consent", templateUpdatedAt: "2026-11-01T12:00:00.000Z", signerRoles: 2, signers: "any", attachedAt: "2026-11-02T12:00:00.000Z" };
+  const forms = [
+    { title: "Travel consent", appliesTo: "family", form: template, chosen: null },
+    { title: "Medical release", appliesTo: "student", form: null, chosen: null },
+    { title: "Trailer towing agreement", appliesTo: "family", form: template, chosen: ["E2E-FAMILY-2"] },
+  ];
+  const formIds: Record<string, string> = {};
+  for (const [at, f] of forms.entries()) {
+    const [row] = await sql`INSERT INTO requirement (step_id, kind, title, required, applies_to, covers, position, form)
+            VALUES (${stepIds.Join!}, 'form', ${f.title}, false, ${f.appliesTo}, ${f.chosen ? "chosen" : "everyone"}, ${100 + at}, ${f.form ? sql.json(f.form) : null}) RETURNING id`;
+    formIds[f.title] = row!.id as string;
+    for (const subject of f.chosen ?? []) await sql`INSERT INTO requirement_cover (requirement_id, subject_qbo_id) VALUES (${row!.id}, ${subject})`;
+  }
+  const zeldaSigned = [{ parentId: p!.id, recipientId: 1, name: "Zelda Quetzalcoatl", email: "zelda@example.com", signedAt: "2026-11-10T15:00:00.000Z" }];
+  await sql`INSERT INTO signature_request (id, requirement_id, family_qbo_id, subject_qbo_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
+              document_created_at, checked_at, all_signed_at, completed_at, evidence_owed)
+            VALUES ('e2e00000-0000-4000-8000-000000000001', ${formIds["Travel consent"]!}, 'E2E-FAMILY', 'E2E-FAMILY', 'complete', 'envelope_e2equetzalcoatl', 'COMPLETED', ${template.templateId}, ${template.templateUpdatedAt},
+              'any', 'Quetzalcoatl Family', ${sql.json(zeldaSigned)}, now(), now(), now(), now(), true)`;
+  const secondWaiting = [{ parentId: crypto.randomUUID(), recipientId: 2, name: "Wilhelmina Secondborn", email: "wilhelmina@second.example", signedAt: null }];
+  await sql`INSERT INTO signature_request (id, requirement_id, family_qbo_id, subject_qbo_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
+              document_created_at, checked_at)
+            VALUES ('e2e00000-0000-4000-8000-000000000002', ${formIds["Travel consent"]!}, 'E2E-FAMILY-2', 'E2E-FAMILY-2', 'waiting', 'envelope_e2esecondfamily', 'PENDING', ${template.templateId}, ${template.templateUpdatedAt},
+              'any', 'Second Family', ${sql.json(secondWaiting)}, now(), now())`;
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   await sql.end();

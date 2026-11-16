@@ -15,6 +15,7 @@ export const PERMISSIONS = [
   "Settings.SignIn.ReadWrite",  // admin-only: change how staff and parents sign in (sign-in settings)
   "Settings.Mail.ReadWrite",    // admin-only: change outgoing mail; whoever controls it can read parents' sign-in codes
   "Settings.QuickBooks.ReadWrite", // admin-only: connect QuickBooks and choose the membership shape; it reaches the club's books
+  "Settings.Forms.ReadWrite",      // admin-only: connect the club's Documenso; its API token can read every signed form
   "Roster.Read",                   // see families, students and parents (or members) as QuickBooks lists them
   "Settings.Parents.ReadWrite",    // admin-only: switch parent sign-ins and welcome emails on, and review company matches
   "Parents.ReadWrite",             // decide held addresses, block and unblock a parent, resend a welcome email
@@ -30,7 +31,7 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Never grantable through a custom role; only the built-in Admin holds them. */
-export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read"];
+export const ADMIN_ONLY: readonly Permission[] = ["Admin.Roles.ReadWrite", "Staff.Users.ReadWrite", "Settings.SignIn.ReadWrite", "Settings.Mail.ReadWrite", "Settings.QuickBooks.ReadWrite", "Settings.Parents.ReadWrite", "Audit.Log.Read", "Admin.Health.Read", "Settings.Forms.ReadWrite"];
 
 export const GRANTABLE: readonly Permission[] = PERMISSIONS.filter((p) => !ADMIN_ONLY.includes(p));
 

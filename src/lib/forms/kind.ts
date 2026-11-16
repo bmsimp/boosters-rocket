@@ -1,0 +1,41 @@
+// How a form requirement is met (v1 spec §10.2): its Documenso document is complete, which is the request's state
+// "complete" and nothing short of it. The entry src/lib/seasons/kinds.ts gives the form kind. It reads the requests
+// of the requirements and the families or students it is asked about, and no others: a parent's season passes its own
+// family and students. Imports no staff-only module (tests/integration/page-guards.test.ts scans this folder).
+import "server-only";
+import { and, inArray } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { requirement, signatureRequest } from "@/lib/db/schema";
+import type { KindRule } from "@/lib/seasons/kinds";
+import type { Standing } from "@/lib/seasons/progress";
+import { getFormsConfig } from "./settings";
+import { STATE_WORDS, isMet, wordsFor } from "./states";
+
+const key = (requirementId: string, subjectQboId: string) => `${requirementId}|${subjectQboId}`; // pairKey() of src/lib/seasons/kinds.ts, which imports this file
+
+export const formRule: KindRule = {
+  standings: async ({ requirements, subjectQboIds }) => {
+    const standings = new Map<string, Standing>();
+    const ids = requirements.map((r) => r.id);
+    if (ids.length === 0 || subjectQboIds?.length === 0) return standings;
+    const rows = await db.select({ requirementId: signatureRequest.requirementId, subjectQboId: signatureRequest.subjectQboId, state: signatureRequest.state, signers: signatureRequest.signers })
+      .from(signatureRequest).where(and(inArray(signatureRequest.requirementId, ids), subjectQboIds ? inArray(signatureRequest.subjectQboId, [...subjectQboIds]) : undefined));
+    // Asked about particular families or students (a parent's own season, or staff looking at one family): a form
+    // that can't be signed yet says so, in place of asking for a signature nobody can give.
+    if (subjectQboIds) {
+      const [config, settings] = await Promise.all([getFormsConfig(), db.select({ id: requirement.id, form: requirement.form }).from(requirement).where(inArray(requirement.id, ids))]);
+      for (const r of requirements) {
+        if (config && settings.find((s) => s.id === r.id)?.form) continue;
+        for (const subject of subjectQboIds) standings.set(key(r.id, subject), { met: false, words: STATE_WORDS.notReady });
+      }
+    }
+    for (const row of rows) {
+      // A form with nothing made for it keeps the words above; anything a document has reached is said as it is.
+      if (row.state === "not_opened" && standings.has(key(row.requirementId, row.subjectQboId))) continue;
+      standings.set(key(row.requirementId, row.subjectQboId), { met: isMet(row.state), words: wordsFor(row.state, row.signers) });
+    }
+    return standings;
+  },
+  nothingYet: () => ({ met: false, words: STATE_WORDS.notSigned }),
+  ticked: false,
+};

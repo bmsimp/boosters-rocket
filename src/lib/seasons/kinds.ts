@@ -1,13 +1,14 @@
 /**
- * How each kind of requirement is met (v1 spec §10.2): one entry per kind, and the only place that knows. Checklist
- * items, payments and volunteering are worked out. Forms get their entry in the slice that builds them: until a
- * kind has one, staff can't create a requirement of it (KIND_RULES[kind] is null), and nothing else has to change.
+ * How each kind of requirement is met (v1 spec §10.2): one entry per kind, and the only place that knows. All four are
+ * built: checklist items (a staff tick), forms (Documenso), payments (invoices carrying an item) and volunteering
+ * (signed-up and, later, confirmed shifts). A kind whose entry is null can't be created by staff.
  */
 import type { RequirementKind } from "@/lib/db/schema";
 import { NO_INVOICE_YET } from "@/lib/money/payment-rule";
 import { paymentStandings } from "@/lib/money/payment-standings";
 import { volunteerStanding } from "@/lib/volunteer/rules";
 import { signedUpAmounts } from "@/lib/volunteer/signed-up";
+import { formRule } from "@/lib/forms/kind";
 import type { Requirement, Standing } from "./progress";
 
 /** What `requirement_progress` holds for one requirement and one family or student. */
@@ -73,7 +74,7 @@ const volunteer: KindRule = {
 
 export const KIND_RULES: Record<RequirementKind, KindRule | null> = {
   checklist,
-  form: null,      // Forms with Documenso: met when the document is completed by the required guardians (§9).
+  form: formRule,  // met when Documenso says the document is completed by the required guardians (§9; src/lib/forms/kind.ts)
   payment,
   volunteer,
 };

@@ -15,6 +15,7 @@ import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
 import { removeRequirementAction, setCoverageAction, updateRequirementAction } from "../../../actions";
 import { PaymentItemForm } from "../../../payment-item";
 import { chooseItemAction, readItemsAction } from "../../../payment-actions";
+import { FormTemplateBox } from "../../../form-template";
 
 export const metadata = { title: "Requirement" };
 export const dynamic = "force-dynamic";
@@ -71,6 +72,8 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
           )}
         </section>
       )}
+
+      {r.kind === "form" && <FormTemplateBox requirementId={r.id} appliesTo={r.appliesTo} canChange={canChange} />}
 
       <section className="box" aria-labelledby="cover-h"><h2 id="cover-h">Who it is asked of</h2>
         <p>{r.covers === "everyone" ? `Everyone: every ${r.appliesTo === "family" ? "family" : "student"} on the roster.`

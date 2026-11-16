@@ -2,7 +2,7 @@ import { and, asc, eq, gt, lte, sql, count } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
 
-export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent";
+export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -19,6 +19,10 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // from QuickBooks each time, so that is bounded too, well above what editing takes.
   contact_save_parent: { max: 6, windowMs: 60 * 60 * 1000 },
   contact_open_parent: { max: 30, windowMs: WINDOW_MS },
+  // Opening a form to sign, and checking how one stands (src/lib/forms/signing.ts), counted per person: each asks the
+  // club's Documenso once, and Documenso counts every call the portal makes against one limit of its own. A family
+  // signing a dozen forms in a sitting opens and checks each a few times, so this sits well above that.
+  form_open_parent: { max: 120, windowMs: WINDOW_MS },
 };
 
 /**

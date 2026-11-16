@@ -118,6 +118,7 @@ export const addRequirementAction = staffAction(SETUP, async (ctx, stepId: strin
   const r = await addRequirement(stepId, { kind, appliesTo, ...fieldsOf(fields) }, op(ctx, SETUP));
   if (!r.ok) return r;
   refresh();
+  if (kind === "form") return { ok: true, message: "Added. Open it to attach its template: until then parents read that it isn't ready." };
   return { ok: true, message: "Added. It is asked of everyone until you choose a list." };
 });
 

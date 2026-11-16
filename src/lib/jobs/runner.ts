@@ -10,6 +10,7 @@ import { sendReviewNotice } from "@/lib/parents/review-notice";
 import { expirePreviousCompany } from "@/lib/parents/company-change";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
+import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -60,6 +61,15 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     }
   } catch {
     ran.push({ job: CLEANUP_JOB, ok: false });
+  }
+  // Forms out for signing are asked about every few minutes (Documenso's webhooks are not retried). It needs Documenso
+  // and neither mail nor QuickBooks; each form is asked about only when its own last read is old enough, so most wakes
+  // ask nothing and say nothing.
+  try {
+    const forms = await checkOpenForms(now);
+    if (forms.asked > 0) ran.push({ job: FORMS_JOB, ok: forms.failed === 0 });
+  } catch {
+    ran.push({ job: FORMS_JOB, ok: false });
   }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record,

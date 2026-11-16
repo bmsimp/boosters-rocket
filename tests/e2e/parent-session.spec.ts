@@ -48,6 +48,8 @@ const PARAMS: Record<string, DynamicRouteParams> = {
   // A shift is the club's, not a family's: `own` is one the Quetzalcoatl family can sign up for, `other` the one the
   // Rivera family has a place on. Neither may send anything of the Riveras' but the count.
   "/volunteer/shifts/[id]": { own: { id: E2E_VOLUNTEER.cleanup }, other: { id: E2E_VOLUNTEER.griddle } },
+  // The Quetzalcoatl family's signed Travel consent, and the second family's unsigned one (fixed ids in scripts/seed-e2e.ts).
+  "/forms/[id]": { own: { id: "e2e00000-0000-4000-8000-000000000001" }, other: { id: "e2e00000-0000-4000-8000-000000000002" } },
 };
 
 // Everything scripts/seed-e2e.ts gives a family that is not the Quetzalcoatl family, Zelda's second family included:
@@ -60,7 +62,9 @@ const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerr
   // QuickBooks' own balance for the second family's student, which staff see under "Worth a look".
   "$362.47",
   // What the season asks of other families alone, and why one of them was let off.
-  "Tuba locker key", "Percussion truck crew", "Cast on his arm"];
+  "Tuba locker key", "Percussion truck crew", "Cast on his arm",
+  // Forms: the one asked of the second family alone, and the second family's own request: its document and its other guardian.
+  "Trailer towing", "envelope_e2esecond", "Wilhelmina", "wilhelmina@second.example"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);
@@ -103,7 +107,7 @@ test("every requirement and waiver the seed gives another family alone is search
   const titles = await sql`SELECT r.title FROM requirement r WHERE r.covers = 'chosen'
     AND NOT EXISTS (SELECT 1 FROM requirement_cover c WHERE c.requirement_id = r.id AND c.subject_qbo_id IN (${mine}))`;
   const reasons = await sql`SELECT waived_reason FROM requirement_progress WHERE waived_reason IS NOT NULL AND subject_qbo_id NOT IN (${mine})`;
-  expect(titles.length).toBeGreaterThanOrEqual(2);
+  expect(titles.length).toBeGreaterThanOrEqual(3);
   expect(reasons.length).toBeGreaterThanOrEqual(1);
   const unsearched = [...titles.map((r) => r.title as string), ...reasons.map((r) => r.waived_reason as string)].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)));
   expect(unsearched, `scripts/seed-e2e.ts gives another family these in the season, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
