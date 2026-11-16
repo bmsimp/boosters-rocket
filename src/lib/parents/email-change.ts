@@ -255,7 +255,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     // Another record is theirs now: this request can never be confirmed. No record at all may come back (a roster read
     // under way), so that one is left for another try.
     if (record) await spend(row.id);
-    return refuse("not_their_record", [EMAIL_COPY.linkNoGood], row.recordQboId);
+    return refuse("not_their_record", [EMAIL_COPY.linkNoGood], record?.qboId);
   }
   if (!(await othersAllow(ctx))) return refuse("not_offered", [EMAIL_COPY.askTheClub], record.qboId);
   const realmId = await connectedCompany();
