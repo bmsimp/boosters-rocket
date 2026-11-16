@@ -247,7 +247,7 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
   });
 
   it.skipIf(!hasFlock)("refuses when another deploy holds the lock", async () => {
-    const holder = spawn("bash", ["-c", 'exec 9>"$1/.deploy.lock"; flock 9; echo locked; sleep 5', "_", dir.replace(/\\/g, "/")]);
+    const holder = spawn("bash", ["-c", 'exec 9>"$1/.deploy.lock"; flock 9; echo locked; sleep 30', "_", dir.replace(/\\/g, "/")]);
     try {
       await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
       const r = run();

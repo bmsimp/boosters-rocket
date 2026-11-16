@@ -1,8 +1,11 @@
 /**
- * Which database a vitest run uses, and the addresses derived from it. vitest.config.mts gives every test DATABASE_URL:
- * TEST_DATABASE_URL when it is set (an agent in its own worktree must set it), else the shared default. The global setup
- * checks and migrates that database; tests that need the server's maintenance database or an empty scratch database
- * ask here, so nothing is hard-coded and two runs on different databases never touch each other's.
+ * Which database a vitest run uses, and the addresses derived from it. TEST_DATABASE_URL names the run's database when
+ * it is set (an agent in its own worktree must set it), else the run has the shared default. The global setup checks
+ * and migrates that database. Test files run in several workers at once, and each worker past the first has a database
+ * of its own, named after the run's (workerDatabase, below); tests/setup/worker.ts puts the worker's address in
+ * DATABASE_URL before an integration test file is loaded. Tests that need the server's maintenance database or an
+ * empty scratch database ask here, so nothing is hard-coded, and two runs on different databases, like two workers of
+ * one run, never touch each other's.
  */
 
 import { statSync } from "node:fs";
@@ -60,7 +63,29 @@ export function assertOwnDatabaseInWorktree(root: string, url: string, linkedWor
   ].join("\n"));
 }
 
-/** Inside a test: the address vitest.config.mts gave this run. */
+/**
+ * What a unit test has for DATABASE_URL when the files run in parallel (tests/setup/no-database.ts): an address that
+ * passes src/env.ts and that nothing listens on, so a unit test can't read or write a database beside the workers.
+ */
+export const NO_DATABASE_URL = "postgres://nobody:nothing@127.0.0.1:1/unit_tests_have_no_database";
+
+/**
+ * The database of one of a run's workers. vitest numbers the workers running at one time from 1 (VITEST_POOL_ID):
+ * worker 1 has the run's own database, and worker N has one named after it, so booster_test gives booster_w2_test and
+ * booster_agent1_test gives booster_agent1_w2_test. tests/setup/worker-databases.ts makes them and drops them.
+ */
+export function workerDatabase(poolId: number, runUrl?: string): { name: string; url: string } {
+  const run = runDatabaseUrl(runUrl);
+  if (!Number.isInteger(poolId) || poolId < 1) throw new Error(`The tests refuse to run: a worker's number must be a whole number from 1 (it is "${poolId}").`);
+  if (poolId === 1) return { name: databaseName(run), url: run };
+  const name = `${databaseName(run).replace(/_test$/, "")}_w${poolId}_test`;
+  if (!validName(name)) {
+    throw new Error(`The tests refuse to run: the worker database name "${name}" must be at most ${MAX_NAME} characters. Use a shorter test database name.`);
+  }
+  return { name, url: withDatabase(run, name) };
+}
+
+/** Inside a test: the address this file was given, the run's database or its worker's. */
 function runDatabaseUrl(url = process.env.DATABASE_URL ?? ""): string {
   assertTestDatabase(url);
   return url;
@@ -78,11 +103,19 @@ export function adminDatabaseUrl(runUrl?: string): string {
 }
 
 /**
- * A scratch database for a test that needs an empty one. Its name comes from the run's database name, so two runs on
- * different databases never drop each other's scratch databases: booster_test gives booster_<purpose>_test, and
+ * What the tests make scratch databases for. A test that needs a new one adds its purpose here: when a run ends it
+ * drops the scratch databases of these purposes that its tests left behind (tests/setup/worker-databases.ts).
+ */
+export const SCRATCH_PURPOSES = ["migrate_script", "migrate_parents", "restore", "workers"] as const;
+export type ScratchPurpose = (typeof SCRATCH_PURPOSES)[number];
+
+/**
+ * A scratch database for a test that needs an empty one. Its name comes from the name of the database the test file
+ * was given, so two runs on different databases, and two workers of one run, never drop each other's scratch
+ * databases: booster_test gives booster_<purpose>_test, its second worker booster_w2_<purpose>_test, and
  * booster_agent1_test gives booster_agent1_<purpose>_test.
  */
-export function scratchDatabase(purpose: string, runUrl?: string): { name: string; url: string } {
+export function scratchDatabase(purpose: ScratchPurpose, runUrl?: string): { name: string; url: string } {
   const run = runDatabaseUrl(runUrl);
   const name = `${databaseName(run).replace(/_test$/, "")}_${purpose}_test`;
   if (!validName(name)) {

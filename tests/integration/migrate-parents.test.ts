@@ -7,8 +7,12 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { adminDatabaseUrl, scratchDatabase } from "../setup/database-url";
 
-// On the run's own server, named after the run's database, so two runs never drop each other's scratch database.
+// On the run's own server, named after this file's database (the run's, or its worker's), so two runs, or two workers
+// of one run, never drop each other's scratch database.
 const ADMIN_URL = adminDatabaseUrl();
+// Making or dropping a database waits for Postgres to write out what every database on the server has changed: with
+// other runs and workers busy, that has taken two minutes.
+const DATABASE_WORK = 300_000;
 const { name: NAME, url: DB_URL } = scratchDatabase("migrate_parents");
 let oldFolder = "";
 
@@ -45,14 +49,14 @@ describe("migration to person records", { timeout: 60_000 }, () => {
     await pg.end();
 
     await migrateWith(path.resolve("drizzle"));
-  });
+  }, DATABASE_WORK);
 
   afterAll(async () => {
     const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
     await admin.unsafe(`DROP DATABASE IF EXISTS ${NAME} WITH (FORCE)`);
     await admin.end();
     rmSync(oldFolder, { recursive: true, force: true });
-  });
+  }, DATABASE_WORK);
 
   const q = async <T>(f: (pg: postgres.Sql) => Promise<T>) => {
     const pg = postgres(DB_URL, { max: 1, onnotice: () => {} });
