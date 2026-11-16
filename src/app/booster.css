@@ -445,6 +445,20 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .volunteer-done { margin-top: var(--s3); font-weight: 700; }
 .volunteer-cancel { margin-top: var(--s2); }
 .lines li > div > .state { margin-top: 2px; }
+/* Checking in: a full-width button per person on a phone, then one for everyone. */
+.checkin-one { grid-column: 1 / -1; }
+.checkin-one .btn { width: 100%; }
+@media (min-width: 760px) { .checkin-one { grid-column: auto; } .checkin-one .btn { width: auto; } }
+.checkin-all { margin-top: var(--s3); }
+/* A shift's check-in sheet, to print or show at the event. A QR code scans only dark on light, whatever the theme. */
+.checkin-sheet { text-align: center; }
+.checkin-qr { display: block; width: min(100%, 20rem); height: auto; margin: var(--s4) auto; color: black; background: white; }
+.checkin-address { overflow-wrap: anywhere; font-size: 1rem; }
+.checkin-sheet .row-actions { justify-content: center; }
+@media print {
+  .bar, .checkin-tools { display: none; }
+  .checkin-sheet .box { border: 0; box-shadow: none; }
+}
 /* ---- End of Volunteer ---- */
 
 /* ---- Forms: the parent's Forms pages and the signing frame. Keep new rules for them inside this block. ---- */

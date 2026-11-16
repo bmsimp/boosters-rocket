@@ -5,24 +5,32 @@ import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { dateWords, hoursWords, shiftTimeWords } from "@/lib/volunteer/clock";
 import { getEventSetup, volunteerRequirementChoices } from "@/lib/volunteer/setup";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { LocalTime } from "@/app/components/local-time";
-import { OneButton } from "../../seasons/forms";
-import { addShiftAction, cancelEventAction, cancelShiftAction, copyEventAction, updateEventAction, updateShiftAction } from "../actions";
-import { CopyForm, EventForm, ShiftForm } from "../forms";
+import { OneButton, TextAction } from "../../seasons/forms";
+import { addShiftAction, cancelEventAction, cancelShiftAction, copyEventAction, removeSignupAction, updateEventAction, updateShiftAction } from "../actions";
+import { addCheckInAction, removeCreditAction } from "../credit/actions";
+import { ConfirmButton, CopyForm, EventForm, ShiftForm } from "../forms";
 
 export const metadata = { title: "Volunteer event" };
 export const dynamic = "force-dynamic";
 
 /**
- * One event: its details, its shifts, and who has signed up for each, by name. A list of people from many families,
- * like the roster's list, so opening it is not audited; every change is.
+ * One event: its details, its shifts, and who has signed up for each, by name, with whether each is checked in. A list
+ * of people from many families, like the roster's list, so opening it is not audited; every change is. Staff who can
+ * change events print each shift's check-in code and take a person off a shift; staff who correct credit add a missed
+ * check-in once a shift has started, or remove one, with a reason only staff see.
  */
 export default async function VolunteerEventPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireStaffPage("Volunteer.Event.Read");
   const { id } = await params;
+  // Read before the sign-ups: a change of company in between makes the tag the older one, and a correction is refused.
+  const rosterTag = await currentRosterTag();
   const event = isUuid(id) ? await getEventSetup(id) : null;
   if (!event) notFound();
   const canChange = can(ctx.effective, "Volunteer.Event.ReadWrite") && !event.cancelled;
+  const canPrint = can(ctx.effective, "Volunteer.Event.ReadWrite");
+  const canCredit = can(ctx.effective, "Volunteer.Credit.ReadWrite");
   const choices = await volunteerRequirementChoices();
   const labelOf = (rid: string) => choices.find((c) => c.id === rid)?.label ?? "A requirement that is gone";
   const options = choices.map((c) => ({ id: c.id, label: `${c.label} (${c.unit}, ${c.appliesTo === "family" ? "each family" : "each student"})${c.current ? "" : " · not the current season"}` }));
@@ -52,11 +60,30 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
           <h2 id={`shift-${s.id}`}>{shiftTimeWords(s.startsAt, s.endsAt)}{s.role ? `, ${s.role}` : ""}</h2>
           <p>{s.cancelled ? "Cancelled. " : ""}{s.signups.length} of {s.places} {s.places === 1 ? "place" : "places"} filled · {hoursWords(s.minutes)} {s.minutes === 60 ? "hour" : "hours"}</p>
           <p className="hint">{s.requirementIds.length === 0 ? "Counts toward no requirement." : `Counts toward: ${s.requirementIds.map(labelOf).join("; ")}.`}</p>
+          {canPrint && !s.cancelled && <p><Link href={`/staff/volunteer/check-in/${s.id}`}>Check-in code to print</Link></p>}
           {s.signups.length === 0 ? <p>Nobody has signed up yet.</p> : (
             <ul className="lines">{s.signups.map((x) => (
               <li key={x.id}><div>
                 <span className="what">{x.fillerName}</span>
                 <span className="when">{x.familyName}{x.fillerKind === "student" ? `, signed up by ${x.signedUpByName}` : ""} · <LocalTime iso={x.signedUpAt} /></span>
+                {/* Plain words: the state icons mean done, to do and waived. */}
+                <span className="state">{x.checkIn ? (x.checkIn.byStaff ? `Checked in (added by ${x.checkIn.byStaff})` : "Checked in") : s.started ? "Not checked in" : "Signed up"}</span>
+                {x.checkIn && <span className="when">Checked in <LocalTime iso={x.checkIn.at} /></span>}
+                {canCredit && x.checkIn && (
+                  <details className="more"><summary>Remove this check-in</summary>
+                    <TextAction field="Why it's being removed (only staff see this)" label="Remove the check-in" pendingLabel="Removing…" maxLength={500} multiline
+                      act={removeCreditAction.bind(null, x.checkIn.creditId, rosterTag)} />
+                  </details>
+                )}
+                {canCredit && !x.checkIn && s.started && !s.cancelled && !event.cancelled && (
+                  <OneButton label={`Check in ${x.fillerName}`} pendingLabel="Checking in…" act={addCheckInAction.bind(null, x.id, rosterTag)} />
+                )}
+                {canPrint && !x.checkIn && (
+                  <details className="more"><summary>Take {x.fillerName} off this shift</summary>
+                    <ConfirmButton label="Remove this sign-up" question={`Remove ${x.fillerName} from this shift? The place is freed${s.ended ? "" : ", and the guardian who signed up is emailed"}.`}
+                      yes="Yes, remove it" act={removeSignupAction.bind(null, x.id)} />
+                  </details>
+                )}
               </div></li>))}</ul>
           )}
           {canChange && !s.cancelled && (

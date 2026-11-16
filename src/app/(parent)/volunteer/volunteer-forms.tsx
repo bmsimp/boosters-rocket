@@ -3,7 +3,7 @@ import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "../../components/action-error";
 
 /**
- * The two things a parent does on the Volunteer pages: sign someone up for a shift, and cancel a sign-up. Each is given
+ * The things a parent does on the Volunteer pages: sign someone up for a shift, cancel a sign-up, and check in. Each is given
  * only what it shows: the family's own people and the words for what a place would count toward. The server action is
  * bound to the shift or sign-up on the server, and checks it again against the session's family.
  */
@@ -64,6 +64,18 @@ export function CancelSignup({ label, act }: { label: string; act: () => Promise
           <button type="button" className="btn btn-line" disabled={pending} onClick={() => setAsking(false)}>Keep it</button>
         </>
       )}
+      <Outcome state={state} />
+    </div>
+  );
+}
+
+/** One press checks someone in (or everyone, with `wide`). The action is bound to the code and the sign-up on the server, and checks both again. */
+export function CheckInButton({ label, act, wide }: { label: string; act: () => Promise<Result>; wide?: boolean }) {
+  const [state, run, pending] = useActionState(async () => safely(() => act(), failed), null);
+  if (state?.ok) return <Outcome state={state} />;
+  return (
+    <div className={wide ? "checkin-all" : "checkin-one"}>
+      <button type="button" className={wide ? "btn volunteer-confirm" : "btn btn-club pay"} disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Checking in…" : label}</button>
       <Outcome state={state} />
     </div>
   );

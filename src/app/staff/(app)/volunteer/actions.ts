@@ -4,6 +4,7 @@ import { staffAction, type StaffCtx } from "@/lib/guards";
 import { isUuid } from "@/lib/seasons/ids";
 import { addShift, cancelEvent, cancelShift, copyEvent, createEvent, updateEvent, updateShift, type EventInput, type ShiftInput } from "@/lib/volunteer/setup";
 import { CUTOFF_MAX, saveVolunteerSettings } from "@/lib/volunteer/settings";
+import { renewCheckInCode, removeSignup } from "@/lib/volunteer/staff-credit";
 
 // Every volunteer write needs the one permission; reading the events and the lists needs Volunteer.Event.Read.
 const WRITE = "Volunteer.Event.ReadWrite" as const;
@@ -104,4 +105,23 @@ export const saveCutoffAction = staffAction(WRITE, async (ctx, typed: string): P
   if (!r.ok) return r;
   refresh();
   return { ok: true, message: "Saved." };
+});
+
+/** A new check-in code for a shift: the printed one opens nothing from now on. */
+export const renewCheckInCodeAction = staffAction(WRITE, async (ctx, shiftId: string): Promise<Done> => {
+  if (!isUuid(shiftId)) return NOT_FROM_PAGE;
+  const r = await renewCheckInCode(shiftId, op(ctx));
+  if (!r.ok) return r;
+  revalidatePath("/staff/volunteer", "layout");
+  return { ok: true, message: "Here is the new code. The old one no longer opens anything, so print this one again." };
+});
+
+/** Takes one person off a shift: the place is free again, and the guardian who took it is told. Refused while it is checked in. */
+export const removeSignupAction = staffAction(WRITE, async (ctx, signupId: string): Promise<Done> => {
+  if (!isUuid(signupId)) return NOT_FROM_PAGE;
+  const r = await removeSignup(signupId, op(ctx));
+  if (!r.ok) return r;
+  refresh();
+  const told = r.told > 0 ? " The guardian who signed up has been emailed." : r.failed > 0 ? " The guardian couldn't be emailed (see Mail under Settings)." : "";
+  return { ok: true, message: `Removed. The place is free again.${told}` };
 });
