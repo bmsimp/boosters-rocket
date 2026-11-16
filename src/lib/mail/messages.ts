@@ -45,6 +45,10 @@ export function reviewNoticeMessage(b: Brand, to: string, o: { newCount: number;
   return { to, subject: `${b.clubName}: ${items(o.newCount)} to review`, text: text(lines), html: html(b, lines) };
 }
 
+/**
+ * A parent's change of sign-in address (src/lib/parents/email-change.ts), to the new address: the link that confirms it.
+ * It says nothing about the person's family or anyone else, and nothing about whether the address is known already.
+ */
 export function emailChangeConfirmMessage(b: Brand, to: string, o: { link: string }): MailMessage {
   const lines = [
     `Someone asked to use this address to sign in to ${b.clubName}. If it was you, open this link within 24 hours to confirm:`,
@@ -54,10 +58,12 @@ export function emailChangeConfirmMessage(b: Brand, to: string, o: { link: strin
   return { to, subject: `Confirm your new email for ${b.clubName}`, text: text(lines), html: html(b, lines) };
 }
 
-export function emailChangeNoticeMessage(b: Brand, to: string, o: { byStaff: boolean }): MailMessage {
-  const lines = o.byStaff
-    ? [`The club changed the email address you sign in to ${b.clubName} with. This address no longer works for signing in.`, "If this is a surprise, contact the club."]
-    : [`Someone asked to change the email address you sign in to ${b.clubName} with. Nothing changes until the new address is confirmed.`, "If it wasn't you, contact the club."];
+/** The same change, to the old address: that it was asked for, and to tell the club if it wasn't them. No link, and not the new address. */
+export function emailChangeNoticeMessage(b: Brand, to: string): MailMessage {
+  const lines = [
+    `Someone asked to change the email address you sign in to ${b.clubName} with. Nothing changes until the new address is confirmed.`,
+    "If it wasn't you, please tell the club.",
+  ];
   return { to, subject: `Your ${b.clubName} sign-in email`, text: text(lines), html: html(b, lines) };
 }
 

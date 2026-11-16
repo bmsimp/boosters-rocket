@@ -1,4 +1,5 @@
 import { requireParentPage } from "@/lib/guards";
+import { canChangeMyEmail } from "@/lib/parents/email-change";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { getClubSettings } from "@/lib/settings/club";
 import { DetailsBox, NotSetUpBox, RosterAsOf, StudentsBox } from "../family-boxes";
@@ -7,14 +8,14 @@ export const metadata = { title: "Family" };
 
 export default async function FamilyPage() {
   const ctx = await requireParentPage("/family");
-  const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
+  const [family, club, ownEmail] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx)]);
   return (
     <main className="wrap single family-page">
       <h1 className="page-title">{family ? family.name : "Your family"}</h1>
       {family ? (
         <>
           {family.students && <StudentsBox students={family.students} />}
-          <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} />
+          <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail} />
         </>
       ) : <NotSetUpBox treasurerEmail={club.treasurerEmail} />}
       {ctx.families.length > 1 && (
@@ -33,6 +34,8 @@ export default async function FamilyPage() {
           <dt>Email</dt><dd>{ctx.email}</dd>
         </dl>
         <p className="help">We email a sign-in code to this address each time you sign in.</p>
+        {/* No id in the link: the page takes whose address it is from the session. */}
+        {ownEmail && <div className="box-foot"><a className="btn btn-line" href="/family/email">Change my sign-in email</a></div>}
       </section>
       {family && <RosterAsOf family={family} />}
     </main>

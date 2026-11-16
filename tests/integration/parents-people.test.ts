@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, parent, parentAuthUser, parentAuthSession, signinCode } from "@/lib/db/schema";
-import { blockPerson, unblockPerson, changeParentEmailByStaff } from "@/lib/parents/people";
+import { blockPerson, unblockPerson } from "@/lib/parents/people";
 import { enabledGuardianRows } from "@/lib/parents/sessions";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { resetDb, seedParent, seedGuardian, seedParentSession, seedWorkingMail } from "../helpers/db";
@@ -87,35 +87,3 @@ describe("blocking and unblocking", () => {
   });
 });
 
-describe("staff changing a parent's email", () => {
-  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); });
-
-  it("changes the one record and the sign-in user, ends sessions, tells the old address, and every family keeps working", async () => {
-    const p = await seedParent({ name: "Ana", email: "ana@example.com" });
-    await seedGuardian({ parentId: p.id, familyQboId: "F1" });
-    await seedGuardian({ parentId: p.id, familyQboId: "F2" });
-    await seedParentSession(p.authUserId);
-    expect(await changeParentEmailByStaff(p.id, " Ana.New@Example.com", o)).toEqual({ ok: true, changed: true });
-    expect((await db.select().from(parent))[0]!.email).toBe("ana.new@example.com");
-    expect((await db.select().from(parentAuthUser))[0]!.email).toBe("ana.new@example.com");
-    expect(await sessionsOf(p.authUserId)).toHaveLength(0);
-    expect((await enabledGuardianRows(p.id)).map((g) => g.familyQboId)).toEqual(["F1", "F2"]);
-    expect(outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
-    expect(outbox[0]!.text).toMatch(/The club changed/);
-    const [a] = (await db.select().from(auditLog)).filter((x) => x.action === "parent.email_change");
-    expect(a).toMatchObject({ before: { email: "ana@example.com" }, after: { email: "ana.new@example.com", by: "staff", sessionsEnded: 1 } });
-  });
-
-  it("refuses an address another person holds, and says who", async () => {
-    const p = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const q = await seedParent({ name: "Ben Lee", email: "ben@example.com" });
-    expect(await changeParentEmailByStaff(p.id, "BEN@example.com", o)).toEqual({ ok: false, reason: "in_use", heldBy: { parentId: q.id, name: "Ben Lee" } });
-  });
-
-  it("treats a change of letter case only as no change", async () => {
-    const p = await seedParent({ name: "Ana", email: "ana@example.com" });
-    await seedParentSession(p.authUserId);
-    expect(await changeParentEmailByStaff(p.id, "ANA@Example.com", o)).toEqual({ ok: true, changed: false });
-    expect(await sessionsOf(p.authUserId)).toHaveLength(1);
-  });
-});

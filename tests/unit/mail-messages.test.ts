@@ -35,10 +35,12 @@ describe("mail messages", () => {
     expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|guardian/i); // the inline CSS property is not wording
   });
   it("puts the confirm link only in the confirm message, and none in the notice", () => {
-    expect(emailChangeConfirmMessage(b, "new@example.com", { link: "https://p.example.org/email-change/confirm?token=abc" }).text)
-      .toContain("https://p.example.org/email-change/confirm?token=abc");
-    expect(emailChangeNoticeMessage(b, "old@example.com", { byStaff: false }).text).not.toMatch(/https?:\/\//);
-    expect(emailChangeNoticeMessage(b, "old@example.com", { byStaff: true }).text).toMatch(/The club changed/);
+    expect(emailChangeConfirmMessage(b, "new@example.com", { link: "https://p.example.org/family/email/abc" }).text)
+      .toContain("https://p.example.org/family/email/abc");
+    const notice = emailChangeNoticeMessage(b, "old@example.com");
+    expect(notice.text).not.toMatch(/https?:\/\//);
+    expect(notice.text).toContain("Someone asked to change the email address you sign in to");
+    expect(notice.text).toContain("If it wasn't you, please tell the club.");
   });
   it("has a plain test message", () => {
     expect(testMessage(b, "admin@example.org").subject).toBe("Test email from FZN <Band> Boosters");

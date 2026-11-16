@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { guardian, heldAddress, parent, parentAuthSession, qboCustomer, setting, signinCode } from "@/lib/db/schema";
+import { guardian, heldAddress, parent, parentAuthSession, parentEmailChange, qboCustomer, setting, signinCode } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getParentSettings, putParentSettings, PARENTS_KEY } from "./settings";
 
@@ -66,6 +66,8 @@ export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toReal
   }
   const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
   const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
+  // A change of sign-in address names the record it would change: another company's customer now (email-change.ts).
+  await tx.delete(parentEmailChange);
   const holds = await tx.delete(heldAddress).returning({ email: heldAddress.email });
   const welcomed = await tx.update(parent).set({ welcomedAt: null, updatedAt: new Date() }).where(isNotNull(parent.welcomedAt)).returning({ id: parent.id });
   await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null });
