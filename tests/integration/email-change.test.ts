@@ -26,7 +26,7 @@ import FamilyDetailsPage from "@/app/(parent)/family/details/page";
 import FamilyEmailPage from "@/app/(parent)/family/email/page";
 import ConfirmEmailPage from "@/app/(parent)/family/email/[token]/page";
 import { inQuickBooks, ofType, qbCustomer, seedContactFamilies, under } from "../helpers/contact";
-import { resetDb, seedGuardian, seedParent, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedGuardian, seedParent, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { emailChangeToken, seedEmailChange } from "../helpers/email-change";
 import { CHENOWETH, RIVERA, connectCompany } from "../helpers/money";
 import { seedParentIn } from "../helpers/parent";
@@ -455,6 +455,8 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     const result = await confirmMyEmailChange(ctxOf(r.identity), token, { lockWaitMs: 150 });
     await lock.release();
     expect(result).toEqual({ ok: true, message: EMAIL_COPY.finishing, signedOut: true });
+    // The worker's next roster read finishes it, not the club: the parent is told it works in a few minutes.
+    expect(EMAIL_COPY.finishing).toContain("within a few minutes");
     expect(inQuickBooks(stub, R_PARENT).PrimaryEmailAddr).toEqual({ Address: NEW });
     expect(await cached(R_PARENT)).toMatchObject({ email: RIVERA.parent.email, syncToken: "0" });
     expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
@@ -464,6 +466,18 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     expect(await rosterRefreshAsked()).toBe(true);
     expect((await audits()).at(-1)).toEqual({ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
       after: { email: NEW, field: NEW, portal: "refresh_asked", code: "busy", sessionsEnded: 1 } });
+  }, 30_000);
+
+  it("a refresh that stored a later version while the confirmation waited keeps it: the answer's older one is not written over it", async () => {
+    const { r, token } = await asked();
+    const lock = await holdTheRosterLock();
+    const confirming = confirmMyEmailChange(ctxOf(r.identity), token, { lockWaitMs: 10_000 });
+    await untilALockIsAwaited();
+    // The refresh holding the lock stores version 6: the club changed the field again in QuickBooks meanwhile.
+    await db.update(qboCustomer).set({ email: "later.change@family-r.example", syncToken: "6" }).where(eq(qboCustomer.qboId, R_PARENT));
+    await lock.release();
+    expect((await confirming).ok).toBe(true);
+    expect(await cached(R_PARENT)).toMatchObject({ email: "later.change@family-r.example", syncToken: "6" });
   }, 30_000);
 
   it("the company changed between the write and the cache: the cache is left alone", async () => {

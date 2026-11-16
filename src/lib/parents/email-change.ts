@@ -55,7 +55,7 @@ export const EMAIL_COPY = {
   notAccepted: "The club's books wouldn't take that address, so nothing was changed. Please ask the club for help.",
   done: (email: string) => `Done. From now on, sign in with ${email}.`,
   /** When the change is in QuickBooks and the new address can't sign in to this family yet, whatever the reason. */
-  finishing: "The change is made in the club's books. The club will finish setting up your sign-in with the new address.",
+  finishing: "The change is made in the club's books. Your new address will work for signing in within a few minutes: if it doesn't yet, please wait a little and try again.",
 } as const;
 
 export type EmailResult = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -345,9 +345,13 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
         if ((await getRosterSource(tx)) !== realmId) throw new NotThisCompany();
         // Spent before the reconcile, which deletes a person's unused requests when it changes their address.
         if (!(await spend(row.id, tx)) && !wrote) return;
-        // As the roster refresh stores an email field: trimmed and lower-cased, at most 320 characters.
-        await tx.update(qboCustomer).set({ email: field?.trim().slice(0, 320).toLowerCase() || null, syncToken: version, ...(updatedAt ? { qboUpdatedAt: updatedAt } : {}) })
-          .where(eq(qboCustomer.qboId, record.qboId));
+        // As the roster refresh stores an email field: trimmed and lower-cased, at most 320 characters. Only over an
+        // older version: a refresh that finished while this waited may hold a later one, which is kept.
+        const [cached] = await tx.select({ syncToken: qboCustomer.syncToken }).from(qboCustomer).where(eq(qboCustomer.qboId, record.qboId)).for("update");
+        if (!cached || versionNumber(cached.syncToken) < versionNumber(version)) {
+          await tx.update(qboCustomer).set({ email: field?.trim().slice(0, 320).toLowerCase() || null, syncToken: version, ...(updatedAt ? { qboUpdatedAt: updatedAt } : {}) })
+            .where(eq(qboCustomer.qboId, record.qboId));
+        }
         const r = await reconcileAccess(tx, { cause: `parent.email.save#${row.id}` });
         const sessionsEnded = await endOldSignIns(tx, ctx.parentId, oldEmail);
         await audit(tx, { field, portal: "reconciled", emailChanged: r.emailChanged, ended: r.ended, granted: r.granted, sessionsEnded });
@@ -362,6 +366,9 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     .where(and(eq(parent.email, newEmail), eq(parent.blocked, false), eq(guardian.familyQboId, ctx.familyQboId), ne(guardian.status, "disabled"))).limit(1);
   return { ok: true, message: open ? EMAIL_COPY.done(newEmail) : EMAIL_COPY.finishing, signedOut: true };
 }
+
+/** A QuickBooks SyncToken as a number, for which version is later; anything that isn't digits is earlier than all. */
+const versionNumber = (t: string | null | undefined): bigint => (t && /^\d{1,20}$/.test(t) ? BigInt(t) : BigInt(-1));
 
 /**
  * Ends every session of the person and deletes their unused sign-in codes, under the lock that claims of the old

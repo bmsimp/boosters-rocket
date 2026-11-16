@@ -40,7 +40,7 @@ export function ConfirmEmailForm({ token }: { token: string }) {
     return (
       <>
         <p role="status" className="paid-up"><Tick />{result.message}</p>
-        <p className="help">You&apos;re signed out everywhere now, so please sign in again.</p>
+        <p className="help">You&apos;re signed out everywhere now. Sign in again with your new address.</p>
         <div className="box-foot"><a className="btn" href="/sign-in">Sign in</a></div>
       </>
     );
