@@ -25,7 +25,9 @@ import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import { patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
+import { noteApiOk } from "@/lib/forms/settings";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
+import { connectForms } from "../helpers/forms";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helpers/qbo-stub";
 
@@ -58,7 +60,8 @@ describe("the health page", () => {
   it("on a portal that was just installed, says in plain words what isn't set up yet", async () => {
     await admin();
     const lines = await healthReport(NOW);
-    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "mail", "parents", "backup", "version"]);
+    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "mail", "forms", "parents", "backup", "version"]);
+    expect(line(lines, "forms")).toMatchObject({ state: "off", word: "Not set up" });
     expect(line(lines, "database")).toMatchObject({ state: "ok", word: "Working" });
     expect(line(lines, "worker")).toMatchObject({ state: "attention", times: [{ label: "Last woke", at: null }] });
     expect(line(lines, "worker").says).toMatch(/has never checked in/);
@@ -87,6 +90,9 @@ describe("the health page", () => {
     await patchMailStatus({ lastSuccessAt: ago(60_000) });
     await seedParentSettings(SIGNINS_ON);
     await put(BACKUP_KEY, { at: ago(3_600_000), file: "booster-rocket-20261115T030000Z.dump", bytes: 3 * 1024 * 1024 });
+    // Forms set up, and Documenso answered a call (tests/integration/forms-staff.test.ts has the line's other states).
+    await connectForms({ origin: "https://sign.club.example", token: "api_made_up_for_the_health_page" });
+    await noteApiOk();
     await runDueJobs(); // a wake: the clean-up, the token refresh and the roster read all run
     const lines = await healthReport();
     for (const l of lines) expect(l.state, `${l.key}: ${l.says} ${l.notes.join(" ")}`).toBe("ok");
@@ -98,6 +104,7 @@ describe("the health page", () => {
     expect(Date.parse(at(line(lines, "quickbooks"), "Last roster read")!)).toBeGreaterThan(Date.now() - 60_000);
     expect(line(lines, "mail")).toMatchObject({ word: "Working", says: "Tested and working, sending through Microsoft 365.", times: [{ label: "Last sent", at: ago(60_000) }, { label: "Last failure", at: null }] });
     expect(line(lines, "parents")).toMatchObject({ word: "On" });
+    expect(line(lines, "forms")).toMatchObject({ word: "Connected", says: "Connected to Documenso at https://sign.club.example." });
     expect(line(lines, "backup")).toMatchObject({ word: "Recent", notes: ["booster-rocket-20261115T030000Z.dump, 3.0 MB"], times: [{ label: "Last backup", at: ago(3_600_000) }] });
 
     const html = await renderPage(HealthPage);

@@ -45,7 +45,8 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
   const { step } = view;
   // A waiver is the club's word on the requirement; the form's own state is said beside it only when it was signed.
   const waived = form.line.state === "waived" && step.kind !== "complete";
-  const stateWords = step.kind === "not_ready" ? STATE_WORDS.notReady : view.words;
+  // The same words as the Forms list: "not ready" only for a form nothing has been made for yet.
+  const stateWords = step.kind === "not_ready" && form.row.state === "not_opened" ? STATE_WORDS.notReady : view.words;
   const due = form.line.dueOn && step.kind !== "complete" && !waived ? dueState(form.line.dueOn, form.today) : null;
   const others = view.signers.filter((s) => !s.signed && !s.you).map((s) => s.name);
   return (
