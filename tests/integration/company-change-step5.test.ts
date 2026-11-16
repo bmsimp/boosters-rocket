@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   formReminderClaim, formReminderRound, parentEmailChange, signatureRequest, signedFormEvidence, signedFormFile, volunteerCredit,
   volunteerReminder, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
-import { resetDb } from "../helpers/db";
+import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { seedTwoFamilies } from "../helpers/parent";
 
 /**
@@ -59,5 +60,26 @@ describe("connecting a different company after step 5", () => {
     const files = await db.select().from(signedFormFile);
     expect(files.map((f) => [f.id, f.sha256, f.size, Buffer.from(f.bytes).toString("hex")]).sort())
       .toEqual(before.files.map((f) => [f.id, f.sha256, f.size, Buffer.from(f.bytes).toString("hex")]).sort());
+  });
+
+  it("marks evidence the worker was storing at that moment as the earlier company's too, once its store commits", async () => {
+    const { a } = await seedTwoFamilies();
+    const requestId = a.forms!.ids.signed;
+    let commit!: () => void;
+    const held = new Promise<void>((resolve) => { commit = resolve; });
+    // As storeEvidence() does: the request locked, the evidence inserted, the commit still to come.
+    const storing = db.transaction(async (tx) => {
+      await tx.select().from(signatureRequest).where(eq(signatureRequest.id, requestId)).for("update");
+      await tx.insert(signedFormEvidence).values({ requestId, realmId: "1111", requirementId: null, familyQboId: a.identity.familyQboId, subjectQboId: a.identity.familyQboId,
+        subjectKind: "family", formTitle: "In flight", envelopeId: "envelope_inflight", signers: [], consents: [], originals: [] });
+      await held;
+    });
+    const clearing = clearRosterOfOtherCompany("2222", admin);
+    await untilALockIsAwaited();
+    commit();
+    await storing;
+    expect(await clearing).toBe(true);
+    const [inFlight] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.formTitle, "In flight"));
+    expect(inFlight).toMatchObject({ requestId: null, earlierCompanyAt: expect.any(Date) });
   });
 });

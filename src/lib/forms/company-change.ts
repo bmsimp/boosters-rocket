@@ -17,6 +17,9 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
  * family of the new company by a QuickBooks id; staff find it in the archive on the staff Forms page.
  */
 export async function clearFormRecords(tx: Tx, o: { fromRealmId: string | null; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
+  // Every request is locked first: evidence being stored right now (storeEvidence() holds its request's row) commits
+  // before the evidence below is marked, so none is left unmarked, pointing at a request deleted here.
+  await tx.select({ id: signatureRequest.id }).from(signatureRequest).for("update");
   const kept = await tx.update(signedFormEvidence).set({ earlierCompanyAt: sql`now()`, requestId: null })
     .where(isNull(signedFormEvidence.earlierCompanyAt)).returning({ id: signedFormEvidence.id });
   const claims = await tx.delete(formReminderClaim).returning({ id: formReminderClaim.id });
