@@ -72,7 +72,7 @@ test("an Admin makes a role by ticking what it lets people do, changes it, and d
   await noSidewaysScroll(page);
 
   await saved.getByRole("button", { name: "Delete role" }).click();
-  await expect(saved.getByRole("group")).toContainText(`Delete ${name}? Nobody holds it.`);
+  await expect(saved.getByRole("group", { name: /^Delete / })).toContainText(`Delete ${name}? Nobody holds it.`);
   await saved.getByRole("button", { name: "Yes, delete it" }).click();
   await expect(page.getByRole("region", { name, exact: true })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Admin", exact: true })).not.toContainText("Delete role");
