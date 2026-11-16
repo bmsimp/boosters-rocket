@@ -6,7 +6,7 @@ import { formatMoney } from "@/lib/money/cents";
 import { getRosterSource, SOURCE_KEY } from "@/lib/roster/source";
 import { seedGuardian, seedParent, seedParentSession } from "./db";
 import { SIGNINS_ON, addToCache, fam, par, seedParentSettings, seedShape, stu } from "./roster-cache";
-import { seedTwoFamilySeason, type FamilySeason } from "./season";
+import { TRIP_DEPOSIT_ITEM, seedTwoFamilySeason, type FamilySeason } from "./season";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -53,7 +53,7 @@ export const FAMILY_A: ParentFamilySpec = {
   invoices: [
     { number: "INV-ALDERQUIST-7101", cents: 713107, payLink: "https://connect.intuit.com/t/scs-v1-alderquist-7101" },
     { number: "INV-ALDERQUIST-7102", cents: 715209 },
-    { number: "INV-ALDERQUIST-7103", cents: 717311, paid: true },
+    { number: "INV-ALDERQUIST-7103", cents: 717311, paid: true, items: [TRIP_DEPOSIT_ITEM] }, // the trip deposit, paid (tests/helpers/season.ts)
   ],
 };
 export const FAMILY_B: ParentFamilySpec = {
@@ -61,7 +61,7 @@ export const FAMILY_B: ParentFamilySpec = {
   parent: { qboId: "QBO-BRACKENMOOR-PARENT-8002", name: "Bettina Brackenmoor", email: "bettina.brackenmoor@family-b.example", phone: "737-555-0182" },
   students: [{ qboId: "QBO-BRACKENMOOR-STUDENT-8003", name: "Barnaby Brackenmoor" }, { qboId: "QBO-BRACKENMOOR-STUDENT-8004", name: "Briseis Brackenmoor" }],
   invoices: [
-    { number: "INV-BRACKENMOOR-8201", cents: 824208, payLink: "https://connect.intuit.com/t/scs-v1-brackenmoor-8201" },
+    { number: "INV-BRACKENMOOR-8201", cents: 824208, payLink: "https://connect.intuit.com/t/scs-v1-brackenmoor-8201", items: [TRIP_DEPOSIT_ITEM] }, // the trip deposit, not paid yet
     { number: "INV-BRACKENMOOR-8202", cents: 826410 },
     { number: "INV-BRACKENMOOR-8203", cents: 828612, paid: true },
   ],
