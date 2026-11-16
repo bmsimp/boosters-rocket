@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { asParent, asStaff, pageOutcome, renderPage, revalidatedPaths, signedOut } from "../helpers/signed-in";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, qboCustomer, requirement, requirementCover, requirementProgress, role, roleAssignment, roleRule, season, seasonStep } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
-import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, clearRosterOfOtherCompanyLocked, setRosterSource } from "@/lib/roster/source";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import type { MembershipShape } from "@/lib/roster/shape";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import SeasonsPage from "@/app/staff/(app)/seasons/page";
@@ -55,8 +57,11 @@ const ROSTER = [
 ];
 
 let setter: Staff, ticker: Staff, reader: Staff, outsider: Staff;
+/** The company tag the seasons' pages carry beside the roster's ids (src/lib/seasons/roster-lock.ts). */
+let TAG = "";
 beforeEach(async () => {
   await resetDb(); await seedShape(); await addToCache(ROSTER);
+  TAG = await currentRosterTag();
   setter = await withRole("setter@club.org", "Sal Setter", ["Season.Steps.*"]);
   ticker = await withRole("ticker@club.org", "Tia Ticker", ["Season.Progress.*"]);
   reader = await withRole("reader@club.org", "Rae Reader", ["Season.*.Read"]);
@@ -89,9 +94,9 @@ describe("the season permissions", () => {
       () => createSeasonAction("Spring", "template"), () => renameSeasonAction(fall.seasonId, "X"), () => setCurrentSeasonAction(fall.seasonId), () => clearCurrentSeasonAction(),
       () => addStepAction(fall.seasonId, "X"), () => updateStepAction(uniforms, "X", null, null), () => moveStepAction(uniforms, "later"), () => removeStepAction(uniforms),
       () => addRequirementAction(uniforms, "checklist", "student", FIELDS), () => updateRequirementAction(fitting, FIELDS),
-      () => setCoverageAction(fitting, "chosen", ["12"]), () => removeRequirementAction(fitting),
+      () => setCoverageAction(fitting, TAG, "chosen", ["12"]), () => removeRequirementAction(fitting),
     ];
-    const progressActions = [() => setTicksAction(fitting, ["12"], true), () => waiveAction(fitting, "12", "reason"), () => removeWaiverAction(fitting, "12")];
+    const progressActions = [() => setTicksAction(fitting, TAG, ["12"], true), () => waiveAction(fitting, TAG, "12", "reason"), () => removeWaiverAction(fitting, TAG, "12")];
     const before = JSON.stringify([await seasons(), await stepsOf(fall.seasonId), await db.select().from(requirement), await db.select().from(requirementCover), await recorded()]);
 
     // Someone with another area's permission, someone who may only read, and each half of the work without the other half.
@@ -265,8 +270,8 @@ describe("steps", () => {
     expect(await audits()).toEqual([]);
     // Once they are cleared, the step goes, with the requirement in it named in the audit row.
     asStaff(ticker);
-    await setTicksAction(fall.requirementIds["Uniform fitting attended"]!, ["12"], false);
-    await removeWaiverAction(fall.requirementIds["Uniform fitting attended"]!, "13");
+    await setTicksAction(fall.requirementIds["Uniform fitting attended"]!, TAG, ["12"], false);
+    await removeWaiverAction(fall.requirementIds["Uniform fitting attended"]!, TAG, "13");
     asStaff(setter);
     expect(await removeStepAction(fall.stepIds.Uniforms!)).toEqual({ ok: true, message: "Removed." });
     expect(await db.select().from(requirement)).toEqual([]);
@@ -326,23 +331,23 @@ describe("requirements", () => {
   it("covers everyone, or a list picked from the roster, and only who the requirement applies to", async () => {
     const fall = await seedFall();
     const fitting = fall.requirementIds["Uniform fitting attended"]!, rsvp = fall.requirementIds["Banquet RSVP"]!;
-    expect(await setCoverageAction(fitting, "chosen", ["13", "22", "13"])).toEqual({ ok: true, message: "Saved. It is asked only of those you chose." });
+    expect(await setCoverageAction(fitting, TAG, "chosen", ["13", "22", "13"])).toEqual({ ok: true, message: "Saved. It is asked only of those you chose." });
     expect((await db.select().from(requirementCover)).map((c) => [c.requirementId, c.subjectQboId]).sort()).toEqual([[fitting, "13"], [fitting, "22"]]);
     expect((await audits("season.requirement.cover"))[0]).toMatchObject({ targetId: fitting, before: { covers: "everyone", subjectQboIds: [] }, after: { covers: "chosen", subjectQboIds: ["13", "22"] } });
 
     // A family on a per-student list, a student on a per-family one, someone inactive, someone unknown: none is on the roster for it.
     for (const [id, bad] of [[fitting, ["10"]], [rsvp, ["12"]], [fitting, ["14"]], [fitting, ["32"]], [rsvp, ["30"]], [fitting, ["13", "no-such-customer"]]] as const) {
-      expect(await setCoverageAction(id, "chosen", [...bad])).toEqual({ ok: false, errors: ["Someone in that list isn't on the roster any more. Reload the page and choose again."] });
+      expect(await setCoverageAction(id, TAG, "chosen", [...bad])).toEqual({ ok: false, errors: ["Someone in that list isn't on the roster any more. Reload the page and choose again."] });
     }
-    expect(await setCoverageAction(fitting, "chosen", [])).toEqual({ ok: false, errors: ["Choose at least one, or ask it of everyone."] });
+    expect(await setCoverageAction(fitting, TAG, "chosen", [])).toEqual({ ok: false, errors: ["Choose at least one, or ask it of everyone."] });
     expect(await audits("season.requirement.cover")).toHaveLength(1);
 
     // Someone on the list who has since left the roster stays on it when the list is saved again.
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "22"));
-    expect(await setCoverageAction(fitting, "chosen", ["12"])).toMatchObject({ ok: true });
+    expect(await setCoverageAction(fitting, TAG, "chosen", ["12"])).toMatchObject({ ok: true });
     expect((await db.select().from(requirementCover)).map((c) => c.subjectQboId).sort()).toEqual(["12", "22"]);
 
-    expect(await setCoverageAction(fitting, "everyone", ["12"])).toEqual({ ok: true, message: "Saved. It is asked of everyone." });
+    expect(await setCoverageAction(fitting, TAG, "everyone", ["12"])).toEqual({ ok: true, message: "Saved. It is asked of everyone." });
     expect(await db.select().from(requirementCover)).toEqual([]);
     expect((await db.select().from(requirement).where(eq(requirement.id, fitting)))[0]!.covers).toBe("everyone");
   });
@@ -350,7 +355,7 @@ describe("requirements", () => {
   it("shows a requirement's settings and its chosen list, with QuickBooks names as text", async () => {
     const fall = await seedFall();
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
-    await setCoverageAction(fitting, "chosen", ["13", "22"]);
+    await setCoverageAction(fitting, TAG, "chosen", ["13", "22"]);
     const html = await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } });
     const text = textOf(html);
     expect(text).toContain("Uniform fitting attended In Uniforms, Fall 2026.");
@@ -374,7 +379,7 @@ describe("requirements", () => {
     expect(textOf(await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } }))).toContain("A tick or waiver is recorded against this requirement, so it can't be removed.");
     expect(await db.select().from(requirement)).toHaveLength(1);
     asStaff(ticker);
-    await setTicksAction(fitting, ["12"], false);
+    await setTicksAction(fitting, TAG, ["12"], false);
     asStaff(setter);
     expect(await removeRequirementAction(fitting)).toEqual({ ok: true, message: "Removed." });
     expect(await db.select().from(requirement)).toEqual([]);
@@ -389,7 +394,7 @@ describe("ticks and waivers", () => {
   it("ticks an item off for one student, then for everyone shown, and unticks it; each change has its own audit row", async () => {
     const fall = await seedFall();
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
-    expect(await setTicksAction(fitting, ["12"], true)).toEqual({ ok: true, message: "Ticked." });
+    expect(await setTicksAction(fitting, TAG, ["12"], true)).toEqual({ ok: true, message: "Ticked." });
     expect(await recorded()).toEqual([expect.objectContaining({ requirementId: fitting, subjectQboId: "12", metBy: ticker.id, waivedAt: null })]);
     expect(revalidatedPaths()).toEqual(["/"]);
     expect(await audits()).toEqual([expect.objectContaining({ action: "season.requirement.tick", permission: "Season.Progress.ReadWrite", actorId: ticker.id, ip: "203.0.113.50",
@@ -397,17 +402,17 @@ describe("ticks and waivers", () => {
       before: { season: "Fall 2026", step: "Uniforms", requirement: "Uniform fitting attended", subjectQboId: "12", subject: "Leo Rivera", familyQboId: "10", ticked: false }, after: { ticked: true } })]);
 
     // Everyone shown: Leo is ticked already and is left alone.
-    expect(await setTicksAction(fitting, ["12", "13", "22"], true)).toEqual({ ok: true, message: "Ticked 2." });
+    expect(await setTicksAction(fitting, TAG, ["12", "13", "22"], true)).toEqual({ ok: true, message: "Ticked 2." });
     expect((await recorded()).map((r) => r.subjectQboId)).toEqual(["12", "13", "22"]);
     expect((await audits("season.requirement.tick")).map((r) => r.targetId)).toEqual([`${fitting}:12`, `${fitting}:13`, `${fitting}:22`]);
-    expect(await setTicksAction(fitting, ["12"], true)).toEqual({ ok: true, message: "Already ticked." });
+    expect(await setTicksAction(fitting, TAG, ["12"], true)).toEqual({ ok: true, message: "Already ticked." });
 
-    expect(await setTicksAction(fitting, ["13"], false)).toEqual({ ok: true, message: "Unticked." });
+    expect(await setTicksAction(fitting, TAG, ["13"], false)).toEqual({ ok: true, message: "Unticked." });
     expect((await recorded()).map((r) => r.subjectQboId)).toEqual(["12", "22"]); // an unticked row is gone: a row exists only while it records something
     expect((await audits("season.requirement.untick"))[0]).toMatchObject({ targetId: `${fitting}:13`, before: { ticked: true, tickedBy: ticker.id, subject: "Maya Rivera" }, after: { ticked: false } });
-    expect(await setTicksAction(fitting, ["12", "13", "22"], false)).toEqual({ ok: true, message: "Unticked 2." });
+    expect(await setTicksAction(fitting, TAG, ["12", "13", "22"], false)).toEqual({ ok: true, message: "Unticked 2." });
     expect(await recorded()).toEqual([]);
-    expect(await setTicksAction(fitting, ["12"], false)).toEqual({ ok: true, message: "Nothing was ticked." });
+    expect(await setTicksAction(fitting, TAG, ["12"], false)).toEqual({ ok: true, message: "Nothing was ticked." });
   });
 
   it("ticks only those the requirement is asked of now", async () => {
@@ -417,47 +422,47 @@ describe("ticks and waivers", () => {
     const NOT_COVERED = { ok: false, errors: ["Someone in that list isn't covered by this requirement any more. Reload the page and try again."] };
     // Not on its chosen list; a family for a per-student item; a student for a per-family one; inactive; unknown; one bad id among good ones.
     for (const [id, who] of [[gloves, ["12"]], [gloves, ["10"]], [rsvp, ["12"]], [gloves, ["14"]], [rsvp, ["30"]], [rsvp, ["no-such"]], [rsvp, ["10", "20", "99"]]] as const) {
-      expect(await setTicksAction(id, [...who], true)).toEqual(NOT_COVERED);
+      expect(await setTicksAction(id, TAG, [...who], true)).toEqual(NOT_COVERED);
     }
     expect(await recorded()).toEqual([]);
     expect(await audits()).toEqual([]);
-    expect(await setTicksAction(NO_SUCH, ["13"], true)).toEqual({ ok: false, errors: ["That isn't there any more. Reload the page."] });
-    expect(await setTicksAction(gloves, ["13"], true)).toEqual({ ok: true, message: "Ticked." });
-    expect(await setTicksAction(rsvp, ["10", "20"], true)).toEqual({ ok: true, message: "Ticked 2." });
+    expect(await setTicksAction(NO_SUCH, TAG, ["13"], true)).toEqual({ ok: false, errors: ["That isn't there any more. Reload the page."] });
+    expect(await setTicksAction(gloves, TAG, ["13"], true)).toEqual({ ok: true, message: "Ticked." });
+    expect(await setTicksAction(rsvp, TAG, ["10", "20"], true)).toEqual({ ok: true, message: "Ticked 2." });
   });
 
   it("waives a requirement for a family or student with a reason, which is in the audit row, and removes the waiver", async () => {
     const fall = await seedFall();
     const fitting = fall.requirementIds["Uniform fitting attended"]!, rsvp = fall.requirementIds["Banquet RSVP"]!;
-    expect(await waiveAction(fitting, "13", "  Wears last year's uniform ")).toEqual({ ok: true, message: "Waived." });
+    expect(await waiveAction(fitting, TAG, "13", "  Wears last year's uniform ")).toEqual({ ok: true, message: "Waived." });
     expect(await recorded()).toEqual([expect.objectContaining({ requirementId: fitting, subjectQboId: "13", metAt: null, waivedBy: ticker.id, waivedReason: "Wears last year's uniform" })]);
     expect(await audits()).toEqual([expect.objectContaining({ action: "season.requirement.waive", permission: "Season.Progress.ReadWrite", targetId: `${fitting}:13`,
       before: expect.objectContaining({ requirement: "Uniform fitting attended", subject: "Maya Rivera", familyQboId: "10", waived: false }), after: { waived: true, reason: "Wears last year's uniform" } })]);
 
     // Waiving again replaces the reason; a tick beside it is kept when the waiver goes.
-    expect(await waiveAction(fitting, "13", "Has her sister's")).toEqual({ ok: true, message: "Waived." });
+    expect(await waiveAction(fitting, TAG, "13", "Has her sister's")).toEqual({ ok: true, message: "Waived." });
     expect((await audits("season.requirement.waive"))[1]).toMatchObject({ before: { waived: true, reason: "Wears last year's uniform" }, after: { waived: true, reason: "Has her sister's" } });
-    await setTicksAction(fitting, ["13"], true);
-    expect(await removeWaiverAction(fitting, "13")).toEqual({ ok: true, message: "The waiver is removed." });
+    await setTicksAction(fitting, TAG, ["13"], true);
+    expect(await removeWaiverAction(fitting, TAG, "13")).toEqual({ ok: true, message: "The waiver is removed." });
     expect(await recorded()).toEqual([expect.objectContaining({ subjectQboId: "13", waivedAt: null, waivedReason: null, waivedBy: null })]);
     expect((await recorded())[0]!.metAt).not.toBeNull();
     expect((await audits("season.requirement.unwaive"))[0]).toMatchObject({ targetId: `${fitting}:13`, before: { waived: true, reason: "Has her sister's", waivedBy: ticker.id }, after: { waived: false } });
-    expect(await removeWaiverAction(fitting, "13")).toEqual({ ok: true, message: "There was no waiver to remove." });
+    expect(await removeWaiverAction(fitting, TAG, "13")).toEqual({ ok: true, message: "There was no waiver to remove." });
     expect(await audits("season.requirement.unwaive")).toHaveLength(1);
 
     // A per-family requirement is waived for the family; alone, the waiver's row goes when the waiver does.
-    expect(await waiveAction(rsvp, "20", "Out of town")).toEqual({ ok: true, message: "Waived." });
-    expect(await removeWaiverAction(rsvp, "20")).toEqual({ ok: true, message: "The waiver is removed." });
+    expect(await waiveAction(rsvp, TAG, "20", "Out of town")).toEqual({ ok: true, message: "Waived." });
+    expect(await removeWaiverAction(rsvp, TAG, "20")).toEqual({ ok: true, message: "The waiver is removed." });
     expect((await recorded()).map((r) => r.subjectQboId)).toEqual(["13"]);
   });
 
   it("refuses a waiver with no reason, or for someone the requirement isn't asked of", async () => {
     const fall = await seedFall();
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
-    expect(await waiveAction(fitting, "13", "   ")).toEqual({ ok: false, errors: ["Say why, in a few words. The reason is kept in the audit log."] });
-    expect(await waiveAction(fitting, "13", "x".repeat(501))).toEqual({ ok: false, errors: ["The reason is too long (500 characters at most)."] });
+    expect(await waiveAction(fitting, TAG, "13", "   ")).toEqual({ ok: false, errors: ["Say why, in a few words. The reason is kept in the audit log."] });
+    expect(await waiveAction(fitting, TAG, "13", "x".repeat(501))).toEqual({ ok: false, errors: ["The reason is too long (500 characters at most)."] });
     for (const who of ["10", "14", "32", "no-such"]) {
-      expect(await waiveAction(fitting, who, "reason")).toEqual({ ok: false, errors: ["Someone in that list isn't covered by this requirement any more. Reload the page and try again."] });
+      expect(await waiveAction(fitting, TAG, who, "reason")).toEqual({ ok: false, errors: ["Someone in that list isn't covered by this requirement any more. Reload the page and try again."] });
     }
     expect(await recorded()).toEqual([]);
     expect(await audits()).toEqual([]);
@@ -467,8 +472,8 @@ describe("ticks and waivers", () => {
   it("shows who has done a requirement, by name, in words; finds by name; and keeps what is recorded for someone who has left", async () => {
     const fall = await seedSeason({ name: "Fall 2026", steps: [{ name: "Uniforms", requirements: [{ title: "Uniform fitting attended", appliesTo: "student", dueOn: "2026-09-01" }] }] });
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
-    await setTicksAction(fitting, ["12", "22"], true);
-    await waiveAction(fitting, "13", "Wears <b>last</b> year's");
+    await setTicksAction(fitting, TAG, ["12", "22"], true);
+    await waiveAction(fitting, TAG, "13", "Wears <b>last</b> year's");
     const html = await renderPage(RequirementProgressPage, { params: { requirementId: fitting } });
     const text = textOf(html);
     expect(text).toContain("Uniform fitting attended In Uniforms, Fall 2026. Checklist item · Required · Each student · Due 2026-09-01 .");
@@ -494,8 +499,8 @@ describe("ticks and waivers", () => {
     const after = textOf(await renderPage(RequirementProgressPage, { params: { requirementId: fitting } }));
     expect(after).toContain("1 of 2 done, 1 waived, 0 still to do.");
     expect(after).toMatch(/No longer asked .* Kai Chen \(deleted\) Ticked/);
-    expect(await setTicksAction(fitting, ["22"], true)).toMatchObject({ ok: false });
-    expect(await setTicksAction(fitting, ["22"], false)).toEqual({ ok: true, message: "Unticked." });
+    expect(await setTicksAction(fitting, TAG, ["22"], true)).toMatchObject({ ok: false });
+    expect(await setTicksAction(fitting, TAG, ["22"], false)).toEqual({ ok: true, message: "Unticked." });
     expect(textOf(await renderPage(RequirementProgressPage, { params: { requirementId: fitting } }))).not.toContain("No longer asked");
 
     expect(await pageOutcome(RequirementProgressPage, { params: { requirementId: NO_SUCH } })).toEqual({ notFound: true });
@@ -533,8 +538,8 @@ describe("ticks and waivers", () => {
     const [aurelio, azalea] = FAMILY_A.students;
     const mine = async () => (await loadMySeason({ familyQboId: FAMILY_A.family.qboId }, FAMILY_A.students))!;
     expect((await mine()).currentIndex).toBe(0);
-    await setTicksAction(fitting, [aurelio!.qboId], true);
-    await waiveAction(fitting, azalea!.qboId, "Borrowed one");
+    await setTicksAction(fitting, TAG, [aurelio!.qboId], true);
+    await waiveAction(fitting, TAG, azalea!.qboId, "Borrowed one");
     const now = await mine();
     expect(now.steps[0]!.students.map((s) => s.lines[0]!.words)).toEqual(["Done", "Waived"]);
     expect(now.currentIndex).toBe(1);
@@ -637,6 +642,48 @@ describe("a different QuickBooks company", () => {
     expect(textOf(await renderPage(RequirementProgressPage, { params: { requirementId: fall.requirementIds["Guard gloves"]! } }))).toContain("It is asked of no students on the roster right now.");
   });
 
+  it("refuses a tick, a waiver or a chosen list from a page that was shown another company's roster", async () => {
+    const fall = await seedFall();
+    const fitting = fall.requirementIds["Uniform fitting attended"]!;
+    await db.transaction((tx) => setRosterSource(tx, "1111"));
+    const shown = await currentRosterTag();
+    expect(shown).not.toContain("1111");
+    await db.transaction((tx) => setRosterSource(tx, "2222"));
+    asStaff(ticker);
+    for (const r of [await setTicksAction(fitting, shown, ["12"], true), await waiveAction(fitting, shown, "12", "Borrowed one"), await removeWaiverAction(fitting, shown, "12")]) {
+      expect(r).toEqual({ ok: false, errors: [ROSTER_MOVED] });
+    }
+    asStaff(setter);
+    expect(await setCoverageAction(fitting, shown, "chosen", ["12"])).toEqual({ ok: false, errors: [ROSTER_MOVED] });
+    expect(await recorded()).toEqual([]);
+    expect(await db.select().from(requirementCover)).toEqual([]);
+    expect(await audits()).toEqual([]);
+    // The page shown now carries the new company's tag, and that one goes through.
+    asStaff(ticker);
+    expect(await setTicksAction(fitting, await currentRosterTag(), ["12"], true)).toEqual({ ok: true, message: "Ticked." });
+  });
+
+  it("waits for a change of company under way, then refuses the ids the page was shown", async () => {
+    const fall = await seedFall();
+    const fitting = fall.requirementIds["Uniform fitting attended"]!;
+    await db.transaction((tx) => setRosterSource(tx, "1111"));
+    const shown = await currentRosterTag();
+    let release!: () => void, locked!: () => void;
+    const held = new Promise<void>((r) => { release = r; }), isLocked = new Promise<void>((r) => { locked = r; });
+    const change = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      locked(); await held;
+      await clearRosterOfOtherCompanyLocked(tx, "2222", SYSTEM);
+    });
+    await isLocked;
+    asStaff(ticker);
+    const tick = setTicksAction(fitting, shown, ["12"], true);
+    await new Promise((r) => setTimeout(r, 300));
+    release(); await change;
+    expect(await tick).toEqual({ ok: false, errors: [ROSTER_MOVED] });
+    expect(await recorded()).toEqual([]);
+  });
+
   it("writes no season row when the seasons record nothing against anyone", async () => {
     await seedFall();
     await db.transaction((tx) => setRosterSource(tx, "1111"));
@@ -661,16 +708,17 @@ describe("values no page sends", () => {
       addRequirementAction(uniforms, "checklist", "student", any(null)), addRequirementAction(uniforms, "checklist", "student", any({ ...FIELDS, required: "yes" })),
       addRequirementAction(uniforms, "checklist", "student", any({ ...FIELDS, amount: "2" })), addRequirementAction(uniforms, "checklist", "student", any({ ...FIELDS, amountUnit: "days" })),
       updateRequirementAction(fitting, any({ ...FIELDS, title: long })), updateRequirementAction(any(12), FIELDS),
-      setCoverageAction(fitting, any("some"), ["12"]), setCoverageAction(fitting, "chosen", any("12")), setCoverageAction(fitting, "chosen", any([12])),
-      setCoverageAction(fitting, "chosen", [""]), setCoverageAction(fitting, "chosen", ["x".repeat(65)]), removeRequirementAction("x"),
+      setCoverageAction(fitting, TAG, any("some"), ["12"]), setCoverageAction(fitting, TAG, "chosen", any("12")), setCoverageAction(fitting, TAG, "chosen", any([12])),
+      setCoverageAction(fitting, any(undefined), "chosen", ["12"]), setCoverageAction(fitting, TAG, "chosen", [""]), setCoverageAction(fitting, TAG, "chosen", ["x".repeat(65)]), removeRequirementAction("x"),
     ];
     for (const r of await Promise.all(setup)) expect(r).toEqual(BROWSER);
     asStaff(ticker);
     const progress = [
-      setTicksAction("x", ["12"], true), setTicksAction(fitting, any("12"), true), setTicksAction(fitting, ["12"], any("true")), setTicksAction(fitting, any([{ qboId: "12" }]), true),
-      setTicksAction(fitting, Array.from({ length: 5001 }, (_v, i) => String(i)), true),
-      waiveAction(fitting, any(12), "reason"), waiveAction(fitting, "12", any(null)), waiveAction(fitting, "12", long), waiveAction(any(undefined), "12", "reason"),
-      removeWaiverAction(fitting, any(["12"])), removeWaiverAction("x", "12"),
+      setTicksAction("x", TAG, ["12"], true), setTicksAction(fitting, TAG, any("12"), true), setTicksAction(fitting, TAG, ["12"], any("true")), setTicksAction(fitting, TAG, any([{ qboId: "12" }]), true),
+      setTicksAction(fitting, TAG, Array.from({ length: 5001 }, (_v, i) => String(i)), true),
+      waiveAction(fitting, TAG, any(12), "reason"), waiveAction(fitting, TAG, "12", any(null)), waiveAction(fitting, TAG, "12", long), waiveAction(any(undefined), TAG, "12", "reason"),
+      removeWaiverAction(fitting, TAG, any(["12"])), removeWaiverAction("x", TAG, "12"),
+      setTicksAction(fitting, any(7), ["12"], true), setTicksAction(fitting, "", ["12"], true), waiveAction(fitting, any(null), "12", "reason"), removeWaiverAction(fitting, "x".repeat(65), "12"),
     ];
     for (const r of await Promise.all(progress)) expect(r).toEqual(BROWSER);
     // An object from the browser can carry more than the fields a page sends: only those fields go on.

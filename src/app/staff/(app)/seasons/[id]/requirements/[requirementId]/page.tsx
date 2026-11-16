@@ -5,6 +5,7 @@ import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { describeRequirement, getRequirementSetup } from "@/lib/seasons/setup";
 import { candidatesFor, loadSubjects } from "@/lib/seasons/subjects";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
 import { removeRequirementAction, setCoverageAction, updateRequirementAction } from "../../../actions";
@@ -20,6 +21,8 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
   if (!found || found.season.id !== id) notFound();
   const { requirement: r, step, season, recorded } = found;
   const canChange = can(ctx.effective, "Season.Steps.ReadWrite");
+  // The tag first: a change of company before the roster is read leaves it the older one, and the save is refused.
+  const rosterTag = await currentRosterTag();
   const families = await loadSubjects();
   const candidates = families ? candidatesFor(r.appliesTo, families) : [];
   const onRoster = new Set(candidates.map((c) => c.qboId));
@@ -53,7 +56,7 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
           : <details className="more"><summary>Change who it is asked of</summary>
               <CoverageForm covers={r.covers} chosen={r.coveredQboIds.filter((q) => onRoster.has(q))} noun={noun}
                 candidates={candidates.map((c) => ({ qboId: c.qboId, label: r.appliesTo === "student" ? `${c.name} (${c.familyName})` : c.name }))}
-                save={setCoverageAction.bind(null, r.id)} />
+                save={setCoverageAction.bind(null, r.id, rosterTag)} />
             </details>)}
       </section>
 

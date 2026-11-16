@@ -101,6 +101,7 @@ Rules for all of them:
 - A parent page reads its season only through `loadMySeason(ctx, family.students)` (`src/lib/seasons/my-season.ts`). A requirement that covers nobody in the family is dropped there, title and all. The staff page for one family reads through the same `loadFamilyStanding()` (`recorded.ts`), so the two can't disagree.
 - Parents read "set" (the ruler's word); staff read "step". States are words with an icon (`StateWords`, `src/app/components/state-words.tsx`): done, to do, waived.
 - A step or requirement with any tick or waiver is refused removal until staff clear them. Kind and applies-to are fixed once a requirement is made.
+- A staff write that names QuickBooks ids (a tick, a waiver, a chosen list) reads the roster inside its transaction after `lockRosterAs(tx, tag)` (`src/lib/seasons/roster-lock.ts`): it holds the roster lock, so no refresh or change of company runs between the check and the write, and it refuses when the page that sent the ids was shown another company's roster. The page carries `currentRosterTag()`, read before the roster.
 
 ### The club's date
 - `clubToday()` (`src/lib/settings/club.ts`) is the one place that decides which day it is: the date in the club's own time zone (a Club setting, an IANA name, UTC until set). Step ranges, a requirement's due date and an invoice's due words all use it. Never the server's date (`new Date()` cut to a day) or the viewer's for anything a parent reads as due or past.

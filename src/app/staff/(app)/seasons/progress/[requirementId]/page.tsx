@@ -32,7 +32,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
   const [{ requirementId }, sp] = await Promise.all([params, searchParams]);
   const progress = isUuid(requirementId) ? await loadRequirementProgress(requirementId) : null;
   if (!progress) notFound();
-  const { requirement: r, step, season, rows, left, counts, ticked } = progress;
+  const { requirement: r, step, season, rows, left, counts, ticked, rosterTag } = progress;
   const canChange = can(ctx.effective, "Season.Progress.ReadWrite");
   const typed = (typeof sp.q === "string" ? sp.q : "").trim().slice(0, 100);
   const q = typed.toLowerCase();
@@ -60,8 +60,8 @@ export default async function RequirementProgressPage({ params, searchParams }: 
           )}
           {canChange && ticked && shown.length > 0 && (
             <div className="row-actions everyone-shown">
-              {anyUnticked && <OneButton label={`Tick everyone shown (${shown.length})`} pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, shownIds, true)} />}
-              {anyTicked && <OneButton label={`Untick everyone shown (${shown.length})`} pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, shownIds, false)} />}
+              {anyUnticked && <OneButton label={`Tick everyone shown (${shown.length})`} pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, rosterTag, shownIds, true)} />}
+              {anyTicked && <OneButton label={`Untick everyone shown (${shown.length})`} pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, shownIds, false)} />}
             </div>
           )}
           {counts.asked > 0 && shown.length === 0 && <p role="status">Nobody matches &quot;{typed}&quot;.</p>}
@@ -77,12 +77,12 @@ export default async function RequirementProgressPage({ params, searchParams }: 
               {canChange && (
                 <div className="row-actions">
                   {ticked && (row.metAt
-                    ? <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, [row.qboId], false)} />
-                    : <OneButton label="Tick" pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, [row.qboId], true)} />)}
+                    ? <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.qboId], false)} />
+                    : <OneButton label="Tick" pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.qboId], true)} />)}
                   {row.waivedAt
-                    ? <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, row.qboId)} />
+                    ? <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, row.qboId)} />
                     : <details className="more"><summary>Waive for {row.name}</summary>
-                        <TextAction field="Why? (kept in the audit log; the family doesn't see it)" label="Waive" pendingLabel="Waiving…" maxLength={500} multiline act={waiveAction.bind(null, r.id, row.qboId)} />
+                        <TextAction field="Why? (kept in the audit log; the family doesn't see it)" label="Waive" pendingLabel="Waiving…" maxLength={500} multiline act={waiveAction.bind(null, r.id, rosterTag, row.qboId)} />
                       </details>}
                 </div>
               )}
@@ -102,8 +102,8 @@ export default async function RequirementProgressPage({ params, searchParams }: 
               </div>
               {canChange && (
                 <div className="row-actions">
-                  {row.metAt && <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, [row.subjectQboId], false)} />}
-                  {row.waivedAt && <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, row.subjectQboId)} />}
+                  {row.metAt && <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.subjectQboId], false)} />}
+                  {row.waivedAt && <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, row.subjectQboId)} />}
                 </div>
               )}
             </li>))}</ul>

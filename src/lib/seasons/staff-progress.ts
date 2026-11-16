@@ -3,7 +3,7 @@
 // (tests/integration/page-guards.test.ts).
 import "server-only";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import { qboCustomer, requirement, requirementProgress, season, seasonStep, staffUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { KIND_RULES, pairKey } from "./kinds";
@@ -11,6 +11,7 @@ import { lineFor, type LineState, type Requirement, type SeasonStanding } from "
 import { loadCovers, loadFacts, loadFamilyStanding, toRequirement } from "./recorded";
 import { getRequirementSetup, type Refused, type RequirementSetup, type SeasonOp } from "./setup";
 import { coveredBy, loadSubjects, type FamilySubject, type Subject } from "./subjects";
+import { currentRosterTag, lockRosterAs, ROSTER_MOVED } from "./roster-lock";
 
 type Done<T = object> = ({ ok: true } & T) | Refused;
 const refuse = (...errors: string[]): Refused => ({ ok: false, errors });
@@ -34,6 +35,8 @@ export type RequirementProgress = RequirementSetup & {
   rows: ProgressRow[] | null;
   left: LeftRow[];
   counts: { asked: number; done: number; waived: number; todo: number };
+  /** The company the rows' ids belong to, for the page's ticks and waivers to carry (roster-lock.ts). */
+  rosterTag: string;
 };
 
 const iso = (d: Date | null) => d?.toISOString() ?? null;
@@ -51,6 +54,8 @@ async function staffNames(ids: (string | null)[]): Promise<Map<string, string>> 
 export async function loadRequirementProgress(requirementId: string): Promise<RequirementProgress | null> {
   const setup = await getRequirementSetup(requirementId);
   if (!setup) return null;
+  // Read before the roster: a change of company in between makes the tag the older one, and a write is refused.
+  const rosterTag = await currentRosterTag();
   const [families, { facts, recorded }] = await Promise.all([loadSubjects(), loadFacts([setup.requirement], null)]);
   const who = await staffNames(recorded.flatMap((r) => [r.metBy, r.waivedBy]));
   const by = new Map(recorded.map((r) => [r.subjectQboId, r]));
@@ -66,7 +71,7 @@ export async function loadRequirementProgress(requirementId: string): Promise<Re
   const names = gone.length ? new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)
     .where(inArray(qboCustomer.qboId, gone.map((r) => r.subjectQboId)))).map((c) => [c.qboId, c.name])) : new Map<string, string>();
   const left = gone.map((r) => ({ subjectQboId: r.subjectQboId, name: names.get(r.subjectQboId) ?? null, metAt: iso(r.metAt), waivedAt: iso(r.waivedAt), waivedReason: r.waivedReason }));
-  return { ...setup, ticked: KIND_RULES[setup.requirement.kind]?.ticked ?? false, rows, left, counts: countsOf(rows ?? []) };
+  return { ...setup, ticked: KIND_RULES[setup.requirement.kind]?.ticked ?? false, rows, left, counts: countsOf(rows ?? []), rosterTag };
 }
 
 export type OverviewRequirement = { id: string; title: string; required: boolean; appliesTo: Requirement["appliesTo"]; counts: RequirementProgress["counts"] };
@@ -129,8 +134,9 @@ export async function loadFamilyProgress(familyQboId: string, seasonId: string):
 }
 
 type Target = { setup: RequirementSetup; families: FamilySubject[] | null };
-const target = async (requirementId: string): Promise<Target | null> => {
-  const setup = await getRequirementSetup(requirementId);
+/** The requirement and the roster, read under the roster lock (lockRosterAs) by the transaction that writes. */
+const target = async (requirementId: string, tx: Tx): Promise<Target | null> => {
+  const setup = await getRequirementSetup(requirementId, tx);
   return setup ? { setup, families: await loadSubjects() } : null;
 };
 const auditTarget = (requirementId: string, subjectQboId: string) => `${requirementId}:${subjectQboId}`;
@@ -144,18 +150,19 @@ const described = (t: RequirementSetup, subject: Subject | undefined, subjectQbo
  * someone the requirement is asked of now; any tick that exists can be taken away, whoever it is for. Each change gets
  * its own audit row, and a pair already as asked is left alone.
  */
-export async function setTicks(requirementId: string, subjectQboIds: readonly string[], ticked: boolean, o: SeasonOp): Promise<Done<{ changed: number }>> {
+export async function setTicks(requirementId: string, rosterTag: string, subjectQboIds: readonly string[], ticked: boolean, o: SeasonOp): Promise<Done<{ changed: number }>> {
   const ids = [...new Set(subjectQboIds)];
   if (ids.length === 0 || ids.length > BULK_MAX) return refuse("There is nobody to change.");
-  const t = await target(requirementId);
-  if (!t) return refuse(GONE);
-  if (!KIND_RULES[t.setup.requirement.kind]?.ticked) return refuse("This kind of requirement isn't ticked off by hand.");
-  const covered = new Map((t.families ? coveredBy(t.setup.requirement, t.families) : []).map((s) => [s.qboId, s]));
-  if (ticked) {
-    if (!t.families) return refuse(NO_ROSTER);
-    if (ids.some((id) => !covered.has(id))) return refuse(NOT_COVERED);
-  }
   return db.transaction(async (tx) => {
+    if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
+    const t = await target(requirementId, tx);
+    if (!t) return refuse(GONE);
+    if (!KIND_RULES[t.setup.requirement.kind]?.ticked) return refuse("This kind of requirement isn't ticked off by hand.");
+    const covered = new Map((t.families ? coveredBy(t.setup.requirement, t.families) : []).map((s) => [s.qboId, s]));
+    if (ticked) {
+      if (!t.families) return refuse(NO_ROSTER);
+      if (ids.some((id) => !covered.has(id))) return refuse(NOT_COVERED);
+    }
     const [r] = await tx.select({ id: requirement.id }).from(requirement).where(eq(requirement.id, requirementId)).for("update");
     if (!r) return refuse(GONE);
     const existing = new Map((await tx.select().from(requirementProgress)
@@ -187,16 +194,17 @@ export async function setTicks(requirementId: string, subjectQboIds: readonly st
  * Waives a requirement of any kind for one family or student it is asked of, with a reason (v1 spec §10.2). The reason
  * is in the audit row. Waiving again replaces the reason.
  */
-export async function waiveRequirement(requirementId: string, subjectQboId: string, rawReason: string, o: SeasonOp): Promise<Done> {
+export async function waiveRequirement(requirementId: string, rosterTag: string, subjectQboId: string, rawReason: string, o: SeasonOp): Promise<Done> {
   const reason = rawReason.trim();
   if (!reason) return refuse("Say why, in a few words. The reason is kept in the audit log.");
   if (reason.length > REASON_MAX) return refuse(`The reason is too long (${REASON_MAX} characters at most).`);
-  const t = await target(requirementId);
-  if (!t) return refuse(GONE);
-  if (!t.families) return refuse(NO_ROSTER);
-  const subject = coveredBy(t.setup.requirement, t.families).find((s) => s.qboId === subjectQboId);
-  if (!subject) return refuse(NOT_COVERED);
   return db.transaction(async (tx) => {
+    if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
+    const t = await target(requirementId, tx);
+    if (!t) return refuse(GONE);
+    if (!t.families) return refuse(NO_ROSTER);
+    const subject = coveredBy(t.setup.requirement, t.families).find((s) => s.qboId === subjectQboId);
+    if (!subject) return refuse(NOT_COVERED);
     const [r] = await tx.select({ id: requirement.id }).from(requirement).where(eq(requirement.id, requirementId)).for("update");
     if (!r) return refuse(GONE);
     const [row] = await tx.select().from(requirementProgress).where(and(eq(requirementProgress.requirementId, r.id), eq(requirementProgress.subjectQboId, subjectQboId))).for("update");
@@ -211,11 +219,12 @@ export async function waiveRequirement(requirementId: string, subjectQboId: stri
 }
 
 /** Takes a waiver away, whoever it is for. With none recorded, nothing changes and nothing is recorded. */
-export async function removeWaiver(requirementId: string, subjectQboId: string, o: SeasonOp): Promise<Done<{ changed: boolean }>> {
-  const t = await target(requirementId);
-  if (!t) return refuse(GONE);
-  const subject = t.families ? coveredBy(t.setup.requirement, t.families).find((s) => s.qboId === subjectQboId) : undefined;
+export async function removeWaiver(requirementId: string, rosterTag: string, subjectQboId: string, o: SeasonOp): Promise<Done<{ changed: boolean }>> {
   return db.transaction(async (tx) => {
+    if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
+    const t = await target(requirementId, tx);
+    if (!t) return refuse(GONE);
+    const subject = t.families ? coveredBy(t.setup.requirement, t.families).find((s) => s.qboId === subjectQboId) : undefined;
     const [row] = await tx.select().from(requirementProgress).where(and(eq(requirementProgress.requirementId, requirementId), eq(requirementProgress.subjectQboId, subjectQboId))).for("update");
     if (!row?.waivedAt) return { ok: true as const, changed: false };
     if (row.metAt) await tx.update(requirementProgress).set({ waivedAt: null, waivedBy: null, waivedReason: null, updatedAt: new Date() }).where(eq(requirementProgress.id, row.id));

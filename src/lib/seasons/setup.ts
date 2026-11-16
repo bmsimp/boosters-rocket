@@ -9,6 +9,7 @@ import { KIND_LABELS, isAvailableKind } from "./kinds";
 import { isCalendarDate, type AmountUnit, type AppliesTo, type Requirement } from "./progress";
 import { loadCovers, toRequirement, type RequirementRow } from "./recorded";
 import { candidatesFor, loadSubjects } from "./subjects";
+import { lockRosterAs, ROSTER_MOVED } from "./roster-lock";
 
 export type SeasonOp = { actor: Actor; ip: string | null; permission?: string };
 export type Refused = { ok: false; errors: string[] };
@@ -277,13 +278,15 @@ export async function updateRequirement(requirementId: string, input: Requiremen
  * students for a per-student one). Every id must be on the roster now. Someone already listed who has since left the
  * roster stays listed, so they are covered again if they come back.
  */
-export async function setCoverage(requirementId: string, covers: "everyone" | "chosen", subjectQboIds: readonly string[], o: SeasonOp): Promise<Done> {
+export async function setCoverage(requirementId: string, rosterTag: string, covers: "everyone" | "chosen", subjectQboIds: readonly string[], o: SeasonOp): Promise<Done> {
   const chosen = [...new Set(subjectQboIds)];
   if (covers === "chosen" && chosen.length === 0) return refuse("Choose at least one, or ask it of everyone.");
   if (chosen.length > COVER_MAX) return refuse("That list is too long.");
-  const families = covers === "chosen" ? await loadSubjects() : [];
-  if (families === null) return refuse("The roster can't be shown right now, so a list can't be chosen. Check QuickBooks under Roster.");
   return db.transaction(async (tx) => {
+    // Under the roster lock, and against the company the page was shown: the list is checked against the roster it is kept with.
+    if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
+    const families = covers === "chosen" ? await loadSubjects() : [];
+    if (families === null) return refuse("The roster can't be shown right now, so a list can't be chosen. Check QuickBooks under Roster.");
     const [r] = await tx.select().from(requirement).where(eq(requirement.id, requirementId)).for("update");
     if (!r) return refuse(GONE);
     const before = (await tx.select({ subjectQboId: requirementCover.subjectQboId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id))).map((c) => c.subjectQboId).sort();
