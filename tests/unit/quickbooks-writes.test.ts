@@ -6,10 +6,14 @@ import path from "node:path";
  * A tripwire. Until 2026-11-15 this file held the portal to reading QuickBooks only. The owner then decided that a
  * parent edits their own phone and mailing address (roadmap, decisions of 2026-11-14; v1 spec §6.2), so the rule it
  * holds now is: the portal sends QuickBooks one write, a sparse update of one customer's phone and billing address,
- * and it can be sent from one place only.
+ * and it can be sent from one place only, for one record only: the signed-in parent's own.
  *
  * A new write (an email change, a staff edit, an invoice) is a decision named in a slice brief: it adds its function
  * and its caller to the lists below on purpose, never to make this pass.
+ *
+ * The checks read the source as text, so each is written to refuse what it can't read rather than pass it: a request
+ * method that isn't written out, a request whose method isn't in the call, a second function that reaches the write.
+ * The last block feeds the checks code they must refuse, so a check that has gone blind fails here.
  */
 const read = (dir: string) => (existsSync(path.resolve(dir)) ? readdirSync(path.resolve(dir), { recursive: true }).map(String) : [])
   .filter((f) => /\.tsx?$/.test(f)).map((f) => ({ file: `${dir}/${f.replaceAll("\\", "/")}`, text: readFileSync(path.resolve(dir, f), "utf8") }));
@@ -17,34 +21,158 @@ const read = (dir: string) => (existsSync(path.resolve(dir)) ? readdirSync(path.
 const code = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
 const CLIENT = "src/lib/quickbooks/client.ts";
+const CONTACT_EDITS = "src/lib/parents/contact-edits.ts";
 /** The one function that sends a write to the QuickBooks API, and the constant that holds its address and body. */
 const WRITE = "qboUpdateCustomerContact";
 /** The only modules that may name that function: where it is written, and the parent's contact edits that call it. */
-const MAY_SEND_THE_WRITE = [CLIENT, "src/lib/parents/contact-edits.ts"];
+const MAY_SEND_THE_WRITE = [CLIENT, CONTACT_EDITS];
 /** What reaches the contact edits' save from a browser: the parent's own server action, and nothing else. */
 const SAVE = "saveMyContact";
-const MAY_SAVE = ["src/lib/parents/contact-edits.ts", "src/app/(parent)/family/details/actions.ts"];
+const MAY_SAVE = [CONTACT_EDITS, "src/app/(parent)/family/details/actions.ts"];
+/** Everything the contact edits may export. A second exported function is a second way to the write. */
+const CONTACT_EDITS_EXPORTS = ["CONTACT_COPY", "ContactView", "SaveContactResult", "loadMyContact", SAVE];
 
-const METHOD = /["']?method["']?\s*:\s*([^,}\n]+)/g;
-const methodsIn = (text: string) => [...code(text).matchAll(METHOD)].map((m) => m[1]!.trim());
+/**
+ * Every place the word `method` stands in the code. `is` is the request method when it is written out as a plain key
+ * with one of the two the portal uses, `method: "GET"` or `method: "POST"`, and null for anything else: a shorthand
+ * (`{ method }`), a computed or quoted key (`["method"]: ...`), a property set later (`init.method = ...`), a value
+ * built from parts. Those could be any method, so none of them is allowed.
+ */
+function methodsIn(source: string): { is: "GET" | "POST" | null; where: string }[] {
+  const text = code(source);
+  return [...text.matchAll(/\bmethod\b/g)].map((m) => {
+    const at = m.index, before = text.slice(Math.max(0, at - 1), at);
+    const written = /^\s*:\s*"(GET|POST)"\s*[,}]/.exec(text.slice(at + m[0].length));
+    const plainKey = !/["'`[.$]/.test(before);
+    return { is: plainKey && written ? (written[1] as "GET" | "POST") : null, where: text.slice(Math.max(0, at - 30), at + 40).replace(/\s+/g, " ").trim() };
+  });
+}
+
+/** Where the call that opens at `open` (its parenthesis) closes. Strings and template text are skipped; `${...}` is code again. */
+function endOfCall(text: string, open: number): number {
+  const frames: { template: boolean; braces: number }[] = [{ template: false, braces: 0 }];
+  let depth = 0, quote: string | null = null;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i]!, frame = frames.at(-1)!;
+    if (quote) { if (ch === "\\") i++; else if (ch === quote) quote = null; continue; }
+    if (frame.template) {
+      if (ch === "\\") i++;
+      else if (ch === "`") frames.pop();
+      else if (ch === "$" && text[i + 1] === "{") { frames.push({ template: false, braces: 0 }); i++; }
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "`") frames.push({ template: true, braces: 0 });
+    else if (ch === "{") frame.braces++;
+    else if (ch === "}") { if (frame.braces === 0 && frames.length > 1) frames.pop(); else frame.braces--; }
+    else if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) return i;
+  }
+  return text.length;
+}
+/** Each call to fetch in the code, as written, arguments and all. */
+function fetchCalls(source: string): string[] {
+  const text = code(source);
+  return [...text.matchAll(/\bfetch\s*\(/g)].map((m) => text.slice(m.index, endOfCall(text, m.index + m[0].length - 1) + 1));
+}
+/** Any way of sending a request that isn't a plain fetch call: nothing in the QuickBooks code uses one. */
+const OTHER_SENDERS = /\bnew\s+Request\b|\bXMLHttpRequest\b|\bsendBeacon\b|["'](?:node:)?https?["']|\bundici\b|\baxios\b/;
+
+/**
+ * What is wrong with how a module sends requests; nothing when every request is a fetch call that says, in the call
+ * itself, that it is a GET or a POST.
+ */
+function requestProblems(source: string): string[] {
+  const problems: string[] = [];
+  const methods = methodsIn(source), calls = fetchCalls(source);
+  for (const m of methods) if (m.is === null) problems.push(`a request method this scan can't read: ${m.where}`);
+  if (/["'`](PUT|PATCH|DELETE)["'`]/i.test(code(source))) problems.push("PUT, PATCH or DELETE written as a string");
+  for (const call of calls) {
+    const own = methodsIn(call);
+    if (own.length !== 1 || own[0]!.is === null) problems.push(`a request that doesn't say in the call itself whether it is a GET or a POST: ${call.slice(0, 70).replace(/\s+/g, " ")}`);
+  }
+  // No method stands anywhere but in a fetch call: an options object built to one side could be handed to any request.
+  if (methods.length !== calls.length) problems.push(`${methods.length} request methods for ${calls.length} fetch calls`);
+  if (OTHER_SENDERS.test(code(source))) problems.push("a request sent some way other than a fetch call");
+  return problems;
+}
+const postsIn = (source: string) => methodsIn(source).filter((m) => m.is === "POST").length;
+
+/** One exported function of a module, from its `export` to the next one. */
+function exportedFunction(source: string, name: string): string {
+  const text = code(source), at = text.indexOf(`export async function ${name}(`);
+  if (at < 0) return "";
+  const next = text.indexOf("\nexport ", at + 1);
+  return text.slice(at, next < 0 ? undefined : next);
+}
+
+/**
+ * What is wrong with how the contact edits reach the write; nothing when the write is imported under its own name,
+ * called once, inside saveMyContact, for the record loadMyRecord(ctx) found for the session, and the module exports
+ * nothing that could be a second way to it.
+ */
+function writerProblems(source: string): string[] {
+  const text = code(source), problems: string[] = [];
+  const named = [...text.matchAll(new RegExp(`\\b${WRITE}\\b`, "g"))].length;
+  const imports = [...text.matchAll(/import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']@\/lib\/quickbooks\/client["']/g)].flatMap((m) => m[1]!.split(",").map((s) => s.trim()));
+  if (!imports.includes(WRITE)) problems.push(`${WRITE} is not imported under its own name`);
+  const save = exportedFunction(source, SAVE);
+  const calls = [...save.matchAll(new RegExp(`\\b${WRITE}\\s*\\(\\s*([^,)]*)`, "g"))].map((m) => m[1]!.trim());
+  if (calls.length !== 1) problems.push(`${SAVE} calls ${WRITE} ${calls.length} times, not once`);
+  else if (calls[0] !== "record.qboId") problems.push(`${WRITE} is called for ${calls[0]}, not for record.qboId`);
+  // Once to import it and once to call it. A third mention is another call, another name for it, or a way to hand it on.
+  if (named !== 2) problems.push(`${WRITE} is named ${named} times: once to import it and once to call it is all`);
+  // `record` is the session's own, and stays so.
+  const OWN = "const record = await loadMyRecord(ctx);";
+  if (save.split(OWN).length !== 2) problems.push(`${SAVE} does not get its record from loadMyRecord(ctx), once`);
+  if (/\b(?:const|let|var)\s+record\b|\brecord\s*=[^=>]|\brecord\.qboId\s*=[^=]/.test(save.replace(OWN, ""))) problems.push(`${SAVE} gives record another value`);
+  if (!/^export async function saveMyContact\(ctx: ParentCtx, /.test(save)) problems.push(`${SAVE} does not take the session's ParentCtx first`);
+  const exported = [...text.matchAll(/^export\s+(?:declare\s+)?(?:async\s+)?(?:function\*?|const|let|var|class|type|interface|enum)\s+(\w+)/gm)].map((m) => m[1]!);
+  if ([...exported].sort().join() !== [...CONTACT_EDITS_EXPORTS].sort().join()) problems.push(`exports ${exported.join(", ")}`);
+  if ([...text.matchAll(/^export\b/gm)].length !== exported.length) problems.push("an export this scan can't read (a re-export, a default, a list)");
+  return problems;
+}
+
+/** `export const CUSTOMER_UPDATE = { ... } as const;` as written in the client. */
+function updateConstant(clientSource: string): string {
+  const text = code(clientSource), at = text.indexOf("export const CUSTOMER_UPDATE = {");
+  return at < 0 ? "" : text.slice(at, text.indexOf("\n} as const;", at));
+}
+/** The top-level and nested fields the update's body can carry, in order. */
+const BODY_FIELDS = ["Id", "SyncToken", "PrimaryPhone", "FreeFormNumber", "BillAddr", "Line1", "Line2", "Line3", "Line4", "Line5", "City", "CountrySubDivisionCode", "PostalCode", "Country"];
+/** The two parts of the body that are left out when unchanged. Any other spread could carry any field. */
+const BODY_SPREADS = ["...(change.phone !== undefined ? { PrimaryPhone: {", "...(change.address !== undefined ? { BillAddr: {"];
+function bodyProblems(constant: string): string[] {
+  const problems: string[] = [];
+  if (!constant.includes(`path: "customer",`)) problems.push("the path is not the customer endpoint");
+  if (!constant.includes("body: (customerId: string, syncToken: string, change: CustomerContactChange) => ({")) problems.push("the body is not built from an id, a version and a contact change alone");
+  const fields = [...constant.matchAll(/(?:^|[{\s])["'`]?([A-Z]\w*)["'`]?\]?\s*:/g)].map((m) => m[1]!);
+  if (fields.join() !== BODY_FIELDS.join()) problems.push(`the body carries ${fields.join(", ")}`);
+  if (!constant.includes("Id: customerId, SyncToken: syncToken, sparse: true,")) problems.push("the update is not sparse, or not of the customer and version it was given");
+  const spreads = [...constant.matchAll(/\.\.\./g)].map((m) => constant.slice(m.index, m.index + 60).replace(/\s+/g, " "));
+  if (spreads.length !== BODY_SPREADS.length || spreads.some((s, i) => !s.startsWith(BODY_SPREADS[i]!))) problems.push(`the body spreads something other than its two parts: ${spreads.join(" | ")}`);
+  if (/\[[^\]]*\]\s*:/.test(constant.replace(/\/\^.*?\$\//g, ""))) problems.push("the body has a computed key");
+  return problems;
+}
 
 describe("the portal writes one thing to QuickBooks: a parent's own phone and address (v1 spec §6.2)", () => {
   const everything = read("src");
   // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts reads and changes a parent's own
   // record: scanned with the rest, on purpose. A new folder that calls QuickBooks is found by the test below.
   const sources = [...read("src/lib/quickbooks"), ...read("src/lib/roster"), ...read("src/lib/jobs"), ...read("src/lib/money"),
-    ...everything.filter((s) => s.file === "src/lib/parents/contact-edits.ts")];
-  const client = code(sources.find((s) => s.file === CLIENT)!.text);
+    ...everything.filter((s) => s.file === CONTACT_EDITS)];
+  const clientSource = sources.find((s) => s.file === CLIENT)!.text;
+  const client = code(clientSource);
+  const contactEdits = sources.find((s) => s.file === CONTACT_EDITS)!.text;
   const bodyOf = (name: string) => {
-    const at = client.indexOf(`export async function ${name}(`);
-    expect(at, `${CLIENT} has no exported function ${name}`).toBeGreaterThanOrEqual(0);
-    const next = client.indexOf("\nexport ", at + 1);
-    return client.slice(at, next < 0 ? undefined : next);
+    const body = exportedFunction(clientSource, name);
+    expect(body, `${CLIENT} has no exported function ${name}`).not.toBe("");
+    return body;
   };
 
   it("finds the QuickBooks code", () => {
     expect(sources.length).toBeGreaterThan(2);
-    expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining([CLIENT, "src/lib/money/family-money.ts", "src/lib/parents/contact-edits.ts"]));
+    expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining([CLIENT, "src/lib/money/family-money.ts", CONTACT_EDITS]));
   });
 
   it("scans every module that calls the QuickBooks client", () => {
@@ -55,11 +183,12 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     expect(unscanned, `These modules call the QuickBooks client and are not scanned here: ${unscanned.join(", ")}. Add their folder to \`sources\` in tests/unit/quickbooks-writes.test.ts.`).toEqual([]);
   });
 
-  it("still has no PUT, PATCH or DELETE, and never a method it can't read", () => {
+  it("still has no PUT, PATCH or DELETE, and never a request whose method it can't read", () => {
     for (const s of sources) {
       expect(s.text, s.file).not.toMatch(/["']?method["']?\s*:\s*["'](PUT|PATCH|DELETE)["']/i);
-      // Every method is written out as "GET" or "POST": one built from a variable could be anything.
-      for (const method of methodsIn(s.text)) expect(method, `${s.file} sets a request method this scan can't read`).toMatch(/^["'](GET|POST)["']$/);
+      // Every request is a fetch call with `method: "GET"` or `method: "POST"` written in it: a method that is a
+      // variable, a shorthand, a computed key or part of an options object built elsewhere could be anything.
+      expect(requestProblems(s.text), s.file).toEqual([]);
     }
   });
 
@@ -68,15 +197,16 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
   });
 
   it("sends nothing but GET, except to Intuit's token and revoke endpoints and the one customer update", () => {
-    const posts = sources.flatMap((s) => methodsIn(s.text).filter((m) => /POST/.test(m)).map(() => s.file));
+    const posts = sources.flatMap((s) => Array.from({ length: postsIn(s.text) }, () => s.file));
     // The token request and the customer update in the client; the revoke in the connection.
     expect(posts.sort()).toEqual([CLIENT, CLIENT, "src/lib/quickbooks/connection.ts"]);
-    expect(methodsIn(bodyOf("tokenRequest"))).toEqual([`"POST"`]);
+    const methods = (text: string) => methodsIn(text).map((m) => m.is);
+    expect(methods(bodyOf("tokenRequest"))).toEqual(["POST"]);
     expect(bodyOf("tokenRequest")).toContain("qboEndpoints().token");
-    expect(methodsIn(bodyOf(WRITE))).toEqual([`"POST"`]);
+    expect(methods(bodyOf(WRITE))).toEqual(["POST"]);
     // Everything else in the client that reaches the API is a GET: qboGet, and what is built on it.
-    expect(methodsIn(bodyOf("qboGet"))).toEqual([`"GET"`]);
-    expect(methodsIn(client)).toEqual([`"POST"`, `"GET"`, `"POST"`]);
+    expect(methods(bodyOf("qboGet"))).toEqual(["GET"]);
+    expect(methods(clientSource)).toEqual(["POST", "GET", "POST"]);
   });
 
   it("can send the update to the customer endpoint only, with nothing in it but an Id, a SyncToken, the phone and the billing address", () => {
@@ -85,14 +215,9 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     expect(write).toContain("/${CUSTOMER_UPDATE.path}`");
     expect(/export async function \w+\(([^)]*)\)/.exec(write)![1]).not.toMatch(/\bpath\b|\burl\b|\bbody\b/);
     expect(write).toContain("JSON.stringify(CUSTOMER_UPDATE.body(customerId, syncToken, change))");
-    const at = client.indexOf("export const CUSTOMER_UPDATE = {");
-    expect(at).toBeGreaterThanOrEqual(0);
-    const constant = client.slice(at, client.indexOf("\n} as const;", at));
-    expect(constant).toContain(`path: "customer",`);
-    // The top-level fields the body can carry. `sparse: true` is what keeps every field not sent as it was.
-    const fields = [...constant.matchAll(/(?:^|[{\s])([A-Z]\w*):/g)].map((m) => m[1]);
-    expect(fields).toEqual(["Id", "SyncToken", "PrimaryPhone", "FreeFormNumber", "BillAddr", "Line1", "Line2", "Line3", "Line4", "Line5", "City", "CountrySubDivisionCode", "PostalCode", "Country"]);
-    expect(constant).toContain("sparse: true,");
+    expect(client).toContain("export const CUSTOMER_UPDATE = {");
+    // The fields the body can carry, and no way to carry another: `sparse: true` keeps every field not sent as it was.
+    expect(bodyProblems(updateConstant(clientSource))).toEqual([]);
   });
 
   it("lets only the parent's contact edits send it, and only the parent's own action save through them", () => {
@@ -101,5 +226,101 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     expect(naming(SAVE)).toEqual([...MAY_SAVE].sort());
     // Nobody reaches the client's write by taking the module whole.
     for (const s of everything) expect(code(s.text), s.file).not.toMatch(/import\s*\*\s*as\s+\w+\s+from\s*["'][^"']*quickbooks\/client["']|import\(\s*["'][^"']*quickbooks\/client["']\s*\)|require\(\s*["'][^"']*quickbooks\/client["']\s*\)/);
+  });
+
+  it("sends it from one place in the contact edits, for the session's own record, and the module is no second way to it", () => {
+    // Naming the module is not enough: a second exported function in it could send the write for any customer, and
+    // any staff page could then call that. So the write is called once, in saveMyContact, for the record
+    // loadMyRecord(ctx) found, and the module exports nothing but its two functions, its copy and its types.
+    expect(writerProblems(contactEdits)).toEqual([]);
+    // The client itself only defines the write: nothing in it calls it.
+    expect([...client.matchAll(new RegExp(`\\b${WRITE}\\b`, "g"))]).toHaveLength(1);
+  });
+
+  describe("and these checks refuse what would get past a careless scan", () => {
+    const fetchWith = (init: string, before = "") => `${before}\nexport async function send(url: string) { return fetch(url, ${init}); }\n`;
+
+    it("a request method that isn't written out as GET or POST", () => {
+      expect(requestProblems(fetchWith(`{ method: "GET", headers: { accept: "application/json" } }`))).toEqual([]);
+      expect(requestProblems(fetchWith(`{ method: "POST", body }`))).toEqual([]);
+      const refused = [
+        fetchWith(`{ method }`, `const method = "PUT";`),                    // shorthand
+        fetchWith(`{ method, body }`, `const method = "P" + "UT";`),
+        fetchWith(`{ ["method"]: "DELETE" }`),                              // computed key
+        fetchWith(`{ "method": "PATCH" }`),                                 // quoted key
+        fetchWith(`{ method: verb }`, `const verb = "PUT";`),               // a variable
+        fetchWith(`{ method: "P" + "UT" }`),                                // built from parts
+        fetchWith(`{ method: "put" }`),
+        fetchWith(`{ method: \`PUT\` }`),
+        fetchWith(`init`, `const init = { method: "POST" };`),              // options built to one side
+        fetchWith(`{ ...init }`, `const init = { method: "POST" };`),
+        fetchWith(`init`, `const init: RequestInit = {}; init.method = "DELETE";`),
+        fetchWith(`{ ...WRITE_OPTIONS }`),                                  // options from a module this test doesn't scan
+        fetchWith(`options`),
+        `export const send = (url: string) => fetch(new Request(url, { method: "POST" }));`,
+        `import { request } from "node:https";\nexport const send = (url: string) => request(url, { method: "POST" });`,
+      ];
+      for (const source of refused) expect(requestProblems(source), source).not.toEqual([]);
+    });
+
+    it("a fetch call is read whole, through strings and templates with brackets in them", () => {
+      const call = "fetch(`${base}/v3/company/${encodeURIComponent(realm)}/customer`, { method: \"POST\", headers: { authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString(\"base64\")}` }, body: \")\" })";
+      expect(fetchCalls(`const res = await ${call};\nconst next = 1;`)).toEqual([call]);
+      expect(fetchCalls(clientSource)).toHaveLength(3);
+    });
+
+    it("a second way to the write through the contact edits", () => {
+      expect(writerProblems(contactEdits)).toEqual([]);
+      const added = (more: string) => `${contactEdits}\n${more}\n`;
+      // loadMyContact gets its record the same way: these cases change the save, which is the one that writes.
+      const cut = contactEdits.indexOf(`export async function ${SAVE}(`);
+      const inSave = (from: string, to: string) => contactEdits.slice(0, cut) + contactEdits.slice(cut).replace(from, to);
+      const OWN = "const record = await loadMyRecord(ctx);";
+      const refused = [
+        // A second sender, for any customer: the case the old check passed.
+        added(`export async function staffSaveContact(qboId: string, version: string, change: CustomerContactChange) { return qboUpdateCustomerContact(qboId, version, change, { realmId: "1" }); }`),
+        added(`async function alsoSend(qboId: string) { return qboUpdateCustomerContact(qboId, "0", { phone: "" }, { realmId: "1" }); }`),
+        // The write handed on under another name.
+        added(`export const sendContact = qboUpdateCustomerContact;`),
+        added(`export { qboUpdateCustomerContact };`),
+        added(`export { qboUpdateCustomerContact as sendContact } from "@/lib/quickbooks/client";`),
+        added(`export * from "@/lib/quickbooks/client";`),
+        added(`export default saveMyContact;`),
+        // Another export, harmless or not: every export is on the list.
+        added(`export async function saveContactFor(ctx: ParentCtx, qboId: string) { return qboId; }`),
+        // The one call, made for another record.
+        contactEdits.replace("qboUpdateCustomerContact(record.qboId,", "qboUpdateCustomerContact(input.qboId,"),
+        contactEdits.replace("qboUpdateCustomerContact(record.qboId,", "qboUpdateCustomerContact(record.parentQboId,"),
+        inSave(OWN, `${OWN}\n  record.qboId = String((input as { id: string }).id);`),
+        inSave(OWN, "const record = await recordFor(input);"),
+        inSave(OWN, "let record = await loadMyRecord(ctx);\n  record = await recordFor(input);"),
+        inSave(OWN, `${OWN}\n  if (input) { const record = await recordFor(input); await qboUpdateCustomerContact(record.qboId, version, {}, { realmId: "1" }); }`),
+        // The write imported under another name.
+        contactEdits.replace("qboUpdateCustomerContact, type CustomerContactChange", "qboUpdateCustomerContact as send, type CustomerContactChange").replace("await qboUpdateCustomerContact(record.qboId,", "await send(record.qboId,"),
+      ];
+      for (const source of refused) {
+        expect(source, "the case didn't change the module").not.toBe(contactEdits);
+        expect(writerProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
+      }
+    });
+
+    it("a body that could carry another field", () => {
+      const constant = updateConstant(clientSource);
+      expect(bodyProblems(constant)).toEqual([]);
+      const refused = [
+        constant.replace("sparse: true,", "sparse: true, ...extra,"),
+        constant.replace("sparse: true,", "sparse: true, ...change,"),
+        constant.replace("Country: change.address.country,", "Country: change.address.country, ...change.address.more,"),
+        constant.replace("sparse: true,", "sparse: true, PrimaryEmailAddr: { Address: change.email },"),
+        constant.replace("sparse: true,", `sparse: true, ["DisplayName"]: change.name,`),
+        constant.replace("sparse: true,", "sparse: false,"),
+        constant.replace("change: CustomerContactChange) => ({", "change: CustomerContactChange, extra: object) => ({"),
+        constant.replace(`path: "customer",`, `path: "invoice",`),
+      ];
+      for (const source of refused) {
+        expect(source, "the case didn't change the constant").not.toBe(constant);
+        expect(bodyProblems(source), source).not.toEqual([]);
+      }
+    });
   });
 });
