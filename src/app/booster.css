@@ -119,6 +119,16 @@ button { font: inherit; cursor: pointer; }
 .menu-panel a { color: var(--club-on); text-decoration: none; font: 600 1.125rem var(--mark); min-height: 48px;
   display: flex; align-items: center; padding: 0 var(--cell); }
 .menu-panel a[aria-current="page"] { box-shadow: inset 4px 0 0 var(--club-on); }
+/* Staff pages at 760px and wider: the menu can hold more links than one row has room for (fourteen for an Admin), so
+   the links wrap onto further rows inside the bar, which grows to hold them, instead of running off its edge. A link's
+   own words never break, and the club's name keeps its place: at most two fifths of the row. With few links the bar is
+   the one 56px row it always was. The parent bar (no .bar-rows) never wraps: the season ruler's grid counts on 56px. */
+@media (min-width: 760px) {
+  .bar-rows .wrap { height: auto; min-height: 56px; padding-top: 6px; padding-bottom: 6px; }
+  .bar-rows .club { flex: 0 1 auto; max-width: 40%; }
+  .bar-rows .top-nav { flex: 1 1 0; min-width: 0; flex-wrap: wrap; justify-content: flex-end; margin-left: 0; }
+  .bar-rows .top-nav a { white-space: nowrap; }
+}
 .account { margin-left: auto; width: 44px; height: 44px; border-radius: 50%; border: 2px solid currentColor;
   display: grid; place-items: center; text-decoration: none; flex: none;
   background: transparent; color: var(--club-on); font: 700 0.875rem var(--mark); }

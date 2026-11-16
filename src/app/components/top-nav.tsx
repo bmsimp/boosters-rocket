@@ -10,6 +10,14 @@ export function isCurrent(path: string, href: string) {
   return path === href || (!EXACT.has(href) && path.startsWith(`${href}/`));
 }
 
+/**
+ * The one link of a menu that is current. Where two match, a section and a page inside it that has a link of its own
+ * (/staff/seasons and /staff/seasons/progress), the longer address is the page the person is on.
+ */
+export function currentHref(path: string, hrefs: readonly string[]): string | null {
+  return hrefs.filter((href) => isCurrent(path, href)).sort((a, b) => b.length - a.length)[0] ?? null;
+}
+
 type NavItem = { href: string; label: string };
 
 export function TopNav({ nav, mobileMenu = false }: { nav: NavItem[]; mobileMenu?: boolean }) {
@@ -17,12 +25,13 @@ export function TopNav({ nav, mobileMenu = false }: { nav: NavItem[]; mobileMenu
   // No links, no landmark: the sign-in pages carry the club bar with no menu, and an empty "Main" navigation would
   // only be announced to a screen reader with nothing in it.
   if (nav.length === 0) return null;
+  const current = currentHref(path, nav.map((n) => n.href));
   return (
     <>
       <nav className="top-nav" aria-label="Main">
-        {nav.map((n) => <Link key={n.href} href={n.href} aria-current={isCurrent(path, n.href) ? "page" : undefined}>{n.label}</Link>)}
+        {nav.map((n) => <Link key={n.href} href={n.href} aria-current={n.href === current ? "page" : undefined}>{n.label}</Link>)}
       </nav>
-      {mobileMenu && <MobileMenu nav={nav} path={path} />}
+      {mobileMenu && <MobileMenu nav={nav} current={current} />}
     </>
   );
 }
@@ -37,7 +46,7 @@ export function AccountLink({ href, initials, label }: { href: string; initials:
  * On narrow screens the top menu is hidden. Parent pages use the bottom tabs; staff pages use this Menu button,
  * which opens the same links. It closes when a link is chosen or Escape is pressed.
  */
-function MobileMenu({ nav, path }: { nav: NavItem[]; path: string }) {
+function MobileMenu({ nav, current }: { nav: NavItem[]; current: string | null }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="menu-mobile" onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
@@ -47,7 +56,7 @@ function MobileMenu({ nav, path }: { nav: NavItem[]; path: string }) {
       {open && (
         <nav id="mobile-menu" className="menu-panel" aria-label="Main">
           {nav.map((n) => (
-            <Link key={n.href} href={n.href} aria-current={isCurrent(path, n.href) ? "page" : undefined} onClick={() => setOpen(false)}>{n.label}</Link>
+            <Link key={n.href} href={n.href} aria-current={n.href === current ? "page" : undefined} onClick={() => setOpen(false)}>{n.label}</Link>
           ))}
         </nav>
       )}

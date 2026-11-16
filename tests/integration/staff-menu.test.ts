@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { asStaff, renderPage } from "../helpers/signed-in";
+import { asStaff, atPath, renderPage } from "../helpers/signed-in";
 
 import { db } from "@/lib/db/client";
 import { role, roleAssignment, roleRule } from "@/lib/db/schema";
@@ -49,6 +49,23 @@ describe("the staff menu", () => {
     expect(html).toContain(SEASONS);
     expect(html).toContain(PROGRESS);
     expect(html).not.toContain(HEALTH);
+  });
+
+  it("marks one entry current: on a Progress page that is Progress, not the Seasons section its address sits under", async () => {
+    asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
+    const current = async (path: string) => {
+      atPath(path);
+      const nav = /<nav class="top-nav"[^>]*>(.*?)<\/nav>/.exec(await menu())![1]!;
+      return [...nav.matchAll(/<a\b[^>]*>/g)].filter((a) => a[0].includes('aria-current="page"')).map((a) => /href="([^"]*)"/.exec(a[0])![1]);
+    };
+    expect(await current("/staff/seasons")).toEqual(["/staff/seasons"]);
+    expect(await current("/staff/seasons/0b0f2a8e-0000-4000-8000-000000000001")).toEqual(["/staff/seasons"]);
+    expect(await current("/staff/seasons/progress")).toEqual(["/staff/seasons/progress"]);
+    expect(await current("/staff/seasons/progress/family/10")).toEqual(["/staff/seasons/progress"]);
+    expect(await current("/staff/health")).toEqual(["/staff/health"]);
+    expect(await current("/staff")).toEqual(["/staff"]);
+    expect(await current("/staff/settings/parents/setup")).toEqual(["/staff/settings/parents"]);
+    expect(await current("/staff/parents/abc")).toEqual(["/staff/parents"]);
   });
 
   it("shows none of them to someone with no season permission", async () => {

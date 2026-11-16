@@ -81,9 +81,10 @@ and the page. Move an item to **Done** when it ships.
   that open, with counts in the headings.
 - **The match review needs a table on wide screens** (2026-11-12, `/staff/settings/parents/matches`). The old
   family, the suggestion, the reason and the choice are stacked lines; side by side they would compare at a glance.
-- **The staff menu has eleven entries** (2026-11-12). Home, Roster, Parents, Staff, Roles, Club, Sign-in, Mail,
-  QuickBooks, Parent sign-ins and Audit, for an Admin. It needs grouping; this ties in with the single Settings page
-  above. **Parents** and **Parent sign-ins** are also easy to mix up.
+- **The staff menu has fourteen entries** (2026-11-12; fourteen since 2026-11-15). Home, Roster, Parents, Seasons,
+  Progress, Staff, Roles, Club, Sign-in, Mail, QuickBooks, Parent sign-ins, Audit and Health, for an Admin. It needs
+  grouping; this ties in with the single Settings page above. **Parents** and **Parent sign-ins** are also easy to
+  mix up, and **Seasons** and **Progress** are two entries only because they have separate permissions.
 - **Step 2 says sign-ins "made by hand" would end** (2026-11-12, `/staff/settings/parents/setup`, step 2). After
   sign-ins have been switched off and on again, the sign-ins that would end can come from QuickBooks too. Step 1
   was reworded to "QuickBooks no longer backs these"; step 2 should say the same.
