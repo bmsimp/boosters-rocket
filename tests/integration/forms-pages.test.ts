@@ -72,8 +72,8 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     expect(waiting.text).toContain("The club is still getting this form ready");
     const other = await page(a.forms!.ids.waitingOther);
     expect(other.text).toContain("Waiting for the other guardian");
-    expect(other.text).toContain("Ottoline Alderquist-Voss Has signed");
-    expect(other.text).toContain("Ansgar Alderquist (you) Hasn't signed yet");
+    expect(other.text).toContain("Ansgar Alderquist (you) Has signed");
+    expect(other.text).toContain("Ottoline Alderquist-Voss Hasn't signed yet");
     const declined = await page(a.forms!.ids.declined);
     expect(declined.text).toContain("This form was declined, so it isn't signed. If that wasn't meant, ask the club and they'll help.");
     expect(declined.html).not.toContain("Start this form again");

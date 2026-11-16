@@ -18,12 +18,17 @@ export const STATE_WORDS = {
   notReady: "Not ready yet",
 } as const;
 
-/** The state in words, for anyone in the family: the lines on Home and Season, and the Forms list. */
-export function wordsFor(state: SignatureRequestState, signers: readonly Pick<RequestSigner, "signedAt">[]): string {
+/**
+ * The state in words, for the guardian looking (`viewer`, their parent id; null for staff): the lines on Home and
+ * Season, the Forms list and the form page. A form that waits for another guardian reads "Not signed yet" to a
+ * guardian who still has to sign it themselves.
+ */
+export function wordsFor(state: SignatureRequestState, signers: readonly Pick<RequestSigner, "signedAt" | "parentId">[], viewer: string | null): string {
   if (state === "complete") return STATE_WORDS.complete;
   if (state === "signed") return STATE_WORDS.sealing;
   if (state === "declined") return STATE_WORDS.declined;
-  if (state === "waiting" && signers.some((s) => s.signedAt !== null)) return STATE_WORDS.waitingOther;
+  const mustSign = viewer !== null && signers.some((s) => s.parentId === viewer && s.signedAt === null);
+  if (state === "waiting" && !mustSign && signers.some((s) => s.signedAt !== null)) return STATE_WORDS.waitingOther;
   return STATE_WORDS.notSigned;
 }
 

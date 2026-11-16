@@ -20,7 +20,7 @@ import {
 } from "@/lib/documenso/client";
 import { hasConsent, recordConsent } from "./consent";
 import { findMyForm, type MyForm } from "./my-forms";
-import { NO_DOCUMENT, asking, claim, isHeld, readAndStore, release, whenReleased, type RequestRow } from "./requests";
+import { NO_DOCUMENT, asking, claim, holdsSignature, isHeld, readAndStore, release, whenReleased, type RequestRow } from "./requests";
 import { getFormsConfig } from "./settings";
 import { readDocument, signersFor, stillRight, wordsFor, type SignerIdentity } from "./states";
 import { checkTemplate, type TemplatePlan } from "./template";
@@ -56,7 +56,7 @@ export type FormView = {
 };
 
 const viewOf = (ctx: ParentCtx, row: RequestRow, step: FormStep): FormView => ({
-  step, words: wordsFor(row.state, row.signers),
+  step, words: wordsFor(row.state, row.signers, ctx.parentId),
   signers: row.signers.map((s) => ({ name: s.name, signed: s.signedAt !== null, you: s.parentId === ctx.parentId })),
 });
 
@@ -245,7 +245,14 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   const config = await getFormsConfig();
   if (row.state === "declined") return viewOf(ctx, row, { kind: "declined", canRestart: config !== null && form.setting !== null });
   if (!config || !form.setting) return viewOf(ctx, row, { kind: "not_ready" });
-  if (!(await hasConsent(row.id, ctx.parentId))) return viewOf(ctx, row, { kind: "consent" });
+  if (!(await hasConsent(row.id, ctx.parentId))) {
+    // Nothing is asked of a guardian a signed form doesn't wait for: everyone has signed, or someone has and it isn't
+    // waiting for them. What the portal last stored is said, and Documenso isn't asked.
+    const mine = row.signers.find((s) => s.parentId === ctx.parentId);
+    if (row.state === "signed") return viewOf(ctx, row, { kind: "sealing" });
+    if (row.state === "waiting" && holdsSignature(row) && (!mine || mine.signedAt !== null)) return viewOf(ctx, row, { kind: "waiting", signedByYou: mine !== undefined });
+    return viewOf(ctx, row, { kind: "consent" });
+  }
   const setting = form.setting;
   const actor = { actor: parentActor({ id: ctx.parentId, email: ctx.email }), ip: ctx.ip };
   if (!(await mayAsk(ctx, row))) return viewOf(ctx, row, { kind: "unavailable" });
@@ -325,13 +332,13 @@ export async function checkMyForm(ctx: ParentCtx, requestId: unknown): Promise<F
   const form = await findMyForm(ctx, requestId);
   if (!form) return NOT_YOUR_FORM;
   const { row } = form;
-  if (row.state === "complete" || row.state === "declined" || row.envelopeId === null) return { ok: true, message: wordsFor(row.state, row.signers), state: row.state };
+  if (row.state === "complete" || row.state === "declined" || row.envelopeId === null) return { ok: true, message: wordsFor(row.state, row.signers, ctx.parentId), state: row.state };
   const config = await getFormsConfig();
   if (!config || !(await hasConsent(row.id, ctx.parentId))) return { ok: false, errors: [CANT_ASK] };
   if (!(await mayAsk(ctx, row))) return { ok: false, errors: [CANT_ASK] };
   const read = await readAndStore(row, config, { actor: parentActor({ id: ctx.parentId, email: ctx.email }), ip: ctx.ip, ...PAGE });
   if (!read.ok) return { ok: false, errors: [CANT_ASK] };
-  return { ok: true, message: wordsFor(read.row.state, read.row.signers), state: read.row.state };
+  return { ok: true, message: wordsFor(read.row.state, read.row.signers, ctx.parentId), state: read.row.state };
 }
 
 /**

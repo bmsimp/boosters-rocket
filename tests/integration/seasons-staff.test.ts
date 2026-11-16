@@ -537,7 +537,7 @@ describe("ticks and waivers", () => {
       { name: "Uniforms", requirements: [{ title: "Uniform fitting attended", appliesTo: "student" }] }, { name: "Wrap-up", requirements: [{ title: "Banquet RSVP", appliesTo: "family" }] }] });
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
     const [aurelio, azalea] = FAMILY_A.students;
-    const mine = async () => (await loadMySeason({ familyQboId: FAMILY_A.family.qboId }, FAMILY_A.students))!;
+    const mine = async () => (await loadMySeason({ familyQboId: FAMILY_A.family.qboId, parentId: crypto.randomUUID() }, FAMILY_A.students))!;
     expect((await mine()).currentIndex).toBe(0);
     await setTicksAction(fitting, TAG, [aurelio!.qboId], true);
     await waiveAction(fitting, TAG, azalea!.qboId, "Borrowed one");

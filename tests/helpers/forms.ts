@@ -73,7 +73,7 @@ export type FamilyForms = {
   markers: string[];
   /** What this family's parent must find on the Forms page: each form's title and its state in words. */
   page: string[];
-  /** The family's request in each state, by state; `waitingOther` is the one the other guardian has signed. */
+  /** The family's request in each state, by state; `waitingOther` is the one the family's parent has signed and its other guardian has not. */
   ids: Record<SignatureRequestState | "waitingOther", string>;
 };
 
@@ -105,7 +105,7 @@ export async function seedTwoFamilyForms(a: { spec: ParentFamilySpec; parentId: 
       complete: await seedRequest({ ...base, requirementId: agreement, subjectQboId: s2.qboId, state: "complete", envelopeId: `envelope_${tag}complete`, signers: [me(signedAt)], subjectName: s2.name }),
       declined: await seedRequest({ ...base, requirementId: photo, subjectQboId: s1.qboId, state: "declined", envelopeId: `envelope_${tag}declined`, signers: [me()], subjectName: s1.name, form: every }),
       waitingOther: await seedRequest({ ...base, requirementId: photo, subjectQboId: s2.qboId, state: "waiting", envelopeId: `envelope_${tag}other`, subjectName: s2.name, form: every,
-        signers: [me(), signer(crypto.randomUUID(), own.otherGuardian, `${tag}.other.guardian@forms.example`, 2, signedAt)] }),
+        signers: [me(signedAt), signer(crypto.randomUUID(), own.otherGuardian, `${tag}.other.guardian@forms.example`, 2)] }),
     };
     return {
       ids,

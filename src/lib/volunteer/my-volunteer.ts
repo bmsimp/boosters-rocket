@@ -166,7 +166,7 @@ async function countsTowardFor(familyQboId: string, students: { qboId: string; n
   const subjects = [familyQboId, ...students.map((s) => s.qboId)];
   const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), subjects);
   const requirements: Requirement[] = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []));
-  const { facts } = await loadFacts(requirements, subjects, "fresh");
+  const { facts } = await loadFacts(requirements, subjects, { amounts: "fresh", parentId: null }); // volunteer requirements only
   const line = (r: Requirement, subject: string, studentName: string | null): CountsToward => ({
     title: r.title, whoMust: whoMustWords(r, studentName), counts: amountWords(r.amountUnit, shiftCredit(r, minutes)), standing: facts.standing(r, subject).words,
   });

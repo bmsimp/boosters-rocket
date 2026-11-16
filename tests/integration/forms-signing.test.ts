@@ -523,7 +523,7 @@ describe("a form's document is never lost track of", () => {
     const row = await requestNow(id);
     expect(row).toMatchObject({ state: "waiting", envelopeId: document.id });
     expect(row.signers.map((s) => [s.parentId, s.signedAt !== null])).toEqual([[ctx.parentId, true], [other.parentId, false]]);
-    expect(theirs.words).toBe("Waiting for the other guardian");
+    expect(theirs.words).toBe("Not signed yet"); // to the guardian who still has to sign it
     const [recovered] = await audits("form.document.recover");
     expect(recovered).toMatchObject({ door: "parent", actorId: other.parentId, targetId: id });
 
@@ -541,6 +541,57 @@ describe("a form's document is never lost track of", () => {
     expect((await open(ctx, id)).step).toEqual({ kind: "complete" });
     expect(await requestNow(id)).toMatchObject({ state: "complete", envelopeId: document.id, evidenceOwed: true });
     expect(stub.documents()).toHaveLength(1);
+  });
+});
+
+describe("what each guardian reads", () => {
+  beforeEach(async () => { await resetDb(); stub.reset(); });
+
+  it("a guardian who still has to sign reads 'Not signed yet' and a Sign button, while the one who signed reads that it waits for the other", async () => {
+    const { ctx } = await scene({ signers: "every", roles: 2 });
+    const other = await secondGuardian();
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    stub.sign(stub.documentFor(id)!.id, FAMILY_A.parent.email);
+    expect((await checkMyForm(ctx, id)).message).toBe("Waiting for the other guardian");
+    const lineFor = async (who: ParentCtx) => (await loadMyForms(who, (await loadMyFamily(who))!))!.groups.find((g) => g.subjectQboId === FAMILY_A.students[0]!.qboId)!.forms[0]!.line;
+    expect((await lineFor(ctx)).words).toBe("Waiting for the other guardian");
+    expect((await lineFor(other)).words).toBe("Not signed yet");
+    const family = (await loadMyFamily(other))!;
+    expect((await loadMySeason(other, family.students))!.steps[0]!.students[0]!.lines[0]!.words).toBe("Not signed yet");
+    const theirs = await agreeAndOpen(other, id);
+    expect(theirs.words).toBe("Not signed yet");
+    tokenIn(theirs);
+  });
+
+  it("asks no consent of a guardian a signed form doesn't wait for", async () => {
+    const { ctx } = await scene({ signers: "any", roles: 1 });
+    const other = await secondGuardian();
+    const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    stub.sealing = "held";
+    stub.sign(stub.documentFor(id)!.id, FAMILY_A.parent.email);
+    expect((await checkMyForm(ctx, id)).state).toBe("signed");
+    stub.calls.length = 0;
+    const view = await open(other, id);
+    expect(view.step).toEqual({ kind: "sealing" });
+    expect(view.words).toBe("Signed, being finished");
+    expect(stub.calls).toEqual([]);
+  });
+
+  it("a student who moved to another family brings no signature along: the new family's season reads the form as not signed", async () => {
+    const { ctx } = await scene({ signers: "any", roles: 1 });
+    const b = await seedSignedInParent(FAMILY_B);
+    const ctxB = ctxOf(b.identity);
+    const student = FAMILY_A.students[0]!;
+    const id = await requestIdFor(ctx, student.qboId);
+    tokenIn(await agreeAndOpen(ctx, id));
+    stub.sign(stub.documentFor(id)!.id, FAMILY_A.parent.email);
+    expect((await checkMyForm(ctx, id)).state).toBe("complete");
+    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, student.qboId));
+    const season = (await loadMySeason(ctxB, (await loadMyFamily(ctxB))!.students))!;
+    const line = season.steps[0]!.students.find((s) => s.qboId === student.qboId)!.lines[0]!;
+    expect(line).toMatchObject({ state: "todo", words: "Not signed yet" });
   });
 });
 

@@ -41,15 +41,21 @@ describe("reading a document's state", () => {
 });
 
 describe("the words for each state", () => {
-  const unsigned = [{ signedAt: null }], half = [{ signedAt: "2026-11-15T01:00:00.000Z" }, { signedAt: null }];
+  const unsigned = [{ parentId: "p1", signedAt: null }], half = [{ parentId: "p1", signedAt: "2026-11-15T01:00:00.000Z" }, { parentId: "p2", signedAt: null }];
   it("says each state in the words a parent reads", () => {
-    expect(wordsFor("not_opened", [])).toBe("Not signed yet");
-    expect(wordsFor("waiting", unsigned)).toBe("Not signed yet");
-    expect(wordsFor("waiting", half)).toBe("Waiting for the other guardian");
-    expect(wordsFor("signed", half)).toBe("Signed, being finished");
-    expect(wordsFor("complete", half)).toBe("Signed");
-    expect(wordsFor("declined", unsigned)).toBe("Declined");
+    expect(wordsFor("not_opened", [], null)).toBe("Not signed yet");
+    expect(wordsFor("waiting", unsigned, null)).toBe("Not signed yet");
+    expect(wordsFor("waiting", half, null)).toBe("Waiting for the other guardian");
+    expect(wordsFor("signed", half, null)).toBe("Signed, being finished");
+    expect(wordsFor("complete", half, null)).toBe("Signed");
+    expect(wordsFor("declined", unsigned, null)).toBe("Declined");
     expect(STATE_WORDS.notReady).toBe("Not ready yet");
+  });
+  it("tells a guardian who still has to sign that it isn't signed yet, though another guardian has", () => {
+    expect(wordsFor("waiting", half, "p2")).toBe("Not signed yet");
+    expect(wordsFor("waiting", half, "p1")).toBe("Waiting for the other guardian");
+    expect(wordsFor("waiting", half, "someone-else")).toBe("Waiting for the other guardian");
+    expect(wordsFor("signed", half, "p2")).toBe("Signed, being finished");
   });
   it("meets the requirement only when complete, and keeps asking about the two states in between", () => {
     expect((["not_opened", "waiting", "signed", "complete", "declined"] as const).filter(isMet)).toEqual(["complete"]);

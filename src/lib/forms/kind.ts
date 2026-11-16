@@ -14,12 +14,14 @@ import { STATE_WORDS, isMet, wordsFor } from "./states";
 const key = (requirementId: string, subjectQboId: string) => `${requirementId}|${subjectQboId}`; // pairKey() of src/lib/seasons/kinds.ts, which imports this file
 
 export const formRule: KindRule = {
-  standings: async ({ requirements, subjectQboIds }) => {
+  standings: async ({ requirements, subjectQboIds, viewing }) => {
     const standings = new Map<string, Standing>();
     const ids = requirements.map((r) => r.id);
     if (ids.length === 0 || subjectQboIds?.length === 0) return standings;
     const rows = await db.select({ requirementId: signatureRequest.requirementId, subjectQboId: signatureRequest.subjectQboId, state: signatureRequest.state, signers: signatureRequest.signers })
-      .from(signatureRequest).where(and(inArray(signatureRequest.requirementId, ids), subjectQboIds ? inArray(signatureRequest.subjectQboId, [...subjectQboIds]) : undefined));
+      // Asked about one family, only that family's own requests: a student who moved in brings no other family's signatures along.
+      .from(signatureRequest).where(and(inArray(signatureRequest.requirementId, ids),
+        subjectQboIds ? and(inArray(signatureRequest.subjectQboId, [...subjectQboIds]), inArray(signatureRequest.familyQboId, [...subjectQboIds])) : undefined));
     // Asked about particular families or students (a parent's own season, or staff looking at one family): a form
     // that can't be signed yet says so, in place of asking for a signature nobody can give.
     if (subjectQboIds) {
@@ -32,7 +34,7 @@ export const formRule: KindRule = {
     for (const row of rows) {
       // A form with nothing made for it keeps the words above; anything a document has reached is said as it is.
       if (row.state === "not_opened" && standings.has(key(row.requirementId, row.subjectQboId))) continue;
-      standings.set(key(row.requirementId, row.subjectQboId), { met: isMet(row.state), words: wordsFor(row.state, row.signers) });
+      standings.set(key(row.requirementId, row.subjectQboId), { met: isMet(row.state), words: wordsFor(row.state, row.signers, viewing.parentId) });
     }
     return standings;
   },

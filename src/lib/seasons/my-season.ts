@@ -27,7 +27,7 @@ export type MySeason = SeasonStanding & {
  * club doesn't list students. It is not trusted to belong to the family: only those the roster cache holds directly
  * under ctx.familyQboId are used, so nothing a caller passes can bring in another family's student.
  */
-export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId">, students: readonly MyStudent[] | null): Promise<MySeason | null> {
+export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, students: readonly MyStudent[] | null): Promise<MySeason | null> {
   const familyQboId = ctx.familyQboId;
   const [current] = await db.select({ id: season.id, name: season.name }).from(season).where(eq(season.isCurrent, true));
   if (!current) return null;
@@ -38,6 +38,6 @@ export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId">, students
   const mine = new Set(under.map((c) => c.qboId));
   const family: FamilyRoster = { familyQboId, students: (students ?? []).filter((s) => mine.has(s.qboId)).map((s) => ({ qboId: s.qboId, name: s.name })) };
   // The waiver reasons that come back with the standing are for staff, and stop here.
-  const { today, standing } = await loadFamilyStanding(current.id, family, "fresh");
+  const { today, standing } = await loadFamilyStanding(current.id, family, { amounts: "fresh", parentId: ctx.parentId });
   return { name: current.name, today, ...standing };
 }

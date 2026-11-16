@@ -21,14 +21,21 @@ export type Recorded = {
 /** The key of one requirement for one family or student. */
 export const pairKey = (requirementId: string, subjectQboId: string) => `${requirementId}|${subjectQboId}`;
 
+/**
+ * Who is looking, as far as the words depend on it. `amounts`: whether a payment's words say how much is left to pay
+ * (src/lib/money/payment-standings.ts). `parentId`: the signed-in guardian on a parent's page, so a form a guardian
+ * still has to sign reads "Not signed yet" to them while it waits for nobody else; null for staff.
+ */
+export type Viewing = { amounts: AmountsShown; parentId: string | null };
+
 export type KindRule = {
   /**
    * How things stand for these requirements (all of this kind) and these families or students, keyed by pairKey().
    * `subjectQboIds` is null when staff ask about everyone. `recorded` is what requirement_progress holds for them; a
    * kind judged from its own records (invoices, signatures, volunteer credit) reads those here instead. A pair left
-   * out stands as `nothingYet`. `amounts` says whether a payment's words may say how much is left to pay.
+   * out stands as `nothingYet`. `viewing` is who is looking.
    */
-  standings(ask: { requirements: readonly Requirement[]; subjectQboIds: readonly string[] | null; recorded: readonly Recorded[]; amounts: AmountsShown }): Promise<Map<string, Standing>>;
+  standings(ask: { requirements: readonly Requirement[]; subjectQboIds: readonly string[] | null; recorded: readonly Recorded[]; viewing: Viewing }): Promise<Map<string, Standing>>;
   /** How a requirement stands for a family or student with nothing to show for it yet. */
   nothingYet(requirement: Requirement): Standing;
   /** True when staff meet it by hand, with a tick (requirement_progress.met_at). */
@@ -45,8 +52,8 @@ const checklist: KindRule = {
 const payment: KindRule = {
   // Met when invoices carrying its QuickBooks product or service exist for the family or student and none of them is
   // still open (src/lib/money/payment-rule.ts), judged from the figures QuickBooks last gave the family.
-  standings: async ({ requirements, subjectQboIds, amounts }) =>
-    new Map((await paymentStandings(requirements, subjectQboIds, amounts)).map((s) => [pairKey(s.requirementId, s.subjectQboId), s.standing])),
+  standings: async ({ requirements, subjectQboIds, viewing }) =>
+    new Map((await paymentStandings(requirements, subjectQboIds, viewing.amounts)).map((s) => [pairKey(s.requirementId, s.subjectQboId), s.standing])),
   nothingYet: () => NO_INVOICE_YET,
   ticked: false,
 };

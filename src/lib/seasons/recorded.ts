@@ -6,8 +6,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { requirement, requirementCover, requirementProgress, seasonStep } from "@/lib/db/schema";
 import { clubToday } from "@/lib/settings/club";
-import type { AmountsShown } from "@/lib/money/payment-standings";
-import { KIND_RULES, NO_RULE_YET, pairKey, type Recorded } from "./kinds";
+import { KIND_RULES, NO_RULE_YET, pairKey, type Recorded, type Viewing } from "./kinds";
 import { seasonStanding, subjectsOf, type Facts, type FamilyRoster, type Requirement, type SeasonStanding, type Standing, type Step } from "./progress";
 
 export type RequirementRow = typeof requirement.$inferSelect;
@@ -43,17 +42,17 @@ export async function loadRecorded(requirementIds: readonly string[], subjectQbo
 
 /**
  * How these requirements stand, for these families and students (null: everyone, for staff): each kind's rule judges
- * its own requirements, and a waiver is a waiver whatever the kind. `amounts`: whether a payment's words say how much
- * is left to pay (./kinds.ts); a parent's pages say it only from current figures, staff only with Finance.Balance.Read.
+ * its own requirements, and a waiver is a waiver whatever the kind. `viewing` is who is looking (./kinds.ts): a
+ * parent's pages say a payment's amount only from current figures, staff only with Finance.Balance.Read.
  */
-export async function loadFacts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, amounts: AmountsShown): Promise<{ facts: Facts; recorded: Recorded[] }> {
+export async function loadFacts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, viewing: Viewing): Promise<{ facts: Facts; recorded: Recorded[] }> {
   const recorded = await loadRecorded(requirements.map((r) => r.id), subjectQboIds);
   const standings = new Map<string, Standing>();
   for (const kind of new Set(requirements.map((r) => r.kind))) {
     const rule = KIND_RULES[kind];
     if (!rule) continue;
     const ofKind = requirements.filter((r) => r.kind === kind), ids = new Set(ofKind.map((r) => r.id));
-    for (const [key, standing] of await rule.standings({ requirements: ofKind, subjectQboIds, recorded: recorded.filter((r) => ids.has(r.requirementId)), amounts })) standings.set(key, standing);
+    for (const [key, standing] of await rule.standings({ requirements: ofKind, subjectQboIds, recorded: recorded.filter((r) => ids.has(r.requirementId)), viewing })) standings.set(key, standing);
   }
   const waived = new Set(recorded.filter((r) => r.waivedAt !== null).map((r) => pairKey(r.requirementId, r.subjectQboId)));
   return {
@@ -72,7 +71,7 @@ export async function loadFacts(requirements: readonly Requirement[], subjectQbo
  * The caller answers for `family`: a parent's query builds it from the session, a staff one from the roster.
  * `recorded` holds the waiver reasons, which are for staff: a parent's query does not pass it on.
  */
-export async function loadFamilyStanding(seasonId: string, family: FamilyRoster, amounts: AmountsShown): Promise<{ today: string; standing: SeasonStanding; recorded: Recorded[] }> {
+export async function loadFamilyStanding(seasonId: string, family: FamilyRoster, viewing: Viewing): Promise<{ today: string; standing: SeasonStanding; recorded: Recorded[] }> {
   const subjects = [family.familyQboId, ...family.students.map((s) => s.qboId)];
   const [steps, today] = await Promise.all([
     db.select().from(seasonStep).where(eq(seasonStep.seasonId, seasonId)).orderBy(asc(seasonStep.position), asc(seasonStep.createdAt)),
@@ -84,7 +83,7 @@ export async function loadFamilyStanding(seasonId: string, family: FamilyRoster,
   const covers = await loadCovers(rows.filter((r) => r.covers === "chosen").map((r) => r.id), subjects);
   // A requirement that is asked of nobody in this family goes no further than this line.
   const asksThem = rows.map((r) => ({ stepId: r.stepId, requirement: toRequirement(r, covers.get(r.id) ?? []) })).filter((r) => subjectsOf(r.requirement, family).length > 0);
-  const { facts, recorded } = await loadFacts(asksThem.map((r) => r.requirement), subjects, amounts);
+  const { facts, recorded } = await loadFacts(asksThem.map((r) => r.requirement), subjects, viewing);
   const ordered: Step[] = steps.map((s) => ({ id: s.id, name: s.name, startsOn: s.startsOn, endsOn: s.endsOn,
     requirements: asksThem.filter((r) => r.stepId === s.id).map((r) => r.requirement) }));
   return { today, standing: seasonStanding(ordered, family, facts, today), recorded };
