@@ -170,7 +170,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
   it("hostile names stay text on the forms", async () => {
     await resetDb(); stub.reset();
     const company = fznCompany();
-    company.customers.push({ Id: "70", DisplayName: "<img src=x onerror=alert(1)> Family", Active: true, SyncToken: "0", MetaData: {}, CustomerTypeRef: { value: "1" } });
+    company.customers.push({ Id: "70", DisplayName: "<img src=x onerror=alert(1)> Family", Active: true, SyncToken: "0", MetaData: { LastUpdatedTime: "2026-11-01T12:00:00-06:00" }, CustomerTypeRef: { value: "1" } });
     tag = await connectRoster(stub, { company });
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
