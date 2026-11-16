@@ -41,10 +41,15 @@ export type MyRecord = {
    * parent's or a flat member's record; every one on a family's record in a club with no parent type.
    */
   signsInBy: "first" | "every";
+  /**
+   * The customer types the record may have and be this person's, by the membership shape: the parent type for a
+   * parent's own record, the family type for a family's, any of the member types for a flat member's.
+   */
+  typeQboIds: readonly string[];
 };
 
 type Row = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null; email: string | null; phone: string | null };
-type Mine = { row: Row; signsInBy: MyRecord["signsInBy"] };
+type Mine = { row: Row } & Pick<MyRecord, "signsInBy" | "typeQboIds">;
 
 // The order the staff roster lists people in (src/lib/roster/model.ts).
 const byName = (a: Row, b: Row) => a.displayName.localeCompare(b.displayName, "en", { sensitivity: "base" }) || a.qboId.localeCompare(b.qboId, "en", { numeric: true });
@@ -74,7 +79,7 @@ export async function loadMyRecord(ctx: ParentCtx): Promise<MyRecord | null> {
   const got = await read(ctx);
   const edits = got?.family.me?.edits;
   if (!got?.mine || !got.family.me || !edits) return null;
-  return { qboId: got.mine.row.qboId, parentQboId: got.mine.row.parentQboId, contact: { ...got.family.me, edits }, signsInBy: got.mine.signsInBy };
+  return { qboId: got.mine.row.qboId, parentQboId: got.mine.row.parentQboId, contact: { ...got.family.me, edits }, signsInBy: got.mine.signsInBy, typeQboIds: got.mine.typeQboIds };
 }
 
 async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Mine | null } | null> {
@@ -109,7 +114,7 @@ async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Mine | nu
     if (family.typeQboId === null || !shape.memberTypeIds.includes(family.typeQboId)) return null;
     // Every address on a member's record signs in through it, so its details are shared like a family's.
     const mine = sourceId === familyId ? family : null;
-    return { family: { name: family.displayName, students: null, me: mine ? contact(mine, "family") : null, rosterReadAt }, mine: mine ? { row: mine, signsInBy: "first" } : null };
+    return { family: { name: family.displayName, students: null, me: mine ? contact(mine, "family") : null, rosterReadAt }, mine: mine ? { row: mine, signsInBy: "first", typeQboIds: shape.memberTypeIds } : null };
   }
 
   if (family.typeQboId !== shape.familyTypeId) return null;
@@ -122,5 +127,5 @@ async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Mine | nu
     : shape.parentTypeId === null ? (sourceId === familyId ? family : undefined)
     : under.find((r) => r.qboId === sourceId && r.typeQboId === shape.parentTypeId);
   return { family: { name: family.displayName, students, me: mine ? contact(mine, shape.parentTypeId === null ? "family" : "own") : null, rosterReadAt },
-    mine: mine ? { row: mine, signsInBy: shape.parentTypeId === null ? "every" : "first" } : null };
+    mine: mine ? (shape.parentTypeId === null ? { row: mine, signsInBy: "every", typeQboIds: [shape.familyTypeId] } : { row: mine, signsInBy: "first", typeQboIds: [shape.parentTypeId] }) : null };
 }

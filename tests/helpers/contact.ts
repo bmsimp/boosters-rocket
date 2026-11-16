@@ -15,6 +15,8 @@ export const qbCustomer = (Id: string, DisplayName: string, extra: Record<string
   ({ Id, DisplayName, Active: true, SyncToken: "0", MetaData: { CreateTime: "2026-08-01T09:00:00-05:00", LastUpdatedTime: "2026-11-01T12:00:00-06:00" }, ...extra });
 /** What makes a customer a sub-customer of another. */
 export const under = (parentId: string) => ({ ParentRef: { value: parentId }, Job: true });
+/** A customer's type, as QuickBooks sends it. The fixtures' types are P_TYPES (tests/helpers/roster-cache.ts): "F", "P", "S", "M". */
+export const ofType = (typeId: string) => ({ CustomerTypeRef: { value: typeId } });
 
 /** The address each family's parent has in the stub, and what the edit form shows of it. */
 const ADDRESSES: Record<string, { BillAddr: Record<string, string>; shown: Omit<ContactValues, "phone"> }> = {
@@ -30,10 +32,10 @@ const ADDRESSES: Record<string, { BillAddr: Record<string, string>; shown: Omit<
 
 /** A family as QuickBooks holds it under the layered shape the fixtures use: the family, its parent with a phone and an address, its students. */
 export const customersOf = (spec: ParentFamilySpec): Record<string, unknown>[] => [
-  qbCustomer(spec.family.qboId, spec.family.name),
-  qbCustomer(spec.parent.qboId, spec.parent.name, { ...under(spec.family.qboId), PrimaryEmailAddr: { Address: spec.parent.email },
+  qbCustomer(spec.family.qboId, spec.family.name, ofType("F")),
+  qbCustomer(spec.parent.qboId, spec.parent.name, { ...under(spec.family.qboId), ...ofType("P"), PrimaryEmailAddr: { Address: spec.parent.email },
     PrimaryPhone: { FreeFormNumber: spec.parent.phone }, BillAddr: { ...ADDRESSES[spec.parent.qboId]!.BillAddr } }),
-  ...spec.students.map((s) => qbCustomer(s.qboId, s.name, under(spec.family.qboId))),
+  ...spec.students.map((s) => qbCustomer(s.qboId, s.name, { ...under(spec.family.qboId), ...ofType("S") })),
 ];
 
 /** What the edit form shows that family's parent before anything is changed. */

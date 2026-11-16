@@ -78,7 +78,8 @@ type Mine = { record: MyRecord; email: string };
  * What the form shows of a customer QuickBooks sent, or why not. This answer is newer than the roster cache, which is
  * read once a day, and newer than the sign-in, which was decided from that cache. So the record must be this person's
  * as QuickBooks has it now, whatever the cache still says: the one asked for, still active, still where the cache has
- * it (one moved to another family is not theirs to change), and its email field must still hold the address they
+ * it (one moved to another family is not theirs to change), still of a customer type that makes it theirs (a parent's
+ * record made a Family is another family to the portal), and its email field must still hold the address they
  * signed in with, by the rule that gave them the sign-in (./access-rules.ts): the first address on a parent's own
  * record, any address on a family's. When the club takes a parent's address off a record, the next roster read ends
  * that sign-in; until it does, nothing the record holds now is shown to them, and they change none of it.
@@ -88,6 +89,7 @@ function formOf(customer: Record<string, unknown> | null, { record, email }: Min
   if (customer.Active !== true && customer.Active !== "true") return failed("inactive");
   const under = isRow(customer.ParentRef) ? str(customer.ParentRef.value) || null : null;
   if (under !== record.parentQboId) return failed("moved");
+  if (!record.typeQboIds.includes(isRow(customer.CustomerTypeRef) ? str(customer.CustomerTypeRef.value) : "")) return failed("retyped");
   const field = isRow(customer.PrimaryEmailAddr) && typeof customer.PrimaryEmailAddr.Address === "string" ? customer.PrimaryEmailAddr.Address : null;
   const addresses = parseEmailField(field).usable;
   if (!(record.signsInBy === "every" ? addresses : addresses.slice(0, 1)).includes(email.trim().toLowerCase())) return failed("not_theirs");

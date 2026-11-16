@@ -20,7 +20,7 @@ import { QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { saveDetailsAction } from "@/app/(parent)/family/details/actions";
 import FamilyPage from "@/app/(parent)/family/page";
 import FamilyDetailsPage from "@/app/(parent)/family/details/page";
-import { contactForm, customersOf, inQuickBooks, qbCustomer, seedContactFamilies, sentBackUntouched, shownTo, under } from "../helpers/contact";
+import { contactForm, customersOf, inQuickBooks, ofType, qbCustomer, seedContactFamilies, sentBackUntouched, shownTo, under } from "../helpers/contact";
 import { resetDb, seedStaff } from "../helpers/db";
 import { CHENOWETH, RIVERA, connectCompany } from "../helpers/money";
 import { seedParentIn, seedSignedInParent } from "../helpers/parent";
@@ -115,15 +115,15 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     await addToCache([{ qboId: "7310", displayName: "Noparent Family", typeQboId: "F", email: "home@noparent.example, work@noparent.example", phone: "512-555-0199" }, stu("7311", "Nico Noparent", "7310")]);
     const p = await seedParentIn({ familyQboId: "7310", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "7310" });
     await connectCompany(stub);
-    stub.customers = [qbCustomer("7310", "Noparent Family", { PrimaryEmailAddr: { Address: "home@noparent.example, work@noparent.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0199" } }),
-      qbCustomer("7311", "Nico Noparent", under("7310"))];
+    stub.customers = [qbCustomer("7310", "Noparent Family", { ...ofType("F"), PrimaryEmailAddr: { Address: "home@noparent.example, work@noparent.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0199" } }),
+      qbCustomer("7311", "Nico Noparent", { ...under("7310"), ...ofType("S") })];
     asParent(p.identity);
     const blank = { line1: "", line2: "", city: "", region: "", postalCode: "", country: "" };
     expect(await loadMyContact(ctxOf(p.identity))).toMatchObject({ state: "ok", me: { edits: "family", name: "Noparent Family" }, form: { values: { phone: "512-555-0199", ...blank }, version: "0" } });
     expect(await save({ phone: NEW_PHONE, ...blank })).toMatchObject({ ok: true, current: { values: { phone: NEW_PHONE }, version: "1" } });
     expect(JSON.parse(posts()[0]!.body)).toEqual({ Id: "7310", SyncToken: "0", sparse: true, PrimaryPhone: { FreeFormNumber: NEW_PHONE } });
     expect(inQuickBooks(stub, "7310")).toMatchObject({ PrimaryPhone: { FreeFormNumber: NEW_PHONE }, PrimaryEmailAddr: { Address: "home@noparent.example, work@noparent.example" } });
-    expect(inQuickBooks(stub, "7311")).toEqual(qbCustomer("7311", "Nico Noparent", under("7310")));
+    expect(inQuickBooks(stub, "7311")).toEqual(qbCustomer("7311", "Nico Noparent", { ...under("7310"), ...ofType("S") }));
     expect(await cached("7310")).toMatchObject({ phone: NEW_PHONE, syncToken: "1" });
     expect((await audits())[0]).toMatchObject({ action: "parent.contact.save", targetId: "7310", before: { phone: "512-555-0199" }, after: { phone: NEW_PHONE } });
     // The page says whose details these are: every parent of the family shares them.
@@ -138,8 +138,8 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
       { qboId: "7420", displayName: "Other Member", typeQboId: "M", email: "other@flat.example", phone: "512-555-0155" }]);
     const m = await seedParentIn({ familyQboId: "7410", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "7410" });
     await connectCompany(stub);
-    const other = qbCustomer("7420", "Other Member", { PrimaryPhone: { FreeFormNumber: "512-555-0155" } });
-    stub.customers = [qbCustomer("7410", "Marisol Thackeray", { PrimaryEmailAddr: { Address: "marisol@flat.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0144" }, BillAddr: { Line1: "3 Wren Row", City: "Austin" } }), copyOf(other)];
+    const other = qbCustomer("7420", "Other Member", { ...ofType("M"), PrimaryPhone: { FreeFormNumber: "512-555-0155" } });
+    stub.customers = [qbCustomer("7410", "Marisol Thackeray", { ...ofType("M"), PrimaryEmailAddr: { Address: "marisol@flat.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0144" }, BillAddr: { Line1: "3 Wren Row", City: "Austin" } }), copyOf(other)];
     asParent(m.identity);
     expect(await save({ phone: "512-555-0144", line1: "3 Wren Row", line2: "", city: "Pflugerville", region: "TX", postalCode: "", country: "" })).toMatchObject({ ok: true, current: { version: "1" } });
     expect(JSON.parse(posts()[0]!.body)).toMatchObject({ Id: "7410", SyncToken: "0", sparse: true, BillAddr: { Line1: "3 Wren Row", City: "Pflugerville", CountrySubDivisionCode: "TX" } });
@@ -430,6 +430,35 @@ describe("when QuickBooks can't be reached or refuses, nothing is changed and th
     expect(posts()).toHaveLength(0);
     expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "unavailable" });
   });
+
+  it("the record was given another customer type in QuickBooks since the roster was read (a family's, a student's, none): it is not theirs to change", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    // A parent's record made a Family is another family to the portal; made a Student, or of no type, it gives no sign-in.
+    for (const type of [ofType("F"), ofType("S"), { CustomerTypeRef: undefined }]) {
+      Object.assign(inQuickBooks(stub, R_PARENT), type);
+      const held = copyOf(stub.customers);
+      expect(await loadMyContact(ctxOf(r.identity)), JSON.stringify(type)).toMatchObject({ state: "unavailable" });
+      expect(await save({ ...SHOWN, phone: NEW_PHONE }), JSON.stringify(type)).toEqual({ ok: false, errors: [CONTACT_COPY.tryLater] });
+      expect(stub.customers).toEqual(held);
+    }
+    expect((await audits()).map((a) => [a.action, (a.after as { code: string }).code])).toEqual(Array.from({ length: 3 }, () => ["parent.contact.save.failed", "retyped"]));
+    expect(posts()).toHaveLength(0);
+    // With its own type back, it is theirs again.
+    Object.assign(inQuickBooks(stub, R_PARENT), ofType("P"));
+    expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok" });
+  });
+
+  it("flat: a member's record may have any of the member types, and no other", async () => {
+    await seedShape({ kind: "flat", memberTypeIds: ["M", "P"] });
+    await addToCache([{ qboId: "7410", displayName: "Marisol Thackeray", typeQboId: "M", email: "marisol@flat.example", phone: "512-555-0144" }]);
+    const m = await seedParentIn({ familyQboId: "7410", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "7410" });
+    await connectCompany(stub);
+    stub.customers = [qbCustomer("7410", "Marisol Thackeray", { ...ofType("P"), PrimaryEmailAddr: { Address: "marisol@flat.example" } })];
+    expect(await loadMyContact(ctxOf(m.identity))).toMatchObject({ state: "ok" });
+    Object.assign(inQuickBooks(stub, "7410"), ofType("S"));
+    expect(await loadMyContact(ctxOf(m.identity))).toMatchObject({ state: "unavailable" });
+  });
 });
 
 describe("what the browser sends is checked, and how often", () => {
@@ -573,7 +602,7 @@ describe("the record must be the signed-in parent's in QuickBooks now, not only 
     const home = await seedParentIn({ familyQboId: "7310", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "7310" });
     const work = await seedParentIn({ familyQboId: "7310", name: "Noparent Family", email: "work@noparent.example", sourceQboId: "7310" });
     await connectCompany(stub);
-    stub.customers = [qbCustomer("7310", "Noparent Family", { PrimaryEmailAddr: { Address: "home@noparent.example, work@noparent.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0199" } })];
+    stub.customers = [qbCustomer("7310", "Noparent Family", { ...ofType("F"), PrimaryEmailAddr: { Address: "home@noparent.example, work@noparent.example" }, PrimaryPhone: { FreeFormNumber: "512-555-0199" } })];
     for (const p of [home, work]) expect(await loadMyContact(ctxOf(p.identity)), p.identity.email).toMatchObject({ state: "ok", me: { edits: "family" } });
     // The club takes the work address off the record. Until the roster is read again, that sign-in still stands.
     Object.assign(inQuickBooks(stub, "7310"), { PrimaryEmailAddr: { Address: "home@noparent.example" } });
