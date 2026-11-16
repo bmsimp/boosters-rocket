@@ -473,8 +473,7 @@ describe("what surrounds the parent pages", () => {
     const a = await seedSignedInParent();
     asParent(a.identity);
     const html = await frame();
-    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: true }, { href: "/payments", current: false }, { href: "/family", current: false }]);
-    expect(html).not.toMatch(/href="\/forms"/);
+    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: true }, { href: "/forms", current: false }, { href: "/payments", current: false }, { href: "/volunteer", current: false }, { href: "/family", current: false }]);
   });
 
   it("marks the tab of the page that is open, and the account control on the Display page", async () => {
@@ -482,13 +481,13 @@ describe("what surrounds the parent pages", () => {
     asParent(a.identity);
     atPath("/family");
     let html = await frame();
-    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/payments", current: false }, { href: "/family", current: true }]);
+    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/forms", current: false }, { href: "/payments", current: false }, { href: "/volunteer", current: false }, { href: "/family", current: true }]);
     expect(account(html)).toContain(`href="/display"`);
     expect(account(html)).not.toContain("aria-current");
     atPath("/display");
     html = await frame();
     expect(account(html)).toContain(`aria-current="page"`);
-    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/payments", current: false }, { href: "/family", current: false }]);
+    for (const nav of ["tabs", "top-nav"]) expect(links(html, nav), nav).toEqual([{ href: "/", current: false }, { href: "/forms", current: false }, { href: "/payments", current: false }, { href: "/volunteer", current: false }, { href: "/family", current: false }]);
   });
 
   it("the not-found page keeps the club bar and the tabs for a signed-in parent, and is plain for anyone else", async () => {

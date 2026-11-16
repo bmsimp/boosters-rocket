@@ -180,7 +180,7 @@ describe("attaching a template to a form requirement", () => {
     expect(made).toMatchObject({ kind: "form", appliesTo: "family", form: null });
     const season = await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } });
     expect(season).toMatch(/<option value="form"(?! disabled)[^>]*>Form<\/option>/);
-    expect(season).toMatch(/<option value="payment" disabled=""[^>]*>Payment \(coming later\)<\/option>/);
+    expect(season).toMatch(/<option value="payment">Payment<\/option>/); // every kind is built now
   });
 
   it("shows the form part only on a form requirement, and asks Documenso for its templates only for staff who can attach one", async () => {
