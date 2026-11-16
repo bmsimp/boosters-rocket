@@ -6,7 +6,6 @@ import type { Line } from "@/lib/seasons/progress";
 import { getClubSettings } from "@/lib/settings/club";
 import { loadMyVolunteering } from "@/lib/volunteer/my-volunteer";
 import { placesWords } from "@/lib/volunteer/rules";
-import { StateWords } from "../../components/state-words";
 import { NotSetUpBox } from "../family-boxes";
 import { RequirementLines } from "../season-parts";
 import { cancelSignupAction } from "./actions";
@@ -57,8 +56,8 @@ export default async function VolunteerPage() {
               <span className="what">{s.eventName}{s.role ? `, ${s.role}` : ""}</span>
               <span className="when">{s.dateWords}, {s.timeWords} · {s.location}</span>
               <span className="when">{s.who === "You" ? "You're doing this one" : `${s.who} is doing this one`}</span>
-              {s.cancel === "cancelled" ? <StateWords state="waived" words="The club cancelled this shift. There's nothing you need to do." />
-                : <StateWords state="done" words="Signed up" />}
+              {/* Plain words: the state icons mean done, to do and waived, and a place is none of those. */}
+              <span className="state">{s.cancel === "cancelled" ? "The club cancelled this shift. There's nothing you need to do." : "Signed up"}</span>
               {s.cancel === "open" && (
                 <>
                   <span className="when">You can cancel here until {s.cancelUntil}.</span>
@@ -84,7 +83,7 @@ export default async function VolunteerPage() {
               <span className="when num">{placesWords(s)}</span>
             </div>
               {s.state === "open" ? <Link className="btn btn-club pay" href={`/volunteer/shifts/${s.id}`}>Sign up<span className="visually-hidden"> for {s.timeWords}{s.role ? `, ${s.role}` : ""}</span></Link>
-                : <StateWords state="waived" words={s.state === "full" ? "Full" : "Started"} />}
+                : <span className="state">{s.state === "full" ? "Full" : "Started"}</span>}
             </li>))}</ul>
         </section>
       ))}

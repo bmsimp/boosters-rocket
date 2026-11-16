@@ -5,7 +5,6 @@ import { loadMyFamily } from "@/lib/parents/my-family";
 import { getClubSettings } from "@/lib/settings/club";
 import { loadShiftForMe } from "@/lib/volunteer/my-volunteer";
 import { placesWords } from "@/lib/volunteer/rules";
-import { StateWords } from "../../../../components/state-words";
 import { NotSetUpBox } from "../../../family-boxes";
 import { signUpAction } from "../../actions";
 import { SignUpForm } from "../../volunteer-forms";
@@ -45,8 +44,8 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
       </section>
 
       <section className="box" aria-labelledby="signup-h"><h2 id="signup-h">Sign up</h2>
-        {shift.state === "started" ? <StateWords state="waived" words="This shift has started, so it's too late to sign up." />
-          : shift.state === "full" ? <StateWords state="waived" words="This shift is full. Every place has been taken." />
+        {shift.state === "started" ? <p className="state">This shift has started, so it&apos;s too late to sign up.</p>
+          : shift.state === "full" ? <p className="state">This shift is full. Every place has been taken.</p>
           : <SignUpForm choices={view.choices} act={signUpAction.bind(null, shift.id)} />}
       </section>
     </main>
