@@ -6,6 +6,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { requirement, requirementCover, requirementProgress, season, seasonStep, type RequirementKind } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { dropUnopenedForms, formsHolding, formsHoldingWords } from "@/lib/forms/removal";
+import { linkedShifts, placesHolding, placesHoldingWords } from "@/lib/volunteer/removal";
 import { KIND_LABELS, isAvailableKind } from "./kinds";
 import { isCalendarDate, type AmountUnit, type AppliesTo, type Requirement } from "./progress";
 import { loadCovers, toRequirement, type RequirementRow } from "./recorded";
@@ -222,10 +223,13 @@ export async function removeStep(stepId: string, o: SeasonOp): Promise<Done> {
     // A form that was made for a family to sign is history too (src/lib/forms/removal.ts); one nobody opened is not.
     const held = await formsHolding(rows.map((r) => r.id), tx);
     if (held > 0) return refuse(formsHoldingWords(s.name, held));
+    const places = await placesHolding(rows.map((r) => r.id), tx);
+    if (places > 0) return refuse(placesHoldingWords(s.name, places));
+    const shifts = await linkedShifts(rows.map((r) => r.id), tx);
     await dropUnopenedForms(rows.map((r) => r.id), tx);
     await tx.delete(seasonStep).where(eq(seasonStep.id, s.id)); // its requirements and their chosen lists go with it
     await writeAudit({ actor: o.actor, action: "season.step.remove", permission: o.permission, targetType: "season_step", targetId: s.id, ip: o.ip,
-      before: { ...stepFacts(s), position: s.position, requirements: rows.map(requirementFacts) } }, tx);
+      before: { ...stepFacts(s), position: s.position, requirements: rows.map((r) => ({ ...requirementFacts(r), ...(shifts.has(r.id) ? { shiftIds: shifts.get(r.id) } : {}) })) } }, tx);
     return { ok: true as const };
   });
 }
@@ -324,11 +328,14 @@ export async function removeRequirement(requirementId: string, o: SeasonOp): Pro
       + `Clear them first on its progress page, or make it optional so it no longer holds the step open.`);
     const held = await formsHolding([r.id], tx);
     if (held > 0) return refuse(formsHoldingWords(r.title, held));
+    const places = await placesHolding([r.id], tx);
+    if (places > 0) return refuse(placesHoldingWords(r.title, places));
+    const shifts = (await linkedShifts([r.id], tx)).get(r.id);
     await dropUnopenedForms([r.id], tx);
     const covered = (await tx.select({ subjectQboId: requirementCover.subjectQboId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id))).map((c) => c.subjectQboId).sort();
     await tx.delete(requirement).where(eq(requirement.id, r.id)); // its chosen list goes with it
     await writeAudit({ actor: o.actor, action: "season.requirement.remove", permission: o.permission, targetType: "requirement", targetId: r.id, ip: o.ip,
-      before: { ...requirementFacts(r), subjectQboIds: covered } }, tx);
+      before: { ...requirementFacts(r), subjectQboIds: covered, ...(shifts ? { shiftIds: shifts } : {}) } }, tx);
     return { ok: true as const };
   });
 }

@@ -16,7 +16,7 @@ import VolunteerEventsPage from "@/app/staff/(app)/volunteer/page";
 import VolunteerEventPage from "@/app/staff/(app)/volunteer/[id]/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
 import RequirementProgressPage from "@/app/staff/(app)/seasons/progress/[requirementId]/page";
-import { addRequirementAction, setTicksAction } from "@/app/staff/(app)/seasons/actions";
+import { addRequirementAction, removeRequirementAction, removeStepAction, setTicksAction } from "@/app/staff/(app)/seasons/actions";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import {
   addShiftAction, cancelEventAction, cancelShiftAction, copyEventAction, createEventAction, saveCutoffAction, updateEventAction, updateShiftAction,
@@ -289,6 +289,21 @@ describe("the cut-off and the volunteer kind of requirement", () => {
     expect(row!.value).toEqual({ cutoffHours: 24 });
     expect((await audits("volunteer.settings.save"))[0]).toMatchObject({ before: { cutoffHours: null }, after: { cutoffHours: 24 } });
     expect(textOf(await renderPage(VolunteerEventsPage))).toContain("until 24 hours before the shift starts");
+  });
+
+  it("won't remove a volunteer requirement, or its step, while families hold places that count toward it; once they don't, the audit keeps its shifts", async () => {
+    const { shift } = await shared();
+    const fall = await seedSeason({ name: "Fall", current: false, steps: [{ name: "Volunteer" }] });
+    const stepId = Object.values(fall.stepIds)[0]!;
+    const [r] = await db.insert(requirement).values({ stepId, kind: "volunteer", title: "Concessions, 2 shifts", appliesTo: "family", amount: 2, amountUnit: "shifts", position: 0 }).returning();
+    await db.insert(volunteerShiftRequirement).values({ shiftId: shift.id, requirementId: r!.id });
+    const refused = { ok: false, errors: ["Concessions, 2 shifts can't be removed: 2 volunteer places count toward it on shifts still on. Make it optional so it no longer holds the step open, or keep it."] };
+    expect(await removeRequirementAction(r!.id)).toEqual(refused);
+    expect(await removeStepAction(stepId)).toEqual({ ok: false, errors: [refused.errors[0]!.replace("Concessions, 2 shifts", "Volunteer")] });
+    expect(await db.select().from(volunteerShiftRequirement)).toHaveLength(1);
+    await db.update(volunteerSignup).set({ cancelledAt: new Date() });
+    expect(await removeRequirementAction(r!.id)).toMatchObject({ ok: true });
+    expect((await audits("season.requirement.remove"))[0]!.before).toMatchObject({ shiftIds: [shift.id] });
   });
 
   it("lets staff make a volunteer requirement, shows the shifts that count toward it, and where each family stands", async () => {
