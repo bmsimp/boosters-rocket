@@ -11,6 +11,8 @@ import { volunteerStanding } from "@/lib/volunteer/rules";
 import { signedUpAmounts } from "@/lib/volunteer/signed-up";
 import { confirmedAmounts } from "@/lib/volunteer/credit";
 import { formRule } from "@/lib/forms/kind";
+import { withBuyout } from "@/lib/buyouts/rules";
+import { buyoutFacts } from "@/lib/buyouts/standing";
 import type { Requirement, Standing } from "./progress";
 
 /** What `requirement_progress` holds for one requirement and one family or student. */
@@ -65,15 +67,18 @@ const payment: KindRule = {
  * shifts a requirement can count toward are listed in volunteer_shift_requirement, so it needs no column of its own.
  * Credit comes from check-ins and from staff (src/lib/volunteer/credit.ts), spent on the family's requirements by one
  * rule (src/lib/volunteer/allocation.ts); a place already credited no longer counts as "signed up for". A buy-out
- * (§11.5, a later slice) will meet a requirement here too. Nothing is ticked by hand: staff correct credit instead.
+ * (§11.5, src/lib/buyouts/) meets it too once its invoice is paid in the stored figures: "Buy-out being set up" while
+ * the invoice is made, "Buy-out invoiced" until it is paid, then "Paid instead" (withBuyout() in
+ * src/lib/buyouts/rules.ts). Credit counts as before alongside it. Nothing is ticked by hand: staff correct credit instead.
  */
 const volunteer: KindRule = {
   standings: async ({ requirements, subjectQboIds }) => {
-    const [signedUp, confirmed] = await Promise.all([signedUpAmounts(requirements, subjectQboIds, pairKey), confirmedAmounts(requirements, subjectQboIds, pairKey)]);
+    const [signedUp, confirmed, bought] = await Promise.all([signedUpAmounts(requirements, subjectQboIds, pairKey), confirmedAmounts(requirements, subjectQboIds, pairKey),
+      buyoutFacts(requirements.map((r) => r.id), subjectQboIds)]);
     const standings = new Map<string, Standing>();
-    for (const key of new Set([...signedUp.keys(), ...confirmed.keys()])) {
+    for (const key of new Set([...signedUp.keys(), ...confirmed.keys(), ...bought.keys()])) {
       const r = requirements.find((x) => key.startsWith(`${x.id}|`));
-      if (r) standings.set(key, volunteerStanding(r, { confirmed: confirmed.get(key) ?? 0, signedUp: signedUp.get(key) ?? 0 }));
+      if (r) standings.set(key, withBuyout(volunteerStanding(r, { confirmed: confirmed.get(key) ?? 0, signedUp: signedUp.get(key) ?? 0 }), bought.get(key) ?? null));
     }
     return standings;
   },

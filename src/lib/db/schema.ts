@@ -589,12 +589,6 @@ export const volunteerReminder = pgTable("volunteer_reminder", {
   createdAt: created(),
 }, (t) => [uniqueIndex("volunteer_reminder_kind_key_uq").on(t.kind, t.key)]);
 
-/** Where a buy-out stands (src/lib/buyouts/rules.ts). All but `voided` and `refused` are live: one at most per requirement and subject. */
-export const BUYOUT_STATES = ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"] as const;
-export type BuyoutState = (typeof BUYOUT_STATES)[number];
-/** What staff must look at on the Reconciliation page (src/lib/buyouts/staff.ts). */
-export const BUYOUT_FLAGS = ["missing", "other_customer", "student_moved", "paid_before_void", "void_refused", "given_up"] as const;
-
 /**
  * A family's or one student's choice to pay instead of volunteering (v1 spec §11.5), and its QuickBooks invoice: the
  * only invoice the portal ever creates. `subject_qbo_id` is the family for a per-family requirement and the student for
@@ -614,7 +608,8 @@ export const buyout = pgTable("buyout", {
   unitCents: integer("unit_cents").notNull(),
   units: integer("units").notNull(),
   amountCents: integer("amount_cents").notNull(),
-  state: text("state", { enum: BUYOUT_STATES }).notNull(),
+  // Where it stands (src/lib/buyouts/rules.ts). All but voided and refused are live: one at most per requirement and subject.
+  state: text("state", { enum: ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"] }).notNull(),
   endReason: text("end_reason", { enum: ["switched_back", "student_moved"] }), // why a voided one was voided
   invoiceQboId: text("invoice_qbo_id"),
   invoiceSyncToken: text("invoice_sync_token"),
@@ -622,7 +617,7 @@ export const buyout = pgTable("buyout", {
   chosenBy: uuid("chosen_by").notNull(),               // parent.id
   chosenByLabel: text("chosen_by_label"),
   lastCode: text("last_code"),                         // the last short code from QuickBooks, never its words
-  flag: text("flag", { enum: BUYOUT_FLAGS }),
+  flag: text("flag", { enum: ["missing", "other_customer", "student_moved", "paid_before_void", "void_refused", "given_up"] }), // for staff, on Reconciliation (src/lib/buyouts/staff.ts)
   flaggedAt: timestamp("flagged_at", { withTimezone: true }),
   createdAt: created(),
   updatedAt: updated(),
@@ -632,6 +627,7 @@ export const buyout = pgTable("buyout", {
   index("buyout_state_ix").on(t.state),
   check("buyout_amount", sql`${t.unitCents} > 0 and ${t.units} > 0 and ${t.amountCents} = ${t.unitCents} * ${t.units}`),
 ]);
+export type BuyoutState = (typeof buyout.$inferSelect)["state"];
 
 /* ---- Forms signed in Documenso (v1 spec §9; docs/superpowers/specs/2026-11-15-documenso-verification.md) ---- */
 

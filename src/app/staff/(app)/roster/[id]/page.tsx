@@ -64,7 +64,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null;
   const records = entry.kind === "family" ? [entry.family.customer, ...entry.family.students, ...entry.family.parents] : [entry.member];
   const edit = canChange ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)),
-    blocked: new Set(waiting.map((w) => (w.write.op === "create" ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
+    blocked: new Set(waiting.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
   const families = page.roster?.kind === "layered" ? page.roster.families.filter((f) => f.customer.active).map((f) => ({ qboId: f.customer.qboId, name: f.customer.displayName })) : [];
   return (
     <main className="wrap single">

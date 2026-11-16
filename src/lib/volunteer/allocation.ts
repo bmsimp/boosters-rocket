@@ -16,8 +16,9 @@
  *  - Nothing goes beyond what a requirement needs; what is left flows on to the next, optional ones included. Each
  *    credit is spent once in total, never counted twice.
  *
- * Buy-outs (§11.5, a later slice) meet a requirement without credit: the caller leaves a bought-out requirement out of
- * `slots` (or asks for nothing on it), so no credit is spent on it and what it would have taken flows on.
+ * Buy-outs (§11.5, src/lib/buyouts/) leave this rule as it is: credit is spent on a bought-out requirement as on any
+ * other, and the requirement is met when credit reaches its amount or its buy-out is paid (withBuyout() in
+ * src/lib/buyouts/rules.ts). A buy-out's price was fixed when it was chosen; credit earned later does not lower it.
  */
 import type { Requirement } from "@/lib/seasons/progress";
 import { countsFor, type Filler } from "./rules";

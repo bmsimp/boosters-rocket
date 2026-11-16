@@ -87,7 +87,9 @@ function figuresOf(row: MoneyRow | undefined, source: string | null, family: Fam
 
 /** Fresh: shown at once. A row that doesn't say which products and services its invoices carry is read again, however new. */
 const isFresh = (row: MoneyRow | undefined, source: string | null, family: FamilyCustomers | null, freshSeconds: number): boolean =>
-  mayShow(row, source, family) && knowsItems(row) && Date.now() - row.readAt.getTime() < freshSeconds * 1000;
+  mayShow(row, source, family) && knowsItems(row) && Date.now() - row.readAt.getTime() < freshSeconds * 1000
+  // A buy-out invoice was made or voided since the read (src/lib/buyouts/writes.ts): QuickBooks is read again.
+  && !(row.staleAt && row.staleAt >= row.readAt);
 const failedJustNow = (row: MoneyRow | undefined): boolean =>
   Boolean(row?.failedAt && (!row.readAt || row.failedAt > row.readAt) && Date.now() - row.failedAt.getTime() < RETRY_AFTER_FAILURE_MS);
 

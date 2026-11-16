@@ -694,3 +694,124 @@ export async function qboSetCustomerActive(customerId: string, syncToken: string
   if (!isQboId(customerId) || !isSyncToken(syncToken)) throw badRosterId();
   return sendRosterWrite(CUSTOMER_WRITES.active(customerId, syncToken, active), o);
 }
+
+/* ---- The only invoices the portal writes: volunteer buy-outs (v1 spec §11.5, src/lib/buyouts/writes.ts) ----
+   A guardian who pays instead of volunteering is billed by an invoice the portal makes, and the portal voids it again
+   when they switch back before paying. These are the first writes that don't go to the customer endpoint: both are
+   POSTs to the invoice endpoint (`INVOICE_WRITES.path`), sent by their own private sender below. Everything above is
+   left as it was. */
+
+/** One buy-out's invoice as it is asked for: one line, the item, how many units at what price, for one customer. */
+export type InvoiceCreate = {
+  customerQboId: string; itemQboId: string;
+  /** Whole shifts or hours still owed, at least 1. */
+  units: number;
+  /** The price of one, in cents. */
+  unitCents: number;
+  /** The portal's own buy-out id (a uuid): written into the invoice's private note so the portal can find it again. */
+  buyoutId: string;
+};
+
+/** A count of cents as QuickBooks writes an amount: dollars, as a number with at most two decimals. The one place cents leave the portal. */
+const qboAmount = (cents: number): number => cents / 100;
+
+/**
+ * The buy-out invoice writes, exactly as they are sent. NOT YET TRIED AGAINST A REAL QUICKBOOKS COMPANY: nobody could
+ * reach the sandbox when they were built, so they follow Intuit's documentation as remembered, like CUSTOMER_UPDATE
+ * above. Unlike every write before them they go to the invoice endpoint. The owner's sandbox check must confirm, with
+ * `minorversion` 75:
+ *   1. `create`: `POST /v3/company/<realm>/invoice` with `{ CustomerRef: { value }, Line: [{ DetailType:
+ *      "SalesItemLineDetail", Amount, SalesItemLineDetail: { ItemRef: { value }, Qty, UnitPrice } }], PrivateNote,
+ *      AllowOnlineACHPayment: true, EmailStatus: "NotSet" }` answers 200 with `{ Invoice }` holding `Id`, `SyncToken`,
+ *      `TotalAmt` and `Balance` equal to the amount; and that the invoice lands on that customer (a student's own
+ *      sub-customer for a per-student requirement, billed with the family) with that item, quantity and amount;
+ *   2. that it carries an `InvoiceLink` when read back with `include=invoiceLink` (INVOICE_QUERIES), so it gets a Pay
+ *      button, and which flags turn online payment on: the owner's books send invoices with online ACH on
+ *      (`AllowOnlineACHPayment`); say whether `AllowOnlineCreditCardPayment` or `AllowOnlinePayment` is wanted too;
+ *   3. that QuickBooks sends no email for it (`EmailStatus: "NotSet"`, no `BillEmail`, and the portal never calls
+ *      `/invoice/<id>/send`);
+ *   4. how the due date is set when none is sent: the customer's terms, the company's default, or the day it is made;
+ *   5. that `PrivateNote` (`notePrefix` and the buy-out's uuid) is kept as sent and comes back in the invoice queries:
+ *      that is how a create whose answer was lost is found again (src/lib/buyouts/writes.ts);
+ *   6. `void`: `POST /v3/company/<realm>/invoice?operation=void` with `{ Id, SyncToken }` answers 200 with `{ Invoice }`,
+ *      its `TotalAmt` and `Balance` now 0, and the invoice queries still return it that way (a voided invoice has a total
+ *      of zero: that is how the portal tells it from a paid one); and that a paid or part-paid invoice is refused, and
+ *      with which code (the portal never asks: it reads the invoice first and voids only one with nothing paid on it);
+ *   7. the Fault codes: an old SyncToken on a void is "5010" (`faults.stale`); an item or a customer that is inactive
+ *      or gone, and an amount QuickBooks won't take, answer HTTP 400 with a code to note here.
+ * Don't change a body without trying the new one in the sandbox first, and tests/helpers/qbo-stub.ts must follow it.
+ */
+export const INVOICE_WRITES = {
+  path: "invoice",
+  create: (c: InvoiceCreate) => ({
+    CustomerRef: { value: c.customerQboId },
+    Line: [{ DetailType: "SalesItemLineDetail", Amount: qboAmount(c.units * c.unitCents), SalesItemLineDetail: { ItemRef: { value: c.itemQboId }, Qty: c.units, UnitPrice: qboAmount(c.unitCents) } }],
+    PrivateNote: `Booster Rocket buy-out ${c.buyoutId}`,
+    AllowOnlineACHPayment: true, EmailStatus: "NotSet",
+  }),
+  void: (invoiceId: string, syncToken: string) => ({ Id: invoiceId, SyncToken: syncToken }),
+  /** The query parameter that makes a POST of `void`'s body a void (`operation=void`). */
+  voidOperation: "void",
+  /** What the private note starts with; the buy-out's id follows it. */
+  notePrefix: "Booster Rocket buy-out ",
+  faults: { stale: "5010" },
+} as const;
+
+const badInvoiceId = () => new QboError("That isn't a QuickBooks record.", "bad_id");
+const isUuidText = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+/**
+ * Sends one buy-out invoice write and returns the invoice as QuickBooks now has it. The one request of the buy-out
+ * writes that is not a GET; the two functions below build its body from INVOICE_WRITES and nothing else, and `voiding`
+ * adds `operation=void` from there. It fails as sendRosterWrite() does, with the same codes: NO_TOKEN for a token that
+ * couldn't be had (nothing was sent), a 4xx for a refusal (nothing was changed), and a timeout, a lost connection, an
+ * unreadable answer or a 5xx when the invoice may have been made or voided. It refuses at once when only an Admin can
+ * fix the connection, sends nothing to a company other than `o.realmId`, and waits for the connection row only with
+ * `mayWait` (the worker). A 401 is answered by one token refresh and one more try; nothing else is tried twice.
+ */
+async function sendInvoiceWrite(payload: Record<string, unknown>, voiding: boolean, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  await refuseWhenOnlyAnAdminCanFixIt();
+  const body = JSON.stringify(payload);
+  let force = false, refreshed = false;
+  for (;;) {
+    const token = o.mayWait ? accessToken({ force }) : accessTokenForPage(force);
+    const a = await within(token, o.signal).catch((e: unknown) => { throw e instanceof QboError ? new QboError(e.message, `${NO_TOKEN}${e.code}`) : e; });
+    force = false;
+    if (a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
+    const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${INVOICE_WRITES.path}`);
+    url.searchParams.set("minorversion", QBO_MINOR_VERSION);
+    if (voiding) url.searchParams.set("operation", INVOICE_WRITES.voidOperation);
+    const timeout = AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS);
+    const gaveUp = () => timeout.aborted || o.signal?.aborted === true;
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "POST", body, headers: { authorization: `Bearer ${a.token}`, accept: "application/json", "content-type": "application/json" },
+        signal: o.signal ? AbortSignal.any([timeout, o.signal]) : timeout, redirect: "error" });
+    } catch {
+      throw gaveUp() ? timedOut() : new QboError("Couldn't reach QuickBooks.", "unreachable");
+    }
+    if (res.status === 401 && !refreshed) {
+      refreshed = true; force = true;
+      await res.body?.cancel().catch(() => {});
+      continue;
+    }
+    if (!res.ok) throw new QboError("QuickBooks refused the change.", await refusalCode(res));
+    let invoice: unknown;
+    try { invoice = ((await res.json()) as { Invoice?: unknown } | null)?.Invoice; } catch { throw gaveUp() ? timedOut() : new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer"); }
+    if (typeof invoice !== "object" || invoice === null || Array.isArray(invoice)) throw new QboError("QuickBooks sent an answer the portal couldn't read.", "bad_answer");
+    return invoice as Record<string, unknown>;
+  }
+}
+
+/** Makes one buy-out's invoice: one line of the item, for the customer, carrying the buy-out's id in its private note. */
+export async function qboCreateInvoice(c: InvoiceCreate, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(c.customerQboId) || !isQboId(c.itemQboId) || !isUuidText(c.buyoutId)) throw badInvoiceId();
+  if (!Number.isSafeInteger(c.units) || c.units < 1 || c.units > 1000 || !Number.isSafeInteger(c.unitCents) || c.unitCents < 1 || c.unitCents > 10_000_000) throw new QboError("That amount can't be sent.", "bad_amount");
+  return sendInvoiceWrite(INVOICE_WRITES.create(c), false, o);
+}
+
+/** Voids one invoice, from the version just read: QuickBooks keeps it, with nothing to pay. */
+export async function qboVoidInvoice(invoiceId: string, syncToken: string, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
+  if (!isQboId(invoiceId) || !isSyncToken(syncToken)) throw badInvoiceId();
+  return sendInvoiceWrite(INVOICE_WRITES.void(invoiceId, syncToken), true, o);
+}

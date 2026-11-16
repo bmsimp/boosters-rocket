@@ -4,7 +4,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { jobRun, qboCustomer, setting, writeQueue, type RosterWrite } from "@/lib/db/schema";
+import { buyout, jobRun, qboCustomer, setting, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
@@ -13,6 +13,8 @@ import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { applyWritten, REFRESH_ASK_KEY, sendWrite } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
+import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
+import { formatMoney } from "@/lib/money/cents";
 
 export const WRITE_QUEUE_JOB = "roster.write_queue";
 /** How long a try may hold an item before another wake may take it: longer than one send takes. */
@@ -79,6 +81,12 @@ async function markDone(item: Item, how: "sent" | "found", resultQboId: string |
  * for its next try, or is stuck once it is old or tried often (afterFailedTry).
  */
 async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise<Step> {
+  // A buy-out's invoice write is tried by its own module, which reads the customer's invoices, not the roster, before
+  // anything that may already have been made is sent again (src/lib/buyouts/writes.ts).
+  if (isBuyoutWrite(item.request)) {
+    const step = await sendBuyoutWrite(item, now, { mayWait: true });
+    return step === "waiting" || step === "stuck" ? step : "done";
+  }
   const w = item.request as RosterWrite;
   if (item.sent) {
     if (!refreshedAt || refreshedAt <= item.lastTriedAt) {
@@ -120,7 +128,7 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
   const asked = await refreshAsked();
   let refreshedAt = await lastGoodRefresh();
   let ran = false, ok = true;
-  const needsRead = due.some((i) => i.sent && (!refreshedAt || refreshedAt <= i.lastTriedAt));
+  const needsRead = due.some((i) => i.sent && !isBuyoutWrite(i.request) && (!refreshedAt || refreshedAt <= i.lastTriedAt));
   if ((asked && (!refreshedAt || refreshedAt <= asked)) || needsRead) {
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
     ran = ran || r.ok || r.reason === "failed";
@@ -144,19 +152,21 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
 
 /** An item as the Reconciliation page and a family's page show it. */
 export type QueueView = {
-  id: string; state: "waiting" | "stuck"; write: RosterWrite; words: string; askedBy: string | null; askedAt: string;
+  id: string; state: "waiting" | "stuck"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null; familyQboId: string | null;
 };
 
 /** What a queued write was, in words, with the names the cache has for its ids. Names are QuickBooks text: shown as text only. */
-export function describeWrite(w: RosterWrite, names: Map<string, string>): string {
+export function describeWrite(w: QueuedWrite, names: Map<string, string>): string {
   const name = (id: string | null) => (id === null ? "the club" : names.get(id) ?? "a customer no longer on the roster");
-  const who = { family: "the family", student: "the student", parent: "the parent", member: "the member" }[w.role];
+  const who = "role" in w ? { family: "the family", student: "the student", parent: "the parent", member: "the member" }[w.role] : "";
   switch (w.op) {
     case "create": return w.familyQboId === null ? `Make ${who} “${w.name}”` : `Add ${who} “${w.name}” to ${name(w.familyQboId)}`;
     case "rename": return `Rename ${who} “${w.was}” to “${w.name}”`;
     case "move": return `Move the student ${name(w.qboId)} from ${name(w.fromFamilyQboId)} to ${name(w.toFamilyQboId)}`;
     case "deactivate": return `Make ${who} ${name(w.qboId)} inactive`;
+    case "invoice_create": return `Invoice ${name(w.customerQboId)} ${formatMoney(w.units * w.unitCents)} for a volunteer buy-out`;
+    case "invoice_void": return `Void the volunteer buy-out invoice of ${name(w.customerQboId)}${w.why === "student_moved" ? ", as the student moved to another family" : ""}`;
   }
 }
 
@@ -209,6 +219,8 @@ export async function giveUp(id: string, rawNote: string, o: QueueOp): Promise<D
     const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
     if (!item) return GONE;
     await tx.update(writeQueue).set({ state: "given_up", note, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() }).where(eq(writeQueue.id, id));
+    // A buy-out whose invoice write is given up waits for the treasurer: its outcome in QuickBooks isn't known.
+    if (isBuyoutWrite(item.request)) await tx.update(buyout).set({ state: "stuck", flag: "given_up", flaggedAt: new Date(), updatedAt: new Date() }).where(and(eq(buyout.id, item.request.buyoutId), inArray(buyout.state, ["being_invoiced", "being_voided", "stuck"])));
     await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,
       before: { state: item.state, tries: item.tries, code: item.lastCode, op: item.request.op }, after: { state: "given_up", note } }, tx);
     return { ok: true as const, message: "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it." };
