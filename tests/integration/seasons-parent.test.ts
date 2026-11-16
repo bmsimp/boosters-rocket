@@ -274,7 +274,8 @@ describe("the Season page", () => {
     expect(text).toContain(`${TWO_FAMILY_SEASON} Every set of the season for ${FAMILY_B.family.name}, and what's done so far.`);
     expect(text).toContain("1. Sign-up Done Your family Handbook read Done Trailer key returned QB82 Waived");
     expect(text).toContain(`2. Uniforms The current set 1 thing left to do ${BARNABY!.name} Uniform fitting attended Not done yet Sousaphone harness check QB83 Done ${BRISEIS!.name} Uniform fitting attended Done`);
-    expect(text).toContain("3. Wrap-up Nothing is asked of your family in this set.");
+    // The trip deposit is optional, so the set is done while it is still to pay (tests/helpers/season.ts).
+    expect(text).toContain("3. Wrap-up Done Your family Trip deposit (optional) Not paid yet ($8,242.08 left to pay)");
   });
 
   it("shows a family the roster can't show nothing of the season", async () => {

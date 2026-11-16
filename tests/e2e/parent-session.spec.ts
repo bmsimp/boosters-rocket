@@ -52,6 +52,8 @@ const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerr
   "ana@example.com", "sam@example.com", "555-0101", "E2E-FAMILY-2", "E2E-P2", "E2E-S3",
   // What the second family owes: its invoice numbers, each amount, its total and the address behind its Pay button.
   "SF-2051", "SF-2052", "SF-2009", "$312.47", "$64.19", "$273.58", "$376.66", "scs-v1-e2e-second",
+  // QuickBooks' own balance for the second family's student, which staff see under "Worth a look".
+  "$362.47",
   // What the season asks of other families alone, and why one of them was let off.
   "Tuba locker key", "Percussion truck crew", "Cast on his arm"];
 

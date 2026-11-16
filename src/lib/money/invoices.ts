@@ -19,6 +19,35 @@ const byNumber = (a: string, b: string) => a.localeCompare(b, "en", { numeric: t
 /** Dates in order, with "no date" last. */
 const byDay = (a: string | null, b: string | null) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1);
 
+/** A QuickBooks record id as the portal keeps one from an answer: digits only. */
+const recordId = (v: unknown): string | null => { const id = text(v, 32); return id !== null && /^\d{1,19}$/.test(id) ? id : null; };
+
+/**
+ * The products and services an invoice's lines carry, in id order, each once: what a payment requirement is met by
+ * (v1 spec §10.2). QuickBooks puts one on each sales line (`SalesItemLineDetail.ItemRef`) and, for a bundle, on the
+ * group line (`GroupLineDetail.GroupItemRef`) and on each line inside it. Lines of other kinds (a subtotal, a discount)
+ * carry none. NOT YET TRIED AGAINST A REAL QUICKBOOKS COMPANY: the owner's sandbox check confirms that `select * from
+ * Invoice` returns `Line` with the item ids in these places (INVOICE_QUERIES in src/lib/quickbooks/client.ts). Null
+ * when `Line` is there and isn't a list: an answer of a shape the portal doesn't know is refused, not read as "no items".
+ */
+export function itemsOf(lines: unknown): string[] | null {
+  if (lines === undefined || lines === null) return [];
+  if (!Array.isArray(lines)) return null;
+  const found = new Set<string>();
+  const visit = (line: unknown, depth: number) => {
+    if (!isRow(line) || depth > 2) return;
+    const sales = isRow(line.SalesItemLineDetail) ? recordId((line.SalesItemLineDetail.ItemRef as { value?: unknown } | null | undefined)?.value) : null;
+    if (sales) found.add(sales);
+    if (isRow(line.GroupLineDetail)) {
+      const group = recordId((line.GroupLineDetail.GroupItemRef as { value?: unknown } | null | undefined)?.value);
+      if (group) found.add(group);
+      if (Array.isArray(line.GroupLineDetail.Line)) for (const inner of line.GroupLineDetail.Line) visit(inner, depth + 1);
+    }
+  };
+  for (const line of lines) visit(line, 0);
+  return [...found].sort(byNumber);
+}
+
 /** Today as a calendar date, in UTC: only used to decide how far back paid invoices go. */
 export const utcDay = (at: Date = new Date()): string => at.toISOString().slice(0, 10);
 
@@ -59,10 +88,12 @@ export function shownInvoices(raw: unknown[], forNames: ReadonlyMap<string, stri
     seen.add(qboId);
     const totalCents = toCents(r.TotalAmt), balanceCents = toCents(r.Balance);
     if (totalCents === null || balanceCents === null) return null;
+    const itemQboIds = itemsOf(r.Line);
+    if (itemQboIds === null) return null;
     const invoice: StoredInvoice = {
       qboId, number: text(r.DocNumber, 50), customerQboId: customer, forName: forNames.get(customer) ?? null, date: day(r.TxnDate), dueDate: day(r.DueDate),
       totalCents, balanceCents: Math.max(balanceCents, 0), currency: currencyOf((r.CurrencyRef as { value?: unknown } | null | undefined)?.value),
-      payLink: balanceCents > 0 ? safePayLink(r.InvoiceLink) : null,
+      payLink: balanceCents > 0 ? safePayLink(r.InvoiceLink) : null, itemQboIds,
     };
     if (balanceCents > 0) open.push(invoice);
     else if (totalCents > 0 && invoice.date !== null && invoice.date >= since) paid.push(invoice);

@@ -155,6 +155,8 @@ export type QboGetOptions = {
    * the token comes from accessTokenForPage(), which refuses as "busy" when the row is held elsewhere.
    */
   failFast?: boolean;
+  /** Waited for before each request is sent, a retry included: the worker's read of every family keeps its gentle pace with it. */
+  pace?: () => Promise<void>;
 };
 
 const RETRY_WAIT_MS = { min: 150, spread: 350 };
@@ -193,6 +195,7 @@ export async function qboGet(path: string, params: Record<string, string> = {}, 
     if (o.realmId !== undefined && a.realmId !== o.realmId) throw new QboError("A different QuickBooks company is connected.", "other_company");
     const url = new URL(`${qboEndpoints().api[a.environment]}/v3/company/${encodeURIComponent(a.realmId)}/${path}`);
     for (const [k, v] of Object.entries({ ...params, minorversion: QBO_MINOR_VERSION })) url.searchParams.set(k, v);
+    if (o.pace) await within(o.pace(), o.signal);
     const timeout = AbortSignal.timeout(o.timeoutMs ?? TIMEOUT_MS);
     const gaveUp = () => timeout.aborted || o.signal?.aborted === true;
     let res: Response;
@@ -285,6 +288,28 @@ export const INVOICE_QUERIES = {
 } as const;
 /** What makes QuickBooks send InvoiceLink at all (v1 spec §8.3). */
 export const INVOICE_INCLUDE = "invoiceLink";
+
+/**
+ * The item query, exactly as it is sent: QuickBooks' products and services, for staff to choose what a payment
+ * requirement is met by. NOT YET TRIED AGAINST A REAL QUICKBOOKS COMPANY, like INVOICE_QUERIES above: nobody could
+ * reach the sandbox for it. The owner's sandbox check must confirm, with `minorversion` 75:
+ *   1. that it is accepted, paged and ordered as the customer query is (`orderby Id startposition 1 maxresults 1000`);
+ *   2. that it answers the company's active products and services, each with `Id`, `Name`, `Type` and `Active`, and
+ *      that a company with none answers a QueryResponse holding no rows (strictRowsOf);
+ *   3. that the `Id` of each is the `ItemRef.value` its invoice lines carry (itemsOf in src/lib/money/invoices.ts).
+ * Don't change it without trying the new one there first.
+ */
+export const ITEM_QUERY = (start: number) => `select * from Item orderby Id startposition ${start} maxresults ${QBO_PAGE}`;
+
+/** Every product and service, a page at a time, read strictly: a 200 that isn't a query answer fails the whole read. */
+export async function qboItems(o: QboGetOptions = {}): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let start = 1; ; start += QBO_PAGE) {
+    const page = strictRowsOf(await qboGet("query", { query: ITEM_QUERY(start) }, o), "Item");
+    out.push(...page);
+    if (page.length < QBO_PAGE) return out;
+  }
+}
 
 /** True once the in-form was refused (a 400, or a Fault) and the one-customer form then worked: kept for the life of the process. */
 let invoicesOneCustomerAtATime = false;

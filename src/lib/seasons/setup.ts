@@ -93,12 +93,16 @@ export async function createSeason(rawName: string, start: "empty" | "template" 
     const [made] = await tx.insert(season).values({ name: name.value }).returning();
     const stepNames = start === "template" ? [...TEMPLATE_STEPS] : (from?.steps ?? []).map((s) => s.name);
     const steps = stepNames.length ? await tx.insert(seasonStep).values(stepNames.map((n, position) => ({ seasonId: made!.id, name: n, position }))).returning() : [];
+    // A payment requirement keeps the QuickBooks product or service it is met by.
+    const sourceIds = (from?.steps ?? []).flatMap((x) => x.requirements.map((r) => r.id));
+    const itemOf = new Map(sourceIds.length === 0 ? [] : (await tx.select({ id: requirement.id, itemQboId: requirement.itemQboId }).from(requirement)
+      .where(inArray(requirement.id, sourceIds))).map((r) => [r.id, r.itemQboId]));
     let copied = 0;
     for (const [i, source] of (from?.steps ?? []).entries()) {
       const target = steps.find((s) => s.position === i)!;
       for (const [position, r] of source.requirements.entries()) {
         const [row] = await tx.insert(requirement).values({ stepId: target.id, kind: r.kind, title: r.title, required: r.required, appliesTo: r.appliesTo,
-          amount: r.amount, amountUnit: r.amountUnit, dueOn: null, covers: r.covers, position }).returning({ id: requirement.id });
+          amount: r.amount, amountUnit: r.amountUnit, dueOn: null, covers: r.covers, itemQboId: itemOf.get(r.id) ?? null, position }).returning({ id: requirement.id });
         if (r.covers === "chosen" && r.coveredQboIds.length) await tx.insert(requirementCover).values(r.coveredQboIds.map((subjectQboId) => ({ requirementId: row!.id, subjectQboId })));
         copied++;
       }

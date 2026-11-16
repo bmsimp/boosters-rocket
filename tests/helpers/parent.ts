@@ -6,7 +6,7 @@ import { formatMoney } from "@/lib/money/cents";
 import { getRosterSource, SOURCE_KEY } from "@/lib/roster/source";
 import { seedGuardian, seedParent, seedParentSession } from "./db";
 import { SIGNINS_ON, addToCache, fam, par, seedParentSettings, seedShape, stu } from "./roster-cache";
-import { seedTwoFamilySeason, type FamilySeason } from "./season";
+import { TRIP_DEPOSIT_ITEM, seedTwoFamilySeason, type FamilySeason } from "./season";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -19,8 +19,11 @@ export type ParentFamilySpec = {
   family: { qboId: string; name: string };
   parent: { qboId: string; name: string; email: string; phone: string };
   students: { qboId: string; name: string }[];
-  /** The family's invoices as QuickBooks last gave them (seedFamilyMoney): open unless `paid`, with a Pay button when `payLink` is set. */
-  invoices?: { number: string; cents: number; paid?: true; payLink?: string }[];
+  /**
+   * The family's invoices as QuickBooks last gave them (seedFamilyMoney): open unless `paid`, with a Pay button when
+   * `payLink` is set, carrying the QuickBooks products and services in `items` (none unless given).
+   */
+  invoices?: { number: string; cents: number; paid?: true; payLink?: string; items?: string[] }[];
 };
 
 export type SeededParent = {
@@ -50,7 +53,7 @@ export const FAMILY_A: ParentFamilySpec = {
   invoices: [
     { number: "INV-ALDERQUIST-7101", cents: 713107, payLink: "https://connect.intuit.com/t/scs-v1-alderquist-7101" },
     { number: "INV-ALDERQUIST-7102", cents: 715209 },
-    { number: "INV-ALDERQUIST-7103", cents: 717311, paid: true },
+    { number: "INV-ALDERQUIST-7103", cents: 717311, paid: true, items: [TRIP_DEPOSIT_ITEM] }, // the trip deposit, paid (tests/helpers/season.ts)
   ],
 };
 export const FAMILY_B: ParentFamilySpec = {
@@ -58,7 +61,7 @@ export const FAMILY_B: ParentFamilySpec = {
   parent: { qboId: "QBO-BRACKENMOOR-PARENT-8002", name: "Bettina Brackenmoor", email: "bettina.brackenmoor@family-b.example", phone: "737-555-0182" },
   students: [{ qboId: "QBO-BRACKENMOOR-STUDENT-8003", name: "Barnaby Brackenmoor" }, { qboId: "QBO-BRACKENMOOR-STUDENT-8004", name: "Briseis Brackenmoor" }],
   invoices: [
-    { number: "INV-BRACKENMOOR-8201", cents: 824208, payLink: "https://connect.intuit.com/t/scs-v1-brackenmoor-8201" },
+    { number: "INV-BRACKENMOOR-8201", cents: 824208, payLink: "https://connect.intuit.com/t/scs-v1-brackenmoor-8201", items: [TRIP_DEPOSIT_ITEM] }, // the trip deposit, not paid yet
     { number: "INV-BRACKENMOOR-8202", cents: 826410 },
     { number: "INV-BRACKENMOOR-8203", cents: 828612, paid: true },
   ],
@@ -89,7 +92,7 @@ export async function seedFamilyMoney(spec: ParentFamilySpec, o: { readAt?: Date
   await db.insert(setting).values({ key: SOURCE_KEY, value: { realmId: MONEY_REALM } }).onConflictDoNothing();
   const invoices: StoredInvoice[] = (spec.invoices ?? []).map((i, n) => ({
     qboId: String(9001 + n), number: i.number, customerQboId: spec.family.qboId, forName: null, date: "2026-10-01", dueDate: i.paid ? null : "2026-12-01",
-    totalCents: i.cents, balanceCents: i.paid ? 0 : i.cents, currency: "USD", payLink: i.payLink ?? null,
+    totalCents: i.cents, balanceCents: i.paid ? 0 : i.cents, currency: "USD", payLink: i.payLink ?? null, itemQboIds: i.items ?? [],
   }));
   const row = { realmId: await getRosterSource(), readAt: o.readAt ?? new Date(), invoices, totalCents: owed(spec), currency: "USD",
     balanceWithJobsCents: o.balanceWithJobsCents === undefined ? owed(spec) : o.balanceWithJobsCents };

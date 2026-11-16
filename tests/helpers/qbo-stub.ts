@@ -27,6 +27,13 @@ export type QboStub = {
    * object), and for a well-formed answer that holds no rows (`{ QueryResponse: {} }`) while `customers` holds some.
    */
   oddRosterAnswer: { customers?: unknown; types?: unknown } | null;
+  /**
+   * The products and services an Item query answers (`select * from Item`), paged like the customers. Like the item
+   * query itself, this follows Intuit's documentation and has not been checked against a real company (ITEM_QUERY in
+   * src/lib/quickbooks/client.ts). `oddItemAnswer` answers the Item query with HTTP 200 and that body instead.
+   */
+  items: Record<string, unknown>[];
+  oddItemAnswer: { body: unknown } | null;
   rateLimitNext: number;        // answer this many API requests, from the next one, with HTTP 429
   failNext: number;             // answer this many API requests, from the next one, with HTTP 500
   apiDelayMs: number;           // wait this long before answering any API request (a slow QuickBooks)
@@ -85,7 +92,7 @@ export async function startQboStub(): Promise<QboStub> {
     void answer().finally(() => { if (--open === 0) for (const wake of waitingForIdle.splice(0)) wake(); });
   };
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
-    invoices: [], refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
+    invoices: [], items: [], oddItemAnswer: null, refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, updateServerFault: null, dropApi: false, dropToken: false, onApiRequest: null,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
@@ -177,7 +184,7 @@ export async function startQboStub(): Promise<QboStub> {
         const entity = /from (\w+)/i.exec(q)?.[1] ?? "";
         const start = Number(/startposition (\d+)/i.exec(q)?.[1] ?? 1), max = Number(/maxresults (\d+)/i.exec(q)?.[1] ?? 100);
         // An entity the stub doesn't hold is refused, as QuickBooks refuses a query it can't parse: never the customer list.
-        if (!["Customer", "CustomerType", "Invoice"].includes(entity)) return json(400, { Fault: { Error: [{ Message: "QueryParserError" }] } });
+        if (!["Customer", "CustomerType", "Invoice", "Item"].includes(entity)) return json(400, { Fault: { Error: [{ Message: "QueryParserError" }] } });
         let matched: Record<string, unknown>[];
         if (entity === "Invoice") {
           // The two filters the portal sends: CustomerRef in ('1','2') and CustomerRef = '1'. Any other invoice query is refused.
@@ -189,6 +196,9 @@ export async function startQboStub(): Promise<QboStub> {
           const withLink = (url.searchParams.get("include") ?? "").toLowerCase() === "invoicelink";
           matched = stub.invoices.filter((i) => ids.has(String((i.CustomerRef as { value?: unknown } | undefined)?.value)))
             .map((i) => (withLink ? i : Object.fromEntries(Object.entries(i).filter(([field]) => field !== "InvoiceLink"))));
+        } else if (entity === "Item") {
+          if (stub.oddItemAnswer) return json(200, stub.oddItemAnswer.body);
+          matched = stub.items;
         } else {
           const odd = stub.oddRosterAnswer ?? {};
           if (entity === "Customer" && "customers" in odd) return json(200, odd.customers);
@@ -216,7 +226,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.reset = () => {
     stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.updateServerFault = null; stub.dropApi = false; stub.dropToken = false; stub.onApiRequest = null;
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
-    stub.invoices = []; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
+    stub.invoices = []; stub.items = []; stub.oddItemAnswer = null; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
   };
   stub.close = () => new Promise<void>((r) => server.close(() => r()));

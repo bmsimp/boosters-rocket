@@ -92,6 +92,13 @@
       "when": 1794804515609,
       "tag": "0012_audit_filters",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794848064921,
+      "tag": "0013_staff_money",
+      "breakpoints": true
     }
   ]
 }

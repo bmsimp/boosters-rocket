@@ -5,7 +5,7 @@
  * tests/unit/quickbooks-writes.test.ts.
  */
 export const QUICKBOOKS_USE = {
-  reads: "The portal reads the club's families and members, and what each family owes, from QuickBooks.",
+  reads: "The portal reads the club's families and members, what each family owes, and the products and services its invoices are for, from QuickBooks.",
   writes: "It changes one thing there: a parent's own phone and mailing address, when that parent edits them in the portal.",
 } as const;
 

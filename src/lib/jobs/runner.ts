@@ -9,6 +9,7 @@ import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { sendReviewNotice } from "@/lib/parents/review-notice";
 import { expirePreviousCompany } from "@/lib/parents/company-change";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
+import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
 
 export const TOKEN_JOB = "quickbooks.token_refresh";
 export const WAKE_KEY = "worker.last_wake";
@@ -61,8 +62,9 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     ran.push({ job: CLEANUP_JOB, ok: false });
   }
   const conn = await connectionView();
-  // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record.
-  if (!conn.connected || conn.needsAdmin) return { ran };
+  // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record,
+  // except that a read of every family under way is ended, saying how far it got.
+  if (!conn.connected || conn.needsAdmin) return { ran: [...ran, ...(await moneyJob(now))] };
   if (await due(TOKEN_JOB, now)) {
     const [run] = await db.insert(jobRun).values({ job: TOKEN_JOB, startedBy: "worker", startedAt: now }).returning();
     try {
@@ -80,7 +82,20 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
     if (r.ok || r.reason === "failed") ran.push({ job: ROSTER_JOB, ok: r.ok });
   }
-  return { ran };
+  // Every family's invoices, once a day or when staff ask (src/lib/money/sweep.ts): after the roster, so it reads the
+  // families as QuickBooks lists them now. A run too long for one wake carries on at the next; it is in this wake's
+  // answer only when it ended.
+  return { ran: [...ran, ...(await moneyJob(now))] };
+}
+
+/** The money job's share of a wake: in its answer only when a run ended. A throw is recorded as a failure, with none of its text. */
+async function moneyJob(now: Date): Promise<{ job: string; ok: boolean }[]> {
+  try {
+    const r = await runMoneyJob({ now });
+    return r.ran && r.finished ? [{ job: MONEY_JOB, ok: r.ok }] : [];
+  } catch {
+    return [{ job: MONEY_JOB, ok: false }];
+  }
 }
 
 /** When the worker last checked in, for the settings view. */

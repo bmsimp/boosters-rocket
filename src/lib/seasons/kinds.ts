@@ -1,9 +1,11 @@
 /**
  * How each kind of requirement is met (v1 spec §10.2): one entry per kind, and the only place that knows. Checklist
- * items are worked out. Forms, payments and volunteering each get their entry in the slice that builds them: until a
+ * items and payments are worked out. Forms and volunteering each get their entry in the slice that builds them: until a
  * kind has one, staff can't create a requirement of it (KIND_RULES[kind] is null), and nothing else has to change.
  */
 import type { RequirementKind } from "@/lib/db/schema";
+import { NO_INVOICE_YET } from "@/lib/money/payment-rule";
+import { paymentStandings } from "@/lib/money/payment-standings";
 import type { Requirement, Standing } from "./progress";
 
 /** What `requirement_progress` holds for one requirement and one family or student. */
@@ -37,10 +39,19 @@ const checklist: KindRule = {
   ticked: true,
 };
 
+const payment: KindRule = {
+  // Met when invoices carrying its QuickBooks product or service exist for the family or student and none of them is
+  // still open (src/lib/money/payment-rule.ts), judged from the figures QuickBooks last gave the family.
+  standings: async ({ requirements, subjectQboIds }) =>
+    new Map((await paymentStandings(requirements, subjectQboIds)).map((s) => [pairKey(s.requirementId, s.subjectQboId), s.standing])),
+  nothingYet: () => NO_INVOICE_YET,
+  ticked: false,
+};
+
 export const KIND_RULES: Record<RequirementKind, KindRule | null> = {
   checklist,
   form: null,      // Forms with Documenso: met when the document is completed by the required guardians (§9).
-  payment: null,   // Money for staff and payment requirements: met when invoices carrying its item exist and none is open (§8).
+  payment,
   volunteer: null, // Volunteering: met when confirmed credit reaches the amount, or a buy-out is paid (§11).
 };
 

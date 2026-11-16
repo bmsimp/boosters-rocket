@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   "Season.Steps.ReadWrite",        // create and change seasons, steps and requirements, and choose the current season
   "Season.Progress.Read",          // see which families and students have met each requirement
   "Season.Progress.ReadWrite",     // tick checklist items off, and waive a requirement for a family or student
+  "Finance.Balance.Read",          // see what every family owes and each family's invoices, and ask for every family to be read from QuickBooks again
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
