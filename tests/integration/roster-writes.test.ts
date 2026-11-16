@@ -174,7 +174,7 @@ describe("a record that changed in QuickBooks meanwhile is never overwritten (v1
   it("is refused by QuickBooks (5010), read again, shown with its current values, and not queued", async () => {
     stub.beforeUpdate = (c) => { if (c.Id === "12") { c.DisplayName = "Leo R. Rivera"; c.SyncToken = "3"; } };
     const r = await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op);
-    expect(r).toEqual({ ok: false, errors: [WRITE_COPY.changed], current: { name: "Leo R. Rivera", active: true, familyName: "Rivera Family", syncToken: "3" } });
+    expect(r).toEqual({ ok: false, errors: [WRITE_COPY.changed], current: { name: "Leo R. Rivera", active: true, familyName: "Rivera Family" } });
     expect(inStub("12")).toMatchObject({ DisplayName: "Leo R. Rivera", SyncToken: "3" });
     expect(await cached("12")).toMatchObject({ displayName: "Leo R. Rivera", syncToken: "3" }); // the cache took the newer record
     expect(await queue()).toEqual([]);

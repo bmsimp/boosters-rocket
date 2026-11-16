@@ -9,7 +9,7 @@ import { ACTION_FAILED, safely } from "@/app/components/action-error";
 /** What a roster write answers (src/lib/roster/writes.ts): a free name to offer when the one asked for is taken, or the record as QuickBooks has it now. */
 export type WriteResult =
   | { ok: true; message: string; queued?: true }
-  | { ok: false; errors: string[]; offer?: string; current?: { name: string; active: boolean; familyName: string | null; syncToken: string } };
+  | { ok: false; errors: string[]; offer?: string; current?: { name: string; active: boolean; familyName: string | null } };
 const failed: WriteResult = { ok: false, errors: [ACTION_FAILED] };
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 

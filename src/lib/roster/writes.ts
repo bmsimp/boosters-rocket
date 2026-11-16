@@ -34,8 +34,11 @@ export type WriteAsk =
   | { op: "move"; qboId: string; syncToken: string; toFamilyQboId: string }
   | { op: "deactivate"; qboId: string; syncToken: string };
 
-/** A record as QuickBooks has it now, read again after it changed while staff were editing (spec §6.3). */
-export type CurrentRecord = { name: string; active: boolean; familyName: string | null; syncToken: string };
+/**
+ * A record as QuickBooks has it now, read again after it changed while staff were editing (spec §6.3): only what the
+ * form shows. Its new version reaches the page when the page is made again, which the action asks for.
+ */
+export type CurrentRecord = { name: string; active: boolean; familyName: string | null };
 
 export type WriteResult =
   | { ok: true; message: string; queued?: true }
@@ -277,7 +280,7 @@ async function readAgain(qboId: string, realmId: string): Promise<CurrentRecord 
     await reconcileAccess(tx, { cause: `roster.read_again#${qboId}` });
     if (!row) return null;
     const [family] = row.parentQboId ? await tx.select({ name: qboCustomer.displayName }).from(qboCustomer).where(eq(qboCustomer.qboId, row.parentQboId)) : [];
-    return { name: row.displayName, active: row.active, familyName: family?.name ?? null, syncToken: row.syncToken };
+    return { name: row.displayName, active: row.active, familyName: family?.name ?? null };
   });
 }
 
