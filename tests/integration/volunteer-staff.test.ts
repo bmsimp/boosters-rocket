@@ -23,7 +23,7 @@ import {
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
-import { dayFromNow, seedEvent, seedSignup } from "../helpers/volunteer";
+import { dayFromNow, seedEvent } from "../helpers/volunteer";
 
 /**
  * The staff side of volunteering (v1 spec §11.1): events and shifts, the sign-up lists, and the emails a change or a
