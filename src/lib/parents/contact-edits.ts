@@ -12,10 +12,12 @@ import type { ParentCtx } from "@/lib/guards";
 import { CUSTOMER_UPDATE, faultCodeOf, isQboId, qboCustomerById, qboUpdateCustomerContact, type CustomerContactChange } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getRosterSource } from "@/lib/roster/source";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { asShown, fieldErrors, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
 import { parseEmailField } from "./emails";
 import { loadMyRecord, type MyContact, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
+import { askForRosterRefresh } from "./refresh-ask";
 import { parentActor } from "./sessions";
 
 /** How long one read from QuickBooks may take while a parent waits (the whole read: one and a half times that), and the write. */
@@ -173,7 +175,7 @@ const mayHaveSaved = (code: string): boolean => code === "timeout" || code === "
  * QuickBooks holds that already, and says so itself if it won't take it.
  *
  * A save is audited with the before and after values, in the transaction that brings the roster cache's phone and
- * SyncToken up to date from QuickBooks' answer. A save that was refused or failed is audited with its short code.
+ * SyncToken up to date from QuickBooks' answer (or, while a roster refresh runs, asks the worker for another). A save that was refused or failed is audited with its short code.
  * A save QuickBooks made but answered with a record the portal can't take for this person's is audited as a save too,
  * with what was sent and that code, and the cache is left as it was.
  */
@@ -239,14 +241,21 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
   }
   const updatedAt = isRow(answer.MetaData) && typeof answer.MetaData.LastUpdatedTime === "string" ? Date.parse(answer.MetaData.LastUpdatedTime) : NaN;
   await db.transaction(async (tx) => {
+    // A roster refresh holds the roster lock from before it reads QuickBooks until it has stored what it read, so one
+    // running now may have read this record before the change, and would put the old phone back over the new one.
+    // The parent doesn't wait for it: the cache is left alone and the worker is asked to read the roster again at its
+    // next wake (./refresh-ask.ts), as a confirmed email change does. Shared, so parents' saves never wait on each other.
+    const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${ROSTER_LOCK}) as locked`)) as unknown as { locked: boolean }[];
+    const busy = !lock?.locked;
+    if (busy) await askForRosterRefresh(tx);
     // The cache row is brought up to date only while the cache is still this company's: after a change of company the
     // id names another customer there, or nothing.
-    if ((await getRosterSource(tx)) === company.realmId) {
+    else if ((await getRosterSource(tx)) === company.realmId) {
       await tx.update(qboCustomer).set({ phone: after.form.values.phone.slice(0, 50) || null, syncToken: after.form.version, ...(Number.isNaN(updatedAt) ? {} : { qboUpdatedAt: new Date(updatedAt) }) })
         .where(eq(qboCustomer.qboId, record.qboId));
     }
     await writeAudit({ actor: actorOf(ctx), action: "parent.contact.save", targetType: "qbo_customer", targetId: record.qboId,
-      before: auditValues(before.form.values, change), after: auditValues(after.form.values, change), ip: ctx.ip }, tx);
+      before: auditValues(before.form.values, change), after: { ...auditValues(after.form.values, change), ...(busy ? { cache: "refresh_asked" } : {}) }, ip: ctx.ip }, tx);
   });
   return { ok: true, message: CONTACT_COPY.saved, current: after.form };
 }

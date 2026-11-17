@@ -57,4 +57,15 @@ describe("resolveStaff", () => {
     await resolveStaff("u9");
     expect((await db.select().from(auditLog)).map((a) => a.action)).toContain("signin.refused");
   });
+
+  it("records the request's address on a refused sign-in and on a first sign-in's bind (v1 spec §13)", async () => {
+    await staffAuthRow("u10", "stranger@example.com", "google");
+    await resolveStaff("u10", "203.0.113.10");
+    const s = await seedStaff({ email: "pat@club.org", status: "invited" });
+    await staffAuthRow("u11", "pat@club.org", "microsoft");
+    expect(await resolveStaff("u11", "203.0.113.11")).toMatchObject({ staffUserId: s.id });
+    const rows = await db.select().from(auditLog);
+    expect(rows.find((a) => a.action === "signin.refused")).toMatchObject({ targetId: "u10", ip: "203.0.113.10" });
+    expect(rows.find((a) => a.action === "staff.bind")).toMatchObject({ targetId: s.id, ip: "203.0.113.11" });
+  });
 });

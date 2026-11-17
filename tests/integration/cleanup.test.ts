@@ -4,7 +4,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser, writeQueue } from "@/lib/db/schema";
+import { auditLog, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
@@ -20,7 +20,7 @@ import { addToCache, fam } from "../helpers/roster-cache";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -178,6 +178,20 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(describeCleanup({ ...NOTHING, writeQueue: 2 })).toBe("Removed 2 finished changes to QuickBooks.");
   });
 
+  it("Better Auth's verification rows, both doors: one that ran out a second ago goes, one with a second left stays", async () => {
+    for (const [table, door] of [[staffAuthVerification, "staff"], [parentAuthVerification, "parent"]] as const) {
+      await db.insert(table).values([
+        { id: `${door}-gone`, identifier: "state", value: "v", expiresAt: at(-SEC) },
+        { id: `${door}-edge`, identifier: "state", value: "v", expiresAt: NOW },
+        { id: `${door}-kept`, identifier: "state", value: "v", expiresAt: at(SEC) },
+      ]);
+    }
+    expect(await clean()).toEqual({ ...NOTHING, verifications: 2 });
+    expect(await ids(db.select({ id: staffAuthVerification.id }).from(staffAuthVerification))).toEqual(["staff-edge", "staff-kept"]);
+    expect(await ids(db.select({ id: parentAuthVerification.id }).from(parentAuthVerification))).toEqual(["parent-edge", "parent-kept"]);
+    expect(describeCleanup({ ...NOTHING, verifications: 2 })).toBe("Removed 2 expired sign-in checks.");
+  });
+
   it("never touches the audit log, however old", async () => {
     await db.insert(auditLog).values({ at: at(-3650 * DAY), door: "system", action: "signin" });
     expect(await clean()).toEqual(NOTHING);
@@ -229,7 +243,7 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
     expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
   });

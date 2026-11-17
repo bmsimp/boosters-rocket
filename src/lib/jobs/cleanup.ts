@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, writeQueue } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -16,7 +16,7 @@ const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; rateLimitEvents: number;
-  emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number;
+  emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
@@ -25,6 +25,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   jobRuns: ["old job record", "old job records"],
   reminderClaims: ["reminder record older than a year", "reminder records older than a year"],
   writeQueue: ["finished change to QuickBooks", "finished changes to QuickBooks"],
+  verifications: ["expired sign-in check", "expired sign-in checks"],
 };
 
 /**
@@ -33,10 +34,10 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * whose rows expire gets its delete below and a boundary test.
  */
 export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run",
-  "form_reminder_claim", "form_reminder_round", "write_queue"] as const;
+  "form_reminder_claim", "form_reminder_round", "write_queue", "staff_auth_verification", "parent_auth_verification"] as const;
 export const KEPT_TABLES: Record<string, string> = {
-  staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts", staff_auth_verification: "Better Auth's own, short-lived and kept by it",
-  parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts", parent_auth_verification: "Better Auth's own, short-lived and kept by it",
+  staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
+  parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
   setting: "the portal's settings, replaced in place",
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
@@ -88,6 +89,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   A signed form's evidence is never deleted.
  * - Staff roster writes that went through or were given up more than FINISHED_WRITES_DAYS ago. Waiting and stuck ones
  *   stay until they finish.
+ * - Better Auth's verification rows of both doors (a staff sign-in's state while it is at Microsoft or Google) whose
+ *   `expires_at` has passed: Better Auth refuses them already, and leaves them behind.
  *
  * The audit log is never touched: it is append-only.
  */
@@ -126,7 +129,10 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const writes = n(await tx.delete(writeQueue).where(and(inArray(writeQueue.state, ["done", "given_up"]),
     lt(writeQueue.finishedAt, new Date(now.getTime() - FINISHED_WRITES_DAYS * 86_400_000)))).returning({ id: writeQueue.id }));
 
-  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes };
+  const verifications = n(await tx.delete(staffAuthVerification).where(lt(staffAuthVerification.expiresAt, now)).returning({ id: staffAuthVerification.id }))
+    + n(await tx.delete(parentAuthVerification).where(lt(parentAuthVerification.expiresAt, now)).returning({ id: parentAuthVerification.id }));
+
+  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications };
 }
 
 /**

@@ -18,7 +18,6 @@ import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthU
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import { confirmEmailChangeAction, requestEmailChangeAction } from "@/app/(parent)/family/email/actions";
 import FamilyPage from "@/app/(parent)/family/page";
@@ -31,6 +30,7 @@ import { emailChangeToken, seedEmailChange } from "../helpers/email-change";
 import { CHENOWETH, RIVERA, connectCompany } from "../helpers/money";
 import { seedParentIn } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 
 let stub: QboStub;
@@ -60,15 +60,6 @@ const linkTo = (to: string) => {
   return /\/family\/email\/([A-Za-z0-9_-]{43})/.exec(mail.text)![1]!;
 };
 const aCode = (parentId: string) => db.insert(signinCode).values({ parentId, codeHash: "an-unused-code", expiresAt: new Date(Date.now() + 600_000) });
-/** Holds the roster lock, as a running refresh does, from when it resolves until release() is called. */
-async function holdTheRosterLock(): Promise<{ release: () => Promise<void> }> {
-  let release!: () => void, taken!: () => void;
-  const released = new Promise<void>((r) => { release = r; });
-  const isTaken = new Promise<void>((r) => { taken = r; });
-  const held = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`); taken(); await released; });
-  await isTaken;
-  return { release: async () => { release(); await held; } };
-}
 
 describe("asking for the change", () => {
   it("stores the request, mails a link to the new address and a notice to the old, and changes nothing else", async () => {

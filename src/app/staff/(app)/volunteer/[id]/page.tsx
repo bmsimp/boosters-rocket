@@ -95,7 +95,8 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
             <details className="more"><summary>Change or cancel this shift</summary>
               <ShiftForm initial={{ startsAt: s.startsAt, endsAt: s.endsAt, places: s.places, role: s.role ?? "", requirementIds: s.requirementIds }} requirements={options}
                 save={updateShiftAction.bind(null, s.id)} label="Save shift" />
-              <OneButton label="Cancel this shift" pendingLabel="Cancelling…" act={cancelShiftAction.bind(null, s.id)} />
+              <ConfirmButton label="Cancel this shift" question="Cancel this shift? Everyone signed up for it is emailed, and its places are no longer offered. This can't be undone."
+                yes="Yes, cancel the shift" act={cancelShiftAction.bind(null, s.id)} />
             </details>
           )}
         </section>
@@ -108,7 +109,8 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
           </section>
           <section className="box" aria-labelledby="cancel-h"><h2 id="cancel-h">Cancel the event</h2>
             <p>Everyone signed up for its shifts is emailed. The event stays here, marked cancelled.</p>
-            <OneButton label="Cancel this event" pendingLabel="Cancelling…" act={cancelEventAction.bind(null, event.id)} />
+            <ConfirmButton label="Cancel this event" question="Cancel the whole event? Everyone signed up for any of its shifts is emailed. This can't be undone."
+              yes="Yes, cancel the event" act={cancelEventAction.bind(null, event.id)} />
           </section>
         </>
       )}

@@ -12,6 +12,7 @@ import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { sendMail } from "@/lib/mail/send";
 import type { MyFamily } from "@/lib/parents/my-family";
+import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { isUuid } from "@/lib/seasons/ids";
 import { isCovered, type Requirement } from "@/lib/seasons/progress";
@@ -190,6 +191,7 @@ export type Result = { ok: true; message: string } | { ok: false; errors: string
 const no = (...errors: string[]): Result => ({ ok: false, errors });
 const NOT_OFFERED = "That shift isn't open for sign-up any more. Reload the page to see what's open.";
 const NOT_FROM_PAGE = "That didn't go through. Reload the page and try again.";
+const RATE_LIMITED = "That's a lot of sign-ups in a few minutes. Please wait a little, then try again.";
 
 /**
  * Takes one place on a shift for the signed-in guardian or one of the family's active students. The shift row is
@@ -201,6 +203,10 @@ const NOT_FROM_PAGE = "That didn't go through. Reload the page and try again.";
 export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, shiftId: unknown, who: unknown, now: Date = new Date()): Promise<Result> {
   if (!isUuid(shiftId) || typeof who !== "string" || who.length === 0 || who.length > 64) return no(NOT_FROM_PAGE);
   if (!family) return no("Your family isn't set up in the portal yet, so you can't sign up here. Please ask the club.");
+  // Each place taken emails the guardian: a page pressed again and again would fill their mailbox.
+  const take = await takeRateLimit("volunteer_signup_parent", ctx.parentId);
+  if (take === "first_refusal") await writeAudit({ actor: { door: "parent", id: ctx.parentId, label: ctx.email }, action: "volunteer.signup.refused", targetType: "parent", targetId: ctx.parentId, after: { code: "rate_limited" }, ip: ctx.ip });
+  if (take !== "taken") return no(RATE_LIMITED);
   const student = who === "me" ? null : (await myStudents(ctx, family)).find((s) => s.qboId === who) ?? null;
   if (who !== "me" && !student) return no(NOT_FROM_PAGE);
   const [{ timeZone: zone }, { cutoffHours }] = await Promise.all([getClubSettings(), getVolunteerSettings()]);

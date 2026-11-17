@@ -10,7 +10,7 @@ import { renewParentSession } from "@/lib/parents/sessions";
 
 export async function getStaffIdentity(): Promise<StaffIdentity | null> {
   const session = await (await getStaffAuth()).api.getSession({ headers: stampClientIp(await headers()) });
-  return session ? resolveStaff(session.user.id) : null;
+  return session ? resolveStaff(session.user.id, await requestIp()) : null;
 }
 
 /**

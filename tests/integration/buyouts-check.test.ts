@@ -163,6 +163,8 @@ describe("a student who moves in the portal (afterStudentMoved)", () => {
     // A per-family buy-out is the family's still: untouched.
     expect(await row(theFamilys.id)).toMatchObject({ state: "invoiced", flag: null });
     expect(await audits("volunteer.buyout.moved")).toHaveLength(1);
+    // The move's own follow-up row counts what it did to buy-outs, beside forms and places.
+    expect((await audits("roster.student.move.followed"))[0]!.after).toMatchObject({ buyoutsToVoid: 1, buyoutsFlagged: 0 });
   });
 
   it("leaves a paid or part-paid one as it is and flags it for the treasurer", async () => {
@@ -176,6 +178,7 @@ describe("a student who moves in the portal (afterStudentMoved)", () => {
     await move("00000000-0000-4000-8000-00000000aaaa");
     expect(await row(paid.id)).toMatchObject({ state: "paid", flag: "student_moved" });
     expect(await row(part.id)).toMatchObject({ state: "being_voided" });
+    expect((await audits("roster.student.move.followed"))[0]!.after).toMatchObject({ buyoutsToVoid: 1, buyoutsFlagged: 1 });
     await runWriteQueue(later(1));
     // Read live before the void: something was paid, so it is never voided.
     expect(await row(part.id)).toMatchObject({ state: "invoiced", flag: "student_moved" });

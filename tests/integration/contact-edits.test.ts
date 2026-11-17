@@ -16,6 +16,7 @@ import type { ParentIdentity } from "@/lib/auth/resolve";
 import { CONTACT_COPY, loadMyContact } from "@/lib/parents/contact-edits";
 import { NOT_THE_FORM, type ContactValues } from "@/lib/parents/contact-fields";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
+import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { saveDetailsAction } from "@/app/(parent)/family/details/actions";
 import FamilyPage from "@/app/(parent)/family/page";
@@ -25,6 +26,7 @@ import { resetDb, seedStaff } from "../helpers/db";
 import { CHENOWETH, RIVERA, connectCompany } from "../helpers/money";
 import { seedParentIn, seedSignedInParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedShape, stu } from "../helpers/roster-cache";
 
 let stub: QboStub;
@@ -67,6 +69,7 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     expect((await cached(R_PARENT)).qboUpdatedAt!.getTime()).toBeGreaterThan(Date.now() - 60_000);
     expect(await cached(R_FAMILY)).toMatchObject({ phone: null, syncToken: "0" });
     expect(await cached(C_PARENT)).toMatchObject({ phone: CHENOWETH.parent.phone, syncToken: "0" });
+    expect(await rosterRefreshAsked()).toBe(false);
 
     const log = await audits();
     expect(log).toHaveLength(1);
@@ -108,6 +111,22 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     expect(mine.BillAddr).toEqual({ Line1: "7 Kestrel Way" });
     expect(await cached(R_PARENT)).toMatchObject({ phone: null, syncToken: "1" });
     expect((await audits())[0]).toMatchObject({ before: { phone: RIVERA.parent.phone, address: { line1: "12 Heron Lane" } }, after: { phone: "", address: { line1: "7 Kestrel Way", city: "" } } });
+  });
+
+  // A refresh holds the roster lock from before its read of QuickBooks until it stores it: one that read this record
+  // before the save would put the old phone back over the new one if the save wrote the cache under it.
+  it("a roster refresh under way: QuickBooks has the change, the cache is left alone and the worker asked to read the roster again", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    const lock = await holdTheRosterLock();
+    const result = await save({ ...SHOWN, phone: NEW_PHONE });
+    await lock.release();
+    expect(result).toEqual({ ok: true, message: CONTACT_COPY.saved, current: { values: { ...SHOWN, phone: NEW_PHONE }, version: "1" } });
+    expect(inQuickBooks(stub, R_PARENT)).toMatchObject({ SyncToken: "1", PrimaryPhone: { FreeFormNumber: NEW_PHONE } });
+    expect(await cached(R_PARENT)).toMatchObject({ phone: RIVERA.parent.phone, syncToken: "0" });
+    expect(await rosterRefreshAsked()).toBe(true);
+    expect((await audits()).at(-1)).toMatchObject({ action: "parent.contact.save", targetId: R_PARENT, before: { phone: RIVERA.parent.phone },
+      after: { phone: NEW_PHONE, cache: "refresh_asked" } });
   });
 
   it("layered, with no parent type: the family's own record is the one changed", async () => {

@@ -17,7 +17,7 @@ import ProgressPage from "@/app/staff/(app)/seasons/progress/page";
 import RequirementProgressPage from "@/app/staff/(app)/seasons/progress/[requirementId]/page";
 import FamilyProgressPage from "@/app/staff/(app)/seasons/progress/family/[familyId]/page";
 import {
-  addRequirementAction, addStepAction, clearCurrentSeasonAction, createSeasonAction, moveStepAction, removeRequirementAction, removeStepAction, removeWaiverAction,
+  addRequirementAction, addStepAction, clearCurrentSeasonAction, createSeasonAction, moveRequirementAction, moveStepAction, removeRequirementAction, removeStepAction, removeWaiverAction,
   renameSeasonAction, setCoverageAction, setCurrentSeasonAction, setTicksAction, updateRequirementAction, updateStepAction, waiveAction,
 } from "@/app/staff/(app)/seasons/actions";
 import { resetDb, seedStaff } from "../helpers/db";
@@ -95,7 +95,7 @@ describe("the season permissions", () => {
       () => createSeasonAction("Spring", "template"), () => renameSeasonAction(fall.seasonId, "X"), () => setCurrentSeasonAction(fall.seasonId), () => clearCurrentSeasonAction(),
       () => addStepAction(fall.seasonId, "X"), () => updateStepAction(uniforms, "X", null, null), () => moveStepAction(uniforms, "later"), () => removeStepAction(uniforms),
       () => addRequirementAction(uniforms, "checklist", "student", FIELDS), () => updateRequirementAction(fitting, FIELDS),
-      () => setCoverageAction(fitting, TAG, "chosen", ["12"]), () => removeRequirementAction(fitting),
+      () => setCoverageAction(fitting, TAG, "chosen", ["12"]), () => removeRequirementAction(fitting), () => moveRequirementAction(fitting, "later"),
     ];
     const progressActions = [() => setTicksAction(fitting, TAG, ["12"], true), () => waiveAction(fitting, TAG, "12", "reason"), () => removeWaiverAction(fitting, TAG, "12")];
     const before = JSON.stringify([await seasons(), await stepsOf(fall.seasonId), await db.select().from(requirement), await db.select().from(requirementCover), await recorded()]);
@@ -185,6 +185,22 @@ describe("seasons", () => {
     // The ticks and the waiver stay with the season they were recorded in.
     expect((await recorded()).every((r) => r.requirementId === last.requirementIds["Handbook read"])).toBe(true);
     expect((await audits("season.create"))[0]!.after).toMatchObject({ start: "last", steps: ["Join", "Wrap-up"], requirements: 2, copiedFrom: { id: last.seasonId, name: "Fall 2026" } });
+  });
+
+  it("copies what each kind is met or billed by: a buy-out's price and item, a form's template, signers and reminder schedule (v1 spec §10.1)", async () => {
+    const last = await seedSeason({ name: "Fall 2026", steps: [{ name: "Join", requirements: [
+      { title: "Two shifts", appliesTo: "family" }, { title: "Medical release", appliesTo: "student" }] }] });
+    const form = { templateId: "envelope_medical", templateTitle: "Medical release", templateUpdatedAt: "2026-08-01T00:00:00.000Z", signerRoles: 2 as const,
+      signers: "every" as const, attachedAt: "2026-08-02T00:00:00.000Z" };
+    await db.update(requirement).set({ kind: "volunteer", amount: 2, amountUnit: "shifts", buyoutUnitCents: 2500, itemQboId: "31" }).where(eq(requirement.id, last.requirementIds["Two shifts"]!));
+    await db.update(requirement).set({ kind: "form", form, formReminders: { before: [7, 1], weeklyAfter: true } }).where(eq(requirement.id, last.requirementIds["Medical release"]!));
+    expect((await createSeasonAction("Fall 2027", "last")).ok).toBe(true);
+    const copy = (await seasons()).find((s) => s.name === "Fall 2027")!;
+    const copied = await db.select().from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).where(eq(seasonStep.seasonId, copy.id)).orderBy(asc(requirement.position));
+    expect(copied.map((r) => ({ title: r.requirement.title, kind: r.requirement.kind, buyoutUnitCents: r.requirement.buyoutUnitCents, itemQboId: r.requirement.itemQboId,
+      form: r.requirement.form, formReminders: r.requirement.formReminders }))).toEqual([
+      { title: "Two shifts", kind: "volunteer", buyoutUnitCents: 2500, itemQboId: "31", form: null, formReminders: null },
+      { title: "Medical release", kind: "form", buyoutUnitCents: null, itemQboId: null, form, formReminders: { before: [7, 1], weeklyAfter: true } }]);
   });
 
   it("refuses a copy when there is nothing to copy, and a name that is empty or too long", async () => {
@@ -388,6 +404,38 @@ describe("requirements", () => {
     expect(await db.select().from(requirement)).toEqual([]);
     expect(await db.select().from(requirementCover)).toEqual([]);
     expect((await audits("season.requirement.remove"))[0]).toMatchObject({ targetId: fitting, before: { title: "Uniform fitting attended", covers: "chosen", subjectQboIds: ["12", "13"] }, after: null });
+  });
+
+  // The roadmap's known gap from step 3: requirements could not be put in another order within a step.
+  it("moves a requirement earlier or later within its step, with its audit row, and families read the new order", async () => {
+    await seedSignedInParent();
+    const fall = await seedSeason({ name: "Fall 2026", steps: [{ name: "Join", requirements: [
+      { title: "Dues paid", appliesTo: "family" }, { title: "Contact sheet", appliesTo: "family" }, { title: "Banquet RSVP", appliesTo: "family" }] }] });
+    const rsvp = fall.requirementIds["Banquet RSVP"]!, dues = fall.requirementIds["Dues paid"]!;
+    const titles = async () => (await db.select().from(requirement).orderBy(asc(requirement.position))).map((r) => r.title);
+    const parentReads = async () => (await loadMySeason({ familyQboId: FAMILY_A.family.qboId, parentId: crypto.randomUUID() }, FAMILY_A.students))!.steps[0]!.family.map((l) => l.title);
+
+    const page = textOf(await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: rsvp } }));
+    expect(page).toContain("Order 3 of the 3 requirements in Join. Families read them in this order. Move earlier");
+    expect(page).not.toContain("Move later");
+    expect(await moveRequirementAction(rsvp, "earlier")).toEqual({ ok: true, message: "Moved." });
+    expect(await titles()).toEqual(["Dues paid", "Banquet RSVP", "Contact sheet"]);
+    expect(await parentReads()).toEqual(["Dues paid", "Banquet RSVP", "Contact sheet"]);
+    expect(revalidatedPaths()).toContain("/");
+    expect((await audits("season.requirement.move"))[0]).toMatchObject({ targetType: "requirement", targetId: rsvp, permission: "Season.Steps.ReadWrite", actorId: setter.id,
+      before: { order: ["Dues paid", "Contact sheet", "Banquet RSVP"] }, after: { order: ["Dues paid", "Banquet RSVP", "Contact sheet"] } });
+
+    // At the end already: nothing changes and nothing is recorded.
+    expect(await moveRequirementAction(dues, "earlier")).toEqual({ ok: true, message: "It is first in its step already." });
+    expect(await titles()).toEqual(["Dues paid", "Banquet RSVP", "Contact sheet"]);
+    expect(await audits("season.requirement.move")).toHaveLength(1);
+    expect(await moveRequirementAction(NO_SUCH, "later")).toEqual({ ok: false, errors: ["That isn't there any more. Reload the page."] });
+
+    // A requirement alone in its step has no order to change, and a reader is offered none.
+    const lone = await seedSeason({ name: "Spring", current: false, steps: [{ name: "Only", requirements: [{ title: "Alone", appliesTo: "family" }] }] });
+    expect(textOf(await renderPage(RequirementPage, { params: { id: lone.seasonId, requirementId: lone.requirementIds.Alone! } }))).not.toContain("Families read them in this order");
+    asStaff(reader);
+    expect(textOf(await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: rsvp } }))).not.toContain("Families read them in this order");
   });
 });
 
@@ -707,7 +755,7 @@ describe("values no page sends", () => {
       renameSeasonAction("not-a-uuid", "X"), renameSeasonAction(fall.seasonId, any(null)), setCurrentSeasonAction(any({ id: fall.seasonId })),
       addStepAction(any(undefined), "X"), addStepAction(fall.seasonId, any(["X"])),
       updateStepAction(uniforms, "X", any(20260801), null), updateStepAction(uniforms, "X", null, "2026-08-01T00:00:00Z"), updateStepAction("1; drop table season", "X", null, null),
-      moveStepAction(uniforms, any("up")), removeStepAction(any(null)),
+      moveStepAction(uniforms, any("up")), removeStepAction(any(null)), moveRequirementAction(fitting, any("up")), moveRequirementAction(any(7), "later"),
       addRequirementAction(uniforms, "raffle", "student", FIELDS), addRequirementAction(uniforms, "checklist", any("everyone"), FIELDS),
       addRequirementAction(uniforms, "checklist", "student", any(null)), addRequirementAction(uniforms, "checklist", "student", any({ ...FIELDS, required: "yes" })),
       addRequirementAction(uniforms, "checklist", "student", any({ ...FIELDS, amount: "2" })), addRequirementAction(uniforms, "checklist", "student", any({ ...FIELDS, amountUnit: "days" })),
