@@ -101,7 +101,9 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    With a proxy of your own, leave out `--profile proxy`.
 2. Watch it come up: `docker compose ps`. Within a few minutes `db`, `app` and `documenso` say `healthy`, `migrate`
    says `Exited (0)`, and `worker` and `backup` say `Up`. Documenso's first start runs its own database set-up and is
-   the slowest.
+   the slowest. `migrate` sets up the portal's empty database; on later starts, before it changes a database that
+   holds data, it checks that a backup was made in the last 26 hours ([updates](updates.md#when-the-start-stops-for-a-backup)).
+   This first start has nothing to back up, so it is never stopped.
 3. If something stops, its log says why: `docker compose logs <name>` (for example `docker compose logs app`). A line
    that names a missing setting means a line of `.env` is still empty.
 4. Check both addresses from your own computer's browser: the portal's address shows the setup page, and
@@ -202,5 +204,8 @@ It prints a new setup code. Open the portal's address, enter it, and fix Step 2,
 ## Stopping and starting
 
 - Stop everything, keeping all data: `docker compose --profile proxy stop`.
-- Start it again: `docker compose --profile proxy up -d`.
+- Start it again: `docker compose --profile proxy up -d`. A start with no database changes to make is never stopped
+  for a backup; one that has changes to make (a new version) needs a backup from the last 26 hours, and says how to
+  make one if not ([updates](updates.md#when-the-start-stops-for-a-backup), where `MIGRATE_WITHOUT_RECENT_BACKUP` is
+  explained too).
 - Never run `docker compose down -v` on a real installation: `-v` deletes the databases.

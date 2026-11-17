@@ -15,6 +15,7 @@ uid="$(docker run --rm "$IMAGE" node -e "process.stdout.write(String(process.get
 docker run --rm "$IMAGE" sh -c "test -f /app/server.js && test -f /app/tools/scripts/migrate.mjs && test -f /app/tools/drizzle/meta/_journal.json" \
   || fail "expected files missing from the image"
 docker run --rm "$IMAGE" test -f tools/scripts/setup-code.mjs || fail "setup-code.mjs missing from the image"
+docker run --rm "$IMAGE" test -f tools/scripts/backup-check.mjs || fail "backup-check.mjs missing from the image"
 docker run --rm "$IMAGE" test -f scripts/setup/New-BoosterRocketStaffApp.ps1 || fail "setup scripts missing from the image"
 
 docker network create "$NET" >/dev/null
@@ -24,7 +25,8 @@ for _ in $(seq 1 30); do docker exec "$NET-db" pg_isready -h 127.0.0.1 -U b -d b
 [ "$ready" = 1 ] || fail "throwaway Postgres never became ready"
 
 DB="postgres://b:b@$NET-db:5432/b"
-docker run --rm --network "$NET" -e DATABASE_URL="$DB" "$IMAGE" node tools/scripts/migrate.mjs | grep -q migrated || fail "migrations didn't run"
+# As deploy/compose.yml runs it: an empty database is a first installation, which the backup check never stops.
+docker run --rm --network "$NET" -e DATABASE_URL="$DB" "$IMAGE" node tools/scripts/migrate.mjs --backup-check | grep -q migrated || fail "migrations didn't run"
 
 docker run -d --name "$NET-app" --network "$NET" -e DATABASE_URL="$DB" \
   -e APP_URL=https://portal.example.org -e BETTER_AUTH_SECRET=smoke-secret-smoke-secret-smoke-secret-1 \
