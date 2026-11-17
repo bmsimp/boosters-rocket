@@ -469,6 +469,8 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 /* Documenso's own page, in a frame: as wide as its box, and tall enough to read and sign a page on a phone. */
 .sign-frame { margin-top: var(--s3); }
 .sign-frame iframe { display: block; width: 100%; height: min(80vh, 900px); min-height: 520px; border: 2px solid var(--ink); background: var(--paper); }
+/* While the keyboard is inside Documenso's page (it takes the focus once the guardian agrees), the frame wears the ring. */
+.sign-frame iframe:focus { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
 .signers { margin-top: var(--s4); }
 /* Staff signed forms: the matrix scrolls inside its box on a narrow screen, the names column staying put; hashes break anywhere. */
 .matrix-filter { display: grid; gap: var(--s3); margin-top: var(--s3); }
