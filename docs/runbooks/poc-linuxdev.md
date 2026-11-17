@@ -721,6 +721,20 @@ to `~/booster-rocket-before-parents.sql` on linuxdev. Migration 0009 ran, the ap
 kept waking. Parent sign-ins are still switched off: the two sign-ins seeded by hand on `POC-FAMILY-1` work as
 before. Checks 18 to 25 have not been run; add a row per check above when they are.
 
+2026-11-17: the whole of v1 was deployed at `06fbcf5`. The database was backed up by hand first, then again by the
+deploy script, into `~/booster-rocket-backups`. Migrations 0010 to 0022 ran, the app came up healthy, the worker ran
+its first jobs, and the portal's address answered for the health check, both sign-in pages and the app manifest.
+
+2026-11-17: the database was moved to Postgres 18 (section 8) at `d1a896b`. It was backed up with Postgres 16 first.
+The move ended with `booster: 54 tables, every one with the same number of rows as before.`, and the deploy after it
+with `Deployed d1a896b.` on PostgreSQL 18.7, the app healthy and the address answering. The same day the newest
+Postgres 18 backup was restored into `booster_restore_check` with `scripts/restore.sh` (54 tables; the audit log's 96
+rows the same as the live database's) and that scratch database was dropped. Then, on the owner's word, Postgres 16's
+data was removed: the portal was stopped, the database's container removed, `docker volume rm booster-rocket-pgdata`,
+`docker compose ... up -d` (not `down`: the tunnel's container is on this project's network), and
+`~/booster-rocket-moving-to-postgres-18` deleted. Going back to Postgres 16 is no longer possible on this host. An
+empty volume named `booster-rocket-pgdata` remains, because the compose file names it for the start check.
+
 Get the commit with `git -C ~/booster-rocket rev-parse --short HEAD` (the deploy script prints it too).
 
 Record results from the development checkout (on Windows), not by committing on linuxdev: a local commit there makes the next `git pull --ff-only` fail (exit 6) or trips the clean-tree check (exit 2).
