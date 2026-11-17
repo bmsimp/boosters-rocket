@@ -152,6 +152,17 @@ describe("the roster pages", () => {
       targetType: "qbo_customer", targetId: "10", ip: "203.0.113.40" });
   });
 
+  it("a family's page leads to its money, season and volunteering credit for staff who may open each, and to none of them otherwise", async () => {
+    await ready();
+    const links = (html: string) => [...html.matchAll(/href="(\/staff\/(?:balances|seasons\/progress\/family|volunteer\/credit)\/[^"]+)"/g)].map((m) => m[1]);
+    expect(links(await entry("10"))).toEqual([]);
+    expect(await entry("10")).not.toContain("More about this family");
+    const [r] = await db.insert(role).values({ key: "more", name: "More" }).returning();
+    await db.insert(roleRule).values(["Finance.Balance.Read", "Season.Progress.Read", "Volunteer.Credit.ReadWrite"].map((pattern) => ({ roleId: r!.id, kind: "include" as const, pattern })));
+    await db.insert(roleAssignment).values({ roleId: r!.id, staffUserId: reader.id });
+    expect(links(await entry("10"))).toEqual(["/staff/balances/10", "/staff/seasons/progress/family/10", "/staff/volunteer/credit/10"]);
+  });
+
   it("is not found, and writes no audit row, for anything that isn't a family", async () => {
     await ready();
     // "%E0%A4%A" is not valid percent-encoding: it must be a plain not-found, never an error page.
