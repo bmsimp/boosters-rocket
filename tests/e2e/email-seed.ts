@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 /**
  * The changes of sign-in address scripts/seed-e2e.ts seeds for Zelda (src/lib/parents/email-change.ts), with fixed
- * tokens, so the specs can open their links (PARAMS in tests/e2e/parent-session.spec.ts; tests/e2e/family-email.spec.ts
+ * tokens, so the specs can open their links (PARAMS in tests/e2e/parent-params.ts; tests/e2e/family-email.spec.ts
  * puts the first back as it was after asking for a change of its own).
  */
 export const E2E_EMAIL = {

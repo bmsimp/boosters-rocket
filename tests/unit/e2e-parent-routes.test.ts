@@ -32,7 +32,7 @@ describe("the parent pages the e2e run asks for", () => {
     const problems = paramsProblems(parentRoutes(dir), { "/invoices/[id]": { own: { id: "E2E-INV-1" }, other: { id: "E2E-INV-9" } } });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("The parent page /students/[id]/forms/[...path] has a dynamic segment and no params to ask for it with");
-    expect(problems[0]).toContain("Add it to PARAMS in tests/e2e/parent-session.spec.ts with ids from scripts/seed-e2e.ts");
+    expect(problems[0]).toContain("Add it to PARAMS in tests/e2e/parent-params.ts with ids from scripts/seed-e2e.ts");
   });
 
   it("has nothing to say when every dynamic page has params, or when there are no dynamic pages", () => {

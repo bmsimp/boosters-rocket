@@ -7,6 +7,7 @@ import { loadCheckInForMe, type CheckInView } from "@/lib/volunteer/check-in";
 import { NotSetUpBox } from "../../../family-boxes";
 import { checkInAction } from "../../actions";
 import { CheckInButton } from "../../volunteer-forms";
+import { Announcer } from "../../../announce";
 
 export const metadata = { title: "Check in" };
 
@@ -44,7 +45,7 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
         {view.people.length === 0 ? (
           <p>Nobody in your family is signed up for this shift, so there&apos;s no one to check in here. If you&apos;d like to help, you can find a shift with a free place on the <Link href="/volunteer">Volunteer page</Link>.</p>
         ) : (
-          <>
+          <Announcer>
             {closed && <p className="state">{closed}</p>}
             <ul className="lines">{view.people.map((p) => (
               <li key={p.signupId}><div>
@@ -61,9 +62,9 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
               <CheckInButton label="Check everyone in" act={checkInAction.bind(null, code, "all")} wide />
             )}
             {view.state === "open" && view.people.every((p) => p.checkedIn) && <p className="volunteer-done">Everyone here is checked in. Thank you for helping!</p>}
-          </>
+          </Announcer>
         )}
-        <p className="help"><Link href="/volunteer">Back to Volunteer</Link></p>
+        <p className="help"><Link className="link-line" href="/volunteer">Back to Volunteer</Link></p>
       </section>
     </main>
   );

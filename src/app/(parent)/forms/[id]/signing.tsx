@@ -15,11 +15,21 @@ function Outcome({ result }: { result: Result | null }) {
   return result.ok ? <p role="status">{result.message}</p> : <ul role="alert" className="errors">{result.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
 }
 
-/** One button that runs an action for this form; the page then comes back drawn with what the server now says. */
+/**
+ * Set when the guardian has just agreed, so the signing frame that replaces the button takes the focus the button had,
+ * and a screen reader says where they are ("Sign: Medical release, frame"). A frame drawn on opening the page doesn't.
+ */
+let frameIsNext = false;
+
+/**
+ * One button that runs an action for this form; the page then comes back drawn with what the server now says. While
+ * it runs the button is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it.
+ */
 function ActButton({ label, pendingLabel, act, primary = true }: { label: string; pendingLabel: string; act: () => Promise<Result>; primary?: boolean }) {
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const press = async () => {
+    if (pending) return;
     setPending(true);
     const r = await safely(act, failed);
     setResult(r.ok ? null : r);
@@ -27,7 +37,7 @@ function ActButton({ label, pendingLabel, act, primary = true }: { label: string
   };
   return (
     <div className="one-button">
-      <button type="button" className={primary ? "btn" : "btn btn-line"} disabled={pending} onClick={press}>{pending ? pendingLabel : label}</button>
+      <button type="button" className={primary ? "btn" : "btn btn-line"} aria-disabled={pending || undefined} onClick={press}>{pending ? pendingLabel : label}</button>
       <Outcome result={result} />
     </div>
   );
@@ -35,7 +45,14 @@ function ActButton({ label, pendingLabel, act, primary = true }: { label: string
 
 /** "I agree to sign electronically": the consent is recorded, and the page comes back with the form. */
 export function AgreeButton({ requestId, label }: { requestId: string; label: string }) {
-  return <ActButton label={label} pendingLabel="One moment…" act={() => agreeToSignAction(requestId)} />;
+  // Set before the action, which brings the page back with the frame as it answers; put back if it didn't work.
+  const agree = async () => {
+    frameIsNext = true;
+    const r = await safely(() => agreeToSignAction(requestId), failed);
+    if (!r.ok) frameIsNext = false;
+    return r;
+  };
+  return <ActButton label={label} pendingLabel="One moment…" act={agree} />;
 }
 
 /** For a declined form: start it again. */
@@ -96,6 +113,11 @@ export function SigningFrame({ requestId, frameUrl, origin, title }: { requestId
     setChecking(false);
   }, [requestId]);
   useEffect(() => {
+    if (!frameIsNext) return;
+    frameIsNext = false;
+    frame.current?.focus();
+  }, []);
+  useEffect(() => {
     const heard = (event: MessageEvent) => {
       // Only Documenso's own frame, at Documenso's own address, is listened to.
       if (event.origin !== origin || event.source !== frame.current?.contentWindow) return;
@@ -110,7 +132,7 @@ export function SigningFrame({ requestId, frameUrl, origin, title }: { requestId
       <iframe ref={frame} src={frameUrl} title={`Sign: ${title}`} />
       <p className="help">When you&apos;ve finished signing, this page says so by itself. If it doesn&apos;t, check here.</p>
       <div className="one-button">
-        <button type="button" className="btn btn-line" disabled={checking} onClick={() => { void check(); }}>{checking ? "Checking…" : "Check whether it's signed"}</button>
+        <button type="button" className="btn btn-line" aria-disabled={checking || undefined} onClick={() => { if (!checking) void check(); }}>{checking ? "Checking…" : "Check whether it's signed"}</button>
         <Outcome result={result} />
       </div>
     </div>

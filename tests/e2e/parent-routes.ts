@@ -1,9 +1,10 @@
 import { readdirSync } from "node:fs";
 
 /**
- * The parent pages as the browser asks for them, found on disk, for tests/e2e/parent-session.spec.ts: a new page is
- * covered without being listed. A page with a dynamic segment can't be asked for without params, so the spec keeps a
- * small map of them, and missingParams() says exactly what to add when a new dynamic page has none.
+ * The parent pages as the browser asks for them, found on disk, for tests/e2e/parent-session.spec.ts and
+ * parent-a11y.spec.ts: a new page is covered without being listed. A page with a dynamic segment can't be asked for
+ * without params, so tests/e2e/parent-params.ts keeps a small map of them, and paramsProblems() says exactly what to
+ * add when a new dynamic page has none.
  * No Playwright here, so tests/unit/e2e-parent-routes.test.ts can run these on folders it makes up.
  */
 export const PARENT_DIR = "src/app/(parent)";
@@ -29,12 +30,12 @@ export const isDynamic = (route: string) => route.includes("[");
 export function paramsProblems(routes: string[], params: Record<string, DynamicRouteParams>): string[] {
   const missing = routes.filter((route) => isDynamic(route) && !params[route]).map((route) =>
     `The parent page ${route} has a dynamic segment and no params to ask for it with, so nothing checks what it sends to the browser. `
-    + `Add it to PARAMS in tests/e2e/parent-session.spec.ts with ids from scripts/seed-e2e.ts, for example `
+    + `Add it to PARAMS in tests/e2e/parent-params.ts with ids from scripts/seed-e2e.ts, for example `
     + `"/students/[id]": { own: { id: "E2E-S1" }, other: { id: "E2E-S3" } }: \`own\` belongs to the family E2E-FAMILY, \`other\` to another family.`);
   const gone = Object.keys(params).filter((route) => !routes.includes(route)).map((route) =>
-    `PARAMS in tests/e2e/parent-session.spec.ts names ${route}, which is not a parent page with a dynamic segment any more. Remove it.`);
+    `PARAMS in tests/e2e/parent-params.ts names ${route}, which is not a parent page with a dynamic segment any more. Remove it.`);
   const plain = Object.keys(params).filter((route) => routes.includes(route) && !isDynamic(route)).map((route) =>
-    `PARAMS in tests/e2e/parent-session.spec.ts names ${route}, which has no dynamic segment. Remove it.`);
+    `PARAMS in tests/e2e/parent-params.ts names ${route}, which has no dynamic segment. Remove it.`);
   return [...missing, ...gone, ...plain];
 }
 
