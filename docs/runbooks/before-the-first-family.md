@@ -202,8 +202,9 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** QuickBooks' payment page opens in the app's own browser view, with a way back to the portal.
     **If not:** note whether it opened at all, and where.
 16. **Sign up for a shift** on each phone.
-    **Pass:** the confirmation email arrives, and its calendar file adds the shift at the right local time: on the
-    iPhone in Mail and Calendar, on Android in Gmail and Google Calendar. **If not:** note the time it showed.
+    **Pass:** the confirmation email arrives with its calendar file attached (this host sends through Microsoft 365, so
+    that is the Microsoft 365 check too), and the file adds the shift at the right local time: on the iPhone in Mail
+    and Calendar, on Android in Gmail and Google Calendar. **If not:** note the time it showed, or that no file came.
 17. **Check in with the shift's code.** As staff, open the event under Volunteering, **Check-in code to print**
     (`/staff/volunteer/check-in/<shiftId>`), and print it.
     **Pass:** the sheet prints on one page, and the address written on it is the portal's own. Within the check-in
@@ -257,11 +258,12 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
 2. **The machine reaches its own two addresses,** the check in [the first start, item 5](first-install.md#5-the-first-start).
    **Pass:** both commands print `200`. **If not:** the "NAT loopback" fix that item gives; until both print `200`,
    forms can't be signed.
-3. **A proxy of your own** (only if you use one): it sends the visitor's bare address in `X-Forwarded-For` and in the
-   header `CLIENT_IP_HEADER` names, and compresses responses ([a proxy of your own](first-install.md#a-proxy-of-your-own)).
+3. **The visitor's address.** With this installation's own proxy, `CLIENT_IP_HEADER` is `x-forwarded-for`. With a
+   proxy of your own, it must send the visitor's bare address in `X-Forwarded-For` and in the header
+   `CLIENT_IP_HEADER` names, and compress responses ([a proxy of your own](first-install.md#a-proxy-of-your-own)).
    **Pass:** sign in once from a phone on mobile data: the audit log shows the phone's public address, not the
    proxy's, and Health's parent sign-ins line doesn't warn about addresses. **If not:** find the header the proxy really
-   sets, put it in `CLIENT_IP_HEADER`, and `docker compose up -d app`.
+   sets, put it in `CLIENT_IP_HEADER` in `deploy/.env`, and `docker compose up -d app`.
 4. **Staff sign-in for real.** Sign in once with the club's Microsoft (Entra) or Google staff sign-in.
    **Pass:** you reach the staff home. On Settings, Staff sign-in, **Change**, a Microsoft certificate reads "Done:
    Microsoft accepted this certificate", and **Download certificate (.cer)** saves the file and then shows its
@@ -418,6 +420,8 @@ work another. Any time before the pilot.
 11. The words parents read when something isn't there yet, for the voice: "For now, the club makes changes for you. Ask
     the club and they'll update it.", "Your family isn't set up here yet", "The club has no active students listed for
     your family right now." and "Sign in to see your students and what's owed."
+12. Whether opening the audit log, filtered to one person's records, should itself be written in the audit log. Today
+    only an export is.
 
 ## Results
 
