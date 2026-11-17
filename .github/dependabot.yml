@@ -25,6 +25,12 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Never a new major version of Postgres as an ordinary update: its data must be moved, not pulled
+    # (docs/runbooks/updates.md, "Moving to a new major version of Postgres"). Minor versions still come. The build's
+    # lead chose this when the installation moved to Postgres 18 (2026-11-17); the owner may change it.
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
     groups:
       images:
         patterns: ["*"]
@@ -35,6 +41,12 @@ updates:
     directory: /deploy
     schedule:
       interval: monthly
+    # Never a new major version of Postgres as an ordinary update: its data must be moved, not pulled
+    # (docs/runbooks/updates.md, "Moving to a new major version of Postgres"). Minor versions still come. The build's
+    # lead chose this when the installation moved to Postgres 18 (2026-11-17); the owner may change it.
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
     groups:
       images:
         patterns: ["*"]
@@ -45,6 +57,13 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # CI's Postgres service (.github/workflows/ci.yml) names the postgres image too. Whether this ecosystem ever offers
+    # it is not known; if it does, never a new major version of Postgres as an ordinary update: its data must be moved,
+    # not pulled (docs/runbooks/updates.md, "Moving to a new major version of Postgres"). The build's lead chose this
+    # when the installation moved to Postgres 18 (2026-11-17); the owner may change it.
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
     groups:
       actions:
         patterns: ["*"]

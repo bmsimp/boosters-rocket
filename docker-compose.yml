@@ -1,13 +1,22 @@
 services:
   db:
-    image: postgres:16
+    # Postgres 18 keeps its data in /var/lib/postgresql/18/docker, on the volume postgres-data. pgdata is where
+    # Postgres 16 kept it: mounted read only, so scripts/postgres-guard.sh refuses to start an empty database while
+    # data there hasn't been moved (AGENTS.md, Tests, says how to move it).
+    image: postgres:18
+    entrypoint: ["bash", "/opt/booster-rocket/postgres-guard.sh"]
+    command: ["postgres"]
     environment:
       POSTGRES_USER: booster
       POSTGRES_PASSWORD: booster
       POSTGRES_DB: booster
+      BR_MOVE_RUNBOOK: 'AGENTS.md, Tests, "Moving the local database to Postgres 18": scripts/move-postgres.sh dev <folder>'
     ports: ["127.0.0.1:5433:5432"]
     volumes:
       - ./docker/initdb:/docker-entrypoint-initdb.d
-      - pgdata:/var/lib/postgresql/data
+      - ./scripts/postgres-guard.sh:/opt/booster-rocket/postgres-guard.sh:ro
+      - postgres-data:/var/lib/postgresql
+      - pgdata:/old-data:ro
 volumes:
+  postgres-data:
   pgdata:

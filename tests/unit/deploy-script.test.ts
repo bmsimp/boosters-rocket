@@ -38,6 +38,7 @@ beforeEach(() => {
       *"setup-code.mjs"*) echo "\${SETUP_CODE_OUT:-}"; exit \${SETUP_CODE_FAIL:-0};;
       *"run --rm migrate"*) exit \${MIGRATE_FAIL:-0};;
       *" build app"*) exit \${BUILD_FAIL:-0};;
+      *"db check"*) exit \${DB_CHECK_FAIL:-0};;
       *"inspect --format {{.Image}}"*) [ -z "\${NO_RUNNING:-}" ] || exit 1; echo "sha256:running123";;
       *"inspect --format {{.State.Health.Status}}"*) if [ -n "\${PRE_HEALTH:-}" ] && [ ! -e "\${BR_DIR}/.recreated" ]; then echo "\${PRE_HEALTH}"; else echo "\${HEALTH:-healthy}"; fi;;
       *"up -d --no-deps --force-recreate app"*) touch "\${BR_DIR}/.recreated"; exit 0;;
@@ -158,6 +159,22 @@ describe("scripts/poc/deploy.sh", { timeout: 30_000 }, () => {
     expect(calls()).not.toContain("run --rm migrate");
     expect(calls()).not.toContain("up -d");
     expect(calls()).not.toContain("booster-rocket-app:previous");
+  });
+
+  it("stops before building when the database must first be moved to a new Postgres, and says so", () => {
+    const r = run([], { DB_CHECK_FAIL: "2" });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("can't start on this version until its data is moved");
+    const c = calls();
+    expect(c.indexOf("run --rm --no-deps -T db check")).toBeGreaterThan(c.indexOf("git pull --ff-only"));
+    for (const step of [" build app", "pg_dump", "run --rm migrate", "up -d", "image tag"]) expect(c).not.toContain(step);
+  });
+
+  it("asks the database service whether it can start before it builds", () => {
+    expect(run().status).toBe(0);
+    const c = calls();
+    expect(c.indexOf("compose -f docker-compose.poc.yml --env-file .env.poc run --rm --no-deps -T db check")).toBeGreaterThan(-1);
+    expect(c.indexOf("run --rm --no-deps -T db check")).toBeLessThan(c.indexOf(" build app"));
   });
 
   it("fails loudly when the app never becomes healthy", () => {

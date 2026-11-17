@@ -17,8 +17,14 @@ name: booster-rocket-club
 services:
   db:
     # One Postgres server, two databases, each with its own role and password (initdb/, run on the first start only).
-    image: postgres:16.16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
+    # Postgres 18 keeps its data in /var/lib/postgresql/18/docker, on the volume postgres-data. db-data is where
+    # Postgres 16 kept it: mounted read only, so ../scripts/postgres-guard.sh refuses to start an empty database while
+    # data there hasn't been moved, and says to follow docs/runbooks/updates.md, "Moving to a new major version of
+    # Postgres". It stays until a person removes it.
+    image: postgres:18.7@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
     restart: unless-stopped
+    entrypoint: ["bash", "/opt/booster-rocket/postgres-guard.sh"]
+    command: ["postgres"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in deploy/.env}
@@ -26,9 +32,12 @@ services:
       PORTAL_DB_PASSWORD: ${PORTAL_DB_PASSWORD:?Set PORTAL_DB_PASSWORD in deploy/.env}
       DOCUMENSO_DB_PASSWORD: ${DOCUMENSO_DB_PASSWORD:?Set DOCUMENSO_DB_PASSWORD in deploy/.env}
       TZ: ${CLUB_TIME_ZONE:?Set CLUB_TIME_ZONE in deploy/.env}
+      BR_MOVE_RUNBOOK: 'docs/runbooks/updates.md, the section "Moving to a new major version of Postgres"'
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
+      - db-data:/old-data:ro
       - ./initdb:/docker-entrypoint-initdb.d:ro
+      - ../scripts/postgres-guard.sh:/opt/booster-rocket/postgres-guard.sh:ro
     healthcheck:
       # Over TCP, so it answers only once the first start's set-up has finished (that runs on the socket alone).
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d booster && pg_isready -h 127.0.0.1 -U postgres -d documenso"]
@@ -157,7 +166,7 @@ services:
     # The nightly backup of both databases (scripts/backup-schedule.sh runs scripts/backup.sh), at BACKUP_AT club
     # time, into BACKUP_DIR. Its lines are in: docker compose logs backup. It tells the portal, so the Health page's
     # backup line stays current. One now: docker compose run --rm backup --now
-    image: postgres:16.16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
+    image: postgres:18.7@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
     restart: unless-stopped
     entrypoint: ["bash", "/opt/booster-rocket/scripts/backup-schedule.sh", "/backups"]
     command: []
@@ -210,6 +219,8 @@ services:
       documenso: { condition: service_started }
 
 volumes:
+  postgres-data:
+  # Postgres 16's data, from before the move to Postgres 18: kept, read only, until a person removes it.
   db-data:
   proxy-data:
   proxy-config:

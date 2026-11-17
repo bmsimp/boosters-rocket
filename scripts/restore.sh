@@ -78,7 +78,16 @@ ask() { pg psql "${CONN[@]}" -d postgres -v ON_ERROR_STOP=1 -Atqc "$1"; }
 run() { pg psql "${CONN[@]}" -d postgres -v ON_ERROR_STOP=1 -q -c 'set client_min_messages = warning' -c "$1" >/dev/null; }
 
 ask 'select 1' >/dev/null 2>&1 || die 3 "The database server didn't answer. Nothing was changed."
-pg_in pg_restore --list < "$FILE" >/dev/null 2>&1 || die 2 "$FILE isn't a backup made by scripts/backup.sh, or it is damaged. Nothing was changed."
+if ! listing="$(pg_in pg_restore --list < "$FILE" 2>&1 >/dev/null)"; then
+  # A backup made by a newer Postgres than this server's tools is refused with "unsupported version (1.16) in file
+  # header": the file is fine, this server is too old for it (a backup made by Postgres 18 can't go into 16).
+  if grep -q 'unsupported version' <<<"$listing"; then
+    die 2 "$FILE was made by a newer version of Postgres than this server's ($(ask 'show server_version' 2>/dev/null || echo 'unknown')), so it can't be loaded here.
+The file itself is not damaged: a newer Postgres can load it. Nothing was changed. docs/runbooks/updates.md, \"Backups from
+before and after the move\", says which backups load where."
+  fi
+  die 2 "$FILE isn't a backup made by scripts/backup.sh, or it is damaged. Nothing was changed."
+fi
 if [ -n "$OWNER" ] && [ "$(ask "select count(*) from pg_roles where rolname = '$OWNER'")" != "1" ]; then
   die 2 "There is no database role named $OWNER on this server. Nothing was changed."
 fi

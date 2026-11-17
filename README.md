@@ -55,7 +55,7 @@ goes through the portal page by page.
 You need Node 26, pnpm and Docker.
 
 ```bash
-docker compose up -d                 # Postgres, on 127.0.0.1:5433
+docker compose up -d                 # Postgres 18, on 127.0.0.1:5433 (from 16: AGENTS.md, Tests)
 cp .env.example .env                 # then set SETTINGS_ENCRYPTION_KEY: openssl rand -base64 32
 pnpm install
 node --env-file=.env --import tsx src/lib/db/migrate.ts   # create the tables

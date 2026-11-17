@@ -4,7 +4,8 @@
 #   scripts/poc/deploy.sh --rollback  return to the previous image
 # The backup goes to BR_BACKUP_DIR (default ~/booster-rocket-backups, outside this checkout), keeping the newest
 # BR_BACKUP_KEEP (default 14): scripts/backup.sh. A deploy never migrates a database it could not back up first.
-# Exit codes: 0 ok, 2 refused (or another deploy running), 3 migrations failed (app untouched), 4 app unhealthy,
+# Exit codes: 0 ok, 2 refused (or another deploy running, or the database must be moved to a new Postgres first:
+# docs/runbooks/poc-linuxdev.md, section 8), 3 migrations failed (app untouched), 4 app unhealthy,
 # 5 nothing to roll back to, 6 git pull failed, 7 build failed (app untouched), 8 backup failed (nothing migrated,
 # app untouched).
 set -euo pipefail
@@ -88,6 +89,11 @@ fi
 check_env_file
 
 git pull --ff-only || die 6 "git pull failed. Nothing was changed."
+# A version that moves to a new major version of Postgres can't start on the old data until it has been moved: the
+# database service's own check (scripts/postgres-guard.sh) says so, and what to do, before anything is built or changed.
+if ! "${COMPOSE[@]}" run --rm --no-deps -T db check >/dev/null; then
+  die 2 "The database can't start on this version until its data is moved (the lines above say why). Nothing was built, migrated or restarted."
+fi
 # compose build moves :current to the new image, and on Docker 29 (containerd image store) the old image is
 # then gone, so give the running version a name of its own before building.
 candidate=""
