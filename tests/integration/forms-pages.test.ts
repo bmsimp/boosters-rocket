@@ -7,7 +7,7 @@ import { AccessDenied } from "@/lib/guards";
 import ParentHome from "@/app/(parent)/page";
 import SeasonPage from "@/app/(parent)/season/page";
 import FormsPage from "@/app/(parent)/forms/page";
-import FormPage from "@/app/(parent)/forms/[id]/page";
+import FormPage, { generateMetadata as generateFormMetadata } from "@/app/(parent)/forms/[id]/page";
 import { agreeToSignAction, checkFormAction, startFormAgainAction } from "@/app/(parent)/forms/actions";
 import { CONSENT_TEXT } from "@/lib/forms/consent";
 import { resetDb, seedStaff } from "../helpers/db";
@@ -65,6 +65,17 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     expect("html" in done && textOf(done.html).match(/\bSigned\b/g)).toEqual(["Signed"]);
     expect("html" in done && textOf(done.html)).toContain("Ansgar Alderquist (you) Has signed");
     for (const id of [...Object.values(b.forms!.ids), "not-an-id", "", "../payments", crypto.randomUUID()]) expect(await formPage(id), id).toEqual({ notFound: true });
+  });
+
+  it("titles a form's page with the form's own name, and with plain \"Form\" for another family's id or nobody signed in", async () => {
+    asParent(a.identity);
+    const title = async (id: string) => (await generateFormMetadata({ params: Promise.resolve({ id }) })).title;
+    expect(await title(a.forms!.ids.complete)).toBe("Uniform agreement");
+    expect(await title(a.forms!.ids.waiting)).toBe("Travel consent");
+    // Family B's forms have titles of their own: none of them reaches family A's tab, nor does a made-up id.
+    for (const id of [...Object.values(b.forms!.ids), "not-an-id", crypto.randomUUID()]) expect(await title(id), id).toBe("Form");
+    signedOut();
+    expect(await title(a.forms!.ids.complete)).toBe("Form");
   });
 
   it("says each stored state in words, and offers nothing that needs Documenso", async () => {

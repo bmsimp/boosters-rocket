@@ -38,7 +38,7 @@ test("an Admin previews, then switches parent sign-ins on (and finds them on the
   await expect(page.getByRole("heading", { name: "Step 1: What would happen" })).toBeVisible();
   await expect(page.getByText("2 people would be able to sign in, to 3 families.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Addresses under more than one family (1)" })).toBeVisible();
-  await expect(page.getByText("sam@example.com: Okafor Family, Lee Family")).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "sam@example.com" })).toContainText("Okafor Family, Lee Family");
   // Zelda's two sign-ins come from records that are in QuickBooks (scripts/seed-e2e.ts), so the reconcile keeps them: none would end.
   // The list is worked out only while sign-ins are off, so on the second pass, with them on, it isn't there at all.
   const [before] = await sql`SELECT value FROM setting WHERE key = 'parents.settings'`;
@@ -161,9 +161,9 @@ test("a family's roster page shows who can sign in and why someone can't; Needs 
   await page.goto("/staff/roster/E2E-40");
   await expect(page.getByRole("heading", { name: "Portal sign-ins" })).toBeVisible();
   const signins = page.getByRole("region", { name: "Portal sign-ins" });
-  await expect(signins.getByText("sam@example.com · Held: this address is also under Lee Family")).toBeVisible();
+  await expect(signins.getByRole("row").filter({ hasText: "sam@example.com" })).toContainText("Held: this address is also under Lee Family");
   await page.goto("/staff/roster/E2E-10");
-  await expect(page.getByRole("region", { name: "Portal sign-ins" }).getByText(/^ana@example\.com · Can sign in/)).toBeVisible();
+  await expect(page.getByRole("region", { name: "Portal sign-ins" }).getByRole("row").filter({ hasText: "ana@example.com" })).toContainText(/Can sign in/);
   await page.goto("/staff/roster");
   const attention = page.getByRole("region", { name: /^Needs attention/ });
   await expect(attention).toBeVisible();

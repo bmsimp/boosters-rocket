@@ -6,6 +6,8 @@ import { familyCreditDetail, type StaffCreditLine } from "@/lib/volunteer/staff-
 import { amountWords } from "@/lib/volunteer/rules";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
+import { DataTable, type Column } from "@/app/components/data-table";
+import { Notice } from "@/app/components/notice";
 import { TextAction } from "../../../seasons/forms";
 import { OutsideCreditForm } from "../../forms";
 import { addOutsideCreditAction, removeCreditAction } from "../actions";
@@ -13,21 +15,30 @@ import { addOutsideCreditAction, removeCreditAction } from "../actions";
 export const metadata = { title: "Family volunteer credit" };
 export const dynamic = "force-dynamic";
 
-function CreditItem({ c, remove }: { c: StaffCreditLine; remove?: (reason: string) => Promise<{ ok: true; message: string } | { ok: false; errors: string[] }> }) {
-  return (
-    <li><div>
-      <span className="what">{c.label}: {c.what}</span>
-      <span className="when">{c.who} · {c.amount} · <LocalTime iso={c.at} /> · by {c.by}</span>
-      {c.note && <span className="when">Note (staff only): {c.note}</span>}
-      {!c.removed && <span className="when">{c.spent.length === 0 ? "Counts toward nothing the club asks now." : `Counts as ${c.spent.join("; ")}.`}</span>}
-      {c.removed && <span className="when">Removed <LocalTime iso={c.removed.at} /> by {c.removed.by}. Reason (staff only): {c.removed.reason}</span>}
-      {remove && (
-        <details className="more"><summary>Remove this credit</summary>
-          <TextAction field="Why it's being removed (only staff see this)" label="Remove it" pendingLabel="Removing…" maxLength={500} multiline act={remove} />
-        </details>
-      )}
-    </div></li>
-  );
+type Remove = (reason: string) => Promise<{ ok: true; message: string } | { ok: false; errors: string[] }>;
+
+/**
+ * The family's credit as a table: what each credit is, who it is for, how much, when and by whom, and where the rule
+ * spends it (or, for removed credit, when and why it was removed). Notes and reasons are for staff only; text only.
+ */
+function CreditTable({ caption, credits, remove }: { caption: string; credits: StaffCreditLine[]; remove?: (id: string) => Remove }) {
+  const columns: Column<StaffCreditLine>[] = [
+    { key: "what", header: "Credit", rowHeader: true, cell: (c) => `${c.label}: ${c.what}` },
+    { key: "who", header: "For", cell: (c) => c.who },
+    { key: "amount", header: "Amount", cell: (c) => c.amount },
+    { key: "at", header: "Recorded", cell: (c) => <><LocalTime iso={c.at} /> by {c.by}</> },
+    { key: "counts", header: credits.some((c) => c.removed) ? "Removed" : "Counts as", cell: (c) => (
+      <>
+        {c.removed ? <span className="t-line">Removed <LocalTime iso={c.removed.at} /> by {c.removed.by}. Reason (staff only): {c.removed.reason}</span>
+          : <span className="t-line">{c.spent.length === 0 ? "Counts toward nothing the club asks now." : `Counts as ${c.spent.join("; ")}.`}</span>}
+        {c.note && <span className="t-line">Note (staff only): {c.note}</span>}
+      </>) },
+    ...(remove ? [{ key: "do", header: "What you can do", quiet: true, cell: (c: StaffCreditLine) => (
+      <details className="more"><summary>Remove this credit</summary>
+        <TextAction field="Why it's being removed (only staff see this)" label="Remove it" pendingLabel="Removing…" maxLength={500} multiline act={remove(c.id)} />
+      </details>) }] : []),
+  ];
+  return <DataTable caption={caption} captionHidden columns={columns} rows={credits} rowKey={(c) => c.id} />;
 }
 
 /**
@@ -53,21 +64,20 @@ export default async function FamilyCreditPage({ params }: { params: Promise<{ f
       <p className="lede">Volunteer credit. <Link href="/staff/volunteer/credit">All families</Link></p>
 
       <section className="box" aria-labelledby="asks-h"><h2 id="asks-h">What the club asks this season</h2>
-        {detail.requirements.length === 0 ? <p>The current season asks no volunteering of this family.</p> : (
-          <ul className="lines">{detail.requirements.map((r) => (
-            <li key={r.id}><div>
-              <span className="what">{r.title}{r.required ? "" : " (optional)"}</span>
-              {r.dueOn && <span className="when">Due <CalendarDate iso={r.dueOn} /></span>}
-              {r.subjects.map((s) => <span className="when" key={s.qboId}>{r.appliesTo === "student" ? `${s.who}: ` : ""}{s.waived ? "Waived" : s.words}</span>)}
-            </div></li>))}</ul>
+        {detail.requirements.length === 0 ? <Notice tone="info" live="none">The current season asks no volunteering of this family.</Notice> : (
+          <DataTable caption="Each volunteering requirement, and where the family stands" captionHidden rows={detail.requirements} rowKey={(r) => r.id} columns={[
+            { key: "title", header: "Requirement", rowHeader: true, cell: (r) => `${r.title}${r.required ? "" : " (optional)"}` },
+            { key: "due", header: "Due", cell: (r) => (r.dueOn ? <CalendarDate iso={r.dueOn} /> : "No due date") },
+            { key: "stands", header: "Where it stands", cell: (r) => r.subjects.map((s) => (
+              <span className="t-line" key={s.qboId}>{r.appliesTo === "student" ? `${s.who}: ` : ""}{s.waived ? "Waived" : s.words}</span>)) },
+          ]} />
         )}
         <p className="hint">Credit fills required requirements before optional ones, a student&apos;s own before the family&apos;s, the soonest due first, and never beyond what each needs.</p>
       </section>
 
       <section className="box" aria-labelledby="credit-h"><h2 id="credit-h">Credit</h2>
-        {detail.credits.length === 0 ? <p>No credit yet.</p> : (
-          <ul className="lines">{detail.credits.map((c) => <CreditItem key={c.id} c={c} remove={removeCreditAction.bind(null, c.id, rosterTag)} />)}</ul>
-        )}
+        {detail.credits.length === 0 ? <Notice tone="info" live="none">No credit yet.</Notice>
+          : <CreditTable caption="Each credit, and where it counts" credits={detail.credits} remove={(id) => removeCreditAction.bind(null, id, rosterTag)} />}
       </section>
 
       <section className="box" aria-labelledby="outside-h"><h2 id="outside-h">Credit volunteering done outside the portal</h2>
@@ -77,7 +87,7 @@ export default async function FamilyCreditPage({ params }: { params: Promise<{ f
 
       {detail.removed.length > 0 && (
         <section className="box" aria-labelledby="removed-h"><h2 id="removed-h">Removed credit</h2>
-          <ul className="lines">{detail.removed.map((c) => <CreditItem key={c.id} c={c} />)}</ul>
+          <CreditTable caption="Each credit removed, and why" credits={detail.removed} />
         </section>
       )}
     </main>

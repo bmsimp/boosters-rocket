@@ -2,7 +2,7 @@
 import { startTransition, useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
-import { ActionOutcome } from "@/app/components/notice";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 
 // The forms of the staff volunteer pages, built as the season pages' are (../seasons/forms.tsx): state is the source of
 // truth and a type="button" calls the action, so a refusal keeps what was typed. Each is given only what it shows.
@@ -147,13 +147,13 @@ export function OutsideCreditForm({ requirements, students, save }: { requiremen
     if (r.ok) { setAmount(""); setNote(""); }
     return r;
   }, null);
-  if (requirements.length === 0) return <p>The current season asks no volunteering of this family, so there&apos;s nothing to credit toward.</p>;
+  if (requirements.length === 0) return <Notice tone="info" live="none">The current season asks no volunteering of this family, so there&apos;s nothing to credit toward.</Notice>;
   return (
     <form onSubmit={noSubmit} className="stack">
       <label className="field"><span>Counts toward</span>
         <select value={requirementId} onChange={(e) => setRequirementId(e.target.value)}>{requirements.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select>
       </label>
-      {chosen?.appliesTo === "student" && (students.length === 0 ? <p>The roster lists no active students in this family.</p> : (
+      {chosen?.appliesTo === "student" && (students.length === 0 ? <Notice tone="info" live="none">The roster lists no active students in this family.</Notice> : (
         <label className="field"><span>Who did it</span>
           <select value={student} onChange={(e) => setStudent(e.target.value)}>{students.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>
         </label>

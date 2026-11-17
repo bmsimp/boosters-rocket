@@ -81,7 +81,7 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
                 {r.dueOn && <span className="when">Due <CalendarDate iso={r.dueOn} /></span>}
                 {/* A payment is met by invoices carrying its item: until one is chosen on its page, nothing can meet it. */}
                 {r.kind === "payment" && r.itemQboId === null && <span className="when"><StateWords state="todo" words="No QuickBooks product or service chosen yet" /></span>}
-                {seesProgress && <span className="when"><Link href={`/staff/seasons/progress/${r.id}`}>Who has done it</Link></span>}
+                {seesProgress && <span className="when"><Link className="link-line" href={`/staff/seasons/progress/${r.id}`}>Who has done it</Link></span>}
               </div></li>))}</ul>
           )}
           {canChange && (

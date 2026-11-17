@@ -717,6 +717,10 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
 
 /* The match review is a table (the Staff pages' table primitive) and takes the page's whole width. */
 main.wrap.single.matches-page > .box { max-width: none; }
+/* A set-up page's step names that are links (Parent sign-ins, QuickBooks) are each a 44px tap target, like any lone link. */
+.setup-progress a { display: inline-flex; align-items: center; min-height: 44px; }
+/* The welcome email as parents will read it (Parent sign-ins, step 3): its lines wrap inside the box, never past it. */
+.email-sample { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; }
 
 @media (forced-colors: active) {
   .nav-group-button.here { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
@@ -738,6 +742,14 @@ main.wrap.single.matches-page > .box { max-width: none; }
 /* On a phone the tab bar is fixed over the foot of the screen. A control the keyboard moves to is scrolled clear of
    it, never left under it (WCAG 2.4.11): the same room the body keeps below the page. */
 @media (max-width: 759.98px) { html:has(nav.tabs) { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom)); } }
+/* "Skip to the page" (src/app/components/club-bar.tsx), the club bar's first Tab stop, on the staff bar too: read out
+   but not drawn until it has the focus, then a ruled paper button at the top of the bar, in the page's flow, so it
+   covers nothing while it shows. Its ring is the bar's club-on, on the club fill around it. */
+.skip-link:not(:focus) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.skip-link:focus { display: flex; align-items: center; width: fit-content; min-height: 44px; margin: var(--s2) var(--cell) 0;
+  padding: 0 var(--s4); background: var(--paper); color: var(--ink); border: 2px solid var(--ink); font-weight: 700; }
+/* Where it lands: not a control, so the focus rests there with no ring, and the next Tab goes on into the page. */
+.page-start:focus { outline: none; }
 /* ---- End of Accessibility fixes for parent pages ---- */
 
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====

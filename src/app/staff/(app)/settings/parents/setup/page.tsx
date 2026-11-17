@@ -1,4 +1,5 @@
 import { Notice } from "@/app/components/notice";
+import { DataTable, type Column } from "@/app/components/data-table";
 import { requireStaffPage } from "@/lib/guards";
 import { accessPreview, missingForSignins } from "@/lib/parents/switches";
 import { getParentSettings } from "@/lib/parents/settings";
@@ -14,6 +15,27 @@ const STEPS: { step: Step; label: string }[] = [{ step: "preview", label: "1. Cl
 const SETUP = "/staff/settings/parents/setup";
 const ENDING_BUSY = "This list is being worked out while the roster refreshes. Reload the page in a minute.";
 const n = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+/** Past this many rows a problem's table is folded, so a real roster's long lists open only when wanted. */
+const FOLD_AFTER = 10;
+const WHO: Column<{ qboId: string; name: string }>[] = [{ key: "name", header: "Person", rowHeader: true, cell: (r) => r.name }];
+
+/**
+ * One problem the clean-up preview found: a heading with its count, then the records as a table (folded behind
+ * "Show all" past FOLD_AFTER rows), or a done notice when there are none. Names and addresses are QuickBooks text.
+ */
+function Problem<R>({ title, noun, rows, rowKey, columns, hint }: {
+  title: string; noun: [string, string]; rows: R[]; rowKey: (r: R) => string; columns: Column<R>[]; hint?: string;
+}) {
+  const table = <DataTable caption={`${title}: ${n(rows.length, ...noun)}`} captionHidden columns={columns} rows={rows} rowKey={rowKey} />;
+  return (
+    <>
+      <h3 className="table-head">{title} ({rows.length})</h3>
+      {rows.length === 0 ? <Notice tone="done" live="none">None.</Notice>
+        : rows.length > FOLD_AFTER ? <details className="more"><summary>Show all {n(rows.length, ...noun)}</summary>{table}</details> : table}
+      {hint && <p className="hint">{hint}</p>}
+    </>
+  );
+}
 
 /**
  * The three steps (spec §3). A pressed switch re-renders the page without its button, and so without that button's
@@ -27,7 +49,6 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
   const step: Step = asked ?? (on ? "welcome" : "preview");
   // The dry run behind "Sign-ins that would end" runs only on the steps that show it, and only while sign-ins are off.
   const [p, missing] = await Promise.all([accessPreview({ ending: step !== "welcome" && !on }), missingForSignins()]);
-  const names = (rows: { name: string }[]) => rows.map((r) => r.name).join(", ");
   const sample = step === "welcome" ? await welcomeEmailFor("parent@example.org") : null;
   const switchedOff = p.settings.everEnabled && !p.settings.signin;
   return (
@@ -41,25 +62,30 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {missing.length > 0 && <Notice tone="warning"><ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>}
           {p.ready.shape && (
             <>
-              <p><b>{n(p.people, "person", "people")} would be able to sign in, to {n(p.families, "family", "families")}.</b></p>
+              <Notice tone="info" live="none"><b>{n(p.people, "person", "people")} would be able to sign in, to {n(p.families, "family", "families")}.</b></Notice>
               <p>Nothing below stops you switching on. The people listed just can&apos;t sign in until it is fixed. Fix records in QuickBooks, choose Refresh now on the Roster, and open this page again.</p>
-              <h3>Addresses under more than one family ({p.held.length})</h3>
-              {p.held.length === 0 ? <p>None.</p> : <ul>{p.held.map((h) => <li key={h.email}>{h.email}: {h.families.map((f) => f.name).join(", ")}</li>)}</ul>}
-              <p className="hint">These are held until someone with access to Parents says whether each is one person.</p>
-              <h3>No email address ({p.noEmail.length})</h3><p>{p.noEmail.length ? names(p.noEmail) : "None."}</p>
-              <h3>More than one address on a person&apos;s record ({p.manyAddresses.length})</h3><p>{p.manyAddresses.length ? names(p.manyAddresses) : "None."}</p>
-              <h3>Nobody could sign in ({p.noSignin.length})</h3><p>{p.noSignin.length ? names(p.noSignin) : "None."}</p>
+              <Problem title="Addresses under more than one family" noun={["address", "addresses"]} rows={p.held} rowKey={(h) => h.email}
+                hint="These are held until someone with access to Parents says whether each is one person." columns={[
+                  { key: "email", header: "Address", rowHeader: true, cell: (h) => h.email },
+                  { key: "families", header: "Under these families", cell: (h) => h.families.map((f) => f.name).join(", ") },
+                ]} />
+              <Problem title="No email address" noun={["person", "people"]} rows={p.noEmail} rowKey={(r) => r.qboId} columns={WHO} />
+              <Problem title="More than one address on a person's record" noun={["person", "people"]} rows={p.manyAddresses} rowKey={(r) => r.qboId} columns={WHO} />
+              <Problem title="Nobody could sign in" noun={["family", "families"]} rows={p.noSignin} rowKey={(r) => r.qboId}
+                columns={[{ key: "name", header: "Family", rowHeader: true, cell: (r) => r.name }]} />
               {/* Worked out only while sign-ins are off: once they are on, the reconcile keeps sign-ins in line by itself. */}
               {!on && (p.endingUnknown ? (
-                <><h3>Sign-ins that would end</h3><Notice tone="info">{ENDING_BUSY}</Notice></>
+                <><h3 className="table-head">Sign-ins that would end</h3><Notice tone="info">{ENDING_BUSY}</Notice></>
               ) : (
-                <><h3>Sign-ins that would end ({p.ending.length})</h3>
-                  {p.ending.length === 0 ? <p>None.</p> : <ul>{p.ending.map((e) => <li key={`${e.email}|${e.familyQboId}`}>{e.name} ({e.email})</li>)}</ul>}
-                  <p className="hint">QuickBooks no longer backs these, so they stop working when sign-ins are switched on.</p></>
+                <Problem title="Sign-ins that would end" noun={["sign-in", "sign-ins"]} rows={p.ending} rowKey={(e) => `${e.email}|${e.familyQboId}`}
+                  hint="QuickBooks no longer backs these, so they stop working when sign-ins are switched on." columns={[
+                    { key: "name", header: "Person", rowHeader: true, cell: (e) => e.name },
+                    { key: "email", header: "Address", cell: (e) => e.email },
+                  ]} />
               ))}
             </>
           )}
-          <p className="box-foot"><a className="btn" href={`${SETUP}?step=signins`}>Next: parent sign-ins</a> <a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
+          <p className="box-foot"><a className="btn" href={`${SETUP}?step=signins`}>Next: parent sign-ins</a> <a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
         </section>
       )}
 
@@ -68,7 +94,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {switchedOff && <Notice tone="info">Parent sign-ins are off. Nobody can sign in.</Notice>}
           {p.settings.signin ? (
             <>
-              <p>Parent sign-ins are on. {n(p.people, "person", "people")} can sign in, to {n(p.families, "family", "families")}.</p>
+              <Notice tone="done" live="none">Parent sign-ins are on. {n(p.people, "person", "people")} can sign in, to {n(p.families, "family", "families")}.</Notice>
               <details><summary>Switch parent sign-ins off</summary>
                 <p>Every parent is signed out at once and nobody can sign in until this is switched on again. Welcome emails are switched off too. Nothing is deleted.</p>
                 <SwitchButton quiet label="Switch parent sign-ins off" pendingLabel="Switching off…" act={setSigninsAction.bind(null, false)} />
@@ -83,7 +109,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
               <SwitchButton label="Switch parent sign-ins on" pendingLabel="Switching on…" act={setSigninsAction.bind(null, true)} />
             </>
           )}
-          <p className="box-foot"><a href={`${SETUP}?step=welcome`}>Next: welcome emails</a> · <a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
+          <p className="box-foot"><a className="link-line" href={`${SETUP}?step=welcome`}>Next: welcome emails</a> · <a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
         </section>
       )}
 
@@ -95,11 +121,11 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {!p.settings.welcome && <p><b>{n(p.welcomeNow, "person", "people")} would be emailed now.</b> After that, each new person is emailed once. They go out a few each minute.</p>}
           <h3>The email</h3>
           <p>Subject: {sample.subject}</p>
-          <pre>{sample.text}</pre>
+          <pre className="email-sample">{sample.text}</pre>
           {p.settings.welcome ? <SwitchButton quiet label="Switch welcome emails off" pendingLabel="Switching off…" act={setWelcomeAction.bind(null, false)} />
             : !p.settings.signin ? <Notice tone="info">Switch parent sign-ins on first (step 2).</Notice>
             : <SwitchButton label="Switch welcome emails on" pendingLabel="Switching on…" act={setWelcomeAction.bind(null, true)} />}
-          <p className="box-foot"><a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
+          <p className="box-foot"><a className="link-line" href="/staff/settings/parents">Back to Parent sign-ins</a></p>
         </section>
       )}
     </main>

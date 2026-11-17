@@ -57,7 +57,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
             <li>Copy the <b>Client ID</b> and <b>Client secret</b> from the app&apos;s <b>Keys and credentials</b> page into the form below, and choose sandbox or production to match.</li>
           </ol>
           <AppKeysForm configured={conn.configured} clientId={conn.clientId} environment={conn.environment} save={saveQboAppAction} />
-          <p className="box-foot"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
+          <p className="box-foot"><a className="link-line" href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>
       )}
 
@@ -82,7 +82,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
                 ? <>QuickBooks has no customer types yet, so there is nothing to choose from. {MAKE_TYPES} Then open <Link href="/staff/roster">Roster</Link>, select <b>Refresh now</b>, and come back.</>
                 : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types: {MAKE_TYPES}</>}</Notice>
             : <ShapeForm types={page.types} shape={page.shape} preview={previewShapeAction} save={saveShapeAction} />}
-          <p className="box-foot"><a href={`${SETUP}?step=connect`}>Back to step 2</a> · <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
+          <p className="box-foot"><a className="link-line" href={`${SETUP}?step=connect`}>Back to step 2</a> · <a className="link-line" href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>
       )}
     </main>

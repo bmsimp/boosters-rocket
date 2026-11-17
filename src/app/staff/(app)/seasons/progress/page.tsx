@@ -31,19 +31,19 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
       <p className="lede">Who has done what the season asks. Open a requirement to tick it off for a family or student, or to waive it.
         {seesSetup && <> <Link href="/staff/seasons">Set up seasons</Link></>}</p>
 
-      {!overview && <section className="box" aria-labelledby="none-h"><h2 id="none-h">No season yet</h2><p>Once a season is set up, its requirements are listed here.</p></section>}
+      {!overview && <Notice tone="info" live="none" title="No season yet" titleId="none-h"><p>Once a season is set up, its requirements are listed here.</p></Notice>}
 
       {overview && (
         <>
           {!overview.roster && <Notice tone="warning">The roster can&apos;t be shown right now, so nobody is listed under any requirement. Check QuickBooks under Roster.</Notice>}
           <section className="box" aria-labelledby="season-h"><h2 id="season-h">{overview.season.name}</h2>
-            <p>{overview.season.isCurrent ? "The current season." : "Not the current season: parents don't see it."}</p>
-            {overview.steps.length === 0 && <p>This season has no steps yet.</p>}
+            <Notice tone="info" live="none">{overview.season.isCurrent ? "The current season." : "Not the current season: parents don't see it."}</Notice>
+            {overview.steps.length === 0 && <Notice tone="info" live="none">This season has no steps yet.</Notice>}
           </section>
           {overview.steps.map((step, i) => (
             <section className="box" key={step.id} aria-labelledby={`step-${step.id}`}>
               <h2 id={`step-${step.id}`}>{i + 1}. {step.name}</h2>
-              {step.requirements.length === 0 ? <p>Nothing is asked in this step.</p> : (
+              {step.requirements.length === 0 ? <Notice tone="info" live="none">Nothing is asked in this step.</Notice> : (
                 <DataTable caption={`What ${step.name} asks, and how many have done it`} captionHidden rows={step.requirements} rowKey={(r) => r.id} columns={[
                   { key: "title", header: "Requirement", rowHeader: true, cell: (r) => <Link href={`/staff/seasons/progress/${r.id}`}>{r.title}</Link> },
                   { key: "required", header: "Required", cell: (r) => (r.required ? "Required" : "Optional") },

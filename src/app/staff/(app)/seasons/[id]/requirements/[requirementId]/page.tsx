@@ -43,8 +43,8 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
   return (
     <main className="wrap single">
       <h1 className="page-title">{r.title}</h1>
-      <p className="lede">In {step.name}, {season.name}. <Link href={back}>Back to {season.name}</Link>
-        {can(ctx.effective, "Season.Progress.Read") && <> · <Link href={`/staff/seasons/progress/${r.id}`}>Who has done it</Link></>}</p>
+      <p className="lede">In {step.name}, {season.name}. <Link className="link-line" href={back}>Back to {season.name}</Link>
+        {can(ctx.effective, "Season.Progress.Read") && <> · <Link className="link-line" href={`/staff/seasons/progress/${r.id}`}>Who has done it</Link></>}</p>
 
       <section className="box" aria-labelledby="req-h"><h2 id="req-h">Settings</h2>
         <p>{describeRequirement(r)}{r.dueOn ? <> · Due <CalendarDate iso={r.dueOn} /></> : null}</p>

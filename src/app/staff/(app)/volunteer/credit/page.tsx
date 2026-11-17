@@ -21,7 +21,7 @@ export default async function VolunteerCreditPage() {
       <p className="lede">Check-ins and volunteering done outside the portal, by family. Open a family to see how its credit counts toward each requirement, or to credit something done elsewhere. <Link href="/staff/volunteer">Back to Volunteer</Link></p>
       <section className="box" aria-labelledby="families-h"><h2 id="families-h">Families</h2>
         {families === null ? <Notice tone="warning" live="none">The roster can&apos;t be shown until QuickBooks is connected and the roster has been read.</Notice>
-          : families.length === 0 ? <p>There are no active families on the roster.</p> : (
+          : families.length === 0 ? <Notice tone="info" live="none">There are no active families on the roster.</Notice> : (
             <DataTable caption="Every active family, by name, with its credit" captionHidden rows={families} rowKey={(f) => f.qboId} columns={[
               { key: "name", header: "Family", rowHeader: true, cell: (f) => <Link href={`/staff/volunteer/credit/${encodeURIComponent(f.qboId)}`}>{f.name}</Link> },
               { key: "credits", header: "Credits", numeric: true, cell: (f) => (f.credits === 0 ? "No credit yet" : `${f.credits} ${f.credits === 1 ? "credit" : "credits"}`) },

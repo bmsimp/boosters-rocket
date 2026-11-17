@@ -166,14 +166,14 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await page.getByLabel("Hours, such as 2 or 1.5").fill("1");
     await page.getByLabel("What was done (only staff see this)").fill(NOTE);
     await page.getByRole("button", { name: "Add credit" }).click();
-    const credit = page.locator("li", { hasText: NOTE });
+    const credit = page.getByRole("row").filter({ hasText: NOTE });
     await expect(credit).toBeVisible();
     await noSidewaysScroll(page);
     await shot(page, "s09-credit");
     await credit.getByText("Remove this credit").click();
     await credit.getByLabel(/^Why it's being removed/).fill("Walk e2e: entered by mistake");
     await credit.getByRole("button", { name: "Remove it" }).click();
-    await expect(page.locator("li", { hasText: NOTE })).toContainText("Removed");
+    await expect(page.getByRole("region", { name: "Removed credit" }).getByRole("row").filter({ hasText: NOTE })).toContainText("Removed");
   });
 
   await test.step("reads the signed-forms matrix and one form's evidence", async () => {

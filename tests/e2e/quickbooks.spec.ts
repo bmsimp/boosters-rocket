@@ -142,7 +142,7 @@ test("staff open a family from the roster, hostile names stay text, and the visi
   const [mark] = await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`;
   await families.getByRole("link", { name: "Rivera Family" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Rivera Family");
-  await expect(page.getByText("ana@example.com · 555-0101")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Parents in QuickBooks" }).getByRole("row").filter({ hasText: "ana@example.com" })).toContainText("555-0101");
   await expect(page.getByRole("region", { name: "Students" }).getByText("Leo Rivera", { exact: true })).toBeVisible();
   const reads = await sql`SELECT target_id, actor_label FROM audit_log WHERE id > ${mark!.id} AND action = 'roster.family.read'`;
   expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "E2E-10", actor_label: "e2e-admin@example.org" }]); // one visit, one row

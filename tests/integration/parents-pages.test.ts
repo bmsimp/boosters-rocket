@@ -245,7 +245,8 @@ describe("the staff pages for parents", () => {
     await seedCache([...ALL, par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null)]);
     await runReconcile({ cause: "test" });
     const html = await familyPage("10");
-    expect(html.match(/<span class="what">Pat Rivera<\/span><span class="when">Can&#x27;t sign in: no email address in QuickBooks<\/span>/g)).toHaveLength(2);
+    const rows = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    expect(rows.filter((r) => r === "Pat Rivera Email No email address Sign-in Can&#x27;t sign in: no email address in QuickBooks")).toHaveLength(2);
   });
 
   it("the staff home tells people who can act that something is waiting, and nobody else", async () => {

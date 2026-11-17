@@ -146,7 +146,10 @@ describe("the roster pages", () => {
     expect(html).toContain("ana@example.com");
     expect(html).toContain("555-0101");
     expect(html).toContain("ana.portal@example.com");
-    expect(html).toContain("ana.portal@example.com · Can sign in (hasn&#x27;t yet)"); // the sign-in's standing, in words (parents spec §4)
+    // The sign-in's standing, in words (parents spec §4), on the person's own row of the sign-ins table.
+    const row = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+      .find((r) => r.includes("ana.portal@example.com"));
+    expect(row).toBe("Ana R. Email ana.portal@example.com Sign-in Can sign in (hasn&#x27;t yet)");
     expect((await audits("roster.family.read"))).toHaveLength(1);
     expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
       targetType: "qbo_customer", targetId: "10", ip: "203.0.113.40" });

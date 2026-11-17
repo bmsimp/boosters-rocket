@@ -480,6 +480,7 @@ The pieces every page is put together from, beside the components above. Each li
 
 ### Focus
 `:focus-visible` everywhere: `club-text` outline, 3px (4px in high contrast), 2px offset; `club-on` inside the club bar. High contrast also thickens link underlines to 2px.
+- **Skip to the page:** the first Tab stop of every club bar that has links in it (parent and staff). Read out but not drawn until it has the focus; then a ruled `paper` button, `ink` text and 2px border, 44px tall, at the top of the bar in the page's flow (it covers nothing), with the bar's `club-on` ring. It lands past the bar and the Switch family line, where the next Tab goes on into the page.
 
 ### Windows contrast themes (forced colors)
 Under `forced-colors: active` the system palette wins; the build only keeps every state readable without its own colors:

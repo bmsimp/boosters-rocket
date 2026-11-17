@@ -17,7 +17,7 @@ export default async function SeasonsPage() {
     <main className="wrap single">
       <h1 className="page-title">Seasons</h1>
       <p className="lede">A season is a list of steps, and each step holds what the club asks of every family or student. Parents see the current season on their Home page.</p>
-      {can(ctx.effective, "Season.Progress.Read") && <p className="lede"><Link href="/staff/seasons/progress">See who has done what</Link></p>}
+      {can(ctx.effective, "Season.Progress.Read") && <p className="lede"><Link className="link-line" href="/staff/seasons/progress">See who has done what</Link></p>}
 
       <section className="box" aria-labelledby="seasons-h"><h2 id="seasons-h">Seasons</h2>
         {seasons.length === 0 ? <p>There are no seasons yet.</p> : (

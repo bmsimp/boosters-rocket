@@ -1,7 +1,7 @@
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { getClubSettings } from "@/lib/settings/club";
 import { familyNames } from "@/lib/parents/directory";
-import { ClubBar, initials } from "./club-bar";
+import { ClubBar, PageStart, initials } from "./club-bar";
 import { ParentTabs } from "./parent-tabs";
 import { PARENT_NAV } from "./parent-nav";
 
@@ -22,6 +22,7 @@ export async function ParentFrame({ who, children }: { who: Pick<ParentIdentity,
       {names && (
         <p className="wrap switch-family">Viewing {names.get(who.familyQboId)}. <a href="/choose-family">Switch family</a></p>
       )}
+      <PageStart />
       {children}
       <footer className="wrap">{club.treasurerEmail && <>Questions about a charge? Email <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>. </>}Runs on Booster Rocket.</footer>
       <ParentTabs />

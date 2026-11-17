@@ -38,7 +38,7 @@ export default async function CheckInSheetPage({ params }: { params: Promise<{ s
       <section className="box checkin-tools" aria-labelledby="tools-h"><h2 id="tools-h">This code</h2>
         <p>Print this page, or show it on a screen at the event. If the code has been shared where it shouldn&apos;t be, make a new one: the old one stops working at once, and credit already earned stays.</p>
         <ConfirmButton label="Make a new code" question="Make a new code? The one already printed or shown will stop working." yes="Yes, make a new code" act={renewCheckInCodeAction.bind(null, sheet.shiftId)} />
-        <p className="help"><Link href={`/staff/volunteer/${sheet.eventId}`}>Back to the event</Link></p>
+        <p className="help"><Link className="link-line" href={`/staff/volunteer/${sheet.eventId}`}>Back to the event</Link></p>
       </section>
     </main>
   );
