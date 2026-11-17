@@ -58,7 +58,7 @@ export default async function QuickBooksSettingsPage() {
         </dl>
       </section>
 
-      <section className="box" aria-labelledby="qbo-check-h"><h2 id="qbo-check-h">The portal's requests</h2>
+      <section className="box" aria-labelledby="qbo-check-h"><h2 id="qbo-check-h">The portal&apos;s requests</h2>
         <p>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null}</p>
         <p><a className="link-line" href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</a></p>
       </section>
