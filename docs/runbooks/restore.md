@@ -7,6 +7,10 @@ signing certificate with its passphrase ([backups](backups.md)).
 A restore puts back everything as it was at the backup: anything done since (a form signed, a parent's change, an audit
 row) is gone from the portal. QuickBooks is not touched; the portal reads it again on its own.
 
+A backup made by Postgres 16 (from before the installation moved to Postgres 18) restores into Postgres 18 with these
+same steps. A backup made by Postgres 18 can't be restored into Postgres 16: going back to 16 is done with its old
+volume, not a backup ([updates](updates.md#going-back-to-postgres-16)).
+
 The commands run in `~/booster-rocket/deploy`; add the `-f` files and `--profile` you start the installation with.
 
 ## Onto the same machine

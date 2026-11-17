@@ -7,7 +7,9 @@ if you use this installation's proxy.
 ## 1. Before anything
 
 1. Read the release's notes on the repository's **Releases** page, for every release since yours. A note that says
-   "change your .env" means a new line to fill in: `.env.example` has it.
+   "change your .env" means a new line to fill in: `.env.example` has it. A release that moves Postgres to a new major
+   version says so: follow [Moving to a new major version of Postgres](#moving-to-a-new-major-version-of-postgres)
+   instead of part 2.
 2. Back up both databases: `docker compose run --rm backup --now`. Note the time in the file names it prints: it is the
    way back. The start in part 2 checks for it: see [When the start stops for a backup](#when-the-start-stops-for-a-backup).
 
@@ -92,5 +94,104 @@ version. Merge it like any change, then update as above. Documenso is the one to
 1. Read Documenso's release notes for every version between the old and the new, and look for changes to signing,
    the API, webhooks or embedded signing: the portal was checked against the version the compose file names.
 2. After updating, sign a test form end to end, open the signed PDF, and check the Health page's forms line.
-3. Postgres moves only within version 16 here. Moving to a new major version needs a backup and a restore into the new
-   version, not just a pull.
+3. A dependency update never moves Postgres to a new major version: `.github/dependabot.yml` is told not to offer one
+   (the build's lead chose this, so that a move is always a release of its own with the section below). It may move
+   Postgres within its version (18.7 to 18.8, say): that is an ordinary update.
+
+## Moving to a new major version of Postgres
+
+Postgres keeps its data in a form that changes between major versions (16, 17, 18): a new major version can't start on
+the old data. The data is moved instead: backed up by the old version, loaded into the new one, and checked. Booster
+Rocket moved from Postgres 16 to Postgres 18 in this way; the release that does it says so in its notes.
+
+Until the move is done, the database refuses to start on the new release, and nothing else starts either.
+`docker compose up -d` stops with `dependency failed to start: container ... db-1 is unhealthy`, and
+`docker compose logs db` says `Booster Rocket: Postgres was NOT started, and no data was changed or deleted.`, why, and
+the name of this section. Nothing is lost: the club's data is still in Postgres 16's own volume, exactly as it was. It
+is never deleted, overwritten or set up again by the move, and the portal never starts on an empty database instead.
+
+The move takes a few minutes for a club's data. The portal and Documenso are away while it runs: pick a quiet time.
+
+### Before the move
+
+Do these with the version you have now, before you get the new release's files.
+
+1. Back up both databases, as in part 1: `docker compose run --rm backup --now`. Once the new files are checked out,
+   this command waits for a database that won't start until the move is done.
+2. Check there is room. The move writes one more backup of both databases, and a second copy of the data in Postgres
+   18's own volume. See how big the data is, then that the disk has at least three times that free:
+   ```bash
+   docker compose exec db psql -U postgres -Atc "select pg_size_pretty(sum(pg_database_size(datname))) from pg_database"
+   df -h ~ /var/lib/docker
+   ```
+
+### The move
+
+1. Get the release's files and images, as in part 2a, steps 1 and 2 (or 2b, step 1), then, for the published image:
+   ```bash
+   cd ~/booster-rocket/deploy
+   docker compose pull
+   ```
+2. Move the data, from the top of the checkout:
+   ```bash
+   cd ~/booster-rocket
+   scripts/move-postgres.sh deploy ~/booster-rocket-moving-to-postgres-18
+   ```
+   It stops the portal, its worker, Documenso and the backup service; starts Postgres 16 on the old data; counts the
+   rows of every table in both databases and backs both up with Postgres 16's own tools into
+   `~/booster-rocket-moving-to-postgres-18` (a folder of its own: the nightly backups never remove these files); starts
+   Postgres 18 on a volume of its own, where it makes the two databases and their roles from `deploy/.env` as on a
+   first installation; loads both backups; counts every table again; and records the move only when every count is
+   the same. Last, it makes the first backup with Postgres 18 into `BACKUP_DIR`. It ends with
+   `The move is done: Postgres 18 holds the data.` and the command to start the portal.
+3. Start the portal as you always do, from `~/booster-rocket/deploy`: `docker compose up -d` (with `--profile proxy` if
+   you use this installation's proxy; for an image built from the checkout, the command of part 2b, step 2).
+4. Check it, as in part 3. The Health page's **Last backup** line shows the backup the move made.
+
+If the move stops with a message, or is cut off (a closed window, a power cut), nothing is lost and nothing is half
+done where the portal could see it: until a move has finished, a start is refused with a message that says so. Read
+the message, put right what it names, and run step 2 again: it starts again from the Postgres 16 data. Run it once
+more after it has finished and it says the data was already moved, and changes nothing.
+
+The database roles' passwords on Postgres 18 are the ones in `deploy/.env` when the move runs. If you ever changed one
+in Postgres ([first install](first-install.md)), the same password must be in `deploy/.env`, as that section says.
+
+### Backups from before and after the move
+
+- Every backup made before the move, and the move's own two files, were made by Postgres 16. They load into Postgres
+  18 with [restore](restore.md) as any backup does.
+- A backup made by Postgres 18 (every one from the move on) can't be loaded into Postgres 16: Postgres 16 refuses the
+  file. To go back to 16, use the old volume, below, not a backup.
+
+### Going back to Postgres 16
+
+While Postgres 16's volume is still there, the previous version starts on it again, with the data as it was when the
+move began. Anything done in the portal or Documenso since the move is not in it.
+
+1. Stop everything, from `~/booster-rocket/deploy`: `docker compose stop`
+2. If a move was cut off, its own Postgres may still be running. Stop it (it says `No such container` if not, which is
+   fine): `docker stop booster-rocket-club-move-postgres-16 booster-rocket-club-move-postgres-18`
+3. Put back the previous version's files and image, as in [Going back](#going-back), step 1.
+4. Start it: `docker compose up -d`. The Health page's **Version** names the previous version.
+
+To come forward again later, update as above. The start is then refused again (Postgres 16 has been used since the
+move), and `scripts/move-postgres.sh` says to run it with `--again` at the end: that moves the Postgres 16 data across
+again and replaces what Postgres 18 holds.
+
+### Removing the old data
+
+Leave Postgres 16's volume and `~/booster-rocket-moving-to-postgres-18` in place until the club has used the portal on
+Postgres 18 for a few weeks and a [restore check](backups.md#checking-a-backup-can-be-restored) of a Postgres 18 backup
+has passed. Removing them is the only step that deletes the old data, and going back to Postgres 16 is no longer
+possible after it.
+
+1. From `~/booster-rocket/deploy`, remove the containers but keep every volume (never add `-v` here: that would delete
+   Postgres 18's data too):
+   ```bash
+   docker compose down
+   ```
+2. Remove Postgres 16's volume, and only that one: `docker volume rm booster-rocket-club_db-data`. Postgres 18's is
+   `booster-rocket-club_postgres-data`; `docker volume ls` lists both before you start.
+3. Start again: `docker compose up -d`. Docker makes a new, empty `db-data` volume, a few bytes that the database's
+   start check reads as "nothing to move".
+4. Delete the move's folder, which holds every family's records: `rm -r ~/booster-rocket-moving-to-postgres-18`.
