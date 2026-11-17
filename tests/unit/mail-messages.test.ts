@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, reviewNoticeMessage } from "@/lib/mail/messages";
+import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, reviewNoticeMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
@@ -35,10 +35,12 @@ describe("mail messages", () => {
     expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|guardian/i); // the inline CSS property is not wording
   });
   it("puts the confirm link only in the confirm message, and none in the notice", () => {
-    expect(emailChangeConfirmMessage(b, "new@example.com", { link: "https://p.example.org/email-change/confirm?token=abc" }).text)
-      .toContain("https://p.example.org/email-change/confirm?token=abc");
-    expect(emailChangeNoticeMessage(b, "old@example.com", { byStaff: false }).text).not.toMatch(/https?:\/\//);
-    expect(emailChangeNoticeMessage(b, "old@example.com", { byStaff: true }).text).toMatch(/The club changed/);
+    expect(emailChangeConfirmMessage(b, "new@example.com", { link: "https://p.example.org/family/email/abc" }).text)
+      .toContain("https://p.example.org/family/email/abc");
+    const notice = emailChangeNoticeMessage(b, "old@example.com");
+    expect(notice.text).not.toMatch(/https?:\/\//);
+    expect(notice.text).toContain("Someone asked to change the email address you sign in to");
+    expect(notice.text).toContain("If it wasn't you, please tell the club.");
   });
   it("has a plain test message", () => {
     expect(testMessage(b, "admin@example.org").subject).toBe("Test email from FZN <Band> Boosters");
@@ -50,5 +52,21 @@ describe("mail messages", () => {
     expect(m.text).toContain("5 waiting in all");
     expect(m.text).toContain("https://portal.example.org/staff/parents");
     expect(reviewNoticeMessage({ clubName: "C", color: "#005102" }, "r@c.org", { newCount: 1, waiting: 1, link: "x" }).subject).toBe("C: 1 parent sign-in to review");
+  });
+
+  it("writes QuickBooks' and the club's own text into the HTML as text, never as markup (v1 spec §12, invariant 6)", () => {
+    const hostile = `<img src=x onerror="alert(1)"> & <b>`;
+    const shift = { event: hostile, role: hostile, when: "Saturday", location: hostile };
+    const messages = [
+      volunteerSignupMessage(b, "ana@example.com", { who: { self: false, name: hostile }, shift, contact: hostile, cancelUntil: null, link: "https://portal.example/volunteer", calendar: "" }),
+      signedFormCopyMessage(b, "ana@example.com", { formTitle: hostile, forName: hostile, pdf: null, link: "https://portal.example/forms" }),
+      formReminderMessage(b, "ana@example.com", { formTitle: hostile, forNames: [hostile], due: null, link: "https://portal.example/forms" }),
+    ];
+    for (const m of messages) {
+      expect(m.html).not.toContain("<img");
+      expect(m.html).not.toContain("<b>");
+      expect(m.html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &lt;b&gt;");
+      expect(m.text).toContain(hostile);
+    }
   });
 });

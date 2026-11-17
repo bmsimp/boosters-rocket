@@ -1,7 +1,7 @@
 # Certificate credentials for Microsoft sign-in — Design
 
 **Date:** 2026-11-09
-**Status:** Draft for review
+**Status:** Built by plan `2026-11-09-certificate-credentials.md`, and proved against the band's tenant on the proof of concept on 2026-11-09 (its runbook, check 2).
 **Superseded in part:** only staff sign-in uses a certificate now; the parent certificate and its script are removed. See docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md.
 **Builds on:** `docs/superpowers/specs/2026-11-08-first-run-setup-design.md` (setup page), on `main`.
 

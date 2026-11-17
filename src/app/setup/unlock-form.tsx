@@ -1,4 +1,5 @@
 "use client";
+import { Notice } from "@/app/components/notice";
 import { useActionState } from "react";
 import { unlockSetupAction } from "./actions";
 
@@ -9,7 +10,7 @@ export function UnlockForm() {
       <label className="field"><span>Setup code</span>
         <input name="code" required autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} placeholder="XXXX-XXXX-XXXX" />
       </label>
-      {state?.error && <p role="alert" className="errors">{state.error}</p>}
+      {state?.error && <Notice tone="problem">{state.error}</Notice>}
       <button className="btn" disabled={pending}>Unlock</button>
     </form>
   );

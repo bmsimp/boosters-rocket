@@ -9,17 +9,118 @@ import { eq } from "drizzle-orm";
 import { mailConfigHash } from "@/lib/mail/config-hash";
 import type { StoredMailConfig } from "@/lib/mail/types";
 
-const TABLES = [
-  "audit_log", "role_assignment", "role_rule", "staff_user", "guardian", "parent", "held_address", "family_match", "signin_code", "rate_limit_event", "parent_email_change", "qbo_connection", "qbo_customer", "qbo_customer_type", "job_run", "setting", "auth_provider", "provider_certificate",
-  "staff_auth_session", "staff_auth_account", "staff_auth_verification", "staff_auth_user",
-  "parent_auth_session", "parent_auth_account", "parent_auth_verification", "parent_auth_user",
-];
+/**
+ * How to empty the database, worked out once per process from the database itself (the schema doesn't change during a
+ * run), so a new table can't be left out and leak rows between tests. One statement, one trip to the server:
+ * every table in the public schema except "role" is locked and emptied, the sequences those tables own start again,
+ * and custom roles are removed.
+ *
+ * The rows are deleted, not truncated. TRUNCATE gives every table and index a new file on disk, which took most of a
+ * second here on each reset, two thousand times a run; deleting a test's few rows takes a couple of milliseconds. The
+ * lock is the one TRUNCATE took: the reset waits for anything a test left running to finish its transaction, then
+ * removes what it wrote too.
+ *
+ * A table emptied by DELETE keeps its pages, though, and Postgres puts later rows wherever it has noted room, not
+ * after the rows before them. Many tests read rows back with no ORDER BY and take the first or the last as the one
+ * written first or last; on a table that keeps its pages they fail now and then. So resetDb() then vacuums the tables
+ * the test wrote, which hands their emptied pages back to the disk: each starts again from no pages, and rows lie in
+ * the order they were written, as after a TRUNCATE. That costs about 10 ms a table the test wrote, against some 40 ms
+ * for TRUNCATE, which also has to empty every table that refers to one it empties.
+ */
+let emptying: Promise<string> | null = null;
+function emptyEverything(): Promise<string> {
+  emptying ??= howToEmpty().catch((e: unknown) => { emptying = null; throw e; });
+  return emptying;
+}
 
-/** Empties every table except the built-in Admin role, and removes custom roles. */
+const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`;
+const literal = (text: string) => `'${text.replaceAll("'", "''")}'`;
+
+/** The tables, but for "role", that have pages on disk: those written since they were last emptied to nothing. */
+async function writtenTables(): Promise<string[]> {
+  const rows = await db.execute<{ name: string }>(sql`SELECT c.oid::regclass::text AS name FROM pg_class c
+    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'r' AND c.relname <> 'role' AND pg_relation_size(c.oid) > 0 ORDER BY 1`);
+  return rows.map((t) => t.name);
+}
+
+async function howToEmpty(): Promise<string> {
+  const tables = await db.execute<{ id: number; name: string }>(sql`SELECT c.oid::int AS id, c.relname AS name FROM pg_class c
+    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND c.relname <> 'role' ORDER BY c.relname`);
+  const references = await db.execute<{ child: number; parent: number }>(sql`SELECT conrelid::int AS child, confrelid::int AS parent FROM pg_constraint
+    WHERE contype = 'f' AND connamespace = 'public'::regnamespace AND conrelid <> confrelid`);
+  const sequences = await db.execute<{ name: string; start: string }>(sql`SELECT s.relname AS name, q.seqstart::text AS start
+    FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_sequence q ON q.seqrelid = s.oid JOIN pg_class t ON t.oid = d.refobjid
+    WHERE d.classid = 'pg_class'::regclass AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
+      AND t.relnamespace = 'public'::regnamespace AND t.relkind IN ('r', 'p') AND t.relname <> 'role' ORDER BY s.relname`);
+  const names = tables.map((t) => quoted(t.name));
+  const customRoles = `DELETE FROM "role" WHERE "builtin" = false`;
+  if (names.length === 0) return customRoles;
+  const order = childrenFirst(tables.map((t) => t.id), [...references]);
+  // Tables that can't be emptied one by one are truncated together, as every reset once did.
+  if (!order) return [`TRUNCATE ${names.join(", ")} RESTART IDENTITY CASCADE`, customRoles].join("; ");
+  const nameOf = new Map(tables.map((t) => [t.id, quoted(t.name)]));
+  return [
+    `LOCK TABLE ${names.join(", ")} IN ACCESS EXCLUSIVE MODE`,
+    ...order.map((id) => `DELETE FROM ${nameOf.get(id)!}`),
+    ...sequences.map((q) => `PERFORM setval('public.${quoted(q.name).replaceAll("'", "''")}'::regclass, ${BigInt(q.start)}, false)`),
+    customRoles,
+  ].join("; ");
+}
+
+/**
+ * The tables in an order where each comes before every table it refers to, or null when there is no such order: they
+ * refer to each other in a circle, or a table that is not being emptied refers to one that is.
+ */
+export function childrenFirst(ids: number[], references: { child: number; parent: number }[]): number[] | null {
+  const waitingOn = new Map(ids.map((id) => [id, new Set<number>()])); // parent -> the children still to be emptied
+  for (const { child, parent } of references) {
+    if (!waitingOn.has(parent)) continue;
+    if (!waitingOn.has(child)) return null;
+    waitingOn.get(parent)!.add(child);
+  }
+  const order: number[] = [];
+  while (order.length < ids.length) {
+    const free = ids.filter((id) => waitingOn.has(id) && waitingOn.get(id)!.size === 0);
+    if (free.length === 0) return null;
+    for (const id of free) { order.push(id); waitingOn.delete(id); }
+    for (const children of waitingOn.values()) for (const id of free) children.delete(id);
+  }
+  return order;
+}
+
+/** Empties every table except the built-in Admin role, removes custom roles, and starts identity columns again from 1. */
 export async function resetDb() {
-  await db.execute(sql.raw(`TRUNCATE ${TABLES.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`));
-  await db.execute(sql`DELETE FROM "role" WHERE "builtin" = false`);
+  const statements = await emptyEverything();
+  // A DO block is one statement and one transaction, whatever protocol the driver speaks.
+  await db.execute(sql.raw(`DO $reset$ BEGIN ${statements}; END $reset$`));
+  // Then the tables the test wrote give their pages back (see above). VACUUM can't run inside a transaction, so it is a
+  // statement of its own; it takes the tables one after another, as at once they kept each other's rows from going.
+  let written = await writtenTables();
+  if (written.length) await db.execute(sql.raw(`VACUUM (INDEX_CLEANUP ON, TRUNCATE ON, PROCESS_TOAST OFF, SKIP_DATABASE_STATS) ${written.join(", ")}`));
+  // A transaction left open somewhere can keep the deleted rows from going. Those few tables are truncated instead.
+  if (written.length) written = await writtenTables();
+  if (written.length) {
+    await db.execute(sql.raw(`DO $reset$ BEGIN PERFORM set_config('client_min_messages', 'warning', true);
+      EXECUTE ${literal(`TRUNCATE ${written.join(", ")} CASCADE`)}; END $reset$`));
+  }
   invalidateProviders();
+}
+
+/**
+ * Resolves once another session on this file's database is waiting for a lock (a row, a table, an advisory lock): for a
+ * test that proves one piece of work waits for another. A sleep guesses how long the second takes to reach the lock,
+ * and on a loaded machine guesses short; this asks Postgres. Only this file uses its database, so the waiter is the
+ * test's own.
+ */
+export async function untilALockIsAwaited(timeoutMs = 15_000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const [row] = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`);
+    if (row!.n > 0) return;
+    if (Date.now() > until) throw new Error(`Nothing was waiting for a lock after ${timeoutMs} ms.`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
 }
 
 export async function adminRoleId(): Promise<string> {

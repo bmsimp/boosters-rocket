@@ -17,9 +17,9 @@ vi.mock("@/lib/mail/senders", async () => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, setting, signinCode } from "@/lib/db/schema";
-import { requestSigninCode, verifySigninCode, hashSigninCode, CODE_TTL_MS } from "@/lib/parents/signin-codes";
-import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { auditLog, guardian, parent, setting, signinCode } from "@/lib/db/schema";
+import { requestSigninCode, verifySigninCode, signinStands, hashSigninCode, CODE_TTL_MS } from "@/lib/parents/signin-codes";
+import { resetDb, seedParent, seedGuardian, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { seedParentSettings } from "../helpers/roster-cache";
 
 const T0 = new Date("2026-11-10T12:00:00Z");
@@ -122,17 +122,32 @@ describe("requesting a code", () => {
     expect((await audits("signin.code_refused"))[0]).toMatchObject({ after: { reason: "rate_limited", limit: "resend" } });
   });
 
-  it("holds 3 codes per email and 10 requests per IP in 15 minutes, and audits hitting them", async () => {
+  it("holds 3 codes per email and 60 requests per IP in 15 minutes, and audits hitting them", async () => {
     await ana();
     for (let i = 0; i < 4; i++) await send("ana@example.com", at(i * 61_000));
     expect(mail.outbox).toHaveLength(3);
     expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ after: { reason: "rate_limited", limit: "email" } });
-    for (let i = 0; i < 7; i++) await send(`nobody${i}@example.com`, at(300_000), "198.51.100.7");
-    await send("ana@example.com", at(300_000), "198.51.100.7"); // 8th from this IP: still allowed by the IP limit, refused by the email one
+    for (let i = 0; i < 57; i++) await send(`nobody${i}@example.com`, at(300_000), "198.51.100.7");
+    await send("ana@example.com", at(300_000), "198.51.100.7"); // 58th from this IP: still allowed by the IP limit, refused by the email one
     for (let i = 0; i < 2; i++) await send(`more${i}@example.com`, at(300_000), "198.51.100.7");
+    expect((await audits("signin.code_refused")).filter((a) => (a.after as { limit?: string }).limit === "ip")).toEqual([]); // the 60th is still let through
     await send("x@example.com", at(300_000), "198.51.100.7");
     expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ after: { reason: "rate_limited", limit: "ip" } });
-  }, 30_000);
+  }, 60_000);
+
+  it("lets a room full of parents on one Wi-Fi address each get a code", async () => {
+    // A registration night: 40 families behind the school's one address inside a few minutes.
+    const people = [];
+    for (let i = 0; i < 40; i++) {
+      const p = await seedParent({ name: `Parent ${i}`, email: `parent${i}@example.com` });
+      await seedGuardian({ parentId: p.id, familyQboId: `F${i}` });
+      people.push(p);
+    }
+    for (const [i, p] of people.entries()) await send(p.email, at(i * 1000), "198.51.100.77");
+    expect(mail.outbox.map((m) => m.to).sort()).toEqual(people.map((p) => p.email).sort());
+    for (const [i, m] of mail.outbox.entries()) expect(await verifySigninCode(m.to, codeOf(m), "198.51.100.77", at(60_000 + i))).toMatchObject({ ok: true });
+    expect(await audits("signin.code_refused")).toEqual([]);
+  }, 60_000);
 
   it("audits a failed send as mail_failed and leaves no usable code", async () => {
     await ana();
@@ -153,13 +168,13 @@ describe("requesting a code", () => {
   it("while mail isn't working, stops writing audit rows once the IP limit is reached", async () => {
     await resetDb();
     await ana();
-    for (let i = 0; i < 15; i++) await send(`n${i}@example.com`, at(i));
+    for (let i = 0; i < 65; i++) await send(`n${i}@example.com`, at(i));
     const refused = await audits("signin.code_refused");
-    expect(refused.filter((a) => (a.after as { detail?: string }).detail === "mail_not_working")).toHaveLength(10);
+    expect(refused.filter((a) => (a.after as { detail?: string }).detail === "mail_not_working")).toHaveLength(60);
     expect(refused.filter((a) => (a.after as { reason: string }).reason === "rate_limited")).toHaveLength(1);
-    expect(refused).toHaveLength(11);
+    expect(refused).toHaveLength(61);
     expect(mail.outbox).toHaveLength(0);
-  }, 30_000);
+  }, 60_000);
 
   it("audits a full email window once, and again in the next one", async () => {
     await ana();
@@ -245,24 +260,57 @@ describe("checking a code", () => {
     expect(await verifySigninCode("ana@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: false, reason: "rejected" });
   });
 
-  it("allows 30 checks per IP in 15 minutes", async () => {
-    for (let i = 0; i < 30; i++) expect(await verifySigninCode(`n${i}@example.com`, "123456", IP, at(i))).toEqual({ ok: false, reason: "rejected" });
-    expect(await verifySigninCode("n@example.com", "123456", IP, at(31))).toEqual({ ok: false, reason: "rate_limited" });
+  it("allows 180 checks per IP in 15 minutes", async () => {
+    for (let i = 0; i < 180; i++) expect(await verifySigninCode(`n${i}@example.com`, "123456", IP, at(i))).toEqual({ ok: false, reason: "rejected" });
+    expect(await verifySigninCode("n@example.com", "123456", IP, at(181))).toEqual({ ok: false, reason: "rate_limited" });
     expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ after: { reason: "rate_limited", limit: "check_ip" } });
-  }, 30_000);
+  }, 60_000);
 
   it("audits a full check window once, and again in the next one", async () => {
-    for (let i = 0; i < 30; i++) await verifySigninCode(`n${i}@example.com`, "123456", IP, at(i));
-    for (let i = 0; i < 5; i++) expect(await verifySigninCode("n@example.com", "123456", IP, at(100 + i))).toEqual({ ok: false, reason: "rate_limited" });
+    for (let i = 0; i < 180; i++) await verifySigninCode(`n${i}@example.com`, "123456", IP, at(i));
+    for (let i = 0; i < 5; i++) expect(await verifySigninCode("n@example.com", "123456", IP, at(200 + i))).toEqual({ ok: false, reason: "rate_limited" });
     const limited = async () => (await audits("signin.code_refused")).filter((a) => (a.after as { reason: string }).reason === "rate_limited");
     expect(await limited()).toHaveLength(1);
     expect((await limited())[0]).toMatchObject({ ip: IP, after: { limit: "check_ip" } });
-    expect(await verifySigninCode("n@example.com", "123456", "198.51.100.9", at(200))).toEqual({ ok: false, reason: "rejected" }); // another IP has its own limit
+    expect(await verifySigninCode("n@example.com", "123456", "198.51.100.9", at(300))).toEqual({ ok: false, reason: "rejected" }); // another IP has its own limit
     // 15 minutes after the first check its slot frees; the check after that fills the window again and is audited again.
     expect(await verifySigninCode("n@example.com", "123456", IP, at(15 * 60_000))).toEqual({ ok: false, reason: "rejected" });
     for (let i = 0; i < 5; i++) expect(await verifySigninCode("n@example.com", "123456", IP, at(15 * 60_000))).toEqual({ ok: false, reason: "rate_limited" });
     expect(await limited()).toHaveLength(2);
-  }, 30_000);
+  }, 60_000);
+
+  it("the last check of a sign-in stands only while the address is still the person's and they are not blocked", async () => {
+    const p = await ana();
+    expect(await signinStands(p.id, " Ana@Example.com ", IP)).toBe(true);
+    expect(await audits("signin.refused")).toEqual([]);
+    expect(await signinStands(p.id, "someone.else@example.com", IP)).toBe(false);
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ door: "parent", actorId: p.id, targetType: "parent", targetId: p.id, after: { reason: "address_changed" }, ip: IP });
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, p.id));
+    expect(await signinStands(p.id, "ana@example.com", IP)).toBe(false);
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ after: { reason: "blocked" } });
+    expect(await signinStands("00000000-0000-4000-8000-000000000000", "ana@example.com", IP)).toBe(false);
+  });
+
+  it("the last check waits for a change of address that is under way, and then sees it", async () => {
+    const p = await ana();
+    let commit!: () => void;
+    const held = new Promise<void>((resolve) => { commit = resolve; });
+    let changed!: () => void;
+    const written = new Promise<void>((resolve) => { changed = resolve; });
+    const changing = db.transaction(async (tx) => {
+      await tx.update(parent).set({ email: "ana.new@example.com" }).where(eq(parent.id, p.id));
+      changed();
+      await held;
+    });
+    await written;
+    let answer: boolean | null = null;
+    const checking = signinStands(p.id, "ana@example.com", IP).then((r) => { answer = r; });
+    await untilALockIsAwaited();
+    expect(answer).toBeNull();                       // still waiting: the change has not been committed
+    commit();
+    await changing; await checking;
+    expect(answer).toBe(false);
+  });
 
   it("counts a code with letters or the wrong length as a wrong try", async () => {
     await ana();

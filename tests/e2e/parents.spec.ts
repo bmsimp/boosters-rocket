@@ -38,9 +38,12 @@ test("an Admin previews, then switches parent sign-ins on (and finds them on the
   await expect(page.getByRole("heading", { name: "Step 1: What would happen" })).toBeVisible();
   await expect(page.getByText("2 people would be able to sign in, to 3 families.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Addresses under more than one family (1)" })).toBeVisible();
-  await expect(page.getByText("sam@example.com: Okafor Family, Lee Family")).toBeVisible();
-  // Zelda's two hand-made sign-ins are listed in QuickBooks now, so the reconcile takes them over: none would end.
-  await expect(page.getByRole("heading", { name: "Sign-ins that would end (0)" })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "sam@example.com" })).toContainText("Okafor Family, Lee Family");
+  // Zelda's two sign-ins come from records that are in QuickBooks (scripts/seed-e2e.ts), so the reconcile keeps them: none would end.
+  // The list is worked out only while sign-ins are off, so on the second pass, with them on, it isn't there at all.
+  const [before] = await sql`SELECT value FROM setting WHERE key = 'parents.settings'`;
+  if ((before?.value as { signin?: boolean } | undefined)?.signin) await expect(page.getByRole("heading", { name: /Sign-ins that would end/ })).toHaveCount(0);
+  else await expect(page.getByRole("heading", { name: "Sign-ins that would end (0)" })).toBeVisible();
 
   const since = await mark();
   await page.goto("/staff/settings/parents/setup?step=signins");
@@ -71,13 +74,13 @@ test("an Admin previews, then switches parent sign-ins on (and finds them on the
 
 test("the staff home and the Parents page show the held address; a refusal keeps the note; deciding and reversing work", async ({ page }) => {
   await page.goto("/staff");
-  await expect(page.getByText("1 address to review.")).toBeVisible();
+  await expect(page.getByText("1 address to review", { exact: true })).toBeVisible();
   await page.goto("/staff/parents");
   await expect(page.getByRole("heading", { name: "To review (1)" })).toBeVisible();
   const waiting = page.getByRole("region", { name: /^To review/ });
   await expect(waiting.getByText("sam@example.com")).toBeVisible();
-  await expect(waiting.getByText("Okafor Family (held)")).toBeVisible();
-  await expect(waiting.getByText("Lee Family (held)")).toBeVisible();
+  await expect(waiting.getByRole("listitem").filter({ hasText: "Okafor Family" }).last()).toContainText("Held");
+  await expect(waiting.getByRole("listitem").filter({ hasText: "Lee Family" }).last()).toContainText("Held");
 
   try {
     // No note: refused.
@@ -87,12 +90,12 @@ test("the staff home and the Parents page show the held address; a refusal keeps
     // A note, but the address stopped being under two families after the page loaded: refused, and the note stays.
     const note = waiting.getByLabel("How do you know? (staff only)");
     await note.fill("Sam confirmed by phone.");
-    await sql`UPDATE qbo_customer SET active = false WHERE qbo_id = '51'`;
+    await sql`UPDATE qbo_customer SET active = false WHERE qbo_id = 'E2E-51'`;
     try {
       await waiting.getByRole("button", { name: "Same person", exact: true }).click();
       await expect(waiting.getByRole("alert")).toContainText("That address isn't held any more. Reload the page.");
     } finally {
-      await sql`UPDATE qbo_customer SET active = true WHERE qbo_id = '51'`;
+      await sql`UPDATE qbo_customer SET active = true WHERE qbo_id = 'E2E-51'`;
     }
     await expect(note).toHaveValue("Sam confirmed by phone.");
 
@@ -104,7 +107,7 @@ test("the staff home and the Parents page show the held address; a refusal keeps
     await expect(decided).toContainText("Sam confirmed by phone.");
     const rows = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.hold.decided', 'parent.access.granted') ORDER BY id`;
     expect(rows.map((r) => r.action)).toEqual(["parent.hold.decided", "parent.access.granted", "parent.access.granted"]);
-    expect(rows[0]!.after).toMatchObject({ decision: "same_person", familyQboIds: ["40", "50"], note: "Sam confirmed by phone." });
+    expect(rows[0]!.after).toMatchObject({ decision: "same_person", familyQboIds: ["E2E-40", "E2E-50"], note: "Sam confirmed by phone." });
     expect(rows[1]!.after).toMatchObject({ cause: "hold" });
 
     // Put it back, so the second pass of the run starts from the same place.
@@ -155,16 +158,16 @@ test("a person's page: block needs a reason, block, then unblock; the visit is i
 });
 
 test("a family's roster page shows who can sign in and why someone can't; Needs attention lists the held item without the address", async ({ page }) => {
-  await page.goto("/staff/roster/40");
+  await page.goto("/staff/roster/E2E-40");
   await expect(page.getByRole("heading", { name: "Portal sign-ins" })).toBeVisible();
   const signins = page.getByRole("region", { name: "Portal sign-ins" });
-  await expect(signins.getByText("sam@example.com · Held: this address is also under Lee Family")).toBeVisible();
-  await page.goto("/staff/roster/10");
-  await expect(page.getByRole("region", { name: "Portal sign-ins" }).getByText(/^ana@example\.com · Can sign in/)).toBeVisible();
+  await expect(signins.getByRole("row").filter({ hasText: "sam@example.com" })).toContainText("Held: this address is also under Lee Family");
+  await page.goto("/staff/roster/E2E-10");
+  await expect(page.getByRole("region", { name: "Portal sign-ins" }).getByRole("row").filter({ hasText: "ana@example.com" })).toContainText(/Can sign in/);
   await page.goto("/staff/roster");
   const attention = page.getByRole("region", { name: /^Needs attention/ });
   await expect(attention).toBeVisible();
-  const held = attention.getByRole("listitem").filter({ hasText: HELD_DETAIL });
+  const held = attention.getByRole("row").filter({ hasText: HELD_DETAIL });
   await expect(held).toHaveCount(1);
   await expect(held).toContainText("Sam Okafor");
   await expect(attention).not.toContainText("sam@example.com");

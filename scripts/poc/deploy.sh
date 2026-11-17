@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# Deploys (or rolls back) the Booster Rocket proof of concept on linuxdev.
-#   scripts/poc/deploy.sh             pull main, build, migrate, recreate app and worker, wait healthy
+# Deploys (or rolls back) a Booster Rocket server run with docker compose.
+#   scripts/poc/deploy.sh             pull main, build, back up the database, migrate, recreate app and worker, wait healthy
 #   scripts/poc/deploy.sh --rollback  return to the previous image
+# The backup goes to BR_BACKUP_DIR (default ~/booster-rocket-backups, outside this checkout), keeping the newest
+# BR_BACKUP_KEEP (default 14): scripts/backup.sh. A deploy never migrates a database it could not back up first.
 # Exit codes: 0 ok, 2 refused (or another deploy running), 3 migrations failed (app untouched), 4 app unhealthy,
-# 5 nothing to roll back to, 6 git pull failed, 7 build failed (app untouched).
+# 5 nothing to roll back to, 6 git pull failed, 7 build failed (app untouched), 8 backup failed (nothing migrated,
+# app untouched).
 set -euo pipefail
 
 BR_DIR="${BR_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 BR_HEALTH_TIMEOUT="${BR_HEALTH_TIMEOUT:-120}"
+BR_BACKUP_DIR="${BR_BACKUP_DIR:-$HOME/booster-rocket-backups}"
+BR_BACKUP_KEEP="${BR_BACKUP_KEEP:-14}"
+SCRIPTS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_IMAGE="booster-rocket-app"
 COMPOSE=(docker compose -f docker-compose.poc.yml --env-file .env.poc)
 
@@ -28,6 +34,9 @@ check_env_file() {
     mode="$(stat -c '%a' .env.poc)"
     [ "$mode" = "600" ] || die 2 ".env.poc must be private: run chmod 600 .env.poc (it is $mode)."
   fi
+  # The portal's own address is set by whoever installs it; nothing can work without it.
+  grep -Eq '^APP_URL=https?://[^[:space:]]+$' .env.poc \
+    || die 2 ".env.poc has no APP_URL. Add a line APP_URL=https://... with the address people use for the portal."
 }
 
 wait_healthy() {
@@ -44,6 +53,17 @@ wait_healthy() {
 recreate_app() {
   "${COMPOSE[@]}" up -d --no-deps --force-recreate app
   wait_healthy
+}
+
+# A migration can't be undone by a rollback, so the database is backed up first, and a deploy that can't back it up
+# stops here. The database is started if this is the first deploy; it is then empty, and the backup is too.
+backup_database() {
+  local db_container
+  "${COMPOSE[@]}" up -d db >/dev/null || die 8 "The database didn't start, so it couldn't be backed up. Nothing was migrated and the running app was not touched."
+  db_container="$("${COMPOSE[@]}" ps -q db 2>/dev/null | head -n 1)"
+  [ -n "$db_container" ] || die 8 "The database container wasn't found, so it couldn't be backed up. Nothing was migrated and the running app was not touched."
+  BR_DB_CONTAINER="$db_container" "$SCRIPTS_DIR/backup.sh" "$BR_BACKUP_DIR" --keep "$BR_BACKUP_KEEP" \
+    || die 8 "The backup failed. Nothing was migrated and the running app was not touched."
 }
 
 recreate_worker() {
@@ -75,7 +95,9 @@ if docker image inspect "$APP_IMAGE:current" >/dev/null 2>&1   && docker image t
   candidate="yes"
   trap 'docker image rm "$APP_IMAGE:rollback-candidate" >/dev/null 2>&1 || true' EXIT
 fi
-"${COMPOSE[@]}" build app || die 7 "The build failed. The running app was not touched."
+# The commit goes into the build so the portal's Health page can say which version is running.
+APP_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)" "${COMPOSE[@]}" build app || die 7 "The build failed. The running app was not touched."
+backup_database
 "${COMPOSE[@]}" run --rm migrate || die 3 "Migrations failed. The running app was not touched."
 running="$(docker inspect --format '{{.Image}}' booster-rocket-app 2>/dev/null || true)"
 if [ -n "$running" ]; then

@@ -33,6 +33,7 @@ import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
 import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
+import { rowNamed } from "../helpers/table";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -86,8 +87,9 @@ describe("the roster pages", () => {
     const html = await list();
     expect(html.indexOf("Chen Family")).toBeLessThan(html.indexOf("Rivera Family"));
     expect(html).toContain('href="/staff/roster/10"');
-    expect(html).toMatch(/Rivera Family<\/a><span class="when">1 student, 1 parent<\/span>/);
-    expect(html).toMatch(/Old Family<\/a><span class="when">0 students, 0 parents · Inactive in QuickBooks<\/span>/);
+    // A row each: the family, its students and parents, and whether QuickBooks has it active.
+    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Active"]);
+    expect(rowNamed(html, "Old Family")).toEqual(["Old Family", "0", "0", "Inactive"]);
     expect(html).not.toContain("Lincoln High");
     expect(html).not.toContain("ana@example.com"); // contact details are on the family's own page
     expect(html).toContain("3 families, 1 student, 2 parents; 2 customers outside the portal");
@@ -97,8 +99,8 @@ describe("the roster pages", () => {
     await ready();
     const html = await list("RIVER");
     expect(html).toContain("Rivera Family");
-    expect(html).not.toMatch(/Chen Family<\/a><span class="when">\d+ student/); // a list row; Needs attention is not filtered and still names Chen Family
-    expect(html).toMatch(/Rivera Family<\/a><span class="when">1 student, 1 parent<\/span>/);
+    expect(rowNamed(html, "Chen Family")).toEqual(["Chen Family", expect.any(String)]); // only in Needs attention, which is not filtered
+    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Active"]);
     expect(await list("%")).toContain("No family matches");
     expect(await list("_")).toContain("No family matches"); // not a one-character wildcard
     expect(await list("Rivera' or '1'='1")).toContain("No family matches");
@@ -144,10 +146,27 @@ describe("the roster pages", () => {
     expect(html).toContain("ana@example.com");
     expect(html).toContain("555-0101");
     expect(html).toContain("ana.portal@example.com");
-    expect(html).toContain("ana.portal@example.com · Can sign in (hasn&#x27;t yet)"); // the sign-in's standing, in words (parents spec §4)
+    // The sign-in's standing, in words (parents spec §4), on the person's own row of the sign-ins table.
+    const row = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+      .find((r) => r.includes("ana.portal@example.com"));
+    expect(row).toBe("Ana R. Email ana.portal@example.com Sign-in Can sign in (hasn&#x27;t yet)");
     expect((await audits("roster.family.read"))).toHaveLength(1);
     expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
       targetType: "qbo_customer", targetId: "10", ip: "203.0.113.40" });
+  });
+
+  it("a family's page leads to its money, season and volunteering credit for staff who may open each, and to none of them otherwise", async () => {
+    await ready();
+    const links = (html: string) => [...html.matchAll(/href="(\/staff\/(?:balances|seasons\/progress\/family|volunteer\/credit)\/[^"]+)"/g)].map((m) => m[1]);
+    expect(links(await entry("10"))).toEqual([]);
+    // Its buy-outs page is Roster.Read's, the roster page's own: the one link every reader of the page gets.
+    const alone = await entry("10");
+    expect(alone).toContain("More about this family");
+    expect([...alone.matchAll(/href="(\/staff\/roster\/10\/[^"]+)"/g)].map((m) => m[1])).toEqual(["/staff/roster/10/buyouts"]);
+    const [r] = await db.insert(role).values({ key: "more", name: "More" }).returning();
+    await db.insert(roleRule).values(["Finance.Balance.Read", "Season.Progress.Read", "Volunteer.Credit.ReadWrite"].map((pattern) => ({ roleId: r!.id, kind: "include" as const, pattern })));
+    await db.insert(roleAssignment).values({ roleId: r!.id, staffUserId: reader.id });
+    expect(links(await entry("10"))).toEqual(["/staff/balances/10", "/staff/seasons/progress/family/10", "/staff/volunteer/credit/10"]);
   });
 
   it("is not found, and writes no audit row, for anything that isn't a family", async () => {

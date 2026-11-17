@@ -65,6 +65,17 @@ describe("Graph sender", () => {
     });
   });
 
+  it("carries a file such as a calendar file as a file attachment, its bytes in base64", async () => {
+    reply = okGraph;
+    const { send } = await sender();
+    const calendar = "BEGIN:VCALENDAR\r\nSUMMARY:Car wash, rinse crew é\r\nEND:VCALENDAR\r\n";
+    await send({ ...msg, attachments: [{ filename: "volunteer-shift.ics", contentType: "text/calendar; charset=utf-8; method=PUBLISH", content: calendar }] });
+    const sent = JSON.parse(seen.find((s) => s.url.endsWith("/sendMail"))!.body);
+    expect(sent.message.attachments).toEqual([{ "@odata.type": "#microsoft.graph.fileAttachment", name: "volunteer-shift.ics",
+      contentType: "text/calendar; charset=utf-8; method=PUBLISH", contentBytes: Buffer.from(calendar, "utf8").toString("base64") }]);
+    expect(sent.saveToSentItems).toBe(false);
+  });
+
   it("reuses the token for the next message", async () => {
     reply = okGraph;
     const { send } = await sender();

@@ -98,6 +98,23 @@ describe("the roster belongs to the connected company", () => {
     expect((await loadRosterPage()).roster).not.toBeNull();
   });
 
+  it("a new company with no customers replaces another company's cache, even when the clearing step never ran", async () => {
+    await db.update(qboConnection).set({ realmId: B });
+    stub.customers = [];
+    // The cache holds company A's customers, and that is no reason to doubt company B's empty answer.
+    expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 0, types: 5 });
+    expect(await db.select().from(qboCustomer)).toEqual([]);
+    expect(await source()).toEqual({ realmId: B });
+    expect(await audits("roster.cleared")).toHaveLength(1);
+  });
+
+  it("a cache that doesn't say which company it came from is not replaced by an answer with no customers", async () => {
+    await db.delete(setting).where(eq(setting.key, "roster.source"));
+    stub.customers = [];
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(no_customers)") });
+    expect(await db.select().from(qboCustomer)).toHaveLength(9);
+  });
+
   it("a refresh during which the connected company changes fails and keeps the old cache", { timeout: 30_000 }, async () => {
     stub.customers = [{ Id: "900", DisplayName: "Someone Else Entirely", Active: true, SyncToken: "0" }];
     stub.queryDelayMs = 300;

@@ -24,6 +24,21 @@ describe("SMTP sender", () => {
     expect(m!.raw).toMatch(/Content-Type: text\/html/);
   });
 
+  it("carries a file such as a calendar file as an attachment", async () => {
+    sink = await startMailSink({ secure: true, ...tls });
+    const calendar = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nSUMMARY:Car wash, rinse crew\r\nEND:VCALENDAR\r\n";
+    await sender(sink.port, "tls")({ ...msg, attachments: [{ filename: "volunteer-shift.ics", contentType: "text/calendar; charset=utf-8; method=PUBLISH", content: calendar }] });
+    const raw = sink.messages[0]!.raw;
+    expect(raw).toMatch(/Content-Type: multipart\/mixed/);
+    expect(raw).toMatch(/Content-Type: text\/calendar; charset=utf-8; method=PUBLISH/);
+    expect(raw).toMatch(/Content-Disposition: attachment; filename=volunteer-shift\.ics/);
+    // The part's body, however nodemailer chose to encode it.
+    const part = raw.slice(raw.indexOf("Content-Type: text/calendar"));
+    const head = part.slice(0, part.indexOf("\r\n\r\n")), body = part.slice(part.indexOf("\r\n\r\n") + 4, part.indexOf("\r\n--"));
+    const decoded = /base64/.test(head) ? Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8") : body;
+    expect(decoded).toContain("SUMMARY:Car wash, rinse crew");
+  });
+
   it("upgrades with STARTTLS", async () => {
     sink = await startMailSink({ secure: false, ...tls });
     await sender(sink.port, "starttls")(msg);

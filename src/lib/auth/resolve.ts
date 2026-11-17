@@ -22,7 +22,8 @@ export function setBootstrapHook(h: BootstrapHook) { bootstrapHook = h; }
 
 const norm = (e: string) => e.trim().toLowerCase();
 
-export async function resolveStaff(authUserId: string): Promise<StaffIdentity | null> {
+/** `ip` is the request's address, for the audit rows a first sign-in writes (v1 spec §13: who, what, when and from where). */
+export async function resolveStaff(authUserId: string, ip: string | null = null): Promise<StaffIdentity | null> {
   const bound = await db.select().from(staffUser).where(eq(staffUser.authUserId, authUserId));
   if (bound[0]) return bound[0].status === "active" ? toStaff(bound[0]) : null;
 
@@ -41,13 +42,13 @@ export async function resolveStaff(authUserId: string): Promise<StaffIdentity | 
       .where(and(eq(staffUser.id, invite.id), isNull(staffUser.authUserId))).returning();
     if (!row) return null;
     await writeAudit({ actor: { door: "staff", id: row.id, label: row.email }, action: "staff.bind", targetType: "staff_user", targetId: row.id,
-      before: { status: invite.status, authUserId: null }, after: { status: "active", authUserId } });
+      before: { status: invite.status, authUserId: null }, after: { status: "active", authUserId }, ip });
     return toStaff(row);
   }
 
   const createdId = await bootstrapHook(email);
   if (!createdId) {
-    await writeAudit({ actor: { door: "staff", id: null, label: email }, action: "signin.refused", targetType: "staff_auth_user", targetId: authUserId });
+    await writeAudit({ actor: { door: "staff", id: null, label: email }, action: "signin.refused", targetType: "staff_auth_user", targetId: authUserId, ip });
     return null;
   }
   const [row] = await db.update(staffUser).set({ authUserId, updatedAt: new Date() })

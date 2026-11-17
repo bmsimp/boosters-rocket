@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { staffAuthClient, parentAuthClient } from "@/lib/auth/client";
+import { Notice } from "./notice";
 
 /** Ends this door's session, then goes to that door's sign-in page. */
 export function SignOutButton({ door }: { door: "staff" | "parent" }) {
@@ -20,7 +21,9 @@ export function SignOutButton({ door }: { door: "staff" | "parent" }) {
   return (
     <div className="sign-out">
       <button type="button" className="btn btn-line" onClick={go} disabled={busy}>{busy ? "Signing out…" : "Sign out"}</button>
-      {failed && <p role="alert" className="errors">We couldn&apos;t sign you out just then. Please try again.</p>}
+      {/* Staff pages answer in notices (DESIGN.md); the parent pages keep their own error line. */}
+      {failed && (door === "staff" ? <Notice tone="problem">We couldn&apos;t sign you out just then. Please try again.</Notice>
+        : <p role="alert" className="errors">We couldn&apos;t sign you out just then. Please try again.</p>)}
     </div>
   );
 }

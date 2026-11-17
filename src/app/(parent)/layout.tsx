@@ -1,23 +1,20 @@
-import { requireParentPage } from "@/lib/guards";
-import { getClubSettings } from "@/lib/settings/club";
-import { ClubBar, initials } from "../components/club-bar";
-import { ParentTabs } from "../components/parent-tabs";
-import { familyNames } from "@/lib/parents/directory";
-import { PARENT_NAV } from "../components/parent-nav";
+import { parentLayoutCtx } from "@/lib/guards";
+import { ParentFrame } from "../components/parent-frame";
+import { RefreshOnResume } from "../components/pwa/refresh-on-resume";
 
+/**
+ * What surrounds a parent page, for a signed-in parent. Not a guard: with nobody signed in (or no family chosen) it
+ * draws the page alone and sends nobody anywhere, and the page's own requireParentPage() then redirects with the page's
+ * address, which a redirect from here could not know.
+ */
 export default async function ParentLayout({ children }: { children: React.ReactNode }) {
-  const [ctx, club] = await Promise.all([requireParentPage(), getClubSettings()]);
-  const names = ctx.families.length > 1 ? await familyNames([ctx.familyQboId]) : null;
+  const ctx = await parentLayoutCtx();
+  if (!ctx) return children;
   return (
-    <>
-      <ClubBar name={club.name} shortName={club.shortName} nav={PARENT_NAV}
-        account={{ href: "/display", initials: initials(ctx.name), label: `Your account and display settings, ${ctx.name}` }} />
-      {ctx.families.length > 1 && (
-        <p className="wrap switch-family">Viewing {names!.get(ctx.familyQboId)}. <a href="/choose-family">Switch family</a></p>
-      )}
+    <ParentFrame who={ctx}>
       {children}
-      <footer className="wrap">{club.treasurerEmail && <>Questions about a charge? Email <a href={`mailto:${club.treasurerEmail}`}>{club.treasurerEmail}</a>. </>}Runs on Booster Rocket.</footer>
-      <ParentTabs />
-    </>
+      {/* An installed app has no reload button: the page's data is read again when the app comes back to the front. */}
+      <RefreshOnResume />
+    </ParentFrame>
   );
 }

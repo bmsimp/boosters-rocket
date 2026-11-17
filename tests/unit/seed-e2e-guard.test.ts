@@ -16,12 +16,14 @@ describe("scripts/seed-e2e.ts", { timeout: 60_000 }, () => {
   ])("refuses %s before connecting to anything", (_name, url) => {
     const r = run(url);
     expect(r.status).toBe(2);
-    expect(r.stderr).toContain('seed-e2e refuses to run: DATABASE_URL must name a database ending in "_test"');
+    expect(r.stderr).toContain("seed-e2e refuses to run: DATABASE_URL names a database this script must not touch");
+    expect(r.stderr).toContain('end in "_test"');
     expect(r.stderr).not.toContain("booster:booster"); // the address, with its password, is not echoed
   });
 
+  // A name of its own, not booster_test: in a git worktree the shared database is refused too (tests/unit/e2e-run-config.test.ts).
   it("goes on to connect when the database name ends in _test", () => {
-    const r = run("postgres://booster:booster@127.0.0.1:1/booster_test");
+    const r = run("postgres://booster:booster@127.0.0.1:1/booster_seedguard_test");
     expect(r.status).toBe(1); // past the guard: it tried the database, and nothing listens on port 1
     expect(r.stderr).not.toContain("refuses to run");
   });

@@ -1,0 +1,29 @@
+# The optional reverse proxy (deploy/compose.yml, profile "proxy"). Everything comes from deploy/.env: the two
+# addresses (APP_URL, DOCUMENSO_URL), the header the portal reads a visitor's address from (CLIENT_IP_HEADER) and the
+# ports. An https address gets its certificate by itself, as long as the name points at this machine and ports 80 and
+# 443 reach it. Caddy's own documentation: https://caddyserver.com/docs/caddyfile
+{
+	http_port {$PROXY_HTTP_PORT}
+	https_port {$PROXY_HTTPS_PORT}
+	# No admin endpoint: the configuration is this file, read when the container starts.
+	admin off
+}
+
+# What both sites get: compressed responses (Documenso compresses nothing itself, and its signing page is large), and
+# the visitor's address as one bare address, no port and no list, replacing whatever the visitor sent. Documenso reads
+# the first entry of X-Forwarded-For and keeps it only when it is a bare address; the portal reads CLIENT_IP_HEADER.
+(to_upstream) {
+	encode zstd gzip
+	reverse_proxy {args[0]} {
+		header_up X-Forwarded-For {remote_host}
+		header_up {$CLIENT_IP_HEADER} {remote_host}
+	}
+}
+
+{$APP_URL} {
+	import to_upstream app:3000
+}
+
+{$DOCUMENSO_URL} {
+	import to_upstream documenso:3000
+}

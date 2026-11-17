@@ -151,7 +151,7 @@ describe("connecting a different QuickBooks company", () => {
     expect((await getPreviousCompany())!.families.map((f) => f.name)).toEqual(["Rivera Family", "Chen Family"]);
     expect(await getParentSettings()).toMatchObject({ signin: false, welcome: false });
     expect(await audits("parent.access.cleared")).toEqual([expect.objectContaining({ door: "system", actorLabel: "worker" })]);
-    expect(await audits("roster.cleared")).toEqual([expect.objectContaining({ after: { reason: "different_company", realmId: "2222" } })]);
+    expect(await audits("roster.cleared")).toEqual([expect.objectContaining({ after: { reason: "different_company", realmId: "2222", writesDeleted: 0 } })]);
     const cache = await db.select().from(qboCustomer);
     expect(cache.map((c) => c.qboId).sort()).toEqual(["10", "11", "12", "20", "21", "30", "40", "50", "60"]);
     expect(cache.every((c) => c.email === null && c.phone === null)).toBe(true);     // no shape after the clear: no contact details

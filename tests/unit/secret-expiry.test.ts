@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { expiringSecrets, certificateNextStep } from "@/app/staff/(app)/secret-expiry-rule";
+import { credentialStanding, expiringSecrets, certificateNextStep } from "@/app/staff/(app)/secret-expiry-rule";
 
 const now = new Date("2026-11-08T00:00:00Z");
 const view = { id: "x", thumbprintSha1: "AB", thumbprintS256: "cd", notAfter: now, createdAt: now };
@@ -30,5 +30,15 @@ describe("certificateNextStep", () => {
     expect(certificateNextStep({ pendingCertificate: true }))
       .toBe("a replacement certificate is ready: add it to the app registration, then select Check and switch under Sign-in.");
     expect(certificateNextStep({ pendingCertificate: false })).toBe("Use Replace certificate under Sign-in.");
+  });
+});
+
+describe("credentialStanding", () => {
+  it("is expired once its date has passed, expiring within 30 days, and working otherwise", () => {
+    expect(credentialStanding(s("staff-microsoft", "2026-11-07T00:00:00Z"), now)).toBe("expired");
+    expect(credentialStanding(s("staff-microsoft", "2026-11-20T00:00:00Z"), now)).toBe("expiring");
+    expect(credentialStanding(s("staff-microsoft", "2027-01-20T00:00:00Z"), now)).toBe("working");
+    expect(credentialStanding(s("staff-microsoft", null), now)).toBe("working");
+    expect(credentialStanding(s("staff-microsoft", null, false), now)).toBe("unreadable");
   });
 });

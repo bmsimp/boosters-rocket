@@ -119,6 +119,16 @@ button { font: inherit; cursor: pointer; }
 .menu-panel a { color: var(--club-on); text-decoration: none; font: 600 1.125rem var(--mark); min-height: 48px;
   display: flex; align-items: center; padding: 0 var(--cell); }
 .menu-panel a[aria-current="page"] { box-shadow: inset 4px 0 0 var(--club-on); }
+/* Staff pages at 760px and wider: the menu can hold more links than one row has room for (fourteen for an Admin), so
+   the links wrap onto further rows inside the bar, which grows to hold them, instead of running off its edge. A link's
+   own words never break, and the club's name keeps its place: at most two fifths of the row. With few links the bar is
+   the one 56px row it always was. The parent bar (no .bar-rows) never wraps: the season ruler's grid counts on 56px. */
+@media (min-width: 760px) {
+  .bar-rows .wrap { height: auto; min-height: 56px; padding-top: 6px; padding-bottom: 6px; }
+  .bar-rows .club { flex: 0 1 auto; max-width: 40%; }
+  .bar-rows .top-nav { flex: 1 1 0; min-width: 0; flex-wrap: wrap; justify-content: flex-end; margin-left: 0; }
+  .bar-rows .top-nav a { white-space: nowrap; }
+}
 .account { margin-left: auto; width: 44px; height: 44px; border-radius: 50%; border: 2px solid currentColor;
   display: grid; place-items: center; text-decoration: none; flex: none;
   background: transparent; color: var(--club-on); font: 700 0.875rem var(--mark); }
@@ -219,9 +229,9 @@ dl.details dt { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-tra
 footer.wrap { padding-top: var(--s5); padding-bottom: var(--s5); color: var(--ink-2); font-size: 0.875rem; }
 footer a { color: var(--club-text); }
 
-/* Bottom tabs on phones */
+/* Bottom tabs on phones: one column for each tab in PARENT_NAV, however many there are */
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; background: var(--paper); border-top: 2px solid var(--ink);
-  display: grid; grid-template-columns: repeat(4, 1fr); padding-bottom: env(safe-area-inset-bottom); }
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding-bottom: env(safe-area-inset-bottom); }
 .tabs a { min-height: 64px; display: grid; place-items: center; align-content: center; gap: 2px; text-decoration: none;
   color: var(--ink-2); font: 600 0.9375rem var(--mark); letter-spacing: .03em; }
 .tabs svg { width: 24px; height: 24px; }
@@ -234,7 +244,7 @@ footer a { color: var(--club-text); }
 .setting .hint { color: var(--ink-2); font-size: 0.9375rem; margin-top: 2px; }
 .choices { display: grid; gap: var(--s2); margin-top: var(--s3); }
 .choice { position: relative; display: block; cursor: pointer; }
-.choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; } /* the whole tile: the keyboard scrolls all of it into view, and a screen reader outlines it */
 .choice span { display: grid; grid-template-columns: 24px 1fr; gap: 2px var(--s3); align-items: center; min-height: 56px;
   padding: var(--s2) var(--s4); border: var(--rule) solid var(--ink); background: var(--paper); }
 .choice span::before { content: ""; width: 20px; height: 20px; border: 2px solid var(--ink); border-radius: 50%;
@@ -337,10 +347,429 @@ p.errors, .sign-out .errors { padding-left: 0; }
 
 .cert-panel code { word-break: break-all; }
 
-/* Roles dropdown: a <details> of checkboxes. */
-.role-picker { position: relative; display: inline-block; }
-.role-picker summary { cursor: pointer; padding: var(--s1) var(--s3); border: var(--rule) solid var(--ink); background: var(--paper); color: var(--ink); }
-.role-picker summary:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+/* ---- Home and Family (parent pages): the rules added with those pages. Keep new ones for them inside this block. ---- */
 
-.role-picker-list { display: grid; gap: var(--s1); padding: var(--s2) var(--s3); border: var(--rule) solid var(--ink); border-top: 0; background: var(--paper); color: var(--ink); }
-.role-picker-item { display: flex; align-items: center; gap: var(--s2); }
+/* The account control is filled, like the monogram, while its page (Display) is open. */
+.account[aria-current="page"] { background: var(--club-on); color: var(--club); }
+
+/* "Viewing <family>. Switch family", above the page for a person in more than one family. */
+.switch-family { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s2); margin-top: var(--s2); font-size: 0.9375rem; color: var(--ink-2); }
+.switch-family a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
+
+/* The family chooser lists families as buttons, not bullets. */
+ul.stack { list-style: none; padding: 0; }
+
+/* A long name or email address wraps where it stands instead of widening the page. */
+dl.details dd { min-width: 0; overflow-wrap: anywhere; }
+.home-head .page-title, .family-page .page-title, .students .who, .money > h2 { overflow-wrap: anywhere; }
+
+/* Where the students and details come from, and when they were read. */
+.roster-asof { font-size: 0.875rem; color: var(--ink-2); }
+main.wrap.single > .roster-asof { margin-top: var(--s4); max-width: 760px; }
+
+/* Home: the head (the greeting), then the boxes. The family's name is the money box's heading. */
+.home-head .page-title { margin-top: var(--s4); }
+@media (min-width: 760px) {
+  /* Boxes fill the two columns in order, so there is no empty column whichever boxes a family has. */
+  main.wrap.home { grid-template-areas: none; grid-template-rows: auto auto 1fr; }
+  .home > * { grid-area: auto; }
+  .home > .home-head, .home > p { grid-column: 1 / -1; }
+  .home > section:only-of-type { grid-column: 1 / -1; max-width: 760px; }
+  .home-head .page-title { margin-top: 0; }
+  /* With the money box, which comes first in the markup: money on the left, as in design/reference/parent-home.html,
+     beside the students and the details stacked on the right. The last row takes up whatever height the money box
+     has over them, so the details sit right under the students. */
+  .home > .money { grid-column: 1; grid-row: 2 / span 2; }
+  .home > .money ~ .students-box, .home > .money ~ .details-box { grid-column: 2; }
+}
+/* ---- End of Home and Family ---- */
+
+/* ---- Season: the ruler's heading on Home, requirement lines, the Season page, and the staff season pages. Keep new rules for them inside this block. ---- */
+
+/* The ruler's heading is a labelled line, not a second page heading, with the way to the Season page beside it. */
+.season-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: var(--s4); }
+.season-title { font: 600 0.9375rem var(--mark); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); overflow-wrap: anywhere; }
+.season-title b { color: var(--ink); }
+.season-head a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; font-size: 0.9375rem; }
+.season-head + .sets { margin-top: 0; }
+
+/* A waived requirement: its own icon and words, in the secondary ink. */
+.state.waived { color: var(--ink-2); }
+
+/* Requirement lines under a student or the family: the title, the state in words, then the due date while something is left. */
+.reqs { list-style: none; padding: 0; margin-top: var(--s1); grid-column: 1 / -1; }
+.reqs li, .students .reqs li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; align-items: start; padding: var(--s2) 0; border-top: 1px solid var(--hair); }
+.reqs .what { font-size: 1rem; overflow-wrap: anywhere; }
+.reqs .optional { color: var(--ink-2); }
+.reqs .when { display: block; font-size: 0.875rem; color: var(--ink-2); }
+.reqs .when.soon { color: var(--due); font-weight: 700; }
+.reqs .when.late { color: var(--late); font-weight: 700; }
+.family-reqs { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--hair); }
+.family-reqs h3 { font: 700 1.1875rem/1.45 var(--read); overflow-wrap: anywhere; }
+.family-reqs > .state { margin-top: 2px; }
+.season-page .box > .state, .step-none { margin-top: var(--s2); }
+
+/* Staff season pages: dropdowns drawn like the other fields, lists of tick boxes, and forms kept folded until wanted. */
+.field select { font: inherit; color: var(--ink); background: var(--paper); border: var(--rule) solid var(--ink); border-radius: 0;
+  min-height: 44px; padding: var(--s2) var(--s3); width: 100%; min-width: 0; } /* never wider than its column, however long an option is */
+.field select:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+fieldset.checks { border: 0; padding: 0; min-width: 0; }
+.checks legend { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); padding: 0; }
+.checks label { display: flex; align-items: center; gap: var(--s2); min-height: 44px; overflow-wrap: anywhere; }
+.checks input { width: 20px; height: 20px; flex: none; min-height: 0; padding: 0; accent-color: var(--club-text); }
+details.more { margin-top: var(--s3); }
+details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; color: var(--club-text); }
+.one-button { display: grid; gap: var(--s2); justify-items: start; }
+.lines.progress-rows li { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.progress-rows .state { margin-top: 2px; }
+.progress-rows .when a { display: inline-block; padding: var(--s2) 0; } /* room to tap the way to a family's page, above the row's buttons */
+.everyone-shown { margin-top: var(--s3); } /* stands clear of the search above it */
+/* ---- End of Season ---- */
+
+/* ---- Volunteer: the parent Volunteer pages and the staff volunteer pages. Keep new rules for them inside this block. ---- */
+
+/* An event's description keeps the lines staff typed. */
+.volunteer-about { white-space: pre-line; overflow-wrap: anywhere; margin-top: var(--s2); }
+.volunteer-page .box > p + p, .volunteer-page .box > dl + p { margin-top: var(--s2); }
+/* Who will fill the place: a choice group, then the one button that signs them up. */
+.volunteer-confirm { margin-top: var(--s4); width: 100%; }
+@media (min-width: 760px) { .volunteer-confirm { width: auto; } }
+.volunteer-done { margin-top: var(--s3); font-weight: 700; }
+.volunteer-cancel { margin-top: var(--s2); }
+.lines li > div > .state { margin-top: 2px; }
+/* Checking in: a full-width button per person on a phone, then one for everyone. */
+.checkin-one { grid-column: 1 / -1; }
+.checkin-one .btn { width: 100%; }
+@media (min-width: 760px) { .checkin-one { grid-column: auto; } .checkin-one .btn { width: auto; } }
+.checkin-all { margin-top: var(--s3); }
+/* A shift's check-in sheet, to print or show at the event. A QR code scans only dark on light, whatever the theme. */
+.checkin-sheet { text-align: center; }
+.checkin-qr { display: block; width: min(100%, 20rem); height: auto; margin: var(--s4) auto; background: white; forced-color-adjust: none; }
+.checkin-address { overflow-wrap: anywhere; font-size: 1rem; }
+.checkin-sheet .row-actions { justify-content: center; }
+@media print {
+  .bar, .checkin-tools { display: none; }
+  .checkin-sheet .box { border: 0; box-shadow: none; }
+}
+/* Paying instead of volunteering: the amount said once, large, then what happens when the guardian confirms. */
+.buyout-amount { font-size: 2rem; font-weight: 700; margin-top: var(--s2); }
+.buyout-points { margin: var(--s2) 0 0 var(--s4); }
+.buyout-points li + li { margin-top: var(--s1); }
+.buyout-next { margin-top: var(--s2); font-weight: 400; }
+/* ---- End of Volunteer ---- */
+
+/* ---- Forms: the parent's Forms pages and the signing frame. Keep new rules for them inside this block. ---- */
+.forms-page .page-title { overflow-wrap: anywhere; }
+.forms-page .box > .state { margin-top: var(--s2); }
+.form-open { justify-self: start; margin-top: var(--s2); display: inline-flex; align-items: center; text-decoration: none; }
+.consent { margin-top: var(--s3); display: grid; gap: var(--s3); max-width: 60ch; }
+/* Documenso's own page, in a frame: as wide as its box, and tall enough to read and sign a page on a phone. */
+.sign-frame { margin-top: var(--s3); }
+.sign-frame iframe { display: block; width: 100%; height: min(80vh, 900px); min-height: 520px; border: 2px solid var(--ink); background: var(--paper); }
+/* While the keyboard is inside Documenso's page (it takes the focus once the guardian agrees), the frame wears the ring. */
+.sign-frame iframe:focus { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+.signers { margin-top: var(--s4); }
+/* Staff signed forms: the matrix scrolls inside its box on a narrow screen, the names column staying put; hashes break anywhere. */
+.matrix-filter { display: grid; gap: var(--s3); margin-top: var(--s3); }
+@media (min-width: 760px) { .matrix-filter { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; } }
+.matrix-filter-go { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.matrix-filter-go a { display: inline-flex; align-items: center; min-height: 44px; }
+.matrix-wrap { position: relative; margin-top: var(--s4); overflow-x: auto; max-width: 100%; } /* positioned, so the hidden words in its cells are clipped with it */
+.matrix-wrap:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+.matrix { border-collapse: collapse; width: 100%; font-size: 0.9375rem; }
+.matrix th, .matrix td { text-align: left; vertical-align: top; padding: var(--s2) var(--s3); border-top: 1px solid var(--hair); min-width: 9rem; }
+.matrix thead th { font: 600 0.875rem var(--mark); letter-spacing: .04em; color: var(--ink-2); border-top: 0; }
+.matrix tbody th[scope="row"] { position: sticky; left: 0; background: var(--paper); font-weight: 600; overflow-wrap: anywhere; }
+.matrix-family th { padding-top: var(--s4); font: 700 1.0625rem/1.4 var(--read); }
+.matrix-family th > span { display: block; overflow-wrap: anywhere; }
+.matrix-link { display: inline-flex; min-height: 44px; align-items: center; color: inherit; }
+.matrix .when { display: block; font-size: 0.875rem; color: var(--ink-2); }
+.hash { overflow-wrap: anywhere; word-break: break-all; }
+/* ---- End of Forms ---- */
+
+/* ---- Staff pages: the staff home, the staff lists and forms, and the primitives they are built from (tables, notices,
+   form controls; DESIGN.md names each with its states). Keep new rules for the staff pages inside this block. ---- */
+
+/* Tables (src/app/components/data-table.tsx). At 760px and up a ruled table: a heavy rule under the header, hairlines
+   between rows, numbers right-aligned. Below 760px each row stacks: a hairline above it, the row's name first, then each
+   cell as label and value side by side. The elements keep their roles, so the stacked rows still read as a table. */
+.table { width: 100%; border-collapse: collapse; margin-top: var(--s3); font-size: 1rem; }
+.table caption { caption-side: top; text-align: left; color: var(--ink-2); font-size: 0.9375rem; padding-bottom: var(--s2); }
+.table th, .table td { text-align: left; vertical-align: top; padding: var(--s2) var(--s3); border-top: 1px solid var(--hair); overflow-wrap: anywhere; }
+.table th:first-child, .table td:first-child { padding-left: 0; }
+.table th:last-child, .table td:last-child { padding-right: 0; }
+.table thead th { font: 600 0.875rem/1.2 var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2);
+  border-top: 0; border-bottom: 2px solid var(--ink); vertical-align: bottom; overflow-wrap: normal; }
+.table tbody th[scope="row"] { font-weight: 700; }
+.table .t-num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }
+.table .t-label { display: none; }
+.table .t-group th { padding-top: var(--s4); font: 700 1.0625rem/1.4 var(--read); border-top: 2px solid var(--ink); }
+.table .t-group th > span { overflow-wrap: anywhere; }
+.table .when { display: block; font-size: 0.875rem; color: var(--ink-2); }
+.table .t-line { display: block; }
+.table th .state { margin-top: 2px; font-size: 0.875rem; }
+.table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-end; justify-items: end; }
+.table .row-actions { grid-column: auto; }
+.table .t-quiet .btn { white-space: nowrap; } /* a row's button keeps its words on one line; the columns of words give way instead */
+.table details.more { margin-top: var(--s1); }
+.table details.more > summary { padding: 10px 0; }
+.table a:not(.btn):not(.matrix-link) { display: inline-flex; align-items: center; min-height: 44px; margin: -10px 0; } /* a 44px tap target, sized from the line, without a taller row */
+@media (max-width: 759.98px) {
+  .table, .table caption, .table tbody, .table tr, .table th, .table td { display: block; }
+  .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .table tbody tr { display: grid; gap: var(--s1); padding: var(--s3) 0; border-top: 1px solid var(--hair); }
+  .table th, .table td { border: 0; padding: 0; }
+  .table td { display: grid; grid-template-columns: minmax(6.5rem, 2fr) minmax(0, 3fr); gap: var(--s3); align-items: baseline; }
+  .table td.t-quiet { display: block; margin-top: var(--s1); }
+  .table .t-num { text-align: left; }
+  .table .t-label { display: block; font: 600 0.8125rem/1.3 var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .table tbody tr.t-group { border-top: 2px solid var(--ink); padding-bottom: 0; }
+  .table .t-group th { padding-top: 0; }
+  .table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-start; justify-items: start; }
+}
+
+/* Notices (src/app/components/notice.tsx): a panel ruled evenly all round in 2px ink, like every box. The tone is carried
+   by what it says: its icon, drawn in paper on a square cell filled with the tone's ink, and its word in the label face
+   in the same ink. Information is ink, needs attention amber, done green, a problem red. */
+.notice { --tone: var(--ink); display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--s3); align-items: start;
+  padding: var(--s3) var(--s4); border: 2px solid var(--ink); background: var(--paper); color: var(--ink); }
+.notice-warning { --tone: var(--due); }
+.notice-done { --tone: var(--done); }
+.notice-problem { --tone: var(--late); }
+.notice > svg { width: 28px; height: 28px; padding: 4px; background: var(--tone); color: var(--paper); }
+.notice:has(> .notice-body > .notice-title) > svg { margin-top: 1px; }
+.notice-body { min-width: 0; overflow-wrap: anywhere; font-size: 1rem; }
+.notice-body > * + * { margin-top: var(--s2); }
+.notice-word { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--tone); margin-right: var(--s1); }
+.notice-title { font: 700 1.5rem/1.1 var(--mark); letter-spacing: .005em; }
+.notice-list { padding-left: 1.2em; margin-top: var(--s1); }
+.notice .box-foot { margin-top: var(--s3); }
+.notice a:not(.btn) { color: var(--club-text); font-weight: 700; }
+main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
+.box > .notice, .box > form + .notice, .box > p + .notice { margin-top: var(--s3); }
+
+/* Form controls. Text fields, text areas and selects fill their column and never run past their box. A select draws its
+   own arrow in ink. Check boxes are ruled squares and radio marks ruled circles, filled in the club's text color when
+   chosen. Disabled is the button's disabled look (hair fill, secondary ink), dashed in high contrast. */
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), .field textarea, .field select { width: 100%; max-width: 100%; min-width: 0; }
+.field select { appearance: none; -webkit-appearance: none; padding-right: 40px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position: calc(100% - 22px) 52%, calc(100% - 16px) 52%; background-size: 6px 6px; background-repeat: no-repeat; }
+.field textarea { resize: vertical; }
+.checks input[type="checkbox"], .checks input[type="radio"] { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 0;
+  display: inline-grid; place-content: center; border: 2px solid var(--ink); border-radius: 0; background: var(--paper); cursor: pointer; }
+.checks input[type="radio"] { border-radius: 50%; }
+.checks input[type="checkbox"]::before { content: ""; width: 6px; height: 11px; border: solid var(--paper); border-width: 0 3px 3px 0;
+  transform: translateY(-1px) rotate(45deg); visibility: hidden; }
+.checks input[type="radio"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--club-text); visibility: hidden; }
+.checks input:checked::before { visibility: visible; }
+.checks input[type="checkbox"]:checked { background: var(--club-text); border-color: var(--club-text); }
+.checks input[type="radio"]:checked { border-color: var(--club-text); }
+.checks label:hover input:not(:checked):not(:disabled) { background: var(--club-tint); }
+.checks input:focus-visible { outline: var(--ring) solid var(--club-text); outline-offset: 2px; }
+.checks > p, .checks .hint { margin-top: var(--s1); }
+.stack > .setting { margin-top: 0; } /* a choice group inside a form keeps to the form's own gaps */
+.btn:disabled, .btn:disabled:hover { background: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
+.field input:disabled, .field textarea:disabled, .field select:disabled { background-color: var(--hair); border-color: var(--hair); color: var(--ink-2); cursor: not-allowed; }
+.checks input:disabled { background: var(--hair); border-color: var(--hair); cursor: not-allowed; }
+.checks label:has(input:disabled) { color: var(--ink-2); }
+:root[data-contrast="more"] .btn:disabled, :root[data-contrast="more"] .field :disabled, :root[data-contrast="more"] .checks input:disabled {
+  background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
+@media (prefers-contrast: more) {
+  :root:not([data-contrast="standard"]) .btn:disabled, :root:not([data-contrast="standard"]) .field :disabled, :root:not([data-contrast="standard"]) .checks input:disabled {
+    background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
+}
+@media (forced-colors: active) {
+  .notice > svg { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 2px solid CanvasText; padding: 2px; } /* no fill here: the cell keeps its edge, the icon and word carry the tone */
+  .field select { appearance: auto; background-image: none; padding-right: var(--s3); }
+  .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
+  .checks input[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
+  .checks input[type="checkbox"]::before { border-color: HighlightText; }
+  .checks input[type="radio"]:checked { border-color: Highlight; }
+  .checks input[type="radio"]::before { background: Highlight; }
+  .checks input:disabled { border-color: GrayText; }
+  .btn:disabled, .field :disabled { border-style: dashed; color: GrayText; }
+}
+
+/* The audit log: a row's details open under its words, and a long code or record id breaks where it must. */
+.audit-table code { overflow-wrap: anywhere; font-size: 0.875rem; }
+.audit-table details summary { cursor: pointer; padding: 10px 0; font-weight: 700; color: var(--club-text); }
+
+/* A heading over one of several tables in a box. */
+.box h3.table-head { font: 700 1.1875rem/1.45 var(--read); margin-top: var(--s4); }
+
+/* The staff home: what needs doing today, one line each, with the way to it. */
+.today { list-style: none; padding: 0; margin-top: var(--s3); }
+.today li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s1) var(--s4);
+  padding: var(--s3) 0; border-top: 1px solid var(--hair); }
+.today li > div { flex: 1 1 20rem; min-width: 0; } /* the words take the line, so every link sits at its end on a laptop, however long its words */
+.today li .state { font-size: 1rem; }
+.today .when { display: block; font-size: 0.875rem; color: var(--ink-2); margin-top: 2px; }
+.today li a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
+.today + .hint, .box > .state + .hint { margin-top: var(--s2); }
+.staff-home .box > .state { margin-top: var(--s3); }
+
+/* Parents: each address to review is one block between heavy rules: the address, who and where, then the decision,
+   its note and its two buttons ruled in together. */
+.review-items { list-style: none; padding: 0; margin-top: var(--s4); }
+.review-item { display: grid; gap: var(--s3); padding: var(--s4) 0; border-top: 2px solid var(--ink); }
+.review-item:last-child { padding-bottom: 0; }
+.review-address { font: 700 1.1875rem/1.45 var(--read); overflow-wrap: anywhere; }
+.review-item dl.details { margin-top: 0; }
+.review-families { list-style: none; padding: 0; display: grid; gap: var(--s1); }
+.review-families .state { grid-column: auto; }
+fieldset.decide { border: 1px solid var(--hair); padding: var(--s3) var(--s4) var(--s4); min-width: 0; display: grid; gap: var(--s3); }
+.decide legend { font: 700 1.0625rem var(--read); padding: 0 var(--s1); }
+.decide .row-actions { margin-top: 0; }
+
+/* The forms matrix keeps its wide table inside its box at 760px and up, and stacks like the other tables below. A cell
+   for someone a form doesn't ask is empty on the wide table and says "Not asked" when the rows stack. */
+.matrix .t-group th .one-button { margin-top: var(--s2); }
+.matrix-none { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 759.98px) {
+  .matrix-none { position: static; width: auto; height: auto; overflow: visible; clip: auto; color: var(--ink-2); }
+  .matrix-wrap { overflow-x: visible; }
+  .matrix th, .matrix td { min-width: 0; }
+  .matrix tbody th[scope="row"] { position: static; }
+}
+/* Every disclosure's summary is a 44px tap target, however its line is set (the Roles page's box, the audit table's Details). */
+details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10px; }
+/* ---- End of Staff pages ---- */
+
+/* ---- Settings and the staff menu: the grouped staff menu, the Settings page and every settings page, the roles
+   checklist, the Staff page and the setup's club step. Keep new rules for them inside this block. ---- */
+
+/* The staff menu at 760px and up. A group is a button drawn like the links beside it; it opens its links in a panel
+   below it, on the club fill like the phone's menu panel. Nothing opens on hover. The group holding the page the
+   person is on carries the same underline as a current link. */
+.top-nav .nav-group { position: relative; display: flex; }
+.nav-group-button { color: var(--club-on); background: transparent; border: 0; border-radius: 0; font: 600 1.125rem var(--mark);
+  padding: 0 12px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.nav-caret { width: 12px; height: 12px; flex: none; transition: transform .15s ease-out; }
+.nav-group-button[aria-expanded="true"] .nav-caret { transform: rotate(180deg); }
+.nav-group-button.here { box-shadow: inset 0 -3px 0 var(--club-on); }
+.nav-panel { position: absolute; right: 0; top: 100%; z-index: 20; min-width: 14rem; max-width: calc(100vw - 2 * var(--cell));
+  display: grid; background: var(--club); border: 2px solid var(--club-on); padding: var(--s1) 0; }
+.nav-panel[hidden] { display: none; }
+.top-nav .nav-panel a { min-height: 48px; padding: 0 var(--s4); white-space: nowrap; }
+.top-nav .nav-panel a[aria-current="page"] { box-shadow: inset 4px 0 0 var(--club-on); }
+/* The phone's Menu panel: each group under its name. A long menu scrolls inside the panel. */
+.menu-panel { max-height: calc(100dvh - 56px); overflow-y: auto; }
+.menu-group { display: grid; margin-top: var(--s1); border-top: 1px solid var(--club-on); padding-top: var(--s1); }
+.menu-group-name { font: 600 0.9375rem var(--mark); letter-spacing: .08em; text-transform: uppercase; padding: var(--s2) var(--cell) 0; }
+
+/* The Settings page: a box per part, its state in words with an icon, what is set, and the way to its own page. */
+.settings-page .box > .state { margin-top: var(--s2); }
+.settings-page .box .details { margin-top: var(--s3); }
+.settings-open { margin-top: var(--s4); display: flex; flex-wrap: wrap; gap: var(--s2); }
+.settings-open .btn { display: inline-flex; }
+.settings-grid { margin-top: var(--cell); display: grid; gap: var(--cell); }
+@media (min-width: 760px) { .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+/* The way back to Settings (or to a part's own page), above a settings page's title. */
+.back-to-settings { margin-top: var(--s3); }
+.back-to-settings + .page-title { margin-top: var(--s1); }
+.back-to-settings a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
+/* The mail steps: each step's name, a link to it, and whether it is done, in words. */
+.mail-steps { display: grid; gap: var(--s1); margin-top: var(--s4); padding-left: 1.4em; max-width: 760px; }
+.mail-steps li { padding-left: var(--s1); }
+.mail-steps a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; margin-right: var(--s3); }
+.mail-steps .state { display: inline-flex; }
+
+/* Setup: each step's Next button and the address box stand clear of the box or form above them, as boxes do. */
+.setup-page > .box, .setup-page > form, .setup-page > .stack { margin-top: var(--cell); }
+
+/* A club color picked on the setup's club step or the Club page, shown on a sample of the club bar. */
+.club-preview { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 0 var(--s4); background: var(--club); color: var(--club-on);
+  border: 2px solid var(--ink); }
+.club-preview .club { font: 700 1.3125rem/1 var(--mark); }
+
+/* The roles checklist: one ruled area per part of the portal, a tick box per thing a role lets people do. */
+.role-form .role-area { border-top: 1px solid var(--hair); padding-top: var(--s3); }
+.role-form .role-area legend { float: left; width: 100%; margin-bottom: var(--s1); }
+.role-form .role-area label { clear: left; align-items: flex-start; padding: var(--s2) 0; min-height: 44px; } /* below the floated legend, never squeezed beside it */
+.role-form .role-area input { margin-top: 2px; }
+.role-form .role-area .hint { display: inline; }
+.role-form .role-patterns { max-width: 60ch; } /* a Notice in the needs-attention tone: what a save of this role will change */
+.role-delete { border-top: 1px solid var(--hair); padding-top: var(--s3); margin-top: var(--s4); }
+
+/* The Staff page: each person's name and email, their roles as ticks with their own Save, then the quieter sign-in
+   switch. On wide screens the three sit side by side, lined up from row to row. */
+.staff-people { list-style: none; padding: 0; margin-top: var(--s3); }
+.staff-person { display: grid; gap: var(--s3); padding: var(--s4) 0; border-top: 1px solid var(--hair); }
+.staff-person:first-child { border-top: 0; }
+.staff-person .who b { overflow-wrap: anywhere; }
+.staff-person .who span { overflow-wrap: anywhere; }
+.staff-roles { display: grid; gap: var(--s2); justify-items: start; }
+.staff-roles fieldset.checks label { min-height: 44px; }
+.btn-quiet { min-height: 44px; padding: 0 var(--s2); border-color: transparent; background: transparent; color: var(--club-text);
+  font-size: 1rem; text-decoration: underline; text-underline-offset: 3px; }
+.btn-quiet:hover { background: var(--club-tint); color: var(--club-text); }
+.staff-name-edit { display: grid; gap: var(--s2); justify-items: start; }
+.staff-name-edit .field { width: 100%; max-width: 24rem; }
+@media (min-width: 760px) {
+  .staff-person { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) auto; align-items: start; }
+  .staff-person > [role="alert"], .staff-person > [role="status"] { grid-column: 1 / -1; }
+}
+
+/* The certificate panel: a done state once Microsoft accepted it, with download and replace tucked under Manage. */
+.cert-done { margin-top: var(--s2); }
+.cert-panel details.more { margin-top: 0; }
+
+/* The match review is a table (the Staff pages' table primitive) and takes the page's whole width. */
+main.wrap.single.matches-page > .box { max-width: none; }
+/* A set-up page's step names that are links (Parent sign-ins, QuickBooks) are each a 44px tap target, like any lone link. */
+.setup-progress a { display: inline-flex; align-items: center; min-height: 44px; }
+/* The welcome email as parents will read it (Parent sign-ins, step 3): its lines wrap inside the box, never past it. */
+.email-sample { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; }
+
+@media (forced-colors: active) {
+  .nav-group-button.here { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
+  .nav-panel { border-color: CanvasText; }
+  .top-nav .nav-panel a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 3px; }
+  .club-preview { forced-color-adjust: none; }
+}
+/* ---- End of Settings and the staff menu ---- */
+
+/* ---- Accessibility fixes for parent pages: the parent pages, the pages before sign-in and the parent frame, where no
+   block above fits (tests/e2e/parent-a11y.spec.ts; docs/accessibility-checks.md). Keep new ones for them inside this block. ---- */
+
+/* A link that stands alone on its line ("Back to sign in") is a tap target of its own: 44px tall, however short its
+   words. A link inside a sentence keeps the sentence's line, as WCAG 2.5.8 allows. */
+.link-line { display: inline-flex; align-items: center; min-height: 44px; }
+/* The status line a box keeps for what its buttons did (src/app/(parent)/announce.tsx): no room taken until it speaks.
+   It takes the focus when it does, and the ring shows where the keyboard now is. */
+.announce:empty { margin: 0; }
+/* On a phone the tab bar is fixed over the foot of the screen. A control the keyboard moves to is scrolled clear of
+   it, never left under it (WCAG 2.4.11): the same room the body keeps below the page. */
+@media (max-width: 759.98px) { html:has(nav.tabs) { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom)); } }
+/* "Skip to the page" (src/app/components/club-bar.tsx), the club bar's first Tab stop, on the staff bar too: read out
+   but not drawn until it has the focus, then a ruled paper button at the top of the bar, in the page's flow, so it
+   covers nothing while it shows. Its ring is the bar's club-on, on the club fill around it. */
+.skip-link:not(:focus) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.skip-link:focus { display: flex; align-items: center; width: fit-content; min-height: 44px; margin: var(--s2) var(--cell) 0;
+  padding: 0 var(--s4); background: var(--paper); color: var(--ink); border: 2px solid var(--ink); font-weight: 700; }
+/* Where it lands: not a control, so the focus rests there with no ring, and the next Tab goes on into the page. */
+.page-start:focus { outline: none; }
+/* ---- End of Accessibility fixes for parent pages ---- */
+
+/* ===== Installed app: safe areas and the install hint. Keep this block last. =====
+   The viewport is "cover" (src/app/layout.tsx), so the page reaches under a notch, rounded corners and the home
+   indicator. These rules keep content clear of them. env() is 0 where there is nothing to clear, so an ordinary
+   browser tab looks as it did. They set padding (and the menu panel's top) only; the rules above keep the rest. */
+body { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+.wrap { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
+.bar { padding-top: env(safe-area-inset-top); }
+.menu-panel { top: calc(56px + env(safe-area-inset-top)); }
+.menu-panel a { padding-left: max(var(--cell), env(safe-area-inset-left)); padding-right: max(var(--cell), env(safe-area-inset-right)); }
+.tabs { padding-bottom: env(safe-area-inset-bottom); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+@media (min-width: 760px) { body { padding-bottom: env(safe-area-inset-bottom); } }
+
+/* Install hint (src/app/components/pwa/install-hint.tsx) */
+.install-hint .install-first { margin-top: var(--s3); }
+.install-hint .steps-list { margin-top: var(--s3); }
+.install-hint .install-actions { margin-top: var(--s4); }
+.install-icon { width: 20px; height: 20px; vertical-align: -4px; }
+/* Under the sign-in form: set apart from it, and its buttons in a row, not the form's full-width ones. */
+.signin .install-hint { margin-top: var(--s6); }
+.signin .install-hint .btn { width: auto; margin-top: 0; }
+/* ===== end of the installed-app block ===== */

@@ -12,13 +12,16 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
+# The commit this image is built from, for the version the Health page shows (next.config.ts). Not a secret.
+ARG APP_COMMIT=""
 # Placeholders only so the env schema parses during `next build`. No real secret is ever present here.
 ENV NEXT_OUTPUT=standalone \
     NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL=postgres://build:build@localhost:5432/build \
     APP_URL=https://build.invalid \
     BETTER_AUTH_SECRET=build-placeholder-not-a-secret-0000000000 \
-    SETTINGS_ENCRYPTION_KEY=YnVpbGQtcGxhY2Vob2xkZXItbm90LWEtc2VjcmV0ISE=
+    SETTINGS_ENCRYPTION_KEY=YnVpbGQtcGxhY2Vob2xkZXItbm90LWEtc2VjcmV0ISE= \
+    APP_COMMIT=$APP_COMMIT
 RUN pnpm build
 
 FROM base AS tools
@@ -31,10 +34,10 @@ RUN printf '{"name":"booster-rocket-tools","private":true,"type":"module"}' > pa
       "drizzle-orm@$(node -p "require('/tmp/drizzle-orm.json').version")" \
       "postgres@$(node -p "require('/tmp/postgres.json').version")"
 COPY drizzle ./drizzle
-COPY scripts/migrate.mjs scripts/seed-poc-guardian.mjs scripts/setup-code.mjs scripts/worker.mjs ./scripts/
+COPY scripts/migrate.mjs scripts/backup-check.mjs scripts/seed-poc-guardian.mjs scripts/setup-code.mjs scripts/worker.mjs ./scripts/
 
 FROM node:26-slim AS run
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 TZ=America/Chicago
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 TZ=UTC
 WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static

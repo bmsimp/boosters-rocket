@@ -19,7 +19,7 @@ jobs:
         with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh
+      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh scripts/backup.sh scripts/restore.sh scripts/backup-schedule.sh deploy/proxy-start.sh
       - name: PowerShell lint
         shell: pwsh
         run: |
@@ -28,7 +28,17 @@ jobs:
           $issues | Format-Table -AutoSize
           if ($issues) { exit 1 }
       - run: pnpm typecheck
-      - run: pnpm test
+      - name: Unit and integration tests
+        # Test files run in parallel workers. Worker 1 uses booster_test; each other worker makes, migrates and at the end
+        # drops a database of its own on the same server (booster_w2_test, ...), which the service's superuser may do.
+        # The runner has 4 cores beside Postgres: 2 workers. BR_TEST_WORKERS=1 runs the files one at a time, as before.
+        # The backup test (tests/integration/backup-restore.test.ts) dumps and restores with Postgres's own tools, which
+        # must be no older than the server and not so new that their dumps use settings it lacks. It runs them inside
+        # the service's container, as the scripts do in deploy/, so they are always the server's own version.
+        env:
+          BR_TEST_WORKERS: "2"
+          BR_TEST_DB_CONTAINER: ${{ job.services.postgres.id }}
+        run: pnpm test
       - name: Build with fake secrets
         env:
           DATABASE_URL: postgres://booster:booster@localhost:5433/booster_test

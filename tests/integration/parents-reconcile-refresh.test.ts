@@ -61,6 +61,27 @@ describe("the reconcile inside a roster refresh", () => {
     expect(failed.after).toEqual({ code: "reconcile_failed" });
   });
 
+  // The gap the review of step 2 left: an answer with no customers in it was saved as an empty roster, and the
+  // reconcile then closed every parent's link.
+  it.each([
+    ["a 200 that isn't a query answer", {}, "bad_answer"],
+    ["a Fault sent with status 200", { Fault: { Error: [{ Message: "a message the portal must never store", code: "4000" }] } }, "fault"],
+    ["a well-formed answer that holds no customers", { QueryResponse: {} }, "no_customers"],
+  ])("%s ends nobody's access: the roster and every link stay as they were", async (_what, body, code) => {
+    await seedParentSettings(SIGNINS_ON);
+    await refreshRoster(worker);
+    const before = { customers: await db.select().from(qboCustomer), links: await db.select().from(guardian), people: await db.select().from(parent) };
+    expect(before.links).toHaveLength(1);
+    stub.oddRosterAnswer = { customers: body };
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining(`(${code})`) });
+    expect(await db.select().from(qboCustomer)).toEqual(before.customers);
+    expect(await db.select().from(guardian)).toEqual(before.links);
+    expect(await db.select().from(parent)).toEqual(before.people);
+    const audit = await db.select().from(auditLog);
+    expect(audit.filter((r) => r.action === "parent.access.ended")).toEqual([]);
+    expect(audit.filter((r) => r.action === "roster.refresh.failed").at(-1)!.after).toEqual({ code });
+  });
+
   it("logs a database failure's SQLSTATE and constraint, and never its query, parameters or message", async () => {
     await seedParentSettings(SIGNINS_ON);
     await refreshRoster(worker);

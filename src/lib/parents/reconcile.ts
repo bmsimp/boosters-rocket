@@ -8,6 +8,7 @@ import { buildRoster, type Cust, type Roster } from "@/lib/roster/model";
 import { decideAccess, type AccessDecision, type HoldSets } from "./access-rules";
 import { getParentSettings, type ParentSettings } from "./settings";
 import { deleteUnusedSigninCodes, endFamilySessions, endParentSessions } from "./sessions";
+import { formsForGoneSigner } from "@/lib/forms/signer-gone";
 
 export const RECONCILE_ACTOR: Actor = { door: "system", id: null, label: "reconcile" };
 /** Thrown by the roster refresh when the reconcile inside it fails, so the refresh can say which part failed. */
@@ -102,9 +103,11 @@ export async function reconcileAccess(tx: Tx, o: { cause: string; report?: Ended
     Object.assign(l, set);
     let sessionsEnded = await endFamilySessions(l.parentId, l.familyQboId, tx);
     if (!links.some((x) => x.parentId === l.parentId && x.status !== "disabled")) sessionsEnded += await endParentSessions(l.parentId, tx);
+    // A document already made for them keeps a working signing link: their unfinished forms for this family start again.
+    const formsReset = wasOpen ? await formsForGoneSigner(tx, { parentId: l.parentId, familyQboId: l.familyQboId, reason: "access_ended", actor: RECONCILE_ACTOR }) : 0;
     // A dropped source is gone from the row: the audit row keeps what it was.
     await audit("parent.access.ended", "guardian", l.id, dropSource ? { status: was, sourceQboId: droppedSource } : { status: was },
-      { parentId: l.parentId, familyQboId: l.familyQboId, reason, sessionsEnded });
+      { parentId: l.parentId, familyQboId: l.familyQboId, reason, sessionsEnded, ...(formsReset ? { formsReset } : {}) });
     r.ended++;
     if (o.report && wasOpen) o.report.ended.push({ ...startedAs.get(l.parentId)!, familyQboId: l.familyQboId });
   };

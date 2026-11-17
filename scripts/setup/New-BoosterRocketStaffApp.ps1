@@ -10,7 +10,7 @@
     4. creates its service principal and grants admin consent for those scopes,
     5. adds Booster Rocket's certificate (made by your Booster Rocket
        server; only its public half is in this script),
-  and prints the values to paste into the Booster Rocket setup page. Nothing is written to disk.
+  and prints the values to enter in the portal: on the setup page, or under Settings, Staff sign-in. Nothing is written to disk.
   Safe to run again: it reuses the app and adds the certificate if it is not already there, leaving other certificates alone.
   With -SetUpMail -Mailbox <address>, it also lets the app send mail as that one mailbox (Exchange Online RBAC for
   Applications: a management scope holding only the mailbox, and the "Application Mail.Send" role on that scope). It
@@ -19,7 +19,7 @@
 .EXAMPLE
   ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e
 .EXAMPLE
-  ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e -SetUpMail -Mailbox webmaster@fznband.org
+  ./New-BoosterRocketStaffApp.ps1 -TenantId 0f8fad5b-d9cb-469f-a165-70867728950e -SetUpMail -Mailbox webmaster@yourclub.org
 #>
 [CmdletBinding()]
 param(
@@ -33,7 +33,7 @@ $ErrorActionPreference = 'Stop'
 if ($AppUrl -notmatch '^https?://') { throw 'Pass -AppUrl with your site address, for example -AppUrl https://portal.example.org' }
 $AppUrl = $AppUrl.TrimEnd('/')
 $CertificateBase64 = '__BOOSTER_ROCKET_CERTIFICATE__'
-if ($CertificateBase64 -notmatch '^[A-Za-z0-9+/]{200,}={0,2}$') { throw 'Download this script from the Booster Rocket setup page; it carries the certificate to add to the app.' }
+if ($CertificateBase64 -notmatch '^[A-Za-z0-9+/]{200,}={0,2}$') { throw 'Download this script from the portal (the setup page, or Settings, Staff sign-in); it carries the certificate to add to the app.' }
 $Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($CertificateBase64))
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
   Write-Host 'This script needs the Microsoft Graph PowerShell module. Install it with:'
@@ -110,7 +110,7 @@ try {
     Write-Host 'The Booster Rocket certificate is already on the app.'
   } else {
     if ($existing | Where-Object { -not $_.key }) {
-      throw "Microsoft didn't return this app's existing certificates, so the script stopped rather than risk removing them. Upload the .cer from the setup page by hand: Certificates & secrets > Certificates > Upload certificate."
+      throw "Microsoft didn't return this app's existing certificates, so the script stopped rather than risk removing them. Upload the .cer from the portal by hand (the setup page, or Settings, Staff sign-in): Certificates & secrets > Certificates > Upload certificate."
     }
     $expired = $existing | Where-Object { $_.endDateTime -and [datetime]$_.endDateTime -lt (Get-Date) } | Select-Object -First 1
     if ($expired) {
@@ -174,19 +174,19 @@ try {
         throw "The role assignment is in place, but Exchange doesn't report $mailAddress in scope. Check the mailbox address, then run this script again."
       }
       Write-Host "The app can now send as $mailAddress, and only as $mailAddress."
-      Write-Host 'Microsoft can take from 30 minutes to 2 hours to apply this. Then use Send test email on the setup page.'
+      Write-Host 'Microsoft can take from 30 minutes to 2 hours to apply this. Then use Send test email in the portal: on the setup page, or under Settings, Outgoing mail.'
     } finally {
       Disconnect-ExchangeOnline -Confirm:$false | Out-Null
     }
   }
 
   Write-Host ''
-  Write-Host 'Enter these on the Booster Rocket setup page. There is no secret to copy.'
+  Write-Host 'Enter these in the portal: on the setup page, or under Settings, Staff sign-in. There is no secret to copy.'
   Write-Host "  Tenant ID:            $tenant"
   Write-Host "  Client ID:            $($app.appId)"
   Write-Host "  Certificate:          $($Certificate.Thumbprint) (expires $($Certificate.NotAfter.ToUniversalTime().ToString('yyyy-MM-dd')))"
   if ($SetUpMail) { Write-Host "  Mail:                 Microsoft 365, sending as $mailAddress" }
-  Write-Host 'A new certificate can take a minute to start working. If the setup page says Microsoft does not have it yet, wait and try again.'
+  Write-Host 'A new certificate can take a minute to start working. If the portal says Microsoft does not have it yet, wait and try again.'
 } finally {
   Disconnect-MgGraph | Out-Null
 }

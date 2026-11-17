@@ -20,9 +20,47 @@ const run = (script: string, ...args: string[]) => spawnSync("bash", [path.join(
   encoding: "utf8", env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, BR_DIR: dir },
 });
 
+const ADDRESS = "https://portal.example.org";
+const calls = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+
 describe("server setup scripts", { timeout: 30_000 }, () => {
+  it("setup.sh writes the address it is given into APP_URL, and no host name of its own", () => {
+    const r = run("setup.sh", `${ADDRESS}/`);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`The portal's address is ${ADDRESS}.`);
+    expect(readFileSync(path.join(dir, ".env.poc"), "utf8").split("\n")).toContain(`APP_URL=${ADDRESS}`);
+    expect(readFileSync(path.resolve(".env.poc.example"), "utf8").split("\n")).toContain("APP_URL=");
+  });
+
+  it("setup.sh refuses a first run with no address, or one that isn't an address, and creates nothing", () => {
+    for (const bad of [[], ["portal.example.org"], ["https://portal.example.org/portal"], ["https://portal.example.org?x=1"], ["ftp://portal.example.org"], ["https://"], ["https://a b"]]) {
+      const r = run("setup.sh", ...bad);
+      expect(r.status, bad.join(" ")).toBe(2);
+      expect(existsSync(path.join(dir, ".env.poc"))).toBe(false);
+      expect(calls()).not.toContain("network create");
+    }
+    expect(run("setup.sh").stderr).toContain("Give the portal's address");
+  });
+
+  it("setup.sh never changes the address of a portal that has one, and says how to move it", () => {
+    expect(run("setup.sh", ADDRESS).status).toBe(0);
+    const again = run("setup.sh", "https://other.example.org");
+    expect(again.status).toBe(0);
+    expect(again.stdout).toContain(`The portal's address is ${ADDRESS}.`);
+    expect(again.stdout).toContain("It was not changed to https://other.example.org.");
+    expect(readFileSync(path.join(dir, ".env.poc"), "utf8").split("\n")).toContain(`APP_URL=${ADDRESS}`);
+    expect(run("setup.sh").stdout).toContain(`left as is. The portal's address is ${ADDRESS}.`);
+  });
+
+  it("setup.sh says so when an older .env.poc has no address", () => {
+    writeFileSync(path.join(dir, ".env.poc"), "DB_PASSWORD=keepme\n"); chmodSync(path.join(dir, ".env.poc"), 0o600);
+    const r = run("setup.sh");
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain("It has no APP_URL");
+  });
+
   it("setup.sh generates SETTINGS_ENCRYPTION_KEY", () => {
-    expect(run("setup.sh").status).toBe(0);
+    expect(run("setup.sh", ADDRESS).status).toBe(0);
     const env = readFileSync(path.join(dir, ".env.poc"), "utf8");
     const key = /^SETTINGS_ENCRYPTION_KEY=(.+)$/m.exec(env)?.[1];
     expect(Buffer.from(key!, "base64")).toHaveLength(32);
@@ -51,7 +89,7 @@ describe("server setup scripts", { timeout: 30_000 }, () => {
   });
 
   it("setup.sh keeps the same key on a second run and never prints it", () => {
-    const first = run("setup.sh");
+    const first = run("setup.sh", ADDRESS);
     const key = /^SETTINGS_ENCRYPTION_KEY=(.+)$/m.exec(readFileSync(path.join(dir, ".env.poc"), "utf8"))![1];
     const second = run("setup.sh");
     expect(second.status).toBe(0);

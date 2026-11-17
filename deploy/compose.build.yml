@@ -1,0 +1,27 @@
+# Builds the portal's image from this checkout instead of pulling the published one. Name both files:
+#
+#   cd deploy
+#   APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f compose.build.yml up -d --build
+#
+# APP_COMMIT is the commit the image is built from, so the Health page can say which version is running (the proof of
+# concept's deploy script passes it the same way). Use this until a release has been published, or to run a change
+# that hasn't been released yet; docs/runbooks/first-install.md and updates.md say more.
+#
+# The image is tagged booster-rocket-app:local, so a built image is never taken for the published one. The app, the
+# worker and the migration share it; the three build sections are the same, and the build runs once.
+x-build: &build
+  context: ..
+  dockerfile: Dockerfile
+  args:
+    APP_COMMIT: ${APP_COMMIT:-}
+
+services:
+  migrate:
+    image: booster-rocket-app:local
+    build: *build
+  app:
+    image: booster-rocket-app:local
+    build: *build
+  worker:
+    image: booster-rocket-app:local
+    build: *build

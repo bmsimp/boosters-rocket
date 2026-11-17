@@ -1,5 +1,6 @@
 // Seeds one test guardian for the proof of concept: the person (made once per email) and their row in one family.
-// Refuses anywhere but portaltest. It sends no email; the tester signs in at /sign-in with a code.
+// Refuses unless the portal's environment says it is a proof of concept (BR_PROOF_OF_CONCEPT=yes): a real club's portal
+// takes its parents from QuickBooks, never from here. It sends no email; the tester signs in at /sign-in with a code.
 import postgres from "postgres";
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -7,9 +8,9 @@ import { randomUUID } from "node:crypto";
 const USAGE = "Usage: node scripts/seed-poc-guardian.mjs --name <name> --email <email> --family <family-id>";
 const fail = (msg) => { console.error(msg); process.exit(1); };
 
-const { DATABASE_URL, APP_URL } = process.env;
+const { DATABASE_URL, BR_PROOF_OF_CONCEPT } = process.env;
 if (!DATABASE_URL) fail("DATABASE_URL is not set");
-if (!APP_URL || !APP_URL.includes("portaltest")) fail("This script only runs against the portaltest proof of concept (APP_URL must contain 'portaltest').");
+if (BR_PROOF_OF_CONCEPT !== "yes") fail("This script only runs against a proof of concept. Nothing was changed. If this portal is one, add BR_PROOF_OF_CONCEPT=yes to its env file and run this again.");
 
 let values;
 try {

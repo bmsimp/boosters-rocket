@@ -6,7 +6,8 @@
 
 web
 
-Responsive web app. Parents mostly use phones; staff mostly use laptops.
+Responsive web app. Parents mostly use phones; staff mostly use laptops. A parent can also install the
+portal as an app on an iPhone or Android phone, from the browser; it is the same web app.
 
 ## Stack
 
@@ -18,8 +19,9 @@ e-signatures. Chosen by the project owner. Full architecture in
 
 - **Parents and guardians** (primary). Non-technical, every age, often on an older phone, often
   in a hurry: in a car-pickup line, at a game, after a reminder email. They come to check what
-  they owe, pay an invoice, sign this season's commitment forms for each of their students, or
-  update a phone number or address. They visit a handful of times a season.
+  they owe, pay an invoice, sign this season's commitment forms for each of their students, sign
+  up for a volunteer shift and check in at it, or update a phone number, address or sign-in email.
+  They visit a handful of times a season.
 - **Staff**: board members, roster volunteers, band directors. Usually on a laptop, sometimes for
   an hour at a time at the start of a season. They manage families and students, set up seasonal
   forms and chase unsigned ones, check balances and the reconciliation report, and manage who can
@@ -45,12 +47,13 @@ themselves.
 
 ## Operating Context
 
-- Every club runs its own copy and rebrands it with its own name, logo and colors. The first
-  install is FZN Band Boosters at `portal.fznband.org`.
+- Every club runs its own copy and rebrands it with its own name, short name and color (a logo
+  can't be supplied yet). The first club to use it is meant to be FZN Band Boosters, at
+  `portal.fznband.org`; it isn't installed there yet.
 - Money: invoices are raised in QuickBooks. Parents pay on QuickBooks' own hosted payment page,
   reached from a "Pay" button on each invoice.
 - Signatures: forms are signed inside the portal through embedded Documenso signing.
-- Parents sign in with an emailed one-time code (Entra External ID); staff sign in with Microsoft
+- Parents sign in with a one-time code that the portal emails them; staff sign in with Microsoft
   or Google.
 - The work is seasonal: a heavy burst at the start of each season (forms, new families), then
   occasional balance checks and payments.
@@ -69,7 +72,8 @@ themselves.
 - One family must never see another family's data; public pages show no family data at all.
 - Terminology: **family** (a QuickBooks customer), **student** (a sub-customer), **guardian**
   (a person who signs in for a family), **staff**, **season**, **form**.
-- Theming: each club supplies a logo and colors at runtime, without a code change or rebuild.
+- Theming: each club supplies its name, short name and color at runtime, without a code change or
+  rebuild. A logo is to follow the same way; it isn't built yet.
 
 ## Brand Commitments
 

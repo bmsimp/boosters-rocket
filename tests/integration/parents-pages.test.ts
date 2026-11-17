@@ -32,6 +32,7 @@ import ChooseFamily from "@/app/choose-family/page";
 import { decideHoldAction, reverseHoldAction, blockAction, unblockAction, resendWelcomeAction } from "@/app/staff/(app)/parents/actions";
 import { resetDb, seedGuardian, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
+import { rowNamed } from "../helpers/table";
 
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const thrown = async (p: Promise<unknown>) => (await p.catch((e: { url?: string; notFound?: boolean }) => e)) as { url?: string; notFound?: boolean };
@@ -94,15 +95,16 @@ describe("the staff pages for parents", () => {
     const html = await parentsPage();
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Can sign in (hasn&#x27;t yet)");
-    expect(html).toContain("Names and email addresses are changed in QuickBooks");
-    expect(html).toContain('<span class="when">Never signed in · Not welcomed yet</span>');
+    expect(html).toContain("Email addresses are changed in QuickBooks, not here");
+    expect(rowNamed(html, "Ana Rivera")).toEqual(["Ana Rivera", "ana@example.com", "Never", "Not sent yet", "Rivera Family: Can sign in (hasn't yet)"]);
     expect(await parentsPage("zzz")).toContain("Nobody matches");
     const [ana] = await db.select().from(parent);
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") });
     await db.insert(auditLog).values({ door: "parent", actorId: ana!.id, actorLabel: ana!.email, action: "signin", targetType: "parent", targetId: ana!.id, at: new Date("2026-11-05T12:00:00Z") });
     const dated = await parentsPage();
-    expect(dated).toContain('<span class="when">Last signed in <time dateTime="2026-11-05T12:00:00.000Z" title="2026-11-05T12:00:00.000Z">');
-    expect(dated).toContain(' · Welcomed <time dateTime="2026-11-01T12:00:00.000Z" title="2026-11-01T12:00:00.000Z">');
+    expect(dated).toContain('<time dateTime="2026-11-05T12:00:00.000Z" title="2026-11-05T12:00:00.000Z">');
+    expect(dated).toContain('Sent <time dateTime="2026-11-01T12:00:00.000Z" title="2026-11-01T12:00:00.000Z">');
+    expect(rowNamed(dated, "Ana Rivera")!.slice(2, 4)).toEqual([expect.stringMatching(/^2026-11-05/), expect.stringMatching(/^Sent 2026-11-01/)]);
   });
 
   it("deciding and reversing go through the actions, and the page follows", async () => {
@@ -197,6 +199,25 @@ describe("the staff pages for parents", () => {
     expect(await blockAction("00000000-0000-4000-8000-00000000dead", "Custody order on file.")).toEqual({ ok: false, errors: ["That person isn't in the portal any more."] });
   });
 
+  it("says, before parent sign-ins are on, that held addresses come up for review once they are", async () => {
+    await resetDb(); await seedShape(); await seedParentSettings({ signin: false, everEnabled: false }); await seedCache(ALL);
+    await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
+    await runReconcile({ cause: "test" });
+    registrar = await seedStaff({ email: "reg@club.org", name: "Reg Istrar" });
+    const [parents] = await db.insert(role).values({ key: "parents", name: "Parents" }).returning();
+    await db.insert(roleRule).values({ roleId: parents!.id, kind: "include", pattern: "Parents.*" });
+    await db.insert(roleAssignment).values({ roleId: parents!.id, staffUserId: registrar.id });
+    as(registrar);
+    const html = await parentsPage();
+    expect(html).toContain("To review (0)");
+    expect(html).toContain("Nothing to review yet. Once parent sign-ins are on, an address that is under more than one family in QuickBooks is held, and comes up here for you to say whether it is one person.");
+    expect(html).not.toContain("Nothing is waiting");
+    // Once they are on, the same address is held and listed.
+    await seedParentSettings(SIGNINS_ON);
+    await runReconcile({ cause: "test" });
+    expect(await parentsPage()).toContain("To review (1)");
+  });
+
   it("a resend is refused while parent sign-ins are switched off", async () => {
     const [ana] = await db.select().from(parent);
     await seedParentSettings({ signin: false });
@@ -224,7 +245,8 @@ describe("the staff pages for parents", () => {
     await seedCache([...ALL, par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null)]);
     await runReconcile({ cause: "test" });
     const html = await familyPage("10");
-    expect(html.match(/<span class="what">Pat Rivera<\/span><span class="when">Can&#x27;t sign in: no email address in QuickBooks<\/span>/g)).toHaveLength(2);
+    const rows = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    expect(rows.filter((r) => r === "Pat Rivera Email No email address Sign-in Can&#x27;t sign in: no email address in QuickBooks")).toHaveLength(2);
   });
 
   it("the staff home tells people who can act that something is waiting, and nobody else", async () => {

@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Static design references, not app code.
     "design/**",
+    // Git worktrees for agents working in parallel: each is linted from inside itself.
+    ".worktrees/**",
   ]),
 ]);
 

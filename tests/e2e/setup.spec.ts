@@ -27,16 +27,16 @@ test("while setup is open, every page goes to /setup, and a wrong code is refuse
   }
   await page.getByLabel("Setup code").fill("AAAA-AAAA-AAAA");
   await page.getByRole("button", { name: "Unlock" }).click();
-  await expect(page.locator("p[role=alert]")).toContainText("isn't right");
+  await expect(page.locator(".notice-problem")).toContainText("isn't right");
 });
 
-test("the right code unlocks the staff step with the redirect URI to copy", async ({ page }) => {
+test("the right code unlocks the staff step with the redirect URI to copy", async ({ page, baseURL }) => {
   const code = reopen();
   await page.goto("/setup");
   await page.getByLabel("Setup code").fill(code.toLowerCase());
   await page.getByRole("button", { name: "Unlock" }).click();
   await expect(page.getByRole("heading", { name: "Step 1: Staff sign-in" })).toBeVisible();
-  await expect(page.getByLabel("Redirect URI").first()).toHaveValue("http://localhost:3100/api/auth/staff/callback/microsoft");
+  await expect(page.getByLabel("Redirect URI").first()).toHaveValue(`${baseURL}/api/auth/staff/callback/microsoft`);
   expect(await page.content()).not.toContain("ci-fake");
 });
 
@@ -99,7 +99,11 @@ test("in a reopened setup, Replace certificate makes a new pending certificate b
     await page.getByLabel("Setup code").fill(code);
     await page.getByRole("button", { name: "Unlock" }).click();
     const ms = page.getByRole("region", { name: "Staff sign-in with Microsoft" });
+    // A certificate in use with nothing waiting is done: Download and Replace are tucked under Manage certificate.
+    await expect(ms.getByText("Done: Microsoft accepted this certificate")).toBeVisible();
     await expect(ms.getByText(g.thumbprintSha1)).toBeVisible();
+    await expect(ms.getByRole("button", { name: "Replace certificate" })).toBeHidden();
+    await ms.getByText("Manage certificate").click();
     await ms.getByRole("button", { name: "Replace certificate" }).click();
     await expect(ms.getByText(/Replacement ready to add/)).toBeVisible();
     const pending = await sql`SELECT thumbprint_sha1 FROM provider_certificate WHERE provider_key = 'staff-microsoft' AND status = 'pending'`;
@@ -110,6 +114,8 @@ test("in a reopened setup, Replace certificate makes a new pending certificate b
     await expect(ms.getByRole("button", { name: "Check and switch" })).toBeVisible();
     page.once("dialog", (d) => d.accept());
     await ms.getByRole("button", { name: "Discard replacement" }).click();
+    await expect(ms.getByText("Done: Microsoft accepted this certificate")).toBeVisible();
+    await ms.getByText("Manage certificate").click();
     await expect(ms.getByRole("button", { name: "Replace certificate" })).toBeVisible();
     const left = await sql`SELECT status, private_key_ciphertext FROM provider_certificate WHERE provider_key = 'staff-microsoft' ORDER BY created_at`;
     expect(left.map((r) => r.status).sort()).toEqual(["active", "retired"]);
@@ -127,10 +133,12 @@ test("a failed staff sign-in shows its message even when Better Auth adds its ow
   await page.getByRole("button", { name: "Unlock" }).click();
   await expect(page.getByRole("heading", { name: "Step 1: Staff sign-in" })).toBeVisible();
   await page.goto("/setup?step=admin");
+  await page.getByLabel("Admin's name").fill("Ada Admin");
   await page.getByLabel("Admin email").fill("admin@example.com");
-  await page.getByRole("button", { name: "Save email" }).click();
+  await page.getByRole("button", { name: "Save name and email" }).click();
+  await expect(page.locator(".notice-done")).toHaveText(/Saved\. Now sign in below as the Admin\./);
   await page.goto("/setup?step=admin&signin=failed&error=access_denied");
-  await expect(page.locator("p[role=alert]")).toContainText("didn't complete");
+  await expect(page.locator(".notice-problem")).toContainText("didn't complete");
   await expect(page.getByRole("button", { name: "Sign out and try again" })).toBeVisible();
 });
 

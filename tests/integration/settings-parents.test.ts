@@ -36,6 +36,7 @@ import ParentSetupPage from "@/app/staff/(app)/settings/parents/setup/page";
 import MatchesPage from "@/app/staff/(app)/settings/parents/matches/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import StaffLayout from "@/app/staff/(app)/layout";
+import { SETTINGS_SECTIONS } from "@/app/staff/(app)/settings/sections";
 import { setSigninsAction, setWelcomeAction, setRequireStudentsAction, setReviewEmailsAction, decideMatchAction, acceptStrongMatchesAction, deletePreviousCompanyAction } from "@/app/staff/(app)/settings/parents/actions";
 import { resetDb, seedGuardian, seedParent, seedStaff, seedWorkingMail } from "../helpers/db";
 import { seedCache, seedShape, fam, par, stu } from "../helpers/roster-cache";
@@ -83,10 +84,12 @@ describe("the Parent sign-ins settings", () => {
     expect(renderToStaticMarkup(await StaffLayout({ children: null }))).not.toContain('href="/staff/settings/parents"');
   });
 
-  it("the staff menu has Parent sign-ins for an Admin, after QuickBooks", async () => {
+  it("Parent sign-ins is a part of Settings for an Admin, after QuickBooks, and not an entry of the staff menu beside Parents", async () => {
     const html = renderToStaticMarkup(await StaffLayout({ children: null }));
-    expect(html).toContain('href="/staff/settings/parents"');
-    expect(html.indexOf('href="/staff/settings/parents"')).toBeGreaterThan(html.indexOf('href="/staff/settings/quickbooks"'));
+    expect(html).toContain('href="/staff/settings"');
+    expect(html).not.toContain('href="/staff/settings/parents"');
+    const keys = SETTINGS_SECTIONS.map((x) => x.key);
+    expect(keys.indexOf("parents")).toBe(keys.indexOf("quickbooks") + 1);
   });
 
   it("the view shows what is set, plainly, with no inputs", async () => {
@@ -107,6 +110,20 @@ describe("the Parent sign-ins settings", () => {
     expect(html).toContain("No Mail");
     expect(html).toContain("Chen Family");
     expect(await audits("settings.parents.save")).toEqual([]);
+  });
+
+  it("step 1 lists each problem as a table, folds a long one behind Show all, and says None for an empty one", async () => {
+    await ready();
+    const many = Array.from({ length: 11 }, (_, i) => par(`5${i}`, `Quiet Parent ${i}`, "10", null));
+    await seedCache([...ROSTER, ...many]);
+    const html = await setup("preview");
+    // Twelve with no email (No Mail and the eleven): more than ten, so the table opens only when asked.
+    expect(html).toMatch(/<h3 class="table-head">No email address \(12\)<\/h3><details class="more"><summary>Show all 12 people<\/summary><table role="table" class="table"><caption class="visually-hidden">No email address: 12 people<\/caption>/);
+    for (const p of many) expect(html).toContain(`<th role="rowheader" scope="row">${p.displayName}</th>`);
+    // One held address: a table shown as it is, with the families it is under.
+    expect(html).toMatch(/Addresses under more than one family \(1\)<\/h3><table role="table" class="table">/);
+    expect(html).toContain("Chen Family, Lee Family");
+    expect(html).toMatch(/More than one address on a person&#x27;s record \(0\)<\/h3><div class="notice notice-done">.*?None\.<\/div><\/div>/);
   });
 
   it("the steps name the real cause from the switch's own check: a shape the roster can't be used with", async () => {
@@ -132,7 +149,8 @@ describe("the Parent sign-ins settings", () => {
     expect(busy).not.toContain("seeded@example.com");
     const free = await setup("preview");
     expect(free).not.toContain(busyText);
-    expect(free).toContain("Hand Seeded (seeded@example.com)");
+    // A row of the table of sign-ins that would end: the person, then the address.
+    expect(free).toMatch(/<th role="rowheader" scope="row">Hand Seeded<\/th><td role="cell">.*?seeded@example\.com<\/div><\/td>/);
     expect(free).toContain("QuickBooks no longer backs these, so they stop working when sign-ins are switched on.");
   });
 

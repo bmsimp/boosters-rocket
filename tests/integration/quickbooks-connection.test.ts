@@ -182,7 +182,7 @@ describe("connecting QuickBooks", () => {
     expect(stub.tokenCalls()).toHaveLength(1);
     expect(revokes()).toHaveLength(1);
     expect((await audits("quickbooks.connect_refused"))[0]!.after).toEqual({ reason: "other_company", revoked: false });
-    await new Promise((r) => setTimeout(r, 2800)); // let the stub finish its slow answer before the next test
+    await stub.idle(); // let the stub finish its slow answer before the next test
   }, 30_000);
 
   const failTheStore = async () => {

@@ -1,0 +1,215 @@
+# Booster Rocket for a club: the portal, its worker, Postgres with the portal's and Documenso's databases, Documenso,
+# a nightly backup and, if the club has no proxy of its own, a reverse proxy. docs/runbooks/first-install.md is the
+# walk-through; deploy/.env.example says what each setting is.
+#
+#   cd deploy && cp .env.example .env    then fill in .env (private: chmod 600 .env)
+#
+# The portal's image, one of two ways (docs/runbooks/first-install.md, step 4, says which to use when):
+#   docker compose up -d                                            the published image named by BOOSTER_ROCKET_IMAGE
+#   docker compose -f compose.yml -f compose.build.yml up -d --build   built here, from this checkout
+# With a proxy of this file's (for a club that has none in front of the portal):
+#   docker compose --profile proxy up -d                            (add -f compose.yml -f compose.build.yml to build)
+#
+# Every image is pinned to a version and its digest. The dependency updates (.github/dependabot.yml) propose new ones.
+# Nothing here names a host: the addresses are APP_URL and DOCUMENSO_URL in .env.
+name: booster-rocket-club
+
+services:
+  db:
+    # One Postgres server, two databases, each with its own role and password (initdb/, run on the first start only).
+    image: postgres:16.16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set POSTGRES_SUPERUSER_PASSWORD in deploy/.env}
+      # Read by initdb/10-databases.sql on the first start, to make the two roles.
+      PORTAL_DB_PASSWORD: ${PORTAL_DB_PASSWORD:?Set PORTAL_DB_PASSWORD in deploy/.env}
+      DOCUMENSO_DB_PASSWORD: ${DOCUMENSO_DB_PASSWORD:?Set DOCUMENSO_DB_PASSWORD in deploy/.env}
+      TZ: ${CLUB_TIME_ZONE:?Set CLUB_TIME_ZONE in deploy/.env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Over TCP, so it answers only once the first start's set-up has finished (that runs on the socket alone).
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d booster && pg_isready -h 127.0.0.1 -U postgres -d documenso"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    # Brings the portal's database up to the version of the image, then stops. The app starts only once it has.
+    # Before it changes a database that already holds data, it checks that a backup was made in the last 26 hours
+    # (scripts/backup-check.mjs), and stops with what to do if not: an empty database and a start with nothing to
+    # apply are never stopped (docs/runbooks/updates.md).
+    image: ${BOOSTER_ROCKET_IMAGE:-ghcr.io/SET-BOOSTER_ROCKET_IMAGE-IN-ENV/booster-rocket:stable}
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://booster:${PORTAL_DB_PASSWORD}@db:5432/booster
+      # Only so the setup code it prints (tools/scripts/setup-code.mjs, run in this service) names the setup page's address.
+      APP_URL: ${APP_URL}
+      # For one start only, by a volunteer who has a backup of their own: MIGRATE_WITHOUT_RECENT_BACKUP=yes docker compose up -d.
+      # Never set it in .env.
+      MIGRATE_WITHOUT_RECENT_BACKUP: ${MIGRATE_WITHOUT_RECENT_BACKUP:-}
+    depends_on:
+      db: { condition: service_healthy }
+    command: ["node", "tools/scripts/migrate.mjs", "--backup-check"]
+
+  app:
+    image: ${BOOSTER_ROCKET_IMAGE:-ghcr.io/SET-BOOSTER_ROCKET_IMAGE-IN-ENV/booster-rocket:stable}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://booster:${PORTAL_DB_PASSWORD}@db:5432/booster
+      APP_URL: ${APP_URL:?Set APP_URL in deploy/.env, the portal's address}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in deploy/.env}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?Set SETTINGS_ENCRYPTION_KEY in deploy/.env}
+      SETTINGS_ENCRYPTION_KEY_PREVIOUS: ${SETTINGS_ENCRYPTION_KEY_PREVIOUS:-}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:?Set CLIENT_IP_HEADER in deploy/.env, the header your proxy sets}
+      # Server logs and psql output only: what parents read as due follows the club's zone set on the staff Club page.
+      TZ: ${CLUB_TIME_ZONE}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    # For a proxy of the club's own on this machine (a tunnel, a web server). Only this machine can reach it here.
+    ports:
+      - "127.0.0.1:${PORTAL_LOCAL_PORT:-3000}:3000"
+
+  worker:
+    # The same image, started in worker mode: every minute it asks the app to run whichever scheduled jobs are due
+    # (scripts/worker.mjs). No port.
+    image: ${BOOSTER_ROCKET_IMAGE:-ghcr.io/SET-BOOSTER_ROCKET_IMAGE-IN-ENV/booster-rocket:stable}
+    restart: unless-stopped
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      WORKER_APP_URL: http://app:3000
+      TZ: ${CLUB_TIME_ZONE}
+    depends_on:
+      app: { condition: service_healthy }
+    command: ["node", "tools/scripts/worker.mjs"]
+    healthcheck:
+      disable: true
+
+  documenso:
+    # Documenso Community Edition, unmodified, at the version the portal was verified against
+    # (docs/superpowers/specs/2026-11-15-documenso-verification.md). Read its release notes before moving it on.
+    image: documenso/documenso:v2.22.0@sha256:f9976d2142d34ee89506e161b0a5ec859a0c327f3fe0a398b46d3941fc8dd35e
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      # Exactly the address people's browsers use: signing is refused under any other name, scheme or port. The
+      # portal's Forms settings take this same address.
+      NEXT_PUBLIC_WEBAPP_URL: ${DOCUMENSO_URL:?Set DOCUMENSO_URL in deploy/.env, Documenso's address}
+      # Its background jobs (sealing a signed form, sending a webhook) call Documenso itself, here, not out through
+      # the proxy.
+      NEXT_PRIVATE_INTERNAL_WEBAPP_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${DOCUMENSO_NEXTAUTH_SECRET:?Set DOCUMENSO_NEXTAUTH_SECRET in deploy/.env}
+      NEXT_PRIVATE_ENCRYPTION_KEY: ${DOCUMENSO_ENCRYPTION_KEY:?Set DOCUMENSO_ENCRYPTION_KEY in deploy/.env}
+      NEXT_PRIVATE_ENCRYPTION_SECONDARY_KEY: ${DOCUMENSO_ENCRYPTION_SECONDARY_KEY:?Set DOCUMENSO_ENCRYPTION_SECONDARY_KEY in deploy/.env}
+      NEXT_PRIVATE_DATABASE_URL: postgresql://documenso:${DOCUMENSO_DB_PASSWORD}@db:5432/documenso
+      NEXT_PRIVATE_DIRECT_DATABASE_URL: postgresql://documenso:${DOCUMENSO_DB_PASSWORD}@db:5432/documenso
+      # Every signed PDF is kept in Documenso's database, so the nightly backup holds them.
+      NEXT_PUBLIC_UPLOAD_TRANSPORT: database
+      # Documenso's own account mail (the first sign-up's confirmation, password resets, invitations). It sends no
+      # mail about forms: the portal turns that off on every document it makes.
+      NEXT_PRIVATE_SMTP_TRANSPORT: smtp-auth
+      NEXT_PRIVATE_SMTP_HOST: ${DOCUMENSO_SMTP_HOST:?Set DOCUMENSO_SMTP_HOST in deploy/.env}
+      NEXT_PRIVATE_SMTP_PORT: ${DOCUMENSO_SMTP_PORT:?Set DOCUMENSO_SMTP_PORT in deploy/.env}
+      NEXT_PRIVATE_SMTP_USERNAME: ${DOCUMENSO_SMTP_USERNAME:-}
+      NEXT_PRIVATE_SMTP_PASSWORD: ${DOCUMENSO_SMTP_PASSWORD:-}
+      NEXT_PRIVATE_SMTP_SECURE: ${DOCUMENSO_SMTP_SECURE:-false}
+      NEXT_PRIVATE_SMTP_FROM_ADDRESS: ${DOCUMENSO_SMTP_FROM_ADDRESS:?Set DOCUMENSO_SMTP_FROM_ADDRESS in deploy/.env}
+      NEXT_PRIVATE_SMTP_FROM_NAME: ${DOCUMENSO_SMTP_FROM_NAME:?Set DOCUMENSO_SMTP_FROM_NAME in deploy/.env}
+      # The signing certificate, from a file (mounted below) with its passphrase.
+      NEXT_PRIVATE_SIGNING_TRANSPORT: local
+      NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: /opt/documenso/cert.p12
+      NEXT_PRIVATE_SIGNING_PASSPHRASE: ${DOCUMENSO_SIGNING_PASSPHRASE:?Set DOCUMENSO_SIGNING_PASSPHRASE in deploy/.env}
+      # No timestamp authority by default: a signature's time is this server's clock, and nothing outside is needed to
+      # seal a form. With one set, each signature carries a trusted time, a hash of every document is sent to that
+      # service, and sealing waits for it (an outage of more than six hours leaves signed forms unsealed until staff
+      # act). The club's owner has not decided yet (roadmap, "Waiting on the owner"); deploy/.env.example explains it.
+      NEXT_PRIVATE_SIGNING_TIMESTAMP_AUTHORITY: ${DOCUMENSO_TIMESTAMP_AUTHORITY:-}
+      DOCUMENSO_DISABLE_TELEMETRY: "true"
+      # Sign-up closed: Documenso's sign-up page is open to the world otherwise. It is opened for a few minutes only to
+      # make the first account (docs/runbooks/documenso.md).
+      NEXT_PUBLIC_DISABLE_SIGNUP: ${DOCUMENSO_DISABLE_SIGNUP:-true}
+      # Optional: staff sign in to Documenso with the club's own sign-in (docs/runbooks/documenso.md).
+      NEXT_PRIVATE_OIDC_WELL_KNOWN: ${DOCUMENSO_OIDC_WELL_KNOWN:-}
+      NEXT_PRIVATE_OIDC_CLIENT_ID: ${DOCUMENSO_OIDC_CLIENT_ID:-}
+      NEXT_PRIVATE_OIDC_CLIENT_SECRET: ${DOCUMENSO_OIDC_CLIENT_SECRET:-}
+      NEXT_PRIVATE_OIDC_PROVIDER_LABEL: ${DOCUMENSO_OIDC_PROVIDER_LABEL:-}
+      NEXT_PRIVATE_OIDC_SKIP_VERIFY: ${DOCUMENSO_OIDC_SKIP_VERIFY:-}
+      # Only when the portal's address resolves to a private address from here (docs/runbooks/documenso.md).
+      NEXT_PRIVATE_WEBHOOK_SSRF_BYPASS_HOSTS: ${DOCUMENSO_WEBHOOK_PRIVATE_HOSTS:-}
+      TZ: ${CLUB_TIME_ZONE}
+    volumes:
+      # Readable by the user Documenso runs as (1001): docs/runbooks/documenso.md says how.
+      - ${DOCUMENSO_SIGNING_CERTIFICATE:?Set DOCUMENSO_SIGNING_CERTIFICATE in deploy/.env, the path to the .p12 file}:/opt/documenso/cert.p12:ro
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 180s
+      retries: 5
+    ports:
+      - "127.0.0.1:${DOCUMENSO_LOCAL_PORT:-3001}:3000"
+
+  backup:
+    # The nightly backup of both databases (scripts/backup-schedule.sh runs scripts/backup.sh), at BACKUP_AT club
+    # time, into BACKUP_DIR. Its lines are in: docker compose logs backup. It tells the portal, so the Health page's
+    # backup line stays current. One now: docker compose run --rm backup --now
+    image: postgres:16.16@sha256:dd2bf3ce2dc83a81674cf7f217fcfd8a5009a4b325dda5b843bfee82a06cff6f
+    restart: unless-stopped
+    entrypoint: ["bash", "/opt/booster-rocket/scripts/backup-schedule.sh", "/backups"]
+    command: []
+    environment:
+      TZ: ${CLUB_TIME_ZONE}
+      BR_BACKUP_AT: ${BACKUP_AT:-03:00}
+      BR_BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      # The tools in this container, over the network to the database, as Postgres's own administrator.
+      BR_DB_CONTAINER: ""
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      BR_DB_NAME: booster
+      BR_DOCUMENSO_DB_NAME: documenso
+    volumes:
+      - ../scripts:/opt/booster-rocket/scripts:ro
+      - ${BACKUP_DIR:?Set BACKUP_DIR in deploy/.env, the folder backups are written to}:/backups
+    depends_on:
+      db: { condition: service_healthy }
+    # A backup under way is let finish when the service is stopped.
+    stop_grace_period: 2m
+
+  proxy:
+    # Optional, for a club with no proxy of its own: docker compose --profile proxy up -d. It answers at APP_URL and
+    # DOCUMENSO_URL, gets their certificates for https addresses by itself, compresses responses, and hands on the
+    # visitor's address as one bare address (no port, no list), in X-Forwarded-For and in the header CLIENT_IP_HEADER
+    # names. Caddyfile is its whole configuration.
+    profiles: ["proxy"]
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    environment:
+      APP_URL: ${APP_URL}
+      DOCUMENSO_URL: ${DOCUMENSO_URL}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER}
+      PROXY_HTTP_PORT: ${PROXY_HTTP_PORT:-80}
+      PROXY_HTTPS_PORT: ${PROXY_HTTPS_PORT:-443}
+    ports:
+      - "${PROXY_HTTP_PORT:-80}:${PROXY_HTTP_PORT:-80}"
+      - "${PROXY_HTTPS_PORT:-443}:${PROXY_HTTPS_PORT:-443}"
+      - "${PROXY_HTTPS_PORT:-443}:${PROXY_HTTPS_PORT:-443}/udp"
+    # It starts only when APP_URL and DOCUMENSO_URL are bare addresses (proxy-start.sh says why), then runs Caddy.
+    command: ["sh", "/etc/caddy/proxy-start.sh"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./proxy-start.sh:/etc/caddy/proxy-start.sh:ro
+      - proxy-data:/data
+      - proxy-config:/config
+    depends_on:
+      app: { condition: service_healthy }
+      documenso: { condition: service_started }
+
+volumes:
+  db-data:
+  proxy-data:
+  proxy-config:

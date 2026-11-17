@@ -1,3 +1,5 @@
+import { DataTable } from "@/app/components/data-table";
+import { Notice } from "@/app/components/notice";
 import { redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { matchReview } from "@/lib/parents/matches";
@@ -18,9 +20,10 @@ export default async function MatchesPage() {
   const why = (s: (typeof open)[number]) => !s.suggested ? "No likely match found."
     : `Suggested: ${s.suggested.name} (${s.nameMatches ? "name matches" : "name differs"}, ${s.addressesMatched} of ${s.old.emails.length} addresses match).`;
   return (
-    <main className="wrap single">
+    <main className="wrap single matches-page">
+      <p className="back-to-settings"><a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
       <h1 className="page-title">Review matches</h1>
-      <p className="lede">Each family from the previous QuickBooks company, beside the family it most likely is in the connected one. Accepting a match carries over decisions made about that family and remembers who was already welcomed. It never lets anyone sign in: that comes only from the connected company&apos;s roster. <a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
+      <p className="lede">Each family from the previous QuickBooks company, beside the family it most likely is in the connected one. Accepting a match carries over decisions made about that family and remembers who was already welcomed. It never lets anyone sign in: that comes only from the connected company&apos;s roster.</p>
 
       {strong > 0 && (
         <section className="box" aria-labelledby="mm-strong-h"><h2 id="mm-strong-h">Strong matches ({strong})</h2>
@@ -30,14 +33,15 @@ export default async function MatchesPage() {
       )}
 
       <section className="box" aria-labelledby="mm-open-h"><h2 id="mm-open-h">To decide ({open.length})</h2>
-        {open.length === 0 ? <p>Every family has been matched.</p> : (
-          <ul className="lines">{open.map((s) => (
-            <li key={s.old.qboId}><div className="stack">
-              <span className="what">{s.old.name}</span>
-              <span className="when">{s.old.emails.length ? `Could sign in: ${s.old.emails.join(", ")}` : "Nobody could sign in"}{s.decision === "rejected" ? " · Marked as no match" : ""}</span>
-              <span className="when">{why(s)}</span>
-              <MatchRow oldId={s.old.qboId} suggested={s.suggested?.qboId ?? null} families={review.families} decide={decideMatchAction} />
-            </div></li>))}</ul>
+        {open.length === 0 ? <Notice tone="done" live="none">Every family has been matched.</Notice> : (
+          // A table on wide screens, so the old family, its suggestion and the choice compare at a glance; stacked on a phone.
+          <DataTable caption="Families from the previous company still to decide" captionHidden rowKey={(s) => s.old.qboId} rows={open}
+            columns={[
+              { key: "old", header: "Family in the previous company", rowHeader: true, cell: (s) => <>{s.old.name}{s.decision === "rejected" && <span className="when">Marked as no match</span>}</> },
+              { key: "emails", header: "Could sign in", cell: (s) => (s.old.emails.length ? s.old.emails.join(", ") : "Nobody could sign in") },
+              { key: "why", header: "Suggestion", cell: (s) => why(s) },
+              { key: "choice", header: "Your choice", cell: (s) => <MatchRow oldId={s.old.qboId} suggested={s.suggested?.qboId ?? null} families={review.families} decide={decideMatchAction} /> },
+            ]} />
         )}
       </section>
 

@@ -8,6 +8,13 @@ were added after that and were first walked through on 2026-11-10, on a site tha
 (section 11). If a screen no longer matches,
 trust the screen and note it in the Results table.
 
+**Since 2026-11-16 the staff menu is grouped, and every setting is under Settings.** Where this runbook says **Mail**,
+**Sign-in**, **QuickBooks** or **Parent sign-ins** "in the staff menu", open **Settings** in the staff menu, then that
+part's box (**Outgoing mail**, **Staff sign-in**, **QuickBooks**, **Parent sign-ins**) and its **Set up** or **Change**.
+**Audit** is under **Admin**. The setup page now asks for the club first, so its steps are one later than written below:
+outgoing mail is Step 3 and the first Admin Step 4. The checks still to make before families use the portal, this
+host's among them, are in [before the first family](before-the-first-family.md).
+
 ## 1. What this is
 
 This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
@@ -39,9 +46,10 @@ Do this over SSH as user `brian`.
 2. Run the setup script. It creates the Docker network `booster-rocket-edge` and a private `.env.poc`
    file with freshly generated `BETTER_AUTH_SECRET`, `DB_PASSWORD` and `SETTINGS_ENCRYPTION_KEY`:
    ```bash
-   scripts/poc/setup.sh
+   scripts/poc/setup.sh https://portaltest.rhinoautomator.com
    ```
-   It is safe to run again; it never overwrites an existing `.env.poc`. (If an older `.env.poc` has no
+   The address is the one people will use for the portal; the script writes it into `.env.poc` as `APP_URL`.
+   It is safe to run again, with or without the address; it never overwrites an existing `.env.poc`. (If an older `.env.poc` has no
    `SETTINGS_ENCRYPTION_KEY`, it adds one and leaves everything else alone.) `.env.poc` holds no
    Microsoft or Google values; those are entered on the setup page and stored encrypted in the
    database. **Back up `.env.poc` along with the database**: `SETTINGS_ENCRYPTION_KEY` is needed to read
@@ -260,8 +268,10 @@ Sources: Role Based Access Control for Applications in Exchange Online
 ## 5. QuickBooks (an Intuit sandbox company)
 
 The portal reads the club's families from QuickBooks. For this proof of concept it connects to an Intuit sandbox
-company, a test company that holds no real books. The portal never writes to QuickBooks. A worker container keeps the
-connection alive. These steps were walked through on 2026-11-11 (section 11). Do them after the first deploy (section 8) and after
+company, a test company that holds no real books. The checks below were made on 2026-11-11, when the portal wrote
+nothing to QuickBooks. It now writes what someone asks it to: a parent's own phone, address and sign-in email, the
+roster changes staff make, and a volunteer buy-out's invoice (`QUICKBOOKS_USE` in
+`src/lib/quickbooks/what-it-does.ts` says it in the words the QuickBooks page shows). A worker container keeps the connection alive. These steps were walked through on 2026-11-11 (section 11). Do them after the first deploy (section 8) and after
 section 3, because they use the staff app. Deploy this version (the one with the worker) first, before step 1.
 
 1. In the Intuit developer app, under **Settings** > **Redirect URIs** > **Development**, add the redirect address
@@ -286,7 +296,10 @@ section 3, because they use the staff app. Deploy this version (the one with the
 sandbox to the band's real books) clears the roster and the membership shape, which must be chosen again in step 3.
 It also closes every parent sign-in link and signs parents out, switches parent sign-ins and welcome emails off,
 and keeps a list of the old company's families, and who could sign in to them, for the match review under
-**Parent sign-ins**. That list is deleted 90 days after the switch, or sooner by an Admin.
+**Parent sign-ins**. That list is deleted 90 days after the switch, or sooner by an Admin. Everything else the portal
+holds about the old company's customers goes too (money figures, seasons' ticks, volunteering, forms being signed,
+changes waiting), and signed forms' evidence is kept: [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)
+has the whole list.
 
 The worker is verified to keep running with no input attached and to stop cleanly on `docker stop` (exit code 0,
 `worker stopped` in its log). That was checked on linuxdev on 2026-11-11 with the script alone in a `node:26-slim`
@@ -338,7 +351,7 @@ that family.
    cd ~/booster-rocket
    docker compose -f docker-compose.poc.yml --env-file .env.poc run --rm migrate node tools/scripts/seed-poc-guardian.mjs --name "<name>" --email "<email you can read>" --family POC-FAMILY-1
    ```
-   Success prints `seeded guardian <id>`. It refuses unless `APP_URL` contains `portaltest`. Running it again with
+   Success prints `seeded guardian <id>`. It refuses unless the env file holds `BR_PROOF_OF_CONCEPT=yes` (add that line to `.env.poc` on a proof of concept, never on a club's real portal). Running it again with
    the same email and family prints "That person is already a guardian in that family." The same email with
    `--family POC-FAMILY-2` adds a second family to the same person.
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
@@ -416,7 +429,8 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    cd ~/booster-rocket
    scripts/poc/deploy.sh
    ```
-   It refuses if the checkout has local changes, pulls `main`, builds the image, runs the database
+   It refuses if the checkout has local changes, pulls `main`, builds the image, backs up the database into
+   `~/booster-rocket-backups` (or `BR_BACKUP_DIR`; `scripts/backup.sh`, keeping the newest 14), runs the database
    migrations, recreates the app and waits up to 120 seconds for it to become healthy, then starts the worker. The first build
    takes several minutes. A worker that won't start doesn't fail the deploy: it prints "The worker didn't start. The
    site is up; check: docker logs booster-rocket-worker".
@@ -432,12 +446,13 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
 
    | Code | Meaning | What to do |
    |---|---|---|
-   | 2 | Refused: local changes, `.env.poc` missing or not mode 600, or another deploy is running | Read the message; fix; run again |
+   | 2 | Refused: local changes, `.env.poc` missing, not mode 600 or without an `APP_URL` line, or another deploy is running | Read the message; fix; run again |
    | 3 | Migrations failed; running app untouched | Read the migrate output above the message; check `DB_PASSWORD` (end of section 2) |
    | 4 | App did not become healthy in time | `docker logs booster-rocket-app`; then `scripts/poc/deploy.sh --rollback` if needed |
    | 5 | Nothing to roll back to | None (nothing was changed) |
    | 6 | `git pull` failed | Check network and SSH key; nothing was changed |
    | 7 | Build failed; running app untouched | Read the build output |
+   | 8 | The backup before the migrations failed; nothing migrated, running app untouched | Check the backup folder can be written by the deploying user (`BR_BACKUP_DIR`), and that the database container runs |
 4. **Roll back** to the previous image (database changes are *not* undone):
    ```bash
    scripts/poc/deploy.sh --rollback
@@ -506,13 +521,14 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The person's links to their families are all closed | Before parent sign-ins are switched on: seed the test parent again (section 6). After they are switched on, the fix is in QuickBooks: the Parent customer exists, is active, has one email address and sits under an active family. Then **Refresh now** on the Roster. The reason a person can't sign in is shown on their page under **Parents**, and in the family's **Portal sign-ins** box. Don't re-enable a link with SQL once sign-ins are on: the next reconcile closes it again, and the SQL bypasses the audit log |
 | A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Before parent sign-ins are switched on: seed them (section 6). After they are switched on, the fix is in QuickBooks: the Parent customer exists, is active, has one email address and sits under an active family. Then **Refresh now** on the Roster. The reason a person can't sign in is shown on their page under **Parents**, and in the family's **Portal sign-ins** box. Addresses are matched trimmed and lowercased |
 | `signin.code_refused`, reason `no_enabled_guardian` | All of the person's links to their families are closed | As in the first row: before sign-ins are on, the seed script (section 6); after, fix the record in QuickBooks and **Refresh now** |
-| `signin.code_refused`, reason `rate_limited` | Details `limit` says which limit: `resend`, a new code asked for within 60 seconds of the last one; `email`, 3 codes to one address; `ip`, 10 code requests from one IP; `check_ip`, 30 code checks from one IP (the parent sees "Too many tries. Wait a few minutes and request a new code."). The last three count 15 minutes back. For `email`, `ip` and `check_ip`, a full window is recorded once: the first refused request writes the row, and later ones in the same window write nothing | `resend`: wait 60 seconds. The others: wait up to 15 minutes, until the oldest request in the window is 15 minutes old |
+| `signin.code_refused`, reason `rate_limited` | Details `limit` says which limit: `resend`, a new code asked for within 60 seconds of the last one; `email`, 3 codes to one address; `ip`, 60 code requests from one IP; `check_ip`, 180 code checks from one IP (the parent sees "Too many tries. Wait a few minutes and request a new code."). The last three count 15 minutes back. For `email`, `ip` and `check_ip`, a full window is recorded once: the first refused request writes the row, and later ones in the same window write nothing | `resend`: wait 60 seconds. The others: wait up to 15 minutes, until the oldest request in the window is 15 minutes old |
 | The sign-in page says "We couldn't reach the portal just then. Please try again in a moment." and there's no audit row | More than 20 code requests, or 20 code checks, from one IP in a minute: the portal turns them away before they are counted or recorded | Wait a minute |
 | `signin.code_refused`, reason `mail_failed`, with `detail: "mail_not_working"`, and no `mail.failed` row | Mail isn't set up, or its settings haven't had a successful test email since they were saved, so nothing was sent | **Mail** in the staff menu (Admins only): **Send test email** |
 | `signin.code_refused`, reason `mail_failed` with no `detail`, and a `mail.failed` row | Microsoft 365 or SMTP refused the message; the `mail.failed` row has the provider's error | For `ErrorAccessDenied`, rerun section 4 step 3 and wait up to 2 hours; staff see the same error on the staff home page |
 | `/sign-in` says "Parent sign-in isn't available yet." | Mail settings aren't saved, or haven't had a successful test since they changed | **Mail** in the staff menu (Admins only): **Send test email** |
 | Parent `signin.refused`, reason `family_not_enabled` | The parent was in, or chose, a family that isn't one of their enabled families. Usually the family's row was disabled while they were signed in: they are sent back to choose a family, and Details names the one they lost. With no family in Details, the chooser was sent something that isn't a family ID | Nothing, if the link was closed on purpose. Otherwise see the first row: the person's page under **Parents** says why the link is closed |
-| "Too many tries. Wait a few minutes and request a new code." | 30 code checks from one IP in 15 minutes | Wait 15 minutes |
+| Parent `signin.refused`, reason `address_changed` (the parent sees "That code didn't work.") | The person's email address was changed (by a roster refresh, by staff or by the parent) at the moment they entered a code that was sent to the old address | Nothing: they sign in with the new address |
+| "Too many tries. Wait a few minutes and request a new code." | 180 code checks from one IP in 15 minutes | Wait 15 minutes |
 | Staff `signin.refused` (door staff; staff refusals carry no reason, so Details is empty) | The Microsoft account is not a known staff member and is not the first Admin email entered in Step 3 of setup | Sign in with that email, or have an Admin add the person first (**Staff** menu) |
 | Microsoft error "AADSTS50011: The redirect URI ... does not match" | Redirect URI in the app registration differs from the one the portal sends | `https://portaltest.rhinoautomator.com/api/auth/staff/callback/microsoft`. Platform must be **Web**; no trailing slash |
 | The setup page refuses the Microsoft tenant ID | It is `common`, `organizations`, `consumers` or something that is not a GUID | Use the **Directory (tenant) ID** GUID from the band's tenant Overview page; also set the registration to **Single tenant only** |

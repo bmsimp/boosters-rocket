@@ -6,6 +6,7 @@ import { effectivePermissions, can, type Effective } from "@/lib/permissions/eff
 import type { Permission } from "@/lib/permissions/registry";
 import { requestIp } from "@/lib/request";
 import { writeAudit } from "@/lib/audit/log";
+import { withReturnPath } from "@/lib/auth/return-path";
 
 export class AccessDenied extends Error {
   constructor() { super("Not allowed"); } // same message whatever the reason (spec §5.1)
@@ -14,7 +15,7 @@ export class AccessDenied extends Error {
 export type StaffCtx = StaffIdentity & { effective: Effective; ip: string | null };
 export type ParentCtx = ParentIdentity & { ip: string | null };
 
-export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock"; permission?: Permission };
+export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock"; permission?: Permission; self?: true };
 const registry = new WeakMap<object, GuardInfo>();
 export function registerGuard(fn: object, info: GuardInfo): void { registry.set(fn, info); }
 export function guardOf(fn: unknown): GuardInfo | undefined {
@@ -44,6 +45,21 @@ export function staffAction<A extends unknown[], R>(permission: Permission, fn: 
     return fn(ctx, ...args);
   };
   registry.set(wrapped, { door: "staff", permission });
+  return wrapped;
+}
+
+/**
+ * A staff member acting on their own record and nothing else (their own name): any signed-in staff member, with no
+ * permission to check. The action must read and change only `ctx.staffUserId`'s own row, never an id it is given.
+ * Registered as the staff door with `self`, which tests/integration/invariants.test.ts accepts in place of a permission.
+ */
+export function staffSelfAction<A extends unknown[], R>(fn: (ctx: StaffCtx, ...args: A) => Promise<R>) {
+  const wrapped = async (...args: A): Promise<R> => {
+    const ctx = await staffCtx();
+    if (!ctx) throw new AccessDenied();
+    return fn(ctx, ...args);
+  };
+  registry.set(wrapped, { door: "staff", self: true });
   return wrapped;
 }
 
@@ -79,9 +95,27 @@ export function parentSessionAction<A extends unknown[], R>(fn: (ctx: ParentSess
   return wrapped;
 }
 
-export async function requireParentPage(): Promise<ParentCtx> {
+/**
+ * The guard of a parent page. `returnTo` is the page's own address, which the page passes for itself
+ * (`requireParentPage("/payments")`, or with the segment it was asked for, `` requireParentPage(`/forms/${id}`) ``): a
+ * visitor who has to sign in or choose a family first is brought back to it afterward. It is checked like any value
+ * that travels through the browser (src/lib/auth/return-path.ts), because a page may build it from the address it was
+ * asked for. Without it the parent lands on the home page.
+ */
+export async function requireParentPage(returnTo?: string): Promise<ParentCtx> {
   const s = await getParentState();
   if (s.status === "ok") return { ...s.identity, ip: await requestIp() };
-  if (s.status === "choose") redirect("/choose-family");
-  redirect((await hasParentSession()) ? "/refused" : "/sign-in");
+  if (s.status === "choose") redirect(withReturnPath("/choose-family", returnTo));
+  redirect((await hasParentSession()) ? "/refused" : withReturnPath("/sign-in", returnTo));
+}
+
+/**
+ * For the parent layout, which draws what surrounds a page: the signed-in parent, or null when there is none to draw
+ * it for. The layout then renders its children alone and sends nobody anywhere: the page inside it calls
+ * requireParentPage() with its own address. A redirect from the layout would come first and could not say which page
+ * was asked for. A layout was never the guard (it does not run again when the browser moves between pages); the pages
+ * guard themselves, and tests/integration/page-guards.test.ts checks that each one does.
+ */
+export async function parentLayoutCtx(): Promise<ParentCtx | null> {
+  return parentCtx();
 }

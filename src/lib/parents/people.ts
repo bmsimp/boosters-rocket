@@ -1,16 +1,18 @@
 import { and, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { guardian, parent, parentAuthUser, parentEmailChange } from "@/lib/db/schema";
+import { guardian, parent, parentEmailChange } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { normalizeEmail } from "@/lib/setup/state";
-import { sendMail, currentBrand } from "@/lib/mail/send";
-import { emailChangeNoticeMessage } from "@/lib/mail/messages";
 import { getParentSettings } from "./settings";
-import { endParentSessions, deleteUnusedSigninCodes, lockEmail } from "./sessions";
+import { endParentSessions, deleteUnusedSigninCodes } from "./sessions";
+import { formsForGoneSigner } from "@/lib/forms/signer-gone";
 
 export type StaffOp = { actor: Actor; ip: string | null; permission?: string };
 
-/** No codes, every session ends. Family links keep their status, so unblocking restores the same access. The reason is for staff only. */
+/**
+ * No codes, every session ends. Family links keep their status, so unblocking restores the same access. The reason is
+ * for staff only. Every unfinished form still waiting for this person's signature is reset and its document withdrawn,
+ * so a signing link the portal handed them earlier can't sign for a family any more (src/lib/forms/signer-gone.ts).
+ */
 export async function blockPerson(parentId: string, rawReason: string, o: StaffOp): Promise<{ ok: true; sessionsEnded: number } | { ok: false; reason: "not_found" | "invalid" }> {
   const reason = rawReason.trim();
   if (!reason || reason.length > 500) return { ok: false, reason: "invalid" };
@@ -21,8 +23,9 @@ export async function blockPerson(parentId: string, rawReason: string, o: StaffO
     await deleteUnusedSigninCodes(p.id, tx);
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, p.id), isNull(parentEmailChange.usedAt)));
     const sessionsEnded = await endParentSessions(p.id, tx);
+    const formsReset = await formsForGoneSigner(tx, { parentId: p.id, familyQboId: null, reason: "blocked", actor: o.actor, ip: o.ip });
     await writeAudit({ actor: o.actor, action: "parent.block", permission: o.permission, targetType: "parent", targetId: p.id,
-      before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: true, reason, sessionsEnded }, ip: o.ip }, tx);
+      before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: true, reason, sessionsEnded, formsReset }, ip: o.ip }, tx);
     return { ok: true as const, sessionsEnded };
   });
 }
@@ -42,28 +45,5 @@ export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok:
   });
 }
 
-/** Staff change a parent's email directly (spec §2). Audited; the old address gets a notice; every session ends. */
-export async function changeParentEmailByStaff(parentId: string, rawEmail: string, o: StaffOp):
-  Promise<{ ok: true; changed: boolean } | { ok: false; reason: "invalid" | "not_found" } | { ok: false; reason: "in_use"; heldBy: { parentId: string; name: string } }> {
-  const email = normalizeEmail(rawEmail);
-  if (!email) return { ok: false, reason: "invalid" };
-  const r = await db.transaction(async (tx) => {
-    await lockEmail(tx, email);
-    const [p] = await tx.select().from(parent).where(eq(parent.id, parentId)).for("update");
-    if (!p) return { ok: false as const, reason: "not_found" as const };
-    if (p.email === email) return { ok: true as const, changed: false, oldEmail: p.email };
-    const [other] = await tx.select().from(parent).where(and(eq(parent.email, email), ne(parent.id, p.id)));
-    if (other) return { ok: false as const, reason: "in_use" as const, heldBy: { parentId: other.id, name: other.name } };
-    await tx.update(parent).set({ email, updatedAt: new Date() }).where(eq(parent.id, p.id));
-    await tx.update(parentAuthUser).set({ email, updatedAt: new Date() }).where(eq(parentAuthUser.parentId, p.id));
-    await deleteUnusedSigninCodes(p.id, tx);
-    await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, p.id), isNull(parentEmailChange.usedAt)));
-    const sessionsEnded = await endParentSessions(p.id, tx);
-    await writeAudit({ actor: o.actor, action: "parent.email_change", permission: o.permission, targetType: "parent", targetId: p.id,
-      before: { email: p.email }, after: { email, by: "staff", sessionsEnded }, ip: o.ip }, tx);
-    return { ok: true as const, changed: true, oldEmail: p.email };
-  });
-  if (!r.ok) return r;
-  if (r.changed) await sendMail(emailChangeNoticeMessage(await currentBrand(), r.oldEmail, { byStaff: true }), { purpose: "email_change_notice", actor: o.actor, ip: o.ip });
-  return { ok: true, changed: r.changed };
-}
+// Staff do not change a parent's address in the portal: a sign-in address lives in QuickBooks only (parents spec,
+// decision 6), and staff change it there. A parent changes their own through src/lib/parents/email-change.ts.

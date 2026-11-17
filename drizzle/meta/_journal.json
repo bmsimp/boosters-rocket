@@ -71,6 +71,97 @@
       "when": 1794468823625,
       "tag": "0009_parents_from_quickbooks",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794741268812,
+      "tag": "0010_family_money",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794763539372,
+      "tag": "0011_seasons",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794804515609,
+      "tag": "0012_audit_filters",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794848064921,
+      "tag": "0013_staff_money",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794848161067,
+      "tag": "0014_volunteer",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1794848326193,
+      "tag": "0015_forms",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794853543214,
+      "tag": "0016_signed_forms",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1794858563903,
+      "tag": "0017_volunteer_credit",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794858626949,
+      "tag": "0018_parent_email_change_record",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794858855592,
+      "tag": "0019_write_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794877362549,
+      "tag": "0020_buyout",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794893223861,
+      "tag": "0021_sandbox_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794902919459,
+      "tag": "0022_requirement_reminders",
+      "breakpoints": true
     }
   ]
 }

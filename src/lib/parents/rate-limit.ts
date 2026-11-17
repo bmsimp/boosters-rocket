@@ -2,12 +2,44 @@ import { and, asc, eq, gt, lte, sql, count } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
 
-export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip";
+export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
+  | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent";
 const WINDOW_MS = 15 * 60 * 1000;
+/**
+ * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
+ * per-IP limits only stop a flood: on a registration night a whole room of parents shares the school's one address, so
+ * they sit well above what a full room asks for (spec §1 Rate limits). With no address they are not applied at all
+ * (signin-codes.ts): every visitor would share one count.
+ */
 export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number }> = {
   code_send_email: { max: 3, windowMs: WINDOW_MS },
-  code_send_ip: { max: 10, windowMs: WINDOW_MS },
-  code_check_ip: { max: 30, windowMs: WINDOW_MS },
+  code_send_ip: { max: 60, windowMs: WINDOW_MS },
+  code_check_ip: { max: 180, windowMs: WINDOW_MS },
+  // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
+  // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
+  // from QuickBooks each time, so that is bounded too, well above what editing takes.
+  contact_save_parent: { max: 6, windowMs: 60 * 60 * 1000 },
+  contact_open_parent: { max: 30, windowMs: WINDOW_MS },
+  // Opening a form to sign, and checking how one stands (src/lib/forms/signing.ts), counted per person: each asks the
+  // club's Documenso once, and Documenso counts every call the portal makes against one limit of its own. A family
+  // signing a dozen forms in a sitting opens and checks each a few times, so this sits well above that.
+  form_open_parent: { max: 120, windowMs: WINDOW_MS },
+  // Checking in at a volunteer shift (src/lib/volunteer/check-in.ts), counted per person: a guardian checks in
+  // themselves and a student or two, a press each, so this sits well above a family's busiest evening.
+  volunteer_checkin_parent: { max: 30, windowMs: WINDOW_MS },
+  // Signing up for a volunteer shift (src/lib/volunteer/my-volunteer.ts), counted per person: each place taken emails
+  // the guardian a confirmation and locks the shift's row. A guardian signing up themselves and a few students for a
+  // season's shifts in one sitting stays well under it.
+  volunteer_signup_parent: { max: 30, windowMs: WINDOW_MS },
+  // A parent's change of their own sign-in address (email-change.ts), counted per person. Each ask mails two
+  // addresses, one of them typed by the parent, so it is kept low; each confirmation reads and may write the club's
+  // QuickBooks. Nobody changes their address more than once or twice, and a link that met a busy moment is tried again.
+  email_request_parent: { max: 5, windowMs: 60 * 60 * 1000 },
+  email_confirm_parent: { max: 10, windowMs: 60 * 60 * 1000 },
+  // A guardian choosing to pay instead of volunteering, or switching back (src/lib/buyouts/writes.ts), counted per
+  // person: each press may make or void an invoice in the club's QuickBooks. A family with a few students chooses for
+  // each in a sitting, and may change its mind once or twice; this sits above that.
+  buyout_parent: { max: 10, windowMs: 60 * 60 * 1000 },
 };
 
 /**

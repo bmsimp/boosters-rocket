@@ -24,11 +24,14 @@ export async function claimBootstrapAdmin(email: string): Promise<string | null>
     if ((await adminCount(tx)) > 0) return null;
     const [adminRole] = await tx.select().from(role).where(eq(role.key, "admin"));
     if (!adminRole) throw new Error("Admin role missing");
-    const [s] = await tx.insert(staffUser).values({ email: got, name: got, status: "active" })
-      .onConflictDoUpdate({ target: staffUser.email, set: { status: "active", updatedAt: new Date() } }).returning();
+    // The name setup asked for; a record already there keeps its own name unless it was only ever the email.
+    const name = setup.adminName ?? got;
+    const [s] = await tx.insert(staffUser).values({ email: got, name, status: "active" })
+      .onConflictDoUpdate({ target: staffUser.email, set: { status: "active", updatedAt: new Date(),
+        name: sql`CASE WHEN ${staffUser.name} = ${staffUser.email} THEN ${name} ELSE ${staffUser.name} END` } }).returning();
     await tx.insert(roleAssignment).values({ roleId: adminRole.id, staffUserId: s!.id }).onConflictDoNothing();
     await writeAudit({ actor: { door: "system", id: null, label: "bootstrap" }, action: "admin.bootstrap",
-      targetType: "staff_user", targetId: s!.id, after: { email: got, role: "Admin" } }, tx);
+      targetType: "staff_user", targetId: s!.id, after: { email: got, name: s!.name, role: "Admin" } }, tx);
     return s!.id;
   });
 }

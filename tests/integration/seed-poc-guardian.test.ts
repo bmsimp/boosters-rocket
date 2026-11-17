@@ -4,16 +4,20 @@ import { db } from "@/lib/db/client";
 import { guardian, parent, parentAuthUser, auditLog } from "@/lib/db/schema";
 import { resetDb } from "../helpers/db";
 
-const TEST_URL = "postgres://booster:booster@localhost:5433/booster_test";
-const run = (appUrl: string, args: string[]) => spawnSync("node", ["scripts/seed-poc-guardian.mjs", ...args],
-  { env: { ...process.env, DATABASE_URL: TEST_URL, APP_URL: appUrl }, encoding: "utf8" });
+// The script writes to this file's database (DATABASE_URL: the run's, or its worker's, tests/setup/worker.ts), where the
+// assertions below read.
+const TEST_URL = process.env.DATABASE_URL!;
+/** The portal's environment says whether it is a proof of concept; no host name decides it. */
+const POC = { BR_PROOF_OF_CONCEPT: "yes" };
+const run = (extra: Record<string, string>, args: string[]) => spawnSync("node", ["scripts/seed-poc-guardian.mjs", ...args],
+  { env: { ...process.env, DATABASE_URL: TEST_URL, APP_URL: "https://portal.example.org", BR_PROOF_OF_CONCEPT: "", ...extra }, encoding: "utf8" });
 const ARGS = ["--name", "Test Parent", "--email", "Test.Parent@Example.com", "--family", "POC-FAMILY-1"];
 
 describe("scripts/seed-poc-guardian.mjs", () => {
   beforeEach(resetDb);
 
   it("inserts one invited guardian and a guardian.seed audit row", async () => {
-    const r = run("https://portaltest.rhinoautomator.com", ARGS);
+    const r = run(POC, ARGS);
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/seeded guardian [0-9a-f-]{36}/);
     const people = await db.select().from(parent);
@@ -29,16 +33,19 @@ describe("scripts/seed-poc-guardian.mjs", () => {
     expect(audits.map((a) => a.action)).toEqual(["parent.seed", "guardian.seed"]);
   });
 
-  it("refuses outside the POC address and changes nothing", async () => {
-    const r = run("https://portal.fznband.org", ARGS);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("only runs against the portaltest proof of concept");
+  it("refuses on a portal that doesn't say it is a proof of concept, whatever its address, and changes nothing", async () => {
+    for (const env of [{}, { BR_PROOF_OF_CONCEPT: "no" }, { BR_PROOF_OF_CONCEPT: "1" }, { APP_URL: "https://portaltest.example.org" }] as Record<string, string>[]) {
+      const r = run(env, ARGS);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("only runs against a proof of concept. Nothing was changed.");
+    }
     expect(await db.select().from(guardian)).toHaveLength(0);
+    expect(await db.select().from(parent)).toHaveLength(0);
   });
 
   it("refuses a second row for the same person and family, plainly, and writes no audit row", async () => {
-    expect(run("https://portaltest.rhinoautomator.com", ARGS).status).toBe(0);
-    const again = run("https://portaltest.rhinoautomator.com", ARGS);
+    expect(run(POC, ARGS).status).toBe(0);
+    const again = run(POC, ARGS);
     expect(again.status).toBe(1);
     expect(again.stderr).toContain("That person is already a guardian in that family");
     expect(again.stderr).not.toMatch(/\bat \S+\.(m?js|ts):\d+/); // no stack trace
@@ -46,14 +53,14 @@ describe("scripts/seed-poc-guardian.mjs", () => {
   });
 
   it("links the same person into a second family without a second person", async () => {
-    expect(run("https://portaltest.rhinoautomator.com", ARGS).status).toBe(0);
-    expect(run("https://portaltest.rhinoautomator.com", [...ARGS.slice(0, 4), "--family", "POC-FAMILY-2"]).status).toBe(0);
+    expect(run(POC, ARGS).status).toBe(0);
+    expect(run(POC, [...ARGS.slice(0, 4), "--family", "POC-FAMILY-2"]).status).toBe(0);
     expect(await db.select().from(parent)).toHaveLength(1);
     expect((await db.select().from(guardian)).map((g) => g.familyQboId).sort()).toEqual(["POC-FAMILY-1", "POC-FAMILY-2"]);
   });
 
   it("refuses missing arguments", () => {
-    const r = run("https://portaltest.rhinoautomator.com", ["--name", "X"]);
+    const r = run(POC, ["--name", "X"]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Usage:");
   });

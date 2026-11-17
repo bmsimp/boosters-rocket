@@ -214,7 +214,9 @@ describe("QuickBooks settings", () => {
     stub.failQueryFrom = null; stub.types = [];
     await refreshRoster(worker);
     const emptyHtml = await setupHtml("shape");
-    expect(emptyHtml).toContain("QuickBooks has no customer types yet. Create them there first (Sales, Customers, Customer types), then select Refresh now on the Roster page.");
+    // Not a dead end: it says the types are made in QuickBooks, and where.
+    expect(emptyHtml).toContain("QuickBooks has no customer types yet, so there is nothing to choose from. Customer types are made in QuickBooks, not here: in QuickBooks Online, open the gear menu, then All lists, then Customer types");
+    expect(emptyHtml).not.toContain("<select");
     expect(emptyHtml).not.toContain("couldn&#x27;t read QuickBooks");
   });
 

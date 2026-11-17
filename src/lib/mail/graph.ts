@@ -1,5 +1,5 @@
 import { signEntraAssertion, CLIENT_ASSERTION_TYPE, type AssertionKey } from "@/lib/auth/client-assertion";
-import { MailSendError, type MailSender } from "./types";
+import { MailSendError, attachmentBytes, type MailSender } from "./types";
 
 export type GraphEndpoints = { login: string; graph: string };
 export const GRAPH_ENDPOINTS: GraphEndpoints = { login: "https://login.microsoftonline.com", graph: "https://graph.microsoft.com" };
@@ -50,6 +50,9 @@ export function createGraphSender(o: { tenantId: string; clientId: string; asser
       message: {
         subject: m.subject, body: { contentType: "HTML", content: m.html },
         toRecipients: [{ emailAddress: { address: m.to } }], from: { emailAddress: { name: o.fromName, address: o.mailbox } },
+        // A file such as a calendar file goes as a file attachment, its bytes in base64 (Graph's sendMail takes up to 3 MB this way).
+        ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ "@odata.type": "#microsoft.graph.fileAttachment", name: a.filename, contentType: a.contentType,
+          contentBytes: attachmentBytes(a).toString("base64") })) } : {}),
       },
       saveToSentItems: false,
     };

@@ -6,6 +6,7 @@ import { staffAuthUser, staffAuthSession, staffAuthAccount, staffAuthVerificatio
 import { env } from "@/env";
 import { loadProviders, type LoadedProviders } from "./providers";
 import { createEntraAssertionGetter } from "./client-assertion";
+import { clientAddress, stampingHandler } from "./client-address";
 
 function buildStaffAuth(p: LoadedProviders) {
   return betterAuth({
@@ -19,8 +20,8 @@ function buildStaffAuth(p: LoadedProviders) {
     }),
     emailAndPassword: { enabled: false },
     account: { accountLinking: { enabled: false } },
-    // Behind Cloudflare: the tunnel sets cf-connecting-ip and the app port is never published, so only that header is trusted.
-    advanced: { cookiePrefix: "br_staff", ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
+    // The visitor's address comes from the portal's one reading of it (client-address.ts), not from a header named here.
+    advanced: { cookiePrefix: "br_staff", ipAddress: clientAddress() },
     databaseHooks: { session: {
       create: { after: (session, ctx) => recordSignin("staff", session, ctx) },
       delete: { after: (session, ctx) => recordSignout("staff", session, ctx) },
@@ -45,6 +46,6 @@ let built: { version: number; auth: StaffAuth } | null = null;
 /** The staff Better Auth instance for the current stored providers; rebuilt after a provider is saved. */
 export async function getStaffAuth(): Promise<StaffAuth> {
   const p = await loadProviders();
-  if (!built || built.version !== p.version) built = { version: p.version, auth: buildStaffAuth(p) };
+  if (!built || built.version !== p.version) built = { version: p.version, auth: stampingHandler(buildStaffAuth(p)) };
   return built.auth;
 }

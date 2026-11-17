@@ -1,9 +1,9 @@
 # Booster Rocket v1 — Design
 
 **Date:** 2026-11-06
-**Status:** Draft for review
-**Revised in part:** parent sign-in, people and outgoing mail. See docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md (it lists the sections it changes).
-**First deployment:** FZN Band Boosters (`portal.fznband.org`)
+**Status:** Built on the branch `parent-portal`: steps 1 to 6 of the roadmap (docs/superpowers/plans/2026-11-07-v1-roadmap.md) were done by 2026-11-16, and step 7 holds the whole portal against this spec, requirement by requirement (docs/conformance.md says where each stands). Not deployed for a club yet: the checks only a person can make come first (docs/runbooks/before-the-first-family.md). Later specs in this folder override the parts of this one that they name.
+**Revised in part:** parent sign-in, people and outgoing mail (docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md, which lists the sections it changes); the QuickBooks connection and roster (2026-11-10-quickbooks-connection-and-roster-design.md); parents from QuickBooks (2026-11-11-parents-from-quickbooks-design.md); forms in Documenso (2026-11-15-documenso-verification.md, section 9 and the corrections in its section 1a). The roadmap's owner decisions of 2026-11-14 widen it: parents edit their own phone and address, and the portal can be installed as an app.
+**First deployment:** planned for FZN Band Boosters (`portal.fznband.org`); not installed there yet.
 
 ---
 
@@ -212,6 +212,13 @@ All of these write to QuickBooks first, then update the cache from QuickBooks' r
 offers a suffixed name (for example "Smith Family (2)") instead of failing.
 
 ### 6.2 Parent edits (contact details)
+
+> **Revised 2026-11-15 (phone and address built):** a parent edits the phone and billing address of *their own*
+> QuickBooks record, the one their sign-in came from (`2026-11-11-parents-from-quickbooks-design.md`): a Parent
+> sub-customer, or, where the club has no parent type or a flat shape, the family's or member's own record, which every
+> parent of that family shares, and the page says so. A sign-in made by hand has no record to edit and is told to ask
+> the club. Nothing is kept in the portal: the address is read from QuickBooks when the edit page opens, and the roster
+> cache gets the new phone and `SyncToken` from QuickBooks' answer. Email changes are a later slice.
 
 - **Phone and address:** written straight to QuickBooks and recorded in the audit log. Only the
   primary guardian's details live in QuickBooks; another guardian's edits stay in the portal.

@@ -22,6 +22,7 @@
     "next": "16.4.5",
     "nodemailer": "10.2.1",
     "postgres": "^4.1.0",
+    "qrcode": "1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "reflect-metadata": "0.2.2",
@@ -29,6 +30,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "^1.65.0",
     "@types/node": "^26",
     "@types/react": "^19",

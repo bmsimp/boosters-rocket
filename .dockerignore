@@ -2,14 +2,23 @@
 .github
 .next
 node_modules
+# Git worktrees for agents working in parallel: whole copies of the repo, each with its own node_modules and build.
+.worktrees
 **/.env
 **/.env.*
 !.env.example
 .superpowers
 .impeccable
 docs
+# The installation folder: compose files and whatever a club keeps beside them. The image never needs it.
+deploy
 design
 tests
+# Test tooling that imports from tests/: without tests/ in the context, `next build` could not type-check them.
+playwright.config.ts
+vitest.config.mts
+scripts/seed-e2e.ts
+scripts/walk-forms-by-hand-local-documenso.ts
 test-results
 playwright-report
 coverage

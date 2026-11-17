@@ -17,7 +17,8 @@ test("parent and staff pages send an anonymous visitor to sign in", async ({ pag
   await page.goto("/");
   await expect(page).toHaveURL(/\/sign-in$/);
   await page.goto("/display");
-  await expect(page).toHaveURL(/\/sign-in$/);
+  // A parent page passes its own address along, so the parent is brought back to it after signing in.
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fdisplay$/);
   await page.goto("/staff/roles");
   await expect(page).toHaveURL(/\/staff\/sign-in$/);
 });
@@ -28,11 +29,11 @@ test("no horizontal scroll on the sign-in page", async ({ page }) => {
   expect(overflow).toBe(false);
 });
 
-test("pages that aren't built yet get the plain not-ready page, not the framework default", async ({ page }) => {
-  for (const path of ["/forms", "/payments", "/family", "/no-such-page"]) {
+test("an address with no page gets the portal's own not-found page, not the framework default", async ({ page }) => {
+  for (const path of ["/no-such-page"]) {
     const res = await page.goto(path);
     expect(res?.status()).toBe(404);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("This part of the portal isn't ready yet");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("We can't find that page");
     expect(await page.content()).not.toContain("Zelda");
   }
 });

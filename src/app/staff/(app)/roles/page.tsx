@@ -1,24 +1,37 @@
 import { requireStaffPage } from "@/lib/guards";
 import { listRoles } from "@/lib/staff/roles";
-import { GRANTABLE } from "@/lib/permissions/registry";
-import { RoleForm } from "./role-form";
+import { checklistView } from "@/lib/permissions/checklist";
+import { ADMIN_ONLY_WORDS } from "@/lib/permissions/words";
+import { DeleteRole, RoleForm } from "./role-form";
+
+export const metadata = { title: "Roles" };
+
+const people = (n: number) => (n === 0 ? "Nobody holds this role yet." : `${n} ${n === 1 ? "person holds" : "people hold"} this role.`);
 
 export default async function RolesPage() {
   await requireStaffPage("Admin.Roles.ReadWrite");
   const roles = await listRoles();
   return (
-    <main className="wrap single">
+    <main className="wrap single roles-page">
       <h1 className="page-title">Roles</h1>
-      <p className="lede">A role is a list of permissions to include and exclude. Exclude always wins. Admin always has everything. Managing roles, adding staff, changing a person&apos;s roles, turning sign-in on or off, and the sign-in settings are Admin only, so a role can&apos;t include them.</p>
+      <p className="lede">A role is a set of things staff may do. Tick what each role lets its people do, then save. A person can hold more than one role, and gets everything their roles give.</p>
+      <details className="box"><summary>What only an Admin can do</summary>
+        <p>The Admin role holds everything. These are kept for Admins alone, so no other role can be given them. The audit log is one, because its rows hold notes staff write about parents.</p>
+        <ul>{ADMIN_ONLY_WORDS.map((w) => <li key={w}>{w}</li>)}</ul>
+      </details>
       {roles.map((r) => (
         <section className="box" key={r.id} aria-labelledby={`role-${r.id}`}>
           <h2 id={`role-${r.id}`}>{r.name}</h2>
-          <p>{r.members} {r.members === 1 ? "person" : "people"}</p>
-          {r.builtin ? <p>Holds every permission. Can&apos;t be changed or deleted.</p> : <RoleForm role={r} />}
+          <p>{people(r.members)}</p>
+          {r.builtin ? <p>Holds every permission, the Admin-only ones too. It can&apos;t be changed or deleted.</p> : (
+            <>
+              <RoleForm role={{ id: r.id, name: r.name, members: r.members, ...checklistView({ include: r.include, exclude: r.exclude }) }} />
+              <DeleteRole role={{ id: r.id, name: r.name, members: r.members }} />
+            </>
+          )}
         </section>
       ))}
       <section className="box" aria-labelledby="new-role"><h2 id="new-role">New role</h2><RoleForm /></section>
-      <details className="box"><summary>All permissions</summary><ul>{GRANTABLE.map((p) => <li key={p}><code>{p}</code></li>)}</ul></details>
     </main>
   );
 }

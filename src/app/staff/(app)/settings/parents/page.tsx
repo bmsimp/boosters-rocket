@@ -4,6 +4,8 @@ import { matchReview } from "@/lib/parents/matches";
 import { getPreviousCompany } from "@/lib/parents/company-change";
 import { LocalTime } from "@/app/components/local-time";
 import { SwitchButton } from "./forms";
+import { StateWords } from "@/app/components/state-words";
+import { BackToSettings } from "../back-to-settings";
 import { setRequireStudentsAction, setReviewEmailsAction, deletePreviousCompanyAction } from "./actions";
 
 export const metadata = { title: "Parent sign-ins" };
@@ -19,10 +21,12 @@ export default async function ParentSettingsPage() {
   const s = p.settings;
   return (
     <main className="wrap single">
+      <BackToSettings />
       <h1 className="page-title">Parent sign-ins</h1>
       <p className="lede">Parents in QuickBooks can sign in to the portal with their email address and a code. Nobody is invited one by one: who can sign in follows the roster, once this is switched on. Only Admins can change this.</p>
 
       <section className="box" aria-labelledby="ps-status-h"><h2 id="ps-status-h">What is set</h2>
+        <StateWords state={s.signin ? "done" : "todo"} words={s.signin ? "On: parents can sign in" : s.everEnabled ? "Switched off: nobody can sign in" : "Not switched on yet"} />
         <dl className="details">
           <dt>Parent sign-ins</dt><dd>{s.signin ? "On" : s.everEnabled ? "Switched off. Nobody can sign in." : "Not switched on yet"}</dd>
           <dt>Who can sign in</dt><dd>{s.signin ? `${n(p.people, "person", "people")}, to ${n(p.families, "family", "families")}` : "Nobody yet"}</dd>

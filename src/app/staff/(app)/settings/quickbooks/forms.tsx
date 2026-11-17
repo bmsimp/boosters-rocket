@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import type { MembershipShape, TypeRow } from "@/lib/roster/shape";
@@ -12,7 +13,7 @@ import type { ShapePreview } from "@/lib/roster/queries";
 
 type Saved = { ok: true } | { ok: false; errors: string[] };
 const failed = { ok: false as const, errors: [ACTION_FAILED] };
-const Errors = ({ errors }: { errors: string[] }) => <ul role="alert" className="errors">{errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+const Errors = ({ errors }: { errors: string[] }) => <ActionOutcome state={{ ok: false, errors }} />;
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 
 export type AppKeys = { clientId: string; clientSecret: string; environment: "sandbox" | "production" };
@@ -46,7 +47,7 @@ export function AppKeysForm({ configured, clientId: savedId, environment: savedE
         <label><input type="radio" name="environment" value="production" checked={environment === "production"} onChange={() => setEnvironment("production")} /> Production (the club&apos;s real books, with the app&apos;s Production keys)</label>
       </fieldset>
       {state && !state.ok && <Errors errors={state.errors} />}
-      {state?.ok && <p role="status">Saved. <a href="/staff/settings/quickbooks/setup?step=connect">Next: sign in to Intuit</a></p>}
+      {state?.ok && <Notice tone="done">Saved. <a href="/staff/settings/quickbooks/setup?step=connect">Next: sign in to Intuit</a></Notice>}
       <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run({ clientId, clientSecret, environment }))}>{pending ? "Saving…" : "Save"}</button>
     </form>
   );
@@ -115,7 +116,7 @@ export function ShapeForm({ types, shape, preview, save }: {
         </fieldset>
       )}
       {seen && current && !seen.result.ok && <Errors errors={seen.result.errors} />}
-      {seen && !current && <p role="status" className="hint">The choice has changed since this preview. Select Preview again to see what it would show.</p>}
+      {seen && !current && <Notice tone="info">The choice has changed since this preview. Select Preview again to see what it would show.</Notice>}
       {p && (
         <div role="status" className="stack">
           <p><b>With this choice the portal would show:</b></p>
@@ -133,7 +134,7 @@ export function ShapeForm({ types, shape, preview, save }: {
         </div>
       )}
       {saved && !saved.ok && <Errors errors={saved.errors} />}
-      {saved?.ok && <p role="status">Saved. {saved.refreshed ? "The roster was read again with this shape." : "The roster couldn't be read again just now; it will be on the next refresh."} <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>}
+      {saved?.ok && <Notice tone="done">Saved. {saved.refreshed ? "The roster was read again with this shape." : "The roster couldn't be read again just now; it will be on the next refresh."} <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></Notice>}
       <div className="row-actions">
         <button type="button" className="btn btn-line" disabled={previewing || saving} onClick={() => startTransition(() => runPreview(choice))}>{previewing ? "Counting…" : "Preview"}</button>
         <button type="button" className="btn" disabled={previewing || saving} onClick={() => startTransition(() => runSave(choice))}>{saving ? "Saving…" : "Save this shape"}</button>
@@ -155,13 +156,13 @@ export function disconnectedNote(revoked: boolean): string {
  */
 export function Disconnect({ connected, disconnect, warning }: { connected: boolean; disconnect: () => Promise<Disconnected>; warning?: string }) {
   const [state, run, pending] = useActionState(async () => safely(() => disconnect(), { ok: false as const, error: ACTION_FAILED }), null);
-  if (!connected) return state?.ok ? <p role="status">{disconnectedNote(state.revoked)}</p> : null;
+  if (!connected) return state?.ok ? <Notice tone="done">{disconnectedNote(state.revoked)}</Notice> : null;
   return (
     <details><summary>Disconnect</summary>
       <p>This asks Intuit to cancel the portal&apos;s access and deletes its copy of the connection. The Intuit app&apos;s keys and the last roster stay, and the roster is marked as no longer current.</p>
-      {warning && <p role="status">{warning}</p>}
+      {warning && <Notice tone="warning">{warning}</Notice>}
       <form action={run} className="stack">
-        {state && !state.ok && <p role="alert" className="errors">{state.error}</p>}
+        {state && !state.ok && <Notice tone="problem">{state.error}</Notice>}
         <button className="btn btn-line" disabled={pending}>{pending ? "Disconnecting…" : "Disconnect QuickBooks"}</button>
       </form>
     </details>
