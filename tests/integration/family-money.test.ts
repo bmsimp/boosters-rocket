@@ -178,6 +178,29 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     expect(await db.select().from(familyMoney)).toHaveLength(1);
   });
 
+  it("figures read while a buy-out invoice was being made stay behind, so the next look asks QuickBooks again", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    await loadFamilyMoney("10");
+    await ageMoney("10", 6 * MINUTE);
+    // As the invoices are asked for, a buy-out's invoice is made and the family's figures are marked behind
+    // (src/lib/buyouts/writes.ts); the answer already on its way doesn't hold the new invoice.
+    stub.onApiRequest = async (call) => {
+      if (!call.path.endsWith("/query")) return;
+      stub.onApiRequest = null;
+      await db.update(familyMoney).set({ staleAt: new Date() }).where(eq(familyMoney.familyQboId, "10"));
+    };
+    expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1"]);
+    const row = (await moneyRow("10"))!;
+    // The figures are as of when QuickBooks was asked, which is before the mark: they are not taken as current.
+    expect(row.staleAt!.getTime()).toBeGreaterThanOrEqual(row.readAt!.getTime());
+    stub.invoices = [inv("1", "10"), inv("2", "10")];
+    const asked = invoiceQueries(stub).length;
+    expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1", "INV-2"]);
+    expect(invoiceQueries(stub)).toHaveLength(asked + 1);
+  });
+
   it("goes by the stored freshness window: a long one keeps a row fresh, none at all asks every time", async () => {
     await twoFamilies();
     await connectCompany(stub);

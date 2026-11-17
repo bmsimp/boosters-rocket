@@ -189,6 +189,10 @@ export type ReadOutcome = { ok: true } | { ok: false; code: string };
  * alone. A difference in the cross-check is recorded for staff, once per family per day at most (v1 spec §8.3).
  */
 async function readAndKeep(tx: Tx, familyQboId: string, before: MoneyRow | undefined, family: FamilyCustomers | null, how: ReadHow): Promise<ReadOutcome> {
+  // The figures are as of when QuickBooks was first asked, not when it had answered: a buy-out invoice made while it was
+  // answering marks the row behind (staleAt) after this, so the next look reads it again rather than taking these
+  // figures, which may not hold it, as current (isFresh, and the daily check of buy-out invoices).
+  const askedAt = new Date();
   const read = await readFromQuickBooks(familyQboId, family, tx, how);
   const now = new Date();
   // The company the cache belongs to changed while QuickBooks was answering: these figures are the old company's.
@@ -205,7 +209,7 @@ async function readAndKeep(tx: Tx, familyQboId: string, before: MoneyRow | undef
   const differs = (outcome.currency !== null && outcome.balanceWithJobsCents !== null && outcome.balanceWithJobsCents !== outcome.totalCents) || customers.length > 0;
   const auditedToday = before?.mismatchAuditedAt != null && utcDay(before.mismatchAuditedAt) === utcDay(now);
   const figures = {
-    realmId: outcome.realmId, readAt: now, invoices: outcome.invoices, totalCents: outcome.totalCents, currency: outcome.currency,
+    realmId: outcome.realmId, readAt: askedAt, invoices: outcome.invoices, totalCents: outcome.totalCents, currency: outcome.currency,
     balanceWithJobsCents: outcome.balanceWithJobsCents, updatedAt: now, ...(differs && !auditedToday ? { mismatchAuditedAt: now } : {}),
     // A page load leaves the worker's customer check as it was: that is a record of its own read, with its own time.
     ...(how.kind === "run" ? { checkedAt: outcome.checks ? now : null, customerChecks: outcome.checks } : {}),
