@@ -56,9 +56,14 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     way the portal wasn't written for. Open the page: each such row says what it found and what it means for the club.
     That is a change to the portal for whoever maintains it; send them a picture of the page. The check changes
     nothing in the portal by itself. The line says when the requests were last checked. "haven't been checked against
-    a company yet" or "didn't finish" needs nothing urgent: when convenient, connect the Intuit sandbox company (not
-    the club's real books), run the check, then reconnect the real company. Against the club's real books the check
-    only reads.
+    a company yet", "didn't finish" or "some of the changes weren't tried" needs nothing urgent. On an installation
+    connected to the club's real books, run the check there when convenient (Settings, QuickBooks, **Check the portal's
+    requests**): against the real books it only reads. The checks that make changes are run on a separate installation
+    connected to an Intuit sandbox company, such as the proof-of-concept host, never by switching this installation's
+    company. Connecting a different company, even for a moment, ends every parent's access, switches parent sign-ins
+    and welcome emails off and deletes the club's ticks, waivers, volunteer sign-ups, buy-outs and forms being signed,
+    and connecting the real books again brings none of it back: see [Reconnecting QuickBooks: Connecting a different
+    company](quickbooks-reconnect.md#connecting-a-different-company), which starts with a backup.
 
 ## Every family's invoices
 

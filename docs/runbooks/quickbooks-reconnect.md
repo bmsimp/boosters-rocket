@@ -44,7 +44,7 @@ Each of those deletions stays in the audit log. Steps:
 
 1. Take a backup first: on the server, in `~/booster-rocket/deploy`, `docker compose run --rm backup --now`.
 2. In the portal: **Settings**, **QuickBooks**, open **Disconnect**, read the warning, then **Disconnect QuickBooks**.
-3. **Set up**: the app's keys for that company (Production keys for real books), **Sign in to Intuit**, choose the new
+3. **Change** (the app's keys are kept after a disconnect, so the button reads Change, not Set up): the app's keys for that company (Production keys for real books), **Sign in to Intuit**, choose the new
    company, approve.
 4. Choose the membership shape, **Preview**, check the counts and names, **Save this shape**.
 5. Check **Roster**, then switch parent sign-ins back on under **Settings**, **Parent sign-ins** and go through the

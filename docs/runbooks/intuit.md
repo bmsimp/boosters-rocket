@@ -75,7 +75,8 @@ Connecting a different company deletes what the portal holds from the sandbox: r
 [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company) first.
 
 1. In the portal: **Settings**, **QuickBooks**, open **Disconnect**, then **Disconnect QuickBooks**.
-2. **Set up** again: the Production keys, **Production**, sign in to Intuit with an account that can open the club's
+2. **Change** (the app's keys are kept after a disconnect, so the button reads Change, not Set up; its steps open at
+   step 1, where the keys go): the Production keys, **Production**, sign in to Intuit with an account that can open the club's
    company, choose it and **Connect**.
 3. Choose the membership shape again, **Preview**, check, **Save this shape**.
 4. Open **Health**: QuickBooks says "Connected" to the club's company, with no word of a sandbox.

@@ -64,3 +64,54 @@ describe("what a volunteer copies off the machine", () => {
     expect(chown).toBeGreaterThan(copy);
   });
 });
+
+describe("what the runbooks tell an Admin to do with QuickBooks", () => {
+  const health = section(read("docs/runbooks/health-warnings.md"), "QuickBooks");
+  it("never tells an installation on the real books to connect the sandbox: that is a change of company, which clears the club's data", () => {
+    expect(health).not.toMatch(/connect the Intuit sandbox company/i);
+    expect(health).not.toMatch(/then reconnect the real company/i);
+    expect(health).toMatch(/never by switching this installation's\s+company/);
+    expect(health).toContain("(quickbooks-reconnect.md#connecting-a-different-company), which starts with a backup");
+  });
+
+  it("names the button a disconnected company shows, Change: Disconnect keeps the app's keys", () => {
+    expect(read("src/app/staff/(app)/settings/quickbooks/page.tsx")).toContain(`conn.configured ? "Change" : "Set up"`);
+    const intuit = section(read("docs/runbooks/intuit.md"), "4. Connect the club's real books");
+    const reconnect = section(read("docs/runbooks/quickbooks-reconnect.md"), "Connecting a different company");
+    for (const steps of [intuit, reconnect]) {
+      expect(steps).not.toMatch(/\*\*Set up\*\*/);
+      expect(steps).toMatch(/\*\*Change\*\*/);
+    }
+  });
+});
+
+describe("the owner's runbook, in its order", () => {
+  const runbook = read("docs/runbooks/before-the-first-family.md");
+  const part1 = section(runbook, "1. Push, and deploy to the proof-of-concept host");
+  it("brings the deploy script up to date and backs up by hand before the first deploy, which the old copy would run without a backup", () => {
+    const deploy = part1.slice(part1.indexOf("4. **Deploy**"), part1.indexOf("5. **Open the Health page**"));
+    const pull = deploy.indexOf("git pull --ff-only"), backup = deploy.indexOf("scripts/backup.sh ~/booster-rocket-backups"), run = deploy.indexOf("scripts/poc/deploy.sh");
+    expect(pull).toBeGreaterThan(0);
+    expect(backup).toBeGreaterThan(pull);
+    expect(run).toBeGreaterThan(backup);
+  });
+
+  it("puts the host back on the first sandbox company, with sign-ins on, after check 25 and before part 2 needs it", () => {
+    const checks = part1.slice(part1.indexOf("8. **Run checks 18 to 25**"), part1.indexOf("9. **Export"));
+    expect(checks).toMatch(/connect the first sandbox company/);
+    expect(checks).toMatch(/switch parent sign-ins back on/);
+  });
+
+  it("asks GitHub for Dependabot's security updates, which only the repository's settings switch on", () => {
+    expect(part1).toMatch(/\*\*Dependabot security updates\*\*/);
+  });
+
+  it("passes CI on what the log shows, and the contrast check on what a notice now has", () => {
+    expect(part1).not.toContain("booster_w2_test");
+    expect(runbook).not.toMatch(/notices keep their left edge/);
+  });
+
+  it("doesn't pass the sandbox check while any change went untried", () => {
+    expect(section(runbook, "2. Check the portal's requests in the Intuit sandbox")).toMatch(/no row under \*\*Changing \(sandbox only\)\*\* reads "Not tried"/);
+  });
+});

@@ -22,8 +22,8 @@ is on no server. The proof-of-concept host is the server its own runbook describ
 sandbox company and the club's Microsoft 365 mail, but no Documenso.
 
 1. **Push the branch `parent-portal` and open a pull request into `main`.** CI runs on a pull request.
-   **Pass:** both jobs, `test` and `image`, finish green. In the `test` job's "Unit and integration tests" step, the
-   log shows a second worker's database (`booster_w2_test`) made at the start and dropped at the end.
+   **Pass:** both jobs, `test` and `image`, finish green, and the `test` job's "Unit and integration tests" step ends
+   with a summary that counts every test file as passed (`Test Files  <n> passed (<n>)`).
    **If not:** open the failing step and copy its last screen of output to whoever maintains the portal. A test that
    failed only with a timeout is worth one "Re-run failed jobs" before anything else. The backup test runs Postgres's
    tools inside the database service's own container (`.github/workflows/ci.yml` says why); if it can't, its message
@@ -31,13 +31,23 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
 2. **Merge the pull request into `main`.** The proof-of-concept host deploys whatever `main` holds.
    **Pass:** `main` on GitHub shows the merge. **If not:** resolve what GitHub says blocks it, then merge.
 3. **Get the host's env file ready before the deploy.** On the host, `~/booster-rocket/.env.poc` needs an `APP_URL`
-   line with the portal's address (the deploy now refuses without one), and the user who deploys must be able to write
+   line with the portal's address (the new deploy script refuses without one), and the user who deploys must be able to write
    to `~/booster-rocket-backups` (or set `BR_BACKUP_DIR` to a folder they can). If the proof of concept's seed script
    is still wanted there, add the line `BR_PROOF_OF_CONCEPT=yes`.
    **Pass:** `grep APP_URL ~/booster-rocket/.env.poc` prints the line, and `ls -ld ~/booster-rocket-backups` shows the
    deploying user as owner (or the folder doesn't exist yet). **If not:** add the line; `mkdir ~/booster-rocket-backups`.
-4. **Deploy** as section 8 of [the proof of concept's runbook](poc-linuxdev.md#8-deploy) says. The deploy now backs up
-   the database before it migrates.
+4. **Deploy** as section 8 of [the proof of concept's runbook](poc-linuxdev.md#8-deploy) says, but first bring the
+   deploy script itself up to date and take one backup by hand. The copy on the host is older than the backup step and
+   the `APP_URL` check, and `deploy.sh` updates itself during its own `git pull` while the old copy keeps running: run
+   as it stands, it would migrate the database (every migration since the host last deployed) with no backup first.
+   ```bash
+   cd ~/booster-rocket
+   git pull --ff-only
+   scripts/backup.sh ~/booster-rocket-backups
+   scripts/poc/deploy.sh
+   ```
+   The hand-run backup ends with a line saying it was kept; stop there if it doesn't. From this run on, the deploy
+   backs up the database before it migrates.
    **Pass:** the last line is `Deployed <short commit>.`, the exit code is 0, and a new `booster-rocket-<time>.dump`
    is in `~/booster-rocket-backups`. **If not:** the exit code says why (the table in that section): 2 refused, 3
    migrations failed, 4 the app didn't become healthy, 6 `git pull` failed, 7 the build failed, 8 the backup failed
@@ -64,6 +74,12 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    second sandbox company. They need edits in the Intuit sandbox and a mailbox you can read.
    **Pass:** each step does what its line says; add a row for each to that runbook's Results table.
    **If not:** note the step and what you saw; that runbook's Troubleshooting table covers the usual causes.
+   **Then put the host back on the first sandbox company,** since check 25 leaves it on the second one, with the roster
+   cleared and parent sign-ins and welcome emails switched off, and part 2 needs the first one's families: on Settings,
+   QuickBooks, **Disconnect**, then connect the first sandbox company (the one with Family, Student and Parent customer
+   types; [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company) has the steps), choose its
+   membership shape again, then switch parent sign-ins back on (Settings, Parent sign-ins, **Change**).
+   **Pass:** Roster lists the sandbox families, and a test parent can sign in.
 9. **Export the audit log once** (Audit in the staff menu, **Export ... (CSV)**) after a parent whose name has an accent
    has signed in, and open the file in Excel or Google Sheets.
    **Pass:** the accent shows as it should, and the columns read well. **If not:** note which program and what it
@@ -75,7 +91,12 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
     version, the commit's first 12 characters and `stable`. If clubs are to pull it without signing in, open the
     package's settings and make it public. **If not:** the workflow's log; a tag that doesn't match `package.json`
     stops it at once and says so.
-11. **Look at the first dependency updates** a few days after pushing (the repository's **Pull requests**).
+11. **Switch on Dependabot's security updates.** The monthly version updates need nothing, but GitHub opens a pull
+    request for a security fix only when the repository asks for them: on GitHub, the repository's **Settings**, **Code
+    security**, switch on the **Dependency graph**, **Dependabot alerts** and **Dependabot security updates**.
+    **Pass:** the page shows all three on. **If not:** note which can't be switched on (an organization's settings may
+    decide it).
+12. **Look at the first dependency updates** a few days after pushing (the repository's **Pull requests**).
     **Pass:** they come grouped (the packages, the Dockerfile's image, the installation's images, the workflows'
     actions) and CI passes on each. **If not:** close any that fail and tell whoever maintains the portal. Read
     [updates](updates.md) before merging one that moves Documenso.
@@ -92,8 +113,12 @@ the club's real books it only reads.
 1. **On the proof-of-concept host** (connected to the Intuit sandbox), as an Admin, open Settings, QuickBooks, **Check
    the portal's requests**, and select **Run the check**. It takes a minute or two.
    **Pass:** **The last check** says "Every request answered as the portal expects", against "An Intuit sandbox company
-   (reads and changes)", and Health's QuickBooks line says when the requests were last checked.
-   **If not:** each row that didn't answer as expected says what it found, what that means for the club, and (for the
+   (reads and changes)"; no row under **Changing (sandbox only)** reads "Not tried"; and Health's QuickBooks line says
+   when the requests were last checked. A "Noted" row is a fact the check recorded, not a failure: "Pay links on
+   invoices" is noted when the sandbox company doesn't take payments online.
+   **If not:** "Finished, but some changes weren't tried" means the check couldn't try every change: each "Not tried"
+   row says why (a roster read under way: run it again in a minute; no customer type or no product or service in the
+   company: add one in QuickBooks, then run it again). For any other result, each row that didn't answer as expected says what it found, what that means for the club, and (for the
    maintainer) which code holds the request. Send a picture of the whole page to whoever maintains the portal. Don't
    connect the club's real books until every row answers as expected. A check that stopped part way is made safe at the
    start of the next run.
@@ -235,7 +260,7 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **Pass:** with NVDA or VoiceOver, Tab to Families in the staff menu: it is read as a collapsed button, expanded after
     Enter, and Escape returns to it. With high contrast on (Display, or the device's own), a staff form's busy button
     shows a dashed border, not a filled one. In a Windows contrast theme (Settings, Accessibility, Contrast themes), the
-    staff tick boxes and radio marks still show which is checked, notices keep their left edge, word and icon, and on
+    staff tick boxes and radio marks still show which is checked, notices keep their border all round, their icon cell's edge, their word and their icon, and on
     Home and Display the current set, the checked option and the focus ring are visible.
     **If not:** note the page and what was missing.
 22. **The staff home for someone with one permission.** Give a test staff member a role with one of the staff home's
