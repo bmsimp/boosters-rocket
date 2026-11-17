@@ -667,3 +667,22 @@ docker image rm br-documenso-spike-tools documenso/documenso:v2.22.0
 - This report was returned to the orchestrator and was **not** saved as `REPORT.md` by the agent that wrote it: the harness it
   ran under refuses to let a sub-agent write a report file, and the agent did not work around that. `NOTES.md` holds every
   verdict and evidence file name.
+
+## 12. Checked on Postgres 18 (2026-11-17)
+
+The installation moved from Postgres 16 to Postgres 18 (`deploy/compose.yml`: `postgres:18.7@sha256:2ea8630d...`, the
+official image; `docs/runbooks/updates.md`, "Moving to a new major version of Postgres"). Documenso v2.22.0
+(`documenso/documenso:v2.22.0@sha256:f9976d21...`, the image this verification used) was checked on it for real, on a
+Windows machine's Docker, by the build that made the move. What was checked:
+
+| Check | How | Result |
+|---|---|---|
+| Its migrations apply to an empty database on 18 | A first installation from `deploy/compose.yml` on fresh volumes: `initdb/10-databases.sql` made the `documenso` role and database, Documenso started on it | "169 migrations found", each applied; `_prisma_migrations` holds 169 finished rows, none failed or rolled back, the last `20261111000001_lowercase_recipient_emails`; the container healthy, `/api/health` `database ok, certificate ok` |
+| It starts on a database restored from a Postgres 16 backup | Documenso's database on 16 (its migrations, its two service accounts, an account signed up through `POST /api/auth/email-password/signup`), backed up by `scripts/backup.sh` with 16's tools, restored with `scripts/restore.sh` into Postgres 18, once by `scripts/move-postgres.sh deploy` and once by hand into a fresh 18 | "No pending migrations to apply"; healthy; `/api/health` ok; every one of its 56 tables held the same number of rows (249 in all) on 18 as on 16 |
+| It works on that database | The account made on 16 signed in on 18 (`POST /api/auth/email-password/authorize` 201; `/settings/profile` 200 signed in, 302 to `/signin` without); a second account signed up on 18 (201, its user and organisation rows written) | Reads and writes work. A wrong password answers 500 on 16 and on 18 alike: Documenso's own behaviour, not the move's |
+| Its extensions and roles | `pg_extension` on 18 after the move | `pgcrypto`, `pg_trgm`, `plpgsql`; every table owned by `documenso`; neither role may connect to the other's database |
+
+Not checked on 18: signing a document end to end in the embedded frame, sealing, the certificate and audit-log
+downloads, and webhook delivery (none was run against this 18 stack). They use the same database calls as the checks
+above, but they were not run. The next walk of `scripts/walk-forms-by-hand-local-documenso.ts` against a Documenso on
+Postgres 18 closes it; the local Documenso stack used for this verification still runs Postgres 16.
