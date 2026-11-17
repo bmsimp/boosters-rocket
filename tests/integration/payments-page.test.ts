@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, qboConnection, qboCustomer, setting, type StoredInvoice } from "@/lib/db/schema";
+import { auditLog, buyout, familyMoney, qboConnection, qboCustomer, setting, type StoredInvoice } from "@/lib/db/schema";
 import { setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
 import PaymentsPage from "@/app/(parent)/payments/page";
@@ -516,5 +516,15 @@ describe("a buy-out's invoice on Payments", () => {
     expect(buyoutTitleOf(mine, { qboId: "9174", customerQboId: FAMILY_A.students[0]!.qboId })).toBeNull();
     await db.transaction((tx) => setRosterSource(tx, "another-company"));
     expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
+  });
+
+  it("names it only while the buy-out is live: one staff closed after it was paid (refunded in QuickBooks) is an invoice like any other", async () => {
+    const { a } = await withBuyoutInvoices();
+    await db.update(buyout).set({ state: "voided", endReason: "closed_by_staff" }).where(eq(buyout.familyQboId, FAMILY_A.family.qboId));
+    expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
+    asParent(a.identity);
+    const html = text(await renderPage(PaymentsPage));
+    expect(html).toContain("Invoice BUY-9174 Invoice date");
+    expect(html).not.toContain("Paying instead of volunteering");
   });
 });
