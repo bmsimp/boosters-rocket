@@ -11,6 +11,7 @@ import { NotSetUpBox } from "../family-boxes";
 import { RequirementLines } from "../season-parts";
 import { cancelSignupAction } from "./actions";
 import { CancelSignup } from "./volunteer-forms";
+import { Announcer } from "../announce";
 
 export const metadata = { title: "Volunteer" };
 
@@ -51,6 +52,7 @@ export default async function VolunteerPage() {
       )}
 
       <section className="box" aria-labelledby="mine-h"><h2 id="mine-h">Your sign-ups</h2>
+        <Announcer>
         {mine.signups.length === 0 ? <p>Nobody in your family is signed up for a shift yet.</p> : (
           <ul className="lines">{mine.signups.map((s) => (
             <li key={s.id}><div>
@@ -68,6 +70,7 @@ export default async function VolunteerPage() {
               {s.cancel === "closed" && !s.checkedIn && <p className="help">It&apos;s less than {mine.cutoffHours} {mine.cutoffHours === 1 ? "hour" : "hours"} before the shift, so it can&apos;t be cancelled here. If you can&apos;t make it, please contact {s.contact}.</p>}
             </div></li>))}</ul>
         )}
+        </Announcer>
       </section>
 
       {credit.length > 0 && (

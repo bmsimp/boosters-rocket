@@ -494,6 +494,9 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 /* A link that stands alone on its line ("Back to sign in") is a tap target of its own: 44px tall, however short its
    words. A link inside a sentence keeps the sentence's line, as WCAG 2.5.8 allows. */
 .link-line { display: inline-flex; align-items: center; min-height: 44px; }
+/* The status line a box keeps for what its buttons did (src/app/(parent)/announce.tsx): no room taken until it speaks.
+   It takes the focus when it does, and the ring shows where the keyboard now is. */
+.announce:empty { margin: 0; }
 /* ---- End of Accessibility fixes for parent pages ---- */
 
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====
