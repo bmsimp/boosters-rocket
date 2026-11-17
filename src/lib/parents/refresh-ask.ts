@@ -27,8 +27,10 @@ export async function rosterRefreshAsked(now = new Date()): Promise<boolean> {
   const raw = (row?.value as { at?: unknown } | undefined)?.at;
   const at = typeof raw === "string" ? Date.parse(raw) : NaN;
   if (Number.isNaN(at)) return false;
+  // Strictly after, as the write queue reads the same ask (src/lib/roster/queue.ts): a refresh that started in the
+  // ask's own millisecond may have read QuickBooks before the change, so it neither answers the ask nor counts as a try.
   const [lastOk] = await db.select({ startedAt: jobRun.startedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
-  if (lastOk && lastOk.startedAt.getTime() >= at) return false;
+  if (lastOk && lastOk.startedAt.getTime() > at) return false;
   const [last] = await db.select({ startedAt: jobRun.startedAt }).from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1);
-  return !last || last.startedAt.getTime() < at || now.getTime() - last.startedAt.getTime() >= RETRY_MS;
+  return !last || last.startedAt.getTime() <= at || now.getTime() - last.startedAt.getTime() >= RETRY_MS;
 }
