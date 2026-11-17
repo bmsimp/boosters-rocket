@@ -197,7 +197,11 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
     expect((await db.select().from(signatureRequest).where(eq(signatureRequest.id, requestId)))[0]).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
     expect((await db.select().from(formWithdrawal)).map((w) => w.envelopeId)).toEqual(["envelope_leowaiting"]);
-    expect((await auditsOf("roster.student.move.followed"))[0]!.after).toMatchObject({ fromFamilyQboId: "10", toFamilyQboId: "20", formsReset: 1 });
+    // The roster read the queue ran first found the move and followed it (src/lib/roster/refresh.ts); the queue's own
+    // follow-up then found nothing left to reset.
+    const followed = (await auditsOf("roster.student.move.followed")).map((r) => r.after as { cause: string; formsReset: number });
+    expect(followed.map((f) => [f.cause.split("#")[0], f.formsReset])).toEqual([["roster.write.found", 0], ["roster.refresh", 1]]);
+    expect(followed[1]).toMatchObject({ fromFamilyQboId: "10", toFamilyQboId: "20" });
   });
 
   it("a change QuickBooks took whose cache update fails is audited, asks for a roster read, and is looked for after it, never simply sent again", async () => {
