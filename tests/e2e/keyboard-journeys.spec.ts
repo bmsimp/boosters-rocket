@@ -60,14 +60,41 @@ async function tabTo(page: Page, target: Locator, o: { max?: number; back?: bool
   throw new Error(`The keyboard did not reach ${target} on ${page.url()} in ${o.max ?? 40} stops. It went: ${stops.join(" > ")}`);
 }
 
-/** From where the focus is, Tab goes on through the page and leaves it (or comes round to the top): nothing traps it. */
-async function tabsOut(page: Page) {
+/**
+ * Where the focused element sits among the page's Tab stops in document order: whether it is the first, and whether it
+ * is the last. A Tab stop is a focusable element with no negative tabindex, not disabled, shown and not inert; of a
+ * group of radios, only one is a stop. Run in the page.
+ */
+function tabEdge(): { first: boolean; last: boolean } {
+  const el = document.activeElement;
+  const shown = (e: Element) => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden" && !e.closest("[inert]");
+  const radios = new Set<string>();
+  const stops = [...document.querySelectorAll<HTMLElement>("a[href], area[href], button, input, select, textarea, summary, iframe, [tabindex], [contenteditable='true']")].filter((e) => {
+    if (e.tabIndex < 0 || (e as HTMLButtonElement).disabled || (e instanceof HTMLInputElement && e.type === "hidden") || !shown(e)) return false;
+    if (e instanceof HTMLInputElement && e.type === "radio" && e.name) {
+      if (radios.has(e.name)) return el === e; // the one the focus is on stands for its group
+      radios.add(e.name);
+    }
+    return true;
+  });
+  const at = stops.findIndex((e) => e === el || (e instanceof HTMLInputElement && el instanceof HTMLInputElement && e.type === "radio" && el.type === "radio" && e.name === el.name && e.name !== ""));
+  return { first: at === 0, last: at !== -1 && at === stops.length - 1 };
+}
+
+/**
+ * From where the focus is, Tab goes on through the page and leaves it, or comes round to the top from the page's last
+ * Tab stop: nothing traps it. Coming back round to a stop it passed from anywhere but the last is a trap.
+ */
+async function tabsOut(page: Page, max = 80) {
   const seen: string[] = [];
-  for (let i = 0; i < 80; i++) {
+  let fromLast = false;
+  for (let i = 0; i < max; i++) {
     await page.keyboard.press("Tab");
     const stop = await page.evaluate(focusStop);
     if (!stop) return;
-    if (seen.length > 3 && stop.element === seen[0]) return;
+    const edge = await page.evaluate(tabEdge);
+    if (fromLast && edge.first) return;
+    fromLast = edge.last;
     seen.push(stop.element);
     for (const p of stop.problems) ringProblems.push(`${new URL(page.url()).pathname} · ${stop.element}: ${p}`);
   }
@@ -91,6 +118,25 @@ function ringsShown() {
   ringProblems = [];
   expect(found, `Tab stops with no visible focus ring:\n${found.join("\n")}`).toEqual([]);
 }
+
+test("the trap measure finds a box that holds the keyboard, and lets a page Tab out or come round from its last stop", async ({ page }) => {
+  const body = (inside: string) => `<!doctype html><html lang="en"><body><main><button>Before</button>${inside}<button>After</button></main></body></html>`;
+  // A hand-made trap: Tab on its last button goes back to its first, so the keyboard never reaches "After".
+  await page.setContent(body(`<div id="box"><button id="a">A</button><button>B</button><button id="c">C</button></div>
+    <script>document.getElementById("c").addEventListener("keydown", (e) => { if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); document.getElementById("a").focus(); } });</script>`));
+  await page.locator("#a").focus();
+  await expect(tabsOut(page, 20)).rejects.toThrow("Tab never left");
+  // The same box with no trap: Tab goes on to "After" and out of the page.
+  await page.setContent(body(`<div><button id="a">A</button><button>B</button><button>C</button></div>`));
+  await page.locator("#a").focus();
+  await tabsOut(page, 20);
+  // A page whose Tab comes round to the top from its last stop is not a trap.
+  await page.setContent(body(`<div><button id="a">A</button><button>B</button></div>
+    <script>document.querySelector("main > button:last-child").addEventListener("keydown", (e) => { if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); document.querySelector("main > button").focus(); } });</script>`));
+  await page.locator("#a").focus();
+  await tabsOut(page, 20);
+  ringProblems = [];
+});
 
 const bar = (page: Page, name: string) => page.locator("header.bar").getByRole("link", { name, exact: true });
 
