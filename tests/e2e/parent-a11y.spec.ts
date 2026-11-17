@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, parentRoutes } from "./parent-routes";
 import { PARAMS } from "./parent-params";
-import { MIN_TARGET, layoutProblems } from "./a11y-checks";
+import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
 
 /**
  * Every page a parent sees, in every display mode, at a phone's width and a desktop's (step 6 of the roadmap; PRODUCT.md:
@@ -165,6 +165,36 @@ async function findProblems(page: Page, where: string, mode: Mode): Promise<stri
   return found;
 }
 
+/**
+ * The keyboard's way through the page: Tab from the top until the focus leaves the last control (or comes round to
+ * the first), and at each stop a visible focus ring, and the control not left under the phone's fixed tab bar.
+ * Walked where it can differ, not in every mode, to keep the run short: KEYBOARD_WALKS.
+ */
+async function keyboardProblems(page: Page, where: string): Promise<string[]> {
+  await page.evaluate(() => {
+    // Start from the top of the page: a focused element put first and taken away again leaves the Tab order's start there.
+    const start = document.createElement("div");
+    start.tabIndex = -1;
+    document.body.prepend(start);
+    start.focus();
+    start.remove();
+    window.scrollTo(0, 0);
+  });
+  const found: string[] = [];
+  let first: string | null = null;
+  for (let i = 0; i < 60; i++) {
+    await page.keyboard.press("Tab");
+    const stop = await page.evaluate(focusStop);
+    if (!stop || stop.element === first) break;
+    first ??= stop.element;
+    for (const problem of stop.problems) found.push(`${where} · Tab stop ${i + 1}, ${stop.element}: ${problem}`);
+  }
+  if (first === null) found.push(`${where} · the keyboard reaches nothing on the page`);
+  return found;
+}
+/** Where the Tab walk is made: every mode on a phone, where the tab bar is, and the plain one on a desktop. */
+const KEYBOARD_WALKS: Record<number, string[]> = { 360: MODES.map((m) => m.name), 1440: ["light", "gold club, light"] };
+
 async function checkTarget(browser: Browser, target: Target, modes: Mode[]) {
   const found: string[] = [];
   for (const width of WIDTHS) {
@@ -172,7 +202,9 @@ async function checkTarget(browser: Browser, target: Target, modes: Mode[]) {
     try {
       for (const mode of modes) {
         await drawIn(page, mode);
-        found.push(...await findProblems(page, `${target.label} · ${width}px · ${mode.name}`, mode));
+        const where = `${target.label} · ${width}px · ${mode.name}`;
+        found.push(...await findProblems(page, where, mode));
+        if (KEYBOARD_WALKS[width]?.includes(mode.name)) found.push(...await keyboardProblems(page, where));
       }
     } finally { await close(); }
   }
@@ -199,6 +231,7 @@ test("the page checks find what they look for, and leave alone what they should"
     <label id="choice" style="display:block;height:30px"><input type="radio" name="r" style="position:absolute;opacity:0;width:1px;height:1px">One</label>
     <span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap">Hidden words for a screen reader</span>
     <div id="ellipsis" style="width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Cut short on purpose</div>
+    <button id="ringless" style="outline:none;width:60px;height:60px">No ring</button>
     <nav id="tabs" style="position:fixed;bottom:0;left:0;right:0;height:50px;background:#fff">Tabs</nav>
     <div style="height:700px"></div><p id="last">The last words, left under the tabs</p>
   </body></html>`);
@@ -212,6 +245,16 @@ test("the page checks find what they look for, and leave alone what they should"
   expect(about("label#choice"), found.join("\n")).toHaveLength(1); // a hidden radio is measured by its label
   expect(about("p#last"), found.join("\n")).toEqual([expect.stringContaining("still under nav#tabs")]);
   expect(found.filter((f) => /a#inline|Hidden words|div#ellipsis/.test(f)), found.join("\n")).toEqual([]);
+
+  // The keyboard: a control with its ring taken away, and one the focus leaves under the fixed bar.
+  await page.locator("#ringless").focus();
+  expect((await page.evaluate(focusStop))?.problems).toEqual([expect.stringContaining("no visible focus ring")]);
+  await page.locator("#last").evaluate((p) => {
+    p.tabIndex = 0; p.style.outline = "3px solid black";
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    p.focus({ preventScroll: true });
+  });
+  expect((await page.evaluate(focusStop))?.problems).toEqual([expect.stringContaining("partly hidden under nav")]);
 });
 
 test.describe("in the seeded club color", () => {

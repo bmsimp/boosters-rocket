@@ -499,6 +499,9 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 /* The status line a box keeps for what its buttons did (src/app/(parent)/announce.tsx): no room taken until it speaks.
    It takes the focus when it does, and the ring shows where the keyboard now is. */
 .announce:empty { margin: 0; }
+/* On a phone the tab bar is fixed over the foot of the screen. A control the keyboard moves to is scrolled clear of
+   it, never left under it (WCAG 2.4.11): the same room the body keeps below the page. */
+@media (max-width: 759.98px) { html:has(nav.tabs) { scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom)); } }
 /* ---- End of Accessibility fixes for parent pages ---- */
 
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====

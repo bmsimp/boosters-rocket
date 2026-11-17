@@ -175,3 +175,35 @@ export function layoutProblems(minTarget: number): LayoutProblem[] {
   }
   return problems;
 }
+
+/**
+ * The element the keyboard is on, for tests/e2e/parent-a11y.spec.ts's Tab walk: a short description, and what is
+ * wrong with how it is shown: no focus ring (an outline under 2px, or none; a hidden radio's ring is on its tile), or
+ * the control left under something fixed on the screen (the phone's tab bar), which WCAG 2.4.11 forbids. Null when
+ * the focus is on the page itself (it has left the last control). Runs in the browser: self-contained, like
+ * layoutProblems.
+ */
+export function focusStop(): { element: string; problems: string[] } | null {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el || el === document.body || el === document.documentElement) return null;
+  const tile = el instanceof HTMLInputElement && el.closest(".choice") && el.nextElementSibling instanceof HTMLElement ? el.nextElementSibling : el;
+  const s = getComputedStyle(tile);
+  const name = (el.getAttribute("aria-label") ?? el.innerText ?? "").replace(/\s+/g, " ").trim()
+    || (el instanceof HTMLInputElement ? (el.labels?.[0]?.innerText ?? "").replace(/\s+/g, " ").trim() : "");
+  const classes = [...el.classList].slice(0, 2).join(".");
+  const element = `${el.tagName.toLowerCase()}${classes ? `.${classes}` : ""}${name ? ` "${name.slice(0, 60)}"` : ""}`;
+  const problems: string[] = [];
+  const width = parseFloat(s.outlineWidth);
+  if ((s.outlineStyle === "none" || !(width >= 2) || /rgba\(\d+, \d+, \d+, 0\)|transparent/.test(s.outlineColor))) {
+    problems.push(`it has the focus and no visible focus ring (outline ${s.outlineStyle} ${s.outlineWidth} ${s.outlineColor})`);
+  }
+  const r = tile.getBoundingClientRect();
+  for (const fixed of document.querySelectorAll<HTMLElement>("body *")) {
+    if (getComputedStyle(fixed).position !== "fixed" || fixed.contains(el)) continue;
+    const f = fixed.getBoundingClientRect();
+    if (f.width && f.height && r.left < f.right && r.right > f.left && r.top < f.bottom && r.bottom > f.top + 1) {
+      problems.push(`it has the focus and is partly hidden under ${fixed.tagName.toLowerCase()}.${[...fixed.classList].join(".")}`);
+    }
+  }
+  return { element, problems };
+}
