@@ -15,6 +15,8 @@ import { formsWaiting } from "@/lib/forms/job";
 import { evidenceHealth } from "@/lib/signed-forms/evidence-job";
 import { moneyRunView } from "@/lib/money/sweep";
 import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
+import { lastDueReminders } from "@/lib/seasons/due-reminders";
+import { dateWords } from "@/lib/volunteer/clock";
 import { lastBackup } from "./backup";
 import { BUILD_VERSION } from "./version";
 import { env } from "@/env";
@@ -28,7 +30,7 @@ import { env } from "@/env";
  */
 export type HealthState = "ok" | "attention" | "off";
 export type HealthLine = {
-  key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "backup" | "version";
+  key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "due_reminders" | "backup" | "version";
   title: string;
   /** "ok": working. "attention": something a person should look at. "off": not set up or switched off, which may be by choice. */
   state: HealthState;
@@ -193,6 +195,24 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
     : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
       says: parents.everEnabled ? "Switched off. No parent can sign in right now." : "Not switched on yet. No parent can sign in until an Admin switches them on." });
+
+  // The reminders before a payment's or a checklist item's due date (src/lib/seasons/due-reminders.ts): when the worker
+  // last looked, and what it sent or couldn't send that day.
+  const due = await lastDueReminders();
+  const dueTimes = [{ label: "Last looked", at: due?.at ?? null }, { label: "Last sent", at: due?.lastSentAt ?? null }, { label: "Last failure", at: due?.lastFailedAt ?? null }];
+  const reminders = (n: number) => (n === 1 ? "1 reminder" : `${n} reminders`);
+  const dueNote = !due ? "It hasn't looked yet. It looks each day from 9:00 club time."
+    : due.sent + due.failed === 0 ? `On ${dateWords(due.day)}, the last day it looked, no family was owed a reminder.`
+      : `On ${dateWords(due.day)}, the last day it looked: ${reminders(due.sent)} sent${due.failed ? `, and ${due.failed === 1 ? "1 email" : `${due.failed} emails`} couldn't be sent` : ""}.`;
+  const dueFailing = Boolean(due?.lastFailedAt && (!due.lastSentAt || due.lastFailedAt >= due.lastSentAt));
+  lines.push(!parents.signin || !parents.welcome
+    ? { key: "due_reminders", title: "Payment and checklist reminders", state: "off", word: "Off", times: dueTimes, notes: due ? [dueNote] : [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
+      says: "Off. Families are emailed before a payment or a checklist item is due only while parent sign-ins and welcome emails are both switched on." }
+    : dueFailing
+      ? { key: "due_reminders", title: "Payment and checklist reminders", state: "attention", word: "Needs attention", times: dueTimes, notes: [dueNote], fix: { href: "/staff/settings/mail", label: "Open mail settings" },
+        says: "The last reminder email couldn't be sent. The worker tries it again 15 minutes later, while it is still the day to send it. Check the outgoing mail line." }
+      : { key: "due_reminders", title: "Payment and checklist reminders", state: "ok", word: "On", times: dueTimes, notes: [dueNote], fix: null,
+        says: "On. From 9:00 club time, families are emailed 14 days and 3 days before a required payment or checklist item of theirs is due." });
 
   const backupAge = backup ? now.getTime() - Date.parse(backup.at) : null;
   const backedUp: Verdict = backupAge === null ? { state: "attention", word: "None recorded", says: "No backup has been recorded. On the server, check that the backup service is running, or run scripts/backup.sh with a folder to keep backups in and set it to run every night." }

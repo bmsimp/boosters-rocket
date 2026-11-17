@@ -14,6 +14,7 @@ import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
 import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
 import { runSignedFormsJobs } from "@/lib/signed-forms/worker";
 import { REMINDERS_JOB, sendVolunteerReminders } from "@/lib/volunteer/reminders";
+import { DUE_REMINDERS_JOB, sendDueReminders } from "@/lib/seasons/due-reminders";
 import { WRITE_QUEUE_JOB, runWriteQueue } from "@/lib/roster/queue";
 import { BUYOUT_CHECK_JOB, checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 
@@ -86,6 +87,14 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (reminders.sent + reminders.failed > 0) ran.push({ job: REMINDERS_JOB, ok: reminders.failed === 0 });
   } catch {
     ran.push({ job: REMINDERS_JOB, ok: false });
+  }
+  // Reminders before a payment's or a checklist item's due date (src/lib/seasons/due-reminders.ts), guarded the same
+  // way: mail and the stored figures, never a live read of QuickBooks; in this wake's answer only when it sent something.
+  try {
+    const due = await sendDueReminders(now);
+    if (due.sent + due.failed > 0) ran.push({ job: DUE_REMINDERS_JOB, ok: due.failed === 0 });
+  } catch {
+    ran.push({ job: DUE_REMINDERS_JOB, ok: false });
   }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record,

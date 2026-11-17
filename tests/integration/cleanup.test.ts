@@ -164,6 +164,16 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(await db.select().from(schema.signedFormFile)).toHaveLength(1);
   });
 
+  it("due-date reminder claims older than a year go, one a second inside it stays", async () => {
+    const year = REMINDER_CLAIM_DAYS * DAY, parentId = crypto.randomUUID();
+    const claim = (dueOn: string, ago: number) => db.insert(schema.requirementReminder).values({ kind: "due_3", familyQboId: "F", parentId, dueOn, triedAt: at(ago), outcome: "sent", createdAt: at(ago) }).returning();
+    await claim("2025-11-01", -year - SEC);
+    const [edge] = await claim("2025-11-02", -year + SEC);
+    const [recent] = await claim("2026-11-02", -DAY);
+    expect(await clean()).toEqual({ ...NOTHING, reminderClaims: 1 });
+    expect(await ids(db.select({ id: schema.requirementReminder.id }).from(schema.requirementReminder))).toEqual([edge!.id, recent!.id].sort());
+  });
+
   it("staff roster writes: one that went through or was given up more than 30 days ago goes; one a second inside stays, and waiting and stuck ones always stay", async () => {
     const w = { op: "deactivate" as const, role: "student" as const, qboId: "12", syncToken: "0" };
     const item = async (state: "waiting" | "stuck" | "done" | "given_up", finishedAt: Date | null) => String((await db.insert(writeQueue)

@@ -24,7 +24,7 @@ test("the Health page tells an Admin what is working, in words, and that the add
   await page.goto("/staff/health");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Health");
   const line = (key: string) => page.locator(`li[data-health="${key}"]`);
-  for (const key of ["database", "worker", "cleanup", "quickbooks", "money", "mail", "forms", "parents", "backup", "version"]) await expect(line(key)).toBeVisible();
+  for (const key of ["database", "worker", "cleanup", "quickbooks", "money", "mail", "forms", "parents", "due_reminders", "backup", "version"]) await expect(line(key)).toBeVisible();
   await expect(line("database")).toContainText("Working");
   // No worker runs beside the browser tests, and nothing has backed this database up: the page says so plainly.
   await expect(line("worker")).toContainText("Needs attention");

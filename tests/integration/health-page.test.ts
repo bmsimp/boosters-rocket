@@ -28,6 +28,7 @@ import { patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
 import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
+import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -62,7 +63,7 @@ describe("the health page", () => {
   it("on a portal that was just installed, says in plain words what isn't set up yet", async () => {
     await admin();
     const lines = await healthReport(NOW);
-    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "mail", "forms", "parents", "backup", "version"]);
+    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "mail", "forms", "parents", "due_reminders", "backup", "version"]);
     expect(line(lines, "forms")).toMatchObject({ state: "off", word: "Not set up" });
     expect(line(lines, "database")).toMatchObject({ state: "ok", word: "Working" });
     expect(line(lines, "worker")).toMatchObject({ state: "attention", times: [{ label: "Last woke", at: null }] });
@@ -72,6 +73,7 @@ describe("the health page", () => {
     expect(line(lines, "money")).toMatchObject({ state: "off", word: "Not running" });
     expect(line(lines, "mail")).toMatchObject({ state: "attention", word: "Not set up" });
     expect(line(lines, "parents")).toMatchObject({ state: "off", word: "Off" });
+    expect(line(lines, "due_reminders")).toMatchObject({ state: "off", word: "Off", fix: { href: "/staff/settings/parents" } });
     expect(line(lines, "backup")).toMatchObject({ state: "attention", word: "None recorded" });
     expect(line(lines, "backup").says).toMatch(/scripts\/backup\.sh/);
     expect(line(lines, "version").says).toBe(`Running ${BUILD_VERSION}.`);
@@ -91,7 +93,8 @@ describe("the health page", () => {
     await seedConnected(stub);
     await seedWorkingMail();
     await patchMailStatus({ lastSuccessAt: ago(60_000) });
-    await seedParentSettings(SIGNINS_ON);
+    // Welcome emails on too, which the reminders before a due date need (their line is off without them).
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
     await put(BACKUP_KEY, { at: ago(3_600_000), file: "booster-rocket-20261115T030000Z.dump", bytes: 3 * 1024 * 1024 });
     // Forms set up, and Documenso answered a call (tests/integration/forms-staff.test.ts has the line's other states).
     await connectForms({ origin: "https://sign.club.example", token: "api_made_up_for_the_health_page" });
@@ -241,6 +244,30 @@ describe("the health page", () => {
   it("says when the last clean-up failed", async () => {
     await db.insert(jobRun).values({ job: CLEANUP_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "failed", detail: "The clean-up couldn't finish. Nothing was removed. (unexpected)" });
     expect(line(await healthReport(), "cleanup")).toMatchObject({ state: "attention", times: [{ label: "Last tried" }] });
+  });
+
+  it("says when the reminders before a due date last looked, what they sent, and when the last one failed", async () => {
+    const due = async () => line(await healthReport(NOW), "due_reminders");
+    await seedParentSettings(SIGNINS_ON);
+    expect(await due()).toMatchObject({ state: "off", word: "Off" });
+    expect((await due()).says).toMatch(/only while parent sign-ins and welcome emails are both switched on/);
+    await seedParentSettings({ welcome: true });
+    expect(await due()).toMatchObject({ state: "ok", word: "On", notes: ["It hasn't looked yet. It looks each day from 9:00 club time."],
+      times: [{ label: "Last looked", at: null }, { label: "Last sent", at: null }, { label: "Last failure", at: null }] });
+    await put(DUE_REMINDERS_KEY, { day: "2027-03-10", at: ago(3_600_000), sent: 0, failed: 0, lastSentAt: null, lastFailedAt: null });
+    expect((await due()).notes).toEqual(["On Wednesday, March 10, 2027, the last day it looked, no family was owed a reminder."]);
+    await put(DUE_REMINDERS_KEY, { day: "2027-03-10", at: ago(60_000), sent: 3, failed: 0, lastSentAt: ago(60_000), lastFailedAt: ago(86_400_000) });
+    expect(await due()).toMatchObject({ state: "ok", notes: ["On Wednesday, March 10, 2027, the last day it looked: 3 reminders sent."],
+      times: [{ label: "Last looked", at: ago(60_000) }, { label: "Last sent", at: ago(60_000) }, { label: "Last failure", at: ago(86_400_000) }] });
+    // The newest send failed: someone should look at mail.
+    await put(DUE_REMINDERS_KEY, { day: "2027-03-10", at: ago(30_000), sent: 3, failed: 1, lastSentAt: ago(60_000), lastFailedAt: ago(30_000) });
+    const failing = await due();
+    expect(failing).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" },
+      notes: ["On Wednesday, March 10, 2027, the last day it looked: 3 reminders sent, and 1 email couldn't be sent."] });
+    expect(failing.says).toMatch(/couldn't be sent/);
+    // A value it can't read is no record at all.
+    await put(DUE_REMINDERS_KEY, { day: 5, at: "not a time" });
+    expect(await due()).toMatchObject({ state: "ok", times: [{ label: "Last looked", at: null }, { label: "Last sent", at: null }, { label: "Last failure", at: null }] });
   });
 
   it("says when the latest sign-ins came with no address, and that it is the header when one is named", async () => {

@@ -140,6 +140,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/signed-forms/rules", names: "all", why: "the staff words and rules of the signed forms pages; parents read src/lib/forms/states.ts" },
   { module: "@/lib/volunteer/staff-credit", names: "all", why: "it reads staff notes and removal reasons, and loads every family for the credit pages" },
   { module: "@/lib/volunteer/reminders", names: "all", why: "the worker's reminders read every family's sign-ups and standings" },
+  { module: "@/lib/seasons/due-reminders", names: "all", why: "the worker's due-date reminders read every family's standings, figures and guardians" },
   { module: "@/lib/volunteer/moved-student", names: "all", why: "it is a roster write's, and reads the sign-up list of staff" },
   { module: "@/lib/roster/writes", names: "all", why: "staff changes to the roster in QuickBooks: it reads every family, and sends writes" },
   { module: "@/lib/roster/queue", names: "all", why: "the write queue names every family's waiting changes" },
