@@ -82,7 +82,7 @@ else
 fi
 
 mkdir -p "$DIR" 2>/dev/null || die 2 "The folder $DIR can't be created."
-[ -d "$DIR" ] && [ -w "$DIR" ] || die 2 "The folder $DIR can't be written to."
+if ! { [ -d "$DIR" ] && [ -w "$DIR" ]; }; then die 2 "The folder $DIR can't be written to."; fi
 
 wait_for_database() {
   local waited=0
@@ -181,6 +181,13 @@ if [ -n "$DOCUMENSO_DB" ]; then
   doc_bytes="$(wc -c < "$doc_final" | tr -d '[:space:]')"
   # Both values are this script's own: a name it made and a count of bytes.
   doc_json="{\"file\": \"$doc_name\", \"bytes\": $doc_bytes}"
+fi
+# Run as root (the nightly service in deploy/compose.yml is), the files are given to whoever owns the folder, so the
+# person who looks after the machine can copy them off it as themselves. They stay readable by that owner alone.
+if [ "$(id -u)" = "0" ]; then
+  owner="$(stat -c '%u:%g' "$DIR")"
+  chown "$owner" "$final"
+  if [ -n "$DOCUMENSO_DB" ]; then chown "$owner" "$doc_final"; fi
 fi
 trap - EXIT
 
