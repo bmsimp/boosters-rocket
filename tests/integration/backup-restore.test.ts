@@ -9,6 +9,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, setting } from "@/lib/db/schema";
 import { BACKUP_KEY, lastBackup } from "@/lib/health/backup";
 import { adminDatabaseUrl, databaseName, scratchDatabase } from "../setup/database-url";
+import { dropScratchDatabase, makeScratchDatabase, markScratchDatabase } from "../setup/worker-databases";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { seedTwoFamilies } from "../helpers/parent";
 import { seedRosterRead } from "../helpers/roster-cache";
@@ -54,8 +55,7 @@ const runUser = () => decodeURIComponent(new URL(RUN_URL).username);
 
 /** A stand-in for Documenso's database: its kind of table names (quoted, mixed case), the extension it makes, rows. */
 async function makeDocumensoStandIn() {
-  const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
-  try { await admin.unsafe(`CREATE DATABASE "${SCRATCH}"`); } finally { await admin.end({ timeout: 5 }); }
+  await makeScratchDatabase("restore"); // marked as this run's: a database of that name the run didn't make is refused
   const pg = postgres(SCRATCH_URL, { max: 1, onnotice: () => {} });
   try {
     await pg.unsafe(`create extension if not exists pgcrypto;
@@ -91,11 +91,17 @@ async function everythingIn(url: string) {
 }
 
 async function dropScratch() {
+  // scripts/restore.sh's own staging database, which the script itself clears before every restore.
   const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
-  try {
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${SCRATCH}_restoring"`);
-    await admin.unsafe(`DROP DATABASE IF EXISTS "${SCRATCH}"`);
-  } finally { await admin.end({ timeout: 5 }); }
+  try { await admin.unsafe(`DROP DATABASE IF EXISTS "${SCRATCH}_restoring"`); } finally { await admin.end({ timeout: 5 }); }
+  await dropScratchDatabase(SCRATCH);
+}
+
+/** scripts/restore.sh into the scratch database. A restore that worked put a database of its own under the name: it is marked as this run's again. */
+async function restoreIntoScratch(args: string[]) {
+  const r = run(RESTORE, args);
+  if (r.status === 0) await markScratchDatabase(SCRATCH);
+  return r;
 }
 
 describe("backup and restore, really done", { timeout: 300_000 }, () => {
@@ -191,7 +197,7 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
 
   it("restores Documenso's backup, and everything in it is the same", async () => {
     // The stand-in is replaced by its own backup: dropped, and made again from the file alone.
-    const r = run(RESTORE, [docDump, SCRATCH, "--replace"]);
+    const r = await restoreIntoScratch([docDump, SCRATCH, "--replace"]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain(`into the database ${SCRATCH} (3 tables, owned by ${runUser()}), replacing what was there`);
     expect(r.stdout).toMatch(/signing certificate \(the \.p12 file\) and its passphrase/);
@@ -237,7 +243,7 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
   });
 
   it("restores into a database that doesn't exist yet, and everything in it is the same", async () => {
-    const r = run(RESTORE, [dump, SCRATCH]);
+    const r = await restoreIntoScratch([dump, SCRATCH]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain(`into the database ${SCRATCH} (${before.tables.length} tables)`);
     expect(r.stdout).toMatch(/open Health/);
@@ -294,7 +300,7 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
   });
 
   it("replaces the database when told to, leaving exactly the backup", async () => {
-    const r = run(RESTORE, [dump, SCRATCH, "--replace"]);
+    const r = await restoreIntoScratch([dump, SCRATCH, "--replace"]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain("replacing what was there");
     // Only its owner may connect, as on a new installation (deploy/initdb/10-databases.sql): no right is left to PUBLIC.
@@ -324,8 +330,8 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     expect(readdirSync(dir)).toEqual(expect.arrayContaining(["booster-rocket-before-the-big-change.dump", "notes.txt"]));
   });
 
-  it("restores as the role it is told to, and refuses one that doesn't exist", () => {
-    const r = run(RESTORE, [dump, SCRATCH, "--replace", "--owner", runUser()]);
+  it("restores as the role it is told to, and refuses one that doesn't exist", async () => {
+    const r = await restoreIntoScratch([dump, SCRATCH, "--replace", "--owner", runUser()]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain(`, owned by ${runUser()}), replacing what was there`);
     const missing = run(RESTORE, [dump, SCRATCH, "--replace", "--owner", "no_such_role_here"]);

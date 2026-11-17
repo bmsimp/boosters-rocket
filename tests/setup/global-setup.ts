@@ -19,7 +19,8 @@ declare module "vitest" {
  * that is another run's worker database, and a database another vitest run is using at this moment.
  *
  * Workers past the first make their own databases as they need them (tests/setup/worker.ts). When the run ends, this
- * drops them, with any scratch database a test left behind.
+ * drops them, with any scratch database a test made and left behind; one with a scratch name that this run didn't make
+ * is left alone, and said so.
  */
 export default async function setup(project: TestProject) {
   const url = project.config.env.DATABASE_URL ?? "";
@@ -36,7 +37,12 @@ export default async function setup(project: TestProject) {
   return async () => {
     try {
       rmSync(folder, { recursive: true, force: true });
-      await dropWorkerDatabases(url);
+      const { leftAlone } = await dropWorkerDatabases(url);
+      if (leftAlone.length > 0) {
+        console.warn(`Left alone: ${leftAlone.join(", ")}. ${leftAlone.length === 1 ? "It has" : "They have"} the name of a scratch database this run's tests use, `
+          + `but this run did not make ${leftAlone.length === 1 ? "it" : "them"} (no comment marks ${leftAlone.length === 1 ? "it" : "them"} as this run's), so ${leftAlone.length === 1 ? "it was" : "they were"} not dropped. `
+          + `A test that needs one of these names refuses to run until it is gone.`);
+      }
     } finally { await release(); }
   };
 }
