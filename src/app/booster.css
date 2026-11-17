@@ -706,18 +706,7 @@ fieldset.decide { border: 1px solid var(--hair); padding: var(--s3) var(--s4) va
 .cert-done { margin-top: var(--s2); }
 .cert-panel details.more { margin-top: 0; }
 
-/* The match review: stacked on a phone, a table on wide screens so the old family and its match compare at a glance. */
-.match-table { width: 100%; border-collapse: collapse; margin-top: var(--s3); font-size: 1rem; }
-.match-table th, .match-table td { text-align: left; vertical-align: top; padding: var(--s3) var(--s3) var(--s3) 0; border-top: 1px solid var(--hair); overflow-wrap: anywhere; }
-.match-table thead th { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); border-top: 0; }
-.match-table .when { display: block; font-size: 0.875rem; color: var(--ink-2); }
-@media (max-width: 759px) {
-  .match-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .match-table, .match-table tbody, .match-table tr, .match-table th, .match-table td { display: block; width: 100%; }
-  .match-table tr { border-top: 1px solid var(--hair); padding: var(--s3) 0; }
-  .match-table th, .match-table td { border-top: 0; padding: var(--s1) 0; }
-}
-
+/* The match review is a table (the Staff pages' table primitive) and takes the page's whole width. */
 main.wrap.single.matches-page > .box { max-width: none; }
 
 @media (forced-colors: active) {

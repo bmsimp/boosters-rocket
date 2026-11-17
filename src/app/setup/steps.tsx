@@ -1,3 +1,4 @@
+import { Notice } from "@/app/components/notice";
 import { PROVIDER_LABELS, toSummaryView } from "@/app/components/sign-in-settings/labels";
 import { ProviderForm } from "@/app/components/sign-in-settings/provider-form";
 import type { ProviderKey, ProviderSummary } from "@/lib/auth/providers";
@@ -23,7 +24,7 @@ export function ClubStep({ initial, timeZones, saved, error }: { initial: ClubVa
     <>
       <h2 className="page-title">Step 1: Your club</h2>
       <p className="lede">The club&apos;s name and color are on every page, in every email and on the app parents put on their phones. You can change them later under Settings.</p>
-      {error === "club_first" && <p role="alert" className="errors">Give the club its name and color first.</p>}
+      {error === "club_first" && <Notice tone="problem">Give the club its name and color first.</Notice>}
       <section className="box" aria-labelledby="club-h"><h2 id="club-h">Name, color and time zone</h2>
         <ClubForm initial={initial} timeZones={timeZones} save={saveSetupClubAction} submit="Save" />
       </section>
@@ -38,7 +39,7 @@ export function StaffStep({ n, appUrl, byKey, error }: { n: number; appUrl: stri
     <>
       <h2 className="page-title">Step {n}: Staff sign-in</h2>
       <p className="lede">Board members and directors sign in with Microsoft, Google, or both. Set up at least one.</p>
-      {error === "staff_first" && <p role="alert" className="errors">Save at least one staff sign-in first.</p>}
+      {error === "staff_first" && <Notice tone="problem">Save at least one staff sign-in first.</Notice>}
       <section className="box" aria-labelledby="ms-h"><h2 id="ms-h">{PROVIDER_LABELS["staff-microsoft"]}</h2>
         <MicrosoftStaffSteps appUrl={appUrl} />
         <ScriptOption script="New-BoosterRocketStaffApp.ps1" example="./New-BoosterRocketStaffApp.ps1 -TenantId <your tenant ID or domain>" />
@@ -59,7 +60,7 @@ export function MailStep({ n, summary, error }: { n: number; summary: MailSummar
     <>
       <h2 className="page-title">Step {n}: Outgoing mail</h2>
       <p className="lede">Parents sign in with a code the portal emails them, so the portal has to be able to send mail first. Use Microsoft 365 if the club has it; otherwise use your mail provider&apos;s SMTP settings.</p>
-      {error === "mail_first" && <p role="alert" className="errors">Save the mail settings and send a test email before going on.</p>}
+      {error === "mail_first" && <Notice tone="problem">Save the mail settings and send a test email before going on.</Notice>}
       <MailGuide summary={summary} save={saveSetupMailAction} test={sendSetupTestMailAction} />
       <div className="stack">
         <form action={goToStepAction.bind(null, "admin")}><button className="btn" disabled={!summary.working}>Next: first Admin</button></form>
@@ -92,7 +93,7 @@ export function AdminStep({ n, adminEmail, adminName, byKey, error, signinFailed
           {byKey["staff-microsoft"]?.readable && <SetupStaffSignIn provider="microsoft" label="Sign in with Microsoft" />}
           {byKey["staff-google"]?.readable && <SetupStaffSignIn provider="google" label="Sign in with Google" />}
         </div>}
-        {message && <><p role="alert" className="errors">{message}</p><SetupStaffSignOut /></>}
+        {message && <><Notice tone="problem">{message}</Notice><SetupStaffSignOut /></>}
       </section>
       <form action={goToStepAction.bind(null, "mail")}><button className="btn btn-line">Back to outgoing mail</button></form>
     </>

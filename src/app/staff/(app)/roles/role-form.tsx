@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome } from "@/app/components/notice";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { PERMISSION_AREAS, PERMISSION_WORDS, readTwinOf } from "@/lib/permissions/words";
@@ -11,7 +12,7 @@ export type RoleView = { id: string; name: string; members: number; granted: Per
 
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
-  return state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return <ActionOutcome state={state} />;
 }
 
 /**

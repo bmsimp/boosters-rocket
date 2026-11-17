@@ -1,3 +1,4 @@
+import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
@@ -27,7 +28,7 @@ export default async function QuickBooksSettingsPage() {
       <BackToSettings />
       <h1 className="page-title">QuickBooks</h1>
       <p className="lede">{QUICKBOOKS_USE.reads} {QUICKBOOKS_USE.writes} Each change is in the audit log. Only Admins can change these settings, because they reach the club&apos;s books.</p>
-      {problems.length > 0 && <section className="box" role="status" aria-labelledby="qbo-problems-h"><h2 id="qbo-problems-h">Needs attention</h2><ul>{problems.map((p) => <li key={p.kind}>{p.text}</li>)}</ul></section>}
+      {problems.length > 0 && <Notice tone="warning" title="Needs attention" titleId="qbo-problems-h"><ul className="notice-list">{problems.map((p) => <li key={p.kind}>{p.text}</li>)}</ul></Notice>}
 
       <section className="box" aria-labelledby="qbo-conn-h"><h2 id="qbo-conn-h">Connection</h2>
         <StateWords state={conn.connected && problems.length === 0 ? "done" : "todo"} words={!conn.configured ? "Not set up yet" : !conn.connected ? "Not connected" : problems.length ? "Connected, and something needs attention" : "Connected"} />
@@ -45,7 +46,7 @@ export default async function QuickBooksSettingsPage() {
 
       <section className="box" aria-labelledby="qbo-shape-h"><h2 id="qbo-shape-h">Membership shape</h2>
         <p>{page.shapeWords ?? "Not chosen yet."}</p>
-        {page.brokenTypes.length > 0 && <p role="status">This shape names a customer type QuickBooks no longer has. Choose the shape again.</p>}
+        {page.brokenTypes.length > 0 && <Notice tone="warning">This shape names a customer type QuickBooks no longer has. Choose the shape again.</Notice>}
       </section>
 
       <section className="box" aria-labelledby="qbo-roster-h"><h2 id="qbo-roster-h">Roster</h2>

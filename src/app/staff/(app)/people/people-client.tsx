@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useTransition, useState } from "react";
 import { inviteStaffAction, setStaffStatusAction, setStaffRolesAction, renameStaffAction, renameMyselfAction } from "./actions";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
@@ -15,8 +16,8 @@ export function InviteForm({ roles }: { roles: RoleOption[] }) {
       <label className="field"><span>Name</span><input name="name" required maxLength={100} autoComplete="off" /></label>
       <label className="field"><span>Email</span><input name="email" type="email" required autoComplete="off" /></label>
       <RoleChecklist key={state?.ok ? `done-${state.id}` : "new"} roles={roles} initial={[]} legend="Roles" idPrefix="invite" />
-      {state && !state.ok && <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-      {state?.ok && <p role="status">Added. They can sign in now.</p>}
+      {state && !state.ok && <ActionOutcome state={state} />}
+      {state?.ok && <Notice tone="done">Added. They can sign in now.</Notice>}
       <button className="btn" disabled={pending}>Add to staff</button>
     </form>
   );
@@ -41,7 +42,7 @@ export function NameEdit({ id, name }: { id?: string; name: string }) {
     return (
       <div className="staff-name-edit">
         <button type="button" className="btn btn-quiet" onClick={() => { setValue(name); setEditing(true); }}>{self ? "Change my name" : "Change name"}<span className="visually-hidden">{self ? "" : ` for ${name}`}</span></button>
-        {state?.ok && <p role="status">Name saved.</p>}
+        {state?.ok && <Notice tone="done">Name saved.</Notice>}
       </div>
     );
   }
@@ -49,7 +50,7 @@ export function NameEdit({ id, name }: { id?: string; name: string }) {
     <form className="staff-name-edit" onSubmit={(e) => { e.preventDefault(); startTransition(() => run()); }}>
       <label className="field"><span>{self ? "Your name" : "Name"}</span>
         <input value={value} onChange={(e) => setValue(e.target.value)} required maxLength={100} autoComplete={self ? "name" : "off"} /></label>
-      {state && !state.ok && <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
+      {state && !state.ok && <ActionOutcome state={state} />}
       <div className="row-actions">
         <button className="btn btn-line" disabled={pending}>{pending ? "Saving…" : "Save name"}</button>
         <button type="button" className="btn btn-quiet" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
@@ -95,8 +96,8 @@ export function PersonRow({ person, roles, canEdit, self }: { person: Person; ro
           onClick={() => run(() => setStaffStatusAction(person.id, disabled ? "active" : "disabled"), disabled ? "Sign-in turned back on." : "Sign-in turned off.")}>
           {disabled ? "Turn sign-in back on" : "Turn off sign-in"}<span className="visually-hidden"> for {person.name}</span></button>
       </div>}
-      {error && <p role="alert" className="errors">{error}</p>}
-      {saved && !error && <p role="status">{saved}</p>}
+      {error && <Notice tone="problem">{error}</Notice>}
+      {saved && !error && <Notice tone="done">{saved}</Notice>}
     </li>
   );
 }

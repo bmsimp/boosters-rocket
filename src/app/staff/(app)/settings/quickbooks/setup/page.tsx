@@ -1,4 +1,5 @@
 // Link, not <a>, for /staff/roster below: the no-html-link-for-pages lint rule treats it as the dynamic /staff/roster/[id] route.
+import { Notice } from "@/app/components/notice";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
@@ -44,7 +45,7 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
       <p className="back-to-settings"><a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
       <h1 className="page-title">Set up QuickBooks</h1>
       <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}>{order.indexOf(s.step) <= order.indexOf(reachable) ? <a href={`${SETUP}?step=${s.step}`}>{s.label}</a> : s.label}</li>)}</ol>
-      {error && <p role="alert" className="errors">{error}</p>}
+      {error && <Notice tone="problem">{error}</Notice>}
 
       {step === "app" && (
         <section className="box" aria-labelledby="qbo-app-h"><h2 id="qbo-app-h">Step 1: Your Intuit app</h2>
@@ -75,11 +76,11 @@ export default async function QuickBooksSetupPage({ searchParams }: { searchPara
           <p>{`Connected to ${conn.companyName ?? "a QuickBooks company"}.`} If that isn&apos;t the club&apos;s company, go back to QuickBooks settings and disconnect.</p>
           <p>Tell the portal which QuickBooks customer types are the club&apos;s members. Customers of any other type, such as schools or vendors, stay out of the portal. When you save, the portal reads the roster again with the new shape. You can change this later.</p>
           {page.types.length === 0
-            ? <p role="status">{page.lastRun && !page.lastRun.ok
+            ? <Notice tone="info">{page.lastRun && !page.lastRun.ok
               ? <>The portal couldn&apos;t read QuickBooks just now{page.lastRun.detail ? `: ${page.lastRun.detail}` : "."} Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b> to try again, then come back.</>
               : page.lastRun
                 ? <>QuickBooks has no customer types yet, so there is nothing to choose from. {MAKE_TYPES} Then open <Link href="/staff/roster">Roster</Link>, select <b>Refresh now</b>, and come back.</>
-                : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types: {MAKE_TYPES}</>}</p>
+                : <>The portal hasn&apos;t read any customer types from QuickBooks yet. Open <Link href="/staff/roster">Roster</Link> and select <b>Refresh now</b>, then come back. If QuickBooks has no customer types: {MAKE_TYPES}</>}</Notice>
             : <ShapeForm types={page.types} shape={page.shape} preview={previewShapeAction} save={saveShapeAction} />}
           <p className="box-foot"><a href={`${SETUP}?step=connect`}>Back to step 2</a> · <a href="/staff/settings/quickbooks">Back to QuickBooks settings</a></p>
         </section>

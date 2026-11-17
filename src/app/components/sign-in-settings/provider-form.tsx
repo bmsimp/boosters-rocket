@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 import { useActionState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
@@ -45,8 +46,8 @@ export function ProviderForm({ providerKey, summary, action, certificateActions 
             <input name="secretExpiresAt" type="date" />
           </label>
         </>}
-        {state && !state.ok && <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-        {state?.ok && <p role="status">{cert ? "Checked and saved. Microsoft accepted the certificate." : "Checked and saved."}{state.replaced && ` ${REPLACED}`}</p>}
+        {state && !state.ok && <ActionOutcome state={state} />}
+        {state?.ok && <Notice tone="done">{cert ? "Checked and saved. Microsoft accepted the certificate." : "Checked and saved."}{state.replaced && ` ${REPLACED}`}</Notice>}
         <button className="btn" disabled={pending}>{pending ? (google ? "Saving…" : "Checking with Microsoft…") : google ? "Save" : switching ? "Check and switch" : "Check and save"}</button>
       </form>
     </div>

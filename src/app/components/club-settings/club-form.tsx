@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useState, type CSSProperties } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { clubCssVars, deriveClubTokens, normalizeHex } from "@/lib/theme/contrast";
@@ -44,8 +45,8 @@ export function ClubForm({ initial, timeZones, save, submit, withTreasurer = fal
         <input name="treasurerEmail" type="email" value={v.treasurerEmail ?? ""} onChange={set("treasurerEmail")} autoComplete="off" /></label>}
       <label className="field"><span>Time zone (decides which day it is for a step&apos;s dates and a due date)</span>
         <select name="timeZone" value={v.timeZone} onChange={set("timeZone")}>{timeZones.map((z) => <option key={z} value={z}>{z.replaceAll("_", " ")}</option>)}</select></label>
-      {state && !state.ok && <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-      {state?.ok && <p role="status">{state.message ?? "Saved."}</p>}
+      {state && !state.ok && <ActionOutcome state={state} />}
+      {state?.ok && <Notice tone="done">{state.message ?? "Saved."}</Notice>}
       <button className="btn" disabled={pending}>{pending ? "Saving…" : submit}</button>
     </form>
   );

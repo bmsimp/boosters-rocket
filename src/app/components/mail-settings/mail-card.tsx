@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 import { useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { LocalTime } from "@/app/components/local-time";
@@ -45,8 +46,8 @@ export function MailSaveForm({ summary, save }: { summary: MailSummary; save: (f
           <label className="field"><span>From address</span><input name="from" type="email" required autoComplete="off" defaultValue={smtp?.from ?? ""} placeholder="boosters@yourclub.org" /></label>
         </>
       )}
-      {saved && !saved.ok && <ul role="alert" className="errors">{saved.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-      {saved?.ok && <p role="status">Saved. Send a test email next, in step 3.</p>}
+      {saved && !saved.ok && <ActionOutcome state={saved} />}
+      {saved?.ok && <Notice tone="done">Saved. Send a test email next, in step 3.</Notice>}
       <button className="btn" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
     </form>
   );
@@ -60,8 +61,8 @@ export function MailTestForm({ summary, test }: { summary: MailSummary; test: (f
     <form action={runTest} className="stack">
       <p className="hint">{summary.working && summary.status.verifiedAt ? <>Working. Last tested <LocalTime iso={summary.status.verifiedAt} />.</> : "Saved, but not tested with these settings yet."}</p>
       <label className="field"><span>Send a test email to</span><input name="to" type="email" required autoComplete="email" /></label>
-      {tested && !tested.ok && <p role="alert" className="errors">{tested.error}</p>}
-      {tested?.ok && <p role="status">Test email sent. Check that it arrived, and look in the spam folder too.</p>}
+      {tested && !tested.ok && <Notice tone="problem">{tested.error}</Notice>}
+      {tested?.ok && <Notice tone="done">Test email sent. Check that it arrived, and look in the spam folder too.</Notice>}
       <button className="btn btn-line" disabled={testing}>{testing ? "Sending…" : "Send test email"}</button>
     </form>
   );

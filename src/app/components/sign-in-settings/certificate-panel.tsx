@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 import { useActionState, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
@@ -14,7 +15,7 @@ function ActionButton({ label, busy, action, confirmText }: { label: string; bus
   const [state, run, pending] = useActionState(async () => safely(action, { ok: false as const, errors: [ACTION_FAILED] }), null);
   return (
     <form action={run} onSubmit={confirmText ? (e) => { if (!confirm(confirmText)) e.preventDefault(); } : undefined}>
-      {state && !state.ok && <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
+      {state && !state.ok && <ActionOutcome state={state} />}
       <button className="btn btn-line" disabled={pending}>{pending ? busy : label}</button>
     </form>
   );
@@ -45,7 +46,7 @@ function DownloadLink({ fileName }: { fileName: string }) {
   return (
     <>
       <p><a className="btn btn-line" href={href} download onClick={download}>Download certificate (.cer)</a></p>
-      {failed && <p role="alert" className="errors">The certificate didn&apos;t download. Reload the page and try again.</p>}
+      {failed && <Notice tone="problem">The certificate didn&apos;t download. Reload the page and try again.</Notice>}
     </>
   );
 }

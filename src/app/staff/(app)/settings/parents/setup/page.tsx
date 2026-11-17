@@ -1,3 +1,4 @@
+import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { accessPreview, missingForSignins } from "@/lib/parents/switches";
 import { getParentSettings } from "@/lib/parents/settings";
@@ -37,7 +38,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
 
       {step === "preview" && (
         <section className="box" aria-labelledby="pp-h"><h2 id="pp-h">Step 1: What would happen</h2>
-          {missing.length > 0 && <ul role="status">{missing.map((m) => <li key={m}>{m}</li>)}</ul>}
+          {missing.length > 0 && <Notice tone="warning"><ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>}
           {p.ready.shape && (
             <>
               <p><b>{n(p.people, "person", "people")} would be able to sign in, to {n(p.families, "family", "families")}.</b></p>
@@ -50,7 +51,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
               <h3>Nobody could sign in ({p.noSignin.length})</h3><p>{p.noSignin.length ? names(p.noSignin) : "None."}</p>
               {/* Worked out only while sign-ins are off: once they are on, the reconcile keeps sign-ins in line by itself. */}
               {!on && (p.endingUnknown ? (
-                <><h3>Sign-ins that would end</h3><p role="status">{ENDING_BUSY}</p></>
+                <><h3>Sign-ins that would end</h3><Notice tone="info">{ENDING_BUSY}</Notice></>
               ) : (
                 <><h3>Sign-ins that would end ({p.ending.length})</h3>
                   {p.ending.length === 0 ? <p>None.</p> : <ul>{p.ending.map((e) => <li key={`${e.email}|${e.familyQboId}`}>{e.name} ({e.email})</li>)}</ul>}
@@ -64,7 +65,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
 
       {step === "signins" && (
         <section className="box" aria-labelledby="psi-h"><h2 id="psi-h">Step 2: Parent sign-ins</h2>
-          {switchedOff && <p role="status">Parent sign-ins are off. Nobody can sign in.</p>}
+          {switchedOff && <Notice tone="info">Parent sign-ins are off. Nobody can sign in.</Notice>}
           {p.settings.signin ? (
             <>
               <p>Parent sign-ins are on. {n(p.people, "person", "people")} can sign in, to {n(p.families, "family", "families")}.</p>
@@ -74,7 +75,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
               </details>
             </>
           ) : missing.length > 0 ? (
-            <><p>Not yet:</p><ul role="status">{missing.map((m) => <li key={m}>{m}</li>)}</ul></>
+            <Notice tone="warning">Not yet:<ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>
           ) : (
             <>
               <p>Switching on lets {n(p.people, "person", "people")} sign in, to {n(p.families, "family", "families")}{p.ending.length ? `, and ends ${n(p.ending.length, "sign-in", "sign-ins")} that QuickBooks no longer backs` : ""}. No email is sent: welcome emails are step 3.</p>
@@ -88,15 +89,15 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
 
       {step === "welcome" && sample && (
         <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Step 3: Welcome emails</h2>
-          <p role="status">{p.settings.welcome
+          <Notice tone="info">{p.settings.welcome
             ? "Welcome emails are on. Each new person is emailed once, when they first get access."
-            : "Welcome emails are off. Nobody is emailed."}</p>
+            : "Welcome emails are off. Nobody is emailed."}</Notice>
           {!p.settings.welcome && <p><b>{n(p.welcomeNow, "person", "people")} would be emailed now.</b> After that, each new person is emailed once. They go out a few each minute.</p>}
           <h3>The email</h3>
           <p>Subject: {sample.subject}</p>
           <pre>{sample.text}</pre>
           {p.settings.welcome ? <SwitchButton quiet label="Switch welcome emails off" pendingLabel="Switching off…" act={setWelcomeAction.bind(null, false)} />
-            : !p.settings.signin ? <p role="status">Switch parent sign-ins on first (step 2).</p>
+            : !p.settings.signin ? <Notice tone="info">Switch parent sign-ins on first (step 2).</Notice>
             : <SwitchButton label="Switch welcome emails on" pendingLabel="Switching on…" act={setWelcomeAction.bind(null, true)} />}
           <p className="box-foot"><a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
         </section>

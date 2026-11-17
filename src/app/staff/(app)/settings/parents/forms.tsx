@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome } from "@/app/components/notice";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 
@@ -10,7 +11,7 @@ const failed: Done = { ok: false, errors: [ACTION_FAILED] };
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
-  return state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return <ActionOutcome state={state} />;
 }
 
 /** One button for one switch. Nothing is typed, so a plain form action is fine. */

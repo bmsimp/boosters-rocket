@@ -1,3 +1,4 @@
+import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { providerSummaries, pendingOnlySummaries, PROVIDER_KEYS, type ProviderSummary } from "@/lib/auth/providers";
@@ -52,7 +53,7 @@ export default async function SignInSettingsPage() {
           </section>
         );
       })}
-      {!working && <p role="status" className="box">Nobody can sign in as staff until one of these works.</p>}
+      {!working && <Notice tone="warning">Nobody can sign in as staff until one of these works.</Notice>}
     </main>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { ActionOutcome } from "@/app/components/notice";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { CopyField } from "@/app/components/sign-in-settings/copy-field";
@@ -12,7 +13,7 @@ const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
-  return state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return <ActionOutcome state={state} />;
 }
 
 /** Documenso's address and API token. A saved token is never sent here; a blank field keeps it. */
@@ -57,7 +58,7 @@ export function WebhookSetup({ address, secretSaved, make }: { address: string; 
       {state?.ok && <CopyField label="Secret (shown this once)" value={state.secret} />}
       <form action={run} className="one-button">
         <button className="btn btn-line" disabled={pending}>{pending ? "Making…" : secretSaved || state?.ok ? "Make a new secret" : "Make the secret"}</button>
-        {state && (state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>)}
+        {state && (<ActionOutcome state={state} />)}
       </form>
       {secretSaved && !state?.ok && <p className="hint">A secret is saved. It can&apos;t be shown again: if Documenso doesn&apos;t have it, make a new one and paste that in. The old one stops working at once.</p>}
     </div>

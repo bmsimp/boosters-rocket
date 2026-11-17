@@ -1,3 +1,5 @@
+import { DataTable } from "@/app/components/data-table";
+import { Notice } from "@/app/components/notice";
 import { redirect } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { matchReview } from "@/lib/parents/matches";
@@ -31,18 +33,15 @@ export default async function MatchesPage() {
       )}
 
       <section className="box" aria-labelledby="mm-open-h"><h2 id="mm-open-h">To decide ({open.length})</h2>
-        {open.length === 0 ? <p>Every family has been matched.</p> : (
+        {open.length === 0 ? <Notice tone="done" live="none">Every family has been matched.</Notice> : (
           // A table on wide screens, so the old family, its suggestion and the choice compare at a glance; stacked on a phone.
-          <table className="match-table">
-            <thead><tr><th scope="col">Family in the previous company</th><th scope="col">Could sign in</th><th scope="col">Suggestion</th><th scope="col">Your choice</th></tr></thead>
-            <tbody>{open.map((s) => (
-              <tr key={s.old.qboId}>
-                <th scope="row">{s.old.name}{s.decision === "rejected" && <span className="when">Marked as no match</span>}</th>
-                <td>{s.old.emails.length ? s.old.emails.join(", ") : "Nobody could sign in"}</td>
-                <td>{why(s)}</td>
-                <td><MatchRow oldId={s.old.qboId} suggested={s.suggested?.qboId ?? null} families={review.families} decide={decideMatchAction} /></td>
-              </tr>))}</tbody>
-          </table>
+          <DataTable caption="Families from the previous company still to decide" captionHidden rowKey={(s) => s.old.qboId} rows={open}
+            columns={[
+              { key: "old", header: "Family in the previous company", rowHeader: true, cell: (s) => <>{s.old.name}{s.decision === "rejected" && <span className="when">Marked as no match</span>}</> },
+              { key: "emails", header: "Could sign in", cell: (s) => (s.old.emails.length ? s.old.emails.join(", ") : "Nobody could sign in") },
+              { key: "why", header: "Suggestion", cell: (s) => why(s) },
+              { key: "choice", header: "Your choice", cell: (s) => <MatchRow oldId={s.old.qboId} suggested={s.suggested?.qboId ?? null} families={review.families} decide={decideMatchAction} /> },
+            ]} />
         )}
       </section>
 
