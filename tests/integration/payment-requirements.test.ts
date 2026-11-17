@@ -206,6 +206,18 @@ describe("staff choose the product or service from QuickBooks", () => {
     expect((await audits("money.items.read.failed"))).toHaveLength(1);
   });
 
+  it("keeps the list it had when QuickBooks answers with no products or services, and says so", async () => {
+    await seeded();
+    setter = await withRole("setter@club.org", ["Season.Steps.*"]);
+    asStaff(setter);
+    await readItemsAction();
+    stub.items = [];
+    const r = await readItemsAction();
+    expect(r).toEqual({ ok: false, errors: [expect.stringMatching(/^QuickBooks answered with no products or services, though the portal has a list read from it before\. The list was kept as it was\./)] });
+    expect(await items()).toHaveLength(3);
+    expect((await audits("money.items.read.failed")).map((a) => [a.actorId, a.after])).toEqual([[setter.id, { code: "no_items", kept: 3 }]]);
+  });
+
   it("chooses one for a payment requirement, audited with before and after, and refuses what no page would send", async () => {
     const fall = await seeded();
     setter = await withRole("setter@club.org", ["Season.Steps.*"]);

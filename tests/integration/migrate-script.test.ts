@@ -4,11 +4,11 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import postgres from "postgres";
-import { adminDatabaseUrl, scratchDatabase } from "../setup/database-url";
+import { scratchDatabase } from "../setup/database-url";
+import { dropScratchDatabase, makeScratchDatabase } from "../setup/worker-databases";
 
 // On the run's own server, named after this file's database (the run's, or its worker's), so two runs, or two workers
 // of one run, never drop each other's scratch database.
-const ADMIN_URL = adminDatabaseUrl();
 // Making or dropping a database waits for Postgres to write out what every database on the server has changed: with
 // other runs and workers busy, that has taken two minutes.
 const DATABASE_WORK = 300_000;
@@ -16,15 +16,10 @@ const { name: FRESH, url: FRESH_URL } = scratchDatabase("migrate_script");
 
 describe("scripts/migrate.mjs", { timeout: 30_000 }, () => {
   beforeAll(async () => {
-    const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
-    await admin.unsafe(`DROP DATABASE IF EXISTS ${FRESH}`);
-    await admin.unsafe(`CREATE DATABASE ${FRESH}`);
-    await admin.end();
+    await makeScratchDatabase("migrate_script"); // marked as this run's: a database of that name the run didn't make is refused
   }, DATABASE_WORK);
   afterAll(async () => {
-    const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
-    await admin.unsafe(`DROP DATABASE IF EXISTS ${FRESH} WITH (FORCE)`);
-    await admin.end();
+    await dropScratchDatabase(FRESH);
   }, DATABASE_WORK);
 
   it("migrates an empty database, including the built-in Admin role", async () => {

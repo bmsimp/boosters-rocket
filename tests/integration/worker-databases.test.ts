@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import postgres from "postgres";
 import { adminDatabaseUrl, databaseName, scratchDatabase, workerDatabase } from "../setup/database-url";
-import { assertNotAWorkerDatabase, dropWorkerDatabases, holdRunLock, prepareWorkerDatabase, workerMark } from "../setup/worker-databases";
+import { assertNotAWorkerDatabase, dropScratchDatabase, dropWorkerDatabases, holdRunLock, makeScratchDatabase, prepareWorkerDatabase, scratchMark, workerMark } from "../setup/worker-databases";
 
 /**
  * The databases a parallel run makes for its workers (tests/setup/worker-databases.ts), tried on a run of this test's
@@ -11,8 +11,10 @@ import { assertNotAWorkerDatabase, dropWorkerDatabases, holdRunLock, prepareWork
 const RUN = scratchDatabase("workers");
 const W2 = workerDatabase(2, RUN.url), W3 = workerDatabase(3, RUN.url);
 const SCRATCH_OF_W2 = scratchDatabase("migrate_script", W2.url);
+/** Someone's own database that happens to have a name the pretend run's scratch databases have. */
+const PRIVATE = scratchDatabase("restore", RUN.url);
 const ANOTHER_RUNS_MARK = workerMark(RUN.url.replace(RUN.name, "someone_elses_test"));
-const MINE = [W2.name, W3.name, SCRATCH_OF_W2.name];
+const MINE = [W2.name, W3.name, SCRATCH_OF_W2.name, PRIVATE.name];
 
 const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
 const dropMine = async () => { for (const name of MINE) await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`); };
@@ -112,14 +114,34 @@ describe("a run's worker databases", { timeout: 300_000 }, () => {
     await (await holdRunLock(RUN.url))();
   });
 
-  it("when the run ends, drops its worker databases and the scratch databases its tests left, and nothing else", async () => {
-    await admin.unsafe(`CREATE DATABASE "${SCRATCH_OF_W2.name}"`);
+  it("makes a scratch database marked as the run's, and refuses one of that name the run didn't make", async () => {
+    // Made from worker 2's file, for the pretend run: named after worker 2's database, marked with the run's name.
+    await makeScratchDatabase("migrate_script", { fileUrl: W2.url, runUrl: RUN.url });
+    expect(await commentOn(SCRATCH_OF_W2.name)).toBe(scratchMark(RUN.url));
+    await inside(SCRATCH_OF_W2.url, (pg) => pg`create table left_behind (id int)`);
+    // One this run left is made again, empty.
+    await makeScratchDatabase("migrate_script", { fileUrl: W2.url, runUrl: RUN.url });
+    expect(await hasTable(SCRATCH_OF_W2.url, "left_behind")).toBe(false);
+    // Someone's own database with a scratch name: refused, and left as it is, by the test that would make it and by a drop.
+    await admin.unsafe(`CREATE DATABASE "${PRIVATE.name}"`);
+    await inside(PRIVATE.url, (pg) => pg`create table someone_elses (id int)`);
+    const making = makeScratchDatabase("restore", { fileUrl: RUN.url, runUrl: RUN.url });
+    await expect(making).rejects.toThrow(`a database of that name exists that this run did not make`);
+    await expect(making).rejects.toThrow(`DROP DATABASE "${PRIVATE.name}"`);
+    expect(await dropScratchDatabase(PRIVATE.name, { runUrl: RUN.url })).toBe(false);
+    expect(await hasTable(PRIVATE.url, "someone_elses")).toBe(true);
+    await expect(assertNotAWorkerDatabase(SCRATCH_OF_W2.url)).rejects.toThrow(`"${SCRATCH_OF_W2.name}" is a scratch database of the test run on "${RUN.name}"`);
+  });
+
+  // The roadmap's known gap from step 4: the teardown dropped databases by their scratch names, whoever made them.
+  it("when the run ends, drops its worker databases and the scratch databases its tests made, and leaves one of a scratch name it didn't make", async () => {
     const dropped = await dropWorkerDatabases(RUN.url);
-    expect(dropped.sort()).toEqual([W2.name, SCRATCH_OF_W2.name].sort());
+    expect(dropped).toEqual({ dropped: [W2.name, SCRATCH_OF_W2.name].sort(), leftAlone: [PRIVATE.name] });
     expect(await exists(W2.name)).toBe(false);
     expect(await exists(SCRATCH_OF_W2.name)).toBe(false);
     expect(await exists(W3.name)).toBe(true); // another run's, by its comment, though it has this run's worker's name
+    expect(await hasTable(PRIVATE.url, "someone_elses")).toBe(true); // a private database with a scratch purpose's name
     expect(await exists(databaseName(process.env.DATABASE_URL!))).toBe(true);
-    expect(await dropWorkerDatabases(RUN.url)).toEqual([]);
+    expect(await dropWorkerDatabases(RUN.url)).toEqual({ dropped: [], leftAlone: [PRIVATE.name] });
   });
 });

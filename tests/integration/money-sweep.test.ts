@@ -10,8 +10,9 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun, qboConnection, setting } from "@/lib/db/schema";
+import { auditLog, jobRun, qboConnection, qboCustomer, qboItem, setting } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
+import { runMoneyAndItems } from "@/lib/jobs/money-job";
 import { askForMoneyRun, MONEY_JOB, moneyRunView, RUN_KEY, runMoneyJob, STOPS_AT_ONE_FAMILY } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { resetDb, seedStaff } from "../helpers/db";
@@ -153,6 +154,24 @@ describe("the worker's read of every family", () => {
     expect((await runs())[0]!.detail).toBe("Read 3 families; 1 family couldn't be read.");
     expect(await moneyRow("NOT-DIGITS")).toMatchObject({ failedCode: "bad_id", readAt: null });
     expect(invoiceQueries(stub).join(" ")).not.toContain("NOT-DIGITS");
+  });
+
+  // The roadmap's known gap from step 7: a family the run passed over as not a family was still stamped as a failed try.
+  it("stamps no failed try on a family the cache stops holding as one while the run reads, and still stamps a read that truly failed", async () => {
+    await threeFamilies();
+    // As the run reads the Riveras, family 20 is made inactive in the cache (a roster refresh, a staff change), and
+    // every request about family 30 finds QuickBooks out of reach.
+    let moved = false;
+    stub.onApiRequest = async (c) => {
+      if (!moved) { moved = true; await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "20")); }
+      stub.dropApi = (c.query.get("query") ?? "").includes("'30'") || c.path.endsWith("/customer/30");
+    };
+    expect(await runMoneyJob({ paceMs: 0 })).toEqual({ ran: true, finished: true, ok: false });
+    expect(invoiceQueries(stub).map((q) => /'(\d+)'/.exec(q!)![1])).toEqual(["10", "30"]); // nothing asked about 20
+    expect(await moneyRow("20")).toBeUndefined();
+    expect(await moneyRow("10")).toMatchObject({ failedAt: null, failedCode: null });
+    expect(await moneyRow("30")).toMatchObject({ readAt: null, failedCode: expect.any(String) });
+    expect((await moneyRow("30"))!.failedAt).toBeInstanceOf(Date);
   });
 
   it("leaves the rest for the next wake when a wake's time is spent, and still writes one audit row for the run", async () => {
@@ -306,5 +325,64 @@ describe("the cross-check, customer by customer", () => {
     await runMoneyJob({ paceMs: 0 });
     expect(await moneyRow("10")).toMatchObject({ checkedAt: null, customerChecks: null, totalCents: 11500 });
     expect((await moneyRow("20"))!.customerChecks).toHaveLength(2);
+  });
+});
+
+// The roadmap's known gap from step 4: the item list was read only when staff pressed "Read the list from QuickBooks".
+describe("the products and services, read by the daily run", () => {
+  const items = () => db.select({ qboId: qboItem.qboId, name: qboItem.name }).from(qboItem).orderBy(asc(qboItem.qboId));
+  const SOLD = [{ Id: "7", Name: "Band fee", Type: "Service", Active: true }, { Id: "8", Name: "Trip deposit", Type: "Service", Active: true }];
+  const itemQueries = () => stub.apiCalls().filter((c) => (c.query.get("query") ?? "").includes("from Item"));
+
+  it("reads them once every family is read, with the staff button's GET, at the run's pace, and keeps them", async () => {
+    await threeFamilies();
+    stub.items = SOLD;
+    expect(await runMoneyAndItems({ paceMs: 0 })).toEqual({ ran: true, finished: true, ok: true, items: true });
+    expect(itemQueries().map((c) => [c.method, c.query.get("query")])).toEqual([["GET", "select * from Item orderby Id startposition 1 maxresults 1000"]]);
+    expect(stub.apiCalls().at(-1)!.query.get("query")).toContain("from Item"); // after the last family
+    expect(await items()).toEqual([{ qboId: "7", name: "Band fee" }, { qboId: "8", name: "Trip deposit" }]);
+    expect((await audits("money.items.read")).map((r) => [r.actorLabel, r.after])).toEqual([["worker", { items: 2 }]]);
+    expect((await runs())[0]!.detail).toBe("Read 3 families.");
+  });
+
+  it("asks for nothing when the run stops part way, or leaves families for the next wake", async () => {
+    await threeFamilies();
+    stub.items = SOLD;
+    stub.onApiRequest = (c) => { stub.dropApi = (c.query.get("query") ?? "").includes("'20'"); };
+    expect(await runMoneyAndItems({ paceMs: 0 })).toEqual({ ran: true, finished: true, ok: false });
+    stub.onApiRequest = null; stub.dropApi = false;
+    expect(await runMoneyAndItems({ paceMs: 0, budgetMs: 0, now: later(16 * MINUTE) })).toEqual({ ran: true, finished: false, ok: true });
+    expect(itemQueries()).toEqual([]);
+    expect(await runMoneyAndItems({ paceMs: 0, now: later(16 * MINUTE) })).toMatchObject({ finished: true, ok: true, items: true });
+    expect(itemQueries()).toHaveLength(1);
+  });
+
+  it.each([
+    ["an empty object", {}],
+    ["a Fault sent as a 200", { Fault: { Error: [{ Message: "nope", code: "500" }] } }],
+    ["items that aren't a list", { QueryResponse: { Item: { Id: "1" } } }],
+  ])("keeps the list it had when the answer is %s, and the run's figures stand", async (_what, body) => {
+    await threeFamilies();
+    stub.items = SOLD;
+    await runMoneyAndItems({ paceMs: 0 });
+    stub.oddItemAnswer = { body };
+    expect(await runMoneyAndItems({ paceMs: 0, now: later(25 * HOUR) })).toEqual({ ran: true, finished: true, ok: true, items: false });
+    expect(await items()).toHaveLength(2);
+    expect((await audits("money.items.read.failed")).map((r) => r.after)).toEqual([{ code: expect.any(String) }]);
+    expect((await runs()).at(-1)).toMatchObject({ outcome: "ok", detail: "Read 3 families." });
+  });
+
+  it("never keeps an answer with no products or services over a list that holds some, as the roster refresh never believes an empty roster", async () => {
+    await threeFamilies();
+    stub.items = SOLD;
+    await runMoneyAndItems({ paceMs: 0 });
+    stub.items = [];
+    expect(await runMoneyAndItems({ paceMs: 0, now: later(25 * HOUR) })).toEqual({ ran: true, finished: true, ok: true, items: false });
+    expect(await items()).toHaveLength(2);
+    expect((await audits("money.items.read.failed")).map((r) => r.after)).toEqual([{ code: "no_items", kept: 2 }]);
+    // With nothing stored, an empty answer is believed: a company that sells nothing yet.
+    await db.delete(qboItem);
+    await runMoneyAndItems({ paceMs: 0, now: later(50 * HOUR) });
+    expect((await audits("money.items.read")).at(-1)!.after).toEqual({ items: 0 });
   });
 });

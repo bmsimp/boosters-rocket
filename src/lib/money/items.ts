@@ -38,9 +38,13 @@ export async function itemsReadAt(): Promise<string | null> {
 /**
  * Reads the products and services from QuickBooks (`select * from Item`, strictly) and replaces the stored list. Only
  * from the company the roster cache came from; the list is saved under the roster lock and only if that is still the
- * company, so a change of company while QuickBooks answered keeps nothing of the old one.
+ * company, so a change of company while QuickBooks answered keeps nothing of the old one. An answer with nothing to
+ * keep never replaces a stored list that holds items, as the roster refresh never believes an empty roster over one
+ * that holds customers: a company doesn't lose every product at once, and the requirements would then name them by
+ * number. Staff press for it (Read the list from QuickBooks); the worker's daily read of every family also asks, at
+ * its own pace (`pace`, src/lib/jobs/money-job.ts).
  */
-export async function readItems(o: ItemOp): Promise<Done> {
+export async function readItems(o: ItemOp & { pace?: () => Promise<void> }): Promise<Done> {
   const c = await getConnection();
   const realmId = await getRosterSource();
   if (!c?.realmId || !c.refreshTokenCiphertext || realmId === null || realmId !== c.realmId) {
@@ -48,7 +52,7 @@ export async function readItems(o: ItemOp): Promise<Done> {
   }
   let raw: Record<string, unknown>[];
   try {
-    raw = await qboItems({ realmId, retry: true });
+    raw = await qboItems({ realmId, retry: true, ...(o.pace ? { pace: o.pace } : {}) });
   } catch (e) {
     const code = e instanceof QboError ? e.code : "unexpected";
     await writeAudit({ actor: o.actor, action: "money.items.read.failed", permission: o.permission, targetType: "qbo_item", ip: o.ip, after: { code } });
@@ -65,6 +69,13 @@ export async function readItems(o: ItemOp): Promise<Done> {
   return db.transaction(async (tx): Promise<Done> => {
     await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
     if ((await getRosterSource(tx)) !== realmId) return refuse(ROSTER_MOVED);
+    if (rows.length === 0) {
+      const [held] = await tx.select({ n: sql<number>`count(*)::int` }).from(qboItem).where(eq(qboItem.realmId, realmId));
+      if ((held?.n ?? 0) > 0) {
+        await writeAudit({ actor: o.actor, action: "money.items.read.failed", permission: o.permission, targetType: "qbo_item", ip: o.ip, after: { code: "no_items", kept: held!.n } }, tx);
+        return refuse("QuickBooks answered with no products or services, though the portal has a list read from it before. The list was kept as it was. Try again in a little while. (no_items)");
+      }
+    }
     await tx.delete(qboItem);
     for (let i = 0; i < rows.length; i += 500) await tx.insert(qboItem).values(rows.slice(i, i + 500));
     await writeAudit({ actor: o.actor, action: "money.items.read", permission: o.permission, targetType: "qbo_item", ip: o.ip, after: { items: rows.length } }, tx);

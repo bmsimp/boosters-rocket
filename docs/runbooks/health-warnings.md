@@ -72,6 +72,21 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   stopped; if it keeps stopping, look at the QuickBooks line.
 - **"... finished more than 2 days ago."** It should run daily: check the worker line.
 
+## Buy-out invoices
+
+The check of each volunteer buy-out's invoice that follows the daily read of every family's invoices: a paid one is
+marked paid, and one QuickBooks no longer shows, or shows on another customer, is flagged for the club.
+
+- **"Not running"** while QuickBooks isn't connected, and **"Not yet run"** before the first daily read: nothing to do.
+- **"The last check of the buy-out invoices stopped with an error."** The worker tries again a minute later. If it
+  keeps saying so, look at `docker compose logs worker` and the worker line.
+- **"... haven't been checked against it."** A read of every family finished more than 15 minutes ago and the check
+  didn't follow it: the worker isn't running, or stopped part way through its wake. See the worker line.
+- **"N buy-out invoices are flagged and waiting for the club."** Open **Reconciliation** (the line's link): each
+  flagged buy-out names its family, requirement and amount. The treasurer looks in QuickBooks for an invoice whose
+  private note reads "Booster Rocket buy-out". The flag goes by itself once a later check finds the invoice where it
+  belongs.
+
 ## Outgoing mail
 
 - **"Not set up"** or **"Not tested."** Parents can't get sign-in codes. **Settings**, **Outgoing mail**: save the
@@ -79,6 +94,20 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 - **"Tested, but the last email failed."** The note has the mail service's reason. The usual ones: a changed or expired
   password (enter it again under **Outgoing mail**); for Microsoft 365, the mailbox renamed, or the app's permission removed
   (run the mail script again, [outgoing mail](mail.md#the-portal-microsoft-365)). Send a test email after the fix.
+
+## Volunteer reminders
+
+The emails the worker sends the day before each volunteer shift, and 14 and 3 days before a volunteer due date, from
+9:00 on the club's clock.
+
+- **"Off"**: parent sign-ins are off, so no reminder goes. **"Waiting for mail"**: outgoing mail isn't set up and
+  tested yet; see the Outgoing mail line.
+- A note that **the nudges before a volunteer due date wait until welcome emails are switched on**: by choice.
+  **Settings**, **Parent sign-ins** switches welcome emails on when the club is ready to email families.
+- **"N volunteer reminders couldn't be sent at the last try."** Each is tried again after 15 minutes while it is still
+  the day for it. Look at the Outgoing mail line, which has the mail service's reason.
+- **"The last try to send volunteer reminders stopped with an error."** The worker tries again a minute later. If it
+  keeps saying so, look at `docker compose logs worker`.
 
 ## Forms (Documenso)
 

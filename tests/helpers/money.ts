@@ -33,7 +33,7 @@ export async function connectCompany(stub: QboStub, realmId = MONEY_REALM): Prom
 }
 
 export const moneyRow = async (familyQboId: string) => (await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId)))[0];
-export const invoiceQueries = (stub: QboStub) => stub.apiCalls().filter((c) => c.path.endsWith("/query")).map((c) => c.query.get("query"));
+export const invoiceQueries = (stub: QboStub) => stub.apiCalls().filter((c) => c.path.endsWith("/query") && /from Invoice\b/.test(c.query.get("query") ?? "")).map((c) => c.query.get("query"));
 
 /** The stored freshness window (src/lib/money/settings.ts). */
 export async function setFreshSeconds(freshSeconds: number): Promise<void> {
