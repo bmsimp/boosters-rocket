@@ -5,7 +5,7 @@ set -euo pipefail
 
 IMAGE="${1:?usage: scripts/smoke-image.sh <image>}"
 NET="br-smoke-$$"
-cleanup() { docker rm -f "$NET-app" "$NET-db" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; }
+cleanup() { docker rm -f -v "$NET-app" "$NET-db" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }

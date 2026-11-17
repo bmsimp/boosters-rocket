@@ -72,7 +72,8 @@ describe("the nightly backup's schedule", { timeout: 300_000 }, () => {
 
   describe("left running", () => {
     const name = `br-schedule-${process.pid}-${randomBytes(3).toString("hex")}`;
-    afterAll(() => { docker(["rm", "-f", name]); });
+    // -v: the image declares a data volume, and without it every run leaves an unnamed volume behind.
+    afterAll(() => { docker(["rm", "-f", "-v", name]); });
 
     it("runs backup.sh at the set minute, keeps going after it fails, prints only its lines, and stops at once when told", async () => {
       // The first whole minute at least 20 seconds away, in UTC: the container is started well before it.
