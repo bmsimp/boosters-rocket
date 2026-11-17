@@ -139,8 +139,11 @@ const CASES: Case[] = [
   { name: "the customers aren't a list", set: (s) => { s.oddRosterAnswer = { customers: { QueryResponse: { Customer: {} } } }; }, fails: ["customers"] },
   { name: "the item query answers a Fault", set: (s) => { s.oddItemAnswer = { body: { Fault: { Error: [{ code: "4000" }] } } }; }, fails: ["items"] },
   { name: "the list form answers other customers' invoices", set: (s) => { s.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: [readInvoice("950", "30")] } }, inFormOnly: true }; }, fails: ["invoices_list_form"] },
-  { name: "the one-customer form answers other customers' invoices", set: (s) => { s.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: [readInvoice("950", "30")] } } }; }, fails: ["invoices_one_form"] },
-  { name: "an empty answer has another shape", set: (s) => { s.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: {} } } }; }, fails: ["empty_answer"] },
+  // With every invoice query answered oddly the check can't find its own invoices to void them, so the student still
+  // owes and QuickBooks refuses to make it inactive (6220), and its family after it (800): the check rightly says its
+  // records aren't all inactive.
+  { name: "the one-customer form answers other customers' invoices", set: (s) => { s.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: [readInvoice("950", "30")] } } }; }, fails: ["invoices_one_form", "all_inactive"] },
+  { name: "an empty answer has another shape", set: (s) => { s.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: {} } } }; }, fails: ["empty_answer", "all_inactive"] },
   { name: "an invoice has no due date", set: (s) => { s.invoices.push(readInvoice("903", "10", { DueDate: undefined })); }, fails: ["invoice_fields"] },
   { name: "an invoice line names a product that isn't on the list", set: (s) => { s.invoices.push(readInvoice("903", "10", { Line: [{ DetailType: "SalesItemLineDetail", Amount: 5, SalesItemLineDetail: { ItemRef: { value: "99" } } }] })); }, fails: ["invoice_items"] },
   { name: "pay links are on another host", set: (s) => { s.invoices.push(readInvoice("903", "10", { InvoiceLink: "https://pay.example.net/t/903" })); }, fails: ["pay_links"] },

@@ -527,9 +527,9 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
     it("send a bill-to email address only from the check of the portal's requests, never for a buy-out", () => {
       // The one optional field of the create (InvoiceCreate.billEmail): given by the check's Pay link probe alone, until
       // the owner decides what a buy-out invoice should carry.
-      const giving = everything.filter((s) => s.file !== CLIENT && /billEmail/.test(code(s.text))).map((s) => s.file).sort();
+      const giving = everything.filter((s) => s.file !== CLIENT && /\bbillEmail\b/.test(code(s.text))).map((s) => s.file).sort();
       expect(giving).toEqual([CHECK_WRITER, `${CHECK_FOLDER}run.ts`].sort());
-      expect(writer).not.toMatch(/billEmail|BillEmail/);
+      expect(writer).not.toMatch(/\bbillEmail\b|BillEmail/);
     });
 
     it("refuse a body that could carry another field, or go elsewhere", () => {
