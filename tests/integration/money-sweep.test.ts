@@ -10,7 +10,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun, qboConnection, setting } from "@/lib/db/schema";
+import { auditLog, jobRun, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { askForMoneyRun, MONEY_JOB, moneyRunView, RUN_KEY, runMoneyJob, STOPS_AT_ONE_FAMILY } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
@@ -153,6 +153,24 @@ describe("the worker's read of every family", () => {
     expect((await runs())[0]!.detail).toBe("Read 3 families; 1 family couldn't be read.");
     expect(await moneyRow("NOT-DIGITS")).toMatchObject({ failedCode: "bad_id", readAt: null });
     expect(invoiceQueries(stub).join(" ")).not.toContain("NOT-DIGITS");
+  });
+
+  // The roadmap's known gap from step 7: a family the run passed over as not a family was still stamped as a failed try.
+  it("stamps no failed try on a family the cache stops holding as one while the run reads, and still stamps a read that truly failed", async () => {
+    await threeFamilies();
+    // As the run reads the Riveras, family 20 is made inactive in the cache (a roster refresh, a staff change), and
+    // every request about family 30 finds QuickBooks out of reach.
+    let moved = false;
+    stub.onApiRequest = async (c) => {
+      if (!moved) { moved = true; await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "20")); }
+      stub.dropApi = (c.query.get("query") ?? "").includes("'30'") || c.path.endsWith("/customer/30");
+    };
+    expect(await runMoneyJob({ paceMs: 0 })).toEqual({ ran: true, finished: true, ok: false });
+    expect(invoiceQueries(stub).map((q) => /'(\d+)'/.exec(q!)![1])).toEqual(["10", "30"]); // nothing asked about 20
+    expect(await moneyRow("20")).toBeUndefined();
+    expect(await moneyRow("10")).toMatchObject({ failedAt: null, failedCode: null });
+    expect(await moneyRow("30")).toMatchObject({ readAt: null, failedCode: expect.any(String) });
+    expect((await moneyRow("30"))!.failedAt).toBeInstanceOf(Date);
   });
 
   it("leaves the rest for the next wake when a wake's time is spent, and still writes one audit row for the run", async () => {
