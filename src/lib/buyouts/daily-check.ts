@@ -4,7 +4,7 @@
 // compares each invoiced buy-out with the figures that run has just stored for its family; the voids it asks for go
 // through the write queue (./writes.ts).
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { buyout, jobRun, qboCustomer, setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
@@ -99,7 +99,10 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
         return;
       }
       if (b.flag === verdict) return;
-      const [marked] = await tx.update(buyout).set({ flag: verdict, flaggedAt: new Date(), updatedAt: new Date() }).where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
+      // Only a row not flagged so already: two wakes following the same run both read it unflagged, and the second's
+      // update, made once the first's is committed, then changes nothing and audits nothing.
+      const [marked] = await tx.update(buyout).set({ flag: verdict, flaggedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"), or(isNull(buyout.flag), ne(buyout.flag, verdict)))).returning({ id: buyout.id });
       if (!marked) return;
       flagged++;
       await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.flagged", targetType: "buyout", targetId: b.id, before: { flag: b.flag },
