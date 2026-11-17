@@ -101,6 +101,21 @@ describe("a parent downloads their own family's signed form", () => {
     expect(page).toContain("Download the signed form");
     for (const m of b.markers) expect(page).not.toContain(m);
   });
+
+  it("says a signed copy is coming only while it is being filed, and to ask the club for one it won't offer the family", async () => {
+    asParent(a.identity);
+    const id = a.forms!.ids.complete;
+    // Signed by a guardian of another family, as a form that came with a moved student is: filed, never offered here.
+    await db.update(signatureRequest).set({ signers: [{ parentId: NOBODY, recipientId: 1, name: "Someone else", email: "else@example.com", signedAt: "2026-11-10T12:00:00.000Z" }] })
+      .where(eq(signatureRequest.id, id));
+    const moved = await renderPage(FormPage, { params: { id } });
+    expect(moved).not.toContain("Download the signed form");
+    expect(moved).not.toContain("download it here soon");
+    expect(moved).toContain("If you&#x27;d like one, just ask the club.");
+    // Still being filed: the copy is on its way.
+    await db.update(signatureRequest).set({ evidenceOwed: true }).where(eq(signatureRequest.id, id));
+    expect(await renderPage(FormPage, { params: { id } })).toContain("download it here soon");
+  });
 });
 
 describe("staff download a signed form's evidence", () => {

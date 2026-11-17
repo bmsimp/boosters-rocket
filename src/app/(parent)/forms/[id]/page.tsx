@@ -96,7 +96,10 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
                   Download the signed form{parts > 1 ? ` (part ${i + 1})` : ""}
                 </a>))}
               </div>
-            ) : <p className="help">The club is filing the signed copy. You&apos;ll be able to download it here soon.</p>}
+            ) : form.row.evidenceOwed
+              ? <p className="help">The club is filing the signed copy. You&apos;ll be able to download it here soon.</p>
+              // Filed, but not offered to this family (signed by guardians of another family, before a student moved here).
+              : <p className="help">The club keeps the signed copy. If you&apos;d like one, just ask the club.</p>}
           </>
         )}
 
