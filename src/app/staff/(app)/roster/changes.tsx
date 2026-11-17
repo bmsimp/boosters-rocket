@@ -6,8 +6,9 @@ import type { QueueView } from "@/lib/roster/queue";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { DataTable } from "@/app/components/data-table";
-import { DeactivateForm, MemberForm, MoveForm, NameForm, ParentForm } from "./write-forms";
-import { addToFamilyAction, createAction, deactivateAction, moveAction, renameAction } from "./write-actions";
+import type { Covered } from "@/lib/roster/writes";
+import { DeactivateForm, FamilyInactiveForm, MemberForm, MoveForm, NameForm, ParentForm } from "./write-forms";
+import { addToFamilyAction, createAction, deactivateAction, familyInactiveAction, moveAction, renameAction } from "./write-actions";
 
 /**
  * The roster's changes in QuickBooks, for staff who hold Roster.Family.ReadWrite with Roster.Read. Every form's action
@@ -85,15 +86,30 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra }: {
   );
 }
 
+/**
+ * Making the family inactive, with everyone under it: the list of who that covers, by name, deepest first as the portal
+ * makes them inactive. The form is given the names it shows; the ids and versions are bound into its action on the server.
+ */
+function FamilyInactive({ family, cover, edit }: { family: Cust; cover: { family: Covered; under: Covered[] }; edit: Edit }) {
+  if (cover.under.some((u) => edit.blocked.has(u.qboId))) {
+    return <Notice tone="info" live="none">A change to someone under {family.displayName} is waiting to reach QuickBooks, so the family can&apos;t be made inactive for now.</Notice>;
+  }
+  const shown: [string, string][] = [[cover.family.qboId, cover.family.syncToken], ...cover.under.map((u): [string, string] => [u.qboId, u.syncToken])];
+  return <FamilyInactiveForm familyName={family.displayName} names={cover.under.map((u) => u.name)}
+    act={familyInactiveAction.bind(null, edit.rosterTag, family.qboId, shown)} />;
+}
+
 /** Every change a family's page offers: the family itself, its students and its parents, as the shape allows. */
-export function FamilyChanges({ shape, family, families, edit }: { shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; families: { qboId: string; name: string }[]; edit: Edit }) {
+export function FamilyChanges({ shape, family, families, edit, cover }: {
+  shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; families: { qboId: string; name: string }[]; edit: Edit; cover: { family: Covered; under: Covered[] } | null;
+}) {
   const { offered } = shapeOperations(shape);
   const f = family.customer;
   const elsewhere = families.filter((x) => x.qboId !== f.qboId);
   return (
     <section className="box" aria-labelledby="family-changes-h"><h2 id="family-changes-h">Change in QuickBooks</h2>
-      <RecordChanges who="the family" c={f} rename={offered.has("rename_family")} deactivate={offered.has("deactivate_family")} edit={edit}
-        warning="Its parents lose access to the portal at once. QuickBooks may make its students and parents inactive too; the roster is read again within a few minutes to see." />
+      <RecordChanges who="the family" c={f} rename={offered.has("rename_family")} deactivate={false} edit={edit} warning=""
+        extra={offered.has("deactivate_family") && f.active && cover ? <FamilyInactive family={f} cover={cover} edit={edit} /> : null} />
       {f.active && offered.has("add_student") && (
         <details className="more"><summary>Add a student</summary>
           <NameForm field="The student's name, as QuickBooks will show it" label="Add the student" pendingLabel="Adding in QuickBooks…" act={addToFamilyAction.bind(null, edit.rosterTag, "student", f.qboId)} />
@@ -106,13 +122,13 @@ export function FamilyChanges({ shape, family, families, edit }: { shape: Extrac
       )}
       {family.students.map((s) => (
         <RecordChanges key={s.qboId} who="the student" c={s} rename={offered.has("rename_student")} deactivate={offered.has("deactivate_student")} edit={edit}
-          warning="The student is no longer counted in the family's season, and their invoices no longer show to the family."
+          warning="The student is no longer counted in the family's season, and their invoices no longer show to the family. A student with an open balance in QuickBooks isn't made inactive until it is paid or written off."
           extra={offered.has("move_student") && s.active && edit.versions.has(s.qboId) && elsewhere.length > 0
             ? <MoveForm families={elsewhere} act={moveAction.bind(null, edit.rosterTag, s.qboId, edit.versions.get(s.qboId)!)} /> : null} />
       ))}
       {family.parents.map((p) => (
         <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
-          warning="They can no longer sign in to the portal for this family." />
+          warning="They can no longer sign in to the portal for this family. A parent with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
       ))}
     </section>
   );
@@ -122,7 +138,7 @@ export function FamilyChanges({ shape, family, families, edit }: { shape: Extrac
 export function MemberChanges({ member, edit }: { member: Cust; edit: Edit }) {
   return (
     <section className="box" aria-labelledby="member-changes-h"><h2 id="member-changes-h">Change in QuickBooks</h2>
-      <RecordChanges who="the member" c={member} rename deactivate edit={edit} warning="They can no longer sign in to the portal." />
+      <RecordChanges who="the member" c={member} rename deactivate edit={edit} warning="They can no longer sign in to the portal. A member with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
     </section>
   );
 }

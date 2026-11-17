@@ -14,7 +14,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, familyMoney, qboCustomer, writeQueue } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { NOT_HERE } from "@/lib/roster/operations";
-import { addToFamilyAction, createAction, deactivateAction, giveUpAction, moveAction, renameAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
+import { addToFamilyAction, createAction, deactivateAction, familyInactiveAction, giveUpAction, moveAction, renameAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
@@ -31,6 +31,8 @@ afterAll(() => stub.close());
 const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" };
+/** The Rivera family's list as its page binds it: the family, Ana and Leo, each at the version the stub's company starts at. */
+const RIVERA_SHOWN: [string, string][] = [["10", "0"], ["11", "0"], ["12", "0"]];
 const everyAction = (tag: string, itemId: string) => [
   () => createAction(tag, "family", "Patel Family"),
   () => addToFamilyAction(tag, "student", "10", "Rosa Rivera"),
@@ -38,6 +40,7 @@ const everyAction = (tag: string, itemId: string) => [
   () => renameAction(tag, "12", "0", "Leon Rivera"),
   () => moveAction(tag, "12", "0", "20"),
   () => deactivateAction(tag, "12", "0"),
+  () => familyInactiveAction(tag, "10", RIVERA_SHOWN),
   () => tryAgainAction(itemId),
   () => giveUpAction(itemId, "Done by hand."),
 ];
@@ -83,6 +86,12 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
       () => renameAction(tag, "x".repeat(65), "0", "Leon"),
       () => moveAction(tag, "12", "0", 20 as unknown as string),
       () => deactivateAction(tag, ["12"] as unknown as string, "0"),
+      () => familyInactiveAction(tag, "10", []),
+      () => familyInactiveAction(tag, "10", "10:0" as unknown as [string, string][]),
+      () => familyInactiveAction(tag, "10", [["10", "zero"]]),
+      () => familyInactiveAction(tag, "10", [["10", "0", "extra"]] as unknown as [string, string][]),
+      () => familyInactiveAction(tag, "10", Array.from({ length: 201 }, (_, i): [string, string] => [String(i), "0"])),
+      () => familyInactiveAction(tag, 10 as unknown as string, RIVERA_SHOWN),
       () => tryAgainAction("not-a-uuid"),
       () => giveUpAction("00000000-0000-4000-8000-000000000000", 7 as unknown as string),
     ];
@@ -100,6 +109,42 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
     const before = revalidatedPaths().length;
     expect(await renameAction(tag, "12", "1", "Ana Rivera")).toMatchObject({ ok: false, offer: "Ana Rivera (2)" });
     expect(revalidatedPaths().length).toBe(before);
+  });
+});
+
+describe("making a family inactive from its page: one action, the amount of a balance only for Finance.Balance.Read", () => {
+  beforeEach(() => { stub.quirks.balances = true; });
+  const owing = () => { stub.invoices = [{ Id: "901", SyncToken: "0", CustomerRef: { value: "12" }, TotalAmt: 12.5, Balance: 12.5 }]; };
+
+  it("says who owes, with the amount only to staff who may see money, and sends nothing", async () => {
+    owing();
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const plain = await familyInactiveAction(tag, "10", RIVERA_SHOWN);
+    expect(plain).toMatchObject({ ok: false, errors: expect.arrayContaining(["Leo Rivera has an open balance in QuickBooks."]) });
+    expect(JSON.stringify(plain)).not.toContain("$12.50");
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Finance.Balance.Read"]));
+    expect(await familyInactiveAction(tag, "10", RIVERA_SHOWN)).toMatchObject({ ok: false, errors: expect.arrayContaining(["Leo Rivera owes $12.50 in QuickBooks."]) });
+    expect(posts()).toEqual([]);
+    expect(revalidatedPaths()).toEqual([]);
+  });
+
+  it("makes the family and everyone under it inactive, and the pages are made again", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(await familyInactiveAction(tag, "10", RIVERA_SHOWN)).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." });
+    expect(revalidatedPaths()).toContain("/");
+    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    expect(html).toContain("It is inactive in QuickBooks");
+    expect(html).not.toContain("Make Rivera Family inactive");
+  });
+
+  it("a stop part way is made again on the pages too, so the list shown next is whoever is still active", async () => {
+    stub.onApiRequest = (c) => { stub.updateFault = c.method === "POST" && /"Id":"12"/.test(c.body) ? "6000" : null; };
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const r = await familyInactiveAction(tag, "10", RIVERA_SHOWN);
+    expect(r).toMatchObject({ ok: false, errors: expect.arrayContaining(["Made inactive in QuickBooks: Ana Rivera."]) });
+    expect(revalidatedPaths()).toContain("/");
+    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    expect(html).toContain("Make Rivera Family inactive");
   });
 });
 

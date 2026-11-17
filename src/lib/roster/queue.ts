@@ -189,7 +189,7 @@ export type QueueView = {
  */
 export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { showAmounts?: boolean } = {}): string {
   const name = (id: string | null) => (id === null ? "the club" : names.get(id) ?? "a customer no longer on the roster");
-  const who = "role" in w ? { family: "the family", student: "the student", parent: "the parent", member: "the member" }[w.role] : "";
+  const who = "role" in w ? { family: "the family", student: "the student", parent: "the parent", member: "the member", other: "the customer" }[w.role] : "";
   switch (w.op) {
     case "create": return w.familyQboId === null ? `Make ${who} “${w.name}”` : `Add ${who} “${w.name}” to ${name(w.familyQboId)}`;
     case "rename": return `Rename ${who} “${w.was}” to “${w.name}”`;

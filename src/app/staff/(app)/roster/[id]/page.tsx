@@ -5,7 +5,7 @@ import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
 import { loadRosterPage, entryFrom } from "@/lib/roster/queries";
-import { versionsOf } from "@/lib/roster/writes";
+import { familyCover, versionsOf } from "@/lib/roster/writes";
 import { loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familySignins, type FamilySignin } from "@/lib/parents/directory";
@@ -100,6 +100,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const records = entry.kind === "family" ? [entry.family.customer, ...entry.family.students, ...entry.family.parents] : [entry.member];
   const edit = canChange ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)),
     blocked: new Set(waiting.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
+  // Who making the family inactive covers: everyone active under it in the cache, at any depth, with their versions.
+  const cover = edit && entry.kind === "family" ? await familyCover(qboId) : null;
   const families = page.roster?.kind === "layered" ? page.roster.families.filter((f) => f.customer.active).map((f) => ({ qboId: f.customer.qboId, name: f.customer.displayName })) : [];
   return (
     <main className="wrap single">
@@ -120,7 +122,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         season={entry.kind === "family" && customer.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && customer.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       <Waiting items={waiting} />
-      {edit && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={entry.family} families={families} edit={edit} />}
+      {edit && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={entry.family} families={families} edit={edit} cover={cover} />}
       {edit && entry.kind === "member" && <MemberChanges member={entry.member} edit={edit} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
       <SignIns signins={signins} detailed={detailed} />

@@ -111,6 +111,37 @@ export function MoveForm({ families, act }: { families: { qboId: string; name: s
   );
 }
 
+/**
+ * Making a family inactive with everyone under it, behind a second press that lists who that covers. Given the names it
+ * shows and nothing else. After a stop part way the answer stays on screen, the page is made again, and the list then
+ * holds whoever is still active, so pressing again carries on.
+ */
+export function FamilyInactiveForm({ familyName, names, act }: { familyName: string; names: string[]; act: () => Promise<WriteResult> }) {
+  const [sure, setSure] = useState(false);
+  const [state, run, pending] = useActionState(async () => safely(() => act(), failed), null);
+  const label = `Make ${familyName} inactive`;
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      {!sure ? <button type="button" className="btn btn-line" onClick={() => setSure(true)}>{label}</button> : (
+        <>
+          {names.length ? (
+            <>
+              <p>This makes these inactive in QuickBooks, in this order, and {familyName} last:</p>
+              <ul className="notice-list">{names.map((n, i) => <li key={`${i}-${n}`}>{n}</li>)}</ul>
+            </>
+          ) : <p>Nobody under {familyName} is active in QuickBooks, so this makes {familyName} alone inactive.</p>}
+          <p>Its parents lose access to the portal at once. Before anything is changed, the portal asks QuickBooks what each of them owes: if anyone has an open balance, nobody is made inactive until it is paid or written off in QuickBooks.</p>
+          <Outcome state={state} pending={pending} />
+          <div className="row-actions">
+            <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making them inactive…" : names.length ? "Yes, make them all inactive" : "Yes, make it inactive"}</button>
+            <button type="button" className="btn btn-line" disabled={pending} onClick={() => setSure(false)}>Keep it active</button>
+          </div>
+        </>
+      )}
+    </form>
+  );
+}
+
 /** Making someone inactive, behind a second press that says what follows. */
 export function DeactivateForm({ label, warning, act }: { label: string; warning: string; act: () => Promise<WriteResult> }) {
   const [sure, setSure] = useState(false);
