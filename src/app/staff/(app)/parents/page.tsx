@@ -40,7 +40,10 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
       {!settings.signin && <Notice tone="warning">{settings.everEnabled ? "Parent sign-ins are switched off, so nobody can sign in right now." : "Parent sign-ins haven't been switched on yet. An Admin does that under Parent sign-ins."}</Notice>}
 
       <section className="box" aria-labelledby="review-h"><h2 id="review-h">To review ({review.waiting.length})</h2>
-        {review.waiting.length === 0 ? <Notice tone="done" live="none">Nothing is waiting.</Notice> : (
+        {/* Addresses are held only while sign-ins are on: before then, say when they will come up (Reconciliation already names them). */}
+        {review.waiting.length === 0 ? (settings.signin
+          ? <Notice tone="done" live="none">Nothing is waiting.</Notice>
+          : <Notice tone="info" live="none">Nothing to review yet. Once parent sign-ins are on, an address that is under more than one family in QuickBooks is held, and comes up here for you to say whether it is one person.</Notice>) : (
           <>
             <p>Each address below is under more than one family in QuickBooks. Nobody at that address can sign in to the families marked held until you say whether it is one person. If it is a copying mistake, choose Not the same person and have the records corrected in QuickBooks.</p>
             <ul className="review-items">{review.waiting.map((h) => (
