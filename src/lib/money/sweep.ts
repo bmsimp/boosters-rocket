@@ -11,6 +11,7 @@ import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { getShape } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { readFamilyForRun } from "./family-money";
+import { readItems } from "./items";
 import { familiesCustomers } from "./stored";
 
 import { MONEY_JOB, RUN_KEY } from "./run-keys";
@@ -112,8 +113,9 @@ export type MoneyJobResult = { ran: false } | { ran: true; finished: boolean; ok
  * A family whose answer is refused (an odd answer, an id that can't be sent) is counted and passed over. Anything else
  * (QuickBooks unreachable, slow or refusing, the connection gone, another company) ends the run as failed, saying how
  * far it got: the next run, 15 minutes later, carries on from the family it stopped at. When STOPS_AT_ONE_FAMILY runs
- * in a row have stopped at the same family, the next one passes it over, counted as not read. One audit row per run, when it
- * ends. Nothing here runs twice at once: a second caller finds the lock taken and does nothing.
+ * in a row have stopped at the same family, the next one passes it over, counted as not read. A run that has read every
+ * family reads the products and services too (readItems, ./items.ts, with its own audit row). One audit row per run, when
+ * it ends. Nothing here runs twice at once: a second caller finds the lock taken and does nothing.
  */
 export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: number } = {}): Promise<MoneyJobResult> {
   const now = o.now ?? new Date();
@@ -188,7 +190,13 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
         stoppedAt: passedOver || state.stoppedAt?.qboId === familyQboId ? null : state.stoppedAt, ...(passedOver ? { passedOver: (state.passedOver ?? 0) + 1 } : {}) };
       await saveState(state);
     }
-    await finish("ok", `${done()}${carriedOn ? ", carrying on from where the last run stopped" : ""}.`, null);
+    // Every family read: the products and services too, through the reader the staff button uses (./items.ts, audited
+    // there, strict, never an empty answer over a list that holds items), so a requirement's item keeps its name. The
+    // run's figures stand whatever it answers.
+    let items: Awaited<ReturnType<typeof readItems>>;
+    try { items = await readItems({ actor: WORKER_ACTOR, ip: null, pace }); } catch { items = { ok: false, errors: [] }; }
+    if (!(await stillOpen())) return { ran: true, finished: true, ok: false };
+    await finish("ok", `${done()}${carriedOn ? ", carrying on from where the last run stopped" : ""}.${items.ok ? "" : " The list of products and services couldn't be read this time; the one read before is kept."}`, null);
     return { ran: true, finished: true, ok: true };
   });
 }
