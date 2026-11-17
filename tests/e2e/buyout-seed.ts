@@ -18,4 +18,9 @@ export const E2E_BUYOUT = {
   buyout: "8d2e3f1a-6f3f-4000-8000-00000000b0b3",
   /** "Rivera trailer shifts": asked of the Rivera family alone, with a buy-out offered. */
   other: "8d2e3f1a-6f3f-4000-8000-00000000b0b4",
+  /**
+   * The Rivera family's buy-out of "Rivera trailer shifts", refused by QuickBooks: nothing was billed, so staff may
+   * close it from Reconciliation (tests/e2e/buyout-close.spec.ts). Its id is in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts).
+   */
+  refused: "8d2e3f1a-6f3f-4000-8000-00000000b0b5",
 } as const;

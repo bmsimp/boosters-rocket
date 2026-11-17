@@ -211,6 +211,10 @@ async function main() {
   }
   await sql`INSERT INTO buyout (id, requirement_id, family_qbo_id, subject_qbo_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, invoice_qbo_id, invoice_sync_token, realm_id, chosen_by, chosen_by_label)
           VALUES (${E2E_BUYOUT.buyout}, ${E2E_BUYOUT.invoiced}, 'E2E-FAMILY', 'E2E-FAMILY', 'E2E-FAMILY', ${HELP_ITEM}, 5000, 2, 10000, 'invoiced', '902', '0', '9130000000000001', ${p!.id}, 'zelda@example.com')`;
+  // The Rivera family's buy-out of its trailer shifts, which QuickBooks refused: on Reconciliation for staff to close
+  // (tests/e2e/buyout-close.spec.ts). Refused, it holds no live place, so the Rivera family's choice is as it was.
+  await sql`INSERT INTO buyout (id, requirement_id, family_qbo_id, subject_qbo_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, last_code, realm_id, chosen_by, chosen_by_label)
+          VALUES (${E2E_BUYOUT.refused}, ${E2E_BUYOUT.other}, 'E2E-10', 'E2E-10', 'E2E-10', ${HELP_ITEM}, 2000, 1, 2000, 'refused', 'fault_6000', '9130000000000001', ${crypto.randomUUID()}, 'a guardian')`;
   // Volunteering (v1 spec §11): one event 20 days ahead with two shifts, their ids fixed so the specs can ask for them
   // (tests/e2e/volunteer.spec.ts, PARAMS in tests/e2e/parent-session.spec.ts). The Rivera family has signed Leo up for
   // the griddle, so the Quetzalcoatl family sees "1 of 4 places filled" and never who. The volunteer spec signs Zelda up

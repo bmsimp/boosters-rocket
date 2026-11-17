@@ -58,7 +58,9 @@ const OTHER_FAMILIES = ["Rivera", "Okafor", "Lee Family", "Lincoln High", "onerr
   // The address Zelda asked to change to under her second family.
   "second-moving.example",
   // Staff changes to other families waiting to reach QuickBooks (the write queue): a new student's name.
-  "Pat Lee"];
+  "Pat Lee",
+  // The Rivera family's refused buy-out (E2E_BUYOUT.refused, tests/e2e/buyout-seed.ts): its id; its requirement's title is above.
+  "8d2e3f1a-6f3f-4000-8000-00000000b0b5"];
 
 test("every parent page with a dynamic segment has params to ask for it with", () => {
   const problems = paramsProblems(routes, PARAMS);

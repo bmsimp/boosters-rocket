@@ -11,6 +11,7 @@ const PAGES: Visit[] = [
   { path: "/staff" },
   { path: "/staff/roster" },
   { path: "/staff/roster/E2E-10" },
+  { path: "/staff/roster/E2E-10/buyouts" },
   { path: "/staff/reconciliation" },
   { path: "/staff/parents" },
   { from: "/staff/parents", link: 'a[href^="/staff/parents/"]' },
