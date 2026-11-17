@@ -328,6 +328,18 @@ describe("a run cut off part way", () => {
     expect(rec!.closedAt).not.toBeNull();
   });
 
+  it("forgets the records it made when a different company is connected, and keeps the runs", async () => {
+    await checkCompany(stub);
+    await run();
+    const { run: r } = await lastRun();
+    expect((await recordsOf(r.id)).length).toBeGreaterThan(0);
+    await db.update(qboConnection).set({ realmId: "9130000000000777" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    expect(await db.select().from(qboCheckRecord)).toEqual([]);
+    expect(await db.select().from(qboCheckRun)).toHaveLength(1);
+    expect(await audits("quickbooks.check.records.cleared")).toHaveLength(1);
+  });
+
   it("runs one at a time", async () => {
     await checkCompany(stub);
     const [a, b] = await Promise.all([run(false), run(false)]);
