@@ -40,13 +40,17 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   - "The roster hasn't been refreshed from QuickBooks in more than 2 days": the worker isn't running (see Worker).
   - "The membership shape names a customer type QuickBooks no longer has": someone renamed or removed a customer type in
     QuickBooks. **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
-  - "Staff changes to the roster: N waiting to reach QuickBooks": changes staff made that QuickBooks couldn't take yet
-    (it was busy or unreachable). They are tried again on their own, after 1, 5, 15 and 60 minutes, then every 6 hours.
+  - "Changes waiting for QuickBooks (staff roster changes and volunteer buy-out invoices): N waiting to reach
+    QuickBooks": changes staff made, or buy-out invoices a guardian asked for, that QuickBooks couldn't take yet (it was
+    busy or unreachable). They are tried again on their own, after 1, 5, 15 and 60 minutes, then every 6 hours.
     Nothing to do unless they stay.
   - "... stuck and waiting for someone to try them again or give them up on the Reconciliation page": a change failed
     8 times or for 24 hours, or QuickBooks may already have it. Open **Reconciliation** (the line's link). For each,
     look at the customer in QuickBooks, then **Try again now** if it isn't there, or **Give up** if it is (or isn't
-    wanted any more).
+    wanted any more). A stuck buy-out invoice: look in QuickBooks for an invoice whose private note reads "Booster
+    Rocket buy-out" on that family or student. The **Volunteer buy-outs** list on the same page shows each buy-out
+    that needs a look (an invoice QuickBooks no longer shows, one on another customer, a student who moved, one
+    QuickBooks refused); the treasurer sorts those out in QuickBooks.
 
 ## Every family's invoices
 

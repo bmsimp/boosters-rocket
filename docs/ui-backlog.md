@@ -4,9 +4,8 @@ A running list of interface problems found while using the portal. A design pass
 using the Dot Book design system (`DESIGN.md`). Add new finds at the bottom of the right section, with the date
 and the page. Move an item to **Done** when it ships, with the date; strike one that no longer applies, with why.
 
-The step 6 design pass split the list three ways: the staff pages (below, all settled on 2026-11-16), the settings,
-roles, staff and setup pages (the settings slice), and accessibility across the portal (the accessibility slice).
-The two marked places below are where the integrator puts those slices' lines when their branches are merged.
+The step 6 design pass split the list three ways: the staff pages, the settings, roles, staff and setup pages, and
+accessibility across the portal. All three were merged on 2026-11-16; what they left open is below.
 
 ## Open
 
@@ -18,103 +17,71 @@ The two marked places below are where the integrator puts those slices' lines wh
   progress page, a family's volunteer credit and a season's requirements are still `.lines` lists. Each is short and
   has a shape of its own, so they were left as lists; if they grow, they take the table primitive like the others.
 
-<!-- ===== Integrator: the settings slice's lines go here (Settings, Roles, Staff, setup, Parent sign-ins, the staff
-     menu). Until that branch is merged, its items are as the 2026-11-15 list left them, in this section. ===== -->
-
-### Staff page (`/staff/people`) [settings slice]
-- **The roles dropdown pushes the page around when it opens** (2026-11-09). It expands inline and shoves the
-  rows below. It should open as an overlay, or use a clearer pattern such as a checklist that's always visible.
-- **Save sits awkwardly beside the roles dropdown** (2026-11-09). It's tall, it's separate from the control it
-  saves, and it's easy to miss that changes need saving.
-- **The first Admin's name shows as their email** (2026-11-09). Setup creates the first Admin without a name.
-  Ask for a name in setup Step 3, or let people edit their name.
-- **Layout of each person's row** (2026-11-09). The name, email and status line, the roles control and the
-  sign-in button don't line up. "Turn off sign-in" is a full-width button that looks as important as Save.
-
-### Roles page (`/staff/roles`) [settings slice]
-- **Role form fields run outside their box** (2026-11-09). The Name, Include and Exclude fields are wider than
-  the box they sit in. (Since 2026-11-16 every `.field` text field fills its column and stops at it; check the page.)
-- **Editing roles means typing permission patterns** (2026-11-09). "Include" and "Exclude" take wildcard
-  patterns such as `Settings.*`. A volunteer shouldn't need to know the permission names. Offer a checklist of
-  permissions in plain words (for example "See the audit log", "Change club settings"), grouped by area.
-
-### Setup and Settings → Sign-in [settings slice]
-- **The page may not update right after downloading a certificate** (2026-11-09). The certificate panel
-  refreshes on a 1.5-second timer after the download starts, so on a slow server the thumbprint can lag until
-  the next page load.
-- **The certificate panel looks like there's still work to do after setup** (2026-11-10). Once a certificate is in
-  use and Microsoft accepted it, the card still shows **Download certificate** and **Replace certificate** as big
-  buttons, so admins wonder if they must upload it by hand. Show a clear "Done: Microsoft accepted this
-  certificate" state, and tuck download/replace under a "Manage certificate" option.
-
-### Mail (`/staff/settings/mail`, setup Step 2) [settings slice]
-- **The page still needs a design pass** (2026-11-10). The numbered Microsoft 365 steps (see Done) sit above the
-  settings form in one long box, the copy fields are plain, and nothing shows which step you are on or whether the
-  script has been run. The staff home warning and this page should read as one guided task. (The staff home's mail
-  warning is a titled notice since 2026-11-16, and the Mail page shows the same notice.)
-
-### QuickBooks setup (`/staff/settings/quickbooks`) [settings slice]
-- **Step 3 with no customer types is a dead end** (2026-11-11). A QuickBooks company with no customer types shows an
-  empty choice. Say that the types are made in QuickBooks, and where.
-
-### Settings as a whole (staff menu: Club, Sign-in, Mail) [settings slice]
-- **Settings are separate pages with separate menu entries** (2026-11-10). The owner expects one **Settings** page
-  with sections for staff sign-in and outgoing mail (and club details), not three top-level entries. Sections
-  still have to follow permissions: Sign-in and Mail are Admin-only, Club has its own permission, so a person sees
-  only the sections they hold. The owner's summary after the first proof-of-concept run with mail: the UI needs a
-  lot of love.
-- **QuickBooks is the first settings page in the new pattern** (2026-11-11). A plain view of what is set, with the steps
-  on their own page. It has no styling of its own yet: the view is a list of labels and values, and the steps reuse the
-  setup page's progress list. When Sign-in and Mail move to the same pattern, give all three one look.
-- **Settings should be a static page with a wizard for setup or edit** (2026-11-10, parked by the owner). After the
-  numbered steps went in, the owner said Mail "reads a bit better" but that it needs to become a page that shows
-  the current settings plainly, with a step-by-step wizard opened to set a section up or change it. Applies to
-  Sign-in and Mail alike, and fits the single Settings page above.
-- **The staff script says "on the setup page" after setup is finished** (2026-11-10). Its last lines tell the Admin
-  to enter values and use Send test email "on the setup page", but on a finished site that page is gone and the
-  place is Mail. Say "in the portal" or name both.
-
-### Parent sign-ins (`/staff/settings/parents`) [settings slice]
-- **No design of their own** (2026-11-12). The Parent sign-ins page and the match review reuse the roster's list
-  styles: labels and values, and lines of grey text under a name. (The Parents page and a person's page have their
-  own design since 2026-11-16: see Done.)
+### Settings and Parent sign-ins (step 6 settings slice, still open)
 - **The clean-up preview won't scale** (2026-11-12, `/staff/settings/parents/setup`, step 1). It is a heading per
   problem and a comma-separated list of names under it. A real roster with dozens of names per heading needs lists
-  that open, with counts in the headings. (A settings page, so left to the settings slice by the step 6 brief.)
-- **The match review needs a table on wide screens** (2026-11-12, `/staff/settings/parents/matches`). The old
-  family, the suggestion, the reason and the choice are stacked lines; side by side they would compare at a glance.
-  The table primitive (`DataTable`, `DESIGN.md` Tables) does exactly this.
-- **Step 2 says sign-ins "made by hand" would end** (2026-11-12, `/staff/settings/parents/setup`, step 2). After
-  sign-ins have been switched off and on again, the sign-ins that would end can come from QuickBooks too. Step 1
-  was reworded to "QuickBooks no longer backs these"; step 2 should say the same.
-- **Step 1 shows "Sign-ins that would end (0)" while sign-ins are on** (2026-11-12, same page). The list is only
-  worked out while sign-ins are off, so when they are on the heading and its hint read oddly. Leave the heading out
-  then.
+  that open, with counts in the headings. Not done in step 6: the settings slice gave the page its back link, its
+  wording and notices, not new lists.
 
-### The staff menu [settings slice, with the staff layout]
-- **The staff menu has fourteen entries** (2026-11-12; twenty since step 5). Home, Roster, Reconciliation, Parents,
-  Seasons, Progress, Balances, Volunteering, Volunteer credit, Signed forms, Staff, Roles, Club, Sign-in, Mail,
-  QuickBooks, Forms, Parent sign-ins, Audit and Health, for an Admin. It needs grouping; this ties in with the single
-  Settings page above. **Parents** and **Parent sign-ins** are also easy to mix up, and **Seasons** and **Progress**
-  are two entries only because they have separate permissions.
+### Parent pages (found by the 2026-11-16 accessibility pass)
+- **A form's page is titled "Form" and a shift's "Sign up for a shift"** (2026-11-16, `/forms/[id]`,
+  `/volunteer/shifts/[id]`). That is what a screen reader hears on arriving; naming the form or the event would say
+  more.
+- **No way past the club bar** (2026-11-16, every parent page). A keyboard user Tabs through six bar stops on every
+  page; a "Skip to the page" link or focusing the heading on arrival would save them.
+- **Documenso's signing frame has a button with no name** (2026-11-16, `/forms/[id]`). It is Documenso's own page;
+  report it upstream.
 
-<!-- ===== End of the settings slice's lines ===== -->
-
-<!-- ===== Integrator: the accessibility slice's lines go here (before sign-in, the family chooser, and anything it
-     finds across the portal). Until that branch is merged, its items are as the 2026-11-15 list left them. ===== -->
-
-### Before sign-in (`/sign-in`, `/staff/sign-in`) [accessibility slice]
-- **Reported as not mobile-friendly** (2026-11-09). In a phone-size test (390 and 360 pixels wide) both pages fit
-  with no sideways scroll, so the problem isn't known yet. Waiting on a screenshot from the owner's phone. Both pages
-  carry the club bar since 2026-11-15 (the club's name and monogram, no menu). The family chooser still has none.
-
-### Parent family chooser (`/choose-family`, parent pages) [accessibility slice]
-- **Family names** (2026-11-10). The chooser and Switch family show `Family account <QBO id>` until the roster plan
-  brings family names; the switch line is unstyled.
-
-<!-- ===== End of the accessibility slice's lines ===== -->
 
 ## Done
+- **Settings are one page** (2026-11-16, was Settings as a whole: separate pages and menu entries). `/staff/settings`
+  has a section for each part (club, staff sign-in, outgoing mail, QuickBooks, parent sign-ins, forms), each shown
+  only with its permission. Each says what is set and whether it works, in words with an icon, and opens its own page.
+- **Every settings page is a plain view, with the steps on their own page** (2026-11-16; was "QuickBooks is the first
+  settings page in the new pattern" and "Settings should be a static page with a wizard", parked). Club, staff
+  sign-in, mail and forms now follow the QuickBooks page (club/edit, sign-in/setup, mail/setup, forms/setup), with a
+  state line on each and a way back to Settings. Their answers and states are notices, like the other staff pages.
+- **Parent sign-ins: no design of their own** (2026-11-12; done 2026-11-16). The view is a settings box with its
+  state line, the steps' states are notices, and the match review is a table (below).
+- **The staff script says "on the setup page" after setup is finished** (2026-11-16). It now says "in the portal: on
+  the setup page, or under Settings, Staff sign-in" (or Outgoing mail).
+- **The roles dropdown pushes the page around**, **Save sits awkwardly beside the roles dropdown**, **Layout of each
+  person's row** (2026-11-16, Staff page). The roles are tick boxes that are always open, with their own Save roles
+  button. The row lines up as name / roles / sign-in on wide screens. "Turn off sign-in" is a quiet link-styled
+  button.
+- **The first Admin's name shows as their email** (2026-11-16). Setup asks for the first Admin's name with their
+  email, and anyone's name can be changed on the Staff page (by an Admin) or by the person themselves, on the staff
+  home.
+- **Editing roles means typing permission patterns**, **Role form fields run outside their box** (2026-11-16, Roles
+  page). Roles are edited by ticking permissions in plain words, grouped by area. There are no pattern fields left. A
+  role written with patterns shows what it gives today, and saving it says it will then no longer take up new
+  permissions by itself. Roles can be deleted after a step that says how many hold them.
+- **The page may not update right after downloading a certificate** and **The certificate panel looks like there's
+  still work to do after setup** (2026-11-16). The page refreshes once the download has finished. A certificate in
+  use reads "Done: Microsoft accepted this certificate", with Download and Replace under Manage certificate.
+- **The Mail page still needs a design pass** (2026-11-16). Mail is one guided task on the setup page and under
+  Settings alike: a list of the steps saying which are done, then each step in its own box. The staff home warning
+  opens those steps.
+- **Step 3 with no customer types is a dead end** (2026-11-16, QuickBooks setup). It says the types are made in
+  QuickBooks, not in the portal: the gear menu, All lists, Customer types, then each customer's type, then Refresh
+  now.
+- **Step 2 says sign-ins "made by hand" would end** and **Step 1 shows "Sign-ins that would end (0)" while sign-ins
+  are on** (2026-11-16, Parent sign-ins steps). Step 2 says "that QuickBooks no longer backs", and step 1 leaves the
+  heading out while sign-ins are on.
+- **The match review needs a table on wide screens** (2026-11-16). On 760px and up it is a table (family in the
+  previous company, could sign in, suggestion, your choice), stacked on a phone: the table primitive.
+- **The staff menu has fourteen entries** (2026-11-16). It is grouped: Home, Families (Roster, Parents), Season
+  (Seasons, Progress, Signed forms, Volunteering, Volunteer credit), Money (Balances, Reconciliation), Settings as one
+  entry, Admin (Staff, Roles, Audit, Health). Parent sign-ins is a part of Settings, no longer beside Parents. Seasons
+  and Progress stay two entries, side by side in Season.
+- **Parent pages checked for accessibility** (2026-11-16): label in name on the account link (parent and staff), 44px
+  lone links, focus kept and statuses announced after volunteer, forms, sign-in, details and email actions, nothing
+  left under the tab bar; `tests/e2e/parent-a11y.spec.ts` guards them.
+- ~~**Before sign-in reported as not mobile-friendly**~~ (2026-11-09; struck 2026-11-16). `tests/e2e/parent-a11y.spec.ts`
+  opens both sign-in steps at 360 and 1440 in every display mode and finds no sideways scroll, clipped text or small
+  target. Reopen it with a screenshot from the phone that showed it.
+- **Family names in the chooser** (2026-11-10; done since step 3's roster). The chooser and Switch family show each
+  family's name from the roster cache; `Family account <id>` is only the fallback for a family the cache doesn't hold.
 - **The staff side needs a lot of love** (2026-11-10, the owner; done 2026-11-16, every staff page outside Settings,
   Roles, Staff and setup). The staff pages are drawn from the design system's primitives: tables for lists of like
   things, notices for states, and the form controls (`DESIGN.md`: Tables, Notices, Form controls, Staff home).

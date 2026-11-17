@@ -361,7 +361,7 @@ Square corners everywhere (0px): boxes, buttons, badges, set cells, choice optio
 
 ### Club bar
 The club's own header. 56px, `club` fill, `club-on` text: monogram (34px circle, inverted colors, Barlow 700 0.875rem), club name, and on desktop the top nav and the account control; desktop nav links are 44px tall. The club's logo replaces the monogram when supplied.
-- **Account control:** a link (not a button) to Account / Display: 44px circle, 2px `club-on` outline, initials in Barlow 700. Its accessible name says where it goes ("Your account and display settings, Ana Ramirez"); `aria-current="page"` on the Display page.
+- **Account control:** a link (not a button) to Account / Display: 44px circle, 2px `club-on` outline, initials in Barlow 700. Its accessible name says where it goes ("AR: Your account and display settings, Ana Ramirez": it starts with the initials it shows, WCAG 2.5.3; the staff bar's reads "AR: Staff home, signed in as Ana Ramirez"); `aria-current="page"` on the Display page.
 - **Focus on the club fill:** inside the bar the focus ring switches to `club-on`, because `club-text` can vanish against the fill.
 
 ### Season set ruler (signature)
@@ -391,6 +391,7 @@ The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px
 - **Primary** (`ink` fill, paper text, 48px tall, body size): the one main action, chiefly the soonest Pay. Hover inverts to paper with ink text.
 - **Line** (paper, ink border and text, 44px, body-row size): other Pay buttons and ordinary actions ("Update my details"). Hover fills ink.
 - **Club** (paper, `club-text` border and text, 44px, body-row size): actions that belong to the club's season ("Sign Maya's forms"). Hover `club-tint`.
+- **Busy on a parent page** is `aria-disabled`, never `disabled`: a button that becomes disabled while it has the focus drops the focus to the page. The form refuses a second submit while its action runs.
 - **Disabled** (`aria-disabled`, or the native `disabled` a form's button carries while its action runs): `hair` fill and border, `ink-2` text, not-allowed cursor, and no hover. In high contrast (where `hair` is full ink) it becomes paper fill with a dashed `ink` border and `ink-2` text, so disabled never reads as a filled primary. Under forced colors the border is dashed and the text `GrayText`.
 - **Motion:** color only, 150ms ease-out; none under reduced motion.
 
@@ -437,6 +438,15 @@ Every staff form is built from these, and parent forms take them up as they are 
 - **Disabled:** `hair` fill and border, `ink-2` text, not-allowed cursor; dashed `ink` border on `paper` in high contrast; dashed with `GrayText` under forced colors. Never color alone: a disabled control is also not focusable or says why beside it.
 - **Forced colors:** check boxes and radio marks draw themselves (`forced-color-adjust: none`) on `Canvas` with a `CanvasText` edge; checked fills with `Highlight` and a `HighlightText` tick.
 
+### Settings view
+A settings page shows what is set as a box per part: a Headline, a state line (done or to do, in words), a details list, and one button to that part's own step page (Set up, Change, or Open the steps). The view has no inputs, and every settings page starts with "Back to Settings" (club-text, bold, 44px). The Settings page lays these boxes in two columns at 760px+. The step pages use the staff pages' form controls, and every answer is a notice (`ActionOutcome`).
+
+### Club bar preview
+On the club step of setup and the Club change page, a 56px sample of the club bar in the chosen color, with the derived club-on text, so the derived-contrast rule can be seen before saving.
+
+### Quiet button
+`.btn-quiet`: no border or fill, club-text and underlined, 44px tall, for an action less important than the Save beside it (Turn off sign-in, Change name).
+
 ### Staff home
 What needs doing today, for the staff member signed in. A "Today" box first: one line for each kind of thing waiting (held addresses to review, changes waiting or stuck on their way to QuickBooks, forms due within a week or signed and not yet finished, shifts in the next week with places to fill), each a to-do state line with a count in words, one line of what it means in `ink-2`, and the link to the page that deals with it. Each line is read only for staff who hold that page's permission. With nothing waiting the box says so in one calm line, a done state ("Nothing needs doing today."). The warnings about the portal's own connections (QuickBooks, outgoing mail, sign-in certificates) follow as titled notices, then the signed-in box with Sign out.
 
@@ -452,7 +462,7 @@ Two-column definition list: Label-style terms in `ink-2`, values in Body row.
 ### Navigation
 - **Phone:** fixed bottom tab bar, 2px `ink` top rule, one 64px tab of equal width for each parent page that exists (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labeled ("2 to sign").
 - **Desktop (760px+):** tabs hide; links move into the club bar in Barlow 600 1.125rem, `club-on`, active marked by a 3px inset underline.
-- **Staff menu (760px+):** a staff member's menu can hold more links than one row has room for (fourteen for an Admin). On staff pages the links wrap onto further rows inside the bar, right-aligned, and the bar grows to hold them; a link's own words never break, and the club's name keeps at most two fifths of the row. With few links the bar is one 56px row, as for parents. The parent bar never wraps: it is always 56px, which the season ruler's grid counts on. Below 760px staff get the Menu button. Grouping the staff menu is still to be designed (`docs/ui-backlog.md`).
+- **Staff menu (grouped).** A staff member's menu is Home, then groups (Families, Season, Money), Settings as one entry, then Admin last; an entry shows only to those who may open its page, and a group only when it has one (`staffMenu()`, `src/app/staff/(app)/staff-menu.ts`). At 760px+ a group is a button drawn like a top-nav link (Barlow 600 1.125rem, club-on, a 12px caret that turns over when open). It opens on click or keyboard only, never on hover, as a disclosure (aria-expanded, aria-controls). Its links drop into a panel under the button, right-aligned to it, on the club fill with a 2px club-on border, links 48px tall, the current one marked by a 4px inset left rule. One group is open at a time. It closes on Escape (focus back to its button), on tabbing out, on choosing a link and on a press outside the menu. The group holding the current page carries the 3px inset underline and the accessible name "<Group>, current section". Below 760px the Menu button opens one panel listing Home, each group's links under its name (Barlow 600 0.9375rem uppercase, a 1px club-on rule above), and Settings; the panel scrolls within the screen. With six entries the staff bar is normally one 56px row; `.bar-rows` still lets it wrap. The parent bar is unchanged and never wraps: it is always 56px, which the season ruler's grid counts on.
 
 ### Focus
 `:focus-visible` everywhere: `club-text` outline, 3px (4px in high contrast), 2px offset; `club-on` inside the club bar. High contrast also thickens link underlines to 2px.
@@ -466,7 +476,7 @@ Under `forced-colors: active` the system palette wins; the build only keeps ever
 - Choice options: ring on `Canvas` with a `CanvasText` border; checked = 3px `Highlight` border and a `Highlight` dot; focus = 3px dashed `CanvasText` outline, 4px offset. All other focus rings use `Highlight`.
 
 ### Not yet designed
-The entrance motion moment, the waiting and closed states, and the monogram fallback for a club without a logo (the build's monogram is a prototype). The settings pages (Club, Sign-in, Mail, QuickBooks, Forms, Parent sign-ins) and setup have their own pass.
+The entrance motion moment, the waiting and closed states, and the monogram fallback for a club without a logo (the build's monogram is a prototype).
 
 ### Copy patterns
 The voice is PRODUCT.md's warm, plain neighbor, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and who can help, and say when it will come back only if the portal knows.
