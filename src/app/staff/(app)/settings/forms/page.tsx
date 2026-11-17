@@ -1,5 +1,5 @@
 import { requireStaffPage } from "@/lib/guards";
-import { formsSummary } from "@/lib/forms/settings";
+import { apiFailing, formsSummary } from "@/lib/forms/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { StateWords } from "@/app/components/state-words";
 import { BackToSettings } from "../back-to-settings";
@@ -17,7 +17,7 @@ export default async function FormsSettingsPage() {
   await requireStaffPage("Settings.Forms.ReadWrite");
   const summary = await formsSummary();
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
-  const failing = Boolean(summary.status.lastApiFailureAt && (!summary.status.lastApiOkAt || summary.status.lastApiFailureAt > summary.status.lastApiOkAt));
+  const failing = apiFailing(summary.status);
   return (
     <main className="wrap single">
       <BackToSettings />

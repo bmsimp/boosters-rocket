@@ -13,8 +13,15 @@ import type { SmtpSecurity, StoredMailConfig } from "./types";
 export const MAIL_KEY = "mail";
 export const MAIL_STATUS_KEY = "mail.status";
 
-export type MailStatus = { verifiedHash: string | null; verifiedAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; lastError: string | null };
-const EMPTY_STATUS: MailStatus = { verifiedHash: null, verifiedAt: null, lastSuccessAt: null, lastFailureAt: null, lastError: null };
+/**
+ * `lastFailed` is whether the send recorded last failed, written in the same statement as its time: two sends in one
+ * millisecond have equal times, so their order can't be read from the times (null in a record from before it was kept).
+ */
+export type MailStatus = { verifiedHash: string | null; verifiedAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; lastError: string | null; lastFailed: boolean | null };
+const EMPTY_STATUS: MailStatus = { verifiedHash: null, verifiedAt: null, lastSuccessAt: null, lastFailureAt: null, lastError: null, lastFailed: null };
+/** Whether the latest send failed: as recorded with it, or, in a record from before that was kept, by the times. */
+export const mailFailing = (s: MailStatus): boolean => typeof s.lastFailed === "boolean" ? s.lastFailed
+  : Boolean(s.lastFailureAt && (!s.lastSuccessAt || s.lastFailureAt > s.lastSuccessAt));
 export type MailDraft =
   | { method: "graph"; mailbox: string }
   | { method: "smtp"; host: string; port: number; security: SmtpSecurity; username: string; from: string; password: string | null };
@@ -134,7 +141,7 @@ export async function mailAttention(): Promise<MailAttention | null> {
   const [c, s] = await Promise.all([getStoredMailConfig(), getMailStatus()]);
   if (!c) return { kind: "not_set_up", lastError: null, since: null };
   if (s.verifiedHash !== mailConfigHash(c)) return { kind: "not_tested", lastError: null, since: null };
-  if (s.lastFailureAt && (!s.lastSuccessAt || s.lastFailureAt > s.lastSuccessAt)) return { kind: "failing", lastError: s.lastError, since: s.lastFailureAt };
+  if (mailFailing(s)) return { kind: "failing", lastError: s.lastError, since: s.lastFailureAt };
   return null;
 }
 

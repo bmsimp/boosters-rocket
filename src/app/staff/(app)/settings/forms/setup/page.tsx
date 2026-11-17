@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
-import { formsSummary } from "@/lib/forms/settings";
+import { apiFailing, formsSummary } from "@/lib/forms/settings";
 import { checkFormsConnectionAction, newWebhookSecretAction, saveFormsSettingsAction } from "../actions";
 import { CheckConnection, ConnectionForm, WebhookSetup } from "../forms-settings";
 import { StateWords } from "@/app/components/state-words";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function FormsSetupPage() {
   await requireStaffPage("Settings.Forms.ReadWrite");
   const summary = await formsSummary();
-  const failing = Boolean(summary.status.lastApiFailureAt && (!summary.status.lastApiOkAt || summary.status.lastApiFailureAt > summary.status.lastApiOkAt));
+  const failing = apiFailing(summary.status);
   const saved = summary.origin !== null && summary.tokenReadable;
   return (
     <main className="wrap single">

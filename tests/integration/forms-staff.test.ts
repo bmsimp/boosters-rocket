@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { asStaff, pageOutcome, renderPage, revalidatedPaths } from "../helpers/signed-in";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -325,11 +325,15 @@ describe("the Health page's line for forms", () => {
 
   it("asks for attention when the last call failed, when a signed form waits too long, and notes what is missing", async () => {
     await connectForms(stub, { webhookSecret: null });
-    await noteApiOk();
-    await noteApiFailure("unauthorized");
+    // Two calls noted in one millisecond have equal times: which came last is what was recorded last, in either order.
+    const atOneInstant = async (calls: () => Promise<void>) => {
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+      try { await calls(); } finally { vi.useRealTimers(); }
+    };
+    await atOneInstant(async () => { await noteApiOk(); await noteApiFailure("unauthorized"); });
     expect(await formsLine()).toMatchObject({ state: "attention", word: "Needs attention", says: expect.stringContaining("The last call to Documenso failed"),
       notes: expect.arrayContaining(["The failure: unauthorized.", expect.stringContaining("No webhook secret is made")]) });
-    await noteApiOk();
+    await atOneInstant(async () => { await noteApiFailure("unauthorized"); await noteApiOk(); });
     expect((await formsLine()).state).toBe("ok");
 
     const fall = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });

@@ -8,9 +8,9 @@ import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { queueCounts } from "@/lib/roster/queue";
-import { mailSummary } from "@/lib/mail/settings";
+import { mailFailing, mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
-import { formsSummary } from "@/lib/forms/settings";
+import { apiFailing as formsApiFailing, formsSummary } from "@/lib/forms/settings";
 import { formsWaiting } from "@/lib/forms/job";
 import { evidenceHealth } from "@/lib/signed-forms/evidence-job";
 import { moneyRunView } from "@/lib/money/sweep";
@@ -144,7 +144,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
 
   const mailTimes = [{ label: "Last sent", at: mail.status.lastSuccessAt }, { label: "Last failure", at: mail.status.lastFailureAt }];
   const mailFix = { href: "/staff/settings/mail", label: "Open mail settings" };
-  const failing = Boolean(mail.status.lastFailureAt && (!mail.status.lastSuccessAt || mail.status.lastFailureAt > mail.status.lastSuccessAt));
+  const failing = mailFailing(mail.status);
   if (!mail.config) {
     lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Not set up", says: "Not set up, so parents can't be sent sign-in codes.", times: [], notes: [], fix: mailFix });
   } else if (!mail.working) {
@@ -173,7 +173,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   if (forms.origin === null && evidence.waiting + evidence.mismatches === 0) {
     lines.push({ key: "forms", title: "Forms (Documenso)", state: "off", word: "Not set up", says: "Not set up. Parents read that forms aren't ready to sign yet; nothing else changes for them.", times: [], notes: [], fix: formsFix });
   } else {
-    const apiFailing = Boolean(forms.status.lastApiFailureAt && (!forms.status.lastApiOkAt || forms.status.lastApiFailureAt > forms.status.lastApiOkAt));
+    const apiFailing = formsApiFailing(forms.status);
     const notes: string[] = [];
     if (waiting.open > 0) notes.push(`${waiting.open === 1 ? "1 form is" : `${waiting.open} forms are`} out for signing and not finished. The worker asks Documenso about each every few minutes.`);
     if (waiting.sealingLate > 0) notes.push(`${waiting.sealingLate === 1 ? "1 form was" : `${waiting.sealingLate} forms were`} signed by everyone more than an hour ago and Documenso still hasn't finished the signed copy. Check Documenso on its server: its signing certificate, and its timestamp service if one is set.`);

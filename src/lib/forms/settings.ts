@@ -23,12 +23,16 @@ const storedSchema = z.object({
 });
 type Stored = z.infer<typeof storedSchema>;
 
-/** When each part last worked, for the Health page. Times are ISO strings; `lastApiError` is a short code, never a body. */
+/**
+ * When each part last worked, for the Health page. Times are ISO strings; `lastApiError` is a short code, never a body.
+ * `lastApiFailed` is whether the call recorded last failed, written in the same statement as its time: two calls in one
+ * millisecond have equal times, so their order can't be read from the times (null in a record from before it was kept).
+ */
 export type FormsStatus = {
-  lastApiOkAt: string | null; lastApiFailureAt: string | null; lastApiError: DocumensoErrorCode | "unexpected" | null;
+  lastApiOkAt: string | null; lastApiFailureAt: string | null; lastApiError: DocumensoErrorCode | "unexpected" | null; lastApiFailed: boolean | null;
   lastWebhookAt: string | null; lastAskedAt: string | null;
 };
-const EMPTY_STATUS: FormsStatus = { lastApiOkAt: null, lastApiFailureAt: null, lastApiError: null, lastWebhookAt: null, lastAskedAt: null };
+const EMPTY_STATUS: FormsStatus = { lastApiOkAt: null, lastApiFailureAt: null, lastApiError: null, lastApiFailed: null, lastWebhookAt: null, lastAskedAt: null };
 
 export type FormsOp = { actor: Actor; ip: string | null; permission?: string };
 type Done<T = object> = ({ ok: true } & T) | { ok: false; errors: string[] };
@@ -62,8 +66,11 @@ async function patchStatus(patch: Partial<FormsStatus>): Promise<void> {
   await db.insert(setting).values({ key: FORMS_STATUS_KEY, value: { ...EMPTY_STATUS, ...patch } })
     .onConflictDoUpdate({ target: setting.key, set: { value: sql`${setting.value} || ${JSON.stringify(patch)}::jsonb`, updatedAt: new Date() } });
 }
-export const noteApiOk = () => patchStatus({ lastApiOkAt: new Date().toISOString() });
-export const noteApiFailure = (code: FormsStatus["lastApiError"]) => patchStatus({ lastApiFailureAt: new Date().toISOString(), lastApiError: code });
+export const noteApiOk = () => patchStatus({ lastApiOkAt: new Date().toISOString(), lastApiFailed: false });
+export const noteApiFailure = (code: FormsStatus["lastApiError"]) => patchStatus({ lastApiFailureAt: new Date().toISOString(), lastApiError: code, lastApiFailed: true });
+/** Whether the latest call to Documenso failed: as recorded with it, or, in a record from before that was kept, by the times. */
+export const apiFailing = (s: FormsStatus): boolean => typeof s.lastApiFailed === "boolean" ? s.lastApiFailed
+  : Boolean(s.lastApiFailureAt && (!s.lastApiOkAt || s.lastApiFailureAt > s.lastApiOkAt));
 export const noteWebhook = () => patchStatus({ lastWebhookAt: new Date().toISOString() });
 export const noteAsked = () => patchStatus({ lastAskedAt: new Date().toISOString() });
 
