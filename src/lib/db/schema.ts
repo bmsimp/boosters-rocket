@@ -317,7 +317,11 @@ export type RosterWrite =
   | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null }
   | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string }
   | { op: "move"; role: "student"; qboId: string; syncToken: string; fromFamilyQboId: string; toFamilyQboId: string }
-  | { op: "deactivate"; role: RosterRole; qboId: string; syncToken: string };
+  /**
+   * `other`: a customer under a family that is neither its student nor its parent (a deeper sub-customer, or one of a
+   * type the shape doesn't name), made inactive only as part of making its family inactive, which is never queued.
+   */
+  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string };
 /**
  * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
  * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company

@@ -72,10 +72,12 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     // The family's figures are behind QuickBooks now, so its next page load reads it.
     const [money] = await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, FAMILY));
     expect(money!.staleAt).not.toBeNull();
-    // It does: the invoice is then among the family's open invoices, with its own Pay button.
+    // It does: the invoice is then among the family's open invoices. With no Pay button, as the sandbox answered on
+    // 2026-11-17: QuickBooks gave the invoice made this way no Pay link (it carries no bill-to email; the stub's
+    // quirks.linkNeedsEmail). What a buy-out invoice should carry is for the owner to decide.
     const after = await loadFamilyMoney(FAMILY);
     expect(after.figures?.current).toBe(true);
-    expect(after.figures?.open.map((i) => [i.qboId, i.totalCents, i.payLink])).toEqual([["5001", 5000, "https://connect.intuit.com/t/scs-v1-stub-5001"]]);
+    expect(after.figures?.open.map((i) => [i.qboId, i.totalCents, i.payLink ?? null])).toEqual([["5001", 5000, null]]);
     // Audited: the choice, with what was asked for, and the invoice made.
     const [chosen] = await audits("volunteer.buyout.chosen");
     expect(chosen!.after).toMatchObject({ customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000 });

@@ -38,7 +38,7 @@ function Found({ r }: { r: CheckResult }) {
 function Results({ run, group, caption }: { run: RunView; group: "reads" | "writes"; caption: string }) {
   const rows = EXPECTATIONS.filter((x) => x.group === group).map((x) => ({ x, r: run.results.find((r) => r.key === x.key) ?? { key: x.key, outcome: "not_run" as const, code: "stopped", learned: {} } }));
   return (
-    <DataTable caption={caption} rowKey={(row) => row.x.key} rows={rows} columns={[
+    <DataTable caption={caption} className="check-results" rowKey={(row) => row.x.key} rows={rows} columns={[
       { key: "request", header: "Request", rowHeader: true, cell: (row) => row.x.title },
       { key: "expects", header: "What the portal expects", cell: (row) => row.x.expects },
       { key: "result", header: "Result", cell: (row) => <StateWords state={STATE[row.r.outcome]} words={OUTCOME_WORDS[row.r.outcome]} /> },
@@ -66,7 +66,7 @@ export default async function CheckRequestsPage() {
       <section className="box" aria-labelledby="check-what-h"><h2 id="check-what-h">What it does</h2>
         {view.environment === "production"
           ? <Notice tone="info" live="none">This is the club&apos;s real books, so the check only reads. The requests that change things are off: they would make test families and an invoice in the real books. To check those, connect an Intuit sandbox company and run it there.</Notice>
-          : <p>It reads the customer types, the customers, the products and services and some invoices. Then, in this Intuit sandbox company only, it makes two test families, a student and a parent, all named &ldquo;Booster Rocket check&rdquo; with the date, and email addresses at example.com, which can receive no mail. It changes only those: their phone, address, email and name, moves the student, makes a $1.00 invoice on the student and voids it. At the end it makes every one of them inactive. QuickBooks deletes no customer, so they stay in the sandbox, inactive.</p>}
+          : <p>It reads the customer types, the customers, the products and services and some invoices. Then, in this Intuit sandbox company only, it makes two test families, a student and a parent, all named &ldquo;Booster Rocket check&rdquo; with the date, and email addresses at example.com, which can receive no mail. It changes only those: their phone, address, email and name, moves the student, makes a $1.00 invoice on the student, and a second one that also carries its own address at example.com to see whether QuickBooks then gives it a Pay link (its email status stays not set, so nothing is emailed), and voids both. At the end it makes every one of them inactive. QuickBooks deletes no customer, so they stay in the sandbox, inactive.</p>}
         <p>It takes a minute or two. Nothing it finds changes how the portal works: where a request answers differently, the result says so, and that is a change for whoever maintains the portal.</p>
       </section>
 

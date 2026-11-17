@@ -12,7 +12,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { afterStudentMoved, applyWritten, REFRESH_ASK_KEY, sendWrite } from "./writes";
+import { afterStudentMoved, applyWritten, owedBy, REFRESH_ASK_KEY, sendWrite } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
@@ -103,6 +103,18 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     if (seen.is === "done") { await foundDone(item, w, seen.qboId); return "done"; }
     if (seen.is === "stuck") return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
   }
+  if (w.op === "deactivate") {
+    // Nobody with a balance is made inactive, here as when staff press it (src/lib/roster/writes.ts): what the customer
+    // owes is read first. One who owes makes the item stuck (`open_balance`), and nothing is sent; one QuickBooks shows
+    // inactive already is done. A read that may go through later waits for the next try, as a send would.
+    const owed = await owedBy(w.qboId, item.realmId, { mayWait: true });
+    if (!owed.ok) {
+      if (classify(owed.code).kind !== "retry") return settle(item, { state: "stuck", code: owed.code, sent: item.sent }, now);
+      return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: owed.code, sent: item.sent }, now);
+    }
+    if (owed.cents > 0) return settle(item, { state: "stuck", code: "open_balance", sent: item.sent }, now);
+    if (!owed.active) { await foundDone(item, w, w.qboId); return "done"; }
+  }
   let answer: Record<string, unknown>;
   // The time of the send itself, not the wake's: the check before a later resend needs a refresh that began after it.
   const triedAt = new Date();
@@ -189,7 +201,7 @@ export type QueueView = {
  */
 export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { showAmounts?: boolean } = {}): string {
   const name = (id: string | null) => (id === null ? "the club" : names.get(id) ?? "a customer no longer on the roster");
-  const who = "role" in w ? { family: "the family", student: "the student", parent: "the parent", member: "the member" }[w.role] : "";
+  const who = "role" in w ? { family: "the family", student: "the student", parent: "the parent", member: "the member", other: "the customer" }[w.role] : "";
   switch (w.op) {
     case "create": return w.familyQboId === null ? `Make ${who} “${w.name}”` : `Add ${who} “${w.name}” to ${name(w.familyQboId)}`;
     case "rename": return `Rename ${who} “${w.was}” to “${w.name}”`;

@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { askRosterWrite, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
+import { askFamilyInactive, askRosterWrite, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
 import { giveUp, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
 import { NAME_MAX } from "@/lib/roster/names";
 
@@ -21,7 +21,9 @@ const version = (v: unknown): v is string => str(v, TOKEN_MAX) && /^\d+$/.test(v
 // A name is checked for its rules in the library; here only that it is text of a size a page could send.
 const name = (v: unknown): v is string => str(v, NAME_MAX * 4);
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId });
+// A balance that stops a change is said with its amount only to staff who may see money (Finance.Balance.Read).
+const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId,
+  showAmounts: can(ctx.effective, "Finance.Balance.Read") });
 // The pages are Roster.Read's: someone who can change the roster but not see it is refused like anyone without the permission.
 const canRead = (ctx: StaffCtx) => can(ctx.effective, "Roster.Read");
 
@@ -62,6 +64,24 @@ export const moveAction = staffAction(P, async (ctx, rosterTag: string, qboId: s
 export const deactivateAction = staffAction(P, async (ctx, rosterTag: string, qboId: string, syncToken: string): Promise<WriteResult> => {
   if (!tag(rosterTag) || !id(qboId) || !version(syncToken)) return NOT_FROM_PAGE;
   return run(ctx, { op: "deactivate", qboId, syncToken }, rosterTag);
+});
+
+/** The most customers one family's list may hold: far more than any family has, and a bound on what a caller can send. */
+const COVER_MAX = 200;
+/** The list the page showed: pairs of a QuickBooks id and the version shown, the family's among them. */
+const shownList = (v: unknown): v is [string, string][] => Array.isArray(v) && v.length > 0 && v.length <= COVER_MAX
+  && v.every((pair) => Array.isArray(pair) && pair.length === 2 && id(pair[0]) && version(pair[1]));
+
+/**
+ * A family made inactive with everyone under it, as staff confirmed the list on its page (src/lib/roster/writes.ts,
+ * askFamilyInactive). The pages are made again whenever anything may have changed, a stop part way included, so the
+ * list shown next is who is still active.
+ */
+export const familyInactiveAction = staffAction(P, async (ctx, rosterTag: string, familyQboId: string, shown: [string, string][]): Promise<WriteResult> => {
+  if (!canRead(ctx) || !tag(rosterTag) || !id(familyQboId) || !shownList(shown)) return NOT_FROM_PAGE;
+  const { result, changed } = await askFamilyInactive(familyQboId, shown, rosterTag, op(ctx));
+  if (changed) revalidatePath("/", "layout");
+  return result;
 });
 
 /* ---- The write queue, from the Reconciliation page ---- */
