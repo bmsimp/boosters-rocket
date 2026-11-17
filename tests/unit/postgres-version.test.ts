@@ -53,7 +53,7 @@ describe("Postgres's version", () => {
 
   it("never comes as an ordinary dependency update", () => {
     const blocks = read(".github/dependabot.yml").split(/\n {2}- package-ecosystem: /).slice(1);
-    for (const ecosystem of ["docker", "docker-compose"]) {
+    for (const ecosystem of ["docker", "docker-compose", "github-actions"]) {
       const block = blocks.find((b) => b.startsWith(`${ecosystem}\n`))!;
       expect(block, ecosystem).toMatch(/ignore:\n\s+- dependency-name: postgres\n\s+update-types: \["version-update:semver-major"\]/);
       expect(block, ecosystem).toContain("Moving to a new major version of Postgres");
