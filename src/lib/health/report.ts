@@ -99,7 +99,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const use = `${QUICKBOOKS_USE.reads} ${QUICKBOOKS_USE.writes}`;
   const qboFix = { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" };
   // Staff changes QuickBooks hasn't taken yet (src/lib/roster/queue.ts): a stuck one waits for a person.
-  const queueNote = writes.waiting + writes.stuck === 0 ? [] : [`Staff changes to the roster: ${writes.waiting} waiting to reach QuickBooks, ${writes.stuck} stuck${writes.stuck ? " and waiting for someone to try them again or give them up on the Reconciliation page" : ""}.`];
+  const queueNote = writes.waiting + writes.stuck === 0 ? [] : [`Changes waiting for QuickBooks (staff roster changes and volunteer buy-out invoices): ${writes.waiting} waiting to reach QuickBooks, ${writes.stuck} stuck${writes.stuck ? " and waiting for someone to try them again or give them up on the Reconciliation page" : ""}.`];
   const queueFix = { href: "/staff/reconciliation", label: "Open Reconciliation" };
   if (!conn.configured) {
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "off", word: "Not set up", says: "Not set up. Families, students and what they owe come from QuickBooks, so parents see none of it yet.", times: [], notes: [], fix: qboFix });
