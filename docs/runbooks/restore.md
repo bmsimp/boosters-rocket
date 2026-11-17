@@ -56,4 +56,6 @@ all of it has loaded.
    token or password that "can't be opened" or "can't be read".
 3. Open `<DOCUMENSO_URL>/api/health`: `"database"` and `"certificate"` both say `ok`. A certificate problem means the
    file or its passphrase isn't the one in `.env`.
-4. Take a backup now: `docker compose run --rm backup --now`.
+4. Take a backup now: `docker compose run --rm backup --now`. The restored database holds the backup time recorded
+   before it was dumped, so until this backup is made, starting a newer version is stopped by the migrate step's
+   backup check ([updates](updates.md#when-the-start-stops-for-a-backup)).

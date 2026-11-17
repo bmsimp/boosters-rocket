@@ -2,7 +2,8 @@
 // src/lib/roster/writes.ts). A per-student buy-out was the old family's choice, billed to the student's own customer:
 // the new family must never be billed for it. A move made in QuickBooks and read by a refresh is not seen here: the
 // daily check (./daily-check.ts) finds the invoice's customer no longer the family's and puts its void on the queue
-// the same way; a refresh itself voids nothing.
+// the same way; a refresh itself voids nothing (it runs a QuickBooks move's forms and volunteer follow-ups only,
+// src/lib/roster/refresh.ts).
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
