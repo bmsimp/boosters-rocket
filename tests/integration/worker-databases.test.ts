@@ -13,8 +13,10 @@ const W2 = workerDatabase(2, RUN.url), W3 = workerDatabase(3, RUN.url);
 const SCRATCH_OF_W2 = scratchDatabase("migrate_script", W2.url);
 /** Someone's own database that happens to have a name the pretend run's scratch databases have. */
 const PRIVATE = scratchDatabase("restore", RUN.url);
+/** A worker database of a run on that private database: the other run's, in use. */
+const PRIVATE_W2 = workerDatabase(2, PRIVATE.url);
 const ANOTHER_RUNS_MARK = workerMark(RUN.url.replace(RUN.name, "someone_elses_test"));
-const MINE = [W2.name, W3.name, SCRATCH_OF_W2.name, PRIVATE.name];
+const MINE = [W2.name, W3.name, SCRATCH_OF_W2.name, PRIVATE_W2.name, PRIVATE.name];
 
 const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
 const dropMine = async () => { for (const name of MINE) await admin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`); };
@@ -135,13 +137,17 @@ describe("a run's worker databases", { timeout: 300_000 }, () => {
 
   // The roadmap's known gap from step 4: the teardown dropped databases by their scratch names, whoever made them.
   it("when the run ends, drops its worker databases and the scratch databases its tests made, and leaves one of a scratch name it didn't make", async () => {
+    // Another run on that private database has a worker database of its own: that run's, in use, and never dropped here.
+    await admin.unsafe(`CREATE DATABASE "${PRIVATE_W2.name}"`);
+    await admin.unsafe(`COMMENT ON DATABASE "${PRIVATE_W2.name}" IS '${workerMark(PRIVATE.url).replaceAll("'", "''")}'`);
     const dropped = await dropWorkerDatabases(RUN.url);
-    expect(dropped).toEqual({ dropped: [W2.name, SCRATCH_OF_W2.name].sort(), leftAlone: [PRIVATE.name] });
+    expect(dropped).toEqual({ dropped: [W2.name, SCRATCH_OF_W2.name].sort(), leftAlone: [PRIVATE.name, PRIVATE_W2.name].sort() });
+    expect(await exists(PRIVATE_W2.name)).toBe(true);
     expect(await exists(W2.name)).toBe(false);
     expect(await exists(SCRATCH_OF_W2.name)).toBe(false);
     expect(await exists(W3.name)).toBe(true); // another run's, by its comment, though it has this run's worker's name
     expect(await hasTable(PRIVATE.url, "someone_elses")).toBe(true); // a private database with a scratch purpose's name
     expect(await exists(databaseName(process.env.DATABASE_URL!))).toBe(true);
-    expect(await dropWorkerDatabases(RUN.url)).toEqual({ dropped: [], leftAlone: [PRIVATE.name] });
+    expect(await dropWorkerDatabases(RUN.url)).toEqual({ dropped: [], leftAlone: [PRIVATE.name, PRIVATE_W2.name].sort() });
   });
 });

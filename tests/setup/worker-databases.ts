@@ -132,8 +132,9 @@ export async function prepareWorkerDatabase(runUrl: string, poolId: number): Pro
  * Drops what this run made: the worker databases that carry its comment, the scratch databases its tests made (named
  * after the run's database and each worker's, tests/setup/database-url.ts, and carrying the run's scratch comment), and
  * the worker databases a test made for a scratch database of its own (tests/integration/worker-databases.test.ts).
- * A database with a scratch database's name that doesn't carry this run's comment is left alone: someone else's, or
- * one scripts/restore.sh made under that name. Returns the names it dropped and the names it left.
+ * A database with a scratch database's name that doesn't carry this run's comment is left alone, and so are the worker
+ * databases marked as its run's: it may be another run's database, in use. Returns the names it dropped and the names
+ * it left.
  */
 export async function dropWorkerDatabases(runUrl: string): Promise<{ dropped: string[]; leftAlone: string[] }> {
   return withAdmin(runUrl, async (admin) => {
@@ -145,8 +146,14 @@ export async function dropWorkerDatabases(runUrl: string): Promise<{ dropped: st
     const present = await admin<{ name: string; comment: string | null }[]>`select datname as name, shobj_description(oid, 'pg_database') as comment
       from pg_database where datname in ${admin(scratch)} order by datname`;
     const mine = present.filter((d) => d.comment === scratchMark(runUrl)).map((d) => d.name);
-    const leftAlone = present.filter((d) => d.comment !== scratchMark(runUrl)).map((d) => d.name);
-    const dropped = [...new Set([...await marked(scratch.map((name) => workerMark(urlOf(name)))), ...mine, ...workers])].sort();
+    const theirs = present.filter((d) => d.comment !== scratchMark(runUrl)).map((d) => d.name);
+    // The worker databases of a run on a scratch-named database (the pretend run of worker-databases.test.ts) go only
+    // when that database is this run's or doesn't exist: one that exists and isn't this run's may be another run's
+    // database in use right now, and its workers are that run's.
+    const runsOnScratch = scratch.filter((name) => !theirs.includes(name));
+    const theirWorkers = await marked(theirs.map((name) => workerMark(urlOf(name))));
+    const leftAlone = [...theirs, ...theirWorkers].sort();
+    const dropped = [...new Set([...await marked(runsOnScratch.map((name) => workerMark(urlOf(name)))), ...mine, ...workers])].sort();
     // All at once: each drop waits for a checkpoint of the whole server, and drops that wait together share one.
     await Promise.all(dropped.map((name) => admin.unsafe(`DROP DATABASE IF EXISTS ${ident(name)} WITH (FORCE)`)));
     return { dropped, leftAlone };
