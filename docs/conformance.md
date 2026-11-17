@@ -1,6 +1,7 @@
 # Does the portal do what the specs say?
 
-**Checked:** 2026-11-16, on the branch `slice/conform` (step 7 of `docs/superpowers/plans/2026-11-07-v1-roadmap.md`).
+**Checked:** 2026-11-16, on the branch `slice/conform` (step 7 of `docs/superpowers/plans/2026-11-07-v1-roadmap.md`),
+then brought up to date when step 7's four slices were merged on `parent-portal` the same day.
 **Against:** `docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md` (the v1 spec), as the later specs in that
 folder override it (`2026-11-10-parent-email-code-sign-in-design.md`, `2026-11-10-quickbooks-connection-and-roster-design.md`,
 `2026-11-11-parents-from-quickbooks-design.md`, `2026-11-15-documenso-verification.md`, and for setup
@@ -10,7 +11,9 @@ One row per requirement. **Built** means code and a test that would fail without
 no test, or a test that covers only part. **Missing** means no code. **Changed** and **Dropped** mean a later spec or the
 owner deliberately changed or removed it; the row names the source. Paths are from the repository root; a test is named
 by its file and the start of its title. "Owner check" means only a real company, phone or host can settle it (the
-roadmap's checks table).
+roadmap's checks table). For every request the portal sends QuickBooks, that owner check is now one page: Settings,
+QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`, `src/lib/quickbooks/sandbox-check/`,
+`tests/integration/quickbooks-check.test.ts`), run by an Admin against an Intuit sandbox company.
 
 ## Counts
 
@@ -19,16 +22,16 @@ roadmap's checks table).
 | §2 In v1 | 10 | 0 | 0 | 0 |
 | §6 Roster management | 15 | 0 | 0 | 6 |
 | §8 Money | 24 | 0 | 0 | 0 |
-| §9 Forms | 22 | 1 | 0 | 2 |
+| §9 Forms | 23 | 0 | 0 | 2 |
 | §10 Seasons | 16 | 2 | 0 | 0 |
 | §11 Volunteering | 26 | 0 | 0 | 0 |
 | §12 Privacy invariants | 9 | 0 | 0 | 0 |
 | §13 Audit log | 9 | 2 | 0 | 0 |
 | §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| **All** | **145** | **8** | **0** | **10** |
+| **All** | **146** | **7** | **0** | **10** |
 
-Nothing the specs ask for is missing outright. The eight partly built rows, and what each lacks, are listed at the foot
+Nothing the specs ask for is missing outright. The seven partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
 are checked one by one after that.
 
@@ -178,7 +181,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 9.4.3 | The consent record and the SHA-256 | | Built | as 9.4.2 |
 | 9.4.4 | Audit entries for which signed-in guardian opened and completed it | `form.sign.open` and `form.signer.signed` | Built | `forms-signing.test.ts` "audits each time a guardian is given their signing frame, and each signature as the portal first reads it" |
 | 9.4.5 | Evidence is the club's record: never deleted, kept across a change of company | AGENTS.md (Forms) | Built | `tests/integration/company-change-step5.test.ts`; `signed-forms-staff.test.ts` "keeps every byte and hash of the earlier evidence" |
-| 9.4.6 | Clubs should have a lawyer review their form text; the docs say so | | Partly built | The staff page where a template is attached says so (this step, see Fixes; `forms-staff.test.ts` "shows the form part only on a form requirement"). The runbook (`docs/runbooks/documenso.md`) does not yet: wording under the report's seams |
+| 9.4.6 | Clubs should have a lawyer review their form text; the docs say so | | Built | The staff page where a template is attached says so (this step, see Fixes; `forms-staff.test.ts` "shows the form part only on a form requirement"), and so do `docs/runbooks/documenso.md` (making templates, item 4) and the owner's runbook (`docs/runbooks/before-the-first-family.md`, part 4, "The lawyer's look") |
 
 ## §10 Season steps and requirements
 
@@ -299,7 +302,6 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 
 | Row | What is missing | Rough size | It would touch |
 |---|---|---|---|
-| 9.4.6 | A sentence in `docs/runbooks/documenso.md` that the club's lawyer reads the form text and the consent | Minutes | The runbook (another slice) |
 | 10.1.9 | Reminders before a payment's or a checklist item's due date | A day | A claim table or `volunteer_reminder`'s pattern, an email, the worker, a schedule like forms' |
 | 10.1.10 | Coverage by grade or section | Days, and an owner decision first: QuickBooks holds no grade | A data source for grade, `requirement_cover`, the coverage rules and pages |
 | 13.1 | A general test that every write has its audit row | Half a day, and it would be a heuristic (a scan of `src/lib` for writes beside `writeAudit`) | `tests/unit/` |
@@ -345,7 +347,7 @@ Each entry of the roadmap's Known gaps section as it stood on `parent-portal` on
 | Step 3 | Coverage is everyone or a chosen list; no due-date reminders; no deleting a season; no reordering requirements | Partly true | Reordering: `a82ee6b`. Due-date reminders exist for forms and volunteering since step 5, not for payment or checklist items. No season delete; coverage waits on the owner |
 | Step 3 | Better Auth's verification rows are never cleaned up | No longer true | `d0702d5`; `cleanup.test.ts` "Better Auth's verification rows, both doors" |
 | Step 3 | Opening the audit log is not audited | Still true | Owner decision |
-| Step 3 | The backup test needs `pg_dump` 16 on the CI runner | Still true | `.github/workflows/ci.yml` installs no `postgresql-client` |
+| Step 3 | The backup test needs `pg_dump` 16 on the CI runner | No longer true, not yet seen on GitHub | `0610b80`: CI runs the tools inside the Postgres service's container (`BR_TEST_DB_CONTAINER`) |
 | Step 3 | A header the proxy doesn't send puts the staff door in one bucket | Still true | By design; the Health page says so |
 | Step 3 | An untouched address part that is too long is sent again | Still true | `saveMyContact()` sends the whole address |
 | Step 4 | The Documenso webhook has only met the stub | Still true | Owner check |
@@ -372,6 +374,6 @@ Each entry of the roadmap's Known gaps section as it stood on `parent-portal` on
 | Step 6 | Copying a season drops the buy-out price; the move's follow-up row doesn't count buy-outs | No longer true | `aee9768`, `fea2769` |
 | Step 6 | The write queue clears the sent flag on a retry that sent nothing | No longer true | `7e3ba2b`; `roster-queue.test.ts` "stays one that may have been made when a resend after it sends nothing" |
 | Step 6 | The portal reaches Documenso at its public address | Still true | `src/lib/documenso/client.ts` |
-| Step 6 | The image's time zone is `America/Chicago` | Still true | `Dockerfile` line 40 |
+| Step 6 | The image's time zone is `America/Chicago` | No longer true | `aae176f`: the `Dockerfile` sets `TZ=UTC`; `deploy/` sets the club's zone |
 | Step 6 | The parent pages' keyboard journeys are not a committed test | Still true | `docs/accessibility-checks.md` |
 | Step 6 | The Parent sign-ins clean-up preview and several staff pages are still lists | Still true | `docs/ui-backlog.md` |

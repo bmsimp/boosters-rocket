@@ -8,7 +8,8 @@ QuickBooks ids are not digits, `isQboId`). Forms were walked twice: from the see
 suite, and once for real against the local Documenso by hand (below).
 
 Each entry says where it was, at which width, what a person would have met, and what became of it: **fixed** (with
-the commit on `slice/walk`), or **open** (with how big a fix it is). "Both" means 390 and 1440.
+the commit on `slice/walk`, merged on `parent-portal` the same day), or **open** (with how big a fix it is; every
+open one is also in `docs/ui-backlog.md`). "Both" means 390 and 1440.
 
 ## How the walk is kept
 
