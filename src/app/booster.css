@@ -488,6 +488,14 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .hash { overflow-wrap: anywhere; word-break: break-all; }
 /* ---- End of Forms ---- */
 
+/* ---- Accessibility fixes for parent pages: the parent pages, the pages before sign-in and the parent frame, where no
+   block above fits (tests/e2e/parent-a11y.spec.ts; docs/accessibility-checks.md). Keep new ones for them inside this block. ---- */
+
+/* A link that stands alone on its line ("Back to sign in") is a tap target of its own: 44px tall, however short its
+   words. A link inside a sentence keeps the sentence's line, as WCAG 2.5.8 allows. */
+.link-line { display: inline-flex; align-items: center; min-height: 44px; }
+/* ---- End of Accessibility fixes for parent pages ---- */
+
 /* ===== Installed app: safe areas and the install hint. Keep this block last. =====
    The viewport is "cover" (src/app/layout.tsx), so the page reaches under a notch, rounded corners and the home
    indicator. These rules keep content clear of them. env() is 0 where there is nothing to clear, so an ordinary

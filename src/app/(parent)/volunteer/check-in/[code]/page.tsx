@@ -63,7 +63,7 @@ export default async function CheckInPage({ params }: { params: Promise<{ code: 
             {view.state === "open" && view.people.every((p) => p.checkedIn) && <p className="volunteer-done">Everyone here is checked in. Thank you for helping!</p>}
           </>
         )}
-        <p className="help"><Link href="/volunteer">Back to Volunteer</Link></p>
+        <p className="help"><Link className="link-line" href="/volunteer">Back to Volunteer</Link></p>
       </section>
     </main>
   );

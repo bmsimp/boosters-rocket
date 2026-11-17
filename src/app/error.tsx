@@ -8,7 +8,7 @@ export default function ErrorPage({ reset }: { error: Error & { digest?: string 
       <h1 className="page-title">Something went wrong on our side</h1>
       <p className="lede">This page didn&apos;t load just now. Nothing you did caused it. Please try again in a moment.</p>
       <button type="button" className="btn" onClick={reset}>Try again</button>
-      <p className="lede"><Link href="/">Back to the home page</Link></p>
+      <p className="lede"><Link className="link-line" href="/">Back to the home page</Link></p>
     </main>
   );
 }

@@ -5,7 +5,7 @@ export default function Refused() {
     <main className="wrap signin">
       <h1 className="page-title">We can&apos;t sign you in with that account</h1>
       <p className="lede">If you think you should have access, contact your booster club and ask them to check the email they have for you.</p>
-      <p className="lede"><a href="/sign-in">Back to sign in</a></p>
+      <p className="lede"><a className="link-line" href="/sign-in">Back to sign in</a></p>
     </main>
   );
 }

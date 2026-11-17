@@ -55,7 +55,7 @@ const DECORATION = ".sets li::after";
 const summary = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
 
 /** A page to open: where, signed in as the seeded parent or not, and anything the device holds before it loads. */
-type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string> };
+type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number };
 
 /** The parent pages, from disk. A dynamic one is opened with its `own` params: the seeded family's thing. */
 function parentTargets(): Target[] {
@@ -68,7 +68,7 @@ function parentTargets(): Target[] {
 /**
  * The pages a parent sees before the parent pages: the sign-in page (both its steps: the code step is the one the
  * device keeps while a code is live, src/app/sign-in/code-step.ts, so no code is sent), the family chooser (Zelda has
- * two families), the refusal and the page the service worker shows offline.
+ * two families), the refusal, the page the service worker shows offline, and the page for an address with no page.
  */
 const BEFORE_SIGN_IN: Target[] = [
   { label: "/sign-in", address: "/sign-in", signedIn: false },
@@ -77,6 +77,9 @@ const BEFORE_SIGN_IN: Target[] = [
   { label: "/choose-family", address: "/choose-family", signedIn: true },
   { label: "/refused", address: "/refused", signedIn: false },
   { label: "/offline.html", address: "/offline.html", signedIn: false },
+  // An address with no page: a signed-in parent keeps the frame around it (src/app/not-found.tsx), anyone else gets it plain.
+  { label: "not found, signed in", address: "/no-such-page", signedIn: true, status: 404 },
+  { label: "not found, signed out", address: "/no-such-page", signedIn: false, status: 404 },
 ];
 
 const TARGETS = [...parentTargets(), ...BEFORE_SIGN_IN];
@@ -105,7 +108,7 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
   const page = await context.newPage();
   const res = await page.goto(target.address);
   expect(res?.status(), `${target.label} answered ${res?.status()} at ${target.address}: it can't be checked with the seeded data. `
-    + `A dynamic parent page needs its ids in PARAMS (tests/e2e/parent-params.ts).`).toBe(200);
+    + `A dynamic parent page needs its ids in PARAMS (tests/e2e/parent-params.ts).`).toBe(target.status ?? 200);
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   return { page, close: () => context.close() };
 }
