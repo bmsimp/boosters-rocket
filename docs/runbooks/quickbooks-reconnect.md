@@ -32,8 +32,9 @@ the QuickBooks page before you disconnect. It:
 - ends every parent's access: each parent's link to a family is closed and parents are signed out; parent sign-ins and
   welcome emails are switched off until an Admin switches them on again;
 - deletes each family's stored invoices and money figures, the item list, the seasons' ticks, waivers and chosen lists,
-  every volunteer sign-up, credit and reminder, every form being signed with its consents and reminders, parents'
-  pending email changes, and staff changes waiting to reach QuickBooks;
+  every volunteer sign-up, credit, reminder and buy-out, every form being signed with its consents and reminders,
+  parents' pending email changes, and staff changes and buy-out invoices waiting to reach QuickBooks (a buy-out invoice
+  already made stays in the old company's books, like any invoice);
 - keeps every signed form's evidence (the club's record), marked as the earlier company's and shown to no parent: staff
   find it on the Forms page under "Earlier company";
 - keeps a list of the old company's families, and who could sign in to them, for the match review under **Parent
@@ -42,9 +43,10 @@ the QuickBooks page before you disconnect. It:
 Each of those deletions stays in the audit log. Steps:
 
 1. Take a backup first: on the server, in `~/booster-rocket/deploy`, `docker compose run --rm backup --now`.
-2. In the portal: **Settings**, **QuickBooks**, **Disconnect QuickBooks**, and read the warning.
+2. In the portal: **Settings**, **QuickBooks**, open **Disconnect**, read the warning, then **Disconnect QuickBooks**.
 3. **Set up**: the app's keys for that company (Production keys for real books), **Sign in to Intuit**, choose the new
    company, approve.
 4. Choose the membership shape, **Preview**, check the counts and names, **Save this shape**.
-5. Check **Roster**, then switch parent sign-ins back on under **Parent sign-ins** and go through the match review.
+5. Check **Roster**, then switch parent sign-ins back on under **Settings**, **Parent sign-ins** and go through the
+   match review (**Review matches** there).
 6. Set up the season's requirements again where they were cleared, and tell families what to expect.

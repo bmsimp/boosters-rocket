@@ -89,10 +89,11 @@ to an account by its email address, so only use a directory where nobody can cho
 
 1. In Documenso, signed in as the forms account, open the team's settings, **API Tokens**, and create a token that
    doesn't expire. Copy it.
-2. In the portal, as an Admin: **Settings**, **Forms**. Enter Documenso's address exactly as `DOCUMENSO_URL` in
-   `deploy/.env` (same name, `https`, no port unless it has one) and paste the token. Save.
-3. **Check the connection.** It asks Documenso whether it is healthy, then makes one call with the token.
-4. **Make the webhook secret** and copy it (it is shown once), and copy the webhook address the page shows.
+2. In the portal, as an Admin: **Settings**, **Forms (Documenso)**, **Set up**. In step 1, enter Documenso's address
+   exactly as `DOCUMENSO_URL` in `deploy/.env` (same name, `https`, no port unless it has one) and paste the token.
+   **Save**.
+3. Step 2, **Check the connection**. It asks Documenso whether it is healthy, then makes one call with the token.
+4. Step 3, **Make the secret**, and copy it (it is shown once), and copy the **Webhook URL** the page shows.
 5. In Documenso, the team's settings, **Webhooks**, add a webhook: paste the address and the secret, and tick every
    document event. Save.
 6. If the portal's address resolves to a private address from the server (a portal reachable only on the club's own
@@ -106,9 +107,12 @@ to an account by its email address, so only use a directory where nobody can cho
 
 1. In Documenso, make the form as a template, with one signer role per guardian and read-only text fields labelled
    "Student name" (or "Family name"), "Guardian 1 name" and "Guardian 2 name".
-2. In the portal, under **Seasons**, add a requirement of the kind **Form** and attach the template on its page. The
-   portal checks the template and says what to change if it can't be used.
+2. In the portal, under **Season**, **Seasons**, add a requirement of the kind **Form** and attach the template on its
+   page. The portal checks the template and says what to change if it can't be used.
 3. Sign it once yourself as a test parent, and open the signed PDF.
+4. Before forms go live, have the club's lawyer read the words parents agree to before they sign (shown on a form's
+   page above **I agree to sign electronically**) and one sealed form with its certificate page and audit log
+   ([before the first family, part 4](before-the-first-family.md#4-documenso-and-entra-a-full-installation)).
 
 ## Trusted time on signatures (a decision for the club)
 

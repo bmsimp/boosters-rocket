@@ -312,7 +312,7 @@ The frontmatter values are FZN's purple default. The gold demo (`#gold`) hand-se
 
 **Character:** Atkinson is the plain, legible voice for everything a parent reads, chosen for older eyes and older phones. Barlow Condensed is the drill chart's lettering: set numbers, box headings, the club name, labels and navigation.
 
-Both faces must be **self-hosted in the Next.js app** (for example via `next/font/local`) with the weights in use: Atkinson 400, 400 italic, 700; Barlow Condensed 500, 600, 700. The reference page loads Google Fonts only as a prototype.
+Both faces are **self-hosted by the Next.js app**: `next/font/google` in `src/app/layout.tsx` downloads them when the portal is built and serves them from the portal itself, so no page asks Google for a font. The weights in use: Atkinson 400 and 700; Barlow Condensed 500, 600, 700. The reference page loads Google Fonts only as a prototype.
 
 ### Hierarchy
 Sizes are rem against a 16px root (18px Large, 20px Larger).
@@ -360,7 +360,7 @@ Square corners everywhere (0px): boxes, buttons, badges, set cells, choice optio
 ## Components
 
 ### Club bar
-The club's own header. 56px, `club` fill, `club-on` text: monogram (34px circle, inverted colors, Barlow 700 0.875rem), club name, and on desktop the top nav and the account control; desktop nav links are 44px tall. The club's logo replaces the monogram when supplied.
+The club's own header. 56px, `club` fill, `club-on` text: monogram (34px circle, inverted colors, Barlow 700 0.875rem, the club's short name), club name, and on desktop the top nav and the account control; desktop nav links are 44px tall. A club's logo is meant to replace the monogram; a club can't supply one yet (Not yet designed, below).
 - **Account control:** a link (not a button) to Account / Display: 44px circle, 2px `club-on` outline, initials in Barlow 700. Its accessible name says where it goes ("AR: Your account and display settings, Ana Ramirez": it starts with the initials it shows, WCAG 2.5.3; the staff bar's reads "AR: Staff home, signed in as Ana Ramirez"); `aria-current="page"` on the Display page.
 - **Focus on the club fill:** inside the bar the focus ring switches to `club-on`, because `club-text` can vanish against the fill.
 
@@ -372,7 +372,7 @@ The club's season steps drawn as yard-line cells. Not a control.
 - **Labels that don't fit:** each cell is a size container; under 76px wide (narrow phone, larger text, zoom) its label hides and the number stays. Labels clamp to two lines otherwise.
 - **Students on set:** one 20px dot per student under the current set, initial in Barlow 700 0.75rem. Finished: `done` fill, paper initial. Still to do: paper fill, `due` 2px inset ring and initial. On the club-filled current set every dot gets a 2px `club-on` outline and the dots spread to an 8px gap, so each keeps an edge whatever the club color. Dots are decoration; the same facts are stated in words in the students box.
 - **Many sets:** with more than 6 sets on a phone (<760px) every label hides and cells show numbers only. At 760px+ labels return.
-- **Reuse:** staff screens use the same ruler as the column header of the forms matrix, one column per set.
+- **Reuse:** the forms matrix is meant to take the same ruler as its column header, one column per set. Not built yet: the matrix has one column per form, under no set (`docs/ui-backlog.md`).
 
 ### Boxes
 The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px padding, no shadow. Headline, then an optional `ink-2` body-small subtitle. Rows inside are divided by 1px `hair` rules.
@@ -458,7 +458,20 @@ Account / Display, reached from the account control. One box of four choice grou
 One vocabulary across the product: **to do, waiting, done, closed**. Each is an icon plus words in Atkinson 700 0.9375rem. Built so far: to do = `due` alert-circle plus "2 forms to sign"; done = `done` tick plus "All forms signed"; and a third, waived = `ink-2` struck circle plus "Waived", for a requirement the club has let a family or student off (the reason is never shown to the family). Waiting and closed must follow the same icon-plus-words pattern; their icon and color are not yet drawn. Counts beside a person ("1 of 3 signed") are Barlow 600 1rem, `ink-2`, right-aligned.
 
 ### Details list
-Two-column definition list: Label-style terms in `ink-2`, values in Body row.
+Two-column definition list (`.details`): Label-style terms in `ink-2`, values in Body row.
+
+### Small primitives
+The pieces every page is put together from, beside the components above. Each lives in `src/app/booster.css` or `src/app/components/`; use them rather than a new rule.
+- **Page head:** the page's `h1` (`.page-title`, Barlow 700 2rem) and an optional one-line intro under it (`.lede`, `ink-2`, at most 60ch).
+- **Hint** (`.hint`): an `ink-2` Body small line that explains the control or text above it. Never a state: a state is a Notice or a State line.
+- **Link line** (`.link-line`): a link alone on its line, 44px tall, so it is a tap target like a button.
+- **Box foot** (`.box-foot`): the buttons or links that close a box, below its content. **Row actions** (`.row-actions`): two or more buttons side by side, wrapping on a phone.
+- **One button** (`.one-button`): a button that runs an action, with its answer under it; while it runs it is `aria-disabled` on a parent page.
+- **Steps:** a numbered list of things to do outside the portal (`.steps-list`, at most 68ch), and the step names of a set-up page in a row with the current one marked (`.setup-progress`, `aria-current="step"`).
+- **Table heading** (`h3.table-head`): the heading over one of several tables in one box.
+- **Copy field** (`CopyField`, `.copy-row`): a read-only value with its Copy button, for what staff paste elsewhere (a command, an address).
+- **Times and dates:** an instant through `LocalTime` (in the viewer's zone, with UTC on hover) and a calendar date through `CalendarDate`; an amount through `formatMoney()`. Never formatted by hand.
+- **Visually hidden** (`.visually-hidden`): words a screen reader reads that the page doesn't draw, such as which invoice a Pay button pays.
 
 ### Navigation
 - **Phone:** fixed bottom tab bar, 2px `ink` top rule, one 64px tab of equal width for each parent page that exists (icon 24px over Barlow label). Active tab: `club-text` with a 3px inset top rule. Count badge: square, `due` fill, paper figure, labeled ("2 to sign").
@@ -477,7 +490,7 @@ Under `forced-colors: active` the system palette wins; the build only keeps ever
 - Choice options: ring on `Canvas` with a `CanvasText` border; checked = 3px `Highlight` border and a `Highlight` dot; focus = 3px dashed `CanvasText` outline, 4px offset. All other focus rings use `Highlight`.
 
 ### Not yet designed
-The entrance motion moment, the waiting and closed states, and the monogram fallback for a club without a logo (the build's monogram is a prototype).
+The entrance motion moment, the waiting and closed states, a club's own logo (there is no way to supply one yet: every club shows its monogram), and the monogram fallback for a club without a logo (the build's monogram is a prototype).
 
 ### Copy patterns
 The voice is PRODUCT.md's warm, plain neighbor, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and who can help, and say when it will come back only if the portal knows.
@@ -503,7 +516,7 @@ The portal can be put on a phone's home screen and then opens without browser ch
 - **Do** give each invoice its own Pay; fill only the soonest-due one.
 - **Do** pair every status color with a word, and an icon where there is room.
 - **Do** keep tap targets at 44px or more (48px for the primary button, 56px for choice options, 64px for tabs) and the focus ring `club-text` 3px (4px in high contrast) with a 2px offset on paper (`club-on` inside the club bar).
-- **Do** reuse the season set ruler as the header of the staff forms matrix.
+- **Do** reuse the season set ruler as the header of the staff forms matrix (still to build: `docs/ui-backlog.md`).
 - **Do** build a list of like things as a `DataTable`, a status as a `Notice`, and a form from the Form controls; never a bare paragraph for a state.
 - **Do** build every new color from the mode tokens so all four modes and forced colors work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.
 - **Do** set type in rem and let layouts reflow at 125% text.

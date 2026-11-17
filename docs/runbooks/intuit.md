@@ -1,8 +1,10 @@
 # Intuit: registering the portal and its production assessment
 
 The portal reads the club's families and invoices from QuickBooks Online, and writes back only what someone asks it to
-(a parent's own phone, address and sign-in email; the roster changes staff make). To do that it is registered with
-Intuit as an app of the club's own, and it connects to the club's company with that app's keys.
+(a parent's own phone, address and sign-in email; the roster changes staff make; and the invoice for a volunteer
+buy-out, made when a guardian chooses to pay instead of volunteering and voided if they switch back before paying). To
+do that it is registered with Intuit as an app of the club's own, and it connects to the club's company with that
+app's keys.
 
 Intuit gives an app two sets of keys. **Development** keys connect only to sandbox companies (test companies that hold
 no real books). **Production** keys connect to the club's real books, and Intuit gives them only after the app passes
@@ -21,7 +23,8 @@ https://developer.intuit.com.
    needs nothing else.
 4. Open the app's **Keys and credentials** (or **Development settings**). Note the **Client ID** and **Client secret**
    of the Development keys. Treat the secret like a password: paste it only into the portal.
-5. Under **Redirect URIs** for Development, add exactly:
+5. The redirect address is on another page: the app's **Settings**, **Redirect URIs**. Under **Development**, add
+   exactly:
    ```
    <APP_URL>/api/quickbooks/callback
    ```
@@ -34,13 +37,18 @@ https://developer.intuit.com.
 2. In the sandbox, set the company up like the club's books: the customer types the club uses (for example Family,
    Student and Parent), with students and parents as sub-customers of a family, and a few invoices.
 3. In the portal, as an Admin: **Settings**, **QuickBooks**, **Set up**.
-4. Enter the Development **Client ID** and **Client secret**, choose **Sandbox**, and select **Next: sign in to Intuit**.
-5. Sign in to Intuit, choose the sandbox company and **Connect**. You come back to the portal.
+4. Enter the Development **Client ID** and **Client secret**, choose **Sandbox**, **Save**, then **Next: sign in to
+   Intuit** in the note that appears.
+5. **Sign in to Intuit**, choose the sandbox company and **Connect**. You come back to the portal.
 6. Choose the membership shape (**Layered** when families have students and parents under them; **Flat** when each
    member is a customer of their own) and the customer types, select **Preview**, check the counts and names, then
    **Save this shape**.
 7. Open **Roster** in the staff menu: the families are listed. **Health** says QuickBooks is "Connected" and names
    the company as a sandbox.
+8. Check the portal's requests: **Settings**, **QuickBooks**, **Check the portal's requests**, **Run the check**. In a
+   sandbox company it tries every request the portal makes, on a few test records of its own, and says for each
+   whether QuickBooks answered as the portal expects. [Before the first family](before-the-first-family.md#2-check-the-portals-requests-in-the-intuit-sandbox)
+   says what to do with what it finds.
 
 ## 3. The production assessment
 
@@ -54,8 +62,10 @@ https://developer.intuit.com.
      show each family its own, and changes in QuickBooks only what a parent or staff member asks it to.
 3. Answer the assessment questionnaire. It asks how the app uses QuickBooks data and keeps it safe. True answers for
    the portal: it runs on the club's own server; it stores the connection's tokens encrypted; families see only their
-   own records; it reads customers, invoices and items, and writes customers' contact details and the roster changes
-   staff make; it keeps an audit log of every change.
+   own records; it reads customers, invoices and items; it writes a parent's own phone, address and email when that
+   parent changes them, the roster changes staff make, and one kind of invoice, a volunteer buy-out, which it creates
+   when a guardian chooses it and voids if they switch back before paying; it never deletes anything or touches a
+   payment; it keeps an audit log of every change.
 4. Submit it, and answer Intuit's follow-up questions by email.
 5. When Intuit approves the app, the **Production** **Client ID** and **Client secret** appear.
 
@@ -64,7 +74,7 @@ https://developer.intuit.com.
 Connecting a different company deletes what the portal holds from the sandbox: read
 [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company) first.
 
-1. In the portal: **Settings**, **QuickBooks**, **Disconnect QuickBooks**.
+1. In the portal: **Settings**, **QuickBooks**, open **Disconnect**, then **Disconnect QuickBooks**.
 2. **Set up** again: the Production keys, **Production**, sign in to Intuit with an account that can open the club's
    company, choose it and **Connect**.
 3. Choose the membership shape again, **Preview**, check, **Save this shape**.

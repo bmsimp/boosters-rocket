@@ -1,6 +1,6 @@
 # What to do when the Health page warns
 
-**Health** in the staff menu (Admins only) has one line for each part of the portal, with a word for its state and
+**Health** in the staff menu (under **Admin**, for Admins only) has one line for each part of the portal, with a word for its state and
 when it last worked. "Needs attention" or a red word means someone should look; "Off" or "Not set up" may be a choice.
 Each entry below starts with the line's title and the words it shows.
 
@@ -51,6 +51,11 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     Rocket buy-out" on that family or student. The **Volunteer buy-outs** list on the same page shows each buy-out
     that needs a look (an invoice QuickBooks no longer shows, one on another customer, a student who moved, one
     QuickBooks refused); the treasurer sorts those out in QuickBooks.
+  - That some of the portal's requests "didn't answer as the portal expects", the last time an Admin ran **Check the
+    portal's requests** (the line's link; Settings, QuickBooks). QuickBooks answered one of the portal's requests in a
+    way the portal wasn't written for. Open the page: each such row says what it found and what it means for the club.
+    That is a change to the portal for whoever maintains it; send them a picture of the page. The line says when the
+    requests were last checked, and that they haven't been until an Admin runs the check.
 
 ## Every family's invoices
 
@@ -61,25 +66,26 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 
 ## Outgoing mail
 
-- **"Not set up"** or **"Not tested."** Parents can't get sign-in codes. **Settings**, **Mail**: save the settings and
-  **Send test email** ([outgoing mail](mail.md)).
+- **"Not set up"** or **"Not tested."** Parents can't get sign-in codes. **Settings**, **Outgoing mail**: save the
+  settings and **Send test email** ([outgoing mail](mail.md)).
 - **"Tested, but the last email failed."** The note has the mail service's reason. The usual ones: a changed or expired
-  password (enter it again under **Mail**); for Microsoft 365, the mailbox renamed, or the app's permission removed
+  password (enter it again under **Outgoing mail**); for Microsoft 365, the mailbox renamed, or the app's permission removed
   (run the mail script again, [outgoing mail](mail.md#the-portal-microsoft-365)). Send a test email after the fix.
 
 ## Forms (Documenso)
 
 - **"Not set up."** Parents read that forms aren't ready; nothing else is affected. [Documenso](documenso.md).
-- **"Not checked."** Saved, but no call has worked yet: **Settings**, **Forms**, **Check the connection**.
+- **"Not checked."** Saved, but no call has worked yet: **Settings**, **Forms (Documenso)**, **Change**, **Check the
+  connection**.
 - **"The last call to Documenso failed."** Parents can't open a form to sign. The note gives the reason in words:
   - "couldn't be reached" or "took too long": `docker compose ps` (is `documenso` `healthy`?), then
     `<DOCUMENSO_URL>/api/health` from a browser. If both look fine, the machine can't reach its own address: run the
     two checks in [the first installation, step 5, item 5](first-install.md#5-the-first-start);
   - "refused the API token": the token was deleted, or the forms account was removed or disabled in Documenso. Make a
-    new token as the forms account and paste it under **Forms**.
+    new token as the forms account and paste it under **Settings**, **Forms (Documenso)**.
 - **"The saved API token can't be opened with this server's encryption key."** `SETTINGS_ENCRYPTION_KEY` in
   `deploy/.env` isn't the one the token was saved with (often after a restore). Put back the right key, or enter the
-  token again under **Forms**.
+  token again under **Settings**, **Forms (Documenso)**.
 - **"... signed forms are waiting too long to be finished"**, with the note "signed by everyone more than an hour ago
   and Documenso still hasn't finished the signed copy". Documenso seals a form after the last signature, in the
   background. Check `<DOCUMENSO_URL>/api/health`: a certificate problem shows there (the file or passphrase in `.env`
@@ -93,7 +99,7 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   wrote `forms.evidence.mismatch` in the audit log. Tell the board: a signed document should never change. Keep the
   backups from before that date.
 - **"No webhook secret is made"**: Documenso can't tell the portal at once when a form is signed; the portal still asks
-  every few minutes. Make one under **Forms** and paste it into Documenso's team webhooks
+  every few minutes. Make one under **Settings**, **Forms (Documenso)** and paste it into Documenso's team webhooks
   ([Documenso, part 3](documenso.md#3-connect-documenso-to-the-portal)).
 - **"N form requirements of the current season have no template attached"**: attach one on each requirement's page.
 

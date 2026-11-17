@@ -2,7 +2,8 @@
 
 **Status:** approved by the owner on 2026-11-11; implemented by plan `2026-11-11-parents-from-quickbooks.md`;
 merged and deployed to the linuxdev proof of concept on 2026-11-12 (commit `82e4639`). Parent sign-ins are still
-switched off there, and the runbook's checks 18-25 have not been run.
+switched off there, and the runbook's checks 18-25 have not been run (docs/runbooks/before-the-first-family.md, part 1).
+**Changed since:** step 5 of the roadmap changes its "What staff cannot do here": staff now create, rename, move and make inactive in QuickBooks from the roster pages.
 **Builds on:** parent email-code sign-in (`2026-11-10-parent-email-code-sign-in-design.md`) and the QuickBooks
 connection and roster (`2026-11-10-quickbooks-connection-and-roster-design.md`).
 **Roadmap:** the first half of Plan 3. The second half (anything that writes to QuickBooks) is a separate

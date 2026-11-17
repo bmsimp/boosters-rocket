@@ -5,8 +5,9 @@ Anything in `monospace` is typed exactly; words in `<angle brackets>` are yours 
 matches what is written here, trust the screen.
 
 The other runbooks: [Intuit](intuit.md), [outgoing mail](mail.md), [Documenso](documenso.md), [backups](backups.md),
-[updates](updates.md), [restore](restore.md), [reconnecting QuickBooks](quickbooks-reconnect.md) and
-[Health page warnings](health-warnings.md).
+[updates](updates.md), [restore](restore.md), [reconnecting QuickBooks](quickbooks-reconnect.md),
+[Health page warnings](health-warnings.md), and [before the first family](before-the-first-family.md), the checks only
+a person can make before families use the portal.
 
 ## What you need before you start
 
@@ -135,14 +136,17 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    opens only once a test email has gone out.
 6. **Step 4, first Admin.** Enter the name and the email of the person who will be Admin, **Save name and email**,
    and sign in as them with Microsoft or Google. Setup closes and the staff home opens: you are signed in as the Admin.
-7. Open **Health** in the staff menu. Every line should be there; [Health page warnings](health-warnings.md) says what
-   each one means. QuickBooks, Forms and parent sign-ins say "Not set up" or "Off" until the next steps.
+7. Open **Health** in the staff menu (under **Admin**). Every line should be there;
+   [Health page warnings](health-warnings.md) says what each one means. QuickBooks, Forms and parent sign-ins say "Not
+   set up" or "Off" until the next steps.
 
 ## 7. The rest of the set-up
 
 1. QuickBooks: [Intuit](intuit.md).
 2. Forms: [Documenso, parts 2 to 4](documenso.md#2-the-first-documenso-account).
 3. Parent sign-ins: under **Settings**, **Parent sign-ins**, once QuickBooks has read the roster.
+4. Before any family signs in: [before the first family](before-the-first-family.md), the checks only a person can
+   make, from real phones to a pilot with a few families.
 
 ## 8. The first backup
 

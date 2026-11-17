@@ -1,7 +1,7 @@
 # Booster Rocket proof of concept on linuxdev — Design
 
 **Date:** 2026-11-08
-**Status:** Draft for review
+**Status:** Built by plan `2026-11-08-poc-linuxdev.md` and running since 2026-11-09. Its runbook (docs/runbooks/poc-linuxdev.md) records checks 1 to 17 passed and 18 to 25 not yet run; the next deploy there is part 1 of docs/runbooks/before-the-first-family.md. A club's real installation is `deploy/` (docs/runbooks/first-install.md), not this one.
 **Builds on:** `docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md` (v1 spec) and Plan 1
 (foundation), merged to `main`.
 

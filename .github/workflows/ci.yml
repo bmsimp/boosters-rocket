@@ -32,7 +32,12 @@ jobs:
         # Test files run in parallel workers. Worker 1 uses booster_test; each other worker makes, migrates and at the end
         # drops a database of its own on the same server (booster_w2_test, ...), which the service's superuser may do.
         # The runner has 4 cores beside Postgres: 2 workers. BR_TEST_WORKERS=1 runs the files one at a time, as before.
-        env: { BR_TEST_WORKERS: "2" }
+        # The backup test (tests/integration/backup-restore.test.ts) dumps and restores with Postgres's own tools, which
+        # must be no older than the server and not so new that their dumps use settings it lacks. It runs them inside
+        # the service's container, as the scripts do in deploy/, so they are always the server's own version.
+        env:
+          BR_TEST_WORKERS: "2"
+          BR_TEST_DB_CONTAINER: ${{ job.services.postgres.id }}
         run: pnpm test
       - name: Build with fake secrets
         env:

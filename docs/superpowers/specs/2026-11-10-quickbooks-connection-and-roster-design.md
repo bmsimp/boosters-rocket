@@ -1,6 +1,6 @@
 # QuickBooks connection and roster — design
 
-**Status:** approved by the owner on 2026-11-11; implemented by plan 2026-11-11-quickbooks-connection-and-roster.md.
+**Status:** approved by the owner on 2026-11-11; implemented by plan 2026-11-11-quickbooks-connection-and-roster.md, and proved against an Intuit sandbox company on the proof of concept on 2026-11-11 and 12 (its runbook, checks 10 to 17). The portal now also writes to QuickBooks, as the roadmap's steps 3, 5 and 6 describe.
 **Revises:** the v1 design (`2026-11-06-booster-rocket-v1-design.md`), sections 3, 4, 7, 8.1, 8.4 and 14, as
 listed in "Changes to the v1 design" below. It delivers the first half of the roadmap's Plan 2. The second
 half (what a parent sees: balances, open invoices, Pay links) is a separate piece.

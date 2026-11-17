@@ -8,6 +8,13 @@ were added after that and were first walked through on 2026-11-10, on a site tha
 (section 11). If a screen no longer matches,
 trust the screen and note it in the Results table.
 
+**Since 2026-11-16 the staff menu is grouped, and every setting is under Settings.** Where this runbook says **Mail**,
+**Sign-in**, **QuickBooks** or **Parent sign-ins** "in the staff menu", open **Settings** in the staff menu, then that
+part's box (**Outgoing mail**, **Staff sign-in**, **QuickBooks**, **Parent sign-ins**) and its **Set up** or **Change**.
+**Audit** is under **Admin**. The setup page now asks for the club first, so its steps are one later than written below:
+outgoing mail is Step 3 and the first Admin Step 4. The checks still to make before families use the portal, this
+host's among them, are in [before the first family](before-the-first-family.md).
+
 ## 1. What this is
 
 This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
@@ -261,9 +268,10 @@ Sources: Role Based Access Control for Applications in Exchange Online
 ## 5. QuickBooks (an Intuit sandbox company)
 
 The portal reads the club's families from QuickBooks. For this proof of concept it connects to an Intuit sandbox
-company, a test company that holds no real books. The portal writes one thing to QuickBooks: a parent's own phone and
-mailing address, when that parent edits them in the portal (since 2026-11-15; the checks below were made before that,
-when it wrote nothing). A worker container keeps the connection alive. These steps were walked through on 2026-11-11 (section 11). Do them after the first deploy (section 8) and after
+company, a test company that holds no real books. The checks below were made on 2026-11-11, when the portal wrote
+nothing to QuickBooks. It now writes what someone asks it to: a parent's own phone, address and sign-in email, the
+roster changes staff make, and a volunteer buy-out's invoice (`QUICKBOOKS_USE` in
+`src/lib/quickbooks/what-it-does.ts` says it in the words the QuickBooks page shows). A worker container keeps the connection alive. These steps were walked through on 2026-11-11 (section 11). Do them after the first deploy (section 8) and after
 section 3, because they use the staff app. Deploy this version (the one with the worker) first, before step 1.
 
 1. In the Intuit developer app, under **Settings** > **Redirect URIs** > **Development**, add the redirect address
@@ -288,7 +296,10 @@ section 3, because they use the staff app. Deploy this version (the one with the
 sandbox to the band's real books) clears the roster and the membership shape, which must be chosen again in step 3.
 It also closes every parent sign-in link and signs parents out, switches parent sign-ins and welcome emails off,
 and keeps a list of the old company's families, and who could sign in to them, for the match review under
-**Parent sign-ins**. That list is deleted 90 days after the switch, or sooner by an Admin.
+**Parent sign-ins**. That list is deleted 90 days after the switch, or sooner by an Admin. Everything else the portal
+holds about the old company's customers goes too (money figures, seasons' ticks, volunteering, forms being signed,
+changes waiting), and signed forms' evidence is kept: [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)
+has the whole list.
 
 The worker is verified to keep running with no input attached and to stop cleanly on `docker stop` (exit code 0,
 `worker stopped` in its log). That was checked on linuxdev on 2026-11-11 with the script alone in a `node:26-slim`
@@ -418,7 +429,8 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    cd ~/booster-rocket
    scripts/poc/deploy.sh
    ```
-   It refuses if the checkout has local changes, pulls `main`, builds the image, runs the database
+   It refuses if the checkout has local changes, pulls `main`, builds the image, backs up the database into
+   `~/booster-rocket-backups` (or `BR_BACKUP_DIR`; `scripts/backup.sh`, keeping the newest 14), runs the database
    migrations, recreates the app and waits up to 120 seconds for it to become healthy, then starts the worker. The first build
    takes several minutes. A worker that won't start doesn't fail the deploy: it prints "The worker didn't start. The
    site is up; check: docker logs booster-rocket-worker".
@@ -434,12 +446,13 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
 
    | Code | Meaning | What to do |
    |---|---|---|
-   | 2 | Refused: local changes, `.env.poc` missing or not mode 600, or another deploy is running | Read the message; fix; run again |
+   | 2 | Refused: local changes, `.env.poc` missing, not mode 600 or without an `APP_URL` line, or another deploy is running | Read the message; fix; run again |
    | 3 | Migrations failed; running app untouched | Read the migrate output above the message; check `DB_PASSWORD` (end of section 2) |
    | 4 | App did not become healthy in time | `docker logs booster-rocket-app`; then `scripts/poc/deploy.sh --rollback` if needed |
    | 5 | Nothing to roll back to | None (nothing was changed) |
    | 6 | `git pull` failed | Check network and SSH key; nothing was changed |
    | 7 | Build failed; running app untouched | Read the build output |
+   | 8 | The backup before the migrations failed; nothing migrated, running app untouched | Check the backup folder can be written by the deploying user (`BR_BACKUP_DIR`), and that the database container runs |
 4. **Roll back** to the previous image (database changes are *not* undone):
    ```bash
    scripts/poc/deploy.sh --rollback
