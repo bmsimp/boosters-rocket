@@ -4,8 +4,9 @@ import QRCode from "qrcode";
 /**
  * A QR code for `text`, drawn on the server as SVG: one path of squares, from the package's matrix (QRCode.create).
  * Nothing is sent to the browser but the drawing: no script, no image file, no HTML string. The text is the portal's
- * own address and a check-in code, never anything a family typed. Dark modules are `currentColor` on the sheet's light
- * background (.checkin-qr in booster.css), with the four-module quiet zone scanners need.
+ * own address and a check-in code, never anything a family typed. Dark modules are black on white whatever the theme,
+ * since a forced-colors theme changes `currentColor` but not a fill (a white code on white in a dark contrast theme),
+ * with the four-module quiet zone scanners need.
  */
 export function QrCode({ text, label }: { text: string; label: string }) {
   const { modules } = QRCode.create(text, { errorCorrectionLevel: "M" });
@@ -17,7 +18,7 @@ export function QrCode({ text, label }: { text: string; label: string }) {
   return (
     <svg className="checkin-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label={label} shapeRendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
       <rect width={size} height={size} fill="white" />
-      <path d={squares.join("")} fill="currentColor" />
+      <path d={squares.join("")} fill="black" />
     </svg>
   );
 }

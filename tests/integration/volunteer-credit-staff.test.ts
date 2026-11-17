@@ -135,7 +135,9 @@ describe("a shift's check-in sheet", () => {
     expect(textOf(html)).toContain("Marching band car wash");
     expect(textOf(html)).toContain("9:00 am to noon");
     expect(html).toMatch(/<svg class="checkin-qr"[^>]*viewBox="0 0 \d+ \d+"[^>]*>/);
-    expect(html).toMatch(/<path d="(M\d+ \d+h1v1h-1z)+" fill="currentColor"/);
+    // Black on white in every theme: a forced-colors theme changes currentColor (white in a dark one) but not a fill.
+    expect(html).toMatch(/<rect [^>]*fill="white"/);
+    expect(html).toMatch(/<path d="(M\d+ \d+h1v1h-1z)+" fill="black"/);
     // Nothing but the drawing: no script, no image file, no HTML string built from text.
     const source = readFileSync(path.resolve(__dirname, "../../src/app/staff/(app)/volunteer/qr-code.tsx"), "utf8");
     expect(source).not.toMatch(/dangerouslySetInnerHTML|<script|<img/);
