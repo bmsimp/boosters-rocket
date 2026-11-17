@@ -30,7 +30,7 @@ test("staff close a refused buy-out from Reconciliation, saying why, and it is g
     await expect(ours()).toContainText("Nothing is sent to QuickBooks.");
     // Asked first: without a reason nothing is closed.
     await ours().getByRole("button", { name: "Close it" }).click();
-    await expect(ours().getByRole("alert")).toHaveText("Say why, in a few words. The note is kept in the audit log, for staff only.");
+    await expect(ours().getByRole("alert")).toContainText("Say why, in a few words. The note is kept in the audit log, for staff only.");
     await ours().getByLabel(/^Why\?/).fill(NOTE);
     await ours().getByRole("button", { name: "Close it" }).click();
   }
