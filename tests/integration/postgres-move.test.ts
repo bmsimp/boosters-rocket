@@ -53,8 +53,10 @@ function setup(kind: "dev" | "deploy", project: string) {
     state() { return this.docker(["inspect", "--format", "{{.State.Status}} {{.State.ExitCode}}", this.db]).stdout.trim(); },
     /** A refused start: the container stops, or (with a restart policy, as deploy/compose.yml has) waits to try again. */
     async refused() {
-      await until("the database container to stop", () => /^(exited|restarting) /.test(this.state()));
-      return this.state().replace(/^restarting /, "exited ");
+      // The state that was seen: a container that restarts may be running again by the time it is read twice.
+      let seen = "";
+      await until("the database container to stop", () => /^(exited|restarting) /.test(seen = this.state()));
+      return seen.replace(/^restarting /, "exited ");
     },
     guardState() { return this.compose("new", ["run", "--rm", "--no-deps", "-T", "db", "state"]).stdout.trim(); },
     /** Every file in a volume, by name and content: whether anything at all changed in it. */

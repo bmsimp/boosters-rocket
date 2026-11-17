@@ -536,7 +536,7 @@ move, from another window while a move runs. Do these in order, on linuxdev, as 
 
 Going back to Postgres 16, while `booster-rocket-pgdata` is still there. Anything done in the portal since the move
 is not in it: it stays in `booster-rocket-postgres` and in the Postgres 18 backups in `~/booster-rocket-backups`,
-which Postgres 16 can't load.
+which Postgres 16 can't load (the previous version's `scripts/restore.sh` calls such a file "damaged"; it isn't).
 
 1. `docker compose -f docker-compose.poc.yml --env-file .env.poc stop`
 2. Always, even if no move was cut off (it stops whatever a move left behind and changes nothing else; it says

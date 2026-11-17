@@ -177,7 +177,9 @@ in Postgres ([first install](first-install.md)), the same password must be in `d
 - A backup made by Postgres 18 (every one from the move on) can't be loaded into Postgres 16. `scripts/restore.sh`
   says so: `... was made by a newer version of Postgres than this server's (16...), so it can't be loaded here. The
   file itself is not damaged`. The file is fine, and Postgres 18 loads it. To go back to 16, use the old volume,
-  below, not a backup.
+  below, not a backup. After going back, the previous version's `scripts/restore.sh` is the one on disk, and it says
+  such a file `isn't a backup made by scripts/backup.sh, or it is damaged`: for a backup made after the move, that
+  means only that Postgres 18 made it.
 
 ### Going back to Postgres 16
 
