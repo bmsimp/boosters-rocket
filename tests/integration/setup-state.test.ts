@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, setting } from "@/lib/db/schema";
-import { getSetupState, updateSetupState, saveAdminEmail, finishSetup, setupStatusCached, clearSetupStatusCache, SETUP_CODE_KEY } from "@/lib/setup/state";
+import { getSetupState, updateSetupState, saveFirstAdmin, finishSetup, setupStatusCached, clearSetupStatusCache, SETUP_CODE_KEY } from "@/lib/setup/state";
 import { issueSetupCode, verifySetupCode, resetSetupCodeLimiter, readStoredCode, MAX_FAILED_TOTAL } from "@/lib/setup/code";
 import { resetDb, seedStaff } from "../helpers/db";
 
@@ -11,28 +11,33 @@ const actions = async () => (await db.select().from(auditLog)).map((a) => a.acti
 describe("setup state", () => {
   beforeEach(async () => { await resetDb(); resetSetupCodeLimiter(); clearSetupStatusCache(); });
 
-  it("starts open at the staff step", async () => {
-    expect(await getSetupState()).toEqual({ status: "open", step: "staff", adminEmail: null, finishedAt: null });
+  it("starts open at the club step", async () => {
+    expect(await getSetupState()).toEqual({ status: "open", step: "club", adminEmail: null, adminName: null, finishedAt: null });
   });
 
-  it("reads an old or unknown step as the staff step", async () => {
+  it("reads an old or unknown step as the first step, and a state saved before the name was asked as having none", async () => {
     await db.insert(setting).values({ key: "setup.state", value: { status: "open", step: "parent", adminEmail: null, finishedAt: null } })
       .onConflictDoUpdate({ target: setting.key, set: { value: { status: "open", step: "parent", adminEmail: null, finishedAt: null } } });
-    expect((await getSetupState()).step).toBe("staff");
+    expect(await getSetupState()).toEqual({ status: "open", step: "club", adminEmail: null, adminName: null, finishedAt: null });
   });
 
-  it("has the mail step between staff sign-in and the first Admin", async () => {
+  it("has the club first, then the mail step between staff sign-in and the first Admin", async () => {
     const { SETUP_STEPS } = await import("@/lib/setup/state");
-    expect(SETUP_STEPS).toEqual(["staff", "mail", "admin"]);
+    expect(SETUP_STEPS).toEqual(["club", "staff", "mail", "admin"]);
     await updateSetupState({ step: "mail" });
     expect((await getSetupState()).step).toBe("mail");
   });
 
-  it("saves the Admin email lower-cased and audits it", async () => {
-    expect(await saveAdminEmail("  First.Admin@Club.ORG ", null)).toEqual({ ok: true });
-    expect((await getSetupState()).adminEmail).toBe("first.admin@club.org");
+  it("saves the Admin's name trimmed and email lower-cased, and audits them", async () => {
+    expect(await saveFirstAdmin("  Ana Rivera ", "  First.Admin@Club.ORG ", null)).toEqual({ ok: true });
+    expect(await getSetupState()).toMatchObject({ adminEmail: "first.admin@club.org", adminName: "Ana Rivera", step: "admin" });
     expect(await actions()).toEqual(["setup.admin_email.save"]);
-    expect(await saveAdminEmail("not an email", null)).toEqual({ ok: false, error: "Enter a valid email address." });
+    const [row] = await db.select().from(auditLog);
+    expect(row).toMatchObject({ before: { adminName: null, adminEmail: null }, after: { adminName: "Ana Rivera", adminEmail: "first.admin@club.org" } });
+    expect(await saveFirstAdmin("Ana", "not an email", null)).toEqual({ ok: false, error: "Enter a valid email address." });
+    expect(await saveFirstAdmin("  ", "a@club.org", null)).toEqual({ ok: false, error: "Enter the Admin's name." });
+    expect(await saveFirstAdmin("a".repeat(101), "a@club.org", null)).toEqual({ ok: false, error: "A name can be 100 characters at most." });
+    expect(await actions()).toEqual(["setup.admin_email.save"]);
   });
 
   it("finishes once, deletes the code and audits", async () => {

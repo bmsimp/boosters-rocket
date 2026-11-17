@@ -26,7 +26,8 @@ const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").r
 export async function saveRole(input: { id?: string; name: string; include: string[]; exclude: string[] }, actor: Actor, ip: string | null):
   Promise<{ ok: true; id: string } | { ok: false; errors: string[] }> {
   const name = input.name.trim();
-  const errors = [...(name ? [] : ["A role needs a name."]), ...validateRules({ include: input.include, exclude: input.exclude })];
+  const errors = [...(name ? [] : ["A role needs a name."]), ...(name.length > 60 ? ["A role's name can be 60 characters at most."] : []),
+    ...validateRules({ include: input.include, exclude: input.exclude })];
   if (input.id) {
     const [existing] = await db.select().from(role).where(eq(role.id, input.id));
     if (!existing) errors.push("That role no longer exists.");
@@ -56,9 +57,13 @@ export async function deleteRole(id: string, actor: Actor, ip: string | null) {
   const [r] = await db.select().from(role).where(eq(role.id, id));
   if (!r) return { ok: false, error: "That role no longer exists." };
   if (r.builtin) return { ok: false, error: "The Admin role can't be deleted." };
+  // The audit row keeps what the role was and who held it, since the rows that said so go with it.
+  const before = (await listRoles()).find((x) => x.id === id);
+  const holders = (await db.select({ id: roleAssignment.staffUserId }).from(roleAssignment).where(eq(roleAssignment.roleId, id))).map((h) => h.id);
   await db.transaction(async (tx) => {
     await tx.delete(role).where(eq(role.id, id));
-    await writeAudit({ actor, action: "role.delete", permission: PERM, targetType: "role", targetId: id, before: { name: r.name }, ip }, tx);
+    await writeAudit({ actor, action: "role.delete", permission: PERM, targetType: "role", targetId: id,
+      before: { name: r.name, include: before?.include ?? [], exclude: before?.exclude ?? [], members: holders.length, heldBy: holders }, ip }, tx);
   });
   return { ok: true };
 }
@@ -132,7 +137,7 @@ export async function listStaff() {
 }
 
 const inviteInput = z.object({
-  name: z.string().trim().min(1, "Enter their name."),
+  name: z.string().trim().min(1, "Enter their name.").max(100, "A name can be 100 characters at most."),
   email: z.string().trim().toLowerCase().email("That email doesn't look right."),
 });
 

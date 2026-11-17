@@ -3,22 +3,26 @@ import { db, type Tx } from "@/lib/db/client";
 import { setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/email";
+import { parseStaffName } from "@/lib/staff/names";
 
-export const SETUP_STEPS = ["staff", "mail", "admin"] as const;
+/** The club's name and color first (only on a new installation: src/lib/setup/club-step.ts), then sign-in, mail, the first Admin. */
+export const SETUP_STEPS = ["club", "staff", "mail", "admin"] as const;
 /** Where to send someone who tries to reach the First Admin step before mail has been tested. */
 export const MAIL_FIRST_URL = "/setup?step=mail&error=mail_first";
 export type SetupStep = (typeof SETUP_STEPS)[number];
 export const isSetupStep = (s: unknown): s is SetupStep => (SETUP_STEPS as readonly unknown[]).includes(s);
-export type SetupState = { status: "open" | "finished"; step: SetupStep; adminEmail: string | null; finishedAt: string | null };
+/** `adminName` is the first Admin's name, asked with their email, so their staff record never carries the email as its name. */
+export type SetupState = { status: "open" | "finished"; step: SetupStep; adminEmail: string | null; adminName: string | null; finishedAt: string | null };
 export const SETUP_STATE_KEY = "setup.state";
 export const SETUP_CODE_KEY = "setup.code";
-const DEFAULT_STATE: SetupState = { status: "open", step: "staff", adminEmail: null, finishedAt: null };
+const DEFAULT_STATE: SetupState = { status: "open", step: "club", adminEmail: null, adminName: null, finishedAt: null };
 
 export async function getSetupState(tx?: Tx): Promise<SetupState> {
   const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, SETUP_STATE_KEY));
   const merged = { ...DEFAULT_STATE, ...((row?.value as Partial<SetupState> | undefined) ?? {}) };
-  // A step this version doesn't have (for example the removed "parent" step) reads as the first step.
-  return { ...merged, step: isSetupStep(merged.step) ? merged.step : "staff" };
+  // A step this version doesn't have (for example the removed "parent" step) reads as the first step. The setup page
+  // moves on from the club step by itself where it isn't asked (an existing installation).
+  return { ...merged, adminName: typeof merged.adminName === "string" ? merged.adminName : null, step: isSetupStep(merged.step) ? merged.step : "club" };
 }
 
 export async function updateSetupState(patch: Partial<SetupState>, tx?: Tx): Promise<SetupState> {
@@ -31,14 +35,17 @@ export async function updateSetupState(patch: Partial<SetupState>, tx?: Tx): Pro
 
 export { normalizeEmail };
 
-export async function saveAdminEmail(raw: string, ip: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
-  const email = normalizeEmail(raw);
+/** The first Admin's name and email, saved together. The name follows the staff name rule (src/lib/staff/names.ts). */
+export async function saveFirstAdmin(rawName: string, rawEmail: string, ip: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
+  const name = parseStaffName(rawName);
+  if (!name.ok) return { ok: false, error: name.errors[0]! === "Enter a name." ? "Enter the Admin's name." : name.errors[0]! };
+  const email = normalizeEmail(rawEmail);
   if (!email) return { ok: false, error: "Enter a valid email address." };
   await db.transaction(async (tx) => {
     const before = await getSetupState(tx);
-    await updateSetupState({ adminEmail: email, step: "admin" }, tx);
+    await updateSetupState({ adminEmail: email, adminName: name.name, step: "admin" }, tx);
     await writeAudit({ actor: { door: "system", id: null, label: "setup" }, action: "setup.admin_email.save", targetType: "setting",
-      targetId: SETUP_STATE_KEY, before: { adminEmail: before.adminEmail }, after: { adminEmail: email }, ip }, tx);
+      targetId: SETUP_STATE_KEY, before: { adminName: before.adminName, adminEmail: before.adminEmail }, after: { adminName: name.name, adminEmail: email }, ip }, tx);
   });
   return { ok: true };
 }

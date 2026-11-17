@@ -7,6 +7,7 @@ import { AccessDenied } from "@/lib/guards";
 import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import FormsSettingsPage from "@/app/staff/(app)/settings/forms/page";
+import FormsSetupPage from "@/app/staff/(app)/settings/forms/setup/page";
 import HealthPage from "@/app/staff/(app)/health/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
 import SeasonSetupPage from "@/app/staff/(app)/seasons/[id]/page";
@@ -53,21 +54,23 @@ describe("forms settings", () => {
     expect(await pageOutcome(FormsSettingsPage)).toEqual({ redirect: "/staff/sign-in" });
     asStaff(await withRole("everything@club.org", ["*", "Settings.*", "Settings.Forms.*", "Settings.Forms.ReadWrite"]));
     expect(await pageOutcome(FormsSettingsPage)).toEqual({ redirect: "/refused" });
+    expect(await pageOutcome(FormsSetupPage)).toEqual({ redirect: "/refused" });
     await expect(saveFormsSettingsAction("https://sign.club.example", "api_x")).rejects.toBeInstanceOf(AccessDenied);
     await expect(checkFormsConnectionAction()).rejects.toBeInstanceOf(AccessDenied);
     await expect(newWebhookSecretAction()).rejects.toBeInstanceOf(AccessDenied);
-    expect((await audits("access.refused")).map((a) => a.permission)).toEqual(Array(4).fill("Settings.Forms.ReadWrite"));
+    expect((await audits("access.refused")).map((a) => a.permission)).toEqual(Array(5).fill("Settings.Forms.ReadWrite"));
     expect(await storedForms()).toBeUndefined();
   });
 
   it("says forms aren't set up, gives the webhook address, and tells an Admin what to do in Documenso", async () => {
     asStaff(admin);
-    const text = textOf(await renderPage(FormsSettingsPage));
-    expect(text).toContain("Forms aren't set up yet. Until they are, parents read that forms aren't ready, and nothing else changes for them.");
+    expect(textOf(await renderPage(FormsSettingsPage))).toContain("Forms aren't set up yet. Until they are, parents read that forms aren't ready, and nothing else changes for them.");
+    // The steps are on their own page (the pattern the QuickBooks page set).
+    const text = textOf(await renderPage(FormsSetupPage));
     expect(text).toContain("Open the team's settings, then API Tokens . Create a token that doesn't expire");
     expect(text).toContain("The address must be exactly the one Documenso itself is set up with");
     expect(text).toContain("open the team's settings, then Webhooks , and add a webhook");
-    expect(await renderPage(FormsSettingsPage)).toContain('value="http://localhost:3000/api/documenso/webhook"');
+    expect(await renderPage(FormsSetupPage)).toContain('value="http://localhost:3000/api/documenso/webhook"');
   });
 
   it("takes Documenso's address as an origin only: https, or http on this machine itself", () => {
@@ -101,7 +104,10 @@ describe("forms settings", () => {
     expect(html).not.toContain(stub.token);
     expect(html).not.toContain(stored.tokenCiphertext!);
     expect(textOf(html)).toContain(`Documenso ${stub.origin} API token Saved`);
-    expect(textOf(html)).toContain("leave blank to keep the saved one");
+    const steps = await renderPage(FormsSetupPage);
+    expect(steps).not.toContain(stub.token);
+    expect(steps).not.toContain(stored.tokenCiphertext!);
+    expect(textOf(steps)).toContain("leave blank to keep the saved one");
 
     // A blank token keeps the saved one, for the same address only.
     expect(await saveFormsSettingsAction(stub.origin, "")).toEqual({ ok: true, message: "Saved. Check the connection next." });

@@ -3,22 +3,22 @@ import { useState } from "react";
 
 export type RoleOption = { id: string; name: string; admin: boolean };
 
-/** A "Roles: Admin, Treasurer" dropdown of checkboxes (name="roleIds"). */
-export function RoleChecklist({ roles, initial }: { roles: RoleOption[]; initial: string[] }) {
+/**
+ * A person's roles as a list of tick boxes that is always open (name="roleIds"), so nothing drops down over the rows
+ * below it. `legend` names it for a screen reader: "Roles for Ana Rivera".
+ */
+export function RoleChecklist({ roles, initial, legend, idPrefix }: { roles: RoleOption[]; initial: string[]; legend: string; idPrefix: string }) {
   const [picked, setPicked] = useState<string[]>(initial);
-  const names = roles.filter((r) => picked.includes(r.id)).map((r) => r.name);
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   return (
-    <details className="role-picker">
-      <summary>Roles: {names.join(", ") || "none"}</summary>
-      <div className="role-picker-list">
-        {roles.map((r) => (
-          <label key={r.id} className="role-picker-item">
-            <input type="checkbox" name="roleIds" value={r.id} checked={picked.includes(r.id)} onChange={() => toggle(r.id)} />
-            <span>{r.name}</span>
-          </label>
-        ))}
-      </div>
-    </details>
+    <fieldset className="checks">
+      <legend>{legend}</legend>
+      {roles.map((r) => (
+        <label key={r.id} htmlFor={`${idPrefix}-${r.id}`}>
+          <input id={`${idPrefix}-${r.id}`} type="checkbox" name="roleIds" value={r.id} checked={picked.includes(r.id)} onChange={() => toggle(r.id)} />
+          <span>{r.name}</span>
+        </label>
+      ))}
+    </fieldset>
   );
 }

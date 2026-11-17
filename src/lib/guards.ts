@@ -15,7 +15,7 @@ export class AccessDenied extends Error {
 export type StaffCtx = StaffIdentity & { effective: Effective; ip: string | null };
 export type ParentCtx = ParentIdentity & { ip: string | null };
 
-export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock"; permission?: Permission };
+export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock"; permission?: Permission; self?: true };
 const registry = new WeakMap<object, GuardInfo>();
 export function registerGuard(fn: object, info: GuardInfo): void { registry.set(fn, info); }
 export function guardOf(fn: unknown): GuardInfo | undefined {
@@ -45,6 +45,21 @@ export function staffAction<A extends unknown[], R>(permission: Permission, fn: 
     return fn(ctx, ...args);
   };
   registry.set(wrapped, { door: "staff", permission });
+  return wrapped;
+}
+
+/**
+ * A staff member acting on their own record and nothing else (their own name): any signed-in staff member, with no
+ * permission to check. The action must read and change only `ctx.staffUserId`'s own row, never an id it is given.
+ * Registered as the staff door with `self`, which tests/integration/invariants.test.ts accepts in place of a permission.
+ */
+export function staffSelfAction<A extends unknown[], R>(fn: (ctx: StaffCtx, ...args: A) => Promise<R>) {
+  const wrapped = async (...args: A): Promise<R> => {
+    const ctx = await staffCtx();
+    if (!ctx) throw new AccessDenied();
+    return fn(ctx, ...args);
+  };
+  registry.set(wrapped, { door: "staff", self: true });
   return wrapped;
 }
 

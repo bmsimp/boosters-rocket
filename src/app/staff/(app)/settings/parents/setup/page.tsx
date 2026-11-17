@@ -31,6 +31,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
   const switchedOff = p.settings.everEnabled && !p.settings.signin;
   return (
     <main className="wrap single">
+      <p className="back-to-settings"><a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
       <h1 className="page-title">Set up parent sign-ins</h1>
       <ol className="setup-progress">{STEPS.map((s) => <li key={s.step} aria-current={s.step === step ? "step" : undefined}><a href={`${SETUP}?step=${s.step}`}>{s.label}</a></li>)}</ol>
 
@@ -47,13 +48,14 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
               <h3>No email address ({p.noEmail.length})</h3><p>{p.noEmail.length ? names(p.noEmail) : "None."}</p>
               <h3>More than one address on a person&apos;s record ({p.manyAddresses.length})</h3><p>{p.manyAddresses.length ? names(p.manyAddresses) : "None."}</p>
               <h3>Nobody could sign in ({p.noSignin.length})</h3><p>{p.noSignin.length ? names(p.noSignin) : "None."}</p>
-              {p.endingUnknown ? (
+              {/* Worked out only while sign-ins are off: once they are on, the reconcile keeps sign-ins in line by itself. */}
+              {!on && (p.endingUnknown ? (
                 <><h3>Sign-ins that would end</h3><p role="status">{ENDING_BUSY}</p></>
               ) : (
                 <><h3>Sign-ins that would end ({p.ending.length})</h3>
                   {p.ending.length === 0 ? <p>None.</p> : <ul>{p.ending.map((e) => <li key={`${e.email}|${e.familyQboId}`}>{e.name} ({e.email})</li>)}</ul>}
                   <p className="hint">QuickBooks no longer backs these, so they stop working when sign-ins are switched on.</p></>
-              )}
+              ))}
             </>
           )}
           <p className="box-foot"><a className="btn" href={`${SETUP}?step=signins`}>Next: parent sign-ins</a> <a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
@@ -75,8 +77,8 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
             <><p>Not yet:</p><ul role="status">{missing.map((m) => <li key={m}>{m}</li>)}</ul></>
           ) : (
             <>
-              <p>Switching on lets {n(p.people, "person", "people")} sign in, to {n(p.families, "family", "families")}{p.ending.length ? `, and ends ${n(p.ending.length, "sign-in", "sign-ins")} made by hand` : ""}. No email is sent: welcome emails are step 3.</p>
-              {p.endingUnknown && <p className="hint">Which sign-ins made by hand would end: {ENDING_BUSY}</p>}
+              <p>Switching on lets {n(p.people, "person", "people")} sign in, to {n(p.families, "family", "families")}{p.ending.length ? `, and ends ${n(p.ending.length, "sign-in", "sign-ins")} that QuickBooks no longer backs` : ""}. No email is sent: welcome emails are step 3.</p>
+              {p.endingUnknown && <p className="hint">Which sign-ins QuickBooks no longer backs would end: {ENDING_BUSY}</p>}
               <SwitchButton label="Switch parent sign-ins on" pendingLabel="Switching on…" act={setSigninsAction.bind(null, true)} />
             </>
           )}
