@@ -67,6 +67,17 @@ describe("the Settings page", () => {
     expect(html).not.toContain("google-secret-do-not-show");
   });
 
+  it("never calls a sign-in whose secret has expired working", async () => {
+    await asAdmin();
+    await seedProvider("staff-google", { clientId: "x.apps.googleusercontent.com" }, "google-secret", new Date(Date.now() - 86_400_000));
+    const html = await renderPage(SettingsPage);
+    const box = new RegExp(`data-settings="sign-in">(.*?)</section>`).exec(html)![1]!;
+    expect(box).toMatch(/<span class="state todo">/);
+    expect(textOf(box)).toContain("Nobody can sign in as staff yet");
+    expect(textOf(box)).toContain("Its secret expired on");
+    expect(textOf(box)).not.toContain("Working");
+  });
+
   it("shows someone who may read the club settings the Club section alone, and an Admin-only section to nobody else", async () => {
     for (const patterns of [["Settings.Club.Read"], ["Settings.Club.ReadWrite"], ["*"], ["Settings.*", "Settings.Mail.ReadWrite", "Settings.Forms.ReadWrite"]]) {
       await resetDb();

@@ -14,6 +14,7 @@ import { StateWords } from "@/app/components/state-words";
 import { LocalTime } from "@/app/components/local-time";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { settingsSections, type SettingsKey, type SettingsSection } from "./sections";
+import { credentialStanding } from "../secret-expiry-rule";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
@@ -71,12 +72,23 @@ const LOADERS: Record<SettingsKey, () => Promise<Summary>> = {
   async "sign-in"() {
     const saved = await providerSummaries();
     const ms = saved.find((s) => s.key === "staff-microsoft"), google = saved.find((s) => s.key === "staff-google");
-    const working = [ms?.readable && "Microsoft", google?.readable && "Google"].filter(Boolean) as string[];
-    const line = (s: typeof ms, cert: boolean): ReactNode => !s ? "Not set up"
-      : !s.readable ? "Saved, but this server can't read it. Open the page to fix it."
-      : s.expiresAt ? <>{cert ? "Working. Its certificate expires " : "Working. Its secret expires "}<CalendarDate iso={s.expiresAt.toISOString()} /></> : "Working";
+    const now = new Date();
+    // A credential whose date has passed signs nobody in: it is not "working", whatever this server can read.
+    const working = [ms && ["working", "expiring"].includes(credentialStanding(ms, now)) && "Microsoft",
+      google && ["working", "expiring"].includes(credentialStanding(google, now)) && "Google"].filter(Boolean) as string[];
+    const attention = [ms, google].some((s) => s && credentialStanding(s, now) !== "working");
+    const line = (s: typeof ms, cert: boolean): ReactNode => {
+      if (!s) return "Not set up";
+      const what = cert ? "certificate" : "secret";
+      const standing = credentialStanding(s, now);
+      if (standing === "unreadable") return "Saved, but this server can't read it. Open the page to fix it.";
+      if (!s.expiresAt) return "Working";
+      const date = <CalendarDate iso={s.expiresAt.toISOString()} />;
+      if (standing === "expired") return <>Its {what} expired on {date}: staff can&apos;t sign in with it. Open the page to replace it.</>;
+      return <>{standing === "expiring" ? "Working, but its " : "Working. Its "}{what} expires {date}</>;
+    };
     return {
-      state: working.length ? "done" : "todo", words: working.length ? `Staff sign in with ${working.join(" and ")}` : "Nobody can sign in as staff yet",
+      state: working.length && !attention ? "done" : "todo", words: working.length ? `Staff sign in with ${working.join(" and ")}` : "Nobody can sign in as staff yet",
       open: "Open sign-in settings", details: [["Microsoft", line(ms, true)], ["Google", line(google, false)]],
     };
   },

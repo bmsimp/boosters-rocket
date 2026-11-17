@@ -14,3 +14,14 @@ export function expiringSecrets(summaries: ProviderSummary[], now = new Date()):
 export const certificateNextStep = (i: Pick<ExpiringSecret, "pendingCertificate">) => (i.pendingCertificate
   ? "a replacement certificate is ready: add it to the app registration, then select Check and switch under Sign-in."
   : "Use Replace certificate under Sign-in.");
+
+/**
+ * How one staff sign-in's credential stands, for the Settings page: the same 30 days as the staff home's warning.
+ * `expired` (its date has passed: nobody can sign in with it), `expiring` (within 30 days), or `working`.
+ */
+export function credentialStanding(s: Pick<ProviderSummary, "readable" | "expiresAt">, now = new Date()): "unreadable" | "expired" | "expiring" | "working" {
+  if (!s.readable) return "unreadable";
+  if (s.expiresAt === null) return "working";
+  const left = s.expiresAt.getTime() - now.getTime();
+  return left <= 0 ? "expired" : left < WARN_MS ? "expiring" : "working";
+}
