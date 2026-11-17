@@ -257,6 +257,9 @@ describe("the health page", () => {
     expect(await due()).toMatchObject({ state: "off", word: "Off" });
     expect((await due()).says).toMatch(/only while parent sign-ins and welcome emails are both switched on/);
     await seedParentSettings({ welcome: true });
+    // Switched on, but outgoing mail isn't set up and tested: the worker sends nothing, and the line says so.
+    expect(await due()).toMatchObject({ state: "off", word: "Waiting for mail", fix: { href: "/staff/settings/mail" } });
+    await seedWorkingMail();
     expect(await due()).toMatchObject({ state: "ok", word: "On", notes: ["It hasn't looked yet. It looks each day from 9:00 club time."],
       times: [{ label: "Last looked", at: null }, { label: "Last sent", at: null }, { label: "Last failure", at: null }] });
     await put(DUE_REMINDERS_KEY, { day: "2027-03-10", at: ago(3_600_000), sent: 0, failed: 0, lastSentAt: null, lastFailedAt: null });

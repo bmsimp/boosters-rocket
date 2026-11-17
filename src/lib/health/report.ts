@@ -216,6 +216,9 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   lines.push(!parents.signin || !parents.welcome
     ? { key: "due_reminders", title: "Payment and checklist reminders", state: "off", word: "Off", times: dueTimes, notes: due ? [dueNote] : [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
       says: "Off. Families are emailed before a payment or a checklist item is due only while parent sign-ins and welcome emails are both switched on." }
+    : !mail.working
+      ? { key: "due_reminders", title: "Payment and checklist reminders", state: "off", word: "Waiting for mail", times: dueTimes, notes: due ? [dueNote] : [], fix: { href: "/staff/settings/mail", label: "Open mail settings" },
+        says: "Not sending until outgoing mail is set up and tested (the Outgoing mail line)." }
     : dueFailing
       ? { key: "due_reminders", title: "Payment and checklist reminders", state: "attention", word: "Needs attention", times: dueTimes, notes: [dueNote], fix: { href: "/staff/settings/mail", label: "Open mail settings" },
         says: "The last reminder email couldn't be sent. The worker tries it again 15 minutes later, while it is still the day to send it. Check the outgoing mail line." }

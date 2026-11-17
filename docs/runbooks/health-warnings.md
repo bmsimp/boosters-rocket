@@ -159,6 +159,7 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 - **"Off."** Families are emailed 14 days and 3 days before a required payment or checklist item is due only while
   parent sign-ins and welcome emails are both switched on: **Settings**, **Parent sign-ins**. It is a choice, the
   Admin's sign that the club is ready to email families.
+- **"Waiting for mail"**: outgoing mail isn't set up and tested, so no reminder goes; see the Outgoing mail line.
 - **"It hasn't looked yet."** Normal on a new installation, or before 9:00 club time on the first day: the worker looks
   each day from then. If it stays that way, check the worker line.
 - **"The last reminder email couldn't be sent."** The worker tries it again 15 minutes later, while it is still the day
