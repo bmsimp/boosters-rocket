@@ -125,6 +125,19 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     expect(await audits("volunteer.buyout.unflagged")).toHaveLength(1);
   });
 
+  it("takes its own flag off one it finds paid, so a paid buy-out is never left flagged missing", async () => {
+    const p = await buyoutFamily(stub);
+    // A run that missed the invoice (made while QuickBooks was answering) flagged it missing; the family has paid since.
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement(), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "5001", flag: "missing" });
+    const other = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Gate shifts" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "5002", flag: "other_customer" });
+    await moneyRun([stored("5001", FAMILY, { balanceCents: 0 }), stored("5002", FAMILY, { balanceCents: 0 })]);
+    expect(await checkBuyoutInvoices()).toMatchObject({ ran: true, paid: 2, flagged: 0 });
+    expect(await row(b.id)).toMatchObject({ state: "paid", flag: null, flaggedAt: null });
+    expect(await row(other.id)).toMatchObject({ state: "paid", flag: null });
+    expect((await audits("volunteer.buyout.paid")).map((a) => a.before)).toEqual(expect.arrayContaining([{ state: "invoiced", flag: "missing" }, { state: "invoiced", flag: "other_customer" }]));
+    expect(await loadBuyoutsToLook()).toEqual([]);
+  });
+
   it("judges only a family that run read: older figures may be from before the invoice was made", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();

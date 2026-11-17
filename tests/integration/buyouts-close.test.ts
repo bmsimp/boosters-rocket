@@ -28,7 +28,7 @@ import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import FamilyProgressPage from "@/app/staff/(app)/seasons/progress/family/[familyId]/page";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
 import { resetDb } from "../helpers/db";
-import { CHENOWETH, RIVERA } from "../helpers/money";
+import { CHENOWETH, invoiceQueries, RIVERA, stubInvoice } from "../helpers/money";
 import { MONEY_REALM, seedFamilyMoney, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
@@ -106,9 +106,30 @@ describe("staff close a buy-out (v1 spec §11.5)", () => {
     asStaff(await writer());
     expect(await closeAsShown(b.id)).toEqual({ ok: true, message: CLOSE_COPY.done });
     expect(await closeAsShown(paid.id)).toEqual({ ok: true, message: CLOSE_COPY.done });
-    expect((await audits("volunteer.buyout.closed")).map((a) => (a.after as { close: string }).close).sort()).toEqual(["invoice_gone", "paid_in_full"]);
+    expect((await audits("volunteer.buyout.closed")).map((a) => (a.after as { close: string }).close).sort()).toEqual(["looks_gone", "paid_in_full"]);
     expect(await rowOf(paid.id)).toMatchObject({ state: "voided", endReason: "closed_by_staff", invoiceQboId: "5002" });
-    expect(stub.apiCalls()).toEqual([]);
+    // The "missing" flag came from stored figures alone, so the close read the customer's invoices first: a GET, nothing sent.
+    expect(stub.apiCalls().every((c) => c.method === "GET")).toBe(true);
+    expect(invoiceQueries(stub)).toHaveLength(1);
+  });
+
+  it("on a daily check's missing flag, reads QuickBooks live first: closes one gone or voided there, refuses one that stands or can't be read", async () => {
+    const { b } = await withBuyout({ state: "invoiced", flag: "missing" });
+    asStaff(await writer());
+    // Made while QuickBooks was answering the money run, so the stored figures missed it: it stands, unpaid.
+    stub.invoices.push(stubInvoice("5001", FAMILY, { TotalAmt: 100, Balance: 100 }));
+    const before = await rowOf(b.id);
+    expect(await closeAsShown(b.id)).toEqual({ ok: false, errors: [CLOSE_COPY.stands] });
+    stub.dropApi = true;
+    expect(await closeAsShown(b.id)).toEqual({ ok: false, errors: [CLOSE_COPY.unreadable] });
+    expect(await rowOf(b.id)).toEqual(before);
+    expect(await audits("volunteer.buyout.closed")).toEqual([]);
+    // Voided in QuickBooks since: nothing is owed, so it closes.
+    stub.dropApi = false;
+    stub.invoices[0] = stubInvoice("5001", FAMILY, { TotalAmt: 0, Balance: 0 });
+    expect(await closeAsShown(b.id)).toEqual({ ok: true, message: CLOSE_COPY.done });
+    expect((await audits("volunteer.buyout.closed"))[0]!.after).toMatchObject({ close: "looks_gone", readLive: "gone" });
+    expect(stub.apiCalls().every((c) => c.method === "GET")).toBe(true);
   });
 
   it("refuses where an unpaid invoice may stand, says what to do in QuickBooks first, and changes nothing", async () => {

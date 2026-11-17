@@ -88,6 +88,23 @@ async function invoicesOf(customerQboId: string, realmId: string, mayWait: boole
   return raw.map(invoiceOf).filter((i): i is Invoice => i !== null);
 }
 
+/**
+ * Whether a buy-out's invoice still stands in QuickBooks, read live for a staff member who asked to close it (./close.ts)
+ * on a flag from stored figures alone: `gone` when the customer's invoices, read strictly, hold it no more or hold it
+ * voided (nothing owed), `stands` when they hold it with an amount, `unreadable` when QuickBooks couldn't be read. A
+ * read only, never waiting for the connection row: the staff member is waiting.
+ */
+export async function invoiceStandsLive(b: Pick<Row, "customerQboId" | "invoiceQboId" | "realmId">): Promise<"gone" | "stands" | "unreadable"> {
+  if (!b.invoiceQboId || !isQboId(b.customerQboId)) return "unreadable";
+  let invoices: Invoice[];
+  try { invoices = await invoicesOf(b.customerQboId, b.realmId, false); } catch (e) {
+    if (e instanceof QboError) return "unreadable";
+    throw e;
+  }
+  const inv = invoices.find((i) => i.qboId === b.invoiceQboId);
+  return !inv || inv.totalCents === 0 ? "gone" : "stands";
+}
+
 const sendOptions = (realmId: string, mayWait: boolean) => ({ realmId, mayWait, timeoutMs: SEND_TIMEOUT_MS, signal: AbortSignal.timeout(SEND_TIMEOUT_MS * 1.5) });
 const short = (code: string) => code.slice(0, 40);
 

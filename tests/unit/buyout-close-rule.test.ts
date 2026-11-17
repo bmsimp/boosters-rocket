@@ -37,12 +37,22 @@ describe("closing a buy-out (v1 spec §11.5)", () => {
     expect(why({ state: "invoiced", flag: "missing", items: [create("done", true), voidItem("waiting")] })).toBe("keep:in_flight");
   });
 
-  it("is offered for one whose invoice QuickBooks no longer shows, flagged by the daily check or found gone by a void", () => {
-    expect(why({ state: "invoiced", flag: "missing" })).toBe("close:invoice_gone");
+  it("is offered for one a void's live read found gone from QuickBooks", () => {
     expect(why({ state: "stuck", flag: "missing", lastCode: "invoice_gone", items: [create("done", true), voidItem("given_up", true)] })).toBe("close:invoice_gone");
     expect(why({ state: "stuck", flag: "student_moved", lastCode: "invoice_gone", items: [create("done", true), voidItem("given_up", true)] })).toBe("close:invoice_gone");
+  });
+
+  it("is offered, read again live first, for one the daily check flagged missing from stored figures alone", () => {
+    expect(why({ state: "invoiced", flag: "missing" })).toBe("close:looks_gone");
+    expect(CLOSE_WORDS.looks_gone).toContain("reads QuickBooks again first");
     // Its stuck void, if any, is given up by the close.
-    expect(why({ state: "stuck", flag: "missing", items: [create("done", true), voidItem("stuck", true)] })).toBe("close:invoice_gone");
+    expect(why({ state: "stuck", flag: "missing", items: [create("done", true), voidItem("stuck", true)] })).toBe("close:looks_gone");
+  });
+
+  it("closes a paid one only as paid in full, whatever other flag the daily check left on it", () => {
+    expect(why({ state: "paid", flag: "missing" })).toBe("keep:nothing_to_do");
+    expect(why({ state: "paid", flag: "other_customer" })).toBe("keep:nothing_to_do");
+    expect(why({ state: "paid", flag: "missing", lastCode: "invoice_gone" })).toBe("keep:nothing_to_do");
   });
 
   it("is offered for a void the portal wouldn't send because the invoice is paid in full", () => {

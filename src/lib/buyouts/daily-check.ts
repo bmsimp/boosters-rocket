@@ -76,11 +76,15 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
         return;
       }
       if (verdict === "paid") {
-        const [done] = await tx.update(buyout).set({ state: "paid", updatedAt: new Date() }).where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
+        // The figures show it, paid: a flag of this check's own (missing, other_customer) is borne out no more. A flag a
+        // void or a move set (paid_before_void, student_moved) is the treasurer's to settle, and stays.
+        const ownFlag = b.flag === "missing" || b.flag === "other_customer";
+        const [done] = await tx.update(buyout).set({ state: "paid", ...(ownFlag ? { flag: null, flaggedAt: null } : {}), updatedAt: new Date() })
+          .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
         if (!done) return;
         paid++;
-        await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.paid", targetType: "buyout", targetId: b.id, before: { state: "invoiced" },
-          after: { state: "paid", invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, runId: run.id } }, tx);
+        await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.paid", targetType: "buyout", targetId: b.id, before: { state: "invoiced", ...(ownFlag ? { flag: b.flag } : {}) },
+          after: { state: "paid", ...(ownFlag ? { flag: null } : {}), invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, runId: run.id } }, tx);
         return;
       }
       if (verdict === "voided") {
