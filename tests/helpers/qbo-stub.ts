@@ -64,7 +64,7 @@ export type QboStub = {
    * `updateFault`, `loseUpdateAnswer`, `updateServerFault` and `dropApi` apply to every write, a create too.
    */
   otherNames: string[];
-  inactiveTakesChildren: boolean; // a customer made inactive takes the customers under it with it (unconfirmed: CUSTOMER_WRITES check 4)
+  inactiveTakesChildren: boolean; // a customer made inactive takes the customers under it with it (not what the sandbox did: see quirks.inactiveWithActiveUnder)
   updateFault: string | null;   // answer every customer update with HTTP 400 and this Fault code ("6000": a validation failure; "5010": a stale object)
   beforeUpdate: ((customer: Record<string, unknown>) => void) | null; // run on the stored customer as an update for it arrives, before its SyncToken is checked: someone editing in QuickBooks at that moment
   loseUpdateAnswer: boolean;    // make a customer update, then close the connection without answering: the change is in QuickBooks and the portal never hears
@@ -78,7 +78,7 @@ export type QboStub = {
    * The buy-out invoice writes (INVOICE_WRITES in src/lib/quickbooks/client.ts), answered as QuickBooks is understood to
    * answer them, which has not been checked against a real company. A create (POST .../invoice) adds an invoice to
    * `invoices`: the next Id from 5001, SyncToken "0", the customer, the lines and the private note sent, TotalAmt and
-   * Balance the line's Amount, an InvoiceLink, and answers `{ Invoice }`. A void (POST .../invoice?operation=void with
+   * Balance the line's Amount, an InvoiceLink only as quirks.invoiceLinkHost and quirks.linkNeedsEmail say, and answers `{ Invoice }`. A void (POST .../invoice?operation=void with
    * Id and SyncToken) needs the stored SyncToken (else 5010), refuses an invoice with anything paid on it with
    * STUB_PAID_VOID_FAULT (the real code is unconfirmed: INVOICE_WRITES check 6), and sets TotalAmt and Balance to 0.
    * `failNext`, `rateLimitNext` and `dropApi` apply to them as to every request.
@@ -113,16 +113,24 @@ export type StubQuirks = {
   duplicateCode: string;              // the code for a name already in use
   fullNames: boolean;                 // a customer read by id carries FullyQualifiedName, built from its ParentRef chain
   balances: boolean;                  // a customer read by id carries Balance and BalanceWithJobs worked out from `invoices`
-  inactiveWithBalance: string | null; // refuse making a customer that owes something inactive, with this code
+  inactiveWithBalance: string | null; // refuse making a customer that owes something inactive, with this code ("6220", as the sandbox did on 2026-11-17)
+  inactiveWithActiveUnder: string | null; // refuse making a customer inactive while an active customer is under it, with this code ("800", as the sandbox did on 2026-11-17)
   copyFamilyContact: boolean;         // a sub-customer made under a family is given the family's phone and address
   invoiceLinkHost: string | null;     // the host of a made invoice's InvoiceLink; null for no link
+  /**
+   * A made invoice gets its InvoiceLink only when it was sent a bill-to email address (BillEmail.Address) and online
+   * payment (AllowOnlineACHPayment or AllowOnlineCreditCardPayment). Said of QuickBooks outside Intuit's reference, which
+   * could not be read, and matching the sandbox on 2026-11-17: the invoice made as a buy-out is made, with no
+   * BillEmail, came back with no link. False makes a link for every made invoice, as the stub once did.
+   */
+  linkNeedsEmail: boolean;
   keepPrivateNote: boolean;           // a made invoice keeps the PrivateNote sent
   invoiceEmailStatus: string | null;  // a made invoice's EmailStatus, whatever was sent ("EmailSent"); null keeps what was sent
   createDrops: string[];              // fields a customer create leaves out of what it makes ("CustomerTypeRef", "BillWithParent")
   emailFirstOnly: boolean;            // an email field of several addresses is stored as its first address alone
 };
 export const defaultQuirks = (): StubQuirks => ({ emptyKeeps: false, limits: {}, limitCode: "6000", checkEmail: false, staleCode: "5010", duplicateCode: "6240", fullNames: false,
-  balances: false, inactiveWithBalance: null, copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", keepPrivateNote: true,
+  balances: false, inactiveWithBalance: "6220", inactiveWithActiveUnder: "800", copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", linkNeedsEmail: true, keepPrivateNote: true,
   invoiceEmailStatus: null, createDrops: [], emailFirstOnly: false });
 
 /** The first field of a write's body longer than its limit, as "Object.Field" or "Field". */
@@ -225,8 +233,11 @@ export async function startQboStub(): Promise<QboStub> {
         if (typeof (sent.CustomerRef as { value?: unknown } | undefined)?.value !== "string" || typeof line?.Amount !== "number") return json(400, fault("2020"));
         const next = String(Math.max(5000, ...stub.invoices.map((i) => Number(i.Id)).filter((n) => !Number.isNaN(n))) + 1);
         const today = new Date().toISOString().slice(0, 10);
+        const billed = typeof (sent.BillEmail as { Address?: unknown } | undefined)?.Address === "string" && (sent.BillEmail as { Address: string }).Address !== "";
+        const payable = sent.AllowOnlineACHPayment === true || sent.AllowOnlineCreditCardPayment === true;
+        const linked = stub.quirks.invoiceLinkHost !== null && (!stub.quirks.linkNeedsEmail || (billed && payable));
         const made: Record<string, unknown> = { ...sent, Id: next, SyncToken: "0", DocNumber: next, TxnDate: today, DueDate: today, TotalAmt: line.Amount, Balance: line.Amount,
-          ...(stub.quirks.invoiceLinkHost ? { InvoiceLink: `https://${stub.quirks.invoiceLinkHost}/t/scs-v1-stub-${next}` } : {}), MetaData: { CreateTime: new Date().toISOString() } };
+          ...(linked ? { InvoiceLink: `https://${stub.quirks.invoiceLinkHost}/t/scs-v1-stub-${next}` } : {}), MetaData: { CreateTime: new Date().toISOString() } };
         if (!stub.quirks.keepPrivateNote) delete made.PrivateNote;
         if (stub.quirks.invoiceEmailStatus !== null) made.EmailStatus = stub.quirks.invoiceEmailStatus;
         stub.invoices.push(made);
@@ -268,6 +279,9 @@ export async function startQboStub(): Promise<QboStub> {
         if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault(stub.quirks.staleCode));
         if ("DisplayName" in sent && nameTaken(sent.DisplayName, stored.Id)) return json(400, fault(stub.quirks.duplicateCode));
         if (sent.Active === false && stub.quirks.inactiveWithBalance && stub.invoices.some((i) => (i.CustomerRef as { value?: unknown } | undefined)?.value === stored.Id && Number(i.Balance) > 0)) return json(400, fault(stub.quirks.inactiveWithBalance));
+        // As the sandbox answered a family on 2026-11-17: refused while a customer directly under it is active, taken once none is.
+        if (sent.Active === false && stub.quirks.inactiveWithActiveUnder && !stub.inactiveTakesChildren
+          && stub.customers.some((c) => (c.ParentRef as { value?: unknown } | undefined)?.value === stored.Id && c.Active !== false)) return json(400, fault(stub.quirks.inactiveWithActiveUnder));
         // Making a family inactive makes the customers under it inactive too, when the test says QuickBooks does so.
         if (sent.Active === false && stub.inactiveTakesChildren) for (const c of stub.customers) if ((c.ParentRef as { value?: unknown } | undefined)?.value === stored.Id) c.Active = false;
         const updated: Record<string, unknown> = sent.sparse === true ? { ...stored } : { Id: stored.Id };

@@ -118,8 +118,10 @@ export const EXPECTATIONS = [
     key: "pay_links", group: "reads", title: "Pay links on invoices",
     expects: `An invoice that can be paid online carries ${LINK} to QuickBooks' own payment page, on intuit.com or a part of it, so the portal can show a Pay button.`,
     learned: (l) => `${num(l.withLink) === 0 ? `None of the ${plural(num(l.checked), "invoice", "invoices")} looked at carried ${LINK}.`
-      : `${num(l.withLink)} of ${plural(num(l.checked), "invoice", "invoices")} carried ${LINK}, on ${words(list(l.hosts))}${num(l.unsafe) ? `; ${num(l.unsafe)} of the links weren't to QuickBooks' payment page, so they would get no Pay button` : ""}.`}${l.ownLinked === false
-      ? " The check's own invoice came back without one. QuickBooks gives an invoice a Pay link only when the company takes payments online, so this company may not; that needs no change to the portal." : ""}`,
+      : `${num(l.withLink)} of ${plural(num(l.checked), "invoice", "invoices")} carried ${LINK}, on ${words(list(l.hosts))}${num(l.unsafe) ? `; ${num(l.unsafe)} of the links weren't to QuickBooks' payment page, so they would get no Pay button` : ""}.`}${l.ownLinked !== false ? ""
+      : num(l.withLink) > 0
+        ? " The check's own invoice, made the way the portal makes a buy-out invoice, came back without one, though other invoices of this company carry one: so the company does take payments online. The Pay link probe, under Changing, says what makes the difference."
+        : " The check's own invoice, made the way the portal makes a buy-out invoice, came back without one too. QuickBooks may give a Pay link only when the company takes payments online, or only to an invoice that carries a customer's email address: the Pay link probe, under Changing, says which."}`,
     ifNot: "Families would see no Pay button for invoices they could pay online.", codeChange: true, where: "INVOICE_INCLUDE in src/lib/quickbooks/client.ts and safePayLink() in src/lib/money/pay-link.ts",
   },
   {
@@ -268,6 +270,14 @@ export const EXPECTATIONS = [
     ifNot: "QuickBooks might email a family an invoice the portal made.", codeChange: true, where: "INVOICE_WRITES.create in src/lib/quickbooks/client.ts",
   },
   {
+    key: "pay_link_probe", group: "writes", title: "A Pay link on a buy-out invoice",
+    expects: "The check makes its invoice a second time, the same but carrying a bill-to email address (the check's own, at example.com) with its email status still not set, so nothing is emailed, and notes whether each came back with a Pay link. It voids the second at once.",
+    learned: (l) => !yes(l.found) ? "The second invoice didn't come back when the student's invoices were read."
+      : `Made as a buy-out invoice is made today, it came back ${yes(l.plainLinked) ? "with" : "without"} ${LINK}. With a bill-to email address, it came back ${yes(l.emailLinked) ? "with" : "without"} one${l.emailStatus === "NotSet" ? ", and its email status still not set" : `, and its email status ${typeof l.emailStatus === "string" && l.emailStatus ? `came back as ${l.emailStatus}` : "came back as nothing"}`}.${
+        !yes(l.plainLinked) && yes(l.emailLinked) ? " So QuickBooks gives a Pay link only to an invoice with an email address: whether a buy-out invoice should carry the family's is for the owner to decide." : ""}`,
+    ifNot: "QuickBooks might email a family an invoice the portal made, or give it a link that isn't to its payment page.", codeChange: true, where: "INVOICE_WRITES.create in src/lib/quickbooks/client.ts",
+  },
+  {
     key: "move", group: "writes", title: "Moving a student to another family",
     expects: "QuickBooks puts the student under the other family, billed with it, and changes nothing else.",
     learned: (l) => `${list(l.changed).length ? `The student moved, and these changed too: ${fields(l.changed)}.` : "The student moved, and nothing else changed."} Its open invoice ${yes(l.invoiceStayed) ? "stayed on the student, still open" : "didn't stay as it was"}.`,
@@ -275,9 +285,9 @@ export const EXPECTATIONS = [
   },
   {
     key: "inactive_with_balance", group: "writes", title: "Making a customer with an open balance inactive",
-    expects: "The check notes what QuickBooks does: takes it, or refuses it with a code.",
+    expects: "QuickBooks refuses it with code 6220 and changes nothing. The portal reads what is owed before it sends this, and says the same words if QuickBooks refuses it anyway.",
     learned: (l) => (l.code === "accepted" ? "QuickBooks took it: a customer with an open balance can be made inactive. The check made it active again to go on." : `QuickBooks refused it with ${codeWords(l.code)}.`),
-    ifNot: "", codeChange: false, where: "CUSTOMER_WRITES.active in src/lib/quickbooks/client.ts",
+    ifNot: "Staff would be told the wrong thing when someone with a balance can't be made inactive.", codeChange: true, where: "CUSTOMER_WRITES.faults.openBalance in src/lib/quickbooks/client.ts and refusalWords() in src/lib/roster/writes.ts",
   },
   {
     key: "void_stale", group: "writes", title: "Voiding an invoice from an old version of it",
@@ -292,10 +302,16 @@ export const EXPECTATIONS = [
     ifNot: "A guardian who switches back before paying would still owe the buy-out.", codeChange: true, where: "INVOICE_WRITES.void in src/lib/quickbooks/client.ts",
   },
   {
-    key: "inactive_children", group: "writes", title: "Making a family inactive",
-    expects: "QuickBooks makes the family inactive. The check notes what it does to the customers under it.",
-    learned: (l) => `The family was made inactive. The customers under it were ${yes(l.childrenInactive) ? "made inactive too" : "left active"}.`,
-    ifNot: "Staff couldn't make a family inactive from the roster pages.", codeChange: true, where: "CUSTOMER_WRITES.active in src/lib/quickbooks/client.ts",
+    key: "family_inactive_while_under", group: "writes", title: "Making a family inactive while a customer under it is active",
+    expects: "QuickBooks refuses it with code 800 and changes nothing: that is why the portal makes everyone under a family inactive first.",
+    learned: (l) => (l.code === "accepted" ? `QuickBooks took it. The customer under it was ${yes(l.childrenInactive) ? "made inactive too" : "left active"}.` : `QuickBooks answered with ${codeWords(l.code)}.`),
+    ifNot: "The portal's way of making a family inactive, everyone under it first, would need looking at again.", codeChange: true, where: "CUSTOMER_WRITES.faults.activeUnder in src/lib/quickbooks/client.ts and askFamilyInactive() in src/lib/roster/writes.ts",
+  },
+  {
+    key: "family_inactive_after", group: "writes", title: "Making a family inactive once everyone under it is inactive",
+    expects: "With the customer under it made inactive first, QuickBooks makes the family inactive.",
+    learned: (l) => `${l.code === "accepted" ? "QuickBooks made the family inactive." : `QuickBooks answered with ${codeWords(l.code)}.`} Making the customer under it inactive ${yes(l.familyVersionRose) ? "raised the family's own version" : "left the family's own version as it was"}.`,
+    ifNot: "Staff couldn't make a family inactive from the roster pages.", codeChange: true, where: "askFamilyInactive() in src/lib/roster/writes.ts and CUSTOMER_WRITES.active in src/lib/quickbooks/client.ts",
   },
   {
     key: "all_inactive", group: "writes", title: "Making every record the check made inactive",

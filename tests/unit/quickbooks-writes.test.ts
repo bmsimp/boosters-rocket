@@ -93,8 +93,10 @@ const MAY_BUYOUT_ASK = [BUYOUT_WRITER, "src/app/(parent)/volunteer/pay-instead/a
 /** Which body each invoice write sends. */
 const INVOICE_BODY = { qboCreateInvoice: "create", qboVoidInvoice: "void" } as const;
 /** The fields the invoice writes' bodies can carry, in the order INVOICE_WRITES writes them. */
+// `BillEmail` (with its `Address`) was added on purpose on 2026-11-17, named in that slice's brief: the check of the
+// portal's requests sends one on its Pay link probe; no buy-out sends one (the test below holds that).
 const INVOICE_BODY_FIELDS = ["CustomerRef", "Line", "DetailType", "Amount", "SalesItemLineDetail", "ItemRef", "Qty", "UnitPrice", "PrivateNote", "AllowOnlineACHPayment", "EmailStatus",
-  "Id", "SyncToken"];
+  "BillEmail", "Address", "Id", "SyncToken"];
 
 /**
  * Every place the word `method` stands in the code. `is` is the request method when it is written out as a plain key
@@ -520,6 +522,14 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       // Both writes are called inside the module's send, and nowhere else in it.
       const send = writer.slice(writer.indexOf(`export async function ${BUYOUT_SEND}(`), writer.indexOf("\nasync function queueItem("));
       for (const name of INVOICE_WRITE_FUNCTIONS) expect(send, name).toMatch(new RegExp(`\\b${name}\\(`));
+    });
+
+    it("send a bill-to email address only from the check of the portal's requests, never for a buy-out", () => {
+      // The one optional field of the create (InvoiceCreate.billEmail): given by the check's Pay link probe alone, until
+      // the owner decides what a buy-out invoice should carry.
+      const giving = everything.filter((s) => s.file !== CLIENT && /billEmail/.test(code(s.text))).map((s) => s.file).sort();
+      expect(giving).toEqual([CHECK_WRITER, `${CHECK_FOLDER}run.ts`].sort());
+      expect(writer).not.toMatch(/billEmail|BillEmail/);
     });
 
     it("refuse a body that could carry another field, or go elsewhere", () => {

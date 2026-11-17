@@ -7,7 +7,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import {
-  CUSTOMER_UPDATE, EMAIL_UPDATE, INVOICE_INCLUDE, INVOICE_QUERIES, INVOICE_WRITES, isQboId,
+  CUSTOMER_UPDATE, CUSTOMER_WRITES, EMAIL_UPDATE, INVOICE_INCLUDE, INVOICE_QUERIES, INVOICE_WRITES, isQboId,
   qboCustomerById, qboCustomerTypes, qboGet, qboInvoices, qboItems, qboQueryAll, type CustomerAddress,
 } from "@/lib/quickbooks/client";
 import { getShape, ROSTER_LOCK } from "@/lib/roster/shape";
@@ -433,7 +433,7 @@ class Check {
     // The invoice: on the check's m.student, with an active product or service from the company's own list.
     const item = this.items.find((i) => i.Active === true && idOf(i) && (i.Type === "Service" || i.Type === "NonInventory"));
     const itemId = item ? idOf(item)! : null;
-    if (!itemId) for (const k of ["invoice_create", "invoice_note", "invoice_no_email", "void_stale", "invoice_void"] as const) this.set(k, "not_run", {}, "no_item");
+    if (!itemId) for (const k of ["invoice_create", "invoice_note", "invoice_no_email", "pay_link_probe", "void_stale", "invoice_void"] as const) this.set(k, "not_run", {}, "no_item");
     const studentInvoice = async (): Promise<Raw | null> => {
       const rows = invoiceRows(await this.get({ query: INVOICE_QUERIES.oneForm(m.student!.id, 1), include: INVOICE_INCLUDE })) ?? [];
       return rows.find((r) => r.Id === m.invoice!.id) ?? null;
@@ -469,6 +469,27 @@ class Check {
       const ownNumber = typeof stu?.Balance === "number", matches = toCents(stu?.Balance) === CHECK_UNIT_CENTS && toCents(fam?.Balance ?? 0) === 0;
       this.set("own_balance", ownNumber && matches ? "as_expected" : "not_as_expected", { number: ownNumber, matches });
     });
+    // The Pay link probe (2026-11-17): the sandbox gave the check's own invoice, made as a buy-out invoice is made, no Pay
+    // link while other invoices had one. The same invoice again, carrying the check's own address at example.com as its
+    // bill-to email, with its email status still not set, says whether that is the difference. Voided at once; the
+    // student's balance is the first invoice's alone again for the steps that follow.
+    if (itemId) await this.step("pay_link_probe", [m.invoice, m.student], async () => {
+      const linkOf = (i: Raw | null) => (typeof i?.InvoiceLink === "string" && i.InvoiceLink.trim() ? i.InvoiceLink.trim() : null);
+      const plain = await studentInvoice();
+      const inv = await checkCreateInvoice(run, { studentQboId: m.student!.id, itemQboId: itemId, units: 1, unitCents: CHECK_UNIT_CENTS, marker: randomUUID(),
+        billEmail: `check-parent-${mark}@example.com` });
+      const id = idOf(inv);
+      const rows = invoiceRows(await this.get({ query: INVOICE_QUERIES.oneForm(m.student!.id, 1), include: INVOICE_INCLUDE })) ?? [];
+      const withEmail = id ? rows.find((r) => r.Id === id) ?? null : null;
+      if (id && withEmail && toCents(withEmail.TotalAmt) !== 0) await checkVoidInvoice(run, { qboId: id }, tokenOf(withEmail));
+      const plainLink = linkOf(plain), emailLink = linkOf(withEmail);
+      const emailStatus = typeof withEmail?.EmailStatus === "string" && /^[A-Za-z]{1,20}$/.test(withEmail.EmailStatus) ? withEmail.EmailStatus : "";
+      const unsafe = [plainLink, emailLink].some((l) => l !== null && safePayLink(l) === null);
+      // What it finds is noted, not counted against the portal: the portal sends no bill-to email yet. An email status
+      // other than "not set", or a link that isn't to QuickBooks' payment page, would be.
+      this.set("pay_link_probe", !withEmail || unsafe || emailStatus !== "NotSet" ? "not_as_expected" : "learned",
+        { found: withEmail !== null, plainLinked: plainLink !== null, emailLinked: emailLink !== null, emailStatus });
+    });
     await this.step("move", [m.student, m.famB], async () => {
       const before = await this.read(m.student!.id);
       await checkMove(run, m.student!.id, tokenOf(before), m.famB!.id);
@@ -481,7 +502,8 @@ class Check {
     await this.step("inactive_with_balance", [m.student, m.invoice], async () => {
       const code = await this.answerTo(async () => checkSetActive(run, target("student", m.student!), tokenOf(await this.read(m.student!.id)), false));
       if (code === "accepted") await checkSetActive(run, target("student", m.student!), tokenOf(await this.read(m.student!.id)), true);
-      this.set("inactive_with_balance", "learned", { code });
+      // Seen in the sandbox on 2026-11-17, and now what the portal relies on: refused with 6220.
+      this.set("inactive_with_balance", code === `fault_${CUSTOMER_WRITES.faults.openBalance}` ? "as_expected" : "not_as_expected", { code });
     });
     if (itemId) await this.step("void_stale", [m.invoice], async () => {
       const mine = await studentInvoice();
@@ -495,12 +517,26 @@ class Check {
       const zero = after !== null && toCents(after.TotalAmt) === 0 && toCents(after.Balance) === 0;
       this.set("invoice_void", zero ? "as_expected" : "not_as_expected", { zero, stillListed: after !== null });
     });
-    await this.step("inactive_children", [m.famA, m.parent], async () => {
-      await checkSetActive(run, target("family", m.famA!), tokenOf(await this.read(m.famA!.id)), false);
+    // Making a family inactive: refused with 800 while its parent is active (as the sandbox answered on 2026-11-17),
+    // then taken once the parent is inactive. The portal relies on both (askFamilyInactive in src/lib/roster/writes.ts).
+    await this.step("family_inactive_while_under", [m.famA, m.parent], async () => {
+      const code = await this.answerTo(async () => checkSetActive(run, target("family", m.famA!), tokenOf(await this.read(m.famA!.id)), false));
       const fam = await this.read(m.famA!.id), p = await this.read(m.parent!.id);
       const childrenInactive = p?.Active === false;
-      if (childrenInactive) await recordClosed(run, "parent", m.parent!.id);
-      this.set("inactive_children", fam?.Active === false ? "as_expected" : "not_as_expected", { childrenInactive });
+      if (code === "accepted" && childrenInactive) await recordClosed(run, "parent", m.parent!.id);
+      this.set("family_inactive_while_under", code === `fault_${CUSTOMER_WRITES.faults.activeUnder}` && fam?.Active !== false ? "as_expected" : "not_as_expected",
+        { code, ...(code === "accepted" ? { childrenInactive } : {}) });
+    });
+    await this.step("family_inactive_after", [m.famA, m.parent], async () => {
+      const before = await this.read(m.famA!.id);
+      if (before?.Active === false) return this.set("family_inactive_after", "not_run", {}, "needs_earlier"); // QuickBooks took the step before
+      const p = await this.read(m.parent!.id);
+      if (p && p.Active !== false) await checkSetActive(run, target("parent", m.parent!), tokenOf(p), false);
+      const mid = await this.read(m.famA!.id);
+      const familyVersionRose = Number(tokenOf(mid)) > Number(tokenOf(before));
+      const code = await this.answerTo(() => checkSetActive(run, target("family", m.famA!), tokenOf(mid), false));
+      const fam = await this.read(m.famA!.id);
+      this.set("family_inactive_after", code === "accepted" && fam?.Active === false ? "as_expected" : "not_as_expected", { code, familyVersionRose });
     });
   }
 

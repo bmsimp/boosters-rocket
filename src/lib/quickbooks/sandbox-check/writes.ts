@@ -62,7 +62,7 @@ export async function recordMade(run: Pick<CheckRun, "actor" | "ip">, rowId: str
 }
 
 /** A 4xx, a token that couldn't be had, or a refusal before sending: QuickBooks made nothing. */
-const madeNothing = (code: string) => /^fault_\d+$|^http_4\d\d$/.test(code) || code.startsWith(NO_TOKEN) || ["bad_id", "bad_amount", "other_company", "needs_admin"].includes(code);
+const madeNothing = (code: string) => /^fault_\d+$|^http_4\d\d$/.test(code) || code.startsWith(NO_TOKEN) || ["bad_id", "bad_amount", "bad_email", "other_company", "needs_admin"].includes(code);
 
 /** A listed create that QuickBooks refused: nothing was made, so the row is closed at once. */
 async function closeUnmade(run: CheckRun, rowId: string, code: string): Promise<void> {
@@ -151,11 +151,17 @@ export async function checkSetActive(run: CheckRun, target: { kind: CheckKind; q
   return answer;
 }
 
-/** A buy-out invoice on a student this run made: one line, the item chosen, a small amount, the check's marker in its note. */
-export async function checkCreateInvoice(run: CheckRun, i: { studentQboId: string; itemQboId: string; units: number; unitCents: number; marker: string }): Promise<Record<string, unknown>> {
+/**
+ * A buy-out invoice on a student this run made: one line, the item chosen, a small amount, the check's marker in its note.
+ * `billEmail`, for the Pay link probe only: the check's own address at example.com, which can receive no mail.
+ */
+export async function checkCreateInvoice(run: CheckRun, i: { studentQboId: string; itemQboId: string; units: number; unitCents: number; marker: string; billEmail?: string }): Promise<Record<string, unknown>> {
   await allowed(run, [{ kind: "student", qboId: i.studentQboId }]);
+  // Only an address at example.com, which can receive no mail, ever goes on an invoice the check makes.
+  if (i.billEmail !== undefined && !/^[a-z0-9.-]{1,80}@example\.com$/.test(i.billEmail)) throw refused("The check sends no email address but its own, at example.com.", "bad_email");
   const rowId = await listBeforeCreate(run, "invoice", i.marker);
-  return create(run, rowId, () => qboCreateInvoice({ customerQboId: i.studentQboId, itemQboId: i.itemQboId, units: i.units, unitCents: i.unitCents, buyoutId: i.marker }, { ...options(run), mayWait: true }));
+  return create(run, rowId, () => qboCreateInvoice({ customerQboId: i.studentQboId, itemQboId: i.itemQboId, units: i.units, unitCents: i.unitCents, buyoutId: i.marker,
+    ...(i.billEmail !== undefined ? { billEmail: i.billEmail } : {}) }, { ...options(run), mayWait: true }));
 }
 
 /** Voids an invoice the check made, and marks it closed once QuickBooks has voided it. */

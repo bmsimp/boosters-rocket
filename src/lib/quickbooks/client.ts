@@ -617,7 +617,13 @@ export const CUSTOMER_WRITES = {
   reparent: (customerId: string, syncToken: string, parentQboId: string) =>
     ({ Id: customerId, SyncToken: syncToken, sparse: true, ParentRef: { value: parentQboId }, Job: true, BillWithParent: true }),
   active: (customerId: string, syncToken: string, active: boolean) => ({ Id: customerId, SyncToken: syncToken, sparse: true, Active: active }),
-  faults: { stale: "5010", duplicateName: "6240" },
+  /**
+   * `openBalance` and `activeUnder` were seen in the sandbox on 2026-11-17 (the check of the portal's requests): making
+   * a customer with an open balance inactive was refused with 6220, and making a family inactive while a customer under
+   * it was still active was refused with 800 and taken once they were inactive. Only the codes were kept, not
+   * QuickBooks' words; Intuit's error reference could not be read to confirm either meaning.
+   */
+  faults: { stale: "5010", duplicateName: "6240", openBalance: "6220", activeUnder: "800" },
 } as const;
 
 export type QboRosterWriteOptions = QboWriteOptions & {
@@ -710,6 +716,12 @@ export type InvoiceCreate = {
   unitCents: number;
   /** The portal's own buy-out id (a uuid): written into the invoice's private note so the portal can find it again. */
   buyoutId: string;
+  /**
+   * A bill-to email address (`BillEmail`), sent only when given. Only the check of the portal's requests gives one (its
+   * Pay link probe, at example.com, with `EmailStatus` still NotSet so nothing is emailed): a buy-out sends none until
+   * the owner has seen what the probe found (point 2 below).
+   */
+  billEmail?: string;
 };
 
 /** A count of cents as QuickBooks writes an amount: dollars, as a number with at most two decimals. The one place cents leave the portal. */
@@ -727,7 +739,12 @@ const qboAmount = (cents: number): number => cents / 100;
  *      sub-customer for a per-student requirement, billed with the family) with that item, quantity and amount;
  *   2. that it carries an `InvoiceLink` when read back with `include=invoiceLink` (INVOICE_QUERIES), so it gets a Pay
  *      button, and which flags turn online payment on: the owner's books send invoices with online ACH on
- *      (`AllowOnlineACHPayment`); say whether `AllowOnlineCreditCardPayment` or `AllowOnlinePayment` is wanted too;
+ *      (`AllowOnlineACHPayment`); say whether `AllowOnlineCreditCardPayment` or `AllowOnlinePayment` is wanted too.
+ *      SEEN IN THE SANDBOX ON 2026-11-17: the invoice made exactly as this create makes it came back with no
+ *      `InvoiceLink`, while 8 other invoices of the same company carried one. Not confirmed from Intuit's reference
+ *      (which could not be read): a link is said elsewhere to be made only for an invoice with online payment on and a
+ *      customer email (`BillEmail`). The check's Pay link probe makes a second invoice with `billEmail` to find out;
+ *      a buy-out sends no `BillEmail` until the owner decides;
  *   3. that QuickBooks sends no email for it (`EmailStatus: "NotSet"`, no `BillEmail`, and the portal never calls
  *      `/invoice/<id>/send`);
  *   4. how the due date is set when none is sent: the customer's terms, the company's default, or the day it is made;
@@ -748,6 +765,7 @@ export const INVOICE_WRITES = {
     Line: [{ DetailType: "SalesItemLineDetail", Amount: qboAmount(c.units * c.unitCents), SalesItemLineDetail: { ItemRef: { value: c.itemQboId }, Qty: c.units, UnitPrice: qboAmount(c.unitCents) } }],
     PrivateNote: `Booster Rocket buy-out ${c.buyoutId}`,
     AllowOnlineACHPayment: true, EmailStatus: "NotSet",
+    BillEmail: c.billEmail === undefined ? undefined : { Address: c.billEmail },
   }),
   void: (invoiceId: string, syncToken: string) => ({ Id: invoiceId, SyncToken: syncToken }),
   /** The query parameter that makes a POST of `void`'s body a void (`operation=void`). */
@@ -807,6 +825,7 @@ async function sendInvoiceWrite(payload: Record<string, unknown>, voiding: boole
 export async function qboCreateInvoice(c: InvoiceCreate, o: QboRosterWriteOptions): Promise<Record<string, unknown>> {
   if (!isQboId(c.customerQboId) || !isQboId(c.itemQboId) || !isUuidText(c.buyoutId)) throw badInvoiceId();
   if (!Number.isSafeInteger(c.units) || c.units < 1 || c.units > 1000 || !Number.isSafeInteger(c.unitCents) || c.unitCents < 1 || c.unitCents > 10_000_000) throw new QboError("That amount can't be sent.", "bad_amount");
+  if (c.billEmail !== undefined && (typeof c.billEmail !== "string" || c.billEmail.length > 100 || !/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(c.billEmail))) throw new QboError("That email address can't be sent.", "bad_email");
   return sendInvoiceWrite(INVOICE_WRITES.create(c), false, o);
 }
 

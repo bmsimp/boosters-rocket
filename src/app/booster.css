@@ -721,6 +721,9 @@ main.wrap.single.matches-page > .box { max-width: none; }
 .setup-progress a { display: inline-flex; align-items: center; min-height: 44px; }
 /* The welcome email as parents will read it (Parent sign-ins, step 3): its lines wrap inside the box, never past it. */
 .email-sample { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; }
+/* Check the portal's requests: a result ("As expected", "Not as expected") keeps its words whole on one line, so its
+   column is given the room; the columns of sentences beside it give way instead. */
+.check-results .state { white-space: nowrap; overflow-wrap: normal; }
 
 @media (forced-colors: active) {
   .nav-group-button.here { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }

@@ -61,19 +61,27 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     expect(byKey.invoices_list_form!.learned).toMatchObject({ form: "list" });
     expect(byKey.pay_links!.learned).toMatchObject({ hosts: ["connect.intuit.com"], unsafe: 0 });
     expect(byKey.empty_answer!.learned).toMatchObject({ shape: "empty", accepted: true });
-    expect(byKey.inactive_with_balance!.learned).toMatchObject({ code: "accepted" });
+    // As the sandbox answered on 2026-11-17, and what the portal now relies on.
+    expect(byKey.inactive_with_balance).toMatchObject({ outcome: "as_expected", learned: { code: "fault_6220" } });
+    expect(byKey.family_inactive_while_under).toMatchObject({ outcome: "as_expected", learned: { code: "fault_800" } });
+    expect(byKey.family_inactive_after).toMatchObject({ outcome: "as_expected", learned: { code: "accepted", familyVersionRose: false } });
+    // The Pay link probe: made as a buy-out invoice is made, no link; with a bill-to email address, a link; nothing emailed.
+    expect(byKey.pay_link_probe).toMatchObject({ outcome: "learned", learned: { found: true, plainLinked: false, emailLinked: true, emailStatus: "NotSet" } });
+    expect(byKey.pay_links).toMatchObject({ outcome: "learned", learned: { ownLinked: false } });
+    const invoicePosts = posts().filter((p) => p.path.endsWith("/invoice") && p.query.get("operation") === null).map((p) => JSON.parse(p.body) as Record<string, unknown>);
+    expect(invoicePosts.map((b) => b.BillEmail ?? null)).toEqual([null, { Address: expect.stringMatching(/^check-parent-[a-z0-9-]+@example\.com$/) }]);
+    expect(invoicePosts.every((b) => b.EmailStatus === "NotSet")).toBe(true);
     expect(r).toMatchObject({ environment: "sandbox", writes: true, realmId: REALM, outcome: "passed", stopCode: null });
     // Two families, a student and a parent, all named for the check, and one invoice: every one closed.
     // The name already in use made nothing: its row is closed with no id.
     const all = await recordsOf(r.id), made = all.filter((m) => m.qboId !== null);
     expect(all.filter((m) => m.qboId === null).map((m) => [m.kind, m.lastCode, m.closedAt !== null])).toEqual([["family", "fault_6240", true]]);
-    expect(made.map((m) => m.kind).sort()).toEqual(["family", "family", "invoice", "parent", "student"]);
+    expect(made.map((m) => m.kind).sort()).toEqual(["family", "family", "invoice", "invoice", "parent", "student"]);
     expect(made.every((m) => m.closedAt !== null)).toBe(true);
     expect(checkCustomers()).toHaveLength(4);
     expect(checkCustomers().every((c) => c.Active === false)).toBe(true);
     expect(checkCustomers().every((c) => String(c.DisplayName).includes(r.tag))).toBe(true);
-    const inv = stub.invoices.find((i) => i.Id === made.find((m) => m.kind === "invoice")!.qboId);
-    expect(inv).toMatchObject({ TotalAmt: 0, Balance: 0 });
+    for (const m of made.filter((x) => x.kind === "invoice")) expect(stub.invoices.find((i) => i.Id === m.qboId)).toMatchObject({ TotalAmt: 0, Balance: 0 });
     // Every write went to a record the check made, or made one.
     const mine = new Set(made.map((m) => m.qboId));
     for (const p of posts()) {
@@ -87,7 +95,7 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     // Audited when it starts and ends, with counts.
     expect(await audits("quickbooks.check.start")).toHaveLength(1);
     const [end] = await audits("quickbooks.check.end");
-    expect(end!.after).toMatchObject({ outcome: "passed", notAsExpected: 0, made: 5, open: 0 });
+    expect(end!.after).toMatchObject({ outcome: "passed", notAsExpected: 0, made: 6, open: 0 });
   });
 
   it("keeps no QuickBooks text but its own names: no family's name, amount or address", async () => {
@@ -135,7 +143,7 @@ const CASES: Case[] = [
   { name: "an empty answer has another shape", set: (s) => { s.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: {} } } }; }, fails: ["empty_answer"] },
   { name: "an invoice has no due date", set: (s) => { s.invoices.push(readInvoice("903", "10", { DueDate: undefined })); }, fails: ["invoice_fields"] },
   { name: "an invoice line names a product that isn't on the list", set: (s) => { s.invoices.push(readInvoice("903", "10", { Line: [{ DetailType: "SalesItemLineDetail", Amount: 5, SalesItemLineDetail: { ItemRef: { value: "99" } } }] })); }, fails: ["invoice_items"] },
-  { name: "pay links are on another host", set: (s) => { s.quirks.invoiceLinkHost = "pay.example.net"; }, fails: ["pay_links"] },
+  { name: "pay links are on another host", set: (s) => { s.invoices.push(readInvoice("903", "10", { InvoiceLink: "https://pay.example.net/t/903" })); }, fails: ["pay_links"] },
   { name: "no balance comes with a customer", set: (s) => { s.quirks.balances = false; }, fails: ["balance_with_jobs", "own_balance"] },
   { name: "a create leaves out the customer type", set: (s) => { s.quirks.createDrops = ["CustomerTypeRef"]; }, fails: ["create_family"] },
   { name: "a student isn't billed with its family", set: (s) => { s.quirks.createDrops = ["BillWithParent"]; }, fails: ["create_student"] },
@@ -158,6 +166,9 @@ const CASES: Case[] = [
   { name: "the private note isn't kept", set: (s) => { s.quirks.keepPrivateNote = false; }, fails: ["invoice_note"] },
   { name: "the invoice is emailed", set: (s) => { s.quirks.invoiceEmailStatus = "EmailSent"; }, fails: ["invoice_no_email"] },
   { name: "a void is refused", set: (s) => { s.onApiRequest = (c) => { s.invoiceFault = c.query.get("operation") === "void" ? "6000" : null; }; }, fails: ["invoice_void", "all_inactive"] },
+  { name: "a customer with an open balance is made inactive", set: (s) => { s.quirks.inactiveWithBalance = null; }, fails: ["inactive_with_balance"] },
+  { name: "a family is made inactive while a customer under it is active", set: (s) => { s.quirks.inactiveWithActiveUnder = null; }, fails: ["family_inactive_while_under"] },
+  { name: "the invoice with a bill-to email carries a link that isn't to QuickBooks' payment page", set: (s) => { s.quirks.invoiceLinkHost = "pay.example.net"; }, fails: ["pay_link_probe"] },
   { name: "a family can't be made inactive", set: (s) => { s.onApiRequest = (c) => { s.updateFault = /"Active":false/.test(c.body) && nameOf(s, c.body)?.endsWith("family B") ? "6000" : null; }; }, fails: ["all_inactive"] },
 ];
 
@@ -202,23 +213,36 @@ describe("each request read as not answering as the portal expects", () => {
     expect(byKey.invoices_list_form).toMatchObject({ outcome: "as_expected", learned: { form: "one_at_a_time", refusal: "http_400" } });
   });
 
-  it("notes, and doesn't fail, a company that gives no Pay link: QuickBooks gives one only when it takes payments online", async () => {
+  it("notes, and doesn't fail, its own invoice without a Pay link, and no longer says the company may not take payments when others carry one", async () => {
     await checkCompany(stub);
-    stub.quirks.invoiceLinkHost = null;
     expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
     const { byKey } = await lastRun();
-    expect(byKey.pay_links).toMatchObject({ outcome: "learned", code: "no_link", learned: { ownLinked: false } });
-    expect(EXPECTATIONS.find((x) => x.key === "pay_links")!.learned(byKey.pay_links!.learned)).toContain("this company may not");
+    expect(byKey.pay_links).toMatchObject({ outcome: "learned", code: "no_link", learned: { ownLinked: false, withLink: 2 } });
+    const words = EXPECTATIONS.find((x) => x.key === "pay_links")!.learned(byKey.pay_links!.learned);
+    expect(words).not.toContain("may not");
+    expect(words).toContain("so the company does take payments online");
+    expect(EXPECTATIONS.find((x) => x.key === "pay_link_probe")!.learned(byKey.pay_link_probe!.learned)).toContain("only to an invoice with an email address");
   });
 
-  it("notes what QuickBooks does about inactive customers either way", async () => {
+  it("says a company whose invoices carry no Pay link at all may not take payments online", async () => {
     await checkCompany(stub);
-    stub.quirks.inactiveWithBalance = "6540";
-    stub.inactiveTakesChildren = true;
+    stub.quirks.invoiceLinkHost = null;
+    stub.invoices = stub.invoices.map((i) => Object.fromEntries(Object.entries(i).filter(([k]) => k !== "InvoiceLink")));
     expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
     const { byKey } = await lastRun();
-    expect(byKey.inactive_with_balance).toMatchObject({ outcome: "learned", learned: { code: "fault_6540" } });
-    expect(byKey.inactive_children).toMatchObject({ outcome: "as_expected", learned: { childrenInactive: true } });
+    expect(byKey.pay_link_probe).toMatchObject({ outcome: "learned", learned: { plainLinked: false, emailLinked: false } });
+    expect(EXPECTATIONS.find((x) => x.key === "pay_links")!.learned(byKey.pay_links!.learned)).toContain("only when the company takes payments online");
+  });
+
+  it("finds it not as expected when QuickBooks takes a family with customers under it active, or a customer with a balance", async () => {
+    await checkCompany(stub);
+    stub.quirks.inactiveWithBalance = null;
+    stub.inactiveTakesChildren = true;
+    expect(await run()).toMatchObject({ ok: true, outcome: "not_as_expected" });
+    const { byKey } = await lastRun();
+    expect(byKey.inactive_with_balance).toMatchObject({ outcome: "not_as_expected", learned: { code: "accepted" } });
+    expect(byKey.family_inactive_while_under).toMatchObject({ outcome: "not_as_expected", learned: { code: "accepted", childrenInactive: true } });
+    expect(byKey.family_inactive_after).toMatchObject({ outcome: "not_run", code: "needs_earlier" });
     expect(checkCustomers().every((c) => c.Active === false)).toBe(true);
   });
 });
@@ -228,7 +252,9 @@ describe("the writes are only for an Intuit sandbox company", () => {
     await checkCompany(stub, { environment: "production" });
     asStaff(admin);
     const r = await runCheckAction();
+    // Every read answered as expected, but none of the changes was tried: said as a pass, not as needing attention.
     expect(r).toMatchObject({ ok: true });
+    expect(r).not.toHaveProperty("attention");
     expect(posts()).toEqual([]);
     const { run: last, byKey } = await lastRun();
     expect(last).toMatchObject({ environment: "production", writes: false });
@@ -465,6 +491,8 @@ describe("who may run it, and where it is said", () => {
     const html = await renderPage(CheckRequestsPage);
     expect(html).toContain("Not as expected");
     expect(html).toContain("This is a change to the portal for whoever maintains it");
+    // The results are a table of its own, whose result words are kept whole (booster.css, .check-results).
+    expect(html).toContain('class="table check-results"');
   });
 });
 
@@ -489,3 +517,14 @@ function everyWrite(r: CheckRun, family: string, student: string, invoice: strin
     () => checkVoidInvoice(r, { qboId: invoice }, "0"),
   ];
 }
+
+describe("the action's answer is a Done only when every request answered as expected", () => {
+  it("needs attention, not Done, when a request didn't answer as the portal expects", async () => {
+    await checkCompany(stub);
+    stub.quirks.duplicateCode = "6000";
+    asStaff(admin);
+    expect(await runCheckAction()).toMatchObject({ ok: true, attention: true, message: expect.stringContaining("didn't answer as the portal expects") });
+    stub.quirks.duplicateCode = "6240";
+    expect(await runCheckAction()).toEqual({ ok: true, message: expect.stringContaining("every request answered as the portal expects") });
+  });
+});

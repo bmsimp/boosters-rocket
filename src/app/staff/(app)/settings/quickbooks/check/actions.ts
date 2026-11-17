@@ -6,7 +6,8 @@ import { runSandboxCheck } from "@/lib/quickbooks/sandbox-check/run";
 import { checkReadiness, NOT_READY_WORDS } from "@/lib/quickbooks/sandbox-check/view";
 
 const P = "Settings.QuickBooks.ReadWrite" as const;
-type Result = { ok: true; message: string } | { ok: false; errors: string[] };
+/** `attention`: the check finished, or stopped, with something to look at: said as needing attention, never as done. */
+type Result = { ok: true; message: string; attention?: true } | { ok: false; errors: string[] };
 
 /**
  * Runs the whole check of the portal's QuickBooks requests (src/lib/quickbooks/sandbox-check/run.ts). Admin only. It
@@ -23,6 +24,7 @@ export const runCheckAction = staffAction(P, async (ctx): Promise<Result> => {
   if (!r.ok) return { ok: false, errors: [r.reason === "running" ? "A check is running already. Wait for it to finish, then reload the page." : NOT_READY_WORDS.not_connected] };
   return {
     ok: true,
+    ...(r.outcome === "passed" ? {} : { attention: true as const }),
     message: r.outcome === "passed" ? "The check is done: every request answered as the portal expects. The results are below."
       : r.outcome === "not_as_expected" ? "The check is done, and some requests didn't answer as the portal expects. The results are below."
         : r.outcome === "incomplete" ? "The check is done, but some changes weren't tried. The results below say which and why; run it again once that is put right."
