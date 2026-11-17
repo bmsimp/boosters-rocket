@@ -3,6 +3,10 @@
 # Container Registry as ghcr.io/<owner>/<repository>, tagged with the release's version, the commit it was built from
 # (the Health page shows the same twelve characters) and, unless the release is a pre-release, stable.
 #
+# Nothing is built until CI (.github/workflows/ci.yml: lint, typecheck, every test, the browser suite, the client
+# bundle and image checks) has finished green on the release's own commit: the first job asks GitHub for that run and
+# stops the release when there is none, so stable never moves to a commit whose tests didn't pass (v1 spec §14).
+#
 # The owner and the repository come from the workflow's own context, so a fork publishes under its own name. The only
 # credential is the token GitHub gives this run, allowed to write packages and nothing else. Every action is pinned to
 # a commit; .github/dependabot.yml proposes new ones.
@@ -13,16 +17,37 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
+  ci-passed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: CI passed on the release's commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" --jq '.total_count')"
+          if [ "$passed" -lt 1 ]; then
+            echo "CI hasn't passed on ${GITHUB_SHA:0:12}, the commit this release names. Release a commit CI has passed on (a merge to main), or wait for its run to finish green, then publish the release again." >&2
+            exit 1
+          fi
+          echo "CI passed on ${GITHUB_SHA:0:12}."
+
   image:
+    needs: ci-passed
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
     env:
       REGISTRY: ghcr.io
       TAG_NAME: ${{ github.event.release.tag_name }}

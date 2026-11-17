@@ -135,7 +135,9 @@ describe("the release workflow", () => {
 
   it("runs when a release is published, may write packages and read the code, and nothing more", () => {
     expect(release).toMatch(/^on:\n {2}release:\n {4}types: \[published\]/m);
-    expect(release).toMatch(/^permissions:\n {2}contents: read\n {2}packages: write\n\n/m);
+    expect(release).toMatch(/^permissions:\n {2}contents: read\n\n/m);
+    // Per job: the CI check may read CI's runs, the image job may write packages (tests/unit/release-workflow.test.ts).
+    expect([...release.matchAll(/^ {6}(\w+): (read|write)$/gm)].map((m) => `${m[1]}: ${m[2]}`)).toEqual(["actions: read", "contents: read", "packages: write"]);
   });
 
   it("pins every action it uses to a commit", () => {
@@ -155,7 +157,7 @@ describe("the release workflow", () => {
   it("takes the registry path from the workflow's context and uses only the token the run is given", () => {
     expect(release).toContain('image="${REGISTRY}/${GITHUB_REPOSITORY,,}"');
     expect(release).not.toMatch(/ghcr\.io\/[a-z0-9]/i);
-    expect([...release.matchAll(/\$\{\{\s*secrets\.(\w+)/g)].map((m) => m[1])).toEqual(["GITHUB_TOKEN"]);
+    expect([...new Set([...release.matchAll(/\$\{\{\s*secrets\.(\w+)/g)].map((m) => m[1]))]).toEqual(["GITHUB_TOKEN"]);
     expect(release).toContain('tags=("$VERSION" "$COMMIT")');
     expect(release).toMatch(/if \[ "\$PRERELEASE" != "true" \]; then tags\+=\(stable\); fi/);
   });
