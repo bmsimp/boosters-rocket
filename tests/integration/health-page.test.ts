@@ -9,6 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboConnection, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
@@ -24,12 +25,15 @@ import { BACKUP_KEY } from "@/lib/health/backup";
 import { BUILD_VERSION } from "@/lib/health/version";
 import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
+import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "@/lib/jobs/marks";
+import { BUYOUT_CHECK_LATE_MS } from "@/lib/health/job-lines";
 import { patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
 import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
+import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helpers/qbo-stub";
 
@@ -62,7 +66,7 @@ describe("the health page", () => {
   it("on a portal that was just installed, says in plain words what isn't set up yet", async () => {
     await admin();
     const lines = await healthReport(NOW);
-    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "mail", "forms", "parents", "backup", "version"]);
+    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "backup", "version"]);
     expect(line(lines, "forms")).toMatchObject({ state: "off", word: "Not set up" });
     expect(line(lines, "database")).toMatchObject({ state: "ok", word: "Working" });
     expect(line(lines, "worker")).toMatchObject({ state: "attention", times: [{ label: "Last woke", at: null }] });
@@ -96,9 +100,10 @@ describe("the health page", () => {
     // Forms set up, and Documenso answered a call (tests/integration/forms-staff.test.ts has the line's other states).
     await connectForms({ origin: "https://sign.club.example", token: "api_made_up_for_the_health_page" });
     await noteApiOk();
-    await runDueJobs(); // a wake: the clean-up, the token refresh and the roster read all run
-    // The read of every family's invoices needs a membership shape, which this company has none of: one is recorded as done.
+    // The read of every family's invoices needs a membership shape, which this company has none of: one is recorded as
+    // done, and the wake's check of the buy-out invoices follows it.
     await db.insert(jobRun).values({ job: MONEY_JOB, finishedAt: new Date(), outcome: "ok", startedBy: "worker" });
+    await runDueJobs(); // a wake: the clean-up, the token refresh, the roster read, the volunteer reminders and the buy-out check all run
     const lines = await healthReport();
     for (const l of lines) expect(l.state, `${l.key}: ${l.says} ${l.notes.join(" ")}`).toBe("ok");
     expect(line(lines, "worker").says).toBe("Waking every minute to run the scheduled jobs.");
@@ -271,5 +276,64 @@ describe("the health page", () => {
     const res = await liveness();
     expect(await res.text()).toBe('{"ok":true}');
     expect([...res.headers.keys()].sort()).toEqual(["cache-control", "content-type"]);
+  });
+});
+
+describe("the lines for the worker's jobs with no run history of their own", () => {
+  beforeEach(async () => { await resetDb(); stub.reset(); Object.assign(stub, fznCompany()); });
+
+  it("says how the volunteer reminders stand: off with sign-ins, waiting for mail, never run, working, and what failed", async () => {
+    const reminders = async () => line(await healthReport(NOW), "volunteer_reminders");
+    expect(await reminders()).toMatchObject({ state: "off", word: "Off", fix: { href: "/staff/settings/parents" } });
+    await seedParentSettings(SIGNINS_ON);
+    expect(await reminders()).toMatchObject({ state: "off", word: "Waiting for mail", fix: { href: "/staff/settings/mail" } });
+    await seedWorkingMail();
+    expect(await reminders()).toMatchObject({ state: "off", word: "Not yet run", times: [{ label: "Last looked", at: null }, { label: "Last sent", at: null }, { label: "Last failure", at: null }] });
+    await runDueJobs(); // a wake looks, and has nothing to send
+    const looked = await reminders();
+    expect(looked).toMatchObject({ state: "ok", word: "Working", times: [{ label: "Last looked", at: expect.any(String) }, { label: "Last sent", at: null }, { label: "Last failure", at: null }] });
+    expect(looked.notes).toEqual(["The nudges before a volunteer due date wait until welcome emails are switched on; the reminders the day before a shift go."]);
+
+    // Later wakes, each a second after the one before.
+    const start = Date.now(), wake = (n: number) => new Date(start + n * 1000);
+    await markJob(REMINDERS_MARK, { counts: { sent: 3 }, failed: 2 }, wake(1));
+    const failing = await reminders();
+    expect(failing).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" }, notes: expect.arrayContaining(["The last ones that went: 3 reminders."]) });
+    expect(failing.says).toMatch(/^2 volunteer reminders couldn't be sent at the last try\./);
+    expect(at(failing, "Last sent")).toBe(wake(1).toISOString());
+    await markJob(REMINDERS_MARK, "threw", wake(2));
+    expect((await reminders()).says).toBe("The last try to send volunteer reminders stopped with an error. The worker tries again at its next wake, a minute later.");
+    // A later look with nothing failing is working again; the failure keeps its time.
+    await markJob(REMINDERS_MARK, { counts: { sent: 0 }, failed: 0 }, wake(3));
+    expect(await reminders()).toMatchObject({ state: "ok", times: [{ label: "Last looked", at: wake(3).toISOString() }, { label: "Last sent", at: wake(1).toISOString() }, { label: "Last failure", at: wake(2).toISOString() }] });
+  });
+
+  it("says how the daily check of the buy-out invoices stands: not running, never run, behind a read, working, and what it found", async () => {
+    const check = async () => line(await healthReport(NOW), "buyout_check");
+    expect(await check()).toMatchObject({ state: "off", word: "Not running" });
+    await seedConnected(stub);
+    expect(await check()).toMatchObject({ state: "off", word: "Not yet run", times: [{ label: "Last checked", at: null }, { label: "Last failure", at: null }] });
+    // A read of every family finished a while ago, and the check hasn't followed it.
+    await db.insert(jobRun).values({ job: MONEY_JOB, startedAt: new Date(NOW.getTime() - BUYOUT_CHECK_LATE_MS - 120_000), finishedAt: new Date(NOW.getTime() - BUYOUT_CHECK_LATE_MS - 1000), outcome: "ok", startedBy: "worker" });
+    const behind = await check();
+    expect(behind).toMatchObject({ state: "attention", word: "Needs attention" });
+    expect(behind.says).toMatch(/haven't been checked against it/);
+    await runDueJobs(); // the wake's check follows that read
+    const working = await check();
+    expect(working).toMatchObject({ state: "ok", word: "Working", notes: ["It has found nothing to change so far."] });
+    expect(Date.parse(at(working, "Last checked")!)).toBeGreaterThan(Date.now() - 60_000);
+
+    // What it did last, in words, and a flag of its own waiting for the treasurer.
+    await markJob(BUYOUT_CHECK_MARK, { counts: { paid: 2, flagged: 1, voided: 0, voiding: 0, unflagged: 0 }, failed: 0 }, new Date(Date.now() + 1000));
+    const requirementId = await seedBuyoutRequirement();
+    await seedBuyout({ requirementId, familyQboId: "10", chosenBy: randomUUID(), flag: "missing" });
+    const flagged = await check();
+    expect(flagged).toMatchObject({ state: "attention", fix: { href: "/staff/reconciliation" } });
+    expect(flagged.notes).toEqual([
+      "1 buy-out invoice is flagged and waiting for the club: QuickBooks no longer shows it, or shows it on another customer. The Reconciliation page lists it.",
+      "The last time it changed something: 2 marked paid, 1 flagged for the club.",
+    ]);
+    await markJob(BUYOUT_CHECK_MARK, "threw", new Date(Date.now() + 2000));
+    expect((await check()).says).toBe("The last check of the buy-out invoices stopped with an error. The worker tries again at its next wake, a minute later.");
   });
 });

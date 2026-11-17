@@ -10,6 +10,7 @@ import { sendReviewNotice } from "@/lib/parents/review-notice";
 import { expirePreviousCompany } from "@/lib/parents/company-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
+import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "./marks";
 import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
 import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
 import { runSignedFormsJobs } from "@/lib/signed-forms/worker";
@@ -83,8 +84,10 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   // Documenso; a few go per wake, from 9:00 on the club's clock, so most wakes send nothing and say nothing.
   try {
     const reminders = await sendVolunteerReminders(now);
+    await markJob(REMINDERS_MARK, { counts: { sent: reminders.sent }, failed: reminders.failed }); // for the Health page
     if (reminders.sent + reminders.failed > 0) ran.push({ job: REMINDERS_JOB, ok: reminders.failed === 0 });
   } catch {
+    await markJob(REMINDERS_MARK, "threw");
     ran.push({ job: REMINDERS_JOB, ok: false });
   }
   const conn = await connectionView();
@@ -118,7 +121,12 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   ran.push(...(await moneyJob(now)));
   // Buy-out invoices (src/lib/buyouts/daily-check.ts), once after each run that read every family: compared with the
   // figures it stored. Guarded like the steps above; in this wake's answer only when it marked or flagged something.
-  try { const b = await checkBuyoutInvoices(); if (b.paid + b.flagged + b.voided + b.voiding + b.unflagged > 0) ran.push({ job: BUYOUT_CHECK_JOB, ok: true }); } catch { ran.push({ job: BUYOUT_CHECK_JOB, ok: false }); }
+  // The Health page reads when it last followed a run, and what it did or that it failed (./marks.ts).
+  try {
+    const b = await checkBuyoutInvoices();
+    if (b.ran) await markJob(BUYOUT_CHECK_MARK, { counts: { paid: b.paid, flagged: b.flagged, voided: b.voided, voiding: b.voiding, unflagged: b.unflagged }, failed: 0 });
+    if (b.paid + b.flagged + b.voided + b.voiding + b.unflagged > 0) ran.push({ job: BUYOUT_CHECK_JOB, ok: true });
+  } catch { await markJob(BUYOUT_CHECK_MARK, "threw"); ran.push({ job: BUYOUT_CHECK_JOB, ok: false }); }
   return { ran };
 }
 

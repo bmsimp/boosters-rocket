@@ -24,8 +24,9 @@ const files = (dir: string): string[] => readdirSync(path.resolve(dir), { recurs
  * and why. A change here is a decision, like an entry in ACTION_NAMES.
  */
 const NOT_AUDITED: Record<string, string> = {
-  // Caches: what Documenso last answered, for the Health page.
+  // Caches for the Health page: what an outside service last answered, or what a job last did.
   "src/lib/forms/settings.ts#patchStatus": "a cache: when Documenso last answered, failed or sent a webhook, for the Health page",
+  "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders and the buy-out check last ran, and their counts, for the Health page; what they send or change is audited",
   // Rows a page load makes so that something has an id: nothing is sent or signed.
   "src/lib/forms/my-forms.ts#loadMyForms": "a placeholder: the family's signature requests are made, not opened and with nothing sent, the first time its Forms page is read, so each has an id; the open that makes a document is audited (form.document.create)",
   // Rate-limit counts.

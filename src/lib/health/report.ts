@@ -16,6 +16,7 @@ import { evidenceHealth } from "@/lib/signed-forms/evidence-job";
 import { moneyRunView } from "@/lib/money/sweep";
 import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 import { lastBackup } from "./backup";
+import { buyoutCheckLine, volunteerRemindersLine } from "./job-lines";
 import { BUILD_VERSION } from "./version";
 import { env } from "@/env";
 
@@ -28,7 +29,8 @@ import { env } from "@/env";
  */
 export type HealthState = "ok" | "attention" | "off";
 export type HealthLine = {
-  key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "backup" | "version";
+  key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "backup" | "version"
+    | "buyout_check" | "volunteer_reminders";
   title: string;
   /** "ok": working. "attention": something a person should look at. "off": not set up or switched off, which may be by choice. */
   state: HealthState;
@@ -135,6 +137,9 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   lines.push({ key: "money", title: "Every family's invoices", ...money, times: moneyTimes, fix: money.state === "attention" ? moneyFix : null,
     notes: [...(moneyRun.last && !moneyRun.last.ok && moneyRun.last.detail ? [moneyRun.last.detail] : []), ...(moneyRun.asked ? ["A staff member asked for a read; the worker starts it within a minute."] : [])] });
 
+  // The daily check of the buy-out invoices, which follows that read (./job-lines.ts).
+  lines.push(await buyoutCheckLine(conn, now));
+
   const mailTimes = [{ label: "Last sent", at: mail.status.lastSuccessAt }, { label: "Last failure", at: mail.status.lastFailureAt }];
   const mailFix = { href: "/staff/settings/mail", label: "Open mail settings" };
   const failing = Boolean(mail.status.lastFailureAt && (!mail.status.lastSuccessAt || mail.status.lastFailureAt > mail.status.lastSuccessAt));
@@ -148,6 +153,9 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   } else {
     lines.push({ key: "mail", title: "Outgoing mail", state: "ok", word: "Working", says: `Tested and working, sending ${mail.config.method === "graph" ? "through Microsoft 365" : "by SMTP"}.`, times: mailTimes, notes: [], fix: null });
   }
+
+  // The volunteer reminders the worker sends (./job-lines.ts).
+  lines.push(await volunteerRemindersLine({ signin: parents.signin, welcome: parents.welcome, mailWorking: mail.working }));
 
   // Forms: the club's Documenso, from what the portal recorded of its own calls (this page calls nothing outside the
   // portal). Documenso can't be asked whether its webhook is set up, so the line shows when one last arrived.
