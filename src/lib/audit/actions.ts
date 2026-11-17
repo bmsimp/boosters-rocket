@@ -113,6 +113,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "season.requirement.form.attach": "Documenso template attached to a form requirement",
   "season.requirement.cover": "Who a requirement covers changed",
   "season.requirement.item": "A payment requirement's product or service chosen",
+  "season.requirement.move": "Requirement moved within its step",
   "season.requirement.remove": "Requirement removed",
   "season.requirement.tick": "Checklist item ticked off",
   "season.requirement.untick": "Checklist tick removed",

@@ -4,7 +4,7 @@ import { staffAction, type StaffCtx } from "@/lib/guards";
 import type { Permission } from "@/lib/permissions/registry";
 import { isUuid } from "@/lib/seasons/ids";
 import {
-  addRequirement, addStep, createSeason, moveStep, removeRequirement, removeStep, renameSeason, setCoverage, setCurrentSeason, updateRequirement, updateStep,
+  addRequirement, addStep, createSeason, moveRequirement, moveStep, removeRequirement, removeStep, renameSeason, setCoverage, setCurrentSeason, updateRequirement, updateStep,
   type RequirementInput,
 } from "@/lib/seasons/setup";
 import { BULK_MAX, removeWaiver, setTicks, waiveRequirement } from "@/lib/seasons/staff-progress";
@@ -128,6 +128,15 @@ export const updateRequirementAction = staffAction(SETUP, async (ctx, requiremen
   if (!r.ok) return r;
   refresh();
   return { ok: true, message: "Saved." };
+});
+
+export const moveRequirementAction = staffAction(SETUP, async (ctx, requirementId: string, direction: "earlier" | "later"): Promise<Done> => {
+  if (!uuid(requirementId) || (direction !== "earlier" && direction !== "later")) return NOT_FROM_PAGE;
+  const r = await moveRequirement(requirementId, direction, op(ctx, SETUP));
+  if (!r.ok) return r;
+  if (!r.moved) return { ok: true, message: direction === "earlier" ? "It is first in its step already." : "It is last in its step already." };
+  refresh();
+  return { ok: true, message: "Moved." };
 });
 
 export const setCoverageAction = staffAction(SETUP, async (ctx, requirementId: string, rosterTag: string, covers: "everyone" | "chosen", subjectQboIds: string[]): Promise<Done> => {

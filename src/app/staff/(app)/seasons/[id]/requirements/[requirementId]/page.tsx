@@ -13,7 +13,7 @@ import { Notice } from "@/app/components/notice";
 import { dateWords, shiftTimeWords } from "@/lib/volunteer/clock";
 import { shiftsCountingToward } from "@/lib/volunteer/setup";
 import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
-import { removeRequirementAction, setCoverageAction, updateRequirementAction } from "../../../actions";
+import { moveRequirementAction, removeRequirementAction, setCoverageAction, updateRequirementAction } from "../../../actions";
 import { PaymentItemForm } from "../../../payment-item";
 import { chooseItemAction, readItemsAction } from "../../../payment-actions";
 import { FormTemplateBox } from "../../../form-template";
@@ -28,7 +28,7 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
   const found = isUuid(id) && isUuid(requirementId) ? await getRequirementSetup(requirementId) : null;
   // The address names the season too: a requirement asked for under another season isn't there.
   if (!found || found.season.id !== id) notFound();
-  const { requirement: r, step, season, recorded } = found;
+  const { requirement: r, step, season, recorded, place } = found;
   const canChange = can(ctx.effective, "Season.Steps.ReadWrite");
   // The tag first: a change of company before the roster is read leaves it the older one, and the save is refused.
   const rosterTag = await currentRosterTag();
@@ -107,6 +107,16 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
       )}
 
       {r.kind === "volunteer" && <BuyoutBox requirementId={r.id} unit={r.amountUnit} rosterTag={rosterTag} canChange={canChange} />}
+
+      {canChange && place.of > 1 && (
+        <section className="box" aria-labelledby="order-h"><h2 id="order-h">Order</h2>
+          <p>{place.index + 1} of the {place.of} requirements in {step.name}. Families read them in this order.</p>
+          <div className="row-actions">
+            {place.index > 0 && <OneButton label="Move earlier" pendingLabel="Moving…" act={moveRequirementAction.bind(null, r.id, "earlier")} />}
+            {place.index < place.of - 1 && <OneButton label="Move later" pendingLabel="Moving…" act={moveRequirementAction.bind(null, r.id, "later")} />}
+          </div>
+        </section>
+      )}
 
       {canChange && (
         <section className="box" aria-labelledby="remove-h"><h2 id="remove-h">Remove</h2>

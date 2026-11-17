@@ -57,18 +57,22 @@ export async function getSeasonSetup(seasonId: string, tx?: Tx): Promise<SeasonS
   })) };
 }
 
-export type RequirementSetup = { requirement: SetupRequirement; step: { id: string; name: string }; season: { id: string; name: string; isCurrent: boolean }; recorded: number };
-/** One requirement with the step and season it is in, and how many ticks and waivers are recorded against it; null when there is none. */
+export type RequirementSetup = { requirement: SetupRequirement; step: { id: string; name: string }; season: { id: string; name: string; isCurrent: boolean }; recorded: number;
+  /** Where it stands among its step's requirements: `index` from 0, of `of`. */
+  place: { index: number; of: number } };
+/** One requirement with the step and season it is in, its place in the step, and how many ticks and waivers are recorded against it; null when there is none. */
 export async function getRequirementSetup(requirementId: string, tx?: Tx): Promise<RequirementSetup | null> {
   const q = tx ?? db;
   const [row] = await q.select({ r: requirement, step: { id: seasonStep.id, name: seasonStep.name }, season: { id: season.id, name: season.name, isCurrent: season.isCurrent } })
     .from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).innerJoin(season, eq(seasonStep.seasonId, season.id)).where(eq(requirement.id, requirementId));
   if (!row) return null;
-  const [covers, [recorded]] = await Promise.all([
+  const [covers, [recorded], inStep] = await Promise.all([
     loadCovers([row.r.id], null, tx),
     q.select({ n: count() }).from(requirementProgress).where(eq(requirementProgress.requirementId, row.r.id)),
+    requirementsOf([row.step.id], tx),
   ]);
-  return { requirement: { ...toRequirement(row.r, covers.get(row.r.id) ?? []), position: row.r.position }, step: row.step, season: row.season, recorded: recorded?.n ?? 0 };
+  return { requirement: { ...toRequirement(row.r, covers.get(row.r.id) ?? []), position: row.r.position }, step: row.step, season: row.season, recorded: recorded?.n ?? 0,
+    place: { index: inStep.findIndex((x) => x.id === row.r.id), of: inStep.length } };
 }
 
 const cleanName = (raw: string, what: string, max: number): { ok: true; value: string } | Refused => {
@@ -257,6 +261,29 @@ function checkRequirement(kind: RequirementKind, input: RequirementInput): { ok:
   if (input.amount === null || !Number.isInteger(input.amount) || input.amount < 1 || input.amount > AMOUNT_MAX) return refuse(`Say how much volunteering: a whole number from 1 to ${AMOUNT_MAX}.`);
   if (input.amountUnit !== "shifts" && input.amountUnit !== "hours") return refuse("Say whether the amount is in shifts or in hours.");
   return { ok: true, value: { title: title.value, required: input.required, amount: input.amount, amountUnit: input.amountUnit, dueOn } };
+}
+
+/**
+ * Moves a requirement one place earlier or later within its step, the order families and staff read it in. At the end
+ * already, nothing changes and nothing is recorded.
+ */
+export async function moveRequirement(requirementId: string, direction: "earlier" | "later", o: SeasonOp): Promise<Done<{ moved: boolean }>> {
+  return db.transaction(async (tx) => {
+    const [r] = await tx.select().from(requirement).where(eq(requirement.id, requirementId));
+    if (!r) return refuse(GONE);
+    await tx.select({ id: seasonStep.id }).from(seasonStep).where(eq(seasonStep.id, r.stepId)).for("update"); // one reorder of a step at a time
+    const rows = await requirementsOf([r.stepId], tx);
+    const from = rows.findIndex((x) => x.id === r.id), to = direction === "earlier" ? from - 1 : from + 1;
+    if (from < 0) return refuse(GONE);
+    if (to < 0 || to >= rows.length) return { ok: true as const, moved: false };
+    const order = rows.map((x) => x.id);
+    [order[from], order[to]] = [order[to]!, order[from]!];
+    for (const [position, id] of order.entries()) await tx.update(requirement).set({ position, updatedAt: new Date() }).where(eq(requirement.id, id));
+    const titles = (ids: string[]) => ids.map((id) => rows.find((x) => x.id === id)!.title);
+    await writeAudit({ actor: o.actor, action: "season.requirement.move", permission: o.permission, targetType: "requirement", targetId: r.id, ip: o.ip,
+      before: { order: titles(rows.map((x) => x.id)) }, after: { order: titles(order) } }, tx);
+    return { ok: true as const, moved: true };
+  });
 }
 
 /** A new requirement at the end of a step, asked of everyone until a list is chosen. Only kinds that can be met today (./kinds.ts) can be made. */
