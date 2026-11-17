@@ -110,15 +110,15 @@ export async function resetDb() {
  * Resolves once another session on this file's database is waiting for a lock (a row, a table, an advisory lock): for a
  * test that proves one piece of work waits for another. A sleep guesses how long the second takes to reach the lock,
  * and on a loaded machine guesses short; this asks Postgres. Only this file uses its database, so the waiter is the
- * test's own.
+ * test's own. `waiters` is how many sessions must be waiting at once, for a test that starts several.
  */
-export async function untilALockIsAwaited(timeoutMs = 15_000): Promise<void> {
+export async function untilALockIsAwaited(timeoutMs = 15_000, waiters = 1): Promise<void> {
   const until = Date.now() + timeoutMs;
   for (;;) {
     const [row] = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM pg_stat_activity
       WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock'`);
-    if (row!.n > 0) return;
-    if (Date.now() > until) throw new Error(`Nothing was waiting for a lock after ${timeoutMs} ms.`);
+    if (row!.n >= waiters) return;
+    if (Date.now() > until) throw new Error(waiters === 1 ? `Nothing was waiting for a lock after ${timeoutMs} ms.` : `Fewer than ${waiters} sessions were waiting for a lock after ${timeoutMs} ms.`);
     await new Promise((r) => setTimeout(r, 20));
   }
 }

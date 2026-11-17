@@ -7,7 +7,7 @@
 import "server-only";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { env } from "@/env";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import { guardian, parent, requirement, requirementReminder, season, seasonStep, setting } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { currentBrand, sendMail } from "@/lib/mail/send";
@@ -39,16 +39,24 @@ export type DueRemindersRecord = { day: string; at: string; sent: number; failed
 
 const isIso = (v: unknown): v is string => typeof v === "string" && !Number.isNaN(Date.parse(v));
 /** The record, or null when there is none or it can't be read. */
-export async function lastDueReminders(): Promise<DueRemindersRecord | null> {
-  const [row] = await db.select().from(setting).where(eq(setting.key, DUE_REMINDERS_KEY));
+export async function lastDueReminders(tx?: Tx): Promise<DueRemindersRecord | null> {
+  const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, DUE_REMINDERS_KEY));
   const v = row?.value as Partial<DueRemindersRecord> | undefined;
   if (!v || typeof v.day !== "string" || !isIso(v.at) || typeof v.sent !== "number" || typeof v.failed !== "number") return null;
   return { day: v.day, at: v.at, sent: v.sent, failed: v.failed, lastSentAt: isIso(v.lastSentAt) ? v.lastSentAt : null, lastFailedAt: isIso(v.lastFailedAt) ? v.lastFailedAt : null };
 }
 
-/** Notes the day's look: once when the club's day is new, and again when this wake sent or failed something. */
-async function noteLook(today: string, counts: { sent: number; failed: number }, now: Date): Promise<void> {
-  const last = await lastDueReminders();
+/** Two wakes noting at once take turns: each reads the record the other wrote, so neither's counts are lost. */
+const RECORD_LOCK = sql`SELECT pg_advisory_xact_lock(hashtext('booster.due_reminders_record'))`;
+
+/**
+ * Notes the day's look, in a transaction of its own that the caller opens: once when the club's day is new, and again
+ * when this wake sent or failed something. It reads and writes the record holding RECORD_LOCK until that transaction
+ * ends, so two wakes at once add up. sendDueReminders() is its caller (exported for the test of two wakes at once).
+ */
+export async function noteLook(tx: Tx, today: string, counts: { sent: number; failed: number }, now: Date): Promise<void> {
+  await tx.execute(RECORD_LOCK);
+  const last = await lastDueReminders(tx);
   if (last?.day === today && counts.sent + counts.failed === 0) return;
   const sameDay = last?.day === today;
   const value: DueRemindersRecord = {
@@ -57,7 +65,7 @@ async function noteLook(today: string, counts: { sent: number; failed: number },
     lastSentAt: counts.sent > 0 ? now.toISOString() : (last?.lastSentAt ?? null),
     lastFailedAt: counts.failed > 0 ? now.toISOString() : (last?.lastFailedAt ?? null),
   };
-  await db.insert(setting).values({ key: DUE_REMINDERS_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
+  await tx.insert(setting).values({ key: DUE_REMINDERS_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
 }
 
 /**
@@ -148,6 +156,6 @@ export async function sendDueReminders(now: Date = new Date()): Promise<{ sent: 
     if (out.ok) sent++; else failed++;
   }
   if (sent + failed > 0) await writeAudit({ actor: ACTOR, action: "season.due_reminders.sent", targetType: "requirement_reminder", after: { clubDate: day.today, sent, failed } });
-  await noteLook(day.today, { sent, failed }, now);
+  await db.transaction((tx) => noteLook(tx, day.today, { sent, failed }, now));
   return { sent, failed };
 }

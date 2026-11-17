@@ -14,9 +14,9 @@ import { runDueJobs } from "@/lib/jobs/runner";
 import { formatMoney } from "@/lib/money/cents";
 import { getParentSettings, putParentSettings } from "@/lib/parents/settings";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
-import { DUE_REMINDERS_JOB, lastDueReminders, sendDueReminders } from "@/lib/seasons/due-reminders";
+import { DUE_REMINDERS_JOB, DUE_REMINDERS_KEY, lastDueReminders, noteLook, sendDueReminders } from "@/lib/seasons/due-reminders";
 import { FIGURES_TELL_MS } from "@/lib/seasons/due-reminder-rules";
-import { resetDb, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { ageMoney } from "../helpers/money";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { TRIP_DEPOSIT_ITEM } from "../helpers/season";
@@ -201,6 +201,28 @@ describe("the reminders before a due date", () => {
     expect((await db.select().from(requirementReminder)).map((r) => r.outcome)).toEqual(["sent", "sent", "sent"]);
     // What the Health page reads: the day, and what went and failed on it.
     expect(await lastDueReminders()).toMatchObject({ day: "2027-03-10", sent: 3, failed: 2, lastSentAt: "2027-03-10T09:46:00.000Z", lastFailedAt: "2027-03-10T09:30:00.000Z" });
+  });
+
+  it("adds up two wakes that note the day at once: neither's counts are lost", async () => {
+    // Yesterday's record: whichever wake writes first starts the new day, and the other adds to it.
+    await db.insert(setting).values({ key: DUE_REMINDERS_KEY,
+      value: { day: "2027-03-09", at: "2027-03-09T09:31:00.000Z", sent: 5, failed: 4, lastSentAt: "2027-03-09T09:30:00.000Z", lastFailedAt: "2027-03-09T09:31:00.000Z" } });
+    // The record's row is held, so both wakes are at the record before either can write: the overlap is made, not hoped for.
+    let release!: () => void, holding!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const holds = new Promise<void>((resolve) => { holding = resolve; });
+    const holder = db.transaction(async (tx) => {
+      await tx.select().from(setting).where(eq(setting.key, DUE_REMINDERS_KEY)).for("update");
+      holding();
+      await held;
+    });
+    await holds;
+    const one = db.transaction((tx) => noteLook(tx, "2027-03-10", { sent: 1, failed: 0 }, at("2027-03-10T09:30:00Z")));
+    const two = db.transaction((tx) => noteLook(tx, "2027-03-10", { sent: 0, failed: 2 }, at("2027-03-10T09:31:00Z")));
+    await untilALockIsAwaited(15_000, 2);
+    release();
+    await Promise.all([holder, one, two]);
+    expect(await lastDueReminders()).toMatchObject({ day: "2027-03-10", sent: 1, failed: 2, lastSentAt: "2027-03-10T09:30:00.000Z", lastFailedAt: "2027-03-10T09:31:00.000Z" });
   });
 
   it("runs on the worker's wake, which says so when it sent something", async () => {

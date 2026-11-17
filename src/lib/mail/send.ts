@@ -22,12 +22,12 @@ async function deliver(stored: StoredMailConfig, m: MailMessage, o: { purpose: M
   } catch (e) {
     // Only MailSendError's sentence is kept; any other error could carry anything, so it becomes a fixed sentence.
     const error = e instanceof MailSendError ? e.message : "Sending failed for an unexpected reason.";
-    await patchMailStatus({ lastFailureAt: new Date().toISOString(), lastError: error });
+    await patchMailStatus({ lastFailureAt: new Date().toISOString(), lastError: error, lastFailed: true });
     await writeAudit({ actor: o.actor ?? MAIL_ACTOR, action: "mail.failed", targetType: "setting", targetId: MAIL_KEY,
       after: { purpose: o.purpose, method: stored.method, to: m.to, error }, ip: o.ip ?? null });
     return { ok: false, error };
   }
-  await patchMailStatus({ lastSuccessAt: new Date().toISOString() });
+  await patchMailStatus({ lastSuccessAt: new Date().toISOString(), lastFailed: false });
   return { ok: true };
 }
 

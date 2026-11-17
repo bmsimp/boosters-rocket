@@ -25,14 +25,14 @@ import { BACKUP_KEY } from "@/lib/health/backup";
 import { BUILD_VERSION } from "@/lib/health/version";
 import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
-import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "@/lib/jobs/marks";
+import { BUYOUT_CHECK_MARK, markJob, readMark, REMINDERS_MARK } from "@/lib/jobs/marks";
 import { BUYOUT_CHECK_LATE_MS } from "@/lib/health/job-lines";
 import { patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
 import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
-import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -346,6 +346,37 @@ describe("the lines for the worker's jobs with no run history of their own", () 
     expect((await reminders()).says).toMatch(/^1 volunteer reminder couldn't be sent at the last try\./);
     await markJob(REMINDERS_MARK, { counts: { sent: 1 }, failed: 0 }, wake(6));
     expect(await reminders()).toMatchObject({ state: "ok", word: "Working" });
+  });
+
+  it("takes the latest word from the mark itself: two wakes in one millisecond, and two marking at once", async () => {
+    await seedParentSettings(SIGNINS_ON);
+    await seedWorkingMail();
+    const reminders = async () => line(await healthReport(NOW), "volunteer_reminders");
+    // One millisecond, in either order: equal times can't say which came last, the mark does.
+    const t = new Date();
+    await markJob(REMINDERS_MARK, { counts: { sent: 1 }, failed: 0 }, t);
+    await markJob(REMINDERS_MARK, { counts: { sent: 0 }, failed: 1 }, t);
+    expect(await reminders()).toMatchObject({ state: "attention", word: "Needs attention" });
+    await markJob(REMINDERS_MARK, { counts: { sent: 1 }, failed: 0 }, t);
+    expect(await reminders()).toMatchObject({ state: "ok", word: "Working" });
+
+    // Two wakes at once, with the mark's row held so both are at it before either writes: neither's mark is lost.
+    let release!: () => void, holding!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const holds = new Promise<void>((resolve) => { holding = resolve; });
+    const holder = db.transaction(async (tx) => {
+      await tx.select().from(setting).where(eq(setting.key, REMINDERS_MARK)).for("update");
+      holding();
+      await held;
+    });
+    await holds;
+    const later = (s: number) => new Date(t.getTime() + s * 1000);
+    const sending = markJob(REMINDERS_MARK, { counts: { sent: 2 }, failed: 0 }, later(1));
+    const throwing = markJob(REMINDERS_MARK, "threw", later(2));
+    await untilALockIsAwaited(15_000, 2);
+    release();
+    await Promise.all([holder, sending, throwing]);
+    expect(await readMark(REMINDERS_MARK)).toMatchObject({ didAt: later(1).toISOString(), did: { sent: 2 }, failedAt: later(2).toISOString(), failure: { kind: "threw" } });
   });
 
   it("says how the daily check of the buy-out invoices stands: not running, never run, behind a read, working, and what it found", async () => {

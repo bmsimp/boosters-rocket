@@ -166,12 +166,16 @@ describe("the release workflow", () => {
 describe("the dependency updates", () => {
   const dependabot = read(".github/dependabot.yml");
 
-  it("watch the packages, the Dockerfile, the installation's images and the workflows, monthly and grouped", () => {
+  it("watch the packages, the Dockerfile, the installation's images and the workflows, monthly", () => {
     const blocks = dependabot.split(/\n {2}- package-ecosystem: /).slice(1);
     expect(blocks.map((b) => `${b.split("\n")[0]} ${/directory: (\S+)/.exec(b)?.[1]}`)).toEqual(["npm /", "docker /", "docker-compose /deploy", "github-actions /"]);
-    for (const b of blocks) {
-      expect(b).toContain("interval: monthly");
-      expect(b).toMatch(/groups:\n\s+\w+:\n\s+patterns: \["\*"\]/);
-    }
+    for (const b of blocks) expect(b).toContain("interval: monthly");
+  });
+
+  // The owner's choice (2026-11-17): one pull request for each package, image and action, never bundled. A `groups`
+  // key anywhere, on any entry, would bundle them again.
+  it("never group updates: each package, image and action comes as its own pull request", () => {
+    expect(dependabot).not.toMatch(/^\s*(multi-ecosystem-)?groups\s*:/m);
+    expect(dependabot).not.toMatch(/^\s*group\s*:/m);
   });
 });

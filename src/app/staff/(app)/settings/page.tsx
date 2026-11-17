@@ -9,7 +9,7 @@ import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { getParentSettings } from "@/lib/parents/settings";
 import { peopleWithAccess } from "@/lib/parents/switches";
-import { formsSummary } from "@/lib/forms/settings";
+import { apiFailing, formsSummary } from "@/lib/forms/settings";
 import { StateWords } from "@/app/components/state-words";
 import { LocalTime } from "@/app/components/local-time";
 import { CalendarDate } from "@/app/components/calendar-date";
@@ -123,7 +123,7 @@ const LOADERS: Record<SettingsKey, () => Promise<Summary>> = {
   },
   async forms() {
     const f = await formsSummary();
-    const failing = Boolean(f.status.lastApiFailureAt && (!f.status.lastApiOkAt || f.status.lastApiFailureAt > f.status.lastApiOkAt));
+    const failing = apiFailing(f.status);
     const words = f.origin === null ? "Not set up yet" : !f.tokenReadable ? "Saved, but this server can't read the API token" : failing ? "The latest call to Documenso failed" : f.status.lastApiOkAt ? "Connected" : "Saved, but not checked yet";
     return {
       state: f.origin !== null && f.tokenReadable && !failing && f.status.lastApiOkAt ? "done" : "todo", words, open: "Open forms settings",

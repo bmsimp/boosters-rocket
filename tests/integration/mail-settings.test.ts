@@ -122,6 +122,23 @@ describe("mail settings", () => {
     expect(await mailAttention()).toBeNull();
   });
 
+  it("knows which send came last when sends land in one millisecond, in either order", async () => {
+    await saveMailSettings({ ...smtp, password: "p" }, o);
+    await sendTestMail("admin@example.org", o);
+    const m = { to: "a@example.com", subject: "s", text: "t", html: "h" };
+    // Equal times can't say which came last: what was recorded last does.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      expect(await sendMail(m, { purpose: "welcome" })).toEqual({ ok: true });
+      box.fail = "The mail server refused the username or password.";
+      expect(await sendMail(m, { purpose: "welcome" })).toEqual({ ok: false, error: "The mail server refused the username or password." });
+      expect(await mailAttention()).toMatchObject({ kind: "failing", lastError: "The mail server refused the username or password." });
+      box.fail = null;
+      expect(await sendMail(m, { purpose: "welcome" })).toEqual({ ok: true });
+      expect(await mailAttention()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("says mail isn't set up when nothing is saved", async () => {
     expect(await mailAttention()).toMatchObject({ kind: "not_set_up" });
     expect(await sendMail({ to: "a@example.com", subject: "s", text: "t", html: "h" }, { purpose: "welcome" })).toEqual({ ok: false, error: "Outgoing mail isn't set up." });

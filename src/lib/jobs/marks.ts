@@ -1,8 +1,8 @@
 // What the worker last did in two jobs that keep no job_run row of their own, for the Health page
 // (src/lib/health/job-lines.ts): the volunteer reminders, which look every wake, and the daily check of the buy-out
 // invoices, which follows each read of every family. Counts and times only: never an address, a name or an id.
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { eq, sql } from "drizzle-orm";
+import { db, type Tx } from "@/lib/db/client";
 import { setting } from "@/lib/db/schema";
 
 export const REMINDERS_MARK = "worker.mark.volunteer_reminders";
@@ -24,32 +24,45 @@ export type JobMark = {
   /** When it last failed: it stopped with an error ("threw"), or some of what it tried failed ("some_failed", with how many). */
   failedAt: string | null;
   failure: { kind: "threw" } | { kind: "some_failed"; count: number } | null;
+  /**
+   * Whether the failure is the latest word: set with failedAt, cleared with okAt. Two runs in one millisecond have
+   * equal times, so the order can't be read from them (null in a mark from before it was kept).
+   */
+  failedLast: boolean | null;
 };
-const EMPTY: JobMark = { ranAt: null, okAt: null, didAt: null, did: null, failedAt: null, failure: null };
+const EMPTY: JobMark = { ranAt: null, okAt: null, didAt: null, did: null, failedAt: null, failure: null, failedLast: null };
 
-export async function readMark(key: string): Promise<JobMark | null> {
-  const [row] = await db.select().from(setting).where(eq(setting.key, key));
+export async function readMark(key: string, tx?: Tx): Promise<JobMark | null> {
+  const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, key));
   return row ? { ...EMPTY, ...(row.value as Partial<JobMark>) } : null;
 }
 
+/** Whether the job's latest word is a failure: as marked, or, in a mark from before that was kept, by the times. */
+export const failedLast = (m: JobMark | null): boolean => typeof m?.failedLast === "boolean" ? m.failedLast
+  : Boolean(m?.failedAt && (!m.okAt || m.failedAt > m.okAt));
+
 /**
  * Records one run of a job: `counts` of what it did (all zero when it did nothing) and how many of its tries failed,
- * or "threw" when it stopped with an error. It never throws itself: a mark that can't be written must not stop the
+ * or "threw" when it stopped with an error. Read and written under a lock of its key, so two wakes marking at once
+ * take turns and neither's mark is lost. It never throws itself: a mark that can't be written must not stop the
  * worker's other jobs.
  */
 export async function markJob(key: string, outcome: { counts: Record<string, number>; failed: number } | "threw", now = new Date()): Promise<void> {
   try {
-    const at = now.toISOString();
-    const before = (await readMark(key)) ?? EMPTY;
-    const next: JobMark = { ...before, ranAt: at };
-    if (outcome === "threw") Object.assign(next, { failedAt: at, failure: { kind: "threw" } });
-    else {
-      const did = Object.values(outcome.counts).some((n) => n > 0);
-      if (did) Object.assign(next, { didAt: at, did: outcome.counts });
-      if (outcome.failed > 0) Object.assign(next, { failedAt: at, failure: { kind: "some_failed", count: outcome.failed } });
-      else if (did || before.failure?.kind !== "some_failed") next.okAt = at;
-    }
-    await db.insert(setting).values({ key, value: next }).onConflictDoUpdate({ target: setting.key, set: { value: next, updatedAt: now } });
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`booster.job_mark:${key}`}))`);
+      const at = now.toISOString();
+      const before = (await readMark(key, tx)) ?? EMPTY;
+      const next: JobMark = { ...before, ranAt: at };
+      if (outcome === "threw") Object.assign(next, { failedAt: at, failure: { kind: "threw" }, failedLast: true });
+      else {
+        const did = Object.values(outcome.counts).some((n) => n > 0);
+        if (did) Object.assign(next, { didAt: at, did: outcome.counts });
+        if (outcome.failed > 0) Object.assign(next, { failedAt: at, failure: { kind: "some_failed", count: outcome.failed }, failedLast: true });
+        else if (did || before.failure?.kind !== "some_failed") Object.assign(next, { okAt: at, failedLast: false });
+      }
+      await tx.insert(setting).values({ key, value: next }).onConflictDoUpdate({ target: setting.key, set: { value: next, updatedAt: now } });
+    });
   } catch {
     // Nothing to do: the next run writes it again.
   }
