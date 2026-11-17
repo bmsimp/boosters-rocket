@@ -65,12 +65,16 @@ function shortTargets(main: Element) {
     }
     return false;
   };
-  const words = (e: Element | null) => (e?.textContent ?? "").replace(/\s+/g, "");
+  // A link is in a sentence when the block it sits in has words of its own, beside its links: a line of links
+  // ("Next: welcome emails · Back to Parent sign-ins") is links alone, each a target of its own.
   const alone = (a: HTMLElement) => {
     if (getComputedStyle(a).display !== "inline") return true; // a block, flex or inline-flex link is a box of its own
     let block: Element | null = a.parentElement;
     while (block && getComputedStyle(block).display.startsWith("inline")) block = block.parentElement;
-    return words(block) === words(a);
+    if (!block) return true;
+    const copy = block.cloneNode(true) as Element;
+    copy.querySelectorAll("a, button, .visually-hidden").forEach((x) => x.remove());
+    return (copy.textContent ?? "").replace(/[\s·•|,;:–—-]/g, "") === "";
   };
   const found: { what: string; h: number }[] = [];
   for (const e of main.querySelectorAll<HTMLElement>("a[href], summary")) {
@@ -96,10 +100,11 @@ test("the lone-link measure finds a short lone link, and leaves a link in a sent
     <p><a href="/a">A link alone</a></p>
     <p>A sentence with <a href="/b">a link</a> inside it.</p>
     <p><a href="/c" style="display:inline-flex;align-items:center;min-height:44px">A link line</a></p>
+    <p><a href="/d">One of a line of links</a> · <a href="/e" style="display:inline-flex;min-height:44px">Another</a></p>
     <details><summary>Short summary</summary></details>
   </main></body></html>`);
   const found = await page.locator("main").evaluate(shortTargets);
-  expect(found.map((f) => f.what)).toEqual(['lone link "A link alone"', 'summary "Short summary"']);
+  expect(found.map((f) => f.what)).toEqual(['lone link "A link alone"', 'lone link "One of a line of links"', 'summary "Short summary"']);
 });
 
 for (const width of [390, 1280]) {

@@ -112,6 +112,20 @@ describe("the Parent sign-ins settings", () => {
     expect(await audits("settings.parents.save")).toEqual([]);
   });
 
+  it("step 1 lists each problem as a table, folds a long one behind Show all, and says None for an empty one", async () => {
+    await ready();
+    const many = Array.from({ length: 11 }, (_, i) => par(`5${i}`, `Quiet Parent ${i}`, "10", null));
+    await seedCache([...ROSTER, ...many]);
+    const html = await setup("preview");
+    // Twelve with no email (No Mail and the eleven): more than ten, so the table opens only when asked.
+    expect(html).toMatch(/<h3 class="table-head">No email address \(12\)<\/h3><details class="more"><summary>Show all 12 people<\/summary><table role="table" class="table"><caption class="visually-hidden">No email address: 12 people<\/caption>/);
+    for (const p of many) expect(html).toContain(`<th role="rowheader" scope="row">${p.displayName}</th>`);
+    // One held address: a table shown as it is, with the families it is under.
+    expect(html).toMatch(/Addresses under more than one family \(1\)<\/h3><table role="table" class="table">/);
+    expect(html).toContain("Chen Family, Lee Family");
+    expect(html).toMatch(/More than one address on a person&#x27;s record \(0\)<\/h3><div class="notice notice-done">.*?None\.<\/div><\/div>/);
+  });
+
   it("the steps name the real cause from the switch's own check: a shape the roster can't be used with", async () => {
     await ready();
     await db.delete(qboCustomer); await db.delete(qboCustomerType);            // a shape is chosen, but nothing has been read
@@ -135,7 +149,8 @@ describe("the Parent sign-ins settings", () => {
     expect(busy).not.toContain("seeded@example.com");
     const free = await setup("preview");
     expect(free).not.toContain(busyText);
-    expect(free).toContain("Hand Seeded (seeded@example.com)");
+    // A row of the table of sign-ins that would end: the person, then the address.
+    expect(free).toMatch(/<th role="rowheader" scope="row">Hand Seeded<\/th><td role="cell">.*?seeded@example\.com<\/div><\/td>/);
     expect(free).toContain("QuickBooks no longer backs these, so they stop working when sign-ins are switched on.");
   });
 
