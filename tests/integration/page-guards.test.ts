@@ -148,6 +148,8 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/buyouts/setup", names: "all", why: "the staff choice of a requirement's buy-out price and item" },
   { module: "@/lib/buyouts/moved", names: "all", why: "it is a roster write's: a moved student's buy-outs" },
   { module: "@/lib/staff-home/today", names: "all", why: "the staff home's counts read every family's forms and every shift's sign-ups" },
+  { module: "@/lib/quickbooks/sandbox-check/run", names: "all", why: "the Admin's check of the portal's requests reads every customer and some families' invoices" },
+  { module: "@/lib/quickbooks/sandbox-check/writes", names: "all", why: "the check's writes to QuickBooks, for an Intuit sandbox company only" },
 ];
 
 describe("every page guards itself", () => {

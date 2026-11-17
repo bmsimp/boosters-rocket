@@ -22,10 +22,21 @@ const code = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace
 
 const CLIENT = "src/lib/quickbooks/client.ts";
 const CONTACT_EDITS = "src/lib/parents/contact-edits.ts";
+/**
+ * The check of the portal's own requests (roadmap step 7, src/lib/quickbooks/sandbox-check/): a deliberate caller of
+ * every write, added to each MAY_SEND list below on purpose. It sends them only to an Intuit sandbox company, only for
+ * records it made itself, and only through its own guard (CHECK_GUARD); it adds no sender of its own, so the client's
+ * POSTs are still six.
+ */
+const CHECK_WRITER = "src/lib/quickbooks/sandbox-check/writes.ts";
+const CHECK_FOLDER = "src/lib/quickbooks/sandbox-check/";
+/** What starts a run: the check itself, and the one Admin action on its page. */
+const CHECK_RUN = "runSandboxCheck";
+const MAY_START_CHECK = ["src/lib/quickbooks/sandbox-check/run.ts", "src/app/staff/(app)/settings/quickbooks/check/actions.ts"];
 /** The one function that sends a write to the QuickBooks API, and the constant that holds its address and body. */
 const WRITE = "qboUpdateCustomerContact";
 /** The only modules that may name that function: where it is written, and the parent's contact edits that call it. */
-const MAY_SEND_THE_WRITE = [CLIENT, CONTACT_EDITS];
+const MAY_SEND_THE_WRITE = [CLIENT, CONTACT_EDITS, CHECK_WRITER];
 /** What reaches the contact edits' save from a browser: the parent's own server action, and nothing else. */
 const SAVE = "saveMyContact";
 const MAY_SAVE = [CONTACT_EDITS, "src/app/(parent)/family/details/actions.ts"];
@@ -39,7 +50,7 @@ const CONTACT_EDITS_EXPORTS = ["CONTACT_COPY", "ContactView", "SaveContactResult
 const EMAIL_CHANGE = "src/lib/parents/email-change.ts";
 const EMAIL_WRITE = "qboUpdateCustomerEmail";
 /** The only modules that may name the email write: where it is written, and the parent's own email change that calls it. */
-const MAY_SEND_THE_EMAIL_WRITE = [CLIENT, EMAIL_CHANGE];
+const MAY_SEND_THE_EMAIL_WRITE = [CLIENT, EMAIL_CHANGE, CHECK_WRITER];
 /** What reaches the email change's confirmation from a browser: the parent's own server action, and nothing else. */
 const CONFIRM = "confirmMyEmailChange";
 const MAY_CONFIRM = [EMAIL_CHANGE, "src/app/(parent)/family/email/actions.ts"];
@@ -54,7 +65,7 @@ const EMAIL_CHANGE_EXPORTS = ["EMAIL_CHANGE_TTL_MS", "EMAIL_COPY", "EmailResult"
  */
 const ROSTER_WRITES = ["qboCreateCustomer", "qboRenameCustomer", "qboMoveCustomer", "qboSetCustomerActive"];
 const ROSTER_WRITER = "src/lib/roster/writes.ts";
-const MAY_SEND_ROSTER_WRITES = [CLIENT, ROSTER_WRITER];
+const MAY_SEND_ROSTER_WRITES = [CLIENT, ROSTER_WRITER, CHECK_WRITER];
 /** The write module's way to QuickBooks: its send (used by the module itself and the queue's job) and the staff ask. */
 const ROSTER_SEND = "sendWrite", ROSTER_ASK = "askRosterWrite";
 const MAY_ROSTER_SEND = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
@@ -74,7 +85,7 @@ const ROSTER_BODY_FIELDS = ["DisplayName", "CustomerTypeRef", "ParentRef", "Job"
  */
 const INVOICE_WRITE_FUNCTIONS = ["qboCreateInvoice", "qboVoidInvoice"];
 const BUYOUT_WRITER = "src/lib/buyouts/writes.ts";
-const MAY_SEND_INVOICE_WRITES = [CLIENT, BUYOUT_WRITER];
+const MAY_SEND_INVOICE_WRITES = [CLIENT, BUYOUT_WRITER, CHECK_WRITER];
 const BUYOUT_SEND = "sendBuyoutWrite";
 const MAY_BUYOUT_SEND = [BUYOUT_WRITER, "src/lib/roster/queue.ts"];
 const BUYOUT_ASKS = ["confirmMyBuyout", "switchMyBuyoutBack"];
@@ -289,6 +300,40 @@ function bodyProblems(constant: string): string[] {
   return problems;
 }
 
+/** Every write the client offers, as the check calls them. */
+const ALL_WRITES = [WRITE, EMAIL_WRITE, ...ROSTER_WRITES, ...INVOICE_WRITE_FUNCTIONS];
+/** The guard every write of the check goes through first, and what it must refuse, written out. */
+const CHECK_GUARD = "async function allowed(run: CheckRun, targets: Target[]): Promise<void> {";
+const GUARD_REFUSES = [`if (c.environment !== "sandbox") throw`, "if (c.realmId !== run.realmId) throw",
+  "if (!row || row.runId !== (t.runId ?? run.id)) throw refused("];
+
+/**
+ * What is wrong with how the check reaches the client's writes; nothing when each write is imported under its own name
+ * and called once, inside an exported function that first awaits the guard, and the guard refuses a company that isn't a
+ * sandbox, another company, and an id the check didn't record.
+ */
+function checkWriterProblems(source: string): string[] {
+  const text = code(source), problems: string[] = [];
+  const imports = [...text.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']@\/lib\/quickbooks\/client["']/g)].flatMap((m) => m[1]!.split(",").map((x) => x.trim()));
+  const at = text.indexOf(CHECK_GUARD);
+  if (at < 0) problems.push("the guard is not there");
+  const guard = at < 0 ? "" : text.slice(at, text.indexOf("\n}\n", at));
+  for (const refusal of GUARD_REFUSES) if (!guard.includes(refusal)) problems.push(`the guard doesn't refuse: ${refusal}`);
+  if (/export\s+(async\s+)?function\s+allowed\b|export\s*\{[^}]*\ballowed\b/.test(text)) problems.push("the guard is exported");
+  for (const name of ALL_WRITES) {
+    if (!imports.includes(name)) problems.push(`${name} is not imported under its own name`);
+    const uses = [...text.matchAll(new RegExp(`\\b${name}\\b`, "g"))];
+    if (uses.length !== 2) problems.push(`${name} is named ${uses.length} times: once to import it and once to call it is all`);
+    const call = uses[1];
+    if (!call) continue;
+    const fn = text.lastIndexOf("\nexport async function ", call.index);
+    const before = text.slice(fn, call.index);
+    if (fn < 0 || !/^\s*\(/.test(text.slice(call.index + name.length))) problems.push(`${name} is not called inside an exported function`);
+    else if (!/\n {2}await allowed\(run, /.test(before)) problems.push(`${name} is called before the guard`);
+    else if (before.slice(before.indexOf("await allowed(run, ")).includes("\n}\n")) problems.push(`${name} is called outside the function that awaited the guard`);
+  }
+  return problems;
+}
 describe("the portal writes one thing to QuickBooks: a parent's own phone and address (v1 spec §6.2)", () => {
   const everything = read("src");
   // src/lib/money reads invoices for parents, and src/lib/parents/contact-edits.ts reads and changes a parent's own
@@ -490,6 +535,68 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       for (const source of refused) {
         expect(source, "the case didn't change the constant").not.toBe(constant);
         expect(invoiceBodyProblems(source), source).not.toEqual([]);
+      }
+    });
+  });
+
+  describe("and the check of the portal's requests, sent only to an Intuit sandbox and only for its own records (roadmap step 7)", () => {
+    const naming = (name: string) => everything.filter((s) => new RegExp(`\\b${name}\\b`).test(code(s.text))).map((s) => s.file).sort();
+    const writer = everything.find((s) => s.file === CHECK_WRITER)?.text ?? "";
+    const check = everything.filter((s) => s.file.startsWith(CHECK_FOLDER));
+
+    it("is scanned with the QuickBooks code, and calls each write once, after its guard", () => {
+      expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining(check.map((s) => s.file)));
+      expect(check.map((s) => s.file)).toContain(CHECK_WRITER);
+      expect(checkWriterProblems(writer)).toEqual([]);
+      // No module of the check but its writer names a write.
+      for (const s of check.filter((x) => x.file !== CHECK_WRITER)) for (const name of ALL_WRITES) expect(code(s.text), `${s.file} names ${name}`).not.toMatch(new RegExp(`\\b${name}\\b`));
+    });
+
+    it("refuses a company that isn't an Intuit sandbox in the action that starts it, and again in its guard", () => {
+      // The action asks for the writes only for a sandbox connection; the guard reads the connection again before each one.
+      const action = code(everything.find((s) => s.file === MAY_START_CHECK[1])!.text);
+      expect(action).toContain(`const writes = (await getConnection())?.environment === "sandbox";`);
+      expect(action).toContain("runSandboxCheck({ staffUserId: ctx.staffUserId, label: ctx.email, ip: ctx.ip, writes })");
+      expect(action).toMatch(/export const runCheckAction = staffAction\(P, /);
+      expect(action).toContain(`const P = "Settings.QuickBooks.ReadWrite" as const;`);
+      const guard = code(writer).slice(code(writer).indexOf(CHECK_GUARD));
+      expect(guard.indexOf("const c = await getConnection();")).toBeGreaterThan(0);
+      expect(guard.indexOf(`if (c.environment !== "sandbox") throw`)).toBeGreaterThan(guard.indexOf("const c = await getConnection();"));
+      const run = code(everything.find((s) => s.file === MAY_START_CHECK[0])!.text);
+      expect(run).toContain(`ask.writes && ready.environment === "sandbox"`);
+    });
+
+    it("is started only from its own Admin action", () => {
+      expect(naming(CHECK_RUN), `${CHECK_RUN} runs the check. Another caller is a decision for a slice brief.`).toEqual([...MAY_START_CHECK].sort());
+    });
+
+    it("never uses the write queue, the roster cache or the reconcile, and writes no table but its own", () => {
+      for (const s of check) {
+        const text = code(s.text);
+        expect(text, s.file).not.toMatch(/\b(writeQueue|reconcileAccess|refreshRoster|sendWrite|askRosterWrite|sendBuyoutWrite|clearRosterOfOtherCompanyLocked|setRosterSource)\b/);
+        expect(text, s.file).not.toMatch(/from\s*["']@\/lib\/(roster\/(queue|writes|refresh)|buyouts\/|parents\/(reconcile|contact-edits|email-change))/);
+        expect(text, s.file).not.toMatch(/import\s*\{[^}]*\bqboCustomer(Type)?\b[^}]*\}\s*from\s*["']@\/lib\/db\/schema["']/);
+        for (const m of text.matchAll(/\.(insert|update|delete)\((\w+)\)/g)) expect(["qboCheckRun", "qboCheckRecord"], `${s.file} writes ${m[2]}`).toContain(m[2]);
+        expect(text, s.file).not.toMatch(/\b(insert\s+into|update|delete\s+from)\s+qbo_customer/i);
+      }
+    });
+
+    it("refuses a write path that could reach a company that isn't a sandbox, or a record it didn't make", () => {
+      const cut = writer.indexOf(CHECK_GUARD);
+      const inGuard = (from: string, to: string) => writer.slice(0, cut) + writer.slice(cut).replace(from, to);
+      const refused = [
+        inGuard(`if (c.environment !== "sandbox") throw`, `if (c.environment === "staging") throw`),
+        inGuard("if (c.realmId !== run.realmId) throw", "if (!c.realmId) throw"),
+        inGuard("if (!row || row.runId !== (t.runId ?? run.id)) throw", "if (!row) throw"),
+        writer.replace("  await allowed(run, [target]);\n  return qboUpdateCustomerContact(", "  return qboUpdateCustomerContact("),
+        writer.replace("  await allowed(run, [target]);\n  return qboUpdateCustomerEmail(", "  void allowed(run, [target]);\n  return qboUpdateCustomerEmail("),
+        `${writer}\nexport async function alsoRename(run: CheckRun, id: string) {\n  await allowed(run, []);\n  return qboRenameCustomer(id, "0", "x", { realmId: run.realmId });\n}\n`,
+        `${writer}\nexport const sendVoid = qboVoidInvoice;\n`,
+        writer.replace("async function allowed(", "export async function allowed("),
+      ];
+      for (const source of refused) {
+        expect(source, "the case didn't change the module").not.toBe(writer);
+        expect(checkWriterProblems(source), `case ${refused.indexOf(source)}`).not.toEqual([]);
       }
     });
   });

@@ -14,6 +14,7 @@ import { formsSummary } from "@/lib/forms/settings";
 import { formsWaiting } from "@/lib/forms/job";
 import { evidenceHealth } from "@/lib/signed-forms/evidence-job";
 import { moneyRunView } from "@/lib/money/sweep";
+import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 import { lastBackup } from "./backup";
 import { BUILD_VERSION } from "./version";
 import { env } from "@/env";
@@ -56,7 +57,7 @@ const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n
 export async function healthReport(now: Date = new Date()): Promise<HealthLine[]> {
   // The database first, on its own: if it can't answer, nothing below can be read, and the page says so.
   await db.execute(sql`select 1`);
-  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, signins, forms, waiting, untemplated, moneyRun, writes] = await Promise.all([
+  const [wake, [cleanup], [lastWrite], conn, problems, roster, mail, parents, backup, signins, forms, waiting, untemplated, moneyRun, writes, checked] = await Promise.all([
     lastWake(),
     db.select().from(jobRun).where(eq(jobRun.job, CLEANUP_JOB)).orderBy(desc(jobRun.id)).limit(1),
     // Each change the portal makes in QuickBooks leaves an audit row: the newest is when one last worked.
@@ -72,6 +73,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       .where(and(eq(season.isCurrent, true), eq(requirement.kind, "form"), isNull(requirement.form))),
     moneyRunView(),
     queueCounts(),
+    lastCheck(),
   ]);
   const lines: HealthLine[] = [];
 
@@ -107,10 +109,14 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     lines.push({ key: "quickbooks", title: "QuickBooks", state: "attention", word: "Not connected", says: "Not connected. The Intuit app's keys are saved, but the portal can't read the roster or what families owe, and parents can't change their phone or address, until an Admin connects.",
       times: rosterTimes, notes: [...queueNote, use], fix: qboFix });
   } else {
-    const attention = problems.length > 0 || writes.stuck > 0;
+    // The check of the portal's own requests (src/lib/quickbooks/sandbox-check/): when it last ran, and whether every request answered as expected.
+    const checkFailed = checked?.outcome === "not_as_expected";
+    const checkFix = { href: "/staff/settings/quickbooks/check", label: "Check the portal's requests" };
+    const attention = problems.length > 0 || writes.stuck > 0 || checkFailed;
     lines.push({
-      key: "quickbooks", title: "QuickBooks", state: attention ? "attention" : "ok", word: attention ? "Needs attention" : "Connected", times: rosterTimes,
-      notes: [...problems.map((p) => p.text), ...queueNote, use], fix: problems.length ? qboFix : writes.stuck ? queueFix : null,
+      key: "quickbooks", title: "QuickBooks", state: attention ? "attention" : "ok", word: attention ? "Needs attention" : "Connected",
+      times: [...rosterTimes, { label: "Requests last checked", at: checked?.at ?? null }],
+      notes: [...problems.map((p) => p.text), ...queueNote, lastCheckWords(checked), use], fix: problems.length ? qboFix : writes.stuck ? queueFix : checkFix,
       says: `Connected to ${conn.companyName ?? "a QuickBooks company"}${conn.environment === "sandbox" ? " (an Intuit sandbox, not the club's real books)" : ""}.`,
     });
   }

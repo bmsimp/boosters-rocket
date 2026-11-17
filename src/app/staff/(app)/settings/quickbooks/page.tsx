@@ -13,6 +13,7 @@ import { getParentSettings } from "@/lib/parents/settings";
 import { peopleWithAccess } from "@/lib/parents/switches";
 import { BackToSettings } from "../back-to-settings";
 import { StateWords } from "@/app/components/state-words";
+import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 
 export const metadata = { title: "QuickBooks settings" };
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
 /** What is set, shown plainly, with no inputs (spec §3 The settings view). Changing anything opens the steps. */
 export default async function QuickBooksSettingsPage() {
   await requireStaffPage("Settings.QuickBooks.ReadWrite");
-  const [conn, page, wake, problems, settings, people] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(), getParentSettings(), peopleWithAccess()]);
+  const [conn, page, wake, problems, settings, people, checked] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(), getParentSettings(), peopleWithAccess(), lastCheck()]);
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
   const warning = settings.signin && people > 0 ? `${people} ${people === 1 ? "person" : "people"} can sign in to the portal now. Connecting a different QuickBooks company afterwards ends all of that access, switches parent sign-ins and welcome emails off, and needs them set up again. Reconnecting this same company changes nothing.` : undefined;
   return (
@@ -55,6 +56,11 @@ export default async function QuickBooksSettingsPage() {
           <dt>What it found</dt><dd>{rosterCounts(page.roster) || "Nothing to show until a shape is chosen."}</dd>
           <dt>Worker</dt><dd>{wake ? <>Last checked in <LocalTime iso={wake} /></> : "Hasn't checked in yet."}</dd>
         </dl>
+      </section>
+
+      <section className="box" aria-labelledby="qbo-check-h"><h2 id="qbo-check-h">The portal&apos;s requests</h2>
+        <p>{lastCheckWords(checked)}{checked ? <> (<LocalTime iso={checked.at} />)</> : null}</p>
+        <p><a className="link-line" href="/staff/settings/quickbooks/check">Check the portal&apos;s requests</a></p>
       </section>
 
       <section className="box" aria-labelledby="qbo-change-h"><h2 id="qbo-change-h">{conn.configured ? "Change" : "Set up"}</h2>

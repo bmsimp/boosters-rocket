@@ -86,6 +86,12 @@ export type QboStub = {
   invoiceFault: string | null;    // answer every invoice write with HTTP 400 and this Fault code, making nothing
   loseInvoiceAnswer: boolean;     // make or void the invoice, then close the connection without answering
   beforeVoid: ((invoice: Record<string, unknown>) => void) | null; // run on the stored invoice as a void arrives: a payment made in QuickBooks at that moment
+  /**
+   * How the stub answers what the check of the portal's requests tries (src/lib/quickbooks/sandbox-check/), each switch
+   * one way QuickBooks might answer. reset() puts back the defaults, which answer as the stub always has;
+   * intuitLike() in tests/helpers/sandbox-check.ts sets every one the way the portal expects of a real company.
+   */
+  quirks: StubQuirks;
   dropToken: boolean;           // close the connection on every token request without answering: Intuit can't be reached
   onApiRequest: ((call: StubCall) => void | Promise<unknown>) | null; // run, and waited for, as each API request arrives, before anything about it is checked: a token revoked at that moment, say
   revokeDelayMs: number;
@@ -97,6 +103,37 @@ export type QboStub = {
    */
   idle(): Promise<void>;
 };
+
+export type StubQuirks = {
+  emptyKeeps: boolean;                // an empty string sent in an update leaves the field as it was, instead of clearing it
+  limits: Record<string, number>;     // the longest value a field takes ("PrimaryPhone.FreeFormNumber": 30); a longer one is refused with `limitCode`
+  limitCode: string;
+  checkEmail: boolean;                // an email field that isn't addresses is refused with `limitCode`
+  staleCode: string;                  // the code for an update or void with an old SyncToken
+  duplicateCode: string;              // the code for a name already in use
+  fullNames: boolean;                 // a customer read by id carries FullyQualifiedName, built from its ParentRef chain
+  balances: boolean;                  // a customer read by id carries Balance and BalanceWithJobs worked out from `invoices`
+  inactiveWithBalance: string | null; // refuse making a customer that owes something inactive, with this code
+  copyFamilyContact: boolean;         // a sub-customer made under a family is given the family's phone and address
+  invoiceLinkHost: string | null;     // the host of a made invoice's InvoiceLink; null for no link
+  keepPrivateNote: boolean;           // a made invoice keeps the PrivateNote sent
+  invoiceEmailStatus: string | null;  // a made invoice's EmailStatus, whatever was sent ("EmailSent"); null keeps what was sent
+  createDrops: string[];              // fields a customer create leaves out of what it makes ("CustomerTypeRef", "BillWithParent")
+  emailFirstOnly: boolean;            // an email field of several addresses is stored as its first address alone
+};
+export const defaultQuirks = (): StubQuirks => ({ emptyKeeps: false, limits: {}, limitCode: "6000", checkEmail: false, staleCode: "5010", duplicateCode: "6240", fullNames: false,
+  balances: false, inactiveWithBalance: null, copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", keepPrivateNote: true,
+  invoiceEmailStatus: null, createDrops: [], emailFirstOnly: false });
+
+/** The first field of a write's body longer than its limit, as "Object.Field" or "Field". */
+function overLimit(sent: Record<string, unknown>, limits: Record<string, number>): boolean {
+  return Object.entries(limits).some(([path, max]) => {
+    const [top, inner] = path.split(".");
+    const v = inner ? (sent[top!] as Record<string, unknown> | undefined)?.[inner] : sent[top!];
+    return typeof v === "string" && v.length > max;
+  });
+}
+const ADDRESSES = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+(\s*[,; ]\s*[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+)*$/;
 
 /** The code the stub refuses the void of a paid or part-paid invoice with. QuickBooks' own is not known yet (INVOICE_WRITES check 6). */
 export const STUB_PAID_VOID_FAULT = "6140";
@@ -120,7 +157,7 @@ export async function startQboStub(): Promise<QboStub> {
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
     invoices: [], items: [], oddItemAnswer: null, refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     otherNames: [], inactiveTakesChildren: false, updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, updateServerFault: null, dropApi: false, dropToken: false, onApiRequest: null,
-    invoiceFault: null, loseInvoiceAnswer: false, beforeVoid: null,
+    invoiceFault: null, loseInvoiceAnswer: false, beforeVoid: null, quirks: defaultQuirks(),
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
@@ -177,7 +214,7 @@ export async function startQboStub(): Promise<QboStub> {
           const stored = stub.invoices.find((i) => i.Id === sent.Id);
           if (!stored) return json(400, fault("610"));
           stub.beforeVoid?.(stored);
-          if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault("5010"));
+          if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault(stub.quirks.staleCode));
           if (Number(stored.Balance) < Number(stored.TotalAmt)) return json(400, fault(STUB_PAID_VOID_FAULT));
           Object.assign(stored, { TotalAmt: 0, Balance: 0, SyncToken: String(Number(stored.SyncToken ?? 0) + 1), MetaData: { LastUpdatedTime: new Date().toISOString() } });
           if (stub.loseInvoiceAnswer) { req.socket.destroy(); return; }
@@ -189,7 +226,9 @@ export async function startQboStub(): Promise<QboStub> {
         const next = String(Math.max(5000, ...stub.invoices.map((i) => Number(i.Id)).filter((n) => !Number.isNaN(n))) + 1);
         const today = new Date().toISOString().slice(0, 10);
         const made: Record<string, unknown> = { ...sent, Id: next, SyncToken: "0", DocNumber: next, TxnDate: today, DueDate: today, TotalAmt: line.Amount, Balance: line.Amount,
-          InvoiceLink: `https://connect.intuit.com/t/scs-v1-stub-${next}`, MetaData: { CreateTime: new Date().toISOString() } };
+          ...(stub.quirks.invoiceLinkHost ? { InvoiceLink: `https://${stub.quirks.invoiceLinkHost}/t/scs-v1-stub-${next}` } : {}), MetaData: { CreateTime: new Date().toISOString() } };
+        if (!stub.quirks.keepPrivateNote) delete made.PrivateNote;
+        if (stub.quirks.invoiceEmailStatus !== null) made.EmailStatus = stub.quirks.invoiceEmailStatus;
         stub.invoices.push(made);
         if (stub.loseInvoiceAnswer) { req.socket.destroy(); return; }
         return json(200, { Invoice: made, time: new Date().toISOString() });
@@ -200,17 +239,23 @@ export async function startQboStub(): Promise<QboStub> {
         if (stub.updateFault) return json(400, fault(stub.updateFault));
         let sent: Record<string, unknown>;
         try { sent = JSON.parse(body) as Record<string, unknown>; } catch { return json(400, fault("2010")); }
+        if (overLimit(sent, stub.quirks.limits)) return json(400, fault(stub.quirks.limitCode));
+        const address = (sent.PrimaryEmailAddr as { Address?: unknown } | undefined)?.Address;
+        if (stub.quirks.checkEmail && typeof address === "string" && address !== "" && !ADDRESSES.test(address.trim())) return json(400, fault(stub.quirks.limitCode));
         // A name taken by any customer (other than the one updated), vendor or employee is refused (CUSTOMER_WRITES).
         const nameTaken = (name: unknown, except: unknown) => typeof name === "string" && [...stub.customers.filter((c) => c.Id !== except).map((c) => c.DisplayName), ...stub.otherNames]
           .some((n) => typeof n === "string" && n.trim().toLowerCase() === name.trim().toLowerCase());
         if (sent.Id === undefined) {
           // A create (CUSTOMER_WRITES.create): the next Id, version 0, active, with the fields sent.
           if (typeof sent.DisplayName !== "string" || !sent.DisplayName.trim()) return json(400, fault("2020"));
-          if (nameTaken(sent.DisplayName, null)) return json(400, fault("6240"));
+          if (nameTaken(sent.DisplayName, null)) return json(400, fault(stub.quirks.duplicateCode));
           const parentId = (sent.ParentRef as { value?: unknown } | undefined)?.value;
           if (parentId !== undefined && !stub.customers.some((c) => c.Id === parentId)) return json(400, fault("2500"));
           const next = String(Math.max(0, ...stub.customers.map((c) => Number(c.Id)).filter((n) => !Number.isNaN(n))) + 1);
-          const made: Record<string, unknown> = { ...sent, Id: next, SyncToken: "0", Active: true, MetaData: { CreateTime: new Date().toISOString(), LastUpdatedTime: new Date().toISOString() } };
+          const family = parentId !== undefined && stub.quirks.copyFamilyContact ? stub.customers.find((c) => c.Id === parentId) : undefined;
+          const copied = family ? Object.fromEntries((["PrimaryPhone", "BillAddr"] as const).filter((f) => family[f] !== undefined && sent[f] === undefined).map((f) => [f, family[f]])) : {};
+          const made: Record<string, unknown> = { ...copied, ...sent, Id: next, SyncToken: "0", Active: true, MetaData: { CreateTime: new Date().toISOString(), LastUpdatedTime: new Date().toISOString() } };
+          for (const f of stub.quirks.createDrops) delete made[f];
           stub.customers.push(made);
           if (stub.loseUpdateAnswer) { req.socket.destroy(); return; }
           if (stub.updateServerFault) return json(stub.updateServerFault.status, { ...fault(stub.updateServerFault.code), Fault: { ...fault(stub.updateServerFault.code).Fault, type: "SystemFault" } });
@@ -220,14 +265,21 @@ export async function startQboStub(): Promise<QboStub> {
         if (at < 0) return json(400, fault("610"));
         stub.beforeUpdate?.(stub.customers[at]!);
         const stored = stub.customers[at]!;
-        if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault("5010"));
-        if ("DisplayName" in sent && nameTaken(sent.DisplayName, stored.Id)) return json(400, fault("6240"));
+        if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault(stub.quirks.staleCode));
+        if ("DisplayName" in sent && nameTaken(sent.DisplayName, stored.Id)) return json(400, fault(stub.quirks.duplicateCode));
+        if (sent.Active === false && stub.quirks.inactiveWithBalance && stub.invoices.some((i) => (i.CustomerRef as { value?: unknown } | undefined)?.value === stored.Id && Number(i.Balance) > 0)) return json(400, fault(stub.quirks.inactiveWithBalance));
         // Making a family inactive makes the customers under it inactive too, when the test says QuickBooks does so.
         if (sent.Active === false && stub.inactiveTakesChildren) for (const c of stub.customers) if ((c.ParentRef as { value?: unknown } | undefined)?.value === stored.Id) c.Active = false;
         const updated: Record<string, unknown> = sent.sparse === true ? { ...stored } : { Id: stored.Id };
         for (const [field, value] of Object.entries(sent)) {
           if (field === "Id" || field === "SyncToken" || field === "sparse") continue;
-          const kept = withoutEmpty(value);
+          // An empty string clears, unless the test says QuickBooks keeps what was there (quirks.emptyKeeps).
+          const merged = stub.quirks.emptyKeeps && typeof value === "object" && value !== null && !Array.isArray(value) && typeof stored[field] === "object"
+            ? { ...(stored[field] as object), ...Object.fromEntries(Object.entries(value).filter(([, v]) => v !== "")) } : value;
+          if (stub.quirks.emptyKeeps && merged === "") continue;
+          const first = stub.quirks.emailFirstOnly && field === "PrimaryEmailAddr" && typeof (merged as { Address?: unknown })?.Address === "string"
+            ? { Address: ((merged as { Address: string }).Address.split(/[,; ]+/)[0] ?? "") } : merged;
+          const kept = withoutEmpty(first);
           if (kept === undefined) delete updated[field]; else updated[field] = kept;
         }
         updated.SyncToken = String(Number(stored.SyncToken ?? 0) + 1);
@@ -241,7 +293,14 @@ export async function startQboStub(): Promise<QboStub> {
       if (byId !== undefined) {
         const customer = stub.customers.find((c) => c.Id === decodeURIComponent(byId));
         // QuickBooks answers a record it doesn't have with a 400 and a fault, not a 404.
-        return customer ? json(200, { Customer: customer }) : json(400, { Fault: { Error: [{ Message: "Object Not Found" }] } });
+        if (!customer) return json(400, { Fault: { Error: [{ Message: "Object Not Found" }] } });
+        const parentOf = (c: Record<string, unknown>) => (c.ParentRef as { value?: unknown } | undefined)?.value;
+        const owed = (id: unknown) => stub.invoices.filter((i) => (i.CustomerRef as { value?: unknown } | undefined)?.value === id).reduce((n, i) => n + Number(i.Balance ?? 0), 0);
+        const under = (id: unknown): Record<string, unknown>[] => stub.customers.filter((c) => parentOf(c) === id).flatMap((c) => [c, ...under(c.Id)]);
+        const fullName = (c: Record<string, unknown>): string => { const up = stub.customers.find((x) => x.Id === parentOf(c)); return up ? `${fullName(up)}:${String(c.DisplayName)}` : String(c.DisplayName); };
+        return json(200, { Customer: { ...customer,
+          ...(stub.quirks.balances ? { Balance: owed(customer.Id), BalanceWithJobs: [customer, ...under(customer.Id)].reduce((n, c) => n + owed(c.Id), 0) } : {}),
+          ...(stub.quirks.fullNames ? { FullyQualifiedName: fullName(customer) } : {}) } });
       }
       if (url.pathname.includes("/companyinfo/")) {
         if (stub.companyInfoDelayMs) await new Promise((r) => setTimeout(r, stub.companyInfoDelayMs));
@@ -297,7 +356,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.idle = () => (open === 0 ? Promise.resolve() : new Promise<void>((r) => waitingForIdle.push(r)));
   stub.reset = () => {
     stub.otherNames = []; stub.inactiveTakesChildren = false; stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.updateServerFault = null; stub.dropApi = false; stub.dropToken = false; stub.onApiRequest = null;
-    stub.invoiceFault = null; stub.loseInvoiceAnswer = false; stub.beforeVoid = null;
+    stub.invoiceFault = null; stub.loseInvoiceAnswer = false; stub.beforeVoid = null; stub.quirks = defaultQuirks();
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
     stub.invoices = []; stub.items = []; stub.oddItemAnswer = null; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;
