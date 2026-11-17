@@ -92,17 +92,20 @@ export const perUnitWords = (unit: Requirement["amountUnit"]): string => (unit =
 
 /**
  * What the figures the worker's daily read stored say about one invoiced buy-out (v1 spec §8.4, ./daily-check.ts):
- * `paid` (its balance is 0), `ok` (still there, on its customer, with something to pay), or a flag for staff: the
- * invoice is on another customer than the buy-out's (`other_customer`), or QuickBooks no longer shows it to the family,
- * because it was voided or deleted there (`missing`) or because the student it was billed to has moved to another
- * family (`student_moved`, a move made in QuickBooks: nothing is voided for it).
+ * `paid` (its balance is 0), `ok` (still there, on its customer, with something to pay), `voided` (voided in
+ * QuickBooks: it is there with a total of 0, so nothing is owed for it), or a flag for staff: the invoice is on another
+ * customer than the buy-out's (`other_customer`), QuickBooks no longer shows it to the family because it was deleted
+ * there (`missing`), or the student it was billed to has moved to another family in QuickBooks (`student_moved`: the
+ * check then has it voided, as a move made in the portal does).
  */
 export function judgeInvoice(b: { invoiceQboId: string; customerQboId: string; perStudent: boolean },
   invoices: readonly { qboId: string; customerQboId: string; totalCents: number; balanceCents: number }[], customerStillTheFamilys: boolean):
-  "paid" | "ok" | "missing" | "other_customer" | "student_moved" {
+  "paid" | "ok" | "voided" | "missing" | "other_customer" | "student_moved" {
+  if (b.perStudent && !customerStillTheFamilys) return "student_moved";
   const inv = invoices.find((i) => i.qboId === b.invoiceQboId);
+  if (!inv) return "missing";
   // A voided invoice has a total of 0: QuickBooks keeps it, with nothing on it.
-  if (!inv || inv.totalCents === 0) return b.perStudent && !customerStillTheFamilys ? "student_moved" : "missing";
+  if (inv.totalCents === 0) return inv.customerQboId === b.customerQboId ? "voided" : "other_customer";
   if (inv.customerQboId !== b.customerQboId) return "other_customer";
   if (inv.totalCents > 0 && inv.balanceCents <= 0) return "paid";
   return "ok";

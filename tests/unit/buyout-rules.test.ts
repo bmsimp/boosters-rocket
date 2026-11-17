@@ -93,11 +93,16 @@ describe("the daily check's verdict on one invoice (spec §8.4)", () => {
     expect(judgeInvoice(b, [inv({ balanceCents: 2000 })], true)).toBe("ok");
     expect(judgeInvoice(b, [inv({ balanceCents: 0 })], true)).toBe("paid");
   });
+  it("is voided when QuickBooks shows it with a total of 0, never flagged as gone or paid", () => {
+    expect(judgeInvoice(b, [inv({ totalCents: 0, balanceCents: 0 })], true)).toBe("voided");
+    expect(judgeInvoice(b, [inv({ totalCents: 0, balanceCents: 0, customerQboId: "7013" })], true)).toBe("other_customer");
+  });
   it("flags one QuickBooks no longer shows, one on another customer, and one whose student moved", () => {
     expect(judgeInvoice(b, [], true)).toBe("missing");
-    expect(judgeInvoice(b, [inv({ totalCents: 0, balanceCents: 0 })], true)).toBe("missing"); // voided in QuickBooks
     expect(judgeInvoice(b, [inv({ customerQboId: "7013" })], true)).toBe("other_customer");
     expect(judgeInvoice(b, [], false)).toBe("student_moved");
+    // A student moved in QuickBooks is a move whatever the family's figures still hold.
+    expect(judgeInvoice(b, [inv()], false)).toBe("student_moved");
     expect(judgeInvoice({ ...b, perStudent: false }, [], false)).toBe("missing");
   });
 });

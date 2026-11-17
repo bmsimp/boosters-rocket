@@ -8,6 +8,7 @@ import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { qboCustomer, requirement, requirementCover, requirementProgress, season, seasonStep, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import type { Requirement } from "@/lib/seasons/progress";
+import { buyoutFacts } from "@/lib/buyouts/standing";
 import { allocateCredit, type Allocation, type Credit, type CreditRequirement, type Slot } from "./allocation";
 import { clockOf, dateWords, shiftTimeWords } from "./clock";
 import type { Filler } from "./rules";
@@ -71,11 +72,14 @@ export async function allocateFamilies(familyQboIds: readonly string[] | null, a
     covers: x.r.covers, coveredQboIds: covers.filter((c) => c.requirementId === x.r.id).map((c) => c.subjectQboId), seasonId: x.seasonId,
   }));
   // A requirement staff waived for the family or a student needs nothing, so it takes no credit and what it would have
-  // taken flows on to the others, as a buy-out's does (allocation.ts). Only when it was waived is read, never why.
+  // taken flows on to the others. Only when it was waived is read, never why. So does one whose buy-out is paid
+  // (v1 spec §11.4: never beyond the amount needed; allocation.ts).
   const waived = requirements.length === 0 ? [] : await q.select({ requirementId: requirementProgress.requirementId, subjectQboId: requirementProgress.subjectQboId })
     .from(requirementProgress).where(and(inArray(requirementProgress.requirementId, requirements.map((r) => r.id)), inArray(requirementProgress.subjectQboId, subjects), isNotNull(requirementProgress.waivedAt)));
+  const bought = await buyoutFacts(requirements.map((r) => r.id), subjects, tx);
+  const paidFor = (requirementId: string, subject: string) => { const f = bought.get(`${requirementId}|${subject}`); return Boolean(f && (f.state === "paid" || f.invoicePaid)); };
   const asked = (r: CreditRequirementRow, subject: string) => (r.covers === "everyone" || r.coveredQboIds.includes(subject))
-    && !waived.some((w) => w.requirementId === r.id && w.subjectQboId === subject);
+    && !waived.some((w) => w.requirementId === r.id && w.subjectQboId === subject) && !paidFor(r.id, subject);
   for (const family of families) {
     const theirs = students.filter((s) => s.parentQboId === family).map((s) => s.qboId);
     const slots: Slot[] = requirements.flatMap((r) => (r.appliesTo === "family" ? (asked(r, family) ? [{ requirement: r, subjectQboId: family }] : [])

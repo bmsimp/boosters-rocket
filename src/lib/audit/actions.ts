@@ -188,6 +188,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "volunteer.buyout.kept": "A buy-out's invoice not voided: something was paid on it, or it is gone",
   "volunteer.buyout.paid": "A buy-out's invoice paid in QuickBooks",
   "volunteer.buyout.flagged": "A buy-out flagged for staff to look at",
+  "volunteer.buyout.unflagged": "A buy-out's flag taken off: its invoice is where it belongs",
   "volunteer.buyout.limit": "Buy-out choices refused: too many in a short time",
 };
 

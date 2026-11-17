@@ -1,7 +1,8 @@
 // Staff and worker only: the daily check of every buy-out's invoice (v1 spec §8.4, the buy-out line), after the
 // worker's read of every family (src/lib/money/sweep.ts). It reads every family's buy-outs, so it is never imported by
 // parent code (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts). It asks QuickBooks nothing itself: it
-// compares each invoiced buy-out with the figures that run has just stored for its family.
+// compares each invoiced buy-out with the figures that run has just stored for its family; the voids it asks for go
+// through the write queue (./writes.ts).
 import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -12,44 +13,85 @@ import { MONEY_JOB } from "@/lib/money/run-keys";
 import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
 import { judgeInvoice } from "./rules";
+import { markBuyoutMoneyStale, queueVoid } from "./writes";
 
 export const BUYOUT_CHECK_JOB = "buyouts.check";
 /** The money run the check last followed: `{ runId }`, so each run is followed once. */
 export const CHECKED_KEY = "buyouts.checked";
 
+/** What one check did: buy-outs marked paid, flagged, ended as voided in QuickBooks, set to be voided, and unflagged. */
+export type BuyoutCheck = { ran: boolean; paid: number; flagged: number; voided: number; voiding: number; unflagged: number };
+const NOT_RUN: BuyoutCheck = { ran: false, paid: 0, flagged: 0, voided: 0, voiding: 0, unflagged: 0 };
+
 /**
  * Follows the latest money run that read every family, once: each invoiced buy-out of the connected company whose
- * family that run read is judged by what it stored (judgeInvoice). Paid ones become paid; one QuickBooks no longer
- * shows is flagged for the Reconciliation page with the family, the requirement and the amount, and audited once (a
- * flag already set is not audited again). A paid buy-out is not judged: stored figures keep paid invoices for 12 months
- * only, so its invoice dropping out says nothing. Nothing is voided here. True when it followed a run.
+ * family that run read is judged by what it stored (judgeInvoice). Paid ones become paid; one voided in QuickBooks
+ * ends as voided (nothing is owed for it); one QuickBooks no longer shows, or shows on another customer, is flagged for
+ * the Reconciliation page with the family, the requirement and the amount, and audited once (a flag already set is not
+ * audited again), and that flag is taken off, audited, once a later run finds the invoice where it belongs. Figures
+ * marked behind since they were read (an invoice made or voided after the run read the family) are not judged. A
+ * per-student one whose student QuickBooks moved to another family has its void put on the write queue, as a move made
+ * in the portal does: the worker reads the invoice live and voids it only when nothing is paid on it, so the new family
+ * is never left an invoice for the old family's choice. A paid buy-out is not judged: stored figures keep paid
+ * invoices for 12 months only, so its invoice dropping out says nothing. `ran` is true when it followed a run.
  */
-export async function checkBuyoutInvoices(): Promise<{ ran: boolean; paid: number; flagged: number }> {
+export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
   const [run] = await db.select().from(jobRun).where(and(eq(jobRun.job, MONEY_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
-  if (!run) return { ran: false, paid: 0, flagged: 0 };
+  if (!run) return NOT_RUN;
   const [seen] = await db.select().from(setting).where(eq(setting.key, CHECKED_KEY));
-  if ((seen?.value as { runId?: unknown } | undefined)?.runId === run.id) return { ran: false, paid: 0, flagged: 0 };
+  if ((seen?.value as { runId?: unknown } | undefined)?.runId === run.id) return NOT_RUN;
   const source = await getRosterSource();
   const rows = source === null ? [] : await db.select().from(buyout).where(and(eq(buyout.state, "invoiced"), eq(buyout.realmId, source)));
   const money = await moneyRows([...new Set(rows.map((b) => b.familyQboId))]);
   const customers = rows.length === 0 ? [] : await db.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer)
     .where(inArray(qboCustomer.qboId, [...new Set(rows.map((b) => b.customerQboId))]));
-  let paid = 0, flagged = 0;
+  let paid = 0, flagged = 0, voided = 0, voiding = 0, unflagged = 0;
   for (const b of rows) {
-    const row = money.get(b.familyQboId);
-    // Only a family this run read, from this company: older figures may be from before the invoice was made.
-    if (!b.invoiceQboId || !row?.readAt || !row.invoices || row.realmId !== source || row.readAt < run.startedAt) continue;
+    if (!b.invoiceQboId) continue;
     const perStudent = b.subjectQboId !== b.familyQboId;
     const c = customers.find((x) => x.qboId === b.customerQboId);
-    const verdict = judgeInvoice({ invoiceQboId: b.invoiceQboId, customerQboId: b.customerQboId, perStudent }, row.invoices, Boolean(c?.active && c.parentQboId === b.familyQboId));
-    if (verdict === "ok") continue;
+    const stillTheFamilys = Boolean(c?.active && c.parentQboId === b.familyQboId);
+    if (perStudent && !stillTheFamilys) {
+      // Moved in QuickBooks: the roster cache says so, whatever the figures hold. Its void goes on the queue once; a
+      // void that found something paid has flagged it, and it is left for the treasurer.
+      if (b.flag === "student_moved") continue;
+      if (await db.transaction((tx) => queueVoid(tx, b, "student_moved", { actor: WORKER_ACTOR, label: "student moved", nextTryAt: new Date() }))) voiding++;
+      continue;
+    }
+    const row = money.get(b.familyQboId);
+    // Only a family this run read, from this company: older figures may be from before the invoice was made, and so
+    // may figures marked behind since they were read.
+    if (!row?.readAt || !row.invoices || row.realmId !== source || row.readAt < run.startedAt || (row.staleAt && row.staleAt >= row.readAt)) continue;
+    const verdict = judgeInvoice({ invoiceQboId: b.invoiceQboId, customerQboId: b.customerQboId, perStudent }, row.invoices, stillTheFamilys);
     await db.transaction(async (tx) => {
+      if (verdict === "ok" || verdict === "student_moved") {
+        // A flag of this check's own that the figures no longer bear out (the invoice was made after the family was read).
+        if (b.flag !== "missing" && b.flag !== "other_customer") return;
+        const [cleared] = await tx.update(buyout).set({ flag: null, flaggedAt: null, updatedAt: new Date() })
+          .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"), eq(buyout.flag, b.flag))).returning({ id: buyout.id });
+        if (!cleared) return;
+        unflagged++;
+        await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.unflagged", targetType: "buyout", targetId: b.id, before: { flag: b.flag },
+          after: { flag: null, invoiceQboId: b.invoiceQboId, runId: run.id } }, tx);
+        return;
+      }
       if (verdict === "paid") {
         const [done] = await tx.update(buyout).set({ state: "paid", updatedAt: new Date() }).where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
         if (!done) return;
         paid++;
         await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.paid", targetType: "buyout", targetId: b.id, before: { state: "invoiced" },
           after: { state: "paid", invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, runId: run.id } }, tx);
+        return;
+      }
+      if (verdict === "voided") {
+        // Voided in QuickBooks (the treasurer cancelled it there): nothing is owed, and the family may volunteer or choose again.
+        const [ended] = await tx.update(buyout).set({ state: "voided", endReason: "voided_in_quickbooks", flag: null, flaggedAt: null, updatedAt: new Date() })
+          .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
+        if (!ended) return;
+        voided++;
+        await markBuyoutMoneyStale(tx, b);
+        await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.voided", targetType: "buyout", targetId: b.id,
+          before: { state: "invoiced", invoiceQboId: b.invoiceQboId, amountCents: b.amountCents }, after: { state: "voided", why: "voided_in_quickbooks", runId: run.id } }, tx);
         return;
       }
       if (b.flag === verdict) return;
@@ -62,5 +104,5 @@ export async function checkBuyoutInvoices(): Promise<{ ran: boolean; paid: numbe
   }
   const value = { runId: run.id };
   await db.insert(setting).values({ key: CHECKED_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
-  return { ran: true, paid, flagged };
+  return { ran: true, paid, flagged, voided, voiding, unflagged };
 }

@@ -233,6 +233,11 @@ export async function tryAgainNow(id: string, o: QueueOp): Promise<Done> {
     const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
     if (!item) return GONE;
     const now = new Date();
+    // A buy-out write whose first try, made at once for the guardian, may still be under way: trying it again now could
+    // send it twice. It is the worker's once that try's hold runs out.
+    if (isBuyoutWrite(item.request) && item.state === "waiting" && item.tries === 0 && item.nextTryAt && item.nextTryAt > now) {
+      return { ok: false as const, errors: ["It is being tried right now. Reload the page in a few minutes to see how it went."] };
+    }
     // Its count of tries and its age are kept, so a stuck item that fails again is stuck again at once.
     await tx.update(writeQueue).set({ state: "waiting", nextTryAt: now, updatedAt: now }).where(eq(writeQueue.id, id));
     await writeAudit({ actor: o.actor, action: "roster.write.again", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,

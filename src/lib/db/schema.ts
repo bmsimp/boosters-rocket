@@ -610,7 +610,7 @@ export const buyout = pgTable("buyout", {
   amountCents: integer("amount_cents").notNull(),
   // Where it stands (src/lib/buyouts/rules.ts). All but voided and refused are live: one at most per requirement and subject.
   state: text("state", { enum: ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"] }).notNull(),
-  endReason: text("end_reason", { enum: ["switched_back", "student_moved"] }), // why a voided one was voided
+  endReason: text("end_reason", { enum: ["switched_back", "student_moved", "voided_in_quickbooks"] }), // why a voided one was voided
   invoiceQboId: text("invoice_qbo_id"),
   invoiceSyncToken: text("invoice_sync_token"),
   realmId: text("realm_id").notNull(),                 // the QuickBooks company the invoice is in

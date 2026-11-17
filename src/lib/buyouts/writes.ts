@@ -52,9 +52,11 @@ export const BUYOUT_COPY = {
   beingCancelled: "Your invoice is already being cancelled.",
   waitingForClub: "Your buy-out is waiting for the club to look at it, so it can't be changed here. Please ask the club.",
   paidSome: "A payment has been made on this invoice, so the portal can't cancel it. The club's treasurer can sort it out in QuickBooks: please get in touch with them.",
+  invoiceGone: "We can't find this invoice in the club's books any more, so nothing was changed here. Please ask the club about it.",
+  clubLooks: "The club needs to look at this invoice, so nothing was changed. Please ask the club about it.",
   cantCheck: "We couldn't check your invoice just now, so nothing was changed. Please try again in a few minutes.",
-  switching: "Done. Your invoice is being cancelled, and you can sign up for shifts again.",
-  switched: "Done. The invoice is cancelled, and nothing is owed for it. You can sign up for shifts again.",
+  switching: "Done. Your invoice is being cancelled, so you don't need to pay it: it leaves your Payments page once it is. You can sign up for shifts now.",
+  switched: "Done. The invoice is cancelled, and nothing is owed for it. You can sign up for shifts now.",
 } as const;
 
 type Item = typeof writeQueue.$inferSelect;
@@ -92,6 +94,17 @@ const short = (code: string) => code.slice(0, 40);
 /** The family's stored figures are behind QuickBooks now: its next page load reads QuickBooks (src/lib/money/family-money.ts). */
 async function markMoneyStale(tx: Tx, familyQboId: string): Promise<void> {
   await tx.update(familyMoney).set({ staleAt: new Date(), updatedAt: new Date() }).where(eq(familyMoney.familyQboId, familyQboId));
+}
+
+/**
+ * Every family whose figures may show this buy-out's invoice: the one that chose it, and for a per-student one the
+ * family its student is under now in the roster cache (a student who moved takes their invoices with them).
+ */
+export async function markBuyoutMoneyStale(tx: Tx, b: Pick<Row, "familyQboId" | "subjectQboId" | "customerQboId">): Promise<void> {
+  await markMoneyStale(tx, b.familyQboId);
+  if (b.subjectQboId === b.familyQboId) return;
+  const [now] = await tx.select({ parentQboId: qboCustomer.parentQboId }).from(qboCustomer).where(eq(qboCustomer.qboId, b.customerQboId));
+  if (now?.parentQboId && now.parentQboId !== b.familyQboId) await markMoneyStale(tx, now.parentQboId);
 }
 
 /** The queue item finished: done, with what QuickBooks made or changed, audited as the queue audits its own. */
@@ -139,7 +152,7 @@ async function created(item: Item, w: Extract<BuyoutWrite, { op: "invoice_create
       .where(and(eq(buyout.id, b.id), inArray(buyout.state, ["being_invoiced", "stuck"]))).returning();
     await itemDone(tx, item, how, inv.qboId, actor);
     if (!made) return;
-    await markMoneyStale(tx, b.familyQboId);
+    await markBuyoutMoneyStale(tx, b);
     await writeAudit({ actor, action: "volunteer.buyout.invoiced", targetType: "buyout", targetId: b.id,
       before: { state: b.state }, after: { state: "invoiced", invoiceQboId: inv.qboId, customerQboId: inv.customerQboId, amountCents: b.amountCents, how, queueId: item.id, ...(elsewhere ? { flag: "other_customer" } : {}) } }, tx);
     // The student moved to another family while the invoice was being made: the old family's choice is not left billed.
@@ -155,7 +168,7 @@ async function voided(item: Item, w: Extract<BuyoutWrite, { op: "invoice_void" }
       .where(and(eq(buyout.id, b.id), inArray(buyout.state, ["being_voided", "stuck"]))).returning({ id: buyout.id });
     await itemDone(tx, item, how, w.invoiceQboId, actor);
     if (!ended) return;
-    await markMoneyStale(tx, b.familyQboId);
+    await markBuyoutMoneyStale(tx, b);
     await writeAudit({ actor, action: "volunteer.buyout.voided", targetType: "buyout", targetId: b.id,
       before: { state: b.state, invoiceQboId: w.invoiceQboId, amountCents: b.amountCents }, after: { state: "voided", why: w.why, how, queueId: item.id } }, tx);
   });
@@ -221,6 +234,9 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
       }
       if (found) return created(item, w, b, found, "found", actor);
     }
+    // Marked as maybe sent before it goes: a try cut off mid-send (a restart) leaves the item `sent`, so whoever takes
+    // it next looks for the invoice by the buy-out's id before sending again. A failure that surely sent nothing puts it back.
+    if (!item.sent) await db.update(writeQueue).set({ sent: true, updatedAt: new Date() }).where(eq(writeQueue.id, item.id));
     let answer: Record<string, unknown>;
     try {
       answer = await qboCreateInvoice({ customerQboId: w.customerQboId, itemQboId: w.itemQboId, units: w.units, unitCents: w.unitCents, buyoutId: b.id }, sendOptions(item.realmId, o.mayWait));
@@ -381,17 +397,25 @@ export async function switchMyBuyoutBack(ctx: ParentCtx, family: Pick<MyFamily, 
   if (b.state === "being_invoiced") return no(BUYOUT_COPY.stillMaking);
   if (b.state === "being_voided") return no(BUYOUT_COPY.beingCancelled);
   if (b.state === "stuck") return no(BUYOUT_COPY.waitingForClub);
-  if (b.state === "paid" || t.view.buyout.invoicePaid || !b.invoiceQboId) return no(BUYOUT_COPY.paidSome);
+  if (b.state === "paid" || t.view.buyout.invoicePaid) return no(BUYOUT_COPY.paidSome);
+  if (!b.invoiceQboId || b.flag !== null) return no(BUYOUT_COPY.clubLooks);
   if (!(await db.transaction((tx) => writable(tx, b.realmId)))) return no(BUYOUT_COPY.cantCheck);
   let invoices: Invoice[];
   try { invoices = await invoicesOf(b.customerQboId, b.realmId, false); } catch (e) { if (e instanceof QboError) return no(BUYOUT_COPY.cantCheck); throw e; }
   const inv = invoices.find((i) => i.qboId === b.invoiceQboId);
-  // Gone from the customer's invoices, voided in QuickBooks, or something paid on it: the treasurer's to sort out.
-  if (!inv || inv.totalCents === 0 || inv.balanceCents < inv.totalCents) return no(BUYOUT_COPY.paidSome);
+  // Gone from the customer's invoices: nothing is changed, and the parent is not told anything was paid. Something paid
+  // on it: the treasurer's to sort out. One voided in QuickBooks already (a total of 0) goes on: the void below finds it
+  // voided and the buy-out ends, as the guardian asked.
+  if (!inv) return no(BUYOUT_COPY.invoiceGone);
+  if (inv.totalCents > 0 && inv.balanceCents < inv.totalCents) return no(BUYOUT_COPY.paidSome);
   const item = await db.transaction((tx) => queueVoid(tx, b, "switched_back", { actor, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS), ip: ctx.ip }));
   if (!item) return no(BUYOUT_COPY.nothingToSwitch);
   const step = await sendBuyoutWrite(item, new Date(), { mayWait: false, actor });
   if (step === "done") return { ok: true, message: BUYOUT_COPY.switched };
-  if (step === "kept") return no(BUYOUT_COPY.paidSome);
+  if (step === "kept") {
+    // Why the void was kept is in the buy-out's code: only a payment is told as one.
+    const [after] = await db.select({ lastCode: buyout.lastCode }).from(buyout).where(eq(buyout.id, b.id));
+    return no(after?.lastCode === "paid" ? BUYOUT_COPY.paidSome : after?.lastCode === "invoice_gone" ? BUYOUT_COPY.invoiceGone : BUYOUT_COPY.clubLooks);
+  }
   return { ok: true, message: BUYOUT_COPY.switching };
 }

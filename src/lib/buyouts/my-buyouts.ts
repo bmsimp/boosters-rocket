@@ -3,10 +3,12 @@
 // something of that family or its own active students, and the buy-outs read are that family's own. What the browser
 // sends back is the requirement id and a choice key made here from the family's own list of subjects ("family", or
 // "s1", "s2" for its students in id order), never a QuickBooks id; both are looked up again within the session's family.
+// Of another family's buy-outs only this is read: whether one still stands for one of this family's own students (a
+// student who moved here in QuickBooks), so no choice is offered that could never be set up. Nothing of it is shown.
 // It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
 import { createHmac } from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { env } from "@/env";
 import { db } from "@/lib/db/client";
 import { buyout, qboCustomer, requirement, season, seasonStep, type BuyoutState } from "@/lib/db/schema";
@@ -33,7 +35,9 @@ export type MyBuyout = {
   /** What a buy-out would cost now, worked out on the server; and its stamp, which the confirm sends back. */
   quote: Quote; stamp: string | null;
   /** The buy-out that stands, if one does: its price as it was fixed. */
-  buyout: { state: BuyoutState; units: number; unitCents: number; amountCents: number; invoicePaid: boolean } | null;
+  buyout: { state: BuyoutState; units: number; unitCents: number; amountCents: number; invoicePaid: boolean;
+    /** The club has something to look at about its invoice (the daily check or a void flagged it): the page says so, and offers nothing. */
+    clubLooking: boolean } | null;
   may: "choose" | "switch_back" | "wait" | "nothing";
   /** A buy-out the club couldn't set up, the last time one was tried: the page says so calmly. */
   refusedBefore: boolean;
@@ -86,6 +90,10 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
   const ids = requirements.map((x) => x.r.id);
   // The family's own buy-outs only: the session's family id is the only one asked about.
   const mine = await db.select().from(buyout).where(and(eq(buyout.familyQboId, ctx.familyQboId), inArray(buyout.requirementId, ids)));
+  // A live buy-out another family chose for one of this family's own students (moved here in QuickBooks): it holds the
+  // one live place for that requirement and student (buyout_live_uq), so a choice here could never be set up.
+  const elsewhere = students.length === 0 ? [] : await db.select({ requirementId: buyout.requirementId, subjectQboId: buyout.subjectQboId }).from(buyout)
+    .where(and(inArray(buyout.requirementId, ids), inArray(buyout.subjectQboId, students.map((s) => s.qboId)), ne(buyout.familyQboId, ctx.familyQboId), inArray(buyout.state, [...LIVE_STATES])));
   const [facts, confirmed, standing, source] = await Promise.all([
     buyoutFacts(ids, subjectIds), confirmedAmounts(requirements.map((x) => x.r), subjectIds, pairKey),
     loadFacts(requirements.map((x) => x.r), subjectIds, { amounts: "fresh", parentId: ctx.parentId }), getRosterSource(),
@@ -98,7 +106,9 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
       const fact = facts.get(key) ?? null;
       const live = fact ? mine.find((b) => b.requirementId === r.id && b.subjectQboId === s.qboId && LIVE_STATES.includes(b.state)) ?? null : null;
       if (!buyoutOffered(terms) && !live) continue;
-      const shown = standing.facts.standing(r, s.qboId);
+      if (!live && elsewhere.some((e) => e.requirementId === r.id && e.subjectQboId === s.qboId)) continue;
+      // A requirement staff waived needs nothing (v1 spec §10.2): there is nothing to buy, as when credit has met it.
+      const shown = !live && standing.facts.waived(r.id, s.qboId) ? { met: true, words: "Waived" } : standing.facts.standing(r, s.qboId);
       const quote = shown.met ? { ok: false as const, why: "met" as const } : quoteBuyout(terms, confirmed.get(key) ?? 0);
       const last = mine.filter((b) => b.requirementId === r.id && b.subjectQboId === s.qboId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
       out.push({
@@ -106,8 +116,9 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
         view: {
           requirementId: r.id, title: r.title, unit: r.amountUnit ?? "shifts", key: s.key, who: s.who, standing: shown.words, met: shown.met,
           quote, stamp: row.itemQboId ? quoteStamp(ctx.familyQboId, r.id, s.qboId, row.itemQboId, quote) : null,
-          buyout: live && fact ? { state: live.state, units: live.units, unitCents: live.unitCents, amountCents: live.amountCents, invoicePaid: fact.invoicePaid } : null,
-          may: guardianMay(fact, quote), refusedBefore: !live && last?.state === "refused",
+          buyout: live && fact ? { state: live.state, units: live.units, unitCents: live.unitCents, amountCents: live.amountCents, invoicePaid: fact.invoicePaid,
+            clubLooking: live.flag !== null } : null,
+          may: live?.flag ? "nothing" : guardianMay(fact, quote), refusedBefore: !live && last?.state === "refused",
         },
       });
     }

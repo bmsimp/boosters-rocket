@@ -9,6 +9,7 @@ import { getClubSettings } from "@/lib/settings/club";
 import { NotSetUpBox } from "../../../../family-boxes";
 import { confirmBuyoutAction, switchBackAction } from "../../actions";
 import { ConfirmBuyout, SwitchBack } from "../../pay-instead-forms";
+import { Announcer } from "../../../../announce";
 
 export const metadata = { title: "Pay instead of volunteering" };
 export const dynamic = "force-dynamic";
@@ -41,13 +42,16 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
         {v.refusedBefore && <p className="help">The last time, the club&apos;s invoice couldn&apos;t be set up, so nothing was billed. You can try again, or ask the club.</p>}
       </section>
 
+      {/* The answer to a confirm or a switch-back outlives the section it was pressed in: the page redraws into another. */}
+      <Announcer>
       {b ? (
         <section className="box" aria-labelledby="buyout-h"><h2 id="buyout-h">Your buy-out</h2>
           <p>{unitsWords(v.unit, b.units)} at {formatMoney(b.unitCents)} {perUnitWords(v.unit)}: <b className="num">{formatMoney(b.amountCents)}</b>.</p>
           {b.state === "being_invoiced" && <p>The club&apos;s invoice is being set up. It will be on your <Link href="/payments">Payments</Link> page soon, with a Pay button. Once it&apos;s there, you can switch back here if you change your mind.</p>}
-          {b.state === "invoiced" && !b.invoicePaid && <p>The invoice is on your <Link href="/payments">Payments</Link> page, with a Pay button. This is done once it&apos;s paid.</p>}
+          {b.clubLooking && b.state !== "paid" && !b.invoicePaid && <p>The club is looking at this invoice, so nothing can be changed here for now. You don&apos;t need to do anything; if you have questions, please ask the club.</p>}
+          {b.state === "invoiced" && !b.invoicePaid && !b.clubLooking && <p>The invoice is on your <Link href="/payments">Payments</Link> page, with a Pay button. This is done once it&apos;s paid.</p>}
           {(b.state === "paid" || b.invoicePaid) && <p>{BUYOUT_WORDS.paid}. Thank you!</p>}
-          {b.state === "being_voided" && <p>The invoice is being cancelled. Once it is, you can sign up for shifts again.</p>}
+          {b.state === "being_voided" && <p>The invoice is being cancelled, so you don&apos;t need to pay it: it leaves your <Link href="/payments">Payments</Link> page once it is. You can sign up for shifts now.</p>}
           {b.state === "stuck" && <p>Something held this up, so it&apos;s waiting for the club to look at it. You don&apos;t need to do anything; if you have questions, please ask the club.</p>}
           {v.may === "switch_back" && (
             <>
@@ -75,6 +79,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
           <p>{v.quote.ok || v.quote.why === "met" ? "This is done already, so there's nothing to pay. Thank you!" : "Paying instead isn't offered for this right now. If you'd like to, please ask the club."}</p>
         </section>
       )}
+      </Announcer>
     </main>
   );
 }

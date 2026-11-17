@@ -118,7 +118,7 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   ran.push(...(await moneyJob(now)));
   // Buy-out invoices (src/lib/buyouts/daily-check.ts), once after each run that read every family: compared with the
   // figures it stored. Guarded like the steps above; in this wake's answer only when it marked or flagged something.
-  try { const b = await checkBuyoutInvoices(); if (b.paid + b.flagged > 0) ran.push({ job: BUYOUT_CHECK_JOB, ok: true }); } catch { ran.push({ job: BUYOUT_CHECK_JOB, ok: false }); }
+  try { const b = await checkBuyoutInvoices(); if (b.paid + b.flagged + b.voided + b.voiding + b.unflagged > 0) ran.push({ job: BUYOUT_CHECK_JOB, ok: true }); } catch { ran.push({ job: BUYOUT_CHECK_JOB, ok: false }); }
   return { ran };
 }
 

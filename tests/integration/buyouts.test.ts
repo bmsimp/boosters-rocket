@@ -26,7 +26,7 @@ import { RIVERA } from "../helpers/money";
 import { seedFamilyMoney, seedParentIn, type SeededParent } from "../helpers/parent";
 import { startQboStub, STUB_PAID_VOID_FAULT, type QboStub } from "../helpers/qbo-stub";
 import { BUYOUT_ITEM, buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
-import { seedOutsideCredit } from "../helpers/volunteer";
+import { seedCheckIn, seedEvent, seedOutsideCredit, seedShift, seedSignup } from "../helpers/volunteer";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -131,17 +131,39 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(posts()).toEqual([]);
   });
 
-  it("never tells a family that a student who moved in still has the old family's buy-out", async () => {
+  it("offers no choice that could never be set up for a student who moved in with the old family's buy-out, and never says why", async () => {
     const p = await buyoutFamily(stub);
-    const req = await seedBuyoutRequirement({ appliesTo: "student" });
+    const req = await seedBuyoutRequirement({ appliesTo: "student", title: "Concession shifts QR79" });
     // The student was the Chenoweth family's, who chose a buy-out for them; QuickBooks moved them since.
+    const stamp = (await shown(p, req, "s1")).stamp;
     await seedBuyout({ requirementId: req, familyQboId: "8010", subjectQboId: STUDENT, chosenBy: p.identity.parentId, invoiceQboId: "9977", unitCents: 4321, units: 1 });
-    const choice = await shown(p, req, "s1");
-    expect(choice).toMatchObject({ buyout: null, may: "choose", standing: "0 of 2 shifts done" });
+    const all = await loadMyBuyouts({ familyQboId: FAMILY, parentId: p.identity.parentId }, family);
+    expect(all.map((b) => b.key)).toEqual(["s2"]);
     asParent(p.identity);
-    const r = await confirmBuyoutAction(req, "s1", choice.stamp);
-    expect(r).toEqual({ ok: false, errors: [BUYOUT_COPY.cantNow] });
+    const html = await renderPage(VolunteerPage);
+    expect(html).not.toMatch(/43\.21|8010|9977|\$86\.42/);
+    const { pageOutcome } = await import("../helpers/signed-in");
+    expect(await pageOutcome(PayInsteadPage, { params: { requirementId: req, choice: "s1" } })).toEqual({ notFound: true });
+    // A confirm sent with a stamp from before is refused as not from the page, telling nothing of the other family.
+    const r = await confirmBuyoutAction(req, "s1", stamp);
+    expect(r).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
     expect(JSON.stringify(r)).not.toMatch(/43\.21|8010|9977/);
+    expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("offers nothing to buy, and bills nothing, for a requirement staff waived", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ amount: 2, unitCents: 5000 });
+    const before = await shown(p, req);
+    expect(before.quote.ok).toBe(true);
+    const { requirementProgress } = await import("@/lib/db/schema");
+    await db.insert(requirementProgress).values({ requirementId: req, subjectQboId: FAMILY, waivedAt: new Date(), waivedReason: "Coach's family" });
+    const now = await shown(p, req);
+    expect(now).toMatchObject({ standing: "Waived", met: true, may: "nothing", quote: { ok: false, why: "met" }, stamp: null });
+    asParent(p.identity);
+    expect(await renderPage(VolunteerPage)).not.toContain("Pay instead of volunteering ($100.00)");
+    expect(await confirmBuyoutAction(req, "family", before.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
     expect(await buyoutsOf(FAMILY)).toEqual([]);
     expect(posts()).toEqual([]);
   });
@@ -244,6 +266,34 @@ describe("the write queue's share of a buy-out", () => {
     expect((await buyoutsOf(FAMILY))[0]!.state).toBe("invoiced");
   });
 
+  it("marks the create as maybe sent before it goes, so a try cut off mid-send is looked for before it is sent again", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    const choice = await shown(p, req);
+    let sentAsPosted: boolean | null = null;
+    stub.onApiRequest = async (c) => {
+      if (c.method === "POST" && c.path.endsWith("/invoice")) sentAsPosted = (await db.select().from(writeQueue))[0]!.sent;
+    };
+    asParent(p.identity);
+    expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
+    expect(sentAsPosted).toBe(true);
+  });
+
+  it("refuses 'Try again now' while the try made at once for the guardian may still be under way", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    const b = await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
+    const [item] = await db.insert(writeQueue).values({ realmId: b.realmId, request: { op: "invoice_create", buyoutId: b.id, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 5000, familyQboId: FAMILY },
+      familyQboId: FAMILY, sent: false, tries: 0, nextTryAt: later(5) }).returning();
+    const { tryAgainNow } = await import("@/lib/roster/queue");
+    const op = { actor: { door: "staff" as const, id: null, label: "registrar@club.org" }, ip: null, permission: "Roster.Family.ReadWrite" };
+    expect(await tryAgainNow(item!.id, op)).toMatchObject({ ok: false });
+    expect((await queueOf(b.id))[0]!.nextTryAt!.getTime()).toBeGreaterThan(Date.now());
+    // Once that try's hold has run out, staff may ask again.
+    await db.update(writeQueue).set({ nextTryAt: new Date(Date.now() - 1000) }).where(eq(writeQueue.id, item!.id));
+    expect(await tryAgainNow(item!.id, op)).toMatchObject({ ok: true });
+  });
+
   it("waits while QuickBooks is busy, and is stuck after the tries run out, for staff to look at", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();
@@ -338,10 +388,50 @@ describe("switching back to volunteering before paying", () => {
   it("keeps the invoice, and flags it, when a payment lands in QuickBooks as the void is sent", async () => {
     const { req } = await invoiced();
     stub.beforeVoid = (inv) => { inv.Balance = 0; };
-    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.paidSome] });
+    // QuickBooks refused the void: the portal can't tell why, so the guardian is told the club will look, not that a payment was made.
+    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.clubLooks] });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ state: "invoiced", flag: "void_refused", lastCode: `fault_${STUB_PAID_VOID_FAULT}` });
     expect(stub.invoices[0]).toMatchObject({ TotalAmt: 100, Balance: 0 });
+  });
+
+  it("ends the buy-out as the guardian asked when the treasurer already voided the invoice in QuickBooks", async () => {
+    const { p, req } = await invoiced();
+    stub.invoices[0]!.TotalAmt = 0; stub.invoices[0]!.Balance = 0;
+    expect(await switchBackAction(req, "family")).toEqual({ ok: true, message: BUYOUT_COPY.switched });
+    expect(invoicePosts().filter((c) => c.query.get("operation") === "void")).toEqual([]);
+    expect((await buyoutsOf(FAMILY))[0]).toMatchObject({ state: "voided", endReason: "switched_back" });
+    expect(await shown(p, req)).toMatchObject({ may: "choose", buyout: null });
+  });
+
+  it("never says a payment was made when the invoice is gone from QuickBooks, and changes nothing", async () => {
+    const { req } = await invoiced();
+    stub.invoices.length = 0;
+    const r = await switchBackAction(req, "family");
+    expect(r).toEqual({ ok: false, errors: [BUYOUT_COPY.invoiceGone] });
+    expect(JSON.stringify(r)).not.toMatch(/payment/i);
+    expect((await buyoutsOf(FAMILY))[0]).toMatchObject({ state: "invoiced", flag: null });
+  });
+
+  it("offers nothing, and says the club is looking, while the buy-out is flagged for staff", async () => {
+    const { p, req } = await invoiced();
+    await db.update(buyout).set({ flag: "missing", flaggedAt: new Date() });
+    expect(await shown(p, req)).toMatchObject({ may: "nothing", buyout: { clubLooking: true } });
+    const page = await renderPage(PayInsteadPage, { params: { requirementId: req, choice: "family" } });
+    expect(page).not.toContain("Volunteer instead");
+    expect(page).not.toContain("with a Pay button");
+    expect(page).toContain("The club is looking at this invoice");
+    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.clubLooks] });
+  });
+
+  it("tells the guardian they can sign up for shifts now, not once the invoice is cancelled", async () => {
+    const { p, req } = await invoiced();
+    await db.update(buyout).set({ state: "being_voided" });
+    const page = await renderPage(PayInsteadPage, { params: { requirementId: req, choice: "family" } });
+    expect(page).not.toContain("Once it is, you can sign up");
+    expect(page).toContain("You can sign up for shifts now");
+    expect(BUYOUT_COPY.switching).not.toMatch(/once it is, you can sign up/i);
+    expect((await shown(p, req)).standing).toBe("Buy-out being cancelled");
   });
 
   it("goes through the queue when QuickBooks can't be reached for the void, and reads 'being cancelled' meanwhile", async () => {
@@ -372,6 +462,20 @@ describe("how the requirement reads, on the parent's pages", () => {
     expect(page).not.toContain("Volunteer instead");
   });
 
+  it("spends no credit on a requirement its paid buy-out has met: the credit counts toward the next one (v1 spec §11.4)", async () => {
+    const p = await buyoutFamily(stub);
+    const r1 = await seedBuyoutRequirement({ title: "First shifts" }), r2 = await seedBuyoutRequirement({ title: "Second shifts" });
+    await seedBuyout({ requirementId: r1, familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "paid", invoiceQboId: "9901" });
+    const event = await seedEvent();
+    for (let i = 0; i < 2; i++) {
+      const shift = await seedShift(event.event.id, { requirementIds: [r1, r2] });
+      const signup = await seedSignup({ shiftId: shift.id, familyQboId: FAMILY, signedUpBy: p.identity.parentId });
+      await seedCheckIn({ signupId: signup.id, familyQboId: FAMILY, by: p.identity.parentId });
+    }
+    expect((await shown(p, r1)).standing).toBe("Paid instead");
+    expect(await shown(p, r2)).toMatchObject({ standing: "2 of 2 shifts done", met: true, quote: { ok: false, why: "met" } });
+  });
+
   it("offers the choice with the amount, and its own page says plainly what will happen", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ title: "Parking crew QR78", unitCents: 3150, amount: 2 });
@@ -384,6 +488,8 @@ describe("how the requirement reads, on the parent's pages", () => {
     }
     expect(page).not.toContain(FAMILY);
     expect(page).not.toContain(BUYOUT_ITEM);
+    // The confirm's answer goes to a status line outside the section that redraws, so it is heard and keeps the focus.
+    expect(page).toMatch(/<p[^>]*role="status"[^>]*class="volunteer-done announce"/);
   });
 
   it("answers 404 for a requirement or a key that isn't the family's", async () => {
