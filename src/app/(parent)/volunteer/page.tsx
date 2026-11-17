@@ -87,8 +87,9 @@ export default async function VolunteerPage() {
                   <CancelSignup label={s.who === "You" ? "Cancel my sign-up" : `Cancel ${s.who}'s sign-up`} act={cancelSignupAction.bind(null, s.id)} />
                 </>
               )}
-              {s.cancel === "closed" && !s.checkedIn && s.started && <p className="help">This shift has started. To check in, scan the club&apos;s check-in code at the shift. If you can&apos;t make it, please contact {s.contact}.</p>}
-              {s.cancel === "closed" && !s.checkedIn && !s.started && <p className="help">It&apos;s less than {mine.cutoffHours} {mine.cutoffHours === 1 ? "hour" : "hours"} before the shift, so it can&apos;t be cancelled here. If you can&apos;t make it, please contact {s.contact}.</p>}
+              {s.cancel === "closed" && s.corrected && <p className="help">The club has updated this check-in. If something isn&apos;t right, please talk to {s.contact}.</p>}
+              {s.cancel === "closed" && !s.checkedIn && !s.corrected && s.started && <p className="help">This shift has started. To check in, scan the club&apos;s check-in code at the shift. If you can&apos;t make it, please contact {s.contact}.</p>}
+              {s.cancel === "closed" && !s.checkedIn && !s.corrected && !s.started && <p className="help">It&apos;s less than {mine.cutoffHours} {mine.cutoffHours === 1 ? "hour" : "hours"} before the shift, so it can&apos;t be cancelled here. If you can&apos;t make it, please contact {s.contact}.</p>}
             </div></li>))}</ul>
         )}
         </Announcer>

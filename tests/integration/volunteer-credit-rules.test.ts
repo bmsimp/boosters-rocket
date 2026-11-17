@@ -6,6 +6,7 @@ import { requirement, requirementProgress, volunteerCredit, volunteerSignup } fr
 import type { ParentCtx } from "@/lib/guards";
 import type { Requirement } from "@/lib/seasons/progress";
 import { checkIn, loadCheckInForMe } from "@/lib/volunteer/check-in";
+import { loadMyVolunteering } from "@/lib/volunteer/my-volunteer";
 import { allocateFamilies } from "@/lib/volunteer/credit";
 import { signedUpAmounts } from "@/lib/volunteer/signed-up";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
@@ -66,6 +67,9 @@ describe("a check-in staff removed", () => {
       { signupId: leo.id, who: LEO!.name, checkedIn: false, corrected: false },
     ]);
     expect(JSON.stringify(view)).not.toContain("staff only");
+    // The Volunteer page says the same, rather than sending the guardian to scan a code that can't check them in.
+    const signups = (await loadMyVolunteering(ctx())).signups;
+    expect(signups.map((s) => [s.id, s.checkedIn, s.corrected])).toEqual([[mine.id, false, true], [leo.id, false, false]]);
     expect(await checkIn(ctx(), shift!.checkinCode, mine.id)).toEqual({ ok: false,
       errors: ["The club has updated this check-in, so it can't be checked in again here. If something isn't right, please talk to Pat Organizer (pat.organizer@club.example)."] });
     // "Everyone" checks in only the place nobody corrected.

@@ -19,7 +19,7 @@ import { isCovered, type Requirement } from "@/lib/seasons/progress";
 import { loadCovers, loadFacts, toRequirement } from "@/lib/seasons/recorded";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
 import { beforeCutoff, clockOf, dateWords, instantWords, shiftInstants, shiftMinutes, shiftTimeWords } from "./clock";
-import { creditedSignups } from "./credit";
+import { correctedSignups, creditedSignups } from "./credit";
 import { contactWords, signupConfirmation } from "./notices";
 import { amountWords, shiftCredit, whoMustWords } from "./rules";
 import { getVolunteerSettings } from "./settings";
@@ -37,6 +37,8 @@ export type MySignup = {
   checkedIn: boolean;
   /** The shift has begun (and not yet ended): what is left to do is check in there, not cancel. */
   started: boolean;
+  /** Staff removed this place's check-in: scanning the code can't check it in again, only staff can (check-in.ts). */
+  corrected: boolean;
 };
 export type MyVolunteering = { events: MyEvent[]; signups: MySignup[]; cutoffHours: number };
 
@@ -86,6 +88,7 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
   // they were signed up from no longer sees or cancels them.
   const stillOurs = await studentsStillUnder(ctx.familyQboId, mine.flatMap(({ s }) => (s.studentQboId ? [s.studentQboId] : [])));
   const credited = await creditedSignups(mine.map(({ s }) => s.id));
+  const corrected = await correctedSignups(mine.map(({ s }) => s.id));
   const signups = mine.flatMap(({ s, shift, event }) => {
     const { start, end } = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (end.getTime() <= now.getTime() || (s.studentQboId !== null && !stillOurs.has(s.studentQboId))) return [];
@@ -94,7 +97,8 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
     return [{ id: s.id, shiftId: shift.id, eventName: event.name, dateWords: dateWords(event.onDate), timeWords: shiftTimeWords(clockOf(shift.startsAt), clockOf(shift.endsAt)),
       role: shift.role, location: event.location, contact: contactWords(event), who: whoWords(ctx, s),
       cancel: cancelled ? "cancelled" as const : open ? "open" as const : "closed" as const,
-      cancelUntil: open ? instantWords(new Date(start.getTime() - cutoffHours * 3_600_000), zone) : null, checkedIn, started: start.getTime() <= now.getTime() }];
+      cancelUntil: open ? instantWords(new Date(start.getTime() - cutoffHours * 3_600_000), zone) : null, checkedIn, started: start.getTime() <= now.getTime(),
+      corrected: !checkedIn && corrected.has(s.id) }];
   });
   return { events: listed, signups, cutoffHours };
 }

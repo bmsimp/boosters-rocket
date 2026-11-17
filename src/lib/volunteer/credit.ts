@@ -119,6 +119,17 @@ export async function creditedSignups(signupIds: readonly string[], tx?: Tx): Pr
   return new Set(rows.flatMap((r) => (r.signupId ? [r.signupId] : [])));
 }
 
+/**
+ * Of these sign-ups, the ones that have ever had a credit, a removed one included. A check-in staff removed (a guardian
+ * checked in who wasn't there, say) is the club's correction: the guardian can't undo it by pressing again. Staff add a
+ * missed check-in themselves (addMissedCheckIn). No reason is read: it is for staff.
+ */
+export async function correctedSignups(signupIds: readonly string[], tx?: Tx): Promise<Set<string>> {
+  if (signupIds.length === 0) return new Set();
+  const rows = await (tx ?? db).select({ signupId: volunteerCredit.signupId }).from(volunteerCredit).where(inArray(volunteerCredit.signupId, [...signupIds]));
+  return new Set(rows.flatMap((r) => (r.signupId ? [r.signupId] : [])));
+}
+
 /* ---- What a parent sees of the family's own credit ---- */
 
 /** One credit as a parent reads it: "Checked in", or "Added by the club" with its amount. Never a staff note. */

@@ -16,7 +16,7 @@ import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { isUuid } from "@/lib/seasons/ids";
 import { getClubSettings } from "@/lib/settings/club";
 import { checkInWindow, clockOf, dateWords, instantWords, shiftInstants, shiftMinutes, shiftTimeWords } from "./clock";
-import { creditedSignups } from "./credit";
+import { correctedSignups, creditedSignups } from "./credit";
 import { ROSTER_BUSY, studentsStillUnder, takePlace, type Result } from "./my-volunteer";
 import { contactWords } from "./notices";
 
@@ -76,17 +76,6 @@ export async function loadCheckInForMe(ctx: Pick<ParentCtx, "familyQboId" | "par
     people: mine.map((s) => ({ signupId: s.id, who: whoOf(ctx, s), checkedIn: credited.has(s.id), corrected: !credited.has(s.id) && corrected.has(s.id) })),
     contact: contactWords(event),
   };
-}
-
-/**
- * Of these sign-ups, the ones that have ever had a credit, a removed one included. A check-in staff removed (a guardian
- * checked in who wasn't there, say) is the club's correction: the guardian can't undo it by pressing again. Staff add a
- * missed check-in themselves (addMissedCheckIn). No reason is read: it is for staff.
- */
-async function correctedSignups(signupIds: readonly string[], tx?: Tx): Promise<Set<string>> {
-  if (signupIds.length === 0) return new Set();
-  const rows = await (tx ?? db).select({ signupId: volunteerCredit.signupId }).from(volunteerCredit).where(inArray(volunteerCredit.signupId, [...signupIds]));
-  return new Set(rows.flatMap((r) => (r.signupId ? [r.signupId] : [])));
 }
 
 const no = (...errors: string[]): Result => ({ ok: false, errors });
