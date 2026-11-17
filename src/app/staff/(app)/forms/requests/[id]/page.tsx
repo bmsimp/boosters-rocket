@@ -41,7 +41,7 @@ export default async function FormRequestPage({ params }: { params: Promise<{ id
         <h2 id="state-h">Where it stands</h2>
         <StateWords state={cellTone(state)} words={CELL_WORDS[state]} />
         <p className="help">{view.signersMode === "every" ? "Every guardian with a sign-in signs it, up to the template's signers." : "Any one guardian signs it."}</p>
-        {view.evidenceId && <p><Link href={`/staff/forms/evidence/${view.evidenceId}`}>Open the signed form and its evidence</Link></p>}
+        {view.evidenceId && <p><Link className="link-line" href={`/staff/forms/evidence/${view.evidenceId}`}>Open the signed form and its evidence</Link></p>}
         {row.state === "complete" && !view.evidenceId && <Notice tone="info" live="none">Signed and sealed. The signed copy is being fetched from Documenso and filed; its evidence will be here soon.</Notice>}
         {row.signers.length > 0 && (
           <DataTable caption="Each guardian who signs it, and whether they have" captionHidden rows={row.signers} rowKey={(s) => String(s.recipientId)} columns={[

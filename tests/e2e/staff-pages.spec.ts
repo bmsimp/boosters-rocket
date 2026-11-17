@@ -67,6 +67,11 @@ for (const width of [390, 1280]) {
       const tree = await page.locator("body").ariaSnapshot();
       const unnamed = tree.split("\n").filter((line) => UNNAMED.test(line));
       expect(unnamed, `${where} has controls with no accessible name at ${width}px`).toEqual([]);
+      // A table's links and every disclosure's summary are 44px tap targets (AGENTS.md, UI).
+      const short = await page.locator("main").evaluate((main) => [...main.querySelectorAll(".table a:not(.btn):not(.matrix-link), summary")]
+        .map((e) => ({ what: `${e.tagName} ${(e.textContent ?? "").trim().slice(0, 40)}`, h: e.getBoundingClientRect().height }))
+        .filter((e) => e.h > 0 && e.h < 44));
+      expect(short, `${where} has tap targets under 44px at ${width}px`).toEqual([]);
     }
     await context.close();
   });

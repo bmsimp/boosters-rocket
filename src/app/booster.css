@@ -512,7 +512,7 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .table .row-actions { grid-column: auto; }
 .table details.more { margin-top: var(--s1); }
 .table details.more > summary { padding: 10px 0; }
-.table a:not(.btn):not(.matrix-link) { display: inline-block; padding: 10px 0; margin: -10px 0; } /* a 44px tap target without a taller row */
+.table a:not(.btn):not(.matrix-link) { display: inline-flex; align-items: center; min-height: 44px; margin: -10px 0; } /* a 44px tap target, sized from the line, without a taller row */
 @media (max-width: 759.98px) {
   .table, .table caption, .table tbody, .table tr, .table th, .table td { display: block; }
   .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -628,6 +628,8 @@ fieldset.decide { border: 1px solid var(--hair); padding: var(--s3) var(--s4) va
   .matrix th, .matrix td { min-width: 0; }
   .matrix tbody th[scope="row"] { position: static; }
 }
+/* Every disclosure's summary is a 44px tap target, however its line is set (the Roles page's box, the audit table's Details). */
+details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10px; }
 /* ---- End of Staff pages ---- */
 
 /* ---- Settings and the staff menu: the grouped staff menu, the Settings page and every settings page, the roles
