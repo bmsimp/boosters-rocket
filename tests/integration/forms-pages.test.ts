@@ -39,7 +39,7 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     const html = await renderPage(FormsPage);
     const text = textOf(html);
     expect(text).toContain("Autumn Field Season: the forms for Alderquist Family");
-    expect(text).toContain("The club's forms aren't ready to sign yet. There's nothing you need to do right now");
+    expect(text).toContain("The forms still to sign aren't ready yet. There's nothing you need to do right now");
     // The family's own forms, then each student's, with the set each belongs to.
     expect(text).toMatch(/Your family Signed once for Alderquist Family Travel consent \(optional\) Sign-up Not signed yet/);
     expect(text).toMatch(/Bus waiver QA74 \(optional\) Sign-up Not ready yet/);
@@ -258,5 +258,21 @@ describe("signing a form on its page", () => {
     const html = await renderPage(FormsPage);
     expect(textOf(html)).toContain("Your family isn't set up here yet");
     expect(html).not.toContain("Brackenmoor");
+  });
+});
+
+describe("the note that forms can't be signed yet (forms not set up)", () => {
+  it("is about the forms still to sign, and is not shown when every form is signed", async () => {
+    await resetDb();
+    const a = await seedSignedInParent(FAMILY_A);
+    const season = await seedSeason({ name: "Fall 2027", steps: [{ name: "Forms" }] });
+    const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Travel consent", appliesTo: "family", form: formSetting({ id: "envelope_seedtemplate", updatedAt: "2026-11-01T12:00:00.000Z" }) });
+    asParent(a.identity);
+    expect(textOf(await renderPage(FormsPage))).toContain("The forms still to sign aren't ready yet.");
+    await db.update(signatureRequest).set({ state: "complete", envelopeId: "envelope_seeddone", envelopeStatus: "COMPLETED", completedAt: new Date(), allSignedAt: new Date() })
+      .where(eq(signatureRequest.requirementId, requirementId));
+    const text = textOf(await renderPage(FormsPage));
+    expect(text).toMatch(/Travel consent \(optional\) Forms Signed/);
+    expect(text).not.toContain("aren't ready");
   });
 });

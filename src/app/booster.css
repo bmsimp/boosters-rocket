@@ -510,6 +510,7 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .table th .state { margin-top: 2px; font-size: 0.875rem; }
 .table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-end; justify-items: end; }
 .table .row-actions { grid-column: auto; }
+.table .t-quiet .btn { white-space: nowrap; } /* a row's button keeps its words on one line; the columns of words give way instead */
 .table details.more { margin-top: var(--s1); }
 .table details.more > summary { padding: 10px 0; }
 .table a:not(.btn):not(.matrix-link) { display: inline-flex; align-items: center; min-height: 44px; margin: -10px 0; } /* a 44px tap target, sized from the line, without a taller row */
@@ -527,14 +528,16 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
   .table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-start; justify-items: start; }
 }
 
-/* Notices (src/app/components/notice.tsx): a ruled panel with a heavy rule down its left edge in the tone's ink, the
-   tone's icon, and its word in the label face. Information is ink, needs attention amber, done green, a problem red. */
-.notice { --tone: var(--ink); display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--s3); align-items: start;
-  padding: var(--s3) var(--s4); border: 2px solid var(--ink); border-left: 8px solid var(--tone); background: var(--paper); color: var(--ink); }
+/* Notices (src/app/components/notice.tsx): a panel ruled evenly all round in 2px ink, like every box. The tone is carried
+   by what it says: its icon, drawn in paper on a square cell filled with the tone's ink, and its word in the label face
+   in the same ink. Information is ink, needs attention amber, done green, a problem red. */
+.notice { --tone: var(--ink); display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--s3); align-items: start;
+  padding: var(--s3) var(--s4); border: 2px solid var(--ink); background: var(--paper); color: var(--ink); }
 .notice-warning { --tone: var(--due); }
 .notice-done { --tone: var(--done); }
 .notice-problem { --tone: var(--late); }
-.notice > svg { width: 20px; height: 20px; color: var(--tone); margin-top: 3px; }
+.notice > svg { width: 28px; height: 28px; padding: 4px; background: var(--tone); color: var(--paper); }
+.notice:has(> .notice-body > .notice-title) > svg { margin-top: 1px; }
 .notice-body { min-width: 0; overflow-wrap: anywhere; font-size: 1rem; }
 .notice-body > * + * { margin-top: var(--s2); }
 .notice-word { font: 600 0.9375rem var(--mark); letter-spacing: .06em; text-transform: uppercase; color: var(--tone); margin-right: var(--s1); }
@@ -577,7 +580,7 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
     background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
 }
 @media (forced-colors: active) {
-  .notice { border-left-width: 8px; }
+  .notice > svg { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 2px solid CanvasText; padding: 2px; } /* no fill here: the cell keeps its edge, the icon and word carry the tone */
   .field select { appearance: auto; background-image: none; padding-right: var(--s3); }
   .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
   .checks input[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
@@ -599,6 +602,7 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
 .today { list-style: none; padding: 0; margin-top: var(--s3); }
 .today li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s1) var(--s4);
   padding: var(--s3) 0; border-top: 1px solid var(--hair); }
+.today li > div { flex: 1 1 20rem; min-width: 0; } /* the words take the line, so every link sits at its end on a laptop, however long its words */
 .today li .state { font-size: 1rem; }
 .today .when { display: block; font-size: 0.875rem; color: var(--ink-2); margin-top: 2px; }
 .today li a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
@@ -671,6 +675,9 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
 .mail-steps a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; margin-right: var(--s3); }
 .mail-steps .state { display: inline-flex; }
 
+/* Setup: each step's Next button and the address box stand clear of the box or form above them, as boxes do. */
+.setup-page > .box, .setup-page > form, .setup-page > .stack { margin-top: var(--cell); }
+
 /* A club color picked on the setup's club step or the Club page, shown on a sample of the club bar. */
 .club-preview { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 0 var(--s4); background: var(--club); color: var(--club-on);
   border: 2px solid var(--ink); }
@@ -682,7 +689,7 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
 .role-form .role-area label { clear: left; align-items: flex-start; padding: var(--s2) 0; min-height: 44px; } /* below the floated legend, never squeezed beside it */
 .role-form .role-area input { margin-top: 2px; }
 .role-form .role-area .hint { display: inline; }
-.role-patterns { border-left: 4px solid var(--due); padding-left: var(--s3); max-width: 60ch; }
+.role-form .role-patterns { max-width: 60ch; } /* a Notice in the needs-attention tone: what a save of this role will change */
 .role-delete { border-top: 1px solid var(--hair); padding-top: var(--s3); margin-top: var(--s4); }
 
 /* The Staff page: each person's name and email, their roles as ticks with their own Save, then the quieter sign-in

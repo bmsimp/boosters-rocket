@@ -10,6 +10,9 @@ import { CertificatePanel, type CertificateActions } from "./certificate-panel";
 
 const REPLACED = "You can now remove the old certificate from the app registration in Entra (Certificates & secrets > Certificates).";
 
+/** Google has no check that works without a person signing in (provider-checks.ts): only the values' form was checked. */
+export const GOOGLE_SAVED = "Saved. Google can't be asked about these values from here: the first sign-in with Google is what proves them.";
+
 export function ProviderForm({ providerKey, summary, action, certificateActions }: {
   providerKey: ProviderKey; summary: SummaryView | null; action: (form: FormData) => Promise<SaveOutcome>; certificateActions?: CertificateActions;
 }) {
@@ -47,7 +50,7 @@ export function ProviderForm({ providerKey, summary, action, certificateActions 
           </label>
         </>}
         {state && !state.ok && <ActionOutcome state={state} />}
-        {state?.ok && <Notice tone="done">{cert ? "Checked and saved. Microsoft accepted the certificate." : "Checked and saved."}{state.replaced && ` ${REPLACED}`}</Notice>}
+        {state?.ok && <Notice tone="done">{cert ? "Checked and saved. Microsoft accepted the certificate." : google ? GOOGLE_SAVED : "Checked and saved."}{state.replaced && ` ${REPLACED}`}</Notice>}
         <button className="btn" disabled={pending}>{pending ? (google ? "Saving…" : "Checking with Microsoft…") : google ? "Save" : switching ? "Check and switch" : "Check and save"}</button>
       </form>
     </div>

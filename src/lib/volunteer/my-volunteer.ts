@@ -35,6 +35,8 @@ export type MySignup = {
   cancel: "open" | "closed" | "cancelled"; cancelUntil: string | null;
   /** Checked in with the shift's code, or added by staff: credit now, and no longer cancelled here. */
   checkedIn: boolean;
+  /** The shift has begun (and not yet ended): what is left to do is check in there, not cancel. */
+  started: boolean;
 };
 export type MyVolunteering = { events: MyEvent[]; signups: MySignup[]; cutoffHours: number };
 
@@ -92,7 +94,7 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
     return [{ id: s.id, shiftId: shift.id, eventName: event.name, dateWords: dateWords(event.onDate), timeWords: shiftTimeWords(clockOf(shift.startsAt), clockOf(shift.endsAt)),
       role: shift.role, location: event.location, contact: contactWords(event), who: whoWords(ctx, s),
       cancel: cancelled ? "cancelled" as const : open ? "open" as const : "closed" as const,
-      cancelUntil: open ? instantWords(new Date(start.getTime() - cutoffHours * 3_600_000), zone) : null, checkedIn }];
+      cancelUntil: open ? instantWords(new Date(start.getTime() - cutoffHours * 3_600_000), zone) : null, checkedIn, started: start.getTime() <= now.getTime() }];
   });
   return { events: listed, signups, cutoffHours };
 }

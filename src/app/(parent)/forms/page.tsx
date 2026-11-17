@@ -41,6 +41,10 @@ function FormLine({ group, form, today, download }: { group: MyFormGroup; form: 
   );
 }
 
+/** Whether any form is still to do. A note that forms can't be signed yet is about those alone: beside a form already
+ * signed it would read as if that one weren't. */
+const stillToSign = (groups: MyFormGroup[]) => groups.some((g) => g.forms.some((f) => f.line.state === "todo"));
+
 /**
  * This season's forms for the signed-in family: for the family itself and for each student, every form with how it
  * stands, in words. The family comes from the session and nothing else. Until the club has set forms up, the page
@@ -60,7 +64,7 @@ export default async function FormsPage() {
         : (
           <>
             <p className="lede">{forms.seasonName}: the forms for {family.name}, and where each one stands.</p>
-            {!forms.ready && <p className="help" role="status">The club&apos;s forms aren&apos;t ready to sign yet. There&apos;s nothing you need to do right now: they&apos;ll show up here when they are.</p>}
+            {!forms.ready && stillToSign(forms.groups) && <p className="help" role="status">The forms still to sign aren&apos;t ready yet. There&apos;s nothing you need to do right now: you can sign them here once they are.</p>}
             {forms.groups.map((group, i) => (
               <section className="box" key={group.subjectQboId} aria-labelledby={`forms-${i}`}>
                 <h2 id={`forms-${i}`}>{group.who === "family" ? "Your family" : group.name}</h2>

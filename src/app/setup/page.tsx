@@ -31,7 +31,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   if (state.status !== "open") notFound();
   if (!(await hasSetupSession())) {
     return (
-      <main className="wrap signin">
+      <main className="wrap signin setup-page">
         <h1 className="page-title">Set up Booster Rocket</h1>
         <p className="lede">Enter the setup code from your server. To get one, run <code>docker compose run --rm migrate node tools/scripts/setup-code.mjs</code> in the installation folder (the first installation runbook, <code>docs/runbooks/first-install.md</code>, says how).</p>
         <UnlockForm />
@@ -54,7 +54,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
   const byKey = Object.fromEntries([...saved, ...(await pendingOnlySummaries(saved.map((s) => s.key)))].map((s) => [s.key, s])) as Partial<Record<ProviderKey, ProviderSummary>>;
   const appUrl = env.APP_URL.replace(/\/+$/, "");
   return (
-    <main className="wrap single">
+    <main className="wrap single setup-page">
       <h1 className="page-title">Set up Booster Rocket</h1>
       <ol className="setup-progress">{steps.map((s) => <li key={s} aria-current={s === step ? "step" : undefined}>{`${n(s)}. ${NAMES[s]}`}</li>)}</ol>
       {step === "club" && <ClubStep initial={await clubValues()} timeZones={timeZoneChoices((await getClubSettings()).timeZone)} saved={!(await clubStepOwed())} error={one("error")} />}

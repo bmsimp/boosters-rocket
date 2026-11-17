@@ -43,12 +43,13 @@ const fieldsOf = (f: RequirementFields): RequirementInput => ({ title: f.title, 
 
 /* ---- Seasons ---- */
 
-export const createSeasonAction = staffAction(SETUP, async (ctx, name: string, start: "empty" | "template" | "last"): Promise<Done> => {
+export const createSeasonAction = staffAction(SETUP, async (ctx, name: string, start: "empty" | "template" | "last"): Promise<Done & { seasonId?: string }> => {
   if (!str(name, TEXT_MAX) || (start !== "empty" && start !== "template" && start !== "last")) return NOT_FROM_PAGE;
   const r = await createSeason(name, start, op(ctx, SETUP));
   if (!r.ok) return r;
   refresh();
-  return { ok: true, message: start === "last" ? "Copied. Dates were left out, and chosen lists were copied as they were: check both before parents see it."
+  // The form goes on to the new season's own page, where its steps are set up.
+  return { ok: true, seasonId: r.seasonId, message: start === "last" ? "Copied. Dates were left out, and chosen lists were copied as they were: check both before parents see it."
     : "Started. Parents don't see it until you make it the current season." };
 });
 
