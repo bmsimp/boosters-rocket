@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboCheckRecord, qboCheckRun, type CheckLearned, type CheckOutcome, type CheckResult } from "@/lib/db/schema";
@@ -77,7 +77,7 @@ const STOPS: Record<string, string> = {
   token_unreachable: "unreachable", token_timeout: "timeout", token_not_connected: "not_connected", token_invalid_grant: "needs_admin", token_unreadable: "needs_admin", token_needs_admin: "needs_admin",
 };
 const stopFor = (e: unknown): string | null => (e instanceof QboError ? STOPS[e.code] ?? null : null);
-const codeOf = (e: unknown): string => (e instanceof QboError ? e.code.slice(0, 60) : "unexpected");
+const codeOf = (e: unknown): string => (e instanceof QboError || e instanceof Stopped ? e.code.slice(0, 60) : "unexpected");
 const isValidation = (code: string) => { const m = /^fault_(\d+)$/.exec(code); return m !== null && CUSTOMER_UPDATE.faults.validation.test(m[1]!); };
 
 /** Runs the whole check: the reads, then (for a sandbox company) the writes. */
@@ -107,7 +107,8 @@ export async function runSandboxCheck(ask: CheckAsk): Promise<CheckAnswer> {
     const ordered: CheckResult[] = EXPECTATIONS.map((x) => results.get(x.key) ?? { key: x.key, outcome: "not_run", code: ready.environment === "production" && x.group === "writes" ? "production" : "stopped", learned: {} });
     const outcome = stopCode ? "stopped" : allAsExpected(ordered) ? "passed" : "not_as_expected";
     const open = await db.select({ id: qboCheckRecord.id }).from(qboCheckRecord).where(and(eq(qboCheckRecord.runId, run.id), isNull(qboCheckRecord.closedAt)));
-    const made = await db.select({ id: qboCheckRecord.id }).from(qboCheckRecord).where(eq(qboCheckRecord.runId, run.id));
+    // What QuickBooks made: a create it refused is listed with no id, and closed.
+    const made = await db.select({ id: qboCheckRecord.id }).from(qboCheckRecord).where(and(eq(qboCheckRecord.runId, run.id), isNotNull(qboCheckRecord.qboId)));
     await db.transaction(async (tx) => {
       await tx.update(qboCheckRun).set({ outcome, stopCode, results: ordered, finishedAt: new Date() }).where(eq(qboCheckRun.id, run.id));
       const count = (o: CheckOutcome) => ordered.filter((r) => r.outcome === o).length;
@@ -156,8 +157,9 @@ class Check {
       throw e;
     }
   }
-  private read = async (id: string): Promise<Raw | null> => qboCustomerById(id, { signal: this.run.signal });
-  private get = (params: Record<string, string>) => qboGet("query", params, { signal: this.run.signal });
+  // Every read names the company the run started with: when another is connected, nothing is asked of it.
+  private read = async (id: string): Promise<Raw | null> => qboCustomerById(id, { signal: this.run.signal, realmId: this.run.realmId });
+  private get = (params: Record<string, string>) => qboGet("query", params, { signal: this.run.signal, realmId: this.run.realmId });
 
   async all(): Promise<void> {
     await this.reads();
@@ -175,16 +177,18 @@ class Check {
   private async reads(): Promise<void> {
     await this.step("customer_types", [true], async () => {
       const types = this.types = await qboCustomerTypes();
+      await stillTheCompany(this.run);
       const ok = types.every((t) => typeof t.Id === "string" && typeof t.Name === "string");
       this.set("customer_types", ok ? "as_expected" : "not_as_expected", { count: types.length });
     });
     await this.step("customers", [true], async () => {
       this.customers = await qboQueryAll("Customer", "Active in (true, false)");
+      await stillTheCompany(this.run);
       const ok = this.customers.every((c) => typeof c.Id === "string" && typeof c.DisplayName === "string" && typeof c.Active === "boolean");
       this.set("customers", ok ? "as_expected" : "not_as_expected", { count: this.customers.length, inactive: this.customers.filter((c) => c.Active === false).length });
     });
     await this.step("items", [true], async () => {
-      this.items = await qboItems({ signal: this.run.signal });
+      this.items = await qboItems({ signal: this.run.signal, realmId: this.run.realmId });
       const ok = this.items.every((i) => typeof i.Id === "string" && typeof i.Name === "string" && typeof i.Type === "string" && typeof i.Active === "boolean");
       const types = [...new Set(this.items.map((i) => i.Type).filter((t): t is string => typeof t === "string" && /^[A-Za-z]{1,30}$/.test(t)))].sort().slice(0, 8);
       this.set("items", ok ? "as_expected" : "not_as_expected", { count: this.items.length, inactive: this.items.filter((i) => i.Active === false).length, types });
@@ -230,7 +234,7 @@ class Check {
       const nobody = String(top + BigInt(7_000_003)).slice(0, 19);
       const body = await this.get({ query: INVOICE_QUERIES.oneForm(nobody, 1), include: INVOICE_INCLUDE });
       const shape = emptyShape(body);
-      const accepted = await qboInvoices([nobody], { signal: this.run.signal }).then((r) => r.length === 0, (e: unknown) => { if (stopFor(e)) throw e; return false; });
+      const accepted = await qboInvoices([nobody], { signal: this.run.signal, realmId: this.run.realmId }).then((r) => r.length === 0, (e: unknown) => { if (stopFor(e)) throw e; return false; });
       this.set("empty_answer", accepted && shape !== "other" ? "as_expected" : "not_as_expected", { shape, accepted });
     });
     // A family's and a sub-customer's balance by id. For a sandbox company the check's own records answer these again below.
@@ -517,6 +521,14 @@ class Check {
   }
 }
 
+/**
+ * Stops the run when the connected company is no longer the one it started with. For the client's two reads that take
+ * no company (the customer types and every customer): what they answered may be another company's, and is not used.
+ */
+async function stillTheCompany(run: CheckRun): Promise<void> {
+  if ((await getConnection())?.realmId !== run.realmId) throw new Stopped("other_company");
+}
+
 /** The rows of an invoice query answer; null when it isn't one. Lenient where the portal's own reader is strict: the empty check judges the shape itself. */
 function invoiceRows(body: unknown): Raw[] | null {
   if (!isRow(body) || "Fault" in body || "fault" in body || !isRow(body.QueryResponse)) return null;
@@ -550,11 +562,12 @@ async function cleanUpEarlier(run: CheckRun, customers: Raw[]): Promise<void> {
 async function closeRecords(run: CheckRun, runId: string, customers?: Raw[]): Promise<{ closed: number; open: number }> {
   const rows = () => db.select().from(qboCheckRecord).where(and(eq(qboCheckRecord.realmId, run.realmId), eq(qboCheckRecord.runId, runId)));
   const ofRun = runId === run.id ? undefined : runId;
-  const signal = run.signal;
+  const read = { signal: run.signal, realmId: run.realmId };
   // A create whose answer was lost: its name is the check's own, and QuickBooks keeps names unique.
   const lost = (await rows()).filter((r) => r.qboId === null && r.closedAt === null && r.kind !== "invoice");
   if (lost.length) {
     const list = customers?.length ? customers : await qboQueryAll("Customer", "Active in (true, false)");
+    await stillTheCompany(run);
     for (const r of lost) {
       const found = list.filter((c) => c.DisplayName === r.name && idOf(c));
       if (found.length === 1) await recordMade(run, r.id, idOf(found[0]!)!);
@@ -566,7 +579,7 @@ async function closeRecords(run: CheckRun, runId: string, customers?: Raw[]): Pr
     try {
       let mine: Raw | null = null;
       for (const s of students) {
-        const rows = invoiceRows(await qboGet("query", { query: INVOICE_QUERIES.oneForm(s.qboId!, 1), include: INVOICE_INCLUDE }, { signal })) ?? [];
+        const rows = invoiceRows(await qboGet("query", { query: INVOICE_QUERIES.oneForm(s.qboId!, 1), include: INVOICE_INCLUDE }, read)) ?? [];
         mine = rows.find((i) => i.Id === r.qboId) ?? mine;
       }
       if (mine && toCents(mine.TotalAmt) === 0) await recordClosed(run, "invoice", r.qboId!);
@@ -577,7 +590,7 @@ async function closeRecords(run: CheckRun, runId: string, customers?: Raw[]): Pr
   const order: Record<string, number> = { student: 0, parent: 1, family: 2 };
   for (const r of all.filter((x) => x.kind !== "invoice" && x.qboId && !x.closedAt).sort((a, b) => order[a.kind]! - order[b.kind]!)) {
     try {
-      const c = await qboCustomerById(r.qboId!, { signal });
+      const c = await qboCustomerById(r.qboId!, read);
       if (!c) await noteCloseFailed(run, r.kind, r.qboId!, "not_found");
       else if (c.Active === false) await recordClosed(run, r.kind, r.qboId!);
       else await checkSetActive(run, { kind: r.kind, qboId: r.qboId!, ofRun }, tokenOf(c), false);

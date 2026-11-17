@@ -117,9 +117,13 @@ export type StubQuirks = {
   copyFamilyContact: boolean;         // a sub-customer made under a family is given the family's phone and address
   invoiceLinkHost: string | null;     // the host of a made invoice's InvoiceLink; null for no link
   keepPrivateNote: boolean;           // a made invoice keeps the PrivateNote sent
+  invoiceEmailStatus: string | null;  // a made invoice's EmailStatus, whatever was sent ("EmailSent"); null keeps what was sent
+  createDrops: string[];              // fields a customer create leaves out of what it makes ("CustomerTypeRef", "BillWithParent")
+  emailFirstOnly: boolean;            // an email field of several addresses is stored as its first address alone
 };
 export const defaultQuirks = (): StubQuirks => ({ emptyKeeps: false, limits: {}, limitCode: "6000", checkEmail: false, staleCode: "5010", duplicateCode: "6240", fullNames: false,
-  balances: false, inactiveWithBalance: null, copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", keepPrivateNote: true });
+  balances: false, inactiveWithBalance: null, copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", keepPrivateNote: true,
+  invoiceEmailStatus: null, createDrops: [], emailFirstOnly: false });
 
 /** The first field of a write's body longer than its limit, as "Object.Field" or "Field". */
 function overLimit(sent: Record<string, unknown>, limits: Record<string, number>): boolean {
@@ -224,6 +228,7 @@ export async function startQboStub(): Promise<QboStub> {
         const made: Record<string, unknown> = { ...sent, Id: next, SyncToken: "0", DocNumber: next, TxnDate: today, DueDate: today, TotalAmt: line.Amount, Balance: line.Amount,
           ...(stub.quirks.invoiceLinkHost ? { InvoiceLink: `https://${stub.quirks.invoiceLinkHost}/t/scs-v1-stub-${next}` } : {}), MetaData: { CreateTime: new Date().toISOString() } };
         if (!stub.quirks.keepPrivateNote) delete made.PrivateNote;
+        if (stub.quirks.invoiceEmailStatus !== null) made.EmailStatus = stub.quirks.invoiceEmailStatus;
         stub.invoices.push(made);
         if (stub.loseInvoiceAnswer) { req.socket.destroy(); return; }
         return json(200, { Invoice: made, time: new Date().toISOString() });
@@ -250,6 +255,7 @@ export async function startQboStub(): Promise<QboStub> {
           const family = parentId !== undefined && stub.quirks.copyFamilyContact ? stub.customers.find((c) => c.Id === parentId) : undefined;
           const copied = family ? Object.fromEntries((["PrimaryPhone", "BillAddr"] as const).filter((f) => family[f] !== undefined && sent[f] === undefined).map((f) => [f, family[f]])) : {};
           const made: Record<string, unknown> = { ...copied, ...sent, Id: next, SyncToken: "0", Active: true, MetaData: { CreateTime: new Date().toISOString(), LastUpdatedTime: new Date().toISOString() } };
+          for (const f of stub.quirks.createDrops) delete made[f];
           stub.customers.push(made);
           if (stub.loseUpdateAnswer) { req.socket.destroy(); return; }
           if (stub.updateServerFault) return json(stub.updateServerFault.status, { ...fault(stub.updateServerFault.code), Fault: { ...fault(stub.updateServerFault.code).Fault, type: "SystemFault" } });
@@ -271,7 +277,9 @@ export async function startQboStub(): Promise<QboStub> {
           const merged = stub.quirks.emptyKeeps && typeof value === "object" && value !== null && !Array.isArray(value) && typeof stored[field] === "object"
             ? { ...(stored[field] as object), ...Object.fromEntries(Object.entries(value).filter(([, v]) => v !== "")) } : value;
           if (stub.quirks.emptyKeeps && merged === "") continue;
-          const kept = withoutEmpty(merged);
+          const first = stub.quirks.emailFirstOnly && field === "PrimaryEmailAddr" && typeof (merged as { Address?: unknown })?.Address === "string"
+            ? { Address: ((merged as { Address: string }).Address.split(/[,; ]+/)[0] ?? "") } : merged;
+          const kept = withoutEmpty(first);
           if (kept === undefined) delete updated[field]; else updated[field] = kept;
         }
         updated.SyncToken = String(Number(stored.SyncToken ?? 0) + 1);
