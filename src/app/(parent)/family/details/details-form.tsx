@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { CONTACT_FIELDS, type ContactField, type ContactForm, type ContactValues } from "@/lib/parents/contact-fields";
 import { saveDetailsAction } from "./actions";
@@ -57,22 +57,30 @@ function DetailsForm({ initial }: { initial: ContactForm }) {
     const shown = "current" in r && r.current ? r.current : { values: typed(f), version: prev.shown.version };
     return { shown, result: r.ok ? { ok: true, message: r.message } : { ok: false, errors: r.errors }, round: prev.round + 1 };
   }, { shown: initial, result: null, round: 0 });
+  // Each answer draws the fields again, so the one that had the focus is gone: the answer takes it, and is read out.
+  const answer = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (state.round > 0) answer.current?.focus(); }, [state.round]);
   return (
-    <form action={action} className="stack">
+    <form action={action} className="stack" onSubmit={(e) => { if (pending) e.preventDefault(); }}>
       {CONTACT_FIELDS.map(({ name, label, max }) => (
         <label className="field" key={`${name}-${state.round}`}>
           <span>{label}{OPTIONAL.includes(name) ? " (optional)" : ""}</span>
           <input name={name} defaultValue={state.shown.values[name]} maxLength={max} {...FILLS[name]} />
         </label>
       ))}
-      {state.result && !state.result.ok && <ul role="alert" className="errors">{state.result.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-      {state.result?.ok && (
-        <p role="status" className="paid-up">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>
-          {state.result.message}
-        </p>
+      {state.result && (
+        <div ref={answer} tabIndex={-1} key={state.round}>
+          {!state.result.ok && <ul role="alert" className="errors">{state.result.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
+          {state.result.ok && (
+            <p role="status" className="paid-up">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>
+              {state.result.message}
+            </p>
+          )}
+        </div>
       )}
-      <button className="btn" disabled={pending}>{pending ? "Saving…" : "Save my details"}</button>
+      {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
+      <button className="btn" aria-disabled={pending || undefined}>{pending ? "Saving…" : "Save my details"}</button>
       <a className="btn btn-line" href="/family">Back to Family</a>
     </form>
   );
