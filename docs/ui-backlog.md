@@ -42,6 +42,23 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
   page; a "Skip to the page" link or focusing the heading on arrival would save them.
 - **Documenso's signing frame has a button with no name** (2026-11-16, `/forms/[id]`). It is Documenso's own page;
   report it upstream.
+- **"Signed" is said three times on a signed form's page** (2026-11-16, the walk, `/forms/[id]`): the heading, the
+  state and the thank-you line. Once in the state would do. Small.
+- **A buy-out's invoice reads as a plain invoice on Payments** (2026-11-16, the walk, `/payments`): "Invoice QZ-…"
+  with nothing saying it is the volunteering buy-out the guardian chose. Small.
+- **The signing frame's Sign button can sit under the tab bar at 390 wide** (2026-11-16, the walk, `/forms/[id]`).
+  Documenso's own Sign button in its signature dialog is hidden by the parent tab bar until the frame is scrolled to
+  the top of the screen. To be seen on a real phone first (`docs/runbooks/before-the-first-family.md`, part 3); if
+  so, a small change to the `.sign-frame` iframe's height.
+
+### Staff pages and setup (found by the 2026-11-16 walk, `docs/walkthrough.md`)
+- **Setup's first-Admin step gives no notice when "Save name and email" works** (`/setup`). Small.
+- **Parents reads "To review (0)" while Reconciliation names a held address** (`/staff/parents`), before parent
+  sign-ins are on. One sentence saying addresses are held for review once parent sign-ins are on. Small.
+- **A payment requirement added with no product says nothing about it** on its step (`/staff/seasons/[id]`). Small.
+- **The signed-forms matrix offers Remind for a form with no template** (`/staff/forms`): the cell reads "Not opened
+  yet". It needs a "Not ready yet" cell state and filter in `src/lib/signed-forms/rules.ts`, with its unit test.
+  Small to medium.
 
 
 ## Done
@@ -103,8 +120,10 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
   titled notices.
 - **Notices are bare paragraphs** (2026-11-11, `/staff/roster`, a family's page; done 2026-11-16). "QuickBooks is
   disconnected, so this roster is no longer current", a failed refresh, the Refresh now messages, the staff home's
-  warnings and every staff form's answer are notices: a word and an icon in the tone's ink, a heavy left rule, never
-  color alone. On a family's page the disconnected notice is set apart from the heading and the boxes.
+  warnings and every staff form's answer are notices: a word and an icon in the tone's ink, never color alone. On a
+  family's page the disconnected notice is set apart from the heading and the boxes. Since the walk of 2026-11-16 a
+  notice is ruled evenly all round in 2px ink and its tone is a filled icon cell with its word, not a heavy left rule
+  (`DESIGN.md`, Notices); the roles page's patterns warning is a notice too.
 - **Lists of many things read as lines of grey text** (2026-11-16). The roster, Parents, Balances and Worth a look,
   the audit log, the signed forms matrix and its form list, a signed form's files, signers and consents, a shift's
   sign-ups, Volunteering's events, volunteer credit, Seasons, Progress and a requirement's list of who has done it,

@@ -54,8 +54,11 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   - That some of the portal's requests "didn't answer as the portal expects", the last time an Admin ran **Check the
     portal's requests** (the line's link; Settings, QuickBooks). QuickBooks answered one of the portal's requests in a
     way the portal wasn't written for. Open the page: each such row says what it found and what it means for the club.
-    That is a change to the portal for whoever maintains it; send them a picture of the page. The line says when the
-    requests were last checked, and that they haven't been until an Admin runs the check.
+    That is a change to the portal for whoever maintains it; send them a picture of the page. The check changes
+    nothing in the portal by itself. The line says when the requests were last checked. "haven't been checked against
+    a company yet" or "didn't finish" needs nothing urgent: when convenient, connect the Intuit sandbox company (not
+    the club's real books), run the check, then reconnect the real company. Against the club's real books the check
+    only reads.
 
 ## Every family's invoices
 
