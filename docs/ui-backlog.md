@@ -13,20 +13,8 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
 - **The forms matrix doesn't use the season ruler as its header** (2026-11-16, `/staff/forms`). `DESIGN.md` says the
   matrix reuses the set ruler, one column per set; it has one column per form, grouped by nothing. Grouping the forms
   under their sets needs the ruler drawn as a table header, which is its own piece of design.
-- **Lists that are still lines** (2026-11-16). A family's roster page (students, parents, portal sign-ins), a family's
-  progress page, a family's volunteer credit and a season's requirements are still `.lines` lists. Each is short and
-  has a shape of its own, so they were left as lists; if they grow, they take the table primitive like the others.
-- **Some lone links on older staff pages are short** (2026-11-16, the review of step 6). The Health page's link on each
-  line ("Open Balances" and the like), "Who has done it" on a season's page and on a requirement's page, and the setup
-  page's step links are ordinary inline links, under 44px tall. Table links and every disclosure's summary are 44px
-  now (`tests/e2e/staff-pages.spec.ts` measures those two kinds only); these take `.link-line` or a button.
-
-### Settings and Parent sign-ins (step 6 settings slice, still open)
-- **The clean-up preview won't scale** (2026-11-12, `/staff/settings/parents/setup`, step 1). Each problem is a
-  heading with its count, and the names under it are one comma-separated line (the held addresses, a list). A real
-  roster with dozens of names per heading needs lists that open. Not done in step 6: the settings slice gave the page
-  its back link, its wording, its counts and notices, not new lists. The owner reads it before the first family
-  (`docs/runbooks/before-the-first-family.md`, part 6).
+- **A season's requirements are still lines** (2026-11-16, `/staff/seasons/[id]`). Each step's requirements on a
+  season's page are a `.lines` list; the other lists named with it became tables on 2026-11-17 (Done, below).
 
 ### Club settings (found during the 2026-11-16 handoff pass)
 - **A club can't supply its logo** (2026-11-16, `/staff/settings/club`). `PRODUCT.md` has each club supply a logo
@@ -35,11 +23,8 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
   designed.
 
 ### Parent pages (found by the 2026-11-16 accessibility pass)
-- **A form's page is titled "Form" and a shift's "Sign up for a shift"** (2026-11-16, `/forms/[id]`,
-  `/volunteer/shifts/[id]`). That is what a screen reader hears on arriving; naming the form or the event would say
-  more.
-- **No way past the club bar** (2026-11-16, every parent page). A keyboard user Tabs through six bar stops on every
-  page; a "Skip to the page" link or focusing the heading on arrival would save them.
+- **A shift's page is titled "Sign up for a shift"** (2026-11-16, `/volunteer/shifts/[id]`). That is what a screen
+  reader hears on arriving; naming the event would say more. (A form's page is named for its form since 2026-11-17.)
 - **Documenso's signing frame has a button with no name** (2026-11-16, `/forms/[id]`). It is Documenso's own page;
   report it upstream.
 - **"Signed" is said three times on a signed form's page** (2026-11-16, the walk, `/forms/[id]`): the heading, the
@@ -62,6 +47,22 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
 
 
 ## Done
+- **Lists that are still lines** (2026-11-16; done 2026-11-17). A family's roster page (students, parents, portal
+  sign-ins, changes waiting), a family's progress page (one table per step, a heading row for the family and each
+  student) and a family's volunteer credit (what is asked, the credit, the removed credit) are tables with captions,
+  and their empty lists and states are notices. A season's requirements are still lines (Open, above).
+- **Some lone links on older staff pages are short** (2026-11-16; done 2026-11-17). The Health page's fix links, "Who
+  has done it" on a season's and a requirement's page, and the set-up pages' step links and foot links are 44px
+  (`.link-line`). `tests/e2e/staff-pages.spec.ts` now opens every staff page on disk and measures every link that
+  stands alone on its line, or on a line of links, beside table links and summaries.
+- **The clean-up preview won't scale** (2026-11-12; done 2026-11-17, `/staff/settings/parents/setup`, step 1). Each
+  problem is a heading with its count over a table (the held addresses with the families they are under, the people,
+  the families, the sign-ins that would end), folded behind "Show all" past ten rows; "None." is a done notice.
+- **A form's page is titled "Form"** (2026-11-16; done 2026-11-17, `/forms/[id]`). The page's title is the form's own
+  name, found within the session's family as the page finds it; "Form" for anything else.
+- **No way past the club bar** (2026-11-16; done 2026-11-17, every page with a club bar that has links). "Skip to the
+  page" is the bar's first Tab stop, drawn only while focused, and lands past the bar (and the Switch family line) on
+  parent and staff pages alike. The sign-in pages' bar has nothing to Tab through, so it has none.
 - **Settings are one page** (2026-11-16, was Settings as a whole: separate pages and menu entries). `/staff/settings`
   has a section for each part (club, staff sign-in, outgoing mail, QuickBooks, parent sign-ins, forms), each shown
   only with its permission. Each says what is set and whether it works, in words with an icon, and opens its own page.

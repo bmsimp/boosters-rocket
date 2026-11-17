@@ -9,24 +9,25 @@ import { parentRoutes } from "./parent-routes";
 // a screen reader can say, and every link that stands alone on its line, every table's link and every disclosure's
 // summary must be a 44px tap target (AGENTS.md, UI: .link-line). Pages whose address holds an id the seed doesn't fix
 // are reached by the first link to one, from the page that lists them. Nothing here changes data.
-type Visit = { path: string } | { from: string; link: string };
+/** A page at its address, or reached from `from` by following the first link matching each of `links` in turn. */
+type Visit = { path: string } | { from: string; links: string[] };
 const STAFF_DIR = "src/app/staff/(app)";
+const SEASON = 'main a[href^="/staff/seasons/"]:not([href^="/staff/seasons/progress"])';
 
 /** Every staff page on disk, by its route, with how it is opened. A static route with no entry is opened at its own address. */
 const VISITS: Record<string, Visit[]> = {
   "/staff/roster/[id]": [{ path: "/staff/roster/E2E-10" }, { path: "/staff/roster/E2E-FAMILY" }],
-  "/staff/parents/[id]": [{ from: "/staff/parents", link: 'main a[href^="/staff/parents/"]' }],
+  "/staff/parents/[id]": [{ from: "/staff/parents", links: ['main a[href^="/staff/parents/"]'] }],
   "/staff/balances/[familyId]": [{ path: "/staff/balances/E2E-FAMILY" }],
-  "/staff/seasons/[id]": [{ from: "/staff/seasons", link: 'main a[href^="/staff/seasons/"]:not([href^="/staff/seasons/progress"])' }],
-  "/staff/seasons/[id]/requirements/[requirementId]": [{ from: "/staff/seasons/progress", link: 'main a[href*="/requirements/"]' },
-    { from: "/staff/seasons", link: 'main a[href^="/staff/seasons/"]:not([href^="/staff/seasons/progress"])' }],
-  "/staff/seasons/progress/[requirementId]": [{ from: "/staff/seasons/progress", link: 'main a[href^="/staff/seasons/progress/"]:not([href*="/family/"])' }],
+  "/staff/seasons/[id]": [{ from: "/staff/seasons", links: [SEASON] }],
+  "/staff/seasons/[id]/requirements/[requirementId]": [{ from: "/staff/seasons", links: [SEASON, 'main a[href*="/requirements/"]'] }],
+  "/staff/seasons/progress/[requirementId]": [{ from: "/staff/seasons/progress", links: ['main a[href^="/staff/seasons/progress/"]:not([href*="/family/"])'] }],
   "/staff/seasons/progress/family/[familyId]": [{ path: "/staff/seasons/progress/family/E2E-FAMILY" }],
   "/staff/volunteer/[id]": [{ path: `/staff/volunteer/${E2E_VOLUNTEER.event}` }],
   "/staff/volunteer/check-in/[shiftId]": [{ path: `/staff/volunteer/check-in/${E2E_VOLUNTEER.griddle}` }],
   "/staff/volunteer/credit/[familyId]": [{ path: "/staff/volunteer/credit/E2E-FAMILY" }],
-  "/staff/forms/evidence/[id]": [{ from: "/staff/forms", link: 'a[href^="/staff/forms/evidence/"]' }],
-  "/staff/forms/requests/[id]": [{ from: "/staff/forms", link: 'a[href^="/staff/forms/requests/"]' }],
+  "/staff/forms/evidence/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/evidence/"]'] }],
+  "/staff/forms/requests/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/requests/"]'] }],
   // A set-up page shows one step at a time: each step is a page of its own.
   "/staff/settings/parents/setup": ["preview", "signins", "welcome"].map((step) => ({ path: `/staff/settings/parents/setup?step=${step}` })),
 };
@@ -44,12 +45,16 @@ async function open(page: Page, visit: Visit): Promise<string> {
     expect(res?.status(), visit.path).toBe(200);
     return visit.path;
   }
-  await page.goto(visit.from);
-  const href = await page.locator(visit.link).first().getAttribute("href");
-  expect(href, `a link to follow on ${visit.from}`).toBeTruthy();
-  const res = await page.goto(href!);
-  expect(res?.status(), href!).toBe(200);
-  return href!;
+  let at = visit.from;
+  await page.goto(at);
+  for (const link of visit.links) {
+    const found = page.locator(link).first();
+    await expect(found, `a link to follow on ${at}: ${link}`).toBeAttached();
+    at = (await found.getAttribute("href"))!;
+    const res = await page.goto(at);
+    expect(res?.status(), at).toBe(200);
+  }
+  return at;
 }
 
 /**

@@ -6,6 +6,32 @@ in every display mode and in forced colors, against axe-core's WCAG 2.0 to 2.2 A
 checks for sideways scrolling, clipped or overlapping text and tap targets, and a Tab walk that fails a stop with
 no focus ring or one left under the phone's tab bar). Add a dated section when the journeys are walked again.
 
+## 2026-11-17, step 8: the journeys are a committed test
+
+`tests/e2e/keyboard-journeys.spec.ts` now walks these journeys by keyboard alone in the browser run (desktop pass, 1440
+wide; `parent-a11y.spec.ts` keeps walking every page with Tab at 360): Tab, Shift+Tab, Enter, Space, the arrow keys and
+typing, nothing clicked. At every Tab stop it fails a missing focus ring; it fails a control the keyboard can't reach
+in the page's order, and a page the keyboard can't Tab out of; and after each action it checks where the focus lands.
+
+| Journey | What the test holds |
+|---|---|
+| 1. Signing in with an emailed code | The first stop is the email field. Enter sends the code and the code field takes the focus; a wrong code is an alert with the focus left in the field; Enter signs in; the chooser's family button by Tab and Enter. |
+| 2. Home to Payments | "Skip to the page" is the first stop, drawn while focused (44px), and the next Tab lands past the club bar and the Switch family line. The bar's order (Skip, Home, Forms, Payments); after Enter on Payments the focus stays on its link; the Pay link is reached and named with its amount and invoice (not followed: it is Intuit's page). |
+| 3. Opening a form | The family's signed form opened by keyboard; its page title is the form's name; the download and Back to Forms are reached. Agreeing and Documenso's frame are not: forms are not set up in the seed (below). |
+| 4. Signing up for a shift and cancelling | The choice group is one stop, then Sign me up; the thank-you takes the focus. Cancel my sign-up puts the focus on Keep it, inside the group "Cancel my sign-up?"; Keep it gives it back; Shift+Tab reaches Yes, cancel it; the cancelled message takes the focus. |
+| 5. Checking in | Check me in by Enter; the box's status line takes the focus; Tab then leaves the page. |
+| 6. The details form | Family, Update my details and Back to Family by keyboard. The form itself is not: the run can't reach QuickBooks, so the page shows only its note (below). |
+| 7. The email change | An address with no "@" keeps the focus in the field; the good one is announced with the focus left on Send me a link; on the emailed link's page, the refused Yes keeps the focus with its alert. |
+| 8. The Display page | Each choice group is one stop and the arrow keys choose (Dark sets `data-theme="dark"`, Match my device takes it off); Contrast, Text size and Motion follow, then Sign out, which signs out. |
+
+Still walked only by hand, or not at all, because the browser run can't reach the service: agreeing to sign and the
+signing frame (journey 3's second half, against the local Documenso as in step 6), saving the phone and address form
+(journey 6), and paying instead of volunteering (journey 9).
+
+Found while making it: a form's page was titled "Form", and every page made the keyboard pass the club bar's stops
+first. A form's page is now titled with its name, and every club bar that has links starts with "Skip to the page",
+on staff pages too (both were "For later" in the section below).
+
 ## 2026-11-16, step 6
 
 ### How
