@@ -52,7 +52,7 @@ all of it has loaded.
 ## After a restore
 
 1. Sign in as an Admin and open **Health**. Each line says when that part last worked.
-2. Look at **QuickBooks**, **Outgoing mail** and **Forms** first: a wrong `SETTINGS_ENCRYPTION_KEY` shows there as a
+2. Look at **QuickBooks**, **Outgoing mail** and **Forms (Documenso)** first: a wrong `SETTINGS_ENCRYPTION_KEY` shows there as a
    token or password that "can't be opened" or "can't be read".
 3. Open `<DOCUMENSO_URL>/api/health`: `"database"` and `"certificate"` both say `ok`. A certificate problem means the
    file or its passphrase isn't the one in `.env`.

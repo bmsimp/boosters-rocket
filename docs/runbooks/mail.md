@@ -3,7 +3,8 @@
 Two things send mail, and each is set up on its own:
 
 - **The portal** sends parents their sign-in codes, welcome emails, reminders and signed copies of forms. It is set up
-  on the portal's setup page (Step 3) and later under **Settings**, **Mail**. Parents can't sign in until it works.
+  on the portal's setup page (Step 3) and later under **Settings**, **Outgoing mail**. Parents can't sign in until it
+  works.
 - **Documenso** sends only its own account mail: the confirmation of the first account, password resets and
   invitations to staff. It sends nothing about forms (the portal switches that off on every form). It is set up in
   `deploy/.env`.
@@ -16,25 +17,27 @@ Both can use the same mailbox. Choose a mailbox that belongs to the club, not to
 The portal sends through Microsoft 365 as one mailbox, using the staff sign-in app's certificate, and Exchange Online
 lets it send as that mailbox and no other. It needs staff sign-in with Microsoft to be set up first (setup Step 2).
 
-1. On a Windows computer with PowerShell 7, install the Exchange Online module once:
-   `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
-2. On the setup page's Step 3 (or **Settings**, **Mail**), choose **Microsoft 365** and follow the numbered steps
-   under **Microsoft 365: let the app send as one mailbox**. They have you download the script
-   `New-BoosterRocketStaffApp.ps1`, unblock it (`Unblock-File .\New-BoosterRocketStaffApp.ps1`) and run it with
-   `-SetUpMail -Mailbox <the club's mailbox>`, signed in as an Exchange administrator.
+1. On a Windows computer with PowerShell 7, install the modules the script needs once:
+   `Install-Module Microsoft.Graph.Authentication, ExchangeOnlineManagement -Scope CurrentUser`
+2. On the setup page's Step 3 (or **Settings**, **Outgoing mail**, **Set up** or **Change**), the first box, **Let
+   Microsoft 365 send for the portal**, holds the numbered steps under **Microsoft 365: let the app send as one
+   mailbox**. They have you download the script `New-BoosterRocketStaffApp.ps1`, unblock it
+   (`Unblock-File .\New-BoosterRocketStaffApp.ps1`) and run it with `-SetUpMail -Mailbox <the club's mailbox>`, signed
+   in as an Exchange administrator. The page writes the command out with the club's tenant and mailbox in it.
 3. The script stops and says what to change if anything would let the app send as more than that one mailbox. Do what
    it says and run it again.
 4. When it ends with "The app can now send as ... and only as ...", wait 30 minutes to 2 hours: Microsoft takes that
    long to apply app permissions.
-5. Enter the mailbox, **Save**, then **Send test email** to an address you can read. When it arrives, the setup page's
-   next step opens.
+5. In **Choose how the portal sends**, choose **Microsoft 365**, enter the mailbox and **Save**; then in **Send a test
+   email**, **Send test email** to an address you can read. When it arrives, the setup page's next step opens.
 
 ## The portal: SMTP
 
 Any mail service that offers SMTP works. You need its server name, port, a username and password, and the address mail
 comes from. The mail service's own help pages give the first two.
 
-1. On the setup page's Step 3 (or **Settings**, **Mail**), choose **SMTP**.
+1. On the setup page's Step 3 (or **Settings**, **Outgoing mail**, **Set up** or **Change**), in **Choose how the
+   portal sends**, choose **SMTP**.
 2. Enter the **Host** and **Port**, and choose **Security**: **STARTTLS** for port 587, **TLS** for port 465. The
    portal never sends without encryption.
 3. Enter the **Username**, **Password** and **From address**. Many services need the from address to be the account's
