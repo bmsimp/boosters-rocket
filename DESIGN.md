@@ -283,7 +283,7 @@ The frontmatter values are FZN's purple default. The gold demo (`#gold`) hand-se
 |---|---|---|---|---|
 | **Field Green** (`done`): done, paid, signed, finished sets | `done` 6.39:1 | `done-dark` 9.26:1 | `done-hc` 9.82:1 | `done-dark-hc` 15.17:1 |
 | **Due Amber** (`due`): to do, due soon, student still on the set, count badge, offline note | `due` 6.01:1 | `due-dark` 8.44:1 | `due-hc` 9.84:1 | `due-dark-hc` 13.02:1 |
-| **Past-Due Red** (`late`): the date line of a past-due invoice, and the word, icon and edge of a problem notice (something that didn't go through) | `late` 7.37:1 | `late-dark` 7.83:1 | `late-hc` 10.35:1 | `late-dark-hc` 11.51:1 |
+| **Past-Due Red** (`late`): the date line of a past-due invoice, and the word and the icon cell of a problem notice (something that didn't go through) | `late` 7.37:1 | `late-dark` 7.83:1 | `late-hc` 10.35:1 | `late-dark-hc` 11.51:1 |
 
 ### Neutral
 - **Chart Paper** (`paper`): the ground of the page, boxes, the season band, tab bar and options. Dark: `paper-dark`, near-black. High contrast: pure white / pure black.
@@ -420,10 +420,11 @@ A status that is not part of a box's ordinary text: the QuickBooks and roster no
 | needs attention | Needs attention | triangle with a bang | `due` |
 | done | Done | tick | `done` |
 | problem | Problem | circled cross | `late` |
-- **Drawn:** a ruled panel: `paper`, a 2px `ink` border, an 8px rule down the left edge in the tone's ink, 12px 16px padding, square corners. The 20px icon in the tone's ink, then the word in Label style in the tone's ink, then the text in Body row.
+- **Drawn:** a ruled panel like every box: `paper`, a 2px `ink` rule evenly all round, 12px 16px padding, square corners. No edge is heavier or colored: the tone is carried by what the notice says. First a 28px square icon cell filled with the tone's ink, its 20px icon drawn in `paper`; then the word in Label style in the tone's ink; then the text in Body row. The fill and the icon are the same pair of tokens as the tone's text on paper, so the icon reads at the tone's own contrast in every mode.
 - **With a title:** a notice can be a section of its own (the staff home's QuickBooks, mail and sign-in warnings): a Headline-size heading names it, the word is read before the heading but not drawn, and its link or button sits under the text.
 - **Announced:** a problem is an alert, every other tone a status; a notice that is simply part of a page as it loads is announced as neither.
-- **Dark and high contrast:** tokens only. Under forced colors the rules are `CanvasText` and the word and icon carry the tone.
+- **Dark and high contrast:** tokens only. Under forced colors the fill is gone: the rules and the icon cell's 2px edge are `CanvasText`, and the word and icon carry the tone.
+- **Inside a form:** a warning about what saving will do (a role written with patterns) is a needs-attention notice that is part of the page, announced as neither, held to 60ch.
 - **Copy:** the same voice as every page: say what happened, what still works and who can help. A refusal says the same thing whatever the reason.
 
 ### Form controls

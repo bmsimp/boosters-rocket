@@ -1,5 +1,5 @@
 "use client";
-import { ActionOutcome } from "@/app/components/notice";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { PERMISSION_AREAS, PERMISSION_WORDS, readTwinOf, withReadTwins } from "@/lib/permissions/words";
@@ -43,10 +43,10 @@ export function RoleForm({ role }: { role?: RoleView }) {
       <label className="field"><span>Name</span>
         <input name="name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={60} autoComplete="off" /></label>
       {role?.patterns && (
-        <p className="role-patterns" role="note">This role was written with patterns, so it also takes up new permissions by itself as they are added. The ticks below are what it gives today. Saving here keeps exactly these ticks, and the role will then no longer take up new permissions by itself.</p>
+        <Notice tone="warning" live="none" className="role-patterns">This role was written with patterns, so it also takes up new permissions by itself as they are added. The ticks below are what it gives today. Saving here keeps exactly these ticks, and the role will then no longer take up new permissions by itself.</Notice>
       )}
       {added.length > 0 && (
-        <p className="role-patterns" role="note">It doesn&apos;t give {added.map((p) => `“${PERMISSION_WORDS[p]}”`).join(" or ")} today, though a change it can make comes with it. Saving gives it.</p>
+        <Notice tone="warning" live="none" className="role-patterns">It doesn&apos;t give {added.map((p) => `“${PERMISSION_WORDS[p]}”`).join(" or ")} today, though a change it can make comes with it. Saving gives it.</Notice>
       )}
       {PERMISSION_AREAS.map((a) => (
         <fieldset key={a.area} className="checks role-area">
