@@ -1,7 +1,8 @@
 # Does the portal do what the specs say?
 
 **Checked:** 2026-11-16, on the branch `slice/conform` (step 7 of `docs/superpowers/plans/2026-11-07-v1-roadmap.md`),
-then brought up to date when step 7's four slices were merged on `parent-portal` the same day.
+then brought up to date when step 7's four slices were merged on `parent-portal` the same day, and again when step
+8's six were merged (2026-11-17).
 **Against:** `docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md` (the v1 spec), as the later specs in that
 folder override it (`2026-11-10-parent-email-code-sign-in-design.md`, `2026-11-10-quickbooks-connection-and-roster-design.md`,
 `2026-11-11-parents-from-quickbooks-design.md`, `2026-11-15-documenso-verification.md`, and for setup
@@ -23,15 +24,15 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §6 Roster management | 15 | 0 | 0 | 6 |
 | §8 Money | 24 | 0 | 0 | 0 |
 | §9 Forms | 23 | 0 | 0 | 2 |
-| §10 Seasons | 16 | 2 | 0 | 0 |
+| §10 Seasons | 17 | 1 | 0 | 0 |
 | §11 Volunteering | 26 | 0 | 0 | 0 |
 | §12 Privacy invariants | 9 | 0 | 0 | 0 |
 | §13 Audit log | 10 | 1 | 0 | 0 |
 | §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| **All** | **146** | **7** | **0** | **10** |
+| **All** | **148** | **5** | **0** | **10** |
 
-Nothing the specs ask for is missing outright. The seven partly built rows, and what each lacks, are listed at the foot
+Nothing the specs ask for is missing outright. The five partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
 are checked one by one after that.
 
@@ -62,7 +63,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 6.1.2 | Create family: add the primary guardian, provision sign-in | Parents come from QuickBooks: staff add a Parent sub-customer and the reconcile gives the sign-in (parents spec §1, §2; email-code spec §6). No portal-only guardian | Changed | `tests/integration/roster-writes.test.ts` "adds a parent with their own email address, billed apart, and with parent sign-ins on they can sign in at once" |
 | 6.1.3 | Add student: sub-customer with ParentRef, Job, BillWithParent | | Built | `roster-writes.test.ts` "adds a student under a family: ParentRef, Job and BillWithParent" |
 | 6.1.4 | Edit family or student names: sparse update | Parents and flat members too | Built | `roster-writes.test.ts` "renames with the version the page was shown, sending the name alone"; `tests/unit/roster-write-rules.test.ts` "a display name" |
-| 6.1.5 | Move a student: update ParentRef; re-scope open signature requests | The move also takes the student's volunteer places and per-student buy-outs (`afterStudentMoved()`) | Built | `roster-writes.test.ts` "moves a student with an open form, a signed form and a place on a shift to come"; `tests/integration/signed-forms-staff.test.ts` "takes a complete form along with its evidence"; `buyouts-check.test.ts` "a student who moves in the portal". A move made in QuickBooks and read by a refresh runs none of this (Known gaps) |
+| 6.1.5 | Move a student: update ParentRef; re-scope open signature requests | The move also takes the student's volunteer places and per-student buy-outs (`afterStudentMoved()`); a move made in QuickBooks is followed by the refresh that reads it (forms and volunteering; buy-outs by the daily check) | Built | `roster-writes.test.ts` "moves a student with an open form, a signed form and a place on a shift to come"; `tests/integration/signed-forms-staff.test.ts` "takes a complete form along with its evidence"; `buyouts-check.test.ts` "a student who moves in the portal". A move made in QuickBooks: `roster-refresh-moves.test.ts`, `tests/unit/roster-moves.test.ts` |
 | 6.1.6 | Deactivate a student or family: Active = false | | Built | `roster-writes.test.ts` "makes a family inactive", "makes a parent inactive" |
 | 6.1.7 | Deactivating disables guardians with no active students | Parents spec decision 5: access follows QuickBooks; "no active students, no access" is a club setting, off by default | Changed | `tests/integration/parents-reconcile.test.ts`, `tests/unit/parents-access-rules.test.ts`, `tests/integration/settings-parents.test.ts` |
 | 6.1.8 | Add, edit or remove a non-primary guardian (portal only) | Every parent is a QuickBooks record (parents spec §2: "links now come only from the reconcile"); staff add one as a Parent sub-customer, rename it or make it inactive | Changed | as 6.1.2 and 6.1.6; `tests/unit/roster-write-rules.test.ts` "layered with no parent type: no parent to add" |
@@ -195,7 +196,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 10.1.6 | Required or optional; optional never holds a step open | | Built | `season-progress.test.ts` "never lets an optional item hold a step open, and still shows its progress" |
 | 10.1.7 | Applies to each family or each student | Fixed once made | Built | `season-progress.test.ts` "tracks a per-family requirement once for the family and a per-student one for each active student"; `seasons-staff.test.ts` "offers a club whose roster lists no students only requirements for each family" |
 | 10.1.8 | Amount: volunteer only, shifts or hours | | Built | `seasons-staff.test.ts` "refuses an amount on a checklist item" |
-| 10.1.9 | Due date: drives reminders and the "due soon" state | Reminders for forms (a schedule) and volunteering (nudges); none for payment or checklist items | Partly built | Due words: `seasons-parent.test.ts` "says a due date in words on the club's day". Reminders: `signed-forms-staff.test.ts`, `volunteer-reminders.test.ts` "the nudges before a due date". No reminder for a payment or checklist requirement (undone) |
+| 10.1.9 | Due date: drives reminders and the "due soon" state | Reminders for forms (a schedule), volunteering (nudges), and since step 8 for payment and checklist items: 14 and 3 days before, one email per guardian, family and due date, a payment's amount only from fresh figures and nothing when the figures can't tell it is unpaid | Built | Due words: `seasons-parent.test.ts` "says a due date in words on the club's day". Reminders: `signed-forms-staff.test.ts`, `volunteer-reminders.test.ts` "the nudges before a due date", `src/lib/seasons/due-reminders.ts` and `due-reminder-rules.ts`; `tests/unit/due-reminder-rules.test.ts`, `tests/integration/due-reminders.test.ts` |
 | 10.1.10 | Who it covers: everyone, or a subset by a fixed filter (grade, section) | Everyone or a hand-picked list; a grade or section filter waits on the owner (QuickBooks holds no grade) | Partly built | `seasons-staff.test.ts` "covers everyone, or a list picked from the roster"; `season-progress.test.ts` "covers everyone, or only the chosen list". Roadmap, Waiting on the owner |
 | 10.2.1 | Form met when its document is completed by the required guardians | | Built | `src/lib/forms/kind.ts`; `season-kinds.test.ts` "meets a form only by its signed document"; `forms-pages.test.ts` "shows on Home and on Season the same words as the Forms page, and done only when the document is complete" |
 | 10.2.2 | Payment met when invoices carrying its item exist and none is open | | Built | `src/lib/money/payment-rule.ts`; `tests/unit/money-payment-rule.test.ts`; `tests/integration/payment-requirements.test.ts`. Owner check: the item on real invoice lines |
@@ -235,7 +236,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 11.5.3 | It appears among the open invoices with its own Pay button | `family_money` marked stale | Built | `buyouts.test.ts` "makes one invoice ... and no email" (the stale mark). Owner check: online payment flags on a real company |
 | 11.5.4 | "Buy-out invoiced" until paid, then met | | Built | `buyouts.test.ts` "reads 'Buy-out invoiced' until the stored figures say its invoice is paid, then 'Paid instead'"; `tests/unit/buyout-rules.test.ts` |
 | 11.5.5 | Switching back before paying voids it; once paid, only the treasurer reverses it | Read live first; voided only with nothing paid | Built | `buyouts.test.ts` "voids the invoice when nothing is paid on it, read live first", "never voids a paid or part-paid invoice" |
-| 11.5.6 | The only invoice the portal makes; create and void through the write queue; the nightly check flags one QuickBooks no longer shows | | Built | `tests/unit/quickbooks-writes.test.ts`; `buyouts.test.ts` "never makes a second invoice after a lost answer", "goes through the queue when QuickBooks can't be reached for the void"; `buyouts-check.test.ts` |
+| 11.5.6 | The only invoice the portal makes; create and void through the write queue; the nightly check flags one QuickBooks no longer shows | | Built | `tests/unit/quickbooks-writes.test.ts`; `buyouts.test.ts` "never makes a second invoice after a lost answer", "goes through the queue when QuickBooks can't be reached for the void"; `buyouts-check.test.ts`. Since step 8 staff close a refused, never-sent, gone or paid-in-full buy-out from Reconciliation or a family's buy-outs page, sending nothing to QuickBooks: `src/lib/buyouts/closing.ts`, `close.ts`; `tests/unit/buyout-close-rule.test.ts`, `tests/integration/buyouts-close.test.ts`, `tests/e2e/buyout-close.spec.ts` |
 
 ## §12 Privacy invariants
 
@@ -302,7 +303,6 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 
 | Row | What is missing | Rough size | It would touch |
 |---|---|---|---|
-| 10.1.9 | Reminders before a payment's or a checklist item's due date | A day | A claim table or `volunteer_reminder`'s pattern, an email, the worker, a schedule like forms' |
 | 10.1.10 | Coverage by grade or section | Days, and an owner decision first: QuickBooks holds no grade | A data source for grade, `requirement_cover`, the coverage rules and pages |
 | 13.4 | Auditing a view of the audit log filtered to one family or person | An hour once the owner decides | `src/app/staff/(app)/audit/page.tsx`, an action name |
 | 14.1, 14.4 | A release and the dependency updates actually run | Owner check once pushing is allowed | GitHub |
@@ -333,7 +333,8 @@ Each in its own commit with its test, on `slice/conform`.
 
 ## The roadmap's Known gaps, checked
 
-Each entry of the roadmap's Known gaps section as it stood on `parent-portal` on 2026-11-16.
+Each entry of the roadmap's Known gaps section as it stood on `parent-portal` on 2026-11-16. Step 8 (2026-11-17) closed
+more of them; the roadmap's own Known gaps section is the current list.
 
 | Left by | Gap (short) | Now | Proof |
 |---|---|---|---|
