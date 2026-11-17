@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireParentPage } from "@/lib/guards";
+import { parentLayoutCtx, requireParentPage } from "@/lib/guards";
 import { CONSENT_TEXT } from "@/lib/forms/consent";
 import { findMyForm } from "@/lib/forms/my-forms";
 import { mySignedDownloads } from "@/lib/forms/my-evidence";
@@ -11,7 +11,16 @@ import { CalendarDate } from "../../../components/calendar-date";
 import { StateWords } from "../../../components/state-words";
 import { AgreeButton, FinishingNote, SigningFrame, StartAgainButton } from "./signing";
 
-export const metadata = { title: "Form" };
+/**
+ * The page's title is the form's own name, what a screen reader says on arriving. It is found as the page finds it,
+ * within the session's family (findMyForm); with no session, or a form that isn't the family's, it is plain "Form",
+ * the same for every refusal. The guard itself is the page's: this only names it.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<{ title: string }> {
+  const [{ id }, ctx] = await Promise.all([params, parentLayoutCtx()]);
+  const form = ctx ? await findMyForm(ctx, id) : null;
+  return { title: form?.line.title ?? "Form" };
+}
 // Every open reads the form's state, and a guardian's own signing token, from Documenso: never from a cache.
 export const dynamic = "force-dynamic";
 
