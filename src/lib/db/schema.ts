@@ -361,6 +361,59 @@ export const writeQueue = pgTable("write_queue", {
   index("write_queue_family_ix").on(t.familyQboId),
 ]);
 
+/**
+ * What one request of the check of the portal's own QuickBooks requests found (src/lib/quickbooks/sandbox-check/), kept in
+ * `qbo_check_run.results`: the expectation's key, its outcome, a short code, and what was learned as short codes, counts
+ * and host names only. Never a customer's name, an amount, an address or any other QuickBooks text.
+ */
+export type CheckOutcome = "as_expected" | "not_as_expected" | "learned" | "not_run";
+export type CheckLearned = Record<string, string | number | boolean | string[]>;
+export type CheckResult = { key: string; outcome: CheckOutcome; code: string | null; learned: CheckLearned };
+
+/**
+ * One run of the check of the portal's QuickBooks requests (src/lib/quickbooks/sandbox-check/): when, by whom, against
+ * which company and environment, and what each request did. The writes run only against an Intuit sandbox company
+ * (`writes`). `outcome` is null while it runs; a run found unfinished by a later one is `cut_off`. Kept: a few rows a
+ * year, read by the check's page and the Health page.
+ */
+export const qboCheckRun = pgTable("qbo_check_run", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  realmId: text("realm_id").notNull(),               // the company checked: its id, never its name
+  environment: text("environment", { enum: ["sandbox", "production"] }).notNull(),
+  writes: boolean("writes").notNull(),                // whether the writes were allowed to run (sandbox only)
+  tag: text("tag").notNull(),                        // what the check's own records are named after: "2026-11-17 a1b2"
+  startedBy: uuid("started_by"),                      // staff_user.id
+  startedByLabel: text("started_by_label"),
+  outcome: text("outcome", { enum: ["passed", "not_as_expected", "stopped", "cut_off"] }),
+  stopCode: text("stop_code"),                        // why a run stopped early: a short code
+  results: jsonb("results").$type<CheckResult[]>().notNull().default(sql`'[]'::jsonb`),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [index("qbo_check_run_started_ix").on(t.startedAt)]);
+
+/**
+ * A record the check made in a sandbox company: the only records it ever writes to. Every write it sends names an id
+ * listed here for its own run (or, to make it inactive, for an earlier run that was cut off). `closed_at` is set once
+ * the customer is inactive or the invoice voided; a row left open is made inactive by the next run first. The ids
+ * belong to the company in `realm_id`; a change of company deletes every row (clearRosterOfOtherCompanyLocked).
+ * A row is written before its create is sent, with no `qbo_id`: a create whose answer was lost is then found again by
+ * its name, which no other record can have (QuickBooks keeps names unique, and each run's names carry a random tag).
+ */
+export const qboCheckRecord = pgTable("qbo_check_record", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull().references(() => qboCheckRun.id, { onDelete: "restrict" }),
+  realmId: text("realm_id").notNull(),
+  kind: text("kind", { enum: ["family", "student", "parent", "invoice"] }).notNull(),
+  qboId: text("qbo_id"),                              // null until QuickBooks answers the create
+  name: text("name").notNull(),                       // the check's own name for it; for an invoice, the marker in its private note
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  lastCode: text("last_code"),                        // the last short code when closing it failed
+  createdAt: created(),
+}, (t) => [
+  uniqueIndex("qbo_check_record_uq").on(t.realmId, t.kind, t.qboId),
+  index("qbo_check_record_run_ix").on(t.runId),
+]);
+
 /* ---- Seasons, steps and requirements (v1 spec §10). Calendar dates are `date` columns read as YYYY-MM-DD, in the club's own time zone. ---- */
 
 export type RequirementKind = "form" | "payment" | "volunteer" | "checklist";

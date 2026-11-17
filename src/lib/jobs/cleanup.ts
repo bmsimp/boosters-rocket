@@ -55,6 +55,8 @@ export const KEPT_TABLES: Record<string, string> = {
   signed_form_evidence: "a signed form's evidence: the club's record, never deleted, kept even after a change of company",
   signed_form_file: "the files of a signed form's evidence: never deleted", signed_form_copy: "the copies of a signed form sent to guardians: part of its record",
   form_withdrawal: "documents waiting to be withdrawn in Documenso: the worker removes each once it is done",
+  qbo_check_run: "the runs of the check of the portal's QuickBooks requests: a few a year, the record of what QuickBooks was seen to answer",
+  qbo_check_record: "the records the check made in a sandbox company, kept so the next run makes inactive any a cut-off run left; emptied on a change of company",
   audit_log: "append-only",
 };
 
