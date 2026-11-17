@@ -17,17 +17,20 @@ roadmap's checks table).
 | Section | Built | Partly built | Missing | Changed or dropped |
 |---|---|---|---|---|
 | §2 In v1 | 10 | 0 | 0 | 0 |
-| §6 Roster management | 12 | 0 | 0 | 4 |
-| §8 Money | 18 | 0 | 0 | 2 |
-| §9 Forms | 21 | 1 | 0 | 3 |
+| §6 Roster management | 15 | 0 | 0 | 6 |
+| §8 Money | 24 | 0 | 0 | 0 |
+| §9 Forms | 22 | 1 | 0 | 2 |
 | §10 Seasons | 16 | 2 | 0 | 0 |
-| §11 Volunteering | 25 | 0 | 0 | 0 |
+| §11 Volunteering | 26 | 0 | 0 | 0 |
 | §12 Privacy invariants | 9 | 0 | 0 | 0 |
 | §13 Audit log | 9 | 2 | 0 | 0 |
 | §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
+| **All** | **145** | **8** | **0** | **10** |
 
-The partly built rows, and what each lacks, are listed again at the foot of this page.
+Nothing the specs ask for is missing outright. The eight partly built rows, and what each lacks, are listed at the foot
+of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
+are checked one by one after that.
 
 ## §2 In v1
 
@@ -82,7 +85,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 6.3.1 | Every update sends the cached SyncToken; a stale one is answered with the current values and nothing is overwritten | | Built | `contact-edits.test.ts` "changed in the moment between the read and the write: QuickBooks refuses, the record is read again"; `roster-writes.test.ts` "is refused by QuickBooks (5010), read again, shown with its current values, and not queued"; `email-change.test.ts` "a record changed in QuickBooks meanwhile" |
 | 6.3.2 | The worker refreshes the roster cache nightly | QuickBooks spec §4: due 24 hours after the last good run, retried every 15 minutes | Built | `src/lib/jobs/runner.ts`; `tests/integration/jobs-runner.test.ts` "retries a failed job, but no more often than every 15 minutes"; `roster-refresh.test.ts` |
 | 6.3.3 | Differences it can't explain are flagged on a reconciliation screen | Needs attention (QuickBooks spec §5, parents spec §1) and `/staff/reconciliation` | Built | `tests/unit/roster-attention.test.ts`; `roster-pages.test.ts` "shows Needs attention with plain words"; `roster-write-pages.test.ts` "the Reconciliation page (Roster.Read)" |
-| 6.3.4 | A refresh never puts an older copy over what a write just stored | AGENTS.md (the cache changes only from QuickBooks' answer, under the roster lock) | Built | `email-change.test.ts` "a refresh that stored a later version while the confirmation waited keeps it"; `contact-edits.test.ts` "a refresh under way while the parent saves" (added in this step, see Fixes) |
+| 6.3.4 | A refresh never puts an older copy over what a write just stored | AGENTS.md (the cache changes only from QuickBooks' answer, under the roster lock) | Built | `email-change.test.ts` "a refresh that stored a later version while the confirmation waited keeps it"; `contact-edits.test.ts` "a roster refresh under way: QuickBooks has the change, the cache is left alone and the worker asked to read the roster again" (fixed in this step) |
 
 ## §8 Money: balances, invoices, payment
 
@@ -128,7 +131,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 8.4.5 | Volunteer reminders and due-date nudges daily, plus the day-before reminder | | Built | `tests/integration/volunteer-reminders.test.ts` |
 | 8.4.6 | Buy-out invoice status with the nightly reconciliation | After each daily money run | Built | `tests/integration/buyouts-check.test.ts` "marks a paid one paid, flags one QuickBooks no longer shows" |
 | 8.4.7 | Expired email-change and session clean-up daily | Every table is cleaned or kept on purpose; Better Auth's verification rows added in this step | Built | `tests/integration/cleanup.test.ts` |
-| 8.4.8 | Every family's invoices read daily by the worker | Added by step 4 (Money for staff) | Changed | `money-sweep.test.ts` |
+| 8.4.8 | (new) Every family's invoices read daily by the worker | Added by step 4 (Money for staff); a family whose read keeps failing is passed over after three stopped runs (this step) | Built | `money-sweep.test.ts` "reads each family in turn", "stops at a family whose read keeps failing" |
 
 ## §9 Commitment forms and signatures
 
@@ -181,7 +184,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 
 | # | Spec says | Override | State | Proof |
 |---|---|---|---|---|
-| 10.1.1 | A season has an ordered list of steps staff name, reorder, add and remove | Removal refused while ticks, waivers, made forms or live places are held | Built | `src/lib/seasons/setup.ts`; `tests/integration/seasons-staff.test.ts` "adds, renames, dates, reorders and removes steps, each with its audit row", "won't remove a step while a tick or a waiver is recorded in it" |
+| 10.1.1 | A season has an ordered list of steps staff name, reorder, add and remove | Removal refused while ticks, waivers, made forms or live places are held. A step's requirements can be reordered too (this step) | Built | `src/lib/seasons/setup.ts`; `tests/integration/seasons-staff.test.ts` "adds, renames, dates, reorders and removes steps, each with its audit row", "won't remove a step while a tick or a waiver is recorded in it", "moves a requirement earlier or later within its step" |
 | 10.1.2 | A step has an optional date range | | Built | as 10.1.1; `tests/unit/season-progress.test.ts` "the current step" |
 | 10.1.3 | A new season can be copied from the last one | Each kind's own settings copied too (buy-out price and item, a form's template, signers and reminders), fixed in this step | Built | `seasons-staff.test.ts` "copies the last season", "copies what each kind is met or billed by" |
 | 10.1.4 | New installs start with a template season (Join, Forms, Volunteer, Season, Wrap-up) | Offered when there are none | Built | `seasons-staff.test.ts` "offers the template when there are none" |
@@ -219,7 +222,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 11.3.3 | A notice when staff change or cancel the shift | Cancelling asks first (fixed in this step) | Built | `volunteer-staff.test.ts` "emails everyone signed up when the date or place changes", "emails the shift's sign-ups when its time changes", "cancels one shift: its sign-ups are emailed"; `tests/e2e/volunteer.spec.ts` (Cancel this event, then Keep it) |
 | 11.3.4 | Reminders before a due date for families with unmet required volunteering | | Built | `volunteer-reminders.test.ts` "emails each family that hasn't met one, once per nudge" |
 | 11.4.1 | Each shift has a check-in code shown as a QR code to print | Its own random code, never its id | Built | `tests/integration/volunteer-credit-staff.test.ts` "draws the code as a QR code on the server, writes out the address it opens, and makes a new code that stops the old one". Owner check: real phones |
-| 11.4.2 | Scanning opens the portal; the guardian must be signed in; checks in the person on the sign-up | Any guardian of the family checks in everyone of the family on the shift (owner's call, Known gaps) | Built | `volunteer-check-in.test.ts` "checks in everyone of the family on the shift at once"; `tests/integration/parent-isolation.test.ts` (the sign-in redirect carries the page) |
+| 11.4.2 | Scanning opens the portal; the guardian must be signed in; checks in the person on the sign-up | Any guardian of the family checks in everyone of the family on the shift (owner's call, Known gaps). The requirement's staff page says what counts (corrected in this step) | Built | `volunteer-check-in.test.ts` "checks in everyone of the family on the shift at once"; `tests/integration/parent-isolation.test.ts` (the sign-in redirect carries the page) |
 | 11.4.3 | Works from 30 minutes before the start until the end; outside, says so and records nothing | | Built | `volunteer-check-in.test.ts` "opens 30 minutes before the start and closes at the end, checked again when the press arrives"; `tests/unit/volunteer-check-in-window.test.ts` |
 | 11.4.4 | A check-in creates credit for that shift | One live credit per sign-up | Built | `volunteer-check-in.test.ts` "after checking in" |
 | 11.4.5 | Staff correct credit (remove, add a missed one) and credit outside work with a note, each audited | The note and a removal's reason are staff-only | Built | `volunteer-credit-staff.test.ts` "adds a missed check-in once the shift has started", "removes a check-in with a reason only staff see", "credits volunteering done outside the portal" |
@@ -261,7 +264,7 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 | 13.8 | Append-only from the app's point of view | | Built | `tests/unit/audit-append-only.test.ts` (added in this step); `cleanup.test.ts` "never touches the audit log, however old" |
 | 13.9 | No secret, code or message body in a row | Email-code spec §1, QuickBooks spec §6 | Built | `signin-codes.test.ts` "never puts the code in a log line or the audit log"; `roster-writes.test.ts` "QuickBooks' words never reach the audit log"; `signed-forms-evidence.test.ts` "audits the hashes, never the bytes" |
 | 13.10 | Staff notes are for staff | AGENTS.md (a waiver's reason, a credit's note, a start-again reason) | Built | `parent-isolation.test.ts` (`season.staffOnly` markers) |
-| 13.11 | A missing entry is a defect | | Built | This step added the address to a refused staff sign-in and a first sign-in's bind (`resolve.test.ts`) and the buy-out counts to a move's follow-up row (`buyouts-check.test.ts`) |
+| 13.11 | A missing entry is a defect | | Built | This step added the address to a refused staff sign-in and a first sign-in's bind (`resolve.test.ts`), the buy-out counts to a move's follow-up row (`buyouts-check.test.ts` "voids an unpaid per-student invoice through the queue"), and words for the new `season.requirement.move` (`tests/unit/audit-actions.test.ts`) |
 
 ## §14 Operations
 
@@ -303,3 +306,72 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 | 13.4 | Auditing a view of the audit log filtered to one family or person | An hour once the owner decides | `src/app/staff/(app)/audit/page.tsx`, an action name |
 | 14.1, 14.4 | A release and the dependency updates actually run | Owner check once pushing is allowed | GitHub |
 | 14.2 | `deploy/`'s migrate refusing to run pending migrations without a recent backup | Two or three hours, and an owner decision: a first install has no backup, and an update at the wrong hour would stop | `scripts/migrate.mjs`, `deploy/compose.yml`, `docs/runbooks/updates.md` |
+
+## Fixed in this step
+
+Each in its own commit with its test, on `slice/conform`.
+
+| Commit | Section | What is now true |
+|---|---|---|
+| `d0702d5` | §8.4 | The daily clean-up removes Better Auth's expired verification rows of both doors |
+| `7e3ba2b` | §6.1, §6.3 | A queued roster write that may have been made stays so after a try that sent nothing |
+| `aee9768` | §10.1 | A copied season keeps each requirement's buy-out, form template and reminder schedule |
+| `d9e75c0` | §13 | A refused staff sign-in and a first sign-in's bind record the request's address |
+| `77dd936` | §13 | A test holds that nothing under `src/` updates, deletes or truncates an audit row |
+| `b43b611` | §12 (2, 3, 4) | Every staff action is called without its permission and refused; every page of each door refuses the other's session; the public pages show nothing of two seeded families |
+| `307e52a` | §12 (6) | No raw-HTML API anywhere under `src/` but the fixed display script; emails escape QuickBooks names |
+| `24bd468` | §11.3 | Cancelling an event or a shift asks first, since it emails everyone signed up |
+| `0731592` | §11.2 | Signing up for shifts is rate-limited per guardian (`volunteer_signup_parent`) |
+| `7ebcb5e` | §12 (5) | No client component reads the environment or imports a module that holds a secret |
+| `e1532c2` | §9.4 | Where a form's template is attached, the page says to have the club's lawyer read its words |
+| `fea2769` | §11.5, §13 | A student's move counts its buy-outs voided and flagged in `roster.student.move.followed` |
+| `890e0b9` | §6.3 | A phone saved while a roster refresh runs is not put back by that refresh for long: the cache waits and the worker reads the roster again |
+| `1dbf38c` | §11.4 | A volunteer requirement's staff page says a check-in is what counts (it said check-in wasn't built) |
+| `a82ee6b` | §10.1 | Staff reorder a step's requirements, audited as `season.requirement.move`; families read the new order |
+| `e2442d6` | §8.4 | A family whose read keeps failing stops at most two daily runs; the third passes it over, counted |
+
+## The roadmap's Known gaps, checked
+
+Each entry of the roadmap's Known gaps section as it stood on `parent-portal` on 2026-11-16.
+
+| Left by | Gap (short) | Now | Proof |
+|---|---|---|---|
+| Step 2 review | No credit line for a family with other customers under it | Still true | `balanceCoversTheSame` in `src/lib/money/family-money.ts`; by design |
+| Step 2 review | Payments and Home ask the roster first; `loadFamilyMoney()` alone does not | Still true | `figuresToShow()` in `src/lib/money/family-money.ts` |
+| Step 2 review | Figures go "not current" when the portal is only busy | Still true | `src/lib/money/family-money.ts` |
+| Step 2 review | A code step left on a shared device | Still true | The device keeps it for the code's 10 minutes, by design |
+| Step 3 | A roster refresh can put an old phone back in the cache | Partly true: behind for minutes, not a day | `890e0b9`: while a refresh runs the save leaves the cache and asks for another; the one under way still stores what it read |
+| Step 3 | The field limits for a parent's phone and address are guesses | Still true | Sandbox check |
+| Step 3 | Coverage is everyone or a chosen list; no due-date reminders; no deleting a season; no reordering requirements | Partly true | Reordering: `a82ee6b`. Due-date reminders exist for forms and volunteering since step 5, not for payment or checklist items. No season delete; coverage waits on the owner |
+| Step 3 | Better Auth's verification rows are never cleaned up | No longer true | `d0702d5`; `cleanup.test.ts` "Better Auth's verification rows, both doors" |
+| Step 3 | Opening the audit log is not audited | Still true | Owner decision |
+| Step 3 | The backup test needs `pg_dump` 16 on the CI runner | Still true | `.github/workflows/ci.yml` installs no `postgresql-client` |
+| Step 3 | A header the proxy doesn't send puts the staff door in one bucket | Still true | By design; the Health page says so |
+| Step 3 | An untouched address part that is too long is sent again | Still true | `saveMyContact()` sends the whole address |
+| Step 4 | The Documenso webhook has only met the stub | Still true | Owner check |
+| Step 4 | Forms are shown, not kept | No longer true | Closed by step 5 (the entry says so) |
+| Step 4 | The consent records no address locally | Still true | Local only |
+| Step 4 | Volunteer credit not allocated; sign-ups not rate-limited; cancelling an event or shift has no confirm | No longer true | Step 5 (`allocateCredit()`); `0731592`; `24bd468` |
+| Step 4 | A payment paid more than 12 months ago reads "No invoice yet"; the item list is read only on a press | Still true | `src/lib/money/invoices.ts`, `src/lib/money/items.ts` |
+| Step 4 | A student moved in QuickBooks leaves an opened form, and a place, behind | Still true for a move made in QuickBooks | `refreshRoster()` runs no `afterStudentMoved()` |
+| Step 4 | A family whose read always fails stalls the daily money run | No longer true | `e2442d6`; `money-sweep.test.ts` "stops at a family whose read keeps failing". Still true: a family passed over as not a family gets a failed-try stamp |
+| Step 4 | The Item list's inactive items have only met the stub | Still true | Sandbox check |
+| Step 4 | The test teardown drops scratch databases by name | Still true | `scratchDatabase()` in `tests/setup/database-url.ts` |
+| Step 4 | The installability browser test fails in a worktree with a long path | Still true | Windows path limit |
+| Step 5 | After an email change that met a busy roster, the old address can still ask for a code | Still true | `confirmMyEmailChange()` |
+| Step 5 | Signed-form evidence is never re-verified on its own, and the rest of that entry | Still true | `src/lib/signed-forms/` |
+| Step 5 | The certificate and audit-log PDFs are kept but not compared | Still true | `src/lib/signed-forms/evidence.ts` |
+| Step 5 | No Health line of its own for volunteer reminders | Still true | `src/lib/health/report.ts` |
+| Step 5 | Making a customer active again is not offered; the queue's pace | Still true | `src/lib/roster/operations.ts`, `queue.ts` |
+| Step 5 review | A moved student's signed form is the old family's to read | Still true | By design (`signedWithin()`) |
+| Step 5 review | A form sealed at the moment of a move is left in Documenso | Still true | `form.document.withdraw.kept` |
+| Step 5 review | A queued move whose answer named another record runs no follow-ups | Still true | `src/lib/roster/queue.ts` |
+| Step 5 review | The copy for a guardian whose student moved goes only as an attachment | Still true | `src/lib/signed-forms/copies.ts` |
+| Step 5 review | Any guardian checks in another guardian's place; no check-in from inside the installed app | Still true | Owner's call |
+| Step 6 | No staff action closes a stuck, refused or flagged buy-out; no Health line for the check; no staff page of one family's buy-outs | Still true | `src/lib/buyouts/staff.ts` |
+| Step 6 | Copying a season drops the buy-out price; the move's follow-up row doesn't count buy-outs | No longer true | `aee9768`, `fea2769` |
+| Step 6 | The write queue clears the sent flag on a retry that sent nothing | No longer true | `7e3ba2b`; `roster-queue.test.ts` "stays one that may have been made when a resend after it sends nothing" |
+| Step 6 | The portal reaches Documenso at its public address | Still true | `src/lib/documenso/client.ts` |
+| Step 6 | The image's time zone is `America/Chicago` | Still true | `Dockerfile` line 40 |
+| Step 6 | The parent pages' keyboard journeys are not a committed test | Still true | `docs/accessibility-checks.md` |
+| Step 6 | The Parent sign-ins clean-up preview and several staff pages are still lists | Still true | `docs/ui-backlog.md` |
