@@ -114,6 +114,7 @@ export type StubQuirks = {
   fullNames: boolean;                 // a customer read by id carries FullyQualifiedName, built from its ParentRef chain
   balances: boolean;                  // a customer read by id carries Balance and BalanceWithJobs worked out from `invoices`
   inactiveWithBalance: string | null; // refuse making a customer that owes something inactive, with this code ("6220", as the sandbox did on 2026-11-17)
+  parentVersionFollows: boolean;      // an update of a customer under a family raises the family's own SyncToken too (not known of QuickBooks: the check's "familyVersionRose" says)
   inactiveWithActiveUnder: string | null; // refuse making a customer inactive while an active customer is under it, with this code ("800", as the sandbox did on 2026-11-17)
   copyFamilyContact: boolean;         // a sub-customer made under a family is given the family's phone and address
   invoiceLinkHost: string | null;     // the host of a made invoice's InvoiceLink; null for no link
@@ -130,7 +131,7 @@ export type StubQuirks = {
   emailFirstOnly: boolean;            // an email field of several addresses is stored as its first address alone
 };
 export const defaultQuirks = (): StubQuirks => ({ emptyKeeps: false, limits: {}, limitCode: "6000", checkEmail: false, staleCode: "5010", duplicateCode: "6240", fullNames: false,
-  balances: false, inactiveWithBalance: "6220", inactiveWithActiveUnder: "800", copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", linkNeedsEmail: true, keepPrivateNote: true,
+  balances: false, inactiveWithBalance: "6220", inactiveWithActiveUnder: "800", parentVersionFollows: false, copyFamilyContact: false, invoiceLinkHost: "connect.intuit.com", linkNeedsEmail: true, keepPrivateNote: true,
   invoiceEmailStatus: null, createDrops: [], emailFirstOnly: false });
 
 /** The first field of a write's body longer than its limit, as "Object.Field" or "Field". */
@@ -299,6 +300,10 @@ export async function startQboStub(): Promise<QboStub> {
         updated.SyncToken = String(Number(stored.SyncToken ?? 0) + 1);
         updated.MetaData = { ...(stored.MetaData as object | undefined), LastUpdatedTime: new Date().toISOString() };
         stub.customers[at] = updated;
+        if (stub.quirks.parentVersionFollows) {
+          const parent = stub.customers.find((c) => c.Id === (stored.ParentRef as { value?: unknown } | undefined)?.value);
+          if (parent) parent.SyncToken = String(Number(parent.SyncToken ?? 0) + 1);
+        }
         if (stub.loseUpdateAnswer) { req.socket.destroy(); return; }
         if (stub.updateServerFault) return json(stub.updateServerFault.status, { ...fault(stub.updateServerFault.code), Fault: { ...fault(stub.updateServerFault.code).Fault, type: "SystemFault" } });
         return json(200, { Customer: updated, time: new Date().toISOString() });

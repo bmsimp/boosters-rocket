@@ -70,19 +70,27 @@ export const WRITE_COPY = {
   waiting: "Another change to this is still waiting to reach QuickBooks. Once it has gone through, or been given up on the Reconciliation page, try again.",
   doneNotShown: "Done in QuickBooks. The roster here will show it after its next read of QuickBooks, usually within a few minutes.",
   queued: "QuickBooks couldn't take this just now, so it is waiting to reach QuickBooks. The portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.",
-  familyHere: "A family is made inactive together with everyone under it: use “Make the family inactive” on its page.",
   balanceFix: "A balance has to be paid, or written off, in QuickBooks first. Then try again.",
   balanceUnread: "QuickBooks couldn't be asked what is owed just now, so nothing was changed. Try again in a few minutes.",
   balanceUnknown: "QuickBooks didn't say what is owed, so nothing was changed. Check the balance in QuickBooks, then try again.",
+  balanceRefused: "QuickBooks wouldn't say what is owed, so nothing was changed. Check the customer in QuickBooks; waiting won't change this answer.",
   coverChanged: "Who is under this family changed in QuickBooks since the page was shown, so nothing was changed. Reload the page, look at the list again, and confirm it.",
 } as const;
 
+/** A family is made inactive only with everyone under it: the refusal names the button as the family's page does. */
+export const familyHereWords = (name: string) =>
+  `A family is made inactive together with everyone under it. On its page, under “Change the family ${name}”, use “Make ${name} inactive”.`;
+/** QuickBooks' 6220, which may be an amount owed or a credit: either has to be settled there first. */
+const accountWords = (name: string) =>
+  `QuickBooks says there is a balance on ${name}'s account, so they weren't made inactive. It has to be settled in QuickBooks first: paid or written off, or a credit used or refunded. Then try again.`;
+
 /**
- * What QuickBooks refused, in words for one customer: an open balance (6220, as the sandbox answered on 2026-11-17),
- * and customers under it still active (800, as the sandbox answered a family on the same day). Null for any other code.
+ * What QuickBooks refused, in words for one customer: a balance on the account (6220, as the sandbox answered on
+ * 2026-11-17), and customers under it still active (800, as the sandbox answered a family on the same day). Null for
+ * any other code.
  */
 export function refusalWords(code: string, name: string): string | null {
-  if (code === `fault_${CUSTOMER_WRITES.faults.openBalance}`) return `QuickBooks says ${name} has an open balance, so they weren't made inactive. ${WRITE_COPY.balanceFix}`;
+  if (code === `fault_${CUSTOMER_WRITES.faults.openBalance}`) return accountWords(name);
   if (code === `fault_${CUSTOMER_WRITES.faults.activeUnder}`) return `QuickBooks won't make ${name} inactive while customers under it are still active, so it wasn't changed. Reload the page to see who is under it, and try again.`;
   return null;
 }
@@ -90,29 +98,41 @@ export function refusalWords(code: string, name: string): string | null {
 const owesWords = (name: string, owed: { cents: number; currency: string }, showAmounts: boolean) =>
   showAmounts ? `${name} owes ${formatMoney(owed.cents, owed.currency)} in QuickBooks.` : `${name} has an open balance in QuickBooks.`;
 
-type Owed = { ok: true; cents: number; currency: string } | { ok: false; code: string };
+/** What one customer owes now, and what the same read shows of it: whether it is active, and its version. */
+export type Owed = { ok: true; cents: number; currency: string; active: boolean; syncToken: string | null } | { ok: false; code: string };
 /**
  * What one customer owes now, read live from QuickBooks before it is made inactive (its own Balance, without the
- * customers under it, who are read one by one). A read for a staff member pressing a button: it never waits in line
- * for the connection row (failFast), and a row held elsewhere is "busy" as a write's would be (token_busy).
+ * customers under it, who are read one by one). For a staff member pressing a button it never waits in line for the
+ * connection row (failFast), and a row held elsewhere is "busy" as a write's would be (token_busy); the write queue's
+ * worker may wait (`mayWait`). An answer about another record is `not_the_customer`, and one with no balance in it
+ * `no_balance`: refusals, never put on the queue, since asking again won't change them.
  */
-async function owedBy(qboId: string, realmId: string): Promise<Owed> {
+export async function owedBy(qboId: string, realmId: string, o: { mayWait?: boolean } = {}): Promise<Owed> {
   let c: Record<string, unknown> | null;
-  try { c = await qboCustomerById(qboId, { failFast: true, realmId, timeoutMs: BALANCE_READ_TIMEOUT_MS }); } catch (e) {
+  try { c = await qboCustomerById(qboId, o.mayWait ? { realmId, timeoutMs: BALANCE_READ_TIMEOUT_MS } : { failFast: true, realmId, timeoutMs: BALANCE_READ_TIMEOUT_MS }); } catch (e) {
     if (!(e instanceof QboError)) throw e;
     return { ok: false, code: e.code === "busy" ? `${NO_TOKEN}busy` : e.code };
   }
-  if (!c || c.Id !== qboId) return { ok: false, code: "bad_answer" };
+  if (!c || c.Id !== qboId) return { ok: false, code: "not_the_customer" };
   const cents = toCents(c.Balance);
   if (cents === null) return { ok: false, code: "no_balance" };
-  return { ok: true, cents, currency: currencyOf(isRow(c.CurrencyRef) ? c.CurrencyRef.value : undefined) };
+  return { ok: true, cents, currency: currencyOf(isRow(c.CurrencyRef) ? c.CurrencyRef.value : undefined), active: c.Active !== false,
+    syncToken: typeof c.SyncToken === "string" && /^\d{1,20}$/.test(c.SyncToken) ? c.SyncToken : null };
 }
-/** The words for a balance that couldn't be read, by its code: the connection's own words where only a person can mend it. */
+/** Whether the read shows a version newer than the one the page was shown: someone changed it in QuickBooks since. */
+const movedOn = (owed: { syncToken: string | null }, shown: string) => owed.syncToken !== null && tokenNumber(owed.syncToken) > tokenNumber(shown);
+/**
+ * The words for a balance that couldn't be read, by its code: the connection's own words where only a person can mend
+ * it, "try again" only where waiting can help, and a refusal that waiting won't change said as one.
+ */
 function unreadWords(code: string): string {
-  if (code === "no_balance" || code === "bad_answer") return WRITE_COPY.balanceUnknown;
+  if (code === "no_balance") return WRITE_COPY.balanceUnknown;
   const kind = classify(code).kind;
-  return kind === "not_connected" ? WRITE_COPY.notConnected : kind === "needs_admin" ? WRITE_COPY.needsAdmin : kind === "other_company" ? WRITE_COPY.otherCompany
-    : code === "bad_id" ? WRITE_COPY.notSent : WRITE_COPY.balanceUnread;
+  if (kind === "not_connected") return WRITE_COPY.notConnected;
+  if (kind === "needs_admin") return WRITE_COPY.needsAdmin;
+  if (kind === "other_company") return WRITE_COPY.otherCompany;
+  if (code === "bad_id") return WRITE_COPY.notSent;
+  return kind === "retry" ? WRITE_COPY.balanceUnread : WRITE_COPY.balanceRefused;
 }
 
 const taken = (name: string, offer: string): WriteResult => ({ ok: false, offer,
@@ -221,7 +241,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
     if (!record.active) return no("That is inactive in QuickBooks already, so there was nothing to change.");
     // A layered club's family goes with everyone under it, deepest first (askFamilyInactive): QuickBooks refuses a family
     // while a customer under it is active.
-    if (where.role === "family") return no(WRITE_COPY.familyHere);
+    if (where.role === "family") return no(familyHereWords(record.displayName));
     return done({ op: "deactivate", role: where.role, qboId: record.qboId, syncToken: ask.syncToken }, where.familyQboId, record.displayName);
   });
 }
@@ -408,9 +428,17 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
       await audited(owed.code, p.write, target);
       return refuse(unreadWords(owed.code));
     }
+    // What the read shows of the record: already inactive there, or changed since the page, is said and not sent; the
+    // record read again is stored and shown (spec §6.3), and the pages are made again.
+    if (!owed.active || movedOn(owed, p.write.syncToken)) {
+      await audited(owed.active ? "moved_on" : "already_inactive", p.write, target);
+      const current = await readAgain(p.write.qboId, p.realmId);
+      const said = owed.active ? WRITE_COPY.changed : "That is inactive in QuickBooks already, so there was nothing to change.";
+      return current ? { ok: false, errors: [said], current } : refuse(owed.active ? WRITE_COPY.changedUnseen : said);
+    }
     if (owed.cents > 0) {
       await audited("open_balance", p.write, target);
-      return refuse(`${owesWords(name, owed, o.showAmounts === true)} So they weren't made inactive. ${WRITE_COPY.balanceFix}`);
+      return refuse(`${owesWords(name, owed, o.showAmounts === true)} They weren't made inactive. ${WRITE_COPY.balanceFix}`);
     }
   }
   let answer: Record<string, unknown>;
@@ -552,29 +580,36 @@ const listed = (names: string[]) => (names.length <= 1 ? names.join("") : `${nam
 
 /**
  * Why one step of the family action stopped, in words for staff, and what follows it: a record changed in QuickBooks is
- * read again (spec §6.3); a write whose answer was lost asks the worker for a roster refresh, since QuickBooks may have
- * made it. `maybe` says the step may have been made.
+ * read again (spec §6.3); a write whose answer was lost, and a family QuickBooks still won't take while someone the
+ * cache doesn't show is under it (800), ask the worker for a roster refresh. `maybe`: the step may have been made.
+ * `changed`: the cache or the refresh ask changed, so the pages are made again.
  */
-async function stepStopped(e: QboError, step: FamilyStep, realmId: string): Promise<{ words: string; maybe: boolean; refreshAsked: boolean }> {
-  const name = step.name;
+async function stepStopped(e: QboError, step: FamilyStep, realmId: string): Promise<{ words: string; maybe: boolean; changed: boolean }> {
+  const name = step.name, isFamily = step.write.role === "family";
+  if (isFamily && e.code === `fault_${CUSTOMER_WRITES.faults.activeUnder}`) {
+    await db.transaction((tx) => askForRosterRefresh(tx));
+    return { words: `QuickBooks won't make ${name} inactive while customers under it are still active, and it has someone under ${name} the roster here doesn't show yet, so ${name} wasn't changed. The roster is being read again: try again in a few minutes.`, maybe: false, changed: true };
+  }
   const said = refusalWords(e.code, name);
-  if (said) return { words: said, maybe: false, refreshAsked: false };
+  if (said) return { words: said, maybe: false, changed: false };
   const failure = classify(e.code);
   switch (failure.kind) {
     case "stale":
       await readAgain(step.write.qboId, realmId);
-      return { words: `${name} changed in QuickBooks since the page was shown, so it wasn't changed. Reload the page to see it as QuickBooks has it now.`, maybe: false, refreshAsked: false };
+      // The family's last step carries the version read just before it, so a refusal now is a change made while this ran.
+      return { words: isFamily ? `${name} changed in QuickBooks while this was running, so it wasn't made inactive. Press “Make ${name} inactive” again.`
+        : `${name} changed in QuickBooks since the page was shown, so it wasn't changed. Reload the page to see it as QuickBooks has it now.`, maybe: false, changed: true };
     case "retry":
       if (failure.sent) {
         await db.transaction((tx) => askForRosterRefresh(tx));
-        return { words: `The portal can't tell whether QuickBooks made ${name} inactive: its answer didn't arrive. The roster is read again within a few minutes to see.`, maybe: true, refreshAsked: true };
+        return { words: `The portal can't tell whether QuickBooks made ${name} inactive: its answer didn't arrive. The roster is read again within a few minutes to see.`, maybe: true, changed: true };
       }
-      return { words: `QuickBooks couldn't take that just now, so ${name} wasn't changed. Try again in a few minutes.`, maybe: false, refreshAsked: false };
-    case "not_connected": return { words: `${name} wasn't changed. ${WRITE_COPY.notConnected}`, maybe: false, refreshAsked: false };
-    case "needs_admin": return { words: `${name} wasn't changed. ${WRITE_COPY.needsAdmin}`, maybe: false, refreshAsked: false };
-    case "other_company": return { words: `${name} wasn't changed. ${WRITE_COPY.otherCompany}`, maybe: false, refreshAsked: false };
+      return { words: `QuickBooks couldn't take that just now, so ${name} wasn't changed. Try again in a few minutes.`, maybe: false, changed: false };
+    case "not_connected": return { words: `${name} wasn't changed. ${WRITE_COPY.notConnected}`, maybe: false, changed: false };
+    case "needs_admin": return { words: `${name} wasn't changed. ${WRITE_COPY.needsAdmin}`, maybe: false, changed: false };
+    case "other_company": return { words: `${name} wasn't changed. ${WRITE_COPY.otherCompany}`, maybe: false, changed: false };
     default:
-      return { words: e.code === "bad_id" ? `${name} couldn't be sent to QuickBooks, so it wasn't changed.` : `QuickBooks wouldn't make ${name} inactive, so it wasn't changed. Check it in QuickBooks.`, maybe: false, refreshAsked: false };
+      return { words: e.code === "bad_id" ? `${name} couldn't be sent to QuickBooks, so it wasn't changed.` : `QuickBooks wouldn't make ${name} inactive, so it wasn't changed. Check it in QuickBooks.`, maybe: false, changed: false };
   }
 }
 
@@ -585,61 +620,95 @@ export type FamilyInactiveAnswer = { result: WriteResult; changed: boolean };
  * Makes a family inactive in QuickBooks, with every active customer under it, as staff confirmed on the family's page
  * (`shown`: each id the page listed, the family's too, with the version it showed). In this order:
  *   1. prepareFamily(): every check one write gets, for the family and everyone under it, under the roster lock;
- *   2. what each of them owes, read live from QuickBooks: when any of them owes anything, nothing is sent at all, and
- *      staff are told who (with the amount only for Finance.Balance.Read) and that it must be paid or written off first;
+ *   2. each of them read live from QuickBooks: when any of them owes anything, nothing is sent at all, and staff are
+ *      told who (with the amount only for Finance.Balance.Read) and that it must be paid or written off first. The same
+ *      read stops it before anything is sent when a version there is newer than the one the page showed, and passes
+ *      over anyone it shows already inactive;
  *   3. each made inactive, deepest first and the family last, each through sendWrite() and applyWritten(): QuickBooks
  *      first, then the cache from its answer under the roster lock, with the reconcile, its follow-ups and its audit row.
+ *      The family's own last step is the one exception to carrying the version the page showed: the family is read
+ *      once more after its members' writes, and sent with the version just read, since QuickBooks may raise it when a
+ *      customer under it changes. Its version was the page's when the action began (step 2), the write sets only the
+ *      inactive flag, and the window is the seconds of the action itself, so nothing anyone changed is overwritten.
  * The first step that doesn't go through stops it: staff are told who was made inactive, who wasn't and why, and that
  * the family is still active. Nothing of it is queued. One audit row (roster.family.deactivate) says how it went.
  */
 export async function askFamilyInactive(familyQboId: string, shown: ReadonlyArray<readonly [string, string]>, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<FamilyInactiveAnswer> {
-  const summary = (outcome: "done" | "stopped" | "refused", code: string | null, made: string[], notMade: string[]) => writeAudit({ actor: o.actor, action: "roster.family.deactivate",
-    permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: familyQboId, after: { outcome, ...(code ? { code: code.slice(0, 40) } : {}), made, notMade } });
+  const summary = (outcome: "done" | "stopped" | "refused", code: string | null, made: string[], notMade: string[], more: { maybe?: string[]; alreadyInactive?: string[] } = {}) =>
+    writeAudit({ actor: o.actor, action: "roster.family.deactivate", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: familyQboId,
+      after: { outcome, ...(code ? { code: code.slice(0, 40) } : {}), made, notMade, ...(more.maybe?.length ? { maybe: more.maybe } : {}), ...(more.alreadyInactive?.length ? { alreadyInactive: more.alreadyInactive } : {}) } });
   const p = await prepareFamily(familyQboId, new Map(shown), rosterTag);
   if (!p.ok) return { result: p.result, changed: false };
   const ids = p.steps.map((s) => s.write.qboId);
 
-  // 2. Nobody with a balance: every one of them is read before anything is sent.
-  const owing: string[] = [];
+  // 2. Each read before anything is sent: what it owes, whether it is active there, and its version.
+  const owing: string[] = [], already = new Set<string>();
   for (const step of p.steps) {
     const owed = await owedBy(step.write.qboId, p.realmId);
     if (!owed.ok) {
       await summary("refused", owed.code, [], ids);
       return { result: refuse(unreadWords(owed.code)), changed: false };
     }
+    if (movedOn(owed, step.write.syncToken)) {
+      await readAgain(step.write.qboId, p.realmId);
+      await summary("refused", "moved_on", [], ids);
+      return { result: refuse(`${step.name} changed in QuickBooks since the page was shown, so nothing was changed. Look at the list again, and confirm it.`), changed: true };
+    }
+    if (!owed.active) { already.add(step.write.qboId); continue; }
     if (owed.cents > 0) owing.push(owesWords(step.name, owed, o.showAmounts === true));
   }
+  const alreadyInactive = [...already];
+  if (already.size) await db.transaction((tx) => askForRosterRefresh(tx)); // the cache is behind QuickBooks: read it again
+  if (already.has(familyQboId)) {
+    await summary("refused", "already_inactive", [], ids, { alreadyInactive });
+    return { result: refuse(`${p.familyName} is inactive in QuickBooks already, so there was nothing to change. The roster is being read again to show it.`), changed: true };
+  }
   if (owing.length) {
-    await summary("refused", "open_balance", [], ids);
-    return { result: { ok: false, errors: [...owing, `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] }, changed: false };
+    await summary("refused", "open_balance", [], ids, { alreadyInactive });
+    return { result: { ok: false, errors: [...owing, `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] }, changed: already.size > 0 };
   }
 
-  // 3. Deepest first, the family last.
+  // 3. Deepest first, the family last; anyone QuickBooks shows inactive already is passed over.
+  const steps = p.steps.filter((s) => !already.has(s.write.qboId));
   const made: FamilyStep[] = [];
   let allShown = true;
-  for (const [i, step] of p.steps.entries()) {
+  const stop = async (i: number, code: string, why: { words: string; maybe: boolean; changed: boolean }) => {
+    const step = steps[i]!;
+    const after = steps.slice(i + 1).filter((s) => s.write.role !== "family").map((s) => s.name);
+    await summary("stopped", code, made.map((s) => s.write.qboId), steps.slice(why.maybe ? i + 1 : i).map((s) => s.write.qboId),
+      { maybe: why.maybe ? [step.write.qboId] : [], alreadyInactive });
+    const errors = [
+      made.length ? `Made inactive in QuickBooks: ${listed(made.map((s) => s.name))}.` : "Nobody was made inactive.",
+      why.words,
+      ...(after.length ? [`Not made inactive yet: ${listed(after)}.`] : []),
+      step.write.role === "family" && why.maybe ? `Whether ${p.familyName} is still active shows once the roster is read again.`
+        : `${p.familyName} is still active. Press “Make ${p.familyName} inactive” again to carry on with whoever is still active.`,
+    ];
+    return { result: { ok: false as const, errors }, changed: made.length > 0 || why.changed || already.size > 0 };
+  };
+  for (const [i, planned] of steps.entries()) {
+    let step = planned;
+    if (step.write.role === "family" && made.length) {
+      // Read once more: QuickBooks may have raised the family's version when the customers under it changed.
+      const fresh = await owedBy(familyQboId, p.realmId);
+      if (!fresh.ok) {
+        return stop(i, fresh.code, { words: `${p.familyName} couldn't be read from QuickBooks again before it was made inactive, so it wasn't changed.${classify(fresh.code).kind === "retry" ? " Try again in a few minutes." : ""}`, maybe: false, changed: false });
+      }
+      if (fresh.cents > 0) return stop(i, "open_balance", { words: `${owesWords(p.familyName, fresh, o.showAmounts === true)} It wasn't made inactive. ${WRITE_COPY.balanceFix}`, maybe: false, changed: false });
+      step = { ...step, write: { ...step.write, syncToken: fresh.syncToken ?? step.write.syncToken } };
+    }
     let answer: Record<string, unknown>;
     try {
       answer = await sendWrite(step.write, p.realmId, { mayWait: false });
     } catch (e) {
       if (!(e instanceof QboError)) throw e;
-      const why = await stepStopped(e, step, p.realmId);
-      const after = p.steps.slice(i + 1).filter((s) => s.write.role !== "family").map((s) => s.name);
-      await summary("stopped", e.code, made.map((s) => s.write.qboId), p.steps.slice(i).map((s) => s.write.qboId));
-      const errors = [
-        made.length ? `Made inactive in QuickBooks: ${listed(made.map((s) => s.name))}.` : "Nobody was made inactive.",
-        why.words,
-        ...(after.length ? [`Not made inactive yet: ${listed(after)}.`] : []),
-        step.write.role === "family" && why.maybe ? `Whether ${p.familyName} is still active shows once the roster is read again.`
-          : `${p.familyName} is still active. Press “Make ${p.familyName} inactive” again to carry on with whoever is still active.`,
-      ];
-      return { result: { ok: false, errors }, changed: made.length > 0 || why.refreshAsked };
+      return stop(i, e.code, await stepStopped(e, step, p.realmId));
     }
     const { cached } = await applyWritten(step.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission });
     if (!cached) allShown = false;
     made.push(step);
   }
-  await summary("done", null, ids, []);
+  await summary("done", null, made.map((s) => s.write.qboId), [], { alreadyInactive });
   const under = made.filter((s) => s.write.role !== "family").map((s) => s.name);
   const message = under.length ? `Made inactive in QuickBooks: ${listed(under)}, then ${p.familyName}.` : `Made ${p.familyName} inactive in QuickBooks.`;
   return { result: { ok: true, message: allShown ? message : `${message} The roster here shows it after its next read of QuickBooks, usually within a few minutes.` }, changed: true };
