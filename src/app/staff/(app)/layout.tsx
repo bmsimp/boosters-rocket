@@ -8,7 +8,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   return (
     <>
       <ClubBar name={club.name} shortName={club.shortName} menu={staffMenu(ctx.effective)}
-        account={{ href: "/staff", initials: initials(ctx.name), label: `Signed in as ${ctx.name}` }} />
+        account={{ href: "/staff", initials: initials(ctx.name), label: `${initials(ctx.name)}: Staff home, signed in as ${ctx.name}` }} />
       {children}
     </>
   );
