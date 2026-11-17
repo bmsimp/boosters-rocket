@@ -155,6 +155,40 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     expect(Math.abs(Date.now() - Date.parse(last!.at))).toBeLessThan(120_000);
   });
 
+  it("run as root, gives both files to the folder's owner, so they can copy them off the machine as themselves", () => {
+    // The nightly service runs the script as root, into a folder the person who looks after the machine owns. Where the
+    // run's database lives in a container, the script really runs there as root, into a folder owned by another user;
+    // otherwise `id` says root and `chown` records what it was asked, on this machine.
+    if (via.BR_DB_CONTAINER) {
+      const c = via.BR_DB_CONTAINER, folder = `/tmp/br-owner-${process.pid}-${Date.now()}`;
+      const inIt = (cmd: string, input?: string) => spawnSync("docker", ["exec", ...(input ? ["-i"] : []), c, "bash", "-c", cmd], { encoding: "utf8", input });
+      try {
+        expect(inIt(`id -u && mkdir -p ${folder}/backups && chown 4321:4322 ${folder}/backups && cat > ${folder}/backup.sh`, readFileSync(BACKUP, "utf8")).stdout.trim()).toBe("0");
+        const env = `BR_DB_CONTAINER= PGUSER=${runUser()} BR_DB_NAME=${SOURCE} BR_DOCUMENSO_DB_NAME=${SCRATCH} BR_DB_WAIT=20`;
+        const r = inIt(`${env} bash ${folder}/backup.sh ${folder}/backups`);
+        expect(r.status, r.stdout + r.stderr).toBe(0);
+        const owned = inIt(`stat -c '%u:%g %a %n' ${folder}/backups/*.dump`).stdout.trim().split("\n").sort();
+        expect(owned).toHaveLength(2);
+        for (const line of owned) expect(line).toMatch(/^4321:4322 600 \S+\/(booster-rocket|documenso)-\d{8}T\d{6}Z\.dump$/);
+      } finally { inIt(`rm -rf ${folder}`); }
+      return;
+    }
+    const elsewhere = mkdtempSync(path.join(tmpdir(), "br-backup-owner-"));
+    try {
+      const bin = path.join(elsewhere, "bin"), log = path.join(elsewhere, "chown.log"), into = path.join(elsewhere, "backups");
+      mkdirSync(bin); mkdirSync(into);
+      writeFileSync(path.join(bin, "id"), `#!/usr/bin/env bash\n[ "$1" = "-u" ] && { echo 0; exit 0; }\nexec /usr/bin/id "$@"\n`);
+      writeFileSync(path.join(bin, "chown"), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(log)}\n`);
+      chmodSync(path.join(bin, "id"), 0o755); chmodSync(path.join(bin, "chown"), 0o755);
+      const r = run(BACKUP, [into], { ...WITH_DOCUMENSO, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}` });
+      expect(r.status, r.stderr).toBe(0);
+      const owner = spawnSync("stat", ["-c", "%u:%g", into], { encoding: "utf8" }).stdout.trim();
+      const asked = readFileSync(log, "utf8").trim().split("\n").sort();
+      expect(asked).toHaveLength(2);
+      for (const line of asked) expect(line).toMatch(new RegExp(`^${owner} \\S+/(booster-rocket|documenso)-\\d{8}T\\d{6}Z\\.dump$`));
+    } finally { rmSync(elsewhere, { recursive: true, force: true }); }
+  });
+
   it("restores Documenso's backup, and everything in it is the same", async () => {
     // The stand-in is replaced by its own backup: dropped, and made again from the file alone.
     const r = run(RESTORE, [docDump, SCRATCH, "--replace"]);
@@ -263,6 +297,13 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     const r = run(RESTORE, [dump, SCRATCH, "--replace"]);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toContain("replacing what was there");
+    // Only its owner may connect, as on a new installation (deploy/initdb/10-databases.sql): no right is left to PUBLIC.
+    const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
+    try {
+      const [acl] = await admin<{ acl: string | null }[]>`select datacl::text as acl from pg_database where datname = ${SCRATCH}`;
+      expect(acl!.acl).not.toBeNull();
+      expect(acl!.acl!).not.toMatch(/[{,]=/);
+    } finally { await admin.end({ timeout: 5 }); }
     const after = await everythingIn(SCRATCH_URL);
     expect(after.tables).toEqual(before.tables);
     for (const t of before.tables) expect(after.rows[t], t).toEqual(before.rows[t]);

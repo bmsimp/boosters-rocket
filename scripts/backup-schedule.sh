@@ -43,8 +43,9 @@ done
 [ -z "$KEEP" ] || [[ "$KEEP" =~ ^[1-9][0-9]{0,3}$ ]] || die 2 "--keep takes a number from 1 to 9999: how many backups to keep."
 [[ "$BR_BACKUP_AT" =~ ^(([01][0-9]|2[0-3]):[0-5][0-9]|off)$ ]] || die 2 "BR_BACKUP_AT must be a time of day like 03:00 (24-hour clock, in the club's time zone), or off."
 [ -n "${TZ:-}" ] || die 2 "Set TZ to the club's time zone, an IANA name such as America/Chicago, so the backup runs at $BR_BACKUP_AT club time."
-[[ "$TZ" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]] && [ -f "/usr/share/zoneinfo/$TZ" ] \
-  || die 2 "TZ is $TZ, which isn't a time zone this machine knows. Use an IANA name such as America/Chicago."
+if ! { [[ "$TZ" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]] && [ -f "/usr/share/zoneinfo/$TZ" ]; }; then
+  die 2 "TZ is $TZ, which isn't a time zone this machine knows. Use an IANA name such as America/Chicago."
+fi
 export TZ
 [ -f "$BACKUP" ] || die 2 "backup.sh isn't beside this script, in $HERE."
 date -d "2000-01-01 00:00" +%s >/dev/null 2>&1 || die 2 "This machine's date command can't read dates (it needs GNU date)."
