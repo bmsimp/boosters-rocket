@@ -2,6 +2,7 @@ import { formSettingOf, templateChoices } from "@/lib/forms/attach";
 import { getFormsConfig } from "@/lib/forms/settings";
 import { SUBJECT_LABEL, guardianLabel } from "@/lib/forms/template";
 import { LocalTime } from "@/app/components/local-time";
+import { Notice } from "@/app/components/notice";
 import { attachFormTemplateAction } from "./form-actions";
 import { FormTemplateForm } from "./form-template-form";
 
@@ -28,7 +29,7 @@ export async function FormTemplateBox({ requirementId, appliesTo, canChange }: {
           <dt>Last changed in Documenso</dt><dd><LocalTime iso={setting.templateUpdatedAt} />, when it was attached</dd>
         </dl>
       ) : <p>No template is attached yet, so parents read that this form isn&apos;t ready.</p>}
-      {!ready && <p role="status">Forms aren&apos;t set up yet. An Admin connects the club&apos;s Documenso under <a href="/staff/settings/forms">Forms settings</a>; then a template can be attached.</p>}
+      {!ready && <Notice tone="info">Forms aren&apos;t set up yet. An Admin connects the club&apos;s Documenso under <a href="/staff/settings/forms">Forms settings</a>; then a template can be attached.</Notice>}
       {canChange && ready && (
         // Folded like the page's other forms, and left to the browser to open and close: drawn again after a
         // template is attached, it stays open, with what the action said still on the screen.

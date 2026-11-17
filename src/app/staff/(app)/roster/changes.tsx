@@ -4,6 +4,7 @@ import type { Cust, Family } from "@/lib/roster/model";
 import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/operations";
 import type { QueueView } from "@/lib/roster/queue";
 import { LocalTime } from "@/app/components/local-time";
+import { Notice } from "@/app/components/notice";
 import { DeactivateForm, MemberForm, MoveForm, NameForm, ParentForm } from "./write-forms";
 import { addToFamilyAction, createAction, deactivateAction, moveAction, renameAction } from "./write-actions";
 
@@ -71,7 +72,7 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra }: {
 }) {
   const version = edit.versions.get(c.qboId);
   if (version === undefined) return null;
-  if (edit.blocked.has(c.qboId)) return <p className="hint">A change to {c.displayName} is waiting to reach QuickBooks, so nothing else can be changed for now.</p>;
+  if (edit.blocked.has(c.qboId)) return <Notice tone="info" live="none">A change to {c.displayName} is waiting to reach QuickBooks, so nothing else can be changed for now.</Notice>;
   return (
     <details className="more"><summary>Change {who} {c.displayName}</summary>
       {rename && <NameForm field="New name" label="Rename" pendingLabel="Renaming in QuickBooks…" initial={c.displayName} act={renameAction.bind(null, edit.rosterTag, c.qboId, version)} />}

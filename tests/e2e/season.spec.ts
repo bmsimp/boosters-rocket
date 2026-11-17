@@ -20,7 +20,7 @@ async function fittingWithYaretziUnticked(page: Page) {
   await page.goto("/staff/seasons/progress");
   await page.getByRole("link", { name: FITTING }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(FITTING);
-  const row = page.locator(".progress-rows li").filter({ hasText: "Yaretzi Quetzalcoatl" });
+  const row = page.locator(".progress-rows tbody tr").filter({ hasText: "Yaretzi Quetzalcoatl" });
   await expect(row).toBeVisible();
   if (await row.getByRole("button", { name: "Untick", exact: true }).isVisible()) {
     await row.getByRole("button", { name: "Untick", exact: true }).click();
@@ -129,7 +129,7 @@ test("staff tick a student off, and the parent then sees it; unticked, the famil
   // Staff untick her: the seed is as it was, and the parent is back on Uniforms.
   await page.goto("/staff/seasons/progress");
   await page.getByRole("link", { name: FITTING }).click();
-  const again = page.locator(".progress-rows li").filter({ hasText: "Yaretzi Quetzalcoatl" });
+  const again = page.locator(".progress-rows tbody tr").filter({ hasText: "Yaretzi Quetzalcoatl" });
   await again.getByRole("button", { name: "Untick", exact: true }).click();
   await expect(again.getByRole("button", { name: "Tick", exact: true })).toBeVisible();
   await expect(again.locator(".state")).toHaveText("Not done yet");
@@ -159,11 +159,11 @@ test("staff open one family's season from a requirement's list, and the visit is
 test("staff see the season's set-up: its steps, what each asks, and every kind offered", async ({ page }) => {
   await page.goto("/staff/seasons");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Seasons");
-  const listed = page.getByRole("region", { name: "Seasons", exact: true }).getByRole("listitem");
+  const listed = page.getByRole("region", { name: "Seasons", exact: true }).locator("tbody tr");
   await expect(listed).toHaveCount(1);
-  await expect(listed).toContainText("Fall 2026");
+  await expect(listed.getByRole("rowheader")).toHaveText("Fall 2026");
   // 10 requirements, and the three volunteer ones with a buy-out (tests/e2e/buyout-seed.ts).
-  await expect(listed).toContainText("Current season: parents see it · 4 steps · 13 requirements");
+  await expect(listed.locator(".t-value")).toHaveText(["Yes, the current season", "4", "13"]);
   await page.getByRole("link", { name: "Fall 2026" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Fall 2026");
   await expect(page.getByRole("heading", { level: 2, name: /^\d\. / })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);

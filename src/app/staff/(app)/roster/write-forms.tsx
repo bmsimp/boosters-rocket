@@ -1,6 +1,7 @@
 "use client";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
+import { Notice } from "@/app/components/notice";
 
 // The forms that change the roster in QuickBooks. As on the season pages, no form `action` on a form with a field: React
 // resets a form after one, and what was typed would vanish on a refusal. Each is given only what it shows, and the
@@ -15,17 +16,17 @@ const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 
 function Outcome({ state, onOffer, pending }: { state: WriteResult | null; onOffer?: (name: string) => void; pending: boolean }) {
   if (!state) return null;
-  if (state.ok) return <p role="status">{state.message}</p>;
+  if (state.ok) return <Notice tone={state.queued ? "info" : "done"}>{state.message}</Notice>;
   return (
-    <div role="alert" className="stack">
-      <ul className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>
+    <Notice tone="problem">
+      {state.errors.length === 1 ? state.errors[0] : <ul className="notice-list">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
       {state.current && (
         <p>Now in QuickBooks: {state.current.name}{state.current.familyName ? `, in ${state.current.familyName}` : ""}{state.current.active ? "" : ", inactive"}.</p>
       )}
       {state.offer && onOffer && (
-        <button type="button" className="btn" disabled={pending} onClick={() => onOffer(state.offer!)}>Use “{state.offer}”</button>
+        <p><button type="button" className="btn" disabled={pending} onClick={() => onOffer(state.offer!)}>Use “{state.offer}”</button></p>
       )}
-    </div>
+    </Notice>
   );
 }
 

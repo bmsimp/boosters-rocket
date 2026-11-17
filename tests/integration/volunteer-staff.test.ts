@@ -34,7 +34,8 @@ import { dayFromNow, seedEvent } from "../helpers/volunteer";
 type Staff = Awaited<ReturnType<typeof seedStaff>>;
 const BROWSER = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const NO_SUCH = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e5f";
-const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"');
+// The label a table's cell carries on a phone repeats its column's header: left out, so a row reads as its cells.
+const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<span class="t-label"[^>]*>[\s\S]*?<\/span>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"');
 const audits = async (action?: string) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => !action || r.action === action);
 const leaked = (text: string, markers: string[]) => markers.filter((m) => text.toLowerCase().includes(m.toLowerCase()));
 const EVENT = { name: "Home game concessions", onDate: dayFromNow(30), location: "North stand", description: "Popcorn and pop.", contactName: "Pat Organizer", contactEmail: "Pat@Club.Example " };

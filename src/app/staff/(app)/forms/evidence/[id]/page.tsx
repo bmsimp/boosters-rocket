@@ -5,6 +5,8 @@ import { requireStaffPage } from "@/lib/guards";
 import { writeAudit } from "@/lib/audit/log";
 import { RECORD_KEY, loadEvidence } from "@/lib/signed-forms/evidence";
 import { LocalTime } from "../../../../../components/local-time";
+import { DataTable } from "../../../../../components/data-table";
+import { Notice } from "../../../../../components/notice";
 
 export const metadata = { title: "Signed form" };
 export const dynamic = "force-dynamic";
@@ -30,31 +32,41 @@ export default async function EvidencePage({ params }: { params: Promise<{ id: s
     <main className="wrap single">
       <h1 className="page-title">{e.formTitle}</h1>
       <p className="lede">Signed for {e.subjectName ?? e.subjectQboId}{e.familyName && e.subjectKind === "student" ? `, of ${e.familyName}` : ""}{e.seasonName ? ` · ${e.seasonName}` : ""}. <Link href="/staff/forms">Back to signed forms</Link></p>
-      {view.earlier && <p role="status" className="box">This form was signed under a QuickBooks company that is no longer connected. It is kept as the club&apos;s record, by the names it had then; families don&apos;t see it.</p>}
-      {e.mismatchAt && <p role="alert" className="box">A later fetch from Documenso gave one of these files a different hash, on <LocalTime iso={e.mismatchAt.toISOString()} />. The first copy is the one kept here.</p>}
+      {view.earlier && <Notice tone="info">This form was signed under a QuickBooks company that is no longer connected. It is kept as the club&apos;s record, by the names it had then; families don&apos;t see it.</Notice>}
+      {e.mismatchAt && <Notice tone="warning" live="alert">A later fetch from Documenso gave one of these files a different hash, on <LocalTime iso={e.mismatchAt.toISOString()} />. The first copy is the one kept here.</Notice>}
 
       <section className="box" aria-labelledby="files-h">
         <h2 id="files-h">Download</h2>
-        <ul className="lines">
-          {view.files.map((f) => (
-            <li key={f.id}><div><a className="what" href={download(f.key)} download>{f.label}</a><span className="when hash">SHA-256 {f.sha256}</span></div><span className="num">{sizeWords(f.size)}</span></li>
-          ))}
-          <li><div><a className="what" href={download(RECORD_KEY)} download>The evidence record (JSON)</a><span className="when">Everything on this page, with each file&apos;s size and hash</span></div></li>
-        </ul>
+        <DataTable caption="Each kept file, with its hash and size" captionHidden rowKey={(f) => f.key}
+          rows={[...view.files.map((f) => ({ key: f.key, label: f.label, hash: `SHA-256 ${f.sha256}`, size: sizeWords(f.size) })),
+            { key: RECORD_KEY, label: "The evidence record (JSON)", hash: "Everything on this page, with each file's size and hash", size: "" }]}
+          columns={[
+            // Plain links, not Links: each is a file, and every download is audited, so none may be fetched ahead of a click.
+            { key: "file", header: "File", rowHeader: true, cell: (f) => <a href={download(f.key)} download>{f.label}</a> },
+            { key: "hash", header: "Hash", cell: (f) => <span className="hash">{f.hash}</span> },
+            { key: "size", header: "Size", numeric: true, cell: (f) => f.size },
+          ]} />
       </section>
 
       <section className="box" aria-labelledby="signers-h">
         <h2 id="signers-h">Who signed</h2>
-        <ul className="lines">{e.signers.map((s, i) => (
-          <li key={i}><div><span className="what">{s.name}</span><span className="when">{s.email}</span></div><span>{s.signedAt ? <>Signed <LocalTime iso={s.signedAt} /></> : "Not signed"}</span></li>))}</ul>
+        <DataTable caption="Who signed, and when" captionHidden rows={e.signers.map((s, i) => ({ ...s, key: String(i) }))} rowKey={(s) => s.key} columns={[
+          { key: "name", header: "Guardian", rowHeader: true, cell: (s) => s.name },
+          { key: "email", header: "Email", cell: (s) => s.email },
+          { key: "signed", header: "Signed", cell: (s) => (s.signedAt ? <LocalTime iso={s.signedAt} /> : "Not signed") },
+        ]} />
         {e.completedAt && <p className="help">Sealed by Documenso <LocalTime iso={e.completedAt.toISOString()} />. Kept here <LocalTime iso={e.storedAt.toISOString()} />.</p>}
       </section>
 
       <section className="box" aria-labelledby="consents-h">
         <h2 id="consents-h">Consent to sign electronically</h2>
         {e.consents.length === 0 ? <p>No consent was recorded with this form.</p> : (
-          <ul className="lines">{e.consents.map((c, i) => (
-            <li key={i}><div><span className="what">{c.name}</span><span className="when">{c.email} · text of {c.textVersion}{c.ip ? ` · from ${c.ip}` : ""}</span></div><span><LocalTime iso={c.agreedAt} /></span></li>))}</ul>
+          <DataTable caption="Each guardian's consent to sign electronically" captionHidden rows={e.consents.map((c, i) => ({ ...c, key: String(i) }))} rowKey={(c) => c.key} columns={[
+            { key: "name", header: "Guardian", rowHeader: true, cell: (c) => c.name },
+            { key: "email", header: "Email", cell: (c) => c.email },
+            { key: "text", header: "Consent text", cell: (c) => <>Text of {c.textVersion}{c.ip ? <span className="when">From {c.ip}</span> : null}</> },
+            { key: "at", header: "Agreed", cell: (c) => <LocalTime iso={c.agreedAt} /> },
+          ]} />
         )}
       </section>
 
@@ -71,12 +83,12 @@ export default async function EvidencePage({ params }: { params: Promise<{ id: s
       <section className="box" aria-labelledby="copies-h">
         <h2 id="copies-h">Copies to guardians</h2>
         {view.copies.length === 0 ? <p>{e.copiesDoneAt ? "No copy was sent." : "Not sent yet."}</p> : (
-          <ul className="lines">{view.copies.map((c, i) => {
-            const who = e.signers.find((s) => s.parentId === c.parentId)?.name ?? "A guardian";
-            const words = c.outcome === "sent" ? (c.how === "attached" ? "Emailed, with the signed form attached" : "Emailed, with a link to download it")
-              : c.outcome === "failed" ? "Couldn't be emailed" : c.outcome === "skipped" ? "Not sent: their access was closed" : "Being sent";
-            return <li key={i}><div><span className="what">{who}</span><span className="when">{words}</span></div><span>{c.doneAt ? <LocalTime iso={c.doneAt.toISOString()} /> : ""}</span></li>;
-          })}</ul>
+          <DataTable caption="The copy each guardian who signed was sent" captionHidden rows={view.copies.map((c, i) => ({ ...c, key: String(i) }))} rowKey={(c) => c.key} columns={[
+            { key: "who", header: "Guardian", rowHeader: true, cell: (c) => e.signers.find((s) => s.parentId === c.parentId)?.name ?? "A guardian" },
+            { key: "what", header: "Copy", cell: (c) => (c.outcome === "sent" ? (c.how === "attached" ? "Emailed, with the signed form attached" : "Emailed, with a link to download it")
+              : c.outcome === "failed" ? "Couldn't be emailed" : c.outcome === "skipped" ? "Not sent: their access was closed" : "Being sent") },
+            { key: "at", header: "When", cell: (c) => (c.doneAt ? <LocalTime iso={c.doneAt.toISOString()} /> : "Not yet") },
+          ]} />
         )}
       </section>
     </main>

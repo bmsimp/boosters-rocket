@@ -209,6 +209,30 @@ components:
     textColor: "{colors.paper}"
     rounded: "{rounded.none}"
     padding: "0 6px"
+  table-header:
+    textColor: "{colors.ink-2}"
+    typography: "{typography.label}"
+  notice:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.none}"
+    padding: "12px 16px"
+  field:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.none}"
+    padding: "8px 12px"
+    height: "44px"
+  field-disabled:
+    backgroundColor: "{colors.hair}"
+    textColor: "{colors.ink-2}"
+  check:
+    backgroundColor: "{colors.paper}"
+    rounded: "{rounded.none}"
+    size: "22px"
+  check-checked:
+    backgroundColor: "{colors.club-text}"
+    textColor: "{colors.paper}"
 ---
 
 # Design System: Booster Rocket
@@ -259,7 +283,7 @@ The frontmatter values are FZN's purple default. The gold demo (`#gold`) hand-se
 |---|---|---|---|---|
 | **Field Green** (`done`): done, paid, signed, finished sets | `done` 6.39:1 | `done-dark` 9.26:1 | `done-hc` 9.82:1 | `done-dark-hc` 15.17:1 |
 | **Due Amber** (`due`): to do, due soon, student still on the set, count badge, offline note | `due` 6.01:1 | `due-dark` 8.44:1 | `due-hc` 9.84:1 | `due-dark-hc` 13.02:1 |
-| **Past-Due Red** (`late`): only the date line of a past-due invoice | `late` 7.37:1 | `late-dark` 7.83:1 | `late-hc` 10.35:1 | `late-dark-hc` 11.51:1 |
+| **Past-Due Red** (`late`): the date line of a past-due invoice, and the word, icon and edge of a problem notice (something that didn't go through) | `late` 7.37:1 | `late-dark` 7.83:1 | `late-hc` 10.35:1 | `late-dark-hc` 11.51:1 |
 
 ### Neutral
 - **Chart Paper** (`paper`): the ground of the page, boxes, the season band, tab bar and options. Dark: `paper-dark`, near-black. High contrast: pure white / pure black.
@@ -367,7 +391,7 @@ The ruled container for every section: `paper`, 2px `ink` border, 0 radius, 16px
 - **Primary** (`ink` fill, paper text, 48px tall, body size): the one main action, chiefly the soonest Pay. Hover inverts to paper with ink text.
 - **Line** (paper, ink border and text, 44px, body-row size): other Pay buttons and ordinary actions ("Update my details"). Hover fills ink.
 - **Club** (paper, `club-text` border and text, 44px, body-row size): actions that belong to the club's season ("Sign Maya's forms"). Hover `club-tint`.
-- **Disabled** (`aria-disabled`): `hair` fill and border, `ink-2` text, not-allowed cursor. In high contrast (where `hair` is full ink) it becomes paper fill with a dashed `ink` border and `ink-2` text, so disabled never reads as a filled primary.
+- **Disabled** (`aria-disabled`, or the native `disabled` a form's button carries while its action runs): `hair` fill and border, `ink-2` text, not-allowed cursor, and no hover. In high contrast (where `hair` is full ink) it becomes paper fill with a dashed `ink` border and `ink-2` text, so disabled never reads as a filled primary. Under forced colors the border is dashed and the text `GrayText`.
 - **Motion:** color only, 150ms ease-out; none under reduced motion.
 
 ### Choice group (ruled options)
@@ -376,6 +400,45 @@ A set of radio buttons drawn as ruled options; the Display page is built from th
 - **Option:** a label wrapping a visually hidden native radio and a square ruled tile: 2px `ink` border, `paper`, min 56px tall, 8px 16px padding; a 20px ring (2px `ink`) as the radio mark, the option name in Body 700, an optional Meta description in `ink-2`. Hover: `club-tint` wash.
 - **Checked:** border and ring turn `club-text`, the border is doubled by a 1px inset rule, and a 10px `club-text` dot fills the ring.
 - **Focus:** the mode's ring (`club-text`, 3px or 4px in high contrast) with a 2px offset around the tile.
+
+### Tables
+For content that is a table: rows of the same things with the same facts, such as the roster, Parents, Balances, the audit log, the forms matrix, a shift's sign-ups, a requirement's progress and the Reconciliation lists. One primitive (`DataTable`, `src/app/components/data-table.tsx`) serves them all. A list of a few things each with its own shape stays a list (`.lines`); money owed stays a ledger (Money lines and total).
+- **Laptop (760px and up):** a real table inside its box. A caption says what it lists, drawn as an `ink-2` Body small line, or read out only (`captionHidden`) when the box's heading already says it. Header cells (`scope="col"`) are Label style in `ink-2` over a 2px `ink` rule; rows are divided by 1px `hair` rules; no zebra stripes, no fills. The cell that names a row is a header cell (`scope="row"`), bold. Numbers and amounts (`numeric`) are right-aligned in tabular figures. A column of buttons (`quiet`) has its header read out only and its buttons at the row's end.
+- **Phone (below 760px):** the header row is hidden and each row stacks: a hairline above it, the row's name first and bold, then each cell as its column's label (Label style at 0.8125rem, `ink-2`) beside its value, two fifths and three fifths. Buttons sit under the row, at its start. The page never scrolls sideways.
+- **Semantics kept:** CSS that changes how a table displays can take its table semantics away, so every part carries its role (`table`, `rowgroup`, `row`, `columnheader`, `rowheader`, `cell`). The label shown in a stacked cell is hidden from assistive technology, which reads the header already.
+- **Groups:** rows can be grouped under a heading row (the forms matrix's families): a `rowgroup` whose first row is a `rowheader` across every column, Atkinson 700 over a 2px `ink` rule.
+- **Wide tables:** a table with a column per item (the forms matrix) scrolls inside its own focusable region at laptop widths, its names column held in place, and stacks like any other on a phone.
+- **Order:** rows come in the page's own order; no sort controls. The column the rows follow says so with `aria-sort` (the audit log, newest first).
+- **Dark and high contrast:** tokens only; in high contrast every hairline is full ink. Under forced colors the rules are `CanvasText`.
+
+### Notices
+A status that is not part of a box's ordinary text: the QuickBooks and roster notices, a refresh's answer, the staff home's warnings, what a form's action answered, and any line that is really a state. One primitive (`Notice`, `src/app/components/notice.tsx`), four tones, each with its own word and icon, so color only repeats them:
+| Tone | Word | Icon | Ink |
+|---|---|---|---|
+| information | Note | circled i | `ink` |
+| needs attention | Needs attention | triangle with a bang | `due` |
+| done | Done | tick | `done` |
+| problem | Problem | circled cross | `late` |
+- **Drawn:** a ruled panel: `paper`, a 2px `ink` border, an 8px rule down the left edge in the tone's ink, 12px 16px padding, square corners. The 20px icon in the tone's ink, then the word in Label style in the tone's ink, then the text in Body row.
+- **With a title:** a notice can be a section of its own (the staff home's QuickBooks, mail and sign-in warnings): a Headline-size heading names it, the word is read before the heading but not drawn, and its link or button sits under the text.
+- **Announced:** a problem is an alert, every other tone a status; a notice that is simply part of a page as it loads is announced as neither.
+- **Dark and high contrast:** tokens only. Under forced colors the rules are `CanvasText` and the word and icon carry the tone.
+- **Copy:** the same voice as every page: say what happened, what still works and who can help. A refusal says the same thing whatever the reason.
+
+### Form controls
+Every staff form is built from these, and parent forms take them up as they are next designed.
+- **Text fields and text areas:** Label-style label above, a 2px `ink` box, `paper`, min 44px tall, 8px 12px padding. They fill their column and never run past their box, whatever is typed or however long an option is. A text area grows downward only.
+- **Selects:** drawn like a text field, with the arrow drawn in `ink` at the right; the platform's own arrow under forced colors.
+- **Single choice:** the Choice group (below). Native radio lists are not used on new forms.
+- **Check boxes:** a 22px ruled square (2px `ink`, `paper`); checked fills with `club-text` and a `paper` tick. Hover on an unchecked one: `club-tint`. Each sits in a 44px-tall label row.
+- **Radio marks outside a choice group** (`.checks` lists kept for long option lists): a 22px ruled circle; checked turns the ring `club-text` with a 10px `club-text` dot.
+- **Fieldsets:** a group of check boxes is a `fieldset` with a Label-style `legend`; a choice group's legend is the Setting legend. A decision that belongs with its note and buttons (Parents, To review) is a fieldset ruled in 1px `hair` with a Body 700 legend, so the note and the two answers read as one.
+- **Focus:** the mode's ring, as everywhere.
+- **Disabled:** `hair` fill and border, `ink-2` text, not-allowed cursor; dashed `ink` border on `paper` in high contrast; dashed with `GrayText` under forced colors. Never color alone: a disabled control is also not focusable or says why beside it.
+- **Forced colors:** check boxes and radio marks draw themselves (`forced-color-adjust: none`) on `Canvas` with a `CanvasText` edge; checked fills with `Highlight` and a `HighlightText` tick.
+
+### Staff home
+What needs doing today, for the staff member signed in. A "Today" box first: one line for each kind of thing waiting (held addresses to review, changes waiting or stuck on their way to QuickBooks, forms due within a week or signed and not yet finished, shifts in the next week with places to fill), each a to-do state line with a count in words, one line of what it means in `ink-2`, and the link to the page that deals with it. Each line is read only for staff who hold that page's permission. With nothing waiting the box says so in one calm line, a done state ("Nothing needs doing today."). The warnings about the portal's own connections (QuickBooks, outgoing mail, sign-in certificates) follow as titled notices, then the signed-in box with Sign out.
 
 ### Display page
 Account / Display, reached from the account control. One box of four choice groups, in order: **Appearance** (Match my device, Light, Dark), **Contrast** (Match my device, Standard, High contrast), **Text size** (Standard, Large, Larger, each option name previewed at its own size), **Motion** (Match my device, Reduce motion). "Match my device" is always first and is the default. Changes apply at once; a closing `ink-2` note says the choice is saved on this device only.
@@ -403,7 +466,7 @@ Under `forced-colors: active` the system palette wins; the build only keeps ever
 - Choice options: ring on `Canvas` with a `CanvasText` border; checked = 3px `Highlight` border and a `Highlight` dot; focus = 3px dashed `CanvasText` outline, 4px offset. All other focus rings use `Highlight`.
 
 ### Not yet designed
-Inputs and forms beyond radio choice groups, the entrance motion moment, the waiting and closed states, and the monogram fallback for a club without a logo (the build's monogram is a prototype).
+The entrance motion moment, the waiting and closed states, and the monogram fallback for a club without a logo (the build's monogram is a prototype). The settings pages (Club, Sign-in, Mail, QuickBooks, Forms, Parent sign-ins) and setup have their own pass.
 
 ### Copy patterns
 The voice is PRODUCT.md's warm, plain neighbor, kind about money. On screen that means: state facts plainly ("Was due Oct 30", never "OVERDUE"); count what is left ("2 forms to sign"); name the person on the button ("Sign Maya's forms"); offer help with a person, not a penalty ("Need more time on the uniform fee? Ask the treasurer. They're happy to work something out."); thank people ("You're all paid up. Thank you!"); when a service is down, say what still works and who can help, and say when it will come back only if the portal knows.
@@ -430,6 +493,7 @@ The portal can be put on a phone's home screen and then opens without browser ch
 - **Do** pair every status color with a word, and an icon where there is room.
 - **Do** keep tap targets at 44px or more (48px for the primary button, 56px for choice options, 64px for tabs) and the focus ring `club-text` 3px (4px in high contrast) with a 2px offset on paper (`club-on` inside the club bar).
 - **Do** reuse the season set ruler as the header of the staff forms matrix.
+- **Do** build a list of like things as a `DataTable`, a status as a `Notice`, and a form from the Form controls; never a bare paragraph for a state.
 - **Do** build every new color from the mode tokens so all four modes and forced colors work without extra rules; check a new surface in light, dark, both high-contrast sets and a Windows contrast theme.
 - **Do** set type in rem and let layouts reflow at 125% text.
 - **Do** make "Match my device" the first and default choice of every display setting, and store display choices on the device.

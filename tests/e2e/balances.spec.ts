@@ -24,18 +24,19 @@ test.describe("staff", () => {
     expect(res?.status()).toBe(200);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Balances");
     const families = page.getByRole("region", { name: "Families" });
-    const quetzalcoatl = families.locator(".lines li").filter({ hasText: "Quetzalcoatl Family" });
+    const quetzalcoatl = families.locator("tbody tr").filter({ hasText: "Quetzalcoatl Family" });
     await expect(quetzalcoatl.locator(".amount")).toHaveText("$185.00");
     await expect(quetzalcoatl).toContainText("2 open invoices, oldest due ");
     await expect(quetzalcoatl.locator("time").last()).not.toContainText("UTC"); // the viewer's own time once the page is live
-    await expect(families.locator(".lines li").filter({ hasText: "Second Family" }).locator(".amount")).toHaveText("$376.66");
-    await expect(families.locator(".lines li").filter({ hasText: "Rivera Family" })).toContainText("Not read from QuickBooks yet");
+    await expect(families.locator("tbody tr").filter({ hasText: "Second Family" }).locator(".amount")).toHaveText("$376.66");
+    await expect(families.locator("tbody tr").filter({ hasText: "Rivera Family" })).toContainText("Not read from QuickBooks yet");
     // QuickBooks text is text: a family named with markup shows its name, and runs nothing.
     await expect(families.getByText("<img src=x onerror=alert(1)> Family")).toBeVisible();
 
     const look = page.getByRole("region", { name: "Worth a look" });
     await expect(look).toContainText("Second Family");
-    await expect(look).toContainText("Wolfgang Secondborn: QuickBooks says $362.47, its open invoices add up to $312.47");
+    const wolfgang = look.getByRole("row").filter({ hasText: "Wolfgang Secondborn" }); // QuickBooks' balance beside what the open invoices add up to
+    await expect(wolfgang.getByRole("cell")).toContainText(["Wolfgang Secondborn", "$362.47", "$312.47"]);
     await expect(look).not.toContainText("Quetzalcoatl");
     await noSidewaysScroll(page);
   });
@@ -46,13 +47,13 @@ test.describe("staff", () => {
     await families.getByLabel("Only families that owe something").check();
     await families.getByRole("button", { name: "Show" }).click();
     await expect(page).toHaveURL(/owing=1/);
-    await expect(families.locator(".lines li")).toHaveCount(2);
+    await expect(families.locator("tbody tr")).toHaveCount(2);
     await expect(families).not.toContainText("Rivera Family");
 
     await families.getByLabel("Find a family or a student").fill("xochitl");
     await families.getByLabel("Only families that owe something").uncheck();
     await families.getByRole("button", { name: "Show" }).click();
-    await expect(families.locator(".lines li")).toHaveCount(1);
+    await expect(families.locator("tbody tr")).toHaveCount(1);
     await families.getByRole("link", { name: "Quetzalcoatl Family" }).click();
 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");

@@ -5,6 +5,8 @@ import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { listSeasons } from "@/lib/seasons/setup";
 import { defaultProgressSeasonId, loadProgressOverview } from "@/lib/seasons/staff-progress";
+import { DataTable } from "@/app/components/data-table";
+import { Notice } from "@/app/components/notice";
 
 export const metadata = { title: "Season progress" };
 export const dynamic = "force-dynamic";
@@ -33,7 +35,7 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
 
       {overview && (
         <>
-          {!overview.roster && <p role="status" className="box">The roster can&apos;t be shown right now, so nobody is listed under any requirement. Check QuickBooks under Roster.</p>}
+          {!overview.roster && <Notice tone="warning">The roster can&apos;t be shown right now, so nobody is listed under any requirement. Check QuickBooks under Roster.</Notice>}
           <section className="box" aria-labelledby="season-h"><h2 id="season-h">{overview.season.name}</h2>
             <p>{overview.season.isCurrent ? "The current season." : "Not the current season: parents don't see it."}</p>
             {overview.steps.length === 0 && <p>This season has no steps yet.</p>}
@@ -42,11 +44,12 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
             <section className="box" key={step.id} aria-labelledby={`step-${step.id}`}>
               <h2 id={`step-${step.id}`}>{i + 1}. {step.name}</h2>
               {step.requirements.length === 0 ? <p>Nothing is asked in this step.</p> : (
-                <ul className="lines">{step.requirements.map((r) => (
-                  <li key={r.id}><div>
-                    <Link className="what" href={`/staff/seasons/progress/${r.id}`}>{r.title}</Link>
-                    <span className="when">{r.required ? "Required" : "Optional"} · {r.appliesTo === "family" ? "Each family" : "Each student"}</span>
-                  </div><span className="amount num">{overview.roster ? tally(r.counts) : ""}</span></li>))}</ul>
+                <DataTable caption={`What ${step.name} asks, and how many have done it`} captionHidden rows={step.requirements} rowKey={(r) => r.id} columns={[
+                  { key: "title", header: "Requirement", rowHeader: true, cell: (r) => <Link href={`/staff/seasons/progress/${r.id}`}>{r.title}</Link> },
+                  { key: "required", header: "Required", cell: (r) => (r.required ? "Required" : "Optional") },
+                  { key: "asked", header: "Asked of", cell: (r) => (r.appliesTo === "family" ? "Each family" : "Each student") },
+                  { key: "done", header: "Done", numeric: true, cell: (r) => (overview.roster ? tally(r.counts) : "") },
+                ]} />
               )}
             </section>
           ))}
@@ -55,8 +58,10 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
 
       {seasons.length > 1 && (
         <section className="box" aria-labelledby="others-h"><h2 id="others-h">Other seasons</h2>
-          <ul className="lines">{seasons.filter((s) => s.id !== overview?.season.id).map((s) => (
-            <li key={s.id}><div><Link className="what" href={`/staff/seasons/progress?season=${s.id}`}>{s.name}</Link>{s.isCurrent && <span className="when">Current season</span>}</div></li>))}</ul>
+          <DataTable caption="The club's other seasons" captionHidden rows={seasons.filter((s) => s.id !== overview?.season.id)} rowKey={(s) => s.id} columns={[
+            { key: "name", header: "Season", rowHeader: true, cell: (s) => <Link href={`/staff/seasons/progress?season=${s.id}`}>{s.name}</Link> },
+            { key: "current", header: "Parents see it", cell: (s) => (s.isCurrent ? "Yes, the current season" : "No") },
+          ]} />
         </section>
       )}
     </main>

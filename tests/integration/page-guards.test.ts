@@ -147,6 +147,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/buyouts/daily-check", names: "all", why: "the worker's check of every family's buy-out invoices" },
   { module: "@/lib/buyouts/setup", names: "all", why: "the staff choice of a requirement's buy-out price and item" },
   { module: "@/lib/buyouts/moved", names: "all", why: "it is a roster write's: a moved student's buy-outs" },
+  { module: "@/lib/staff-home/today", names: "all", why: "the staff home's counts read every family's forms and every shift's sign-ups" },
 ];
 
 describe("every page guards itself", () => {

@@ -33,6 +33,7 @@ import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
 import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
+import { rowNamed } from "../helpers/table";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -86,8 +87,9 @@ describe("the roster pages", () => {
     const html = await list();
     expect(html.indexOf("Chen Family")).toBeLessThan(html.indexOf("Rivera Family"));
     expect(html).toContain('href="/staff/roster/10"');
-    expect(html).toMatch(/Rivera Family<\/a><span class="when">1 student, 1 parent<\/span>/);
-    expect(html).toMatch(/Old Family<\/a><span class="when">0 students, 0 parents · Inactive in QuickBooks<\/span>/);
+    // A row each: the family, its students and parents, and whether QuickBooks has it active.
+    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Active"]);
+    expect(rowNamed(html, "Old Family")).toEqual(["Old Family", "0", "0", "Inactive"]);
     expect(html).not.toContain("Lincoln High");
     expect(html).not.toContain("ana@example.com"); // contact details are on the family's own page
     expect(html).toContain("3 families, 1 student, 2 parents; 2 customers outside the portal");
@@ -97,8 +99,8 @@ describe("the roster pages", () => {
     await ready();
     const html = await list("RIVER");
     expect(html).toContain("Rivera Family");
-    expect(html).not.toMatch(/Chen Family<\/a><span class="when">\d+ student/); // a list row; Needs attention is not filtered and still names Chen Family
-    expect(html).toMatch(/Rivera Family<\/a><span class="when">1 student, 1 parent<\/span>/);
+    expect(rowNamed(html, "Chen Family")).toEqual(["Chen Family", expect.any(String)]); // only in Needs attention, which is not filtered
+    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Active"]);
     expect(await list("%")).toContain("No family matches");
     expect(await list("_")).toContain("No family matches"); // not a one-character wildcard
     expect(await list("Rivera' or '1'='1")).toContain("No family matches");

@@ -74,13 +74,13 @@ test("an Admin previews, then switches parent sign-ins on (and finds them on the
 
 test("the staff home and the Parents page show the held address; a refusal keeps the note; deciding and reversing work", async ({ page }) => {
   await page.goto("/staff");
-  await expect(page.getByText("1 address to review.")).toBeVisible();
+  await expect(page.getByText("1 address to review", { exact: true })).toBeVisible();
   await page.goto("/staff/parents");
   await expect(page.getByRole("heading", { name: "To review (1)" })).toBeVisible();
   const waiting = page.getByRole("region", { name: /^To review/ });
   await expect(waiting.getByText("sam@example.com")).toBeVisible();
-  await expect(waiting.getByText("Okafor Family (held)")).toBeVisible();
-  await expect(waiting.getByText("Lee Family (held)")).toBeVisible();
+  await expect(waiting.getByRole("listitem").filter({ hasText: "Okafor Family" }).last()).toContainText("Held");
+  await expect(waiting.getByRole("listitem").filter({ hasText: "Lee Family" }).last()).toContainText("Held");
 
   try {
     // No note: refused.
@@ -167,7 +167,7 @@ test("a family's roster page shows who can sign in and why someone can't; Needs 
   await page.goto("/staff/roster");
   const attention = page.getByRole("region", { name: /^Needs attention/ });
   await expect(attention).toBeVisible();
-  const held = attention.getByRole("listitem").filter({ hasText: HELD_DETAIL });
+  const held = attention.getByRole("row").filter({ hasText: HELD_DETAIL });
   await expect(held).toHaveCount(1);
   await expect(held).toContainText("Sam Okafor");
   await expect(attention).not.toContainText("sam@example.com");

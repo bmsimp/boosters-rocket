@@ -7,6 +7,8 @@ import { loadRequest } from "@/lib/signed-forms/evidence";
 import { CELL_WORDS, RESTART_REASONS, cellState, cellTone } from "@/lib/signed-forms/rules";
 import { LocalTime } from "../../../../../components/local-time";
 import { StateWords } from "../../../../../components/state-words";
+import { DataTable } from "../../../../../components/data-table";
+import { Notice } from "../../../../../components/notice";
 import { remindRequestAction, startAgainAction } from "../../actions";
 import { RemindButton, StartAgainForm } from "../../forms";
 
@@ -40,20 +42,25 @@ export default async function FormRequestPage({ params }: { params: Promise<{ id
         <StateWords state={cellTone(state)} words={CELL_WORDS[state]} />
         <p className="help">{view.signersMode === "every" ? "Every guardian with a sign-in signs it, up to the template's signers." : "Any one guardian signs it."}</p>
         {view.evidenceId && <p><Link href={`/staff/forms/evidence/${view.evidenceId}`}>Open the signed form and its evidence</Link></p>}
-        {row.state === "complete" && !view.evidenceId && <p className="help">Signed and sealed. The signed copy is being fetched from Documenso and filed; its evidence will be here soon.</p>}
+        {row.state === "complete" && !view.evidenceId && <Notice tone="info" live="none">Signed and sealed. The signed copy is being fetched from Documenso and filed; its evidence will be here soon.</Notice>}
         {row.signers.length > 0 && (
-          <ul className="lines">{row.signers.map((s) => (
-            <li key={s.recipientId}><div><span className="what">{s.name}</span><span className="when">{s.email}</span></div>
-              <span>{s.signedAt ? <>Signed <LocalTime iso={s.signedAt} /></> : "Hasn't signed yet"}</span></li>))}</ul>
+          <DataTable caption="Each guardian who signs it, and whether they have" captionHidden rows={row.signers} rowKey={(s) => String(s.recipientId)} columns={[
+            { key: "name", header: "Guardian", rowHeader: true, cell: (s) => s.name },
+            { key: "email", header: "Email", cell: (s) => s.email },
+            { key: "signed", header: "Signed", cell: (s) => (s.signedAt ? <LocalTime iso={s.signedAt} /> : "Hasn't signed yet") },
+          ]} />
         )}
-        {row.evidenceError && row.evidenceOwed && <p className="help">The last try at fetching the signed copy failed ({row.evidenceError}). The worker tries again{row.evidenceNextAt ? <> after <LocalTime iso={row.evidenceNextAt.toISOString()} /></> : " soon"}.</p>}
+        {row.evidenceError && row.evidenceOwed && <Notice tone="warning" live="none">The last try at fetching the signed copy failed ({row.evidenceError}). The worker tries again{row.evidenceNextAt ? <> after <LocalTime iso={row.evidenceNextAt.toISOString()} /></> : " soon"}.</Notice>}
       </section>
 
       <section className="box" aria-labelledby="consent-h">
         <h2 id="consent-h">Consent to sign electronically</h2>
         {view.consents.length === 0 ? <p>No guardian has agreed yet.</p> : (
-          <ul className="lines">{view.consents.map((c, i) => (
-            <li key={i}><div><span className="what">{c.parentName}</span><span className="when">Text of {c.textVersion}</span></div><span><LocalTime iso={c.agreedAt.toISOString()} /></span></li>))}</ul>
+          <DataTable caption="Each guardian's consent to sign electronically" captionHidden rows={view.consents.map((c, i) => ({ ...c, key: String(i) }))} rowKey={(c) => c.key} columns={[
+            { key: "name", header: "Guardian", rowHeader: true, cell: (c) => c.parentName },
+            { key: "text", header: "Consent text", cell: (c) => `Text of ${c.textVersion}` },
+            { key: "at", header: "Agreed", cell: (c) => <LocalTime iso={c.agreedAt.toISOString()} /> },
+          ]} />
         )}
       </section>
 

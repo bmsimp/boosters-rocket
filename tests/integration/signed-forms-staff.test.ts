@@ -123,7 +123,7 @@ describe("the matrix", () => {
     await db.insert(requirementProgress).values({ requirementId: travel, subjectQboId: FAMILY_B.family.qboId, waivedAt: new Date(), waivedReason: "Staff-only reason QZ19" });
     const oneHtml = await renderPage(SignedFormsPage, { searchParams: { form: travel } });
     const one = textOf(oneHtml);
-    expect(textOf(/<thead>[\s\S]*?<\/thead>/.exec(oneHtml)![0]).trim()).toBe("Family and students Travel consent");
+    expect(textOf(/<table[^>]*class="table matrix"[^>]*>[\s\S]*?(<thead[\s\S]*?<\/thead>)/.exec(oneHtml)![1]!).trim()).toBe("Family and students Travel consent");
     expect(one).toContain("Waived");
     expect(one).not.toContain("Staff-only reason QZ19");
     const signed = await renderPage(SignedFormsPage, { searchParams: { state: "signed" } });

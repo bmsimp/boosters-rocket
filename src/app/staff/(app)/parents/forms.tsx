@@ -1,6 +1,7 @@
 "use client";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
+import { ActionOutcome } from "@/app/components/notice";
 
 // No form `action` on the forms with a text field: React resets a form after one, and the note would vanish on a
 // refusal. State is the source of truth; a type="button" calls the action inside startTransition (see
@@ -11,7 +12,7 @@ const failed: Done = { ok: false, errors: [ACTION_FAILED] };
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
-  return state.ok ? <p role="status">{state.message}</p> : <ul role="alert" className="errors">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>;
+  return <ActionOutcome state={state} />;
 }
 
 /**
@@ -24,14 +25,17 @@ export function HoldForm({ email, familyQboIds, decide }: {
   const [note, setNote] = useState("");
   const [state, run, pending] = useActionState(async (_: Done | null, decision: Decision) => safely(() => decide(email, decision, familyQboIds, note), failed), null);
   return (
-    <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>How do you know? (staff only)</span>
-        <textarea name="note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
-      <Outcome state={state} />
-      <div className="row-actions">
-        <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run("same_person"))}>Same person</button>
-        <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run("not_same"))}>Not the same person</button>
-      </div>
+    <form onSubmit={noSubmit}>
+      <fieldset className="decide">
+        <legend>Is it one person?</legend>
+        <label className="field"><span>How do you know? (staff only)</span>
+          <textarea name="note" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <Outcome state={state} />
+        <div className="row-actions">
+          <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run("same_person"))}>Same person</button>
+          <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run("not_same"))}>Not the same person</button>
+        </div>
+      </fieldset>
     </form>
   );
 }

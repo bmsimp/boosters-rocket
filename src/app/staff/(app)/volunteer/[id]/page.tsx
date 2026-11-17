@@ -4,9 +4,10 @@ import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { dateWords, hoursWords, shiftTimeWords } from "@/lib/volunteer/clock";
-import { getEventSetup, volunteerRequirementChoices } from "@/lib/volunteer/setup";
+import { getEventSetup, volunteerRequirementChoices, type StaffSignup } from "@/lib/volunteer/setup";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { LocalTime } from "@/app/components/local-time";
+import { DataTable } from "@/app/components/data-table";
 import { OneButton, TextAction } from "../../seasons/forms";
 import { addShiftAction, cancelEventAction, cancelShiftAction, copyEventAction, removeSignupAction, updateEventAction, updateShiftAction } from "../actions";
 import { addCheckInAction, removeCreditAction } from "../credit/actions";
@@ -62,29 +63,33 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
           <p className="hint">{s.requirementIds.length === 0 ? "Counts toward no requirement." : `Counts toward: ${s.requirementIds.map(labelOf).join("; ")}.`}</p>
           {canPrint && !s.cancelled && <p><Link href={`/staff/volunteer/check-in/${s.id}`}>Check-in code to print</Link></p>}
           {s.signups.length === 0 ? <p>Nobody has signed up yet.</p> : (
-            <ul className="lines">{s.signups.map((x) => (
-              <li key={x.id}><div>
-                <span className="what">{x.fillerName}</span>
-                <span className="when">{x.familyName}{x.fillerKind === "student" ? `, signed up by ${x.signedUpByName}` : ""} · <LocalTime iso={x.signedUpAt} /></span>
-                {/* Plain words: the state icons mean done, to do and waived. */}
-                <span className="state">{x.checkIn ? (x.checkIn.byStaff ? `Checked in (added by ${x.checkIn.byStaff})` : "Checked in") : s.started ? "Not checked in" : "Signed up"}</span>
-                {x.checkIn && <span className="when">Checked in <LocalTime iso={x.checkIn.at} /></span>}
-                {canCredit && x.checkIn && (
-                  <details className="more"><summary>Remove this check-in</summary>
-                    <TextAction field="Why it's being removed (only staff see this)" label="Remove the check-in" pendingLabel="Removing…" maxLength={500} multiline
-                      act={removeCreditAction.bind(null, x.checkIn.creditId, rosterTag)} />
-                  </details>
-                )}
-                {canCredit && !x.checkIn && s.started && !s.cancelled && !event.cancelled && (
-                  <OneButton label={`Check in ${x.fillerName}`} pendingLabel="Checking in…" act={addCheckInAction.bind(null, x.id, rosterTag)} />
-                )}
-                {canPrint && !x.checkIn && (
-                  <details className="more"><summary>Take {x.fillerName} off this shift</summary>
-                    <ConfirmButton label="Remove this sign-up" question={`Remove ${x.fillerName} from this shift? The place is freed${s.ended ? "" : ", and the guardian who signed up is emailed"}.`}
-                      yes="Yes, remove it" act={removeSignupAction.bind(null, x.id)} />
-                  </details>
-                )}
-              </div></li>))}</ul>
+            <DataTable caption="Who has signed up for this shift" captionHidden rows={s.signups} rowKey={(x) => x.id} columns={[
+              { key: "who", header: "Who", rowHeader: true, cell: (x) => x.fillerName },
+              { key: "family", header: "Family", cell: (x) => <>{x.familyName}{x.fillerKind === "student" ? `, signed up by ${x.signedUpByName}` : ""}</> },
+              { key: "when", header: "Signed up", cell: (x) => <LocalTime iso={x.signedUpAt} /> },
+              // Plain words: the state icons mean done, to do and waived.
+              { key: "checkin", header: "Check-in", cell: (x) => (
+                <><b>{x.checkIn ? (x.checkIn.byStaff ? `Checked in (added by ${x.checkIn.byStaff})` : "Checked in") : s.started ? "Not checked in" : "Signed up"}</b>
+                  {x.checkIn && <span className="when">Checked in <LocalTime iso={x.checkIn.at} /></span>}</>) },
+              ...(canCredit || canPrint ? [{ key: "do", header: "What you can do", quiet: true, cell: (x: StaffSignup) => (
+                <>
+                  {canCredit && x.checkIn && (
+                    <details className="more"><summary>Remove this check-in</summary>
+                      <TextAction field="Why it's being removed (only staff see this)" label="Remove the check-in" pendingLabel="Removing…" maxLength={500} multiline
+                        act={removeCreditAction.bind(null, x.checkIn.creditId, rosterTag)} />
+                    </details>
+                  )}
+                  {canCredit && !x.checkIn && s.started && !s.cancelled && !event.cancelled && (
+                    <OneButton label={`Check in ${x.fillerName}`} pendingLabel="Checking in…" act={addCheckInAction.bind(null, x.id, rosterTag)} />
+                  )}
+                  {canPrint && !x.checkIn && (
+                    <details className="more"><summary>Take {x.fillerName} off this shift</summary>
+                      <ConfirmButton label="Remove this sign-up" question={`Remove ${x.fillerName} from this shift? The place is freed${s.ended ? "" : ", and the guardian who signed up is emailed"}.`}
+                        yes="Yes, remove it" act={removeSignupAction.bind(null, x.id)} />
+                    </details>
+                  )}
+                </>) }] : []),
+            ]} />
           )}
           {canChange && !s.cancelled && (
             <details className="more"><summary>Change or cancel this shift</summary>
