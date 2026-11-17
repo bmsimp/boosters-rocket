@@ -510,6 +510,7 @@ details.more > summary { cursor: pointer; padding: 10px 0; font-weight: 700; col
 .table th .state { margin-top: 2px; font-size: 0.875rem; }
 .table .t-quiet .row-actions, .table .t-quiet .one-button { justify-content: flex-end; justify-items: end; }
 .table .row-actions { grid-column: auto; }
+.table .t-quiet .btn { white-space: nowrap; } /* a row's button keeps its words on one line; the columns of words give way instead */
 .table details.more { margin-top: var(--s1); }
 .table details.more > summary { padding: 10px 0; }
 .table a:not(.btn):not(.matrix-link) { display: inline-flex; align-items: center; min-height: 44px; margin: -10px 0; } /* a 44px tap target, sized from the line, without a taller row */
@@ -579,7 +580,7 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
     background-color: var(--paper); border-style: dashed; border-color: var(--ink); color: var(--ink-2); }
 }
 @media (forced-colors: active) {
-  .notice > svg { border: 2px solid CanvasText; padding: 2px; } /* the fill is gone here: the cell keeps its edge, the icon and word carry the tone */
+  .notice > svg { forced-color-adjust: none; background: Canvas; color: CanvasText; border: 2px solid CanvasText; padding: 2px; } /* no fill here: the cell keeps its edge, the icon and word carry the tone */
   .field select { appearance: auto; background-image: none; padding-right: var(--s3); }
   .checks input[type="checkbox"], .checks input[type="radio"] { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
   .checks input[type="checkbox"]:checked { background: Highlight; border-color: Highlight; }
