@@ -161,9 +161,9 @@ test("a family's roster page shows who can sign in and why someone can't; Needs 
   await page.goto("/staff/roster/E2E-40");
   await expect(page.getByRole("heading", { name: "Portal sign-ins" })).toBeVisible();
   const signins = page.getByRole("region", { name: "Portal sign-ins" });
-  await expect(signins.getByText("sam@example.com · Held: this address is also under Lee Family")).toBeVisible();
+  await expect(signins.getByRole("row").filter({ hasText: "sam@example.com" })).toContainText("Held: this address is also under Lee Family");
   await page.goto("/staff/roster/E2E-10");
-  await expect(page.getByRole("region", { name: "Portal sign-ins" }).getByText(/^ana@example\.com · Can sign in/)).toBeVisible();
+  await expect(page.getByRole("region", { name: "Portal sign-ins" }).getByRole("row").filter({ hasText: "ana@example.com" })).toContainText(/Can sign in/);
   await page.goto("/staff/roster");
   const attention = page.getByRole("region", { name: /^Needs attention/ });
   await expect(attention).toBeVisible();

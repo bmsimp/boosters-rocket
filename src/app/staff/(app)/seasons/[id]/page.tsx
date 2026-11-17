@@ -78,7 +78,7 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
                 <Link className="what" href={`/staff/seasons/${season.id}/requirements/${r.id}`}>{r.title}</Link>
                 <span className="when">{describeRequirement(r)} · {r.covers === "everyone" ? "Everyone" : `A chosen list of ${r.coveredQboIds.length}`}</span>
                 {r.dueOn && <span className="when">Due <CalendarDate iso={r.dueOn} /></span>}
-                {seesProgress && <span className="when"><Link href={`/staff/seasons/progress/${r.id}`}>Who has done it</Link></span>}
+                {seesProgress && <span className="when"><Link className="link-line" href={`/staff/seasons/progress/${r.id}`}>Who has done it</Link></span>}
               </div></li>))}</ul>
           )}
           {canChange && (

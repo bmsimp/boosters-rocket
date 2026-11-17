@@ -43,7 +43,7 @@ export default async function HealthPage() {
             {l.times.length > 0 && <span className="when">{l.times.map((t, i) => (
               <Fragment key={t.label}>{i > 0 ? " · " : ""}{t.label}: {t.at ? <LocalTime iso={t.at} /> : "never"}</Fragment>))}</span>}
             {l.notes.map((n) => <span className="when" key={n}>{n}</span>)}
-            {l.fix && <span className="when"><a href={l.fix.href}>{l.fix.label}</a></span>}
+            {l.fix && <span className="when"><a className="link-line" href={l.fix.href}>{l.fix.label}</a></span>}
           </div>
           <StateWord state={l.state} word={l.word} /></li>))}
         </ul>

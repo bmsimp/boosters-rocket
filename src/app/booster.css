@@ -717,6 +717,8 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
 
 /* The match review is a table (the Staff pages' table primitive) and takes the page's whole width. */
 main.wrap.single.matches-page > .box { max-width: none; }
+/* A set-up page's step names that are links (Parent sign-ins, QuickBooks) are each a 44px tap target, like any lone link. */
+.setup-progress a { display: inline-flex; align-items: center; min-height: 44px; }
 
 @media (forced-colors: active) {
   .nav-group-button.here { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }

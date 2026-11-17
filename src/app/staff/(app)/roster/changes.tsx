@@ -5,6 +5,7 @@ import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/op
 import type { QueueView } from "@/lib/roster/queue";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
+import { DataTable } from "@/app/components/data-table";
 import { DeactivateForm, MemberForm, MoveForm, NameForm, ParentForm } from "./write-forms";
 import { addToFamilyAction, createAction, deactivateAction, moveAction, renameAction } from "./write-actions";
 
@@ -39,9 +40,11 @@ export function Waiting({ items }: { items: QueueView[] }) {
   return (
     <section className="box" aria-labelledby="waiting-h"><h2 id="waiting-h">Waiting to reach QuickBooks</h2>
       <p>These changes were asked for but QuickBooks hasn&apos;t taken them yet. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>.</p>
-      <ul className="lines">{items.map((i) => (
-        <li key={i.id}><div><span className="what">{i.words}</span>
-          <span className="when">{i.state === "stuck" ? "Stuck: it needs someone to look at it" : "Waiting to reach QuickBooks"} · asked <LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</span></div></li>))}</ul>
+      <DataTable caption="Each change, and where it stands" captionHidden rows={items} rowKey={(i) => i.id} columns={[
+        { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
+        { key: "state", header: "Where it stands", cell: (i) => (i.state === "stuck" ? "Stuck: it needs someone to look at it" : "Waiting to reach QuickBooks") },
+        { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
+      ]} />
     </section>
   );
 }
