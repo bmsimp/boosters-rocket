@@ -14,6 +14,7 @@ import { auditLog, familyMoney, qboConnection, qboCustomer, setting, type Stored
 import { setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
 import PaymentsPage from "@/app/(parent)/payments/page";
+import HomePage from "@/app/(parent)/page";
 import { MoneyBox } from "@/app/(parent)/money-box";
 import { buyoutTitleOf, loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoices";
 import { BUYOUT_ITEM } from "../helpers/buyouts";
@@ -493,6 +494,16 @@ describe("a buy-out's invoice on Payments", () => {
 
     asParent(b.identity);
     const theirs = text(await renderPage(PaymentsPage));
+    expect(theirs).not.toContain("Paying instead of volunteering");
+    for (const mine of a.buyout!.markers) expect(theirs).not.toContain(mine);
+  });
+
+  it("is named so in Home's money box too, and only to the family that chose it", async () => {
+    const { a, b } = await withBuyoutInvoices();
+    asParent(a.identity);
+    expect(text(await renderPage(HomePage))).toContain("Paying instead of volunteering: Concession stand shifts QA74");
+    asParent(b.identity);
+    const theirs = text(await renderPage(HomePage));
     expect(theirs).not.toContain("Paying instead of volunteering");
     for (const mine of a.buyout!.markers) expect(theirs).not.toContain(mine);
   });

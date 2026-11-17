@@ -6,6 +6,7 @@ import { getClubSettings } from "@/lib/settings/club";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import { DetailsBox, FamilyStepBox, NotSetUpBox, RosterAsOf, StudentsBox } from "./family-boxes";
 import { loadFamilyMoney } from "@/lib/money/family-money";
+import { loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoices";
 import { MoneySection } from "./money-box";
 import { SeasonRuler } from "./season-parts";
 
@@ -25,6 +26,8 @@ export default async function ParentHome() {
   // The family's money first: a read that brings stale figures up to date is made before the season's payment lines
   // are worked out from the same row, so the money box and those lines never disagree on one page.
   const money = family ? await loadFamilyMoney(ctx.familyQboId) : null;
+  // A buy-out's invoice is named as such, from the family's own buy-outs only, as on Payments.
+  const buyouts = money ? await loadMyBuyoutInvoices(ctx.familyQboId) : undefined;
   // The club's current season as it stands for this family: only for a family the roster may show, and null when no
   // season is current. With none there is no ruler, and nothing in its place.
   const season = family ? await loadMySeason(ctx, family.students) : null;
@@ -39,7 +42,7 @@ export default async function ParentHome() {
         {family ? (
           <>
             {/* Only for a family the roster may show: when it may not, nothing of it is shown, money included. */}
-            {money && <MoneySection money={money} more />}
+            {money && <MoneySection money={money} buyouts={buyouts} more />}
             {family.students ? <StudentsBox students={family.students} season={season} /> : season && <FamilyStepBox season={season} />}
             <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "family"} />
             <RosterAsOf family={family} />
