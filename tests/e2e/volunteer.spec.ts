@@ -78,4 +78,13 @@ test("staff see the shift's sign-ups by name", async ({ context, page }) => {
   await expect(shift).toContainText("Leo Rivera");
   await expect(shift).toContainText("Rivera Family");
   await noSidewaysScroll(page);
+
+  // Cancelling emails everyone signed up, so the button asks first; "Keep it" leaves the event as it was.
+  await page.getByRole("button", { name: "Cancel this event" }).click();
+  await expect(page.getByText("Cancel the whole event? Everyone signed up for any of its shifts is emailed.")).toBeVisible();
+  await page.getByRole("button", { name: "Keep it" }).click();
+  await expect(page.getByRole("button", { name: "Cancel this event" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Yes, cancel the event" })).toHaveCount(0);
+  await page.reload();
+  await expect(shift).toContainText("1 of 4 places filled");
 });
