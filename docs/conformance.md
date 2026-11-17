@@ -26,12 +26,12 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §10 Seasons | 16 | 2 | 0 | 0 |
 | §11 Volunteering | 26 | 0 | 0 | 0 |
 | §12 Privacy invariants | 9 | 0 | 0 | 0 |
-| §13 Audit log | 9 | 2 | 0 | 0 |
+| §13 Audit log | 10 | 1 | 0 | 0 |
 | §14 Operations | 8 | 4 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| **All** | **145** | **8** | **0** | **10** |
+| **All** | **146** | **7** | **0** | **10** |
 
-Nothing the specs ask for is missing outright. The eight partly built rows, and what each lacks, are listed at the foot
+Nothing the specs ask for is missing outright. The seven partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
 are checked one by one after that.
 
@@ -257,7 +257,7 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 
 | # | Spec says | Override | State | Proof |
 |---|---|---|---|---|
-| 13.1 | Every create, update and delete is recorded | | Partly built | Each write's test asserts its row (for example `seasons-staff.test.ts` "each with its audit row", `roster-writes.test.ts`, `volunteer-staff.test.ts` "and audits it"), and `tests/unit/audit-actions.test.ts` holds every action to words. No test finds a write with no row in general: a new write is caught only by its own test and review |
+| 13.1 | Every create, update and delete is recorded | Rate-limit counts, a claim held while a form's document is made, the check of the portal's requests' own records, Documenso's and the worker's last answers for the Health page, the placeholder request rows a family's Forms page makes, which step of setup is showing and a connection's state before Intuit answers are not the club's records, and are named on purpose with why. Sign-in codes and sessions are ended inside the block, reconcile or email change that audits them | Built | `tests/unit/audit-rows.test.ts`: every insert, update and delete under `src/` (drizzle's, and SQL) sits in a function that writes an audit row, or in a helper only such functions call (kept to its file, or given the caller's transaction), or is in its `NOT_AUDITED` list with why; it found none of the club's records written without one. A heuristic: it follows calls by name, and can't tell that a caller's row is in the same transaction. Each write's own test still asserts its row (for example `seasons-staff.test.ts` "each with its audit row", `roster-writes.test.ts`), and `tests/unit/audit-actions.test.ts` holds every action to words |
 | 13.2 | Every sign-in, sign-out and refused sign-in, both doors | | Built | `tests/integration/signin-audit.test.ts`; `signin-codes.test.ts` (`signin.code_refused`, `signin.code_wrong`); `tests/integration/resolve.test.ts` (a refused staff sign-in, with its address since this step) |
 | 13.3 | Staff reads of family data: a family's details, balances, invoices, signed forms, any export | The forms matrix, a read of many families, is not audited on purpose | Built | `roster-pages.test.ts` "a family's page ... and the visit is audited"; `signed-forms-staff.test.ts` "is not audited" (the matrix, by design); `balances-pages.test.ts` "audits the read before anything is shown"; `signed-forms-staff.test.ts` "audits the read of a signed form's evidence before it is shown"; `signed-forms-downloads.test.ts`; `seasons-staff.test.ts` "shows where one family stands ... and audits the read"; `volunteer-credit-staff.test.ts` "is audited before it shows anything"; `parents-pages.test.ts` (`parent.read`); `audit-log.test.ts` "audits the export with its filters and count" |
 | 13.4 | Opening the audit log itself, filtered to one family or person | Not decided | Partly built | The export is audited; the page is not (roadmap Known gaps: the owner to say) |
@@ -304,7 +304,6 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 |---|---|---|---|
 | 10.1.9 | Reminders before a payment's or a checklist item's due date | A day | A claim table or `volunteer_reminder`'s pattern, an email, the worker, a schedule like forms' |
 | 10.1.10 | Coverage by grade or section | Days, and an owner decision first: QuickBooks holds no grade | A data source for grade, `requirement_cover`, the coverage rules and pages |
-| 13.1 | A general test that every write has its audit row | Half a day, and it would be a heuristic (a scan of `src/lib` for writes beside `writeAudit`) | `tests/unit/` |
 | 13.4 | Auditing a view of the audit log filtered to one family or person | An hour once the owner decides | `src/app/staff/(app)/audit/page.tsx`, an action name |
 | 14.1, 14.4 | A release and the dependency updates actually run | Owner check once pushing is allowed | GitHub |
 | 14.6 | The restore runbook carried out once on real data | An hour of the owner's | The owner's runbook, part 1 item 7, and its Results table |
