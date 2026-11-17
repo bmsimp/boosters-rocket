@@ -44,10 +44,10 @@ function SignIns({ signins, detailed }: { signins: FamilySignin[]; detailed: boo
 
 /**
  * The family's other staff pages, each for staff who may open it: the way from the roster to a family's money, its
- * season and its volunteering, without going back to a list. Each of those pages records its own read.
+ * season, its volunteering and its buy-outs, without going back to a list. Each of those pages records its own read.
  */
-function Elsewhere({ qboId, money, season, credit }: { qboId: string; money: boolean; season: boolean; credit: boolean }) {
-  if (!money && !season && !credit) return null;
+function Elsewhere({ qboId, money, season, credit, buyouts }: { qboId: string; money: boolean; season: boolean; credit: boolean; buyouts: boolean }) {
+  if (!money && !season && !credit && !buyouts) return null;
   const at = encodeURIComponent(qboId);
   return (
     <section className="box" aria-labelledby="entry-elsewhere-h"><h2 id="entry-elsewhere-h">More about this family</h2>
@@ -55,6 +55,7 @@ function Elsewhere({ qboId, money, season, credit }: { qboId: string; money: boo
         {money && <li><Link className="link-line" href={`/staff/balances/${at}`}>What it owes</Link></li>}
         {season && <li><Link className="link-line" href={`/staff/seasons/progress/family/${at}`}>Where it stands this season</Link></li>}
         {credit && <li><Link className="link-line" href={`/staff/volunteer/credit/${at}`}>Its volunteering credit</Link></li>}
+        {buyouts && <li><Link className="link-line" href={`/staff/roster/${at}/buyouts`}>Its volunteer buy-outs</Link></li>}
       </ul>
     </section>
   );
@@ -97,7 +98,11 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       ) : (
         <People id="entry-member-h" title="In QuickBooks" people={[entry.member]} contact empty="" />
       )}
-      {entry.kind === "family" && customer.active && <Elsewhere qboId={customer.qboId} money={can(ctx.effective, "Finance.Balance.Read")} season={can(ctx.effective, "Season.Progress.Read")} credit={can(ctx.effective, "Volunteer.Credit.ReadWrite")} />}
+      {/* Buy-outs for any family or member, active or not: one made inactive may still have one to close. */}
+      <Elsewhere qboId={customer.qboId} buyouts
+        money={entry.kind === "family" && customer.active && can(ctx.effective, "Finance.Balance.Read")}
+        season={entry.kind === "family" && customer.active && can(ctx.effective, "Season.Progress.Read")}
+        credit={entry.kind === "family" && customer.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       <Waiting items={waiting} />
       {edit && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={entry.family} families={families} edit={edit} />}
       {edit && entry.kind === "member" && <MemberChanges member={entry.member} edit={edit} />}

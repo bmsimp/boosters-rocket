@@ -156,7 +156,10 @@ describe("the roster pages", () => {
     await ready();
     const links = (html: string) => [...html.matchAll(/href="(\/staff\/(?:balances|seasons\/progress\/family|volunteer\/credit)\/[^"]+)"/g)].map((m) => m[1]);
     expect(links(await entry("10"))).toEqual([]);
-    expect(await entry("10")).not.toContain("More about this family");
+    // Its buy-outs page is Roster.Read's, the roster page's own: the one link every reader of the page gets.
+    const alone = await entry("10");
+    expect(alone).toContain("More about this family");
+    expect([...alone.matchAll(/href="(\/staff\/roster\/10\/[^"]+)"/g)].map((m) => m[1])).toEqual(["/staff/roster/10/buyouts"]);
     const [r] = await db.insert(role).values({ key: "more", name: "More" }).returning();
     await db.insert(roleRule).values(["Finance.Balance.Read", "Season.Progress.Read", "Volunteer.Credit.ReadWrite"].map((pattern) => ({ roleId: r!.id, kind: "include" as const, pattern })));
     await db.insert(roleAssignment).values({ roleId: r!.id, staffUserId: reader.id });

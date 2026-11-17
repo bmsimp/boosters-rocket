@@ -75,7 +75,7 @@ export default async function ReconciliationPage() {
         )}
       </section>
 
-      <BuyoutsToLook showAmounts={money} />
+      <BuyoutsToLook showAmounts={money} canChange={canChange} />
 
       <section className="box" aria-labelledby="attention-h"><h2 id="attention-h">Needs attention in the roster{roster.attention.length ? ` (${roster.attention.length})` : ""}</h2>
         {!roster.roster ? <Notice tone="warning" live="none">The roster can&apos;t be shown right now. <Link href="/staff/roster">Open the roster</Link> to see why.</Notice>
