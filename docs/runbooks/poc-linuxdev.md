@@ -515,8 +515,8 @@ move, from another window while a move runs. Do these in order, on linuxdev, as 
    `The move is done: Postgres 18 holds the data. ...`, `Now deploy, ...` naming step 5, and exit code 0 (`echo $?`).
    Any other ending says what went wrong: nothing is lost, and running the same command again starts again from the
    Postgres 16 data. If it stops at the start with `The Postgres 16 server also holds what the move doesn't carry`
-   and names a database or role, nothing was changed: one left by a restore check (section 10) isn't needed, so run
-   the same command with `--leave-others` at the end; anything else, back it up with `pg_dump` first.
+   and names a database or role, nothing was changed: one left by trying a restore (`booster_restore_check`) isn't
+   needed, so run the same command with `--leave-others` at the end; anything else, back it up with `pg_dump` first.
 5. Deploy as usual (section 8, step 1), which builds, backs up with Postgres 18 into `~/booster-rocket-backups`,
    migrates and starts the app and the worker:
    ```bash
@@ -545,7 +545,8 @@ which Postgres 16 can't load (the previous version's `scripts/restore.sh` calls 
    remove them: `mkdir -p ~/booster-rocket-postgres-18-backups && cp -p ~/booster-rocket-backups/*.dump ~/booster-rocket-postgres-18-backups/`
 4. `git log --oneline` and `git checkout <the commit before the move>`.
 5. Build that commit's portal and start it on Postgres 16. Not `scripts/poc/deploy.sh --rollback`: the move stopped
-   the app, so the image the move's step 5 replaced was not kept, and the one `--rollback` holds is older still.
+   the app, so the deploy in the move's step 5 kept no copy of the image that ran on Postgres 16, and the one
+   `--rollback` holds is older still.
    ```bash
    APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f docker-compose.poc.yml --env-file .env.poc build app
    docker compose -f docker-compose.poc.yml --env-file .env.poc up -d db app worker
