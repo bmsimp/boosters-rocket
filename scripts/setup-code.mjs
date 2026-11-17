@@ -35,7 +35,7 @@ try {
               VALUES ('system', 'server', 'setup.reopen', 'setting', 'setup.state', ${sql.json({ status: state.status })}, ${sql.json({ status: "open" })})`;
   } else if (state.status === "finished") {
     if (mode !== "--if-open") {
-      console.error("Setup is already finished. To reopen it (for example, nobody can sign in), run scripts/poc/reopen-setup.sh.");
+      console.error("Setup is already finished. To reopen it (for example, nobody can sign in), run this again with --reopen: docker compose run --rm migrate node tools/scripts/setup-code.mjs --reopen in the installation folder (scripts/poc/reopen-setup.sh on the proof of concept).");
       exitCode = 3;
     }
   }

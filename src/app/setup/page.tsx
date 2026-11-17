@@ -33,7 +33,7 @@ export default async function SetupPage({ searchParams }: { searchParams: Promis
     return (
       <main className="wrap signin">
         <h1 className="page-title">Set up Booster Rocket</h1>
-        <p className="lede">Enter the setup code from your server. <code>deploy.sh</code> prints it after a deploy, or run <code>scripts/poc/setup-code.sh</code> for a new one.</p>
+        <p className="lede">Enter the setup code from your server. To get one, run <code>docker compose run --rm migrate node tools/scripts/setup-code.mjs</code> in the installation folder (the first installation runbook, <code>docs/runbooks/first-install.md</code>, says how).</p>
         <UnlockForm />
         <AddressBox />
       </main>

@@ -17,8 +17,8 @@ import { sendTestMail, type SendOutcome } from "@/lib/mail/send";
 const UNLOCK_MESSAGES = {
   wrong: "That code isn't right. Check it against what the server printed.",
   slowed: "Too many wrong codes from here. Wait 15 minutes and try again.",
-  void: "This code stopped working after too many wrong tries. On the server, run scripts/poc/setup-code.sh for a new one.",
-  no_code: "No setup code has been issued yet. On the server, run scripts/poc/setup-code.sh.",
+  void: "This code stopped working after too many wrong tries. On the server, in the installation folder, run docker compose run --rm migrate node tools/scripts/setup-code.mjs for a new one (docs/runbooks/first-install.md).",
+  no_code: "No setup code has been issued yet. On the server, in the installation folder, run docker compose run --rm migrate node tools/scripts/setup-code.mjs (docs/runbooks/first-install.md).",
 } as const;
 
 export const unlockSetupAction = setupUnlockAction(async (_prev: { error: string } | null, form: FormData): Promise<{ error: string } | null> => {

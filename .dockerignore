@@ -10,6 +10,8 @@ node_modules
 .superpowers
 .impeccable
 docs
+# The installation folder: compose files and whatever a club keeps beside them. The image never needs it.
+deploy
 design
 tests
 # Test tooling that imports from tests/: without tests/ in the context, `next build` could not type-check them.
