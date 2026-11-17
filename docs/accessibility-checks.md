@@ -125,6 +125,20 @@ no focus ring or one left under the phone's tab bar). Add a dated section when t
   (lighter in dark); in forced colors it is a dashed system ring, 4px off the tile. Rings in every mode.
 - Nothing found.
 
+### 9. Paying instead of volunteering, and switching back (`/volunteer/pay-instead/[requirementId]/[choice]`)
+
+Added after the step 6 review; read from the code and the rendered page, not yet walked in a browser (the e2e run
+can't reach QuickBooks, so no buy-out is made there).
+
+- **Found and fixed:**
+  - "Confirm: invoice me $X", "Yes, cancel the invoice" and "Keep paying instead" were disabled while busy; now
+    `aria-disabled`, so they keep the focus (`tests/unit/parent-busy-buttons.test.ts` holds every parent page to it).
+  - "Volunteer instead" opened the question with the focus on nothing, as cancelling a sign-up once did. It now puts
+    the focus on "Keep paying instead", inside a group named "Volunteer instead?", and that button gives it back.
+  - A confirm or a switch-back that works redraws the page into another section, so its message ("Done. An invoice
+    from the club for $25.00…", "Done. The invoice is cancelled…") vanished unheard. It now goes to a status line
+    outside both sections (`Announcer`), which is announced and takes the focus.
+
 ### On a phone: the tab bar and the focus
 
 - Walking the pages with Tab at 360 wide, a control the focus scrolled to at the foot of the screen was left partly
