@@ -32,7 +32,9 @@ export async function checkOpenForms(now: Date = new Date()): Promise<FormsCheck
   const due = await db.select().from(signatureRequest)
     .where(and(inArray(signatureRequest.state, [...UNFINISHED]), isNotNull(signatureRequest.envelopeId),
       or(isNull(signatureRequest.checkedAt), lt(signatureRequest.checkedAt, new Date(now.getTime() - ASK_EVERY_MS)))))
-    .orderBy(sql`${signatureRequest.checkedAt} asc nulls first`, asc(signatureRequest.id)).limit(ASK_AT_MOST);
+    // Longest unread first; two read at the same moment in the order they were made, then by id, so the order never
+    // depends on how the database happens to return equal times.
+    .orderBy(sql`${signatureRequest.checkedAt} asc nulls first`, asc(signatureRequest.createdAt), asc(signatureRequest.id)).limit(ASK_AT_MOST);
   for (const row of due) {
     const read = await readAndStore(row, config, { actor: FORMS_WORKER, ip: null });
     done.asked++;

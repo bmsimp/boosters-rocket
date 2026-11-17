@@ -137,9 +137,10 @@ describe("the worker asks Documenso about forms that are out", () => {
     stub.drop = false;
     expect(await checkOpenForms()).toMatchObject({ asked: 2, failed: 0, completed: 1 });
     expect((await requestNow(b.id)).state).toBe("waiting");
-    // One form's own failure doesn't stop the others.
-    await db.update(signatureRequest).set({ checkedAt: ago(ASK_EVERY_MS + 1000) }).where(eq(signatureRequest.id, b.id));
-    const c = await outForSigning("STU-3");
+    // One form's own failure doesn't stop the others. B was read longest ago, so it is asked first and meets the one
+    // failing call; C, signed, is asked after it. The times differ on purpose: equal ones would leave the order to chance.
+    await db.update(signatureRequest).set({ checkedAt: ago(ASK_EVERY_MS + 60_000) }).where(eq(signatureRequest.id, b.id));
+    const c = await outForSigning("STU-3", { checkedAgo: ASK_EVERY_MS + 1000 });
     stub.failNext = 1;
     stub.sign(c.document.id, "stu-3@example.com");
     expect(await checkOpenForms()).toMatchObject({ asked: 2, failed: 1, completed: 1 });
