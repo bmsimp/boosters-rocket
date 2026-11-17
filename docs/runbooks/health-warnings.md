@@ -109,7 +109,8 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 - A note that **the nudges before a volunteer due date wait until welcome emails are switched on**: by choice.
   **Settings**, **Parent sign-ins** switches welcome emails on when the club is ready to email families.
 - **"N volunteer reminders couldn't be sent at the last try."** Each is tried again after 15 minutes while it is still
-  the day for it. Look at the Outgoing mail line, which has the mail service's reason.
+  the day for it. Look at the Outgoing mail line, which has the mail service's reason. The line keeps saying so until
+  a reminder goes through.
 - **"The last try to send volunteer reminders stopped with an error."** The worker tries again a minute later. If it
   keeps saying so, look at `docker compose logs worker`.
 

@@ -11,7 +11,12 @@ export const BUYOUT_CHECK_MARK = "worker.mark.buyout_check";
 export type JobMark = {
   /** When the job last ran, whatever it did. */
   ranAt: string | null;
-  /** When it last ran with nothing failing. */
+  /**
+   * When it last ran with nothing failing, as far as clearing a failure goes: after some of its tries failed
+   * ("some_failed"), only a run that did something with nothing failing; after one that stopped with an error, any run
+   * that finished. A failed reminder isn't tried again for 15 minutes, so the wakes in between, sending nothing, say
+   * nothing about whether mail works.
+   */
   okAt: string | null;
   /** When it last did something (sent a reminder, changed a buy-out), and what, in counts. */
   didAt: string | null;
@@ -39,9 +44,10 @@ export async function markJob(key: string, outcome: { counts: Record<string, num
     const next: JobMark = { ...before, ranAt: at };
     if (outcome === "threw") Object.assign(next, { failedAt: at, failure: { kind: "threw" } });
     else {
-      if (Object.values(outcome.counts).some((n) => n > 0)) Object.assign(next, { didAt: at, did: outcome.counts });
+      const did = Object.values(outcome.counts).some((n) => n > 0);
+      if (did) Object.assign(next, { didAt: at, did: outcome.counts });
       if (outcome.failed > 0) Object.assign(next, { failedAt: at, failure: { kind: "some_failed", count: outcome.failed } });
-      else next.okAt = at;
+      else if (did || before.failure?.kind !== "some_failed") next.okAt = at;
     }
     await db.insert(setting).values({ key, value: next }).onConflictDoUpdate({ target: setting.key, set: { value: next, updatedAt: now } });
   } catch {

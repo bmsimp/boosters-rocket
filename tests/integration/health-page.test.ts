@@ -328,11 +328,21 @@ describe("the lines for the worker's jobs with no run history of their own", () 
     expect(failing).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" }, notes: expect.arrayContaining(["The last ones that went: 3 reminders."]) });
     expect(failing.says).toMatch(/^2 volunteer reminders couldn't be sent at the last try\./);
     expect(at(failing, "Last sent")).toBe(wake(1).toISOString());
+    // The wakes after a failed send send nothing (a failed reminder waits 15 minutes): they say nothing about mail, so
+    // the failure stands until a send goes through.
+    await markJob(REMINDERS_MARK, { counts: { sent: 0 }, failed: 0 }, wake(1.5));
+    expect(await reminders()).toMatchObject({ state: "attention", word: "Needs attention" });
     await markJob(REMINDERS_MARK, "threw", wake(2));
     expect((await reminders()).says).toBe("The last try to send volunteer reminders stopped with an error. The worker tries again at its next wake, a minute later.");
     // A later look with nothing failing is working again; the failure keeps its time.
     await markJob(REMINDERS_MARK, { counts: { sent: 0 }, failed: 0 }, wake(3));
     expect(await reminders()).toMatchObject({ state: "ok", times: [{ label: "Last looked", at: wake(3).toISOString() }, { label: "Last sent", at: wake(1).toISOString() }, { label: "Last failure", at: wake(2).toISOString() }] });
+    // Some failed again; an idle wake leaves it failing, and a wake that sends with nothing failing is working again.
+    await markJob(REMINDERS_MARK, { counts: { sent: 0 }, failed: 1 }, wake(4));
+    await markJob(REMINDERS_MARK, { counts: { sent: 0 }, failed: 0 }, wake(5));
+    expect((await reminders()).says).toMatch(/^1 volunteer reminder couldn't be sent at the last try\./);
+    await markJob(REMINDERS_MARK, { counts: { sent: 1 }, failed: 0 }, wake(6));
+    expect(await reminders()).toMatchObject({ state: "ok", word: "Working" });
   });
 
   it("says how the daily check of the buy-out invoices stands: not running, never run, behind a read, working, and what it found", async () => {
