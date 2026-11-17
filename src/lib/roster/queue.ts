@@ -182,8 +182,12 @@ export type QueueView = {
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null; familyQboId: string | null;
 };
 
-/** What a queued write was, in words, with the names the cache has for its ids. Names are QuickBooks text: shown as text only. */
-export function describeWrite(w: QueuedWrite, names: Map<string, string>): string {
+/**
+ * What a queued write was, in words, with the names the cache has for its ids. Names are QuickBooks text: shown as text
+ * only. A buy-out invoice's amount is what a family is billed, so it is said only with `showAmounts` (a staff member
+ * holding Finance.Balance.Read), as the Balances pages and the buy-outs table say it.
+ */
+export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { showAmounts?: boolean } = {}): string {
   const name = (id: string | null) => (id === null ? "the club" : names.get(id) ?? "a customer no longer on the roster");
   const who = "role" in w ? { family: "the family", student: "the student", parent: "the parent", member: "the member" }[w.role] : "";
   switch (w.op) {
@@ -191,20 +195,23 @@ export function describeWrite(w: QueuedWrite, names: Map<string, string>): strin
     case "rename": return `Rename ${who} “${w.was}” to “${w.name}”`;
     case "move": return `Move the student ${name(w.qboId)} from ${name(w.fromFamilyQboId)} to ${name(w.toFamilyQboId)}`;
     case "deactivate": return `Make ${who} ${name(w.qboId)} inactive`;
-    case "invoice_create": return `Invoice ${name(w.customerQboId)} ${formatMoney(w.units * w.unitCents)} for a volunteer buy-out`;
+    case "invoice_create": return `Invoice ${name(w.customerQboId)}${o.showAmounts ? ` ${formatMoney(w.units * w.unitCents)}` : ""} for a volunteer buy-out`;
     case "invoice_void": return `Void the volunteer buy-out invoice of ${name(w.customerQboId)}${w.why === "student_moved" ? ", as the student moved to another family" : ""}`;
   }
 }
 
-/** Every waiting and stuck item, newest first; for one family, only the items under or about it (`familyQboId`). */
-export async function loadOpenWrites(o: { familyQboId?: string } = {}): Promise<QueueView[]> {
+/**
+ * Every waiting and stuck item, newest first; for one family, only the items under or about it (`familyQboId`). With
+ * `showAmounts` a buy-out invoice's words carry its amount (describeWrite).
+ */
+export async function loadOpenWrites(o: { familyQboId?: string; showAmounts?: boolean } = {}): Promise<QueueView[]> {
   const where = and(inArray(writeQueue.state, ["waiting", "stuck"]), o.familyQboId === undefined ? undefined
     : sql`(${writeQueue.familyQboId} = ${o.familyQboId} or ${writeQueue.targetQboId} = ${o.familyQboId} or ${writeQueue.request}->>'toFamilyQboId' = ${o.familyQboId})`);
   const rows = await db.select().from(writeQueue).where(where).orderBy(desc(writeQueue.createdAt));
   if (!rows.length) return [];
   const names = new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)).map((c) => [c.qboId, c.name]));
   return rows.map((r) => ({
-    id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
+    id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
     lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode, familyQboId: r.familyQboId,
   }));
 }

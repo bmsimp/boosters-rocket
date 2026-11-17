@@ -6,6 +6,7 @@
 #   scripts/restore.sh <backup file> <database> --owner <role>   the restored database and everything in it belong to
 #                                                                <role> (the portal's or Documenso's own database role)
 # Without --owner, a database that is replaced keeps the owner it had, and a new one belongs to the user restoring it.
+# Either way only its owner (and superusers) may connect to it, as on a new installation.
 # The backup is first loaded into a database of its own beside the one you name. Only when all of it has loaded does
 # it take that name, so a restore that fails leaves the database you named exactly as it was.
 # Stop the portal (or Documenso) before replacing the database it is using: a database that is in use is refused.
@@ -47,8 +48,8 @@ while [ "$#" -gt 0 ]; do
     *) if [ -z "$FILE" ]; then FILE="$1"; elif [ -z "$DB" ]; then DB="$1"; else usage; fi; shift ;;
   esac
 done
-[ -n "$FILE" ] && [ -n "$DB" ] || usage
-[ -f "$FILE" ] && [ -r "$FILE" ] || die 2 "The backup file $FILE can't be read."
+if [ -z "$FILE" ] || [ -z "$DB" ]; then usage; fi
+if ! { [ -f "$FILE" ] && [ -r "$FILE" ]; }; then die 2 "The backup file $FILE can't be read."; fi
 [ -s "$FILE" ] || die 2 "The backup file $FILE is empty."
 # The names go into SQL below, so they are held to plain lower-case letters, digits and underscores. The database's is
 # short enough to leave room for the name of the database the backup is loaded into first.
@@ -104,6 +105,9 @@ owned_by="" as_role=()
 if [ -n "$OWNER" ]; then owned_by=" owner \"$OWNER\""; as_role=(--role="$OWNER"); fi
 run "drop database if exists \"$STAGING\"" || die 4 "Couldn't clear $STAGING, left by an earlier restore. Nothing was changed."
 run "create database \"$STAGING\"$owned_by" || die 4 "Couldn't create a database to load the backup into. Nothing was changed."
+# A new database lets every role connect to it. The installation lets only each database's owner in
+# (deploy/initdb/10-databases.sql), so the portal's role and Documenso's can't open each other's: a restore keeps that.
+run "revoke all on database \"$STAGING\" from public" || { run "drop database if exists \"$STAGING\"" || true; die 4 "Couldn't close the restored database to other roles. Nothing was changed."; }
 if ! pg_in pg_restore "${CONN[@]}" -d "$STAGING" --no-owner --no-acl "${as_role[@]}" --exit-on-error --single-transaction < "$FILE"; then
   run "drop database if exists \"$STAGING\"" || true
   if [ "$exists" != "0" ]; then die 4 "The backup didn't load. The database $DB was left as it was."; fi

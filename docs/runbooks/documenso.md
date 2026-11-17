@@ -30,25 +30,29 @@ authority shows as trusted; Documenso's documentation, "Signing certificate", sa
    rm signing.key signing.crt
    ```
    A certificate without a passphrase makes signing fail, so never leave it empty.
-3. Let Documenso read it. Documenso runs as the user number 1001:
+3. Keep a copy of `documenso-signing.p12` with its passphrase, together, somewhere safe that is not this machine,
+   now, while the file is still yours to read (the next step hands it to Documenso). The nightly backup doesn't copy
+   it.
+4. Let Documenso read it. Documenso runs as the user number 1001:
    ```bash
    sudo chown 1001 documenso-signing.p12
    sudo chmod 400 documenso-signing.p12
    ```
-4. In `deploy/.env`: `DOCUMENSO_SIGNING_CERTIFICATE=/srv/booster-rocket/documenso-signing.p12` and
+   From now on only Documenso (and `sudo`) can read the file here: a later copy needs `sudo cp`, and the copy then
+   needs `sudo chown "$USER"` before you can move it anywhere.
+5. In `deploy/.env`: `DOCUMENSO_SIGNING_CERTIFICATE=/srv/booster-rocket/documenso-signing.p12` and
    `DOCUMENSO_SIGNING_PASSPHRASE=<the passphrase>`.
-5. Keep a copy of `documenso-signing.p12` with its passphrase, together, somewhere safe that is not this machine. The
-   nightly backup doesn't copy it.
 6. Write the date it expires (three years from today) where the board will see it, with a reminder a month before.
 
 ### Renewing it
 
 Forms already sealed keep their signature: renewing changes nothing in them.
 
-1. Make a new certificate as in steps 1 to 3, under a new name (`documenso-signing-<year>.p12`).
+1. Make a new certificate as in steps 1 to 4, under a new name (`documenso-signing-<year>.p12`), keeping its copy
+   (step 3) before handing it to Documenso (step 4).
 2. Put the new name and passphrase in `deploy/.env`, then `docker compose up -d documenso`.
 3. Check `<DOCUMENSO_URL>/api/health`: it says `"certificate":{"status":"ok"}`.
-4. Keep the new file and passphrase as in step 5. Keep the old ones too, with a note of the dates they were in use.
+4. Keep the old file and passphrase too, with a note of the dates they were in use.
 
 ## 2. The first Documenso account
 

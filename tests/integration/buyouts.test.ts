@@ -263,8 +263,10 @@ describe("the write queue's share of a buy-out", () => {
 
   it("says what each write is, in words, with the names the cache has", () => {
     const names = new Map([[FAMILY, "Riverquill Family"]]);
-    expect(describeWrite({ op: "invoice_create", buyoutId: "b", customerQboId: FAMILY, itemQboId: "1", units: 2, unitCents: 2500, familyQboId: FAMILY }, names))
-      .toBe("Invoice Riverquill Family $50.00 for a volunteer buy-out");
+    const create = { op: "invoice_create" as const, buyoutId: "b", customerQboId: FAMILY, itemQboId: "1", units: 2, unitCents: 2500, familyQboId: FAMILY };
+    expect(describeWrite(create, names, { showAmounts: true })).toBe("Invoice Riverquill Family $50.00 for a volunteer buy-out");
+    // The amount is what the family is billed: said only to staff who may see money.
+    expect(describeWrite(create, names)).toBe("Invoice Riverquill Family for a volunteer buy-out");
     expect(describeWrite({ op: "invoice_void", buyoutId: "b", invoiceQboId: "5001", customerQboId: FAMILY, familyQboId: FAMILY, why: "switched_back" }, names))
       .toBe("Void the volunteer buy-out invoice of Riverquill Family");
   });

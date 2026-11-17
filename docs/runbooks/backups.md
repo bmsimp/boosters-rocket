@@ -46,8 +46,11 @@ The `backup` service does it: at `BACKUP_AT` (default `03:00`) in `CLUB_TIME_ZON
 ## Copying the backups off this machine
 
 Copy `BACKUP_DIR` somewhere else every day, after the backup has run: another machine, or storage the club rents. The
-files are private (each family's records are in them): keep the copy where only the board can read it. Any tool that
-copies a folder works; an example with `rsync` to another machine the club controls, from cron at 04:00:
+files are private (each family's records are in them): keep the copy where only the board can read it. Each backup
+file belongs to the owner of `BACKUP_DIR` (the person who looks after the installation, from the first installation)
+and only they can read it, so run the copy as that person, from their own `crontab -e`; a copy run as anyone else is
+refused. Any tool that copies a folder works; an example with `rsync` to another machine the club controls, from cron
+at 04:00:
 
 ```
 0 4 * * * rsync -a --delete /srv/booster-rocket/backups/ <user>@<other machine>:booster-rocket-backups/
