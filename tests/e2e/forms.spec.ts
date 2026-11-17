@@ -47,7 +47,7 @@ test("a parent sees this season's forms for the family and each student, with ea
   await expect(page).toHaveURL(new RegExp(`/forms/${OWN_FORM}$`));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Travel consent");
   await expect(page.getByRole("main")).toContainText("For your family, Quetzalcoatl Family · Join");
-  await expect(page.getByRole("main")).toContainText("This form is signed. Thank you!");
+  await expect(page.getByRole("main")).toContainText("SignedThank you! There's nothing more to do for this form.");
   await expect(page.getByRole("main")).toContainText("Zelda Quetzalcoatl (you)Has signed");
   await expect(page.locator("iframe")).toHaveCount(0);
   await noSidewaysScroll(page);

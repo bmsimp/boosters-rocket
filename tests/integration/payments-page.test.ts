@@ -10,11 +10,13 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { auditLog, familyMoney, qboConnection, qboCustomer, setting, type StoredInvoice } from "@/lib/db/schema";
 import { setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
 import PaymentsPage from "@/app/(parent)/payments/page";
 import { MoneyBox } from "@/app/(parent)/money-box";
+import { buyoutTitleOf, loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoices";
+import { BUYOUT_ITEM } from "../helpers/buyouts";
 import { resetDb } from "../helpers/db";
 import { ageMoney, CHENOWETH, connectCompany, invoiceQueries, moneyRow, RIVERA, stubInvoice as inv } from "../helpers/money";
 import { FAMILY_A, FAMILY_B, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
@@ -464,5 +466,44 @@ describe("one family never sees another's money", () => {
     expect(html).toContain(NOTHING);
     for (const theirs of moneyMarkers(FAMILY_B)) expect(html).not.toContain(theirs);
     expect((await db.select().from(setting).where(eq(setting.key, "roster.source"))).length).toBe(1);
+  });
+});
+
+describe("a buy-out's invoice on Payments", () => {
+  const onA = (qboId: string, balanceCents: number): StoredInvoice => ({ qboId, number: `BUY-${qboId}`, customerQboId: FAMILY_A.family.qboId, forName: null, date: "2026-10-02",
+    dueDate: balanceCents ? "2026-12-02" : null, totalCents: 7438, balanceCents, currency: "USD", payLink: null, itemQboIds: [BUYOUT_ITEM] });
+  /** A's figures with two more invoices: its own buy-out's (9174, open) and one that carries B's buy-out's invoice id (9285, paid). */
+  async function withBuyoutInvoices() {
+    const { a, b } = await seedTwoFamilies();
+    const [row] = await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, FAMILY_A.family.qboId));
+    await db.update(familyMoney).set({ invoices: [onA("9174", 7438), ...row!.invoices!, onA("9285", 0)], totalCents: row!.totalCents! + 7438, balanceWithJobsCents: null })
+      .where(eq(familyMoney.familyQboId, FAMILY_A.family.qboId));
+    return { a, b };
+  }
+
+  it("is named as the family's own volunteering buy-out, found by the family's own buy-outs alone", async () => {
+    const { a, b } = await withBuyoutInvoices();
+    asParent(a.identity);
+    const html = text(await renderPage(PaymentsPage));
+    expect(html).toContain("Invoice BUY-9174 Paying instead of volunteering: Concession stand shifts QA74 Invoice date");
+    expect(html.match(/Paying instead of volunteering/g)).toHaveLength(1);
+    // An invoice id of B's buy-out, even among A's own invoices, names nothing of B's.
+    expect(html).toContain("Invoice BUY-9285 Invoice date");
+    for (const theirs of b.buyout!.markers) expect(html).not.toContain(theirs);
+
+    asParent(b.identity);
+    const theirs = text(await renderPage(PaymentsPage));
+    expect(theirs).not.toContain("Paying instead of volunteering");
+    for (const mine of a.buyout!.markers) expect(theirs).not.toContain(mine);
+  });
+
+  it("names a buy-out only on the customer the portal raised it on, and only in the company the roster came from", async () => {
+    await withBuyoutInvoices();
+    const mine = await loadMyBuyoutInvoices(FAMILY_A.family.qboId);
+    expect([...mine.keys()]).toEqual(["9174"]);
+    expect(buyoutTitleOf(mine, { qboId: "9174", customerQboId: FAMILY_A.family.qboId })).toBe("Concession stand shifts QA74");
+    expect(buyoutTitleOf(mine, { qboId: "9174", customerQboId: FAMILY_A.students[0]!.qboId })).toBeNull();
+    await db.transaction((tx) => setRosterSource(tx, "another-company"));
+    expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
   });
 });

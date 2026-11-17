@@ -137,7 +137,7 @@ export async function remindNow(scope: ReminderScope, op: Op): Promise<Done<{ me
   const people = (n: number) => (n === 1 ? "1 guardian" : `${n} guardians`);
   // One email per guardian per form: a family's guardian may get one for each of its forms.
   const emailed = counts.emailed === guardians.size ? `Emailed ${people(guardians.size)}.` : `Emailed ${people(guardians.size)}, ${counts.emailed} reminders in all.`;
-  const message = counts.emailed + counts.failed + counts.alreadyToday === 0 ? "Nobody needs a reminder: everyone has signed, or the form was waived."
+  const message = counts.emailed + counts.failed + counts.alreadyToday === 0 ? "Nobody needs a reminder: everyone has signed, the form was waived, or it isn't ready to sign yet."
     : [emailed, counts.alreadyToday ? `${counts.alreadyToday === 1 ? "1 reminder" : `${counts.alreadyToday} reminders`} had already gone today, so ${counts.alreadyToday === 1 ? "it wasn't" : "they weren't"} sent again.` : "",
       counts.failed ? `${counts.failed === 1 ? "1 email" : `${counts.failed} emails`} couldn't be sent: see Mail settings.` : ""].filter(Boolean).join(" ");
   return { ok: true, message, counts: { ...counts, guardians: guardians.size } };

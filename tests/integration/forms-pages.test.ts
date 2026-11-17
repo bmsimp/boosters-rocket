@@ -60,7 +60,9 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
     asParent(a.identity);
     const done = await formPage(a.forms!.ids.complete);
     expect("html" in done && textOf(done.html)).toContain("Uniform agreement For Azalea Alderquist · Uniforms");
-    expect("html" in done && textOf(done.html)).toContain("This form is signed. Thank you!");
+    expect("html" in done && textOf(done.html)).toContain("This form Signed Thank you! There's nothing more to do for this form.");
+    // "Signed" once, as the state: not again as the heading or in the thanks (docs/walkthrough.md).
+    expect("html" in done && textOf(done.html).match(/\bSigned\b/g)).toEqual(["Signed"]);
     expect("html" in done && textOf(done.html)).toContain("Ansgar Alderquist (you) Has signed");
     for (const id of [...Object.values(b.forms!.ids), "not-an-id", "", "../payments", crypto.randomUUID()]) expect(await formPage(id), id).toEqual({ notFound: true });
   });
@@ -225,7 +227,7 @@ describe("signing a form on its page", () => {
     expect(home).toContain("Azalea Alderquist 0 of 1 done 1 thing left to do in Forms Medical release Not signed yet"); // her own form is another request
     expect(season).toMatch(/Medical release Signed/);
     expect(forms).toMatch(/Medical release Forms Signed Open/);
-    expect(textOf(await renderPage(FormPage, { params: { id } }))).toContain("This form is signed. Thank you!");
+    expect(textOf(await renderPage(FormPage, { params: { id } }))).toContain("Signed Thank you! There's nothing more to do for this form.");
   });
 
   it("offers to start a declined form again, and says calmly when Documenso can't be reached", async () => {

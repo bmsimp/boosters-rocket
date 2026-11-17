@@ -136,6 +136,7 @@ test("a failed staff sign-in shows its message even when Better Auth adds its ow
   await page.getByLabel("Admin's name").fill("Ada Admin");
   await page.getByLabel("Admin email").fill("admin@example.com");
   await page.getByRole("button", { name: "Save name and email" }).click();
+  await expect(page.locator(".notice-done")).toHaveText(/Saved\. Now sign in below as the Admin\./);
   await page.goto("/setup?step=admin&signin=failed&error=access_denied");
   await expect(page.locator(".notice-problem")).toContainText("didn't complete");
   await expect(page.getByRole("button", { name: "Sign out and try again" })).toBeVisible();

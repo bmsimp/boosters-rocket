@@ -24,7 +24,8 @@ export const NAME_MAX = 60, TITLE_MAX = 120, STEPS_MAX = 20, REQUIREMENTS_MAX = 
 const GONE = "That isn't there any more. Reload the page.";
 
 export type SeasonSummary = { id: string; name: string; isCurrent: boolean; createdAt: string; steps: number; requirements: number };
-export type SetupRequirement = Requirement & { position: number };
+/** `itemQboId`: the QuickBooks product or service a payment (or a buy-out) is billed with; null until staff choose one. */
+export type SetupRequirement = Requirement & { position: number; itemQboId: string | null };
 export type SetupStep = { id: string; name: string; position: number; startsOn: string | null; endsOn: string | null; requirements: SetupRequirement[] };
 export type SeasonSetup = { id: string; name: string; isCurrent: boolean; steps: SetupStep[] };
 
@@ -53,7 +54,7 @@ export async function getSeasonSetup(seasonId: string, tx?: Tx): Promise<SeasonS
   const covers = await loadCovers(rows.map((r) => r.id), null, tx);
   return { id: s.id, name: s.name, isCurrent: s.isCurrent, steps: steps.map((x) => ({
     id: x.id, name: x.name, position: x.position, startsOn: x.startsOn, endsOn: x.endsOn,
-    requirements: rows.filter((r) => r.stepId === x.id).map((r) => ({ ...toRequirement(r, covers.get(r.id) ?? []), position: r.position })),
+    requirements: rows.filter((r) => r.stepId === x.id).map((r) => ({ ...toRequirement(r, covers.get(r.id) ?? []), position: r.position, itemQboId: r.itemQboId })),
   })) };
 }
 
@@ -71,7 +72,7 @@ export async function getRequirementSetup(requirementId: string, tx?: Tx): Promi
     q.select({ n: count() }).from(requirementProgress).where(eq(requirementProgress.requirementId, row.r.id)),
     requirementsOf([row.step.id], tx),
   ]);
-  return { requirement: { ...toRequirement(row.r, covers.get(row.r.id) ?? []), position: row.r.position }, step: row.step, season: row.season, recorded: recorded?.n ?? 0,
+  return { requirement: { ...toRequirement(row.r, covers.get(row.r.id) ?? []), position: row.r.position, itemQboId: row.r.itemQboId }, step: row.step, season: row.season, recorded: recorded?.n ?? 0,
     place: { index: inStep.findIndex((x) => x.id === row.r.id), of: inStep.length } };
 }
 

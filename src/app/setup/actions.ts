@@ -102,11 +102,15 @@ export const goToStepAction = setupAction(async (step: SetupStep): Promise<void>
   redirect(`/setup?step=${step}`);
 });
 
+/** What the first Admin's form says after a save: what went wrong, or that it was saved and what comes next. */
+export type FirstAdminState = { error: string } | { saved: string } | null;
+const ADMIN_SAVED = "Saved. Now sign in below as the Admin.";
+
 /** The first Admin's name and email. Not before the club has a name, so the portal never finishes with the default one. */
-export const saveFirstAdminAction = setupAction(async (_prev: { error: string } | null, form: FormData): Promise<{ error: string } | null> => {
+export const saveFirstAdminAction = setupAction(async (_prev: FirstAdminState, form: FormData): Promise<FirstAdminState> => {
   if (await clubStepOwed()) return { error: "Give the club its name first (step 1)." };
   const r = await saveFirstAdmin(String(form.get("name") ?? ""), String(form.get("email") ?? ""), await requestIp());
   if (!r.ok) return { error: r.error };
   revalidatePath("/setup");
-  return null;
+  return { saved: ADMIN_SAVED };
 }, { onExpired: () => ({ error: SETUP_SESSION_ENDED }) });

@@ -80,7 +80,7 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // The question a link puts, with the address it would change to, and the address the parent signs in with now.
   "/family/email/[token]": (family) => [`Use ${family.emailChange!.newEmail} to sign in from now on?`, family.spec.parent.email],
   "/family/email": (family) => [family.spec.parent.email, "Send me a link"],
-  "/forms/[id]": (family) => ["Uniform agreement", family.spec.students[1]!.name, "This form is signed. Thank you!", `${family.spec.parent.name} (you)`],
+  "/forms/[id]": (family) => ["Uniform agreement", family.spec.students[1]!.name, "nothing more to do for this form", `${family.spec.parent.name} (you)`],
 };
 /** The family as the roster cache has it: its name, its students, and the parent's own name, address and number. */
 function rosterOf(family: SeededParent): string[] {

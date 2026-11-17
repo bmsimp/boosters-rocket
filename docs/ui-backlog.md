@@ -42,26 +42,18 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
   page; a "Skip to the page" link or focusing the heading on arrival would save them.
 - **Documenso's signing frame has a button with no name** (2026-11-16, `/forms/[id]`). It is Documenso's own page;
   report it upstream.
-- **"Signed" is said three times on a signed form's page** (2026-11-16, the walk, `/forms/[id]`): the heading, the
-  state and the thank-you line. Once in the state would do. Small.
-- **A buy-out's invoice reads as a plain invoice on Payments** (2026-11-16, the walk, `/payments`): "Invoice QZ-…"
-  with nothing saying it is the volunteering buy-out the guardian chose. Small.
 - **The signing frame's Sign button can sit under the tab bar at 390 wide** (2026-11-16, the walk, `/forms/[id]`).
   Documenso's own Sign button in its signature dialog is hidden by the parent tab bar until the frame is scrolled to
   the top of the screen. To be seen on a real phone first (`docs/runbooks/before-the-first-family.md`, part 3); if
   so, a small change to the `.sign-frame` iframe's height.
 
-### Staff pages and setup (found by the 2026-11-16 walk, `docs/walkthrough.md`)
-- **Setup's first-Admin step gives no notice when "Save name and email" works** (`/setup`). Small.
-- **Parents reads "To review (0)" while Reconciliation names a held address** (`/staff/parents`), before parent
-  sign-ins are on. One sentence saying addresses are held for review once parent sign-ins are on. Small.
-- **A payment requirement added with no product says nothing about it** on its step (`/staff/seasons/[id]`). Small.
-- **The signed-forms matrix offers Remind for a form with no template** (`/staff/forms`): the cell reads "Not opened
-  yet". It needs a "Not ready yet" cell state and filter in `src/lib/signed-forms/rules.ts`, with its unit test.
-  Small to medium.
-
 
 ## Done
+- **The walk's small finds** (2026-11-16, `docs/walkthrough.md`; done 2026-11-17 on `slice/finish`). A signed form's
+  page says "Signed" once; a buy-out's invoice on Payments says it pays instead of volunteering; setup's "Save name and
+  email" answers in a notice; Parents says, before sign-ins are on, that held addresses come up there once they are; a
+  step's line says when a payment requirement has no product or service yet; and the signed-forms matrix has a "Not
+  ready yet" state and filter, with no Remind for a family whose only outstanding forms have no template.
 - **Settings are one page** (2026-11-16, was Settings as a whole: separate pages and menu entries). `/staff/settings`
   has a section for each part (club, staff sign-in, outgoing mail, QuickBooks, parent sign-ins, forms), each shown
   only with its permission. Each says what is set and whether it works, in words with an icon, and opens its own page.

@@ -38,15 +38,21 @@ services:
 
   migrate:
     # Brings the portal's database up to the version of the image, then stops. The app starts only once it has.
+    # Before it changes a database that already holds data, it checks that a backup was made in the last 26 hours
+    # (scripts/backup-check.mjs), and stops with what to do if not: an empty database and a start with nothing to
+    # apply are never stopped (docs/runbooks/updates.md).
     image: ${BOOSTER_ROCKET_IMAGE:-ghcr.io/SET-BOOSTER_ROCKET_IMAGE-IN-ENV/booster-rocket:stable}
     restart: "no"
     environment:
       DATABASE_URL: postgresql://booster:${PORTAL_DB_PASSWORD}@db:5432/booster
       # Only so the setup code it prints (tools/scripts/setup-code.mjs, run in this service) names the setup page's address.
       APP_URL: ${APP_URL}
+      # For one start only, by a volunteer who has a backup of their own: MIGRATE_WITHOUT_RECENT_BACKUP=yes docker compose up -d.
+      # Never set it in .env.
+      MIGRATE_WITHOUT_RECENT_BACKUP: ${MIGRATE_WITHOUT_RECENT_BACKUP:-}
     depends_on:
       db: { condition: service_healthy }
-    command: ["node", "tools/scripts/migrate.mjs"]
+    command: ["node", "tools/scripts/migrate.mjs", "--backup-check"]
 
   app:
     image: ${BOOSTER_ROCKET_IMAGE:-ghcr.io/SET-BOOSTER_ROCKET_IMAGE-IN-ENV/booster-rocket:stable}

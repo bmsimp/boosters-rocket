@@ -27,11 +27,11 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §11 Volunteering | 26 | 0 | 0 | 0 |
 | §12 Privacy invariants | 9 | 0 | 0 | 0 |
 | §13 Audit log | 9 | 2 | 0 | 0 |
-| §14 Operations | 8 | 4 | 0 | 2 |
+| §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| **All** | **145** | **8** | **0** | **10** |
+| **All** | **146** | **7** | **0** | **10** |
 
-Nothing the specs ask for is missing outright. The eight partly built rows, and what each lacks, are listed at the foot
+Nothing the specs ask for is missing outright. The seven partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
 are checked one by one after that.
 
@@ -274,7 +274,7 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 | # | Spec says | Override | State | Proof |
 |---|---|---|---|---|
 | 14.1 | One image per release with a `stable` tag on GitHub Container Registry | Also the version and the commit's first 12 characters | Partly built | `.github/workflows/release.yml`; checked with actionlint, never run (nothing may be pushed): owner check |
-| 14.2 | Migrations on start-up after a pre-migration backup check | The `migrate` service runs before the app; the updates runbook backs up first by hand; `scripts/poc/deploy.sh` stops if the backup fails | Partly built | `deploy/compose.yml`, `docs/runbooks/updates.md` step 2, `tests/unit/deploy-script.test.ts`. Nothing stops `deploy/`'s migrate when no recent backup exists (undone) |
+| 14.2 | Migrations on start-up after a pre-migration backup check | The `migrate` service runs before the app. Before it changes a database that already holds data (migrations applied, more to apply), it refuses unless the last good backup (`backup.last_success`, recorded by `scripts/backup.sh`) is less than 26 hours old, and says what to do: `docker compose run --rm backup --now`, then start again. A first installation (an empty database) and a start with nothing to apply are never stopped; `MIGRATE_WITHOUT_RECENT_BACKUP=yes` lets one start through for a volunteer with a backup of their own. `scripts/poc/deploy.sh` backs up first itself and stops if that fails | Built | `scripts/backup-check.mjs`, run by `scripts/migrate.mjs --backup-check` in `deploy/compose.yml`; `docs/runbooks/updates.md` "When the start stops for a backup", `first-install.md`; `tests/integration/migrate-script.test.ts` "scripts/migrate.mjs --backup-check" (empty, nothing to apply, none, old, the override, fresh), `tests/unit/deploy-migrate.test.ts`, `tests/unit/deploy-script.test.ts` |
 | 14.3 | A club's host pulls `stable`; FZN by App Service continuous deployment | Owner decision 6: nothing depends on one provider; `deploy/compose.yml` pulls the pinned image | Changed | `docs/runbooks/updates.md`; `tests/unit/deploy-names-no-host.test.ts` |
 | 14.4 | Dependency updates automated; every release passes CI before `stable` moves | Security updates also need Dependabot's settings switched on in the repository (the owner's runbook, part 1 item 11) | Partly built | `.github/dependabot.yml`; `release.yml` builds and publishes only after its first job finds CI's green run on the release's commit (`tests/unit/release-workflow.test.ts`). Never run: owner check |
 | 14.5 | Backups of both databases with point-in-time restore | `scripts/backup.sh` nightly at `BACKUP_AT` club time, both databases or neither, newest 14 kept (no point-in-time restore on a plain host) | Changed | `backup-restore.test.ts` "backs up both databases into the folder in one run", "a backup that fails keeps nothing"; `backup-schedule.test.ts` |
@@ -308,7 +308,6 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 | 13.4 | Auditing a view of the audit log filtered to one family or person | An hour once the owner decides | `src/app/staff/(app)/audit/page.tsx`, an action name |
 | 14.1, 14.4 | A release and the dependency updates actually run | Owner check once pushing is allowed | GitHub |
 | 14.6 | The restore runbook carried out once on real data | An hour of the owner's | The owner's runbook, part 1 item 7, and its Results table |
-| 14.2 | `deploy/`'s migrate refusing to run pending migrations without a recent backup | Two or three hours, and an owner decision: a first install has no backup, and an update at the wrong hour would stop | `scripts/migrate.mjs`, `deploy/compose.yml`, `docs/runbooks/updates.md` |
 
 ## Fixed in this step
 

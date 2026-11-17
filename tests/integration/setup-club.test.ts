@@ -80,7 +80,7 @@ describe("setup asks for the club first on a new installation", () => {
     await saveSetupClubAction(CLUB);
     expect(await page("admin")).toContain("Admin&#x27;s name");
     expect(await saveFirstAdminAction(null, form({ name: "  ", email: "ana@club.org" }))).toEqual({ error: "Enter the Admin's name." });
-    expect(await saveFirstAdminAction(null, form({ name: " Ana Rivera ", email: "Ana@Club.org" }))).toBeNull();
+    expect(await saveFirstAdminAction(null, form({ name: " Ana Rivera ", email: "Ana@Club.org" }))).toEqual({ saved: "Saved. Now sign in below as the Admin." });
     expect(await getSetupState()).toMatchObject({ step: "admin", adminEmail: "ana@club.org", adminName: "Ana Rivera" });
     const id = await claimBootstrapAdmin("ana@club.org");
     const [made] = await db.select().from(staffUser).where(eq(staffUser.id, id!));

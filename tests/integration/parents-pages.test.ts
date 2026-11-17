@@ -199,6 +199,25 @@ describe("the staff pages for parents", () => {
     expect(await blockAction("00000000-0000-4000-8000-00000000dead", "Custody order on file.")).toEqual({ ok: false, errors: ["That person isn't in the portal any more."] });
   });
 
+  it("says, before parent sign-ins are on, that held addresses come up for review once they are", async () => {
+    await resetDb(); await seedShape(); await seedParentSettings({ signin: false, everEnabled: false }); await seedCache(ALL);
+    await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
+    await runReconcile({ cause: "test" });
+    registrar = await seedStaff({ email: "reg@club.org", name: "Reg Istrar" });
+    const [parents] = await db.insert(role).values({ key: "parents", name: "Parents" }).returning();
+    await db.insert(roleRule).values({ roleId: parents!.id, kind: "include", pattern: "Parents.*" });
+    await db.insert(roleAssignment).values({ roleId: parents!.id, staffUserId: registrar.id });
+    as(registrar);
+    const html = await parentsPage();
+    expect(html).toContain("To review (0)");
+    expect(html).toContain("Nothing to review yet. Once parent sign-ins are on, an address that is under more than one family in QuickBooks is held, and comes up here for you to say whether it is one person.");
+    expect(html).not.toContain("Nothing is waiting");
+    // Once they are on, the same address is held and listed.
+    await seedParentSettings(SIGNINS_ON);
+    await runReconcile({ cause: "test" });
+    expect(await parentsPage()).toContain("To review (1)");
+  });
+
   it("a resend is refused while parent sign-ins are switched off", async () => {
     const [ana] = await db.select().from(parent);
     await seedParentSettings({ signin: false });

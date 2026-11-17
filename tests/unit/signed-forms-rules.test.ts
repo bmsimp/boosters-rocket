@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ATTACH_LIMIT_BYTES, CELL_WORDS, EVIDENCE_BACKOFF_MS, UNSEALED_RESTART_MS, cellState, cellTone, clubHour, isReminderDay, nextEvidenceTry, parseSchedule, reminderDates, restartPlan,
+  ATTACH_LIMIT_BYTES, CELL_WORDS, EVIDENCE_BACKOFF_MS, FILTER_STATES, REMINDABLE_STATES, UNSEALED_RESTART_MS, cellState, cellTone, clubHour, isReminderDay, nextEvidenceTry, parseSchedule, reminderDates, restartPlan,
   whoStillHasToSign,
 } from "@/lib/signed-forms/rules";
 import { movedStudentPlan } from "@/lib/forms/moved";
@@ -35,7 +35,22 @@ describe("a cell of the staff matrix", () => {
     expect(cellState({ covered: true, waived: false, request: req("signed", ["x"]) })).toBe("sealing");
     expect(cellState({ covered: true, waived: false, request: req("complete", ["x"]) })).toBe("signed");
     expect(cellState({ covered: true, waived: false, request: req("declined") })).toBe("declined");
-    expect(Object.values(CELL_WORDS)).toEqual(["", "Not opened yet", "Waiting for a guardian", "Waiting for the other guardian", "Signed, being sealed", "Signed", "Declined", "Waived"]);
+    expect(Object.values(CELL_WORDS)).toEqual(["", "Not ready yet", "Not opened yet", "Waiting for a guardian", "Waiting for the other guardian", "Signed, being sealed", "Signed", "Declined", "Waived"]);
+  });
+  it("reads Not ready yet for a form with no template that nothing has been made for, as parents read it", () => {
+    expect(cellState({ covered: true, waived: false, ready: false, request: null })).toBe("not_ready");
+    expect(cellState({ covered: true, waived: false, ready: false, request: req("not_opened") })).toBe("not_ready");
+    expect(CELL_WORDS.not_ready).toBe("Not ready yet");
+    // Anything a document has reached is said as it is, and a waiver or a form it doesn't cover comes first.
+    expect(cellState({ covered: true, waived: false, ready: false, request: req("waiting", [null]) })).toBe("waiting");
+    expect(cellState({ covered: true, waived: false, ready: false, request: req("complete", ["x"]) })).toBe("signed");
+    expect(cellState({ covered: true, waived: true, ready: false, request: null })).toBe("waived");
+    expect(cellState({ covered: false, waived: false, ready: false, request: null })).toBe("not_asked");
+    expect(FILTER_STATES).toContain("not_ready");
+    expect(cellTone("not_ready")).toBe("todo");
+    // A reminder can't help a form that can't be opened.
+    expect(REMINDABLE_STATES).not.toContain("not_ready");
+    expect([...REMINDABLE_STATES].sort()).toEqual(["declined", "not_opened", "waiting", "waiting_other"]);
   });
   it("reads Signed when signed, even if waived as well; otherwise a waiver comes first", () => {
     expect(cellState({ covered: true, waived: true, request: req("complete") })).toBe("signed");
