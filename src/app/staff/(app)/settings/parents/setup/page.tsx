@@ -75,7 +75,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
                 columns={[{ key: "name", header: "Family", rowHeader: true, cell: (r) => r.name }]} />
               {/* Worked out only while sign-ins are off: once they are on, the reconcile keeps sign-ins in line by itself. */}
               {!on && (p.endingUnknown ? (
-                <><h3>Sign-ins that would end</h3><Notice tone="info">{ENDING_BUSY}</Notice></>
+                <><h3 className="table-head">Sign-ins that would end</h3><Notice tone="info">{ENDING_BUSY}</Notice></>
               ) : (
                 <Problem title="Sign-ins that would end" noun={["sign-in", "sign-ins"]} rows={p.ending} rowKey={(e) => `${e.email}|${e.familyQboId}`}
                   hint="QuickBooks no longer backs these, so they stop working when sign-ins are switched on." columns={[
