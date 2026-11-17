@@ -42,7 +42,7 @@ export async function itemsReadAt(): Promise<string | null> {
  * keep never replaces a stored list that holds items, as the roster refresh never believes an empty roster over one
  * that holds customers: a company doesn't lose every product at once, and the requirements would then name them by
  * number. Staff press for it (Read the list from QuickBooks); the worker's daily read of every family also asks, at
- * its own pace (`pace`, src/lib/money/sweep.ts).
+ * its own pace (`pace`, src/lib/jobs/money-job.ts).
  */
 export async function readItems(o: ItemOp & { pace?: () => Promise<void> }): Promise<Done> {
   const c = await getConnection();

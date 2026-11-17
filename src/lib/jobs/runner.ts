@@ -11,7 +11,8 @@ import { expirePreviousCompany } from "@/lib/parents/company-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "./marks";
-import { MONEY_JOB, runMoneyJob } from "@/lib/money/sweep";
+import { MONEY_JOB } from "@/lib/money/sweep";
+import { runMoneyAndItems } from "./money-job";
 import { FORMS_JOB, checkOpenForms } from "@/lib/forms/job";
 import { runSignedFormsJobs } from "@/lib/signed-forms/worker";
 import { REMINDERS_JOB, sendVolunteerReminders } from "@/lib/volunteer/reminders";
@@ -133,7 +134,7 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
 /** The money job's share of a wake: in its answer only when a run ended. A throw is recorded as a failure, with none of its text. */
 async function moneyJob(now: Date): Promise<{ job: string; ok: boolean }[]> {
   try {
-    const r = await runMoneyJob({ now });
+    const r = await runMoneyAndItems({ now }); // with the products and services once a run has read every family
     return r.ran && r.finished ? [{ job: MONEY_JOB, ok: r.ok }] : [];
   } catch {
     return [{ job: MONEY_JOB, ok: false }];

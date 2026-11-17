@@ -197,7 +197,7 @@ async function readAndKeep(tx: Tx, familyQboId: string, before: MoneyRow | undef
     // The worker's run listed a family the cache no longer holds as one (made inactive, or moved under another, while
     // the run read): nothing was asked of QuickBooks and nothing failed, so nothing is stamped on a row for it.
     if (how.kind === "run" && outcome.code === "not_a_family") return { ok: false, code: outcome.code };
-    const failed ={ failedAt: now, failedCode: outcome.code.slice(0, 40), updatedAt: now };
+    const failed = { failedAt: now, failedCode: outcome.code.slice(0, 40), updatedAt: now };
     await tx.insert(familyMoney).values({ familyQboId, ...failed }).onConflictDoUpdate({ target: familyMoney.familyQboId, set: failed });
     return { ok: false, code: outcome.code };
   }
