@@ -392,8 +392,12 @@ async function readAgain(qboId: string, realmId: string): Promise<CurrentRecord 
   if (!answer || answer.Id !== qboId) return null;
   return db.transaction(async (tx) => {
     if (!(await lockRosterAs(tx, rosterTagOf(realmId)))) return null;
-    const row = await upsertFromAnswer(tx, answer, await getShape(tx));
+    const shape = await getShape(tx);
+    const stored = await upsertFromAnswer(tx, answer, shape);
     await reconcileAccess(tx, { cause: `roster.read_again#${qboId}` });
+    // Shown as QuickBooks has it now, from this read: the cache keeps a row of the same version it already holds (an
+    // answer is stored only when newer), so its values can lag behind what QuickBooks just showed.
+    const row = stored ? customerRow(answer, new Set(shapeTypeIds(shape)), new Date()) ?? stored : null;
     if (!row) return null;
     const [family] = row.parentQboId ? await tx.select({ name: qboCustomer.displayName }).from(qboCustomer).where(eq(qboCustomer.qboId, row.parentQboId)) : [];
     return { name: row.displayName, active: row.active, familyName: family?.name ?? null };
@@ -433,6 +437,8 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
     if (!owed.active || movedOn(owed, p.write.syncToken)) {
       await audited(owed.active ? "moved_on" : "already_inactive", p.write, target);
       const current = await readAgain(p.write.qboId, p.realmId);
+      // Inactive there at the version the cache holds: the cache is behind QuickBooks, so the roster is read again.
+      if (!owed.active) await db.transaction((tx) => askForRosterRefresh(tx));
       const said = owed.active ? WRITE_COPY.changed : "That is inactive in QuickBooks already, so there was nothing to change.";
       return current ? { ok: false, errors: [said], current } : refuse(owed.active ? WRITE_COPY.changedUnseen : said);
     }
