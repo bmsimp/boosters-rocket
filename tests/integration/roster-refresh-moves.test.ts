@@ -20,6 +20,7 @@ import { auditLog, buyout, formWithdrawal, jobRun, parent, qboCustomer, setting,
 import * as volunteerMoved from "@/lib/volunteer/moved-student";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
+import { runWriteQueue } from "@/lib/roster/queue";
 import { setRosterSource } from "@/lib/roster/source";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
@@ -35,7 +36,7 @@ import { seedCheckIn, seedEvent, seedSignup } from "../helpers/volunteer";
 import { seedBuyout, seedBuyoutRequirement, queueOf } from "../helpers/buyouts";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
-import { asOp, auditsOf, connectRoster, REALM, staffWith, WORKER } from "../helpers/roster-writes";
+import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 
 /**
  * A student moved to another family in QuickBooks, and read by a roster refresh, is followed up as a move staff make in
@@ -118,7 +119,7 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     const [row] = await followed();
     expect(await followed()).toHaveLength(1);
     expect(row).toMatchObject({ door: "system", actorLabel: "roster", targetType: "qbo_customer", targetId: LEO,
-      after: { fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, cause: `roster.refresh#${run.id}`, formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1 } });
+      after: { fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, cause: `roster.refresh#${run.id}`, formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1, buyouts: "daily_check" } });
     expect(await auditsOf("forms.request.moved")).toHaveLength(2);
     expect(await auditsOf("volunteer.signup.moved")).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cancelled: 1, guardiansTold: 1 }) })]);
     // Ana, who took the place, is told once, after the commit, about her own sign-up, and never where Leo went.
@@ -189,6 +190,25 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.refresh#${(await lastRun()).id}`, formsReset: 1, formsMoved: 1, placesGivenUp: 1 }) })]);
     expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+  });
+
+  it("a queued move QuickBooks made already: the refresh that finds it follows it, and marking it done takes nothing more from the families", async () => {
+    const leo = await seedLeo();
+    moveInQuickBooks(LEO, CHEN);
+    // Sent after the last read, its answer lost: the queue reads the roster again before it looks for it.
+    const item = await seedQueued({ op: "move", role: "student", qboId: LEO, syncToken: "0", fromFamilyQboId: RIVERA, toFamilyQboId: CHEN }, { sent: true, lastTriedAt: new Date() });
+
+    expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
+    expect(await queueItem(item.id)).toMatchObject({ state: "done" });
+    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    // The refresh followed the move; the queue's own look at it found nothing left to move, cancel or tell.
+    const rows = await followed();
+    expect(rows.map((r) => (r.after as { cause: string }).cause).sort()).toEqual([`roster.refresh#${(await lastRun()).id}`, `roster.write.found#${LEO}`].sort());
+    expect(rows.find((r) => (r.after as { cause: string }).cause.startsWith("roster.write.found"))!.after).toMatchObject({ formsMoved: 0, formsReset: 0, placesGivenUp: 0 });
+    expect(await db.select().from(formWithdrawal)).toHaveLength(1);
+    expect(await auditsOf("forms.request.moved")).toHaveLength(2);
+    expect(mail.outbox).toHaveLength(1);
+    expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
 
   it("a follow-up that fails leaves the old roster and everything of the student as it was, and records the run as failed; the next refresh follows the move", async () => {

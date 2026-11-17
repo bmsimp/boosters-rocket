@@ -1,5 +1,5 @@
 import { sql, eq, desc } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import { jobRun, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
@@ -11,7 +11,6 @@ import { studentMoves, type StudentMove } from "./moves";
 import { logReconcileFailure, reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
-import type { Tx } from "@/lib/db/client";
 
 export { ROSTER_LOCK, ROSTER_JOB };
 
@@ -53,7 +52,7 @@ async function followMovedStudent(sp: Tx, move: StudentMove, cause: string): Pro
   const volunteer = await volunteerForMovedStudent(sp, move, { actor: MOVE_ACTOR, ip: null });
   await writeAudit({ actor: MOVE_ACTOR, action: "roster.student.move.followed", targetType: "qbo_customer", targetId: move.studentQboId,
     after: { fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId, cause,
-      formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled } }, sp);
+      formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled, buyouts: "daily_check" } }, sp);
   return volunteer.tell;
 }
 
@@ -136,8 +135,8 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       // A savepoint: a failure here undoes the cache changes and the parent-access changes together, so the roster and
       // who can sign in never disagree (parents spec §2), and the failed run can still be recorded.
       await tx.transaction(async (sp) => {
-        // Where each customer sat in the cache about to be replaced, kept only when that cache is this company's:
-        // a first read of a company, or another company's cache cleared below, has no move to follow.
+        // Whether the cache about to be replaced is this company's: a first read of a company, and another company's
+        // cache cleared below, have no move to follow.
         const ours = (await getRosterSource(sp)) === realmId;
         // The cache came from another company and connecting didn't clear it (it failed, or the process stopped): clear
         // it now, with that company's parent access, in the same savepoint as the swap. Its shape goes with it, so the
@@ -146,6 +145,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         // Another company's cache was just cleared, and a new company may truly have no customers yet. Otherwise the
         // customers in the cache are this company's, and an answer without one of them is not believed.
         if (!cleared && customerRows.length === 0 && (await sp.select({ qboId: qboCustomer.qboId }).from(qboCustomer).limit(1)).length > 0) throw new NoCustomersInAnswer();
+        // Where each customer sat in that cache, read before it is replaced, under the roster lock this run holds.
         const before = ours ? await sp.select({ qboId: qboCustomer.qboId, typeQboId: qboCustomer.typeQboId, parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer) : [];
         const rows = cleared ? customerRows.map((r) => ({ ...r, email: null, phone: null })) : customerRows;
         await sp.delete(qboCustomerType);
