@@ -153,8 +153,10 @@ describe("seasons", () => {
     expect(empty).toContain("Start your first season The template has 5 steps: Join, Forms, Volunteer, Season, Wrap-up. Rename or remove them to fit your club.");
     expect(empty).not.toContain("Copy ");
 
-    expect(await createSeasonAction("  Fall   2027 ", "template")).toEqual({ ok: true, message: "Started. Parents don't see it until you make it the current season." });
+    const started = await createSeasonAction("  Fall   2027 ", "template");
     const [made] = await seasons();
+    // The id of the season made, so the form can go on to its page.
+    expect(started).toEqual({ ok: true, seasonId: made!.id, message: "Started. Parents don't see it until you make it the current season." });
     expect(made).toMatchObject({ name: "Fall 2027", isCurrent: false });
     expect((await stepsOf(made!.id)).map((s) => [s.position, s.name])).toEqual([[0, "Join"], [1, "Forms"], [2, "Volunteer"], [3, "Season"], [4, "Wrap-up"]]);
     expect(revalidatedPaths()).toEqual(["/"]);
@@ -173,7 +175,7 @@ describe("seasons", () => {
         { title: "Guard gloves", appliesTo: "student", required: false, chosen: ["13", "22"] }] },
       { name: "Wrap-up" },
     ] });
-    expect(await createSeasonAction("Fall 2027", "last")).toEqual({ ok: true, message: "Copied. Dates were left out, and chosen lists were copied as they were: check both before parents see it." });
+    expect(await createSeasonAction("Fall 2027", "last")).toEqual({ ok: true, seasonId: expect.any(String), message: "Copied. Dates were left out, and chosen lists were copied as they were: check both before parents see it." });
     const copy = (await seasons()).find((s) => s.name === "Fall 2027")!;
     expect(copy.isCurrent).toBe(false);
     expect((await stepsOf(copy.id)).map((s) => [s.name, s.startsOn, s.endsOn])).toEqual([["Join", null, null], ["Wrap-up", null, null]]);

@@ -54,12 +54,17 @@ export function TextAction({ field, label, pendingLabel, initial = "", maxLength
   );
 }
 
-/** A new season: its name, and how it starts. `lastName` is the season a copy would be taken from, when there is one. */
-export function NewSeasonForm({ lastName, create }: { lastName: string | null; create: (name: string, start: "empty" | "template" | "last") => Promise<Done> }) {
+/**
+ * A new season: its name, and how it starts. `lastName` is the season a copy would be taken from, when there is one.
+ * Once it is made, the page goes on to the new season, where its steps are set up, as a new volunteer event does.
+ */
+export function NewSeasonForm({ lastName, create }: { lastName: string | null; create: (name: string, start: "empty" | "template" | "last") => Promise<Done & { seasonId?: string }> }) {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [state, run, pending] = useActionState(async (_: Done | null, start: "empty" | "template" | "last") => {
     const r = await safely(() => create(name, start), failed);
     if (r.ok) setName("");
+    if (r.ok && "seasonId" in r && r.seasonId) router.push(`/staff/seasons/${r.seasonId}`);
     return r;
   }, null);
   const go = (start: "empty" | "template" | "last") => () => startTransition(() => run(start));
