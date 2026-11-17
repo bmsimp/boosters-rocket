@@ -27,11 +27,11 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §11 Volunteering | 26 | 0 | 0 | 0 |
 | §12 Privacy invariants | 9 | 0 | 0 | 0 |
 | §13 Audit log | 9 | 2 | 0 | 0 |
-| §14 Operations | 9 | 3 | 0 | 2 |
+| §14 Operations | 8 | 4 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| **All** | **146** | **7** | **0** | **10** |
+| **All** | **145** | **8** | **0** | **10** |
 
-Nothing the specs ask for is missing outright. The seven partly built rows, and what each lacks, are listed at the foot
+Nothing the specs ask for is missing outright. The eight partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
 are checked one by one after that.
 
@@ -259,9 +259,9 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 |---|---|---|---|---|
 | 13.1 | Every create, update and delete is recorded | | Partly built | Each write's test asserts its row (for example `seasons-staff.test.ts` "each with its audit row", `roster-writes.test.ts`, `volunteer-staff.test.ts` "and audits it"), and `tests/unit/audit-actions.test.ts` holds every action to words. No test finds a write with no row in general: a new write is caught only by its own test and review |
 | 13.2 | Every sign-in, sign-out and refused sign-in, both doors | | Built | `tests/integration/signin-audit.test.ts`; `signin-codes.test.ts` (`signin.code_refused`, `signin.code_wrong`); `tests/integration/resolve.test.ts` (a refused staff sign-in, with its address since this step) |
-| 13.3 | Staff reads of family data: a family's details, balances, invoices, signed forms, any export | | Built | `roster-pages.test.ts` "a family's page ... and the visit is audited"; `balances-pages.test.ts` "audits the read before anything is shown"; `signed-forms-staff.test.ts` "audits the read of a signed form's evidence before it is shown"; `signed-forms-downloads.test.ts`; `seasons-staff.test.ts` "shows where one family stands ... and audits the read"; `volunteer-credit-staff.test.ts` "is audited before it shows anything"; `parents-pages.test.ts` (`parent.read`); `audit-log.test.ts` "audits the export with its filters and count" |
+| 13.3 | Staff reads of family data: a family's details, balances, invoices, signed forms, any export | The forms matrix, a read of many families, is not audited on purpose | Built | `roster-pages.test.ts` "a family's page ... and the visit is audited"; `signed-forms-staff.test.ts` "is not audited" (the matrix, by design); `balances-pages.test.ts` "audits the read before anything is shown"; `signed-forms-staff.test.ts` "audits the read of a signed form's evidence before it is shown"; `signed-forms-downloads.test.ts`; `seasons-staff.test.ts` "shows where one family stands ... and audits the read"; `volunteer-credit-staff.test.ts` "is audited before it shows anything"; `parents-pages.test.ts` (`parent.read`); `audit-log.test.ts` "audits the export with its filters and count" |
 | 13.4 | Opening the audit log itself, filtered to one family or person | Not decided | Partly built | The export is audited; the page is not (roadmap Known gaps: the owner to say) |
-| 13.5 | Parents viewing their own family are not recorded | | Built | `seasons-parent.test.ts` "is not audited: a parent looking at their own family's season leaves no row"; `signed-forms-staff.test.ts` "is not audited" (the matrix) |
+| 13.5 | Parents viewing their own family are not recorded | | Built | `seasons-parent.test.ts` "is not audited: a parent looking at their own family's season leaves no row"; `parent-home-family.test.ts` "records nothing: a parent viewing their own family is not audited"; `payments-page.test.ts` (Payments leaves no audit row) |
 | 13.6 | Each entry: who (person and door), action and permission, record, before and after, when, request IP | | Built | `tests/integration/audit.test.ts` "records who, what, which record, before/after, and IP"; `doors.test.ts` (the refusal's permission) |
 | 13.7 | Admins can view and export it | Admin only (`Audit.Log.Read` is `ADMIN_ONLY`) | Built | `audit-log.test.ts` "is Admin only", "gives an Admin every matching row as CSV, never cached" |
 | 13.8 | Append-only from the app's point of view | | Built | `tests/unit/audit-append-only.test.ts` (added in this step); `cleanup.test.ts` "never touches the audit log, however old" |
@@ -276,9 +276,9 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 | 14.1 | One image per release with a `stable` tag on GitHub Container Registry | Also the version and the commit's first 12 characters | Partly built | `.github/workflows/release.yml`; checked with actionlint, never run (nothing may be pushed): owner check |
 | 14.2 | Migrations on start-up after a pre-migration backup check | The `migrate` service runs before the app; the updates runbook backs up first by hand; `scripts/poc/deploy.sh` stops if the backup fails | Partly built | `deploy/compose.yml`, `docs/runbooks/updates.md` step 2, `tests/unit/deploy-script.test.ts`. Nothing stops `deploy/`'s migrate when no recent backup exists (undone) |
 | 14.3 | A club's host pulls `stable`; FZN by App Service continuous deployment | Owner decision 6: nothing depends on one provider; `deploy/compose.yml` pulls the pinned image | Changed | `docs/runbooks/updates.md`; `tests/unit/deploy-names-no-host.test.ts` |
-| 14.4 | Dependency updates automated; every release passes CI before `stable` moves | | Partly built | `.github/dependabot.yml`, `release.yml` (publishes the image CI checked). Never run: owner check |
+| 14.4 | Dependency updates automated; every release passes CI before `stable` moves | Security updates also need Dependabot's settings switched on in the repository (the owner's runbook, part 1 item 11) | Partly built | `.github/dependabot.yml`; `release.yml` builds and publishes only after its first job finds CI's green run on the release's commit (`tests/unit/release-workflow.test.ts`). Never run: owner check |
 | 14.5 | Backups of both databases with point-in-time restore | `scripts/backup.sh` nightly at `BACKUP_AT` club time, both databases or neither, newest 14 kept (no point-in-time restore on a plain host) | Changed | `backup-restore.test.ts` "backs up both databases into the folder in one run", "a backup that fails keeps nothing"; `backup-schedule.test.ts` |
-| 14.6 | Restore is a launch requirement, with a runbook carried out at least once | | Built | `scripts/restore.sh`, `docs/runbooks/restore.md`; `backup-restore.test.ts` "restores Documenso's backup, and everything in it is the same", "restores into a database that doesn't exist yet". Owner check: once on real data |
+| 14.6 | Restore is a launch requirement, with a runbook carried out at least once | | Partly built | `scripts/restore.sh`, `docs/runbooks/restore.md`; `backup-restore.test.ts` "restores Documenso's backup, and everything in it is the same", "restores into a database that doesn't exist yet". Nobody has followed the runbook yet: owner check (the owner's runbook, part 1 item 7) |
 | 14.7 | The health page checks QuickBooks, Graph (now mail), Documenso API and webhook, and email | Email-code spec §6: mail sending instead of Graph; plus the worker, backups, money run, clean-up, sign-in addresses | Built | `src/lib/health/report.ts`; `tests/integration/health-page.test.ts`; `forms-staff.test.ts` "the Health page's line for forms"; `tests/e2e/ops.spec.ts` |
 | 14.8 | Runbook: first deployment | | Built | `docs/runbooks/first-install.md`; `tests/unit/runbooks.test.ts`, `deploy-names-no-host.test.ts` |
 | 14.9 | Runbook: Intuit app registration and assessment | | Built | `docs/runbooks/intuit.md`; same tests. Written without Intuit's screens (owner check) |
@@ -307,6 +307,7 @@ Each was read; the four marked "mutated" were also broken on purpose in this ste
 | 13.1 | A general test that every write has its audit row | Half a day, and it would be a heuristic (a scan of `src/lib` for writes beside `writeAudit`) | `tests/unit/` |
 | 13.4 | Auditing a view of the audit log filtered to one family or person | An hour once the owner decides | `src/app/staff/(app)/audit/page.tsx`, an action name |
 | 14.1, 14.4 | A release and the dependency updates actually run | Owner check once pushing is allowed | GitHub |
+| 14.6 | The restore runbook carried out once on real data | An hour of the owner's | The owner's runbook, part 1 item 7, and its Results table |
 | 14.2 | `deploy/`'s migrate refusing to run pending migrations without a recent backup | Two or three hours, and an owner decision: a first install has no backup, and an update at the wrong hour would stop | `scripts/migrate.mjs`, `deploy/compose.yml`, `docs/runbooks/updates.md` |
 
 ## Fixed in this step
