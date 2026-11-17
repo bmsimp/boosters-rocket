@@ -15,6 +15,10 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
   under their sets needs the ruler drawn as a table header, which is its own piece of design.
 - **A season's requirements are still lines** (2026-11-16, `/staff/seasons/[id]`). Each step's requirements on a
   season's page are a `.lines` list; the other lists named with it became tables on 2026-11-17 (Done, below).
+- **The Health page's QuickBooks line carries a paragraph** (2026-11-17, `/staff/health`). Its notes hold the whole of
+  what the portal reads and changes in QuickBooks (`QUICKBOOKS_USE`, several sentences), which is heavy for a line
+  that should say at a glance whether QuickBooks works and when. The words belong on the QuickBooks settings page; the
+  line could link to them.
 
 ### Club settings (found during the 2026-11-16 handoff pass)
 - **A club can't supply its logo** (2026-11-16, `/staff/settings/club`). `PRODUCT.md` has each club supply a logo

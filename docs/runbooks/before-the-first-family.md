@@ -115,7 +115,8 @@ the club's real books it only reads.
    **Pass:** **The last check** says "Every request answered as the portal expects", against "An Intuit sandbox company
    (reads and changes)"; no row under **Changing (sandbox only)** reads "Not tried"; and Health's QuickBooks line says
    when the requests were last checked. A "Noted" row is a fact the check recorded, not a failure: "Pay links on
-   invoices" is noted when the sandbox company doesn't take payments online.
+   invoices" is noted when the check's own invoice comes back without a Pay link, and "A Pay link on a buy-out
+   invoice" notes whether a bill-to email address is what gives one (see Results, 2026-11-17).
    **If not:** "Finished, but some changes weren't tried" means the check couldn't try every change: each "Not tried"
    row says why (a roster read under way: run it again in a minute; no customer type or no product or service in the
    company: add one in QuickBooks, then run it again). For any other result, each row that didn't answer as expected says what it found, what that means for the club, and (for the
@@ -131,8 +132,8 @@ The page replaces these checks the roadmap's checks table asked for by hand (eac
 | A sparse update of a phone and a billing address (1 to 6) | A parent changing a phone number; A parent changing a mailing address; Clearing a phone and an address; A phone change from an old version of the record; The longest phone number; The longest address the portal allows |
 | The Item query and the item on invoice lines (1 to 3) | The products and services; The product or service on each invoice line; A student's own balance, read by its ID |
 | A sparse update of the email field (1 to 6) | A parent changing their sign-in email; An email field holding two addresses; The longest email field; An email change from an old version of the record; An email field that isn't an address |
-| The staff roster writes (1 to 6) | Making a family; Making a student under a family; Making a parent under a family; Renaming a family; Moving a student to another family; Making a family inactive; Making a customer with an open balance inactive; Making a customer with a name already in use; A rename from an old version of the record |
-| Creating and voiding a buy-out invoice (1, 3 to 5, and the void's old-version code in 6) | Making a buy-out invoice on a student; A buy-out invoice is not emailed; Finding a buy-out invoice again; Voiding a buy-out invoice; Voiding an invoice from an old version of it |
+| The staff roster writes (1 to 6) | Making a family; Making a student under a family; Making a parent under a family; Renaming a family; Moving a student to another family; Making a family inactive while a customer under it is active; Making a family inactive once everyone under it is inactive; Making a customer with an open balance inactive; Making a customer with a name already in use; A rename from an old version of the record |
+| Creating and voiding a buy-out invoice (1 to 5, and the void's old-version code in 6) | Making a buy-out invoice on a student; A buy-out invoice is not emailed; Finding a buy-out invoice again; A Pay link on a buy-out invoice; Voiding a buy-out invoice; Voiding an invoice from an old version of it |
 
 The roster's own two checks (the customer query's order and inactive customer types) were made by hand on the proof of
 concept on 2026-11-11 (its checks 16 and 17); the page reads the customers and their types again each run.
@@ -163,7 +164,9 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    **Pass:** the invoice reaches Payments with a **Pay** button; pay it in QuickBooks, ask for a read on Balances, and
    the requirement goes from "Buy-out invoiced" to "Paid instead". Choose another and switch back before paying: the
    invoice is voided in QuickBooks. Note whether online payment needed more than the ACH flag the portal sets (if the
-   invoice has no **Pay** button, it did).
+   invoice has no **Pay** button, it did). On 2026-11-17 the check's own invoice, made exactly this way, came back
+   with no Pay link: until the owner decides whether a buy-out invoice carries the family's email address (see the
+   check's "A Pay link on a buy-out invoice" row), expect no **Pay** button here, and say so in Results.
    **If not:** Reconciliation lists a buy-out that needs a look; note what it says.
 7. **An email change on a phone.** As a parent: Family, **Change my sign-in email**, a new address you can read. Open
    the emailed link on the phone while signed out.
@@ -188,6 +191,14 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
 11. **The products and services after a daily run.** After the next daily read of every family, open a payment
     requirement's page. **Pass:** it still names its product or service, as the list read by **Read the list from
     QuickBooks** did. **If not:** note what it names.
+12. **Making a family inactive.** Give a test family a student and a parent, and an open invoice on the student. On
+    the family's Roster page, open **Change the family**, choose **Make <family> inactive**, read the list, and
+    confirm.
+    **Pass:** the list names the student and the parent, then says the family goes last; with the invoice open,
+    nobody is made inactive and the page names the student as having an open balance (with the amount only for staff
+    who can see Balances), saying it must be paid or written off in QuickBooks first. Void the invoice in QuickBooks,
+    confirm again: the student and the parent, then the family, are inactive in QuickBooks, and the family's parents
+    can no longer sign in. **If not:** note what the page said and what QuickBooks shows for each.
 
 ## 3. Real phones
 
@@ -488,6 +499,12 @@ work another. Any time before the pilot.
 15. Staff can make a customer inactive from the roster pages, but not active again: that was left out while building
     because it widens what the portal changes in QuickBooks. Today a customer is made active again in QuickBooks
     itself, and the next roster refresh brings it back.
+16. The lead's choice, not the owner's (2026-11-17): making a family inactive is never put on the write queue. When
+    QuickBooks can't be reached part way, it stops, says who was made inactive and who wasn't, asks for a roster
+    refresh where a write's answer was lost, and staff press it again later. One student or parent made inactive by
+    itself still waits on the queue as before.
+17. The lead's choice, not the owner's (2026-11-17): a credit (a negative balance) is left to QuickBooks. The portal's
+    own check stops only an amount owed; whatever QuickBooks refuses is told in words.
 
 ## Results
 
@@ -495,3 +512,4 @@ Add a row for each item each time you do it.
 
 | Date | Part and item | Pass, fail or skipped | What you saw |
 |---|---|---|---|
+| 2026-11-17 | 2.1 | Fail (34 of 37 rows as expected) | On the proof-of-concept host against an Intuit sandbox company. "Making a family inactive": not as expected, refused with code 800; the check's clean-up later made all five of its records inactive, students and parents first. "Making a customer with an open balance inactive": noted, refused with code 6220. "Pay links on invoices": noted, 8 of 9 invoices carried a Pay link (on developer.intuit.com, the sandbox's); the one without was the check's own, made as a buy-out invoice is made. The owner then decided: a family is made inactive in one action, everyone under it first, and nobody with a balance is made inactive. The check now expects 800 and 6220, and adds a Pay link probe; run it again. |
