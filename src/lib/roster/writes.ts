@@ -229,7 +229,8 @@ function auditAfter(w: RosterWrite, answer: Record<string, unknown>) {
  * (formsForMovedStudent, src/lib/forms/moved.ts: a complete one moves with its evidence, any other is reset under the
  * new family and its document queued for the worker to withdraw), then the student's volunteer places
  * (volunteerForMovedStudent, src/lib/volunteer/moved-student.ts: places on shifts still to come are given up, credit
- * stays with the family it was earned for), then the audit row of the move's follow-up with their counts. The answer's
+ * stays with the family it was earned for), then its per-student buy-outs (buyoutsForMovedStudent, src/lib/buyouts/moved.ts:
+ * an unpaid invoice queued to void, anything else flagged), then the audit row of the move's follow-up with their counts. The answer's
  * `tell` emails the guardians whose places were given up: call it after the transaction commits.
  */
 export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fromFamilyQboId: string; toFamilyQboId: string; cause: string },
@@ -237,10 +238,11 @@ export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fr
   const who = { studentQboId: move.studentQboId, fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId };
   const forms = await formsForMovedStudent(tx, { ...who, actor: o.actor, ip: o.ip });
   const volunteer = await volunteerForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
-  await buyoutsForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
+  const buyouts = await buyoutsForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
   await writeAudit({ actor: { door: "system", id: null, label: "roster" }, action: "roster.student.move.followed", targetType: "qbo_customer", targetId: move.studentQboId,
     after: { fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId, cause: move.cause,
-      formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled } }, tx);
+      formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled,
+      buyoutsToVoid: buyouts.voiding, buyoutsFlagged: buyouts.flagged } }, tx);
   return { tell: volunteer.tell };
 }
 
