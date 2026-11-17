@@ -74,7 +74,9 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
   const events = await db.select().from(volunteerEvent).where(and(isNull(volunteerEvent.cancelledAt), gte(volunteerEvent.onDate, from)))
     .orderBy(asc(volunteerEvent.onDate), asc(volunteerEvent.createdAt));
   const shifts = events.length === 0 ? [] : await db.select().from(volunteerShift)
-    .where(and(inArray(volunteerShift.eventId, events.map((e) => e.id)), isNull(volunteerShift.cancelledAt))).orderBy(asc(volunteerShift.startsAt), asc(volunteerShift.createdAt));
+    .where(and(inArray(volunteerShift.eventId, events.map((e) => e.id)), isNull(volunteerShift.cancelledAt)))
+    // Then by id: an event's copy makes all its shifts in one transaction, at one time, and two may start together.
+    .orderBy(asc(volunteerShift.startsAt), asc(volunteerShift.createdAt), asc(volunteerShift.id));
   const ongoing = shifts.filter((s) => shiftInstants(events.find((e) => e.id === s.eventId)!.onDate, s.startsAt, s.endsAt, zone).end.getTime() > now.getTime());
   const filled = await filledOn(ongoing.map((s) => s.id));
   const listed = events.map((e) => myEvent(e, ongoing.filter((s) => s.eventId === e.id).map((s) => myShift(e, s, filled.get(s.id) ?? 0, zone, now)))).filter((e) => e.shifts.length > 0);
