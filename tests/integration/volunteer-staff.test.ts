@@ -334,6 +334,8 @@ describe("the cut-off and the volunteer kind of requirement", () => {
     expect(page).toContain("Shifts that count toward it");
     expect(page).toContain("Marching band car wash");
     expect(page).toContain("9:00 am to noon");
+    // v1 spec 11.4: what counts is a check-in, and the page says so (it once said check-in wasn't built).
+    expect(page).toContain("A shift counts as one shift once the person on it checks in with the shift's code, or staff add the check-in under Volunteer credit. Until then the family sees it as signed up for.");
     const progress = textOf(await renderPage(RequirementProgressPage, { params: { requirementId: r!.id } }));
     // A's student is checked in on the shift (a required requirement is filled before the optional one it also counts toward); B is signed up.
     expect(progress).toContain("1 of 2 shifts done");

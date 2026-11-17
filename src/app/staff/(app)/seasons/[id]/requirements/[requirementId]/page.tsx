@@ -102,7 +102,7 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
                 <span className="when">{dateWords(x.onDate)}, {shiftTimeWords(x.startsAt, x.endsAt)}{x.cancelled ? " · Cancelled" : ""}</span>
               </div></li>))}</ul>
           )}
-          <p className="hint">A shift counts {r.amountUnit === "hours" ? "its length in hours" : "as one shift"}. Until check-in is built, nothing is confirmed: families see how much they are signed up for.</p>
+          <p className="hint">A shift counts {r.amountUnit === "hours" ? "its length in hours" : "as one shift"} once the person on it checks in with the shift&apos;s code, or staff add the check-in under Volunteer credit. Until then the family sees it as signed up for.</p>
         </section>
       )}
 
