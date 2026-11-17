@@ -1,10 +1,10 @@
 // What stands in the way of removing a volunteer requirement (src/lib/seasons/setup.ts): places families hold on
-// shifts that count toward it, and credit counting toward it. Removing it would unlink every such shift at once, and
+// shifts that count toward it, credit counting toward it, and buy-outs chosen for it. Removing it would unlink every such shift at once, and
 // nothing would say which; credit done outside the portal for it would go with it.
 import "server-only";
 import { and, count, eq, inArray, isNull } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
-import { volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { buyout, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 
 /**
  * How many live places, on shifts and events still on, and live credits count toward these requirements: a place not
@@ -25,7 +25,9 @@ export async function placesHolding(requirementIds: readonly string[], tx: Tx): 
     .innerJoin(volunteerCredit, and(eq(volunteerCredit.signupId, volunteerSignup.id), isNull(volunteerCredit.removedAt)))
     .where(inArray(volunteerShiftRequirement.requirementId, ids));
   const [outside] = await tx.select({ n: count() }).from(volunteerCredit).where(and(inArray(volunteerCredit.requirementId, ids), isNull(volunteerCredit.removedAt)));
-  return (places?.n ?? 0) + (checkIns?.n ?? 0) + (outside?.n ?? 0);
+  // A buy-out of any state: it is a family's record of an invoice, and keeps the requirement it was for.
+  const [bought] = await tx.select({ n: count() }).from(buyout).where(inArray(buyout.requirementId, ids));
+  return (places?.n ?? 0) + (checkIns?.n ?? 0) + (outside?.n ?? 0) + (bought?.n ?? 0);
 }
 
 /** The shifts linked to these requirements, by requirement id: kept in the removal's audit row, so the links can be made again. */

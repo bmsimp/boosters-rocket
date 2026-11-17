@@ -48,6 +48,8 @@ const PARAMS: Record<string, (family: SeededParent) => Record<string, string | s
   "/forms/[id]": (family) => ({ id: family.forms!.ids.complete }),
   // The link mailed to the address the parent asked to change to: their own pending request. Opening it changes nothing.
   "/family/email/[token]": (family) => ({ token: family.emailChange!.token }),
+  // The family's own volunteer requirement with a buy-out: its page shows the buy-out's state and amount, never the other's.
+  "/volunteer/pay-instead/[requirementId]/[choice]": (family) => ({ requirementId: family.buyout!.requirementId, choice: family.buyout!.key }),
 };
 
 /** Pages that show nothing about the family, and why. Everything else must show at least one of its own family's markers. */
@@ -66,7 +68,9 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // Every step of the current season, the family's own requirements among them, and its students by name.
   "/season": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.season!.page],
   // The event both families signed up for, the one count every family sees, and the family's own sign-up.
-  "/volunteer": (family) => [family.spec.family.name, ...family.volunteer!.page],
+  "/volunteer": (family) => [family.spec.family.name, ...family.volunteer!.page, ...family.buyout!.page],
+  // The family's own buy-out: the requirement and where it stands, A's invoiced and B's paid.
+  "/volunteer/pay-instead/[requirementId]/[choice]": (family) => family.buyout!.page,
   "/volunteer/shifts/[id]": () => ["2 of 4 places filled", "Rinse crew"],
   // The shift, the family's name, and its own person on it, checked in or not.
   "/volunteer/check-in/[code]": (family) => ["Rinse crew", family.spec.family.name, ...family.volunteer!.checkIn],

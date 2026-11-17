@@ -143,6 +143,10 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/volunteer/moved-student", names: "all", why: "it is a roster write's, and reads the sign-up list of staff" },
   { module: "@/lib/roster/writes", names: "all", why: "staff changes to the roster in QuickBooks: it reads every family, and sends writes" },
   { module: "@/lib/roster/queue", names: "all", why: "the write queue names every family's waiting changes" },
+  { module: "@/lib/buyouts/staff", names: "all", why: "the Reconciliation list of every family's buy-outs that need a look" },
+  { module: "@/lib/buyouts/daily-check", names: "all", why: "the worker's check of every family's buy-out invoices" },
+  { module: "@/lib/buyouts/setup", names: "all", why: "the staff choice of a requirement's buy-out price and item" },
+  { module: "@/lib/buyouts/moved", names: "all", why: "it is a roster write's: a moved student's buy-outs" },
 ];
 
 describe("every page guards itself", () => {
@@ -356,6 +360,10 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/volunteer/credit.ts",
   "src/lib/volunteer/allocation.ts",
   "src/lib/volunteer/check-in.ts",
+  "src/lib/buyouts/rules.ts",
+  "src/lib/buyouts/standing.ts",
+  "src/lib/buyouts/my-buyouts.ts",
+  "src/lib/buyouts/writes.ts",
   "src/app/components/parent-frame.tsx",
   "src/app/not-found.tsx",
 ];

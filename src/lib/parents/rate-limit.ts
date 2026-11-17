@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
 
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
-  | "volunteer_checkin_parent" | "email_request_parent" | "email_confirm_parent";
+  | "volunteer_checkin_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -32,6 +32,10 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // QuickBooks. Nobody changes their address more than once or twice, and a link that met a busy moment is tried again.
   email_request_parent: { max: 5, windowMs: 60 * 60 * 1000 },
   email_confirm_parent: { max: 10, windowMs: 60 * 60 * 1000 },
+  // A guardian choosing to pay instead of volunteering, or switching back (src/lib/buyouts/writes.ts), counted per
+  // person: each press may make or void an invoice in the club's QuickBooks. A family with a few students chooses for
+  // each in a sitting, and may change its mind once or twice; this sits above that.
+  buyout_parent: { max: 10, windowMs: 60 * 60 * 1000 },
 };
 
 /**

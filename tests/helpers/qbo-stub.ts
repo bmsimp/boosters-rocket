@@ -74,6 +74,18 @@ export type QboStub = {
    */
   updateServerFault: { status: number; code: string } | null;
   dropApi: boolean;             // close the connection on every API request without answering: QuickBooks can't be reached
+  /**
+   * The buy-out invoice writes (INVOICE_WRITES in src/lib/quickbooks/client.ts), answered as QuickBooks is understood to
+   * answer them, which has not been checked against a real company. A create (POST .../invoice) adds an invoice to
+   * `invoices`: the next Id from 5001, SyncToken "0", the customer, the lines and the private note sent, TotalAmt and
+   * Balance the line's Amount, an InvoiceLink, and answers `{ Invoice }`. A void (POST .../invoice?operation=void with
+   * Id and SyncToken) needs the stored SyncToken (else 5010), refuses an invoice with anything paid on it with
+   * STUB_PAID_VOID_FAULT (the real code is unconfirmed: INVOICE_WRITES check 6), and sets TotalAmt and Balance to 0.
+   * `failNext`, `rateLimitNext` and `dropApi` apply to them as to every request.
+   */
+  invoiceFault: string | null;    // answer every invoice write with HTTP 400 and this Fault code, making nothing
+  loseInvoiceAnswer: boolean;     // make or void the invoice, then close the connection without answering
+  beforeVoid: ((invoice: Record<string, unknown>) => void) | null; // run on the stored invoice as a void arrives: a payment made in QuickBooks at that moment
   dropToken: boolean;           // close the connection on every token request without answering: Intuit can't be reached
   onApiRequest: ((call: StubCall) => void | Promise<unknown>) | null; // run, and waited for, as each API request arrives, before anything about it is checked: a token revoked at that moment, say
   revokeDelayMs: number;
@@ -85,6 +97,9 @@ export type QboStub = {
    */
   idle(): Promise<void>;
 };
+
+/** The code the stub refuses the void of a paid or part-paid invoice with. QuickBooks' own is not known yet (INVOICE_WRITES check 6). */
+export const STUB_PAID_VOID_FAULT = "6140";
 
 /** A value as a customer update stores it: an empty string clears, in an object too, and an object left with nothing is gone. */
 function withoutEmpty(value: unknown): unknown {
@@ -105,6 +120,7 @@ export async function startQboStub(): Promise<QboStub> {
   const stub = { calls: [], customers: [], types: [], companyName: "Stub Boosters", codes: new Set(), accessTokens: new Set(), refreshTokens: new Set(),
     invoices: [], items: [], oddItemAnswer: null, refuseInQuery: false, oddInvoiceAnswer: null, oddRosterAnswer: null, rateLimitNext: 0, failNext: 0, apiDelayMs: 0, peakApi: 0,
     otherNames: [], inactiveTakesChildren: false, updateFault: null, beforeUpdate: null, loseUpdateAnswer: false, updateServerFault: null, dropApi: false, dropToken: false, onApiRequest: null,
+    invoiceFault: null, loseInvoiceAnswer: false, beforeVoid: null,
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
     let body = "";
@@ -152,6 +168,32 @@ export async function startQboStub(): Promise<QboStub> {
       if (stub.apiDelayMs) await new Promise((r) => setTimeout(r, stub.apiDelayMs));
       if (stub.rateLimitNext > 0) { stub.rateLimitNext--; return json(429, { Fault: { Error: [{ Message: "a throttling message the portal must never store" }] } }); }
       if (stub.failNext > 0) { stub.failNext--; return json(500, { Fault: { Error: [{ Message: "a message the portal must never store" }] } }); }
+      if (call.method === "POST" && /\/invoice$/.test(url.pathname)) {
+        // The buy-out invoice writes (INVOICE_WRITES): a create, or a void with operation=void.
+        if (stub.invoiceFault) return json(400, fault(stub.invoiceFault));
+        let sent: Record<string, unknown>;
+        try { sent = JSON.parse(body) as Record<string, unknown>; } catch { return json(400, fault("2010")); }
+        if (url.searchParams.get("operation") === "void") {
+          const stored = stub.invoices.find((i) => i.Id === sent.Id);
+          if (!stored) return json(400, fault("610"));
+          stub.beforeVoid?.(stored);
+          if (sent.SyncToken !== String(stored.SyncToken ?? "0")) return json(400, fault("5010"));
+          if (Number(stored.Balance) < Number(stored.TotalAmt)) return json(400, fault(STUB_PAID_VOID_FAULT));
+          Object.assign(stored, { TotalAmt: 0, Balance: 0, SyncToken: String(Number(stored.SyncToken ?? 0) + 1), MetaData: { LastUpdatedTime: new Date().toISOString() } });
+          if (stub.loseInvoiceAnswer) { req.socket.destroy(); return; }
+          return json(200, { Invoice: stored, time: new Date().toISOString() });
+        }
+        if (url.searchParams.has("operation") || sent.Id !== undefined) return json(400, fault("2010"));
+        const line = (Array.isArray(sent.Line) ? sent.Line[0] : undefined) as { Amount?: unknown } | undefined;
+        if (typeof (sent.CustomerRef as { value?: unknown } | undefined)?.value !== "string" || typeof line?.Amount !== "number") return json(400, fault("2020"));
+        const next = String(Math.max(5000, ...stub.invoices.map((i) => Number(i.Id)).filter((n) => !Number.isNaN(n))) + 1);
+        const today = new Date().toISOString().slice(0, 10);
+        const made: Record<string, unknown> = { ...sent, Id: next, SyncToken: "0", DocNumber: next, TxnDate: today, DueDate: today, TotalAmt: line.Amount, Balance: line.Amount,
+          InvoiceLink: `https://connect.intuit.com/t/scs-v1-stub-${next}`, MetaData: { CreateTime: new Date().toISOString() } };
+        stub.invoices.push(made);
+        if (stub.loseInvoiceAnswer) { req.socket.destroy(); return; }
+        return json(200, { Invoice: made, time: new Date().toISOString() });
+      }
       if (call.method === "POST") {
         // The customer writes the portal sends. Anything else posted to the API is refused.
         if (!/\/customer$/.test(url.pathname)) return json(400, fault("2010"));
@@ -255,6 +297,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.idle = () => (open === 0 ? Promise.resolve() : new Promise<void>((r) => waitingForIdle.push(r)));
   stub.reset = () => {
     stub.otherNames = []; stub.inactiveTakesChildren = false; stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.updateServerFault = null; stub.dropApi = false; stub.dropToken = false; stub.onApiRequest = null;
+    stub.invoiceFault = null; stub.loseInvoiceAnswer = false; stub.beforeVoid = null;
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
     stub.invoices = []; stub.items = []; stub.oddItemAnswer = null; stub.refuseInQuery = false; stub.oddInvoiceAnswer = null; stub.oddRosterAnswer = null; stub.rateLimitNext = 0; stub.failNext = 0; stub.apiDelayMs = 0; stub.peakApi = 0;
     stub.codes.clear(); stub.accessTokens.clear(); stub.refreshTokens.clear(); stub.failToken = null; stub.failQueryFrom = null; stub.nullQueryBody = false; stub.failRevoke = false; stub.revokeDelayMs = 0; stub.tokenDelayMs = 0; stub.queryDelayMs = 0; stub.companyInfoDelayMs = 0; stub.refreshExpiresIn = 8_640_000;

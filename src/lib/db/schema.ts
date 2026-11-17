@@ -278,6 +278,7 @@ export const familyMoney = pgTable("family_money", {
   customerChecks: jsonb("customer_checks").$type<CustomerCheck[]>(), // what that comparison found, one entry per customer compared
   failedAt: timestamp("failed_at", { withTimezone: true }),
   failedCode: text("failed_code"),                                   // a short code, never a response body
+  staleAt: timestamp("stale_at", { withTimezone: true }),             // a buy-out invoice was made or voided since `read_at`: the next page load reads QuickBooks (src/lib/buyouts/writes.ts)
   updatedAt: updated(),
 });
 
@@ -317,6 +318,17 @@ export type RosterWrite =
   | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string }
   | { op: "move"; role: "student"; qboId: string; syncToken: string; fromFamilyQboId: string; toFamilyQboId: string }
   | { op: "deactivate"; role: RosterRole; qboId: string; syncToken: string };
+/**
+ * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
+ * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company
+ * the queue row names, from the roster cache when the guardian chose; `buyoutId` is the portal's own `buyout.id`, which
+ * the invoice carries in its private note so the portal can find it again.
+ */
+export type BuyoutWrite =
+  | { op: "invoice_create"; buyoutId: string; customerQboId: string; itemQboId: string; units: number; unitCents: number; familyQboId: string }
+  | { op: "invoice_void"; buyoutId: string; invoiceQboId: string; customerQboId: string; familyQboId: string; why: "switched_back" | "student_moved" };
+/** Everything the write queue holds: the staff roster writes and the buy-out invoice writes. */
+export type QueuedWrite = RosterWrite | BuyoutWrite;
 
 /**
  * Staff roster writes that QuickBooks didn't take at the time and may take later (v1 spec §4, §8.4): it was busy, it
@@ -327,7 +339,7 @@ export type RosterWrite =
 export const writeQueue = pgTable("write_queue", {
   id: uuid("id").primaryKey().defaultRandom(),
   realmId: text("realm_id").notNull(),               // the company it is for: never sent to another
-  request: jsonb("request").$type<RosterWrite>().notNull(),
+  request: jsonb("request").$type<QueuedWrite>().notNull(),
   targetQboId: text("target_qbo_id"),                // the customer it changes; null for a create
   familyQboId: text("family_qbo_id"),                // the family it is under or about, for the family's page
   state: text("state", { enum: ["waiting", "stuck", "done", "given_up"] }).notNull().default("waiting"),
@@ -404,7 +416,8 @@ export const requirement = pgTable("requirement", {
   amountUnit: text("amount_unit", { enum: ["shifts", "hours"] }),
   dueOn: date("due_on", { mode: "string" }),
   covers: text("covers", { enum: ["everyone", "chosen"] }).notNull().default("everyone"),
-  itemQboId: text("item_qbo_id"),                      // payment only: the QuickBooks product or service it is met by (src/lib/money/payment-rule.ts)
+  itemQboId: text("item_qbo_id"),                      // payment: the QuickBooks product or service it is met by (src/lib/money/payment-rule.ts); volunteer: what a buy-out is billed with
+  buyoutUnitCents: integer("buyout_unit_cents"),       // volunteer only: a buy-out's price per shift or hour still owed, in cents; null when no buy-out is offered (src/lib/buyouts/)
   position: integer("position").notNull(),
   form: jsonb("form").$type<FormSetting>(),              // the form kind only: the Documenso template and who must sign; null until staff attach one
   formReminders: jsonb("form_reminders").$type<FormReminders>(), // the form kind only: when reminders go (staff Forms page); null for none
@@ -575,6 +588,46 @@ export const volunteerReminder = pgTable("volunteer_reminder", {
   outcome: text("outcome", { enum: ["sent", "failed"] }),
   createdAt: created(),
 }, (t) => [uniqueIndex("volunteer_reminder_kind_key_uq").on(t.kind, t.key)]);
+
+/**
+ * A family's or one student's choice to pay instead of volunteering (v1 spec §11.5), and its QuickBooks invoice: the
+ * only invoice the portal ever creates. `subject_qbo_id` is the family for a per-family requirement and the student for
+ * a per-student one; `customer_qbo_id` is who the invoice is billed to (the family customer, or the student's own), read
+ * from the roster cache for the session's family. The price is fixed when the guardian confirms: credit earned later
+ * does not lower it. One live buy-out at most per requirement and subject (`buyout_live_uq`), so a guardian can never
+ * make two invoices for one requirement. `flag` is set for the treasurer (the daily check, a move, a paid invoice the
+ * portal would not void) and shown on the Reconciliation page. Never expires; a company change deletes every row.
+ */
+export const buyout = pgTable("buyout", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "restrict" }),
+  familyQboId: text("family_qbo_id").notNull(),
+  subjectQboId: text("subject_qbo_id").notNull(),
+  customerQboId: text("customer_qbo_id").notNull(),
+  itemQboId: text("item_qbo_id").notNull(),
+  unitCents: integer("unit_cents").notNull(),
+  units: integer("units").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  // Where it stands (src/lib/buyouts/rules.ts). All but voided and refused are live: one at most per requirement and subject.
+  state: text("state", { enum: ["being_invoiced", "invoiced", "paid", "being_voided", "voided", "refused", "stuck"] }).notNull(),
+  endReason: text("end_reason", { enum: ["switched_back", "student_moved"] }), // why a voided one was voided
+  invoiceQboId: text("invoice_qbo_id"),
+  invoiceSyncToken: text("invoice_sync_token"),
+  realmId: text("realm_id").notNull(),                 // the QuickBooks company the invoice is in
+  chosenBy: uuid("chosen_by").notNull(),               // parent.id
+  chosenByLabel: text("chosen_by_label"),
+  lastCode: text("last_code"),                         // the last short code from QuickBooks, never its words
+  flag: text("flag", { enum: ["missing", "other_customer", "student_moved", "paid_before_void", "void_refused", "given_up"] }), // for staff, on Reconciliation (src/lib/buyouts/staff.ts)
+  flaggedAt: timestamp("flagged_at", { withTimezone: true }),
+  createdAt: created(),
+  updatedAt: updated(),
+}, (t) => [
+  uniqueIndex("buyout_live_uq").on(t.requirementId, t.subjectQboId).where(sql`state not in ('voided', 'refused')`),
+  index("buyout_family_ix").on(t.familyQboId),
+  index("buyout_state_ix").on(t.state),
+  check("buyout_amount", sql`${t.unitCents} > 0 and ${t.units} > 0 and ${t.amountCents} = ${t.unitCents} * ${t.units}`),
+]);
+export type BuyoutState = (typeof buyout.$inferSelect)["state"];
 
 /* ---- Forms signed in Documenso (v1 spec §9; docs/superpowers/specs/2026-11-15-documenso-verification.md) ---- */
 

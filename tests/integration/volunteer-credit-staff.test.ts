@@ -333,7 +333,7 @@ describe("a different QuickBooks company", () => {
     expect(await db.select().from(volunteerSignup)).toEqual([]);
     expect((await db.select().from(volunteerShift)).map((s) => s.checkinCode)).toEqual(codes);
     expect((await audits("volunteer.signups.cleared"))[0]!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 0,
-      credits: 2, removedCredits: 1, reminders: 1 });
+      credits: 2, removedCredits: 1, reminders: 1, buyouts: 2 });
   });
 });
 

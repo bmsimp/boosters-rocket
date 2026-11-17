@@ -405,6 +405,6 @@ describe("a change of QuickBooks company", () => {
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: { door: "staff", id: null, label: "admin" }, ip: null })).toBe(true);
     expect(await signups()).toEqual([]);
     const [audit] = await audits("volunteer.signups.cleared");
-    expect(audit!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 1, credits: 2, removedCredits: 0, reminders: 0 });
+    expect(audit!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 1, credits: 2, removedCredits: 0, reminders: 0, buyouts: 2 });
   });
 });

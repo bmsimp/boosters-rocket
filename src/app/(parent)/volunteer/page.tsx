@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { requireParentPage } from "@/lib/guards";
+import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
+import { formatMoney } from "@/lib/money/cents";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { loadMySeason, type MySeason } from "@/lib/seasons/my-season";
 import type { Line } from "@/lib/seasons/progress";
@@ -37,8 +39,10 @@ export default async function VolunteerPage() {
   if (!family) {
     return <main className="wrap single"><h1 className="page-title">Volunteer</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
-  const [mine, season, credit] = await Promise.all([loadMyVolunteering(ctx), loadMySeason(ctx, family.students), loadMyCredit(ctx, family.students ?? [])]);
+  const [mine, season, credit, buyouts] = await Promise.all([loadMyVolunteering(ctx), loadMySeason(ctx, family.students), loadMyCredit(ctx, family.students ?? []), loadMyBuyouts(ctx, family)]);
   const asked = volunteerLines(season);
+  // Paying instead: offered on what isn't met yet, and shown wherever a buy-out stands (src/lib/buyouts/my-buyouts.ts).
+  const payInstead = buyouts.filter((b) => b.buyout !== null || (b.may === "choose" && b.quote.ok));
   return (
     <main className="wrap single volunteer-page">
       <h1 className="page-title">Volunteer</h1>
@@ -47,6 +51,22 @@ export default async function VolunteerPage() {
       {asked.length > 0 && (
         <section className="box" aria-labelledby="asked-h"><h2 id="asked-h">What the club asks</h2>
           {asked.map((a) => <div className="family-reqs" key={a.who}><h3>{a.who}</h3><RequirementLines lines={a.lines} today={season!.today} /></div>)}
+        </section>
+      )}
+
+      {payInstead.length > 0 && (
+        <section className="box" aria-labelledby="pay-h"><h2 id="pay-h">Pay instead of volunteering</h2>
+          <p>If you can&apos;t make the shifts, you can pay for what&apos;s left instead. The club sends an invoice to your Payments page.</p>
+          <ul className="lines">{payInstead.map((b) => (
+            <li key={`${b.requirementId}-${b.key}`}><div>
+              <span className="what">{b.title}</span>
+              <span className="when">{b.who}</span>
+              <span className="state">{b.standing}</span>
+            </div>
+              {b.buyout === null && b.quote.ok
+                ? <Link className="btn btn-club pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>Pay instead of volunteering ({formatMoney(b.quote.amountCents)})<span className="visually-hidden">: {b.title}, {b.who}</span></Link>
+                : <Link className="btn btn-line pay" href={`/volunteer/pay-instead/${b.requirementId}/${b.key}`}>See your buy-out<span className="visually-hidden">: {b.title}, {b.who}</span></Link>}
+            </li>))}</ul>
         </section>
       )}
 

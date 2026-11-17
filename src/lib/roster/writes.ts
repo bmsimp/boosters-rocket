@@ -16,6 +16,7 @@ import { reconcileAccess } from "@/lib/parents/reconcile";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
+import { buyoutsForMovedStudent } from "@/lib/buyouts/moved";
 import { getShape, missingTypes, shapeTypeIds, type MembershipShape } from "./shape";
 import { buildRoster, type Cust, type Roster } from "./model";
 import { getRosterSource } from "./source";
@@ -236,6 +237,7 @@ export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fr
   const who = { studentQboId: move.studentQboId, fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId };
   const forms = await formsForMovedStudent(tx, { ...who, actor: o.actor, ip: o.ip });
   const volunteer = await volunteerForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
+  await buyoutsForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
   await writeAudit({ actor: { door: "system", id: null, label: "roster" }, action: "roster.student.move.followed", targetType: "qbo_customer", targetId: move.studentQboId,
     after: { fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId, cause: move.cause,
       formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled } }, tx);
