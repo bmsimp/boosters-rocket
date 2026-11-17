@@ -235,7 +235,9 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
 14. **Display modes.** On Display, try dark, high contrast and the largest text size, then open Home, Volunteer, a
     shift and a form's page.
     **Pass:** the filled account circle on Display is readable against the club color; nothing scrolls sideways, the
-    five tabs keep their words, and moving the focus (a keyboard or switch) never leaves it under the tab bar.
+    five tabs keep their words, and moving the focus (a keyboard or switch) never leaves it under the tab bar. With a
+    keyboard (or a switch), the first Tab on Home shows **Skip to the page** at the top of the club bar with a ring,
+    and Enter moves on past the bar.
     **If not:** a screenshot, with the mode.
 15. **Pay from the installed app.** On Payments, **Pay**.
     **Pass:** QuickBooks' payment page opens in the app's own browser view, with a way back to the portal.
@@ -276,7 +278,8 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     Enter, and Escape returns to it. With high contrast on (Display, or the device's own), a staff form's busy button
     shows a dashed border, not a filled one. In a Windows contrast theme (Settings, Accessibility, Contrast themes), the
     staff tick boxes and radio marks still show which is checked, notices keep their border all round, their icon cell's edge, their word and their icon, and on
-    Home and Display the current set, the checked option and the focus ring are visible.
+    Home and Display the current set, the checked option and the focus ring are visible. In that theme too, the first
+    Tab on a parent page and on a staff page shows **Skip to the page** with its ring, and Enter moves on past the bar.
     **If not:** note the page and what was missing.
 22. **The staff home for someone with one permission.** Give a test staff member a role with one of the staff home's
     four permissions only, and sign in as them.
@@ -341,8 +344,10 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     **I agree to sign electronically**, sign with a finger in the frame. Leave Safari's "Prevent Cross-Site Tracking"
     on (its default).
     **Pass:** the page says "Signed". On the form's certificate page in Documenso, the address is the phone's public
-    address. **If not:** note the phone and the step; a frame that loads and then can't be signed usually means the
-    Forms address isn't exactly Documenso's own.
+    address. With the phone held upright, Documenso's own **Sign** button in its signature dialog isn't hidden under the
+    portal's tab bar (the walk found it can be at 390 wide; `docs/ui-backlog.md`). **If not:** note the phone and the
+    step; a frame that loads and then can't be signed usually means the Forms address isn't exactly Documenso's own. A
+    Sign button under the tab bar: a screenshot, with the phone.
 12. **The guardian's copy.** Open the sealed PDF a guardian got by email, in Outlook or Gmail on a phone, then in Adobe
     Acrobat Reader (or `pdfsig`).
     **Pass:** the attachment opens and the signature panel says the document hasn't changed since it was signed (with
@@ -357,8 +362,10 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     what the page said.
 15. **The signing frame by keyboard.** On a computer, open a form, agree with the keyboard.
     **Pass:** the focus lands in the signing frame, and Tab gets back out of it. **If not:** note where the focus went.
-16. **VoiceOver and TalkBack in a form:** agree to a form and land in the signing frame.
-    **Pass:** the frame is announced, and you can leave it again. **If not:** note what was read.
+16. **VoiceOver and TalkBack in a form** (or Narrator on Windows): open a form's page, agree, and land in the signing
+    frame.
+    **Pass:** the page's title read on arriving is the form's own name (for example "Travel consent"), not "Form"; the
+    frame is announced, and you can leave it again. **If not:** note what was read.
 17. **Optional: staff sign in to Documenso with the club's Entra.** Register a single-tenant app, set the
     `DOCUMENSO_OIDC_*` lines and skip-verify ([Documenso, "Staff sign-in to Documenso"](documenso.md#staff-sign-in-to-documenso-with-the-clubs-own-sign-in-optional)).
     **Pass:** a staff member with a mailbox signs in, one without is refused, and once invited to the club's
@@ -399,14 +406,18 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    **Pass:** the number who could sign in looks right, and you have read each list: addresses under more than one
    family (held until someone answers on Parents), no email address, more than one address on a person's record, nobody
    could sign in. Fix what you can in QuickBooks, **Refresh now** on the Roster, and open the preview again; the rest
-   you know about. (With many names the lists are long; `docs/ui-backlog.md` has it.)
+   you know about. Against the real books, each problem is a table under a heading with its count, and a long one is
+   folded behind **Show all**; it should read well at the club's size.
    **If not:** a family you expected and don't see is a QuickBooks record to check: its type, its parent customer, an
    email address on the parent.
 4. **The daily read of every family's invoices, at the club's size.** The day after connecting, open Health.
    **Pass:** **Every family's invoices** is "Working" and finished within the day. A run longer than a few minutes
    carries on at the next wake by itself. QuickBooks turning the portal away for asking too often shows as a stop with
-   `http_429` in the line's note; there should be none. **If not:**
-   [Health page warnings, every family's invoices](health-warnings.md#every-familys-invoices).
+   `http_429` in the line's note; there should be none. The **Buy-out invoices** and **Volunteer reminders** lines
+   read sensibly too: when the daily check and the reminders last looked, and nothing that needs attention.
+   **If not:**
+   [Health page warnings, every family's invoices](health-warnings.md#every-familys-invoices), and that page's entry
+   for the line.
 5. **The products and services:** on a payment requirement's page, **Read the list from QuickBooks**.
    **Pass:** the club's items are listed and a requirement can name its own. **If not:** note what the page said.
 
@@ -434,8 +445,8 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 
 1. **Settings, Parent sign-ins, step 3, "Welcome emails".** Read the sample email and how many people would be emailed
    now, then **Switch welcome emails on**.
-   **Pass:** they go out a few each minute; Health's mail line stays "Working". From now on, scheduled form reminders
-   and volunteer due-date nudges also go, from 9:00 club time. **If not:** **Switch welcome emails off** stops the rest
+   **Pass:** they go out a few each minute; Health's mail line stays "Working". From now on, scheduled form reminders,
+   volunteer due-date nudges and the payment and checklist reminders also go, from 9:00 club time. **If not:** **Switch welcome emails off** stops the rest
    at once; Health's mail line says why sending failed ([outgoing mail](mail.md)).
 
 ## Choices to confirm
@@ -474,6 +485,9 @@ work another. Any time before the pilot.
     `docker compose run --rm backup --now` the start goes ahead.
 14. Payment and checklist items are reminded 14 and 3 days before their due date, with no schedule of their own, and
     a payment's reminder says its amount only from figures read in the last few minutes, so most say "Not paid yet".
+15. Staff can make a customer inactive from the roster pages, but not active again: that was left out while building
+    because it widens what the portal changes in QuickBooks. Today a customer is made active again in QuickBooks
+    itself, and the next roster refresh brings it back.
 
 ## Results
 

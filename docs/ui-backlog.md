@@ -29,8 +29,8 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
   report it upstream.
 - **The signing frame's Sign button can sit under the tab bar at 390 wide** (2026-11-16, the walk, `/forms/[id]`).
   Documenso's own Sign button in its signature dialog is hidden by the parent tab bar until the frame is scrolled to
-  the top of the screen. To be seen on a real phone first (`docs/runbooks/before-the-first-family.md`, part 3); if
-  so, a small change to the `.sign-frame` iframe's height.
+  the top of the screen. To be seen on a real phone first (`docs/runbooks/before-the-first-family.md`, part 4, item
+  11); if so, a small change to the `.sign-frame` iframe's height.
 
 
 ## Done
