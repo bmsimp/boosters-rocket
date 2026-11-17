@@ -4,10 +4,15 @@ import { guardian, parent, parentEmailChange } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getParentSettings } from "./settings";
 import { endParentSessions, deleteUnusedSigninCodes } from "./sessions";
+import { formsForGoneSigner } from "@/lib/forms/signer-gone";
 
 export type StaffOp = { actor: Actor; ip: string | null; permission?: string };
 
-/** No codes, every session ends. Family links keep their status, so unblocking restores the same access. The reason is for staff only. */
+/**
+ * No codes, every session ends. Family links keep their status, so unblocking restores the same access. The reason is
+ * for staff only. Every unfinished form still waiting for this person's signature is reset and its document withdrawn,
+ * so a signing link the portal handed them earlier can't sign for a family any more (src/lib/forms/signer-gone.ts).
+ */
 export async function blockPerson(parentId: string, rawReason: string, o: StaffOp): Promise<{ ok: true; sessionsEnded: number } | { ok: false; reason: "not_found" | "invalid" }> {
   const reason = rawReason.trim();
   if (!reason || reason.length > 500) return { ok: false, reason: "invalid" };
@@ -18,8 +23,9 @@ export async function blockPerson(parentId: string, rawReason: string, o: StaffO
     await deleteUnusedSigninCodes(p.id, tx);
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, p.id), isNull(parentEmailChange.usedAt)));
     const sessionsEnded = await endParentSessions(p.id, tx);
+    const formsReset = await formsForGoneSigner(tx, { parentId: p.id, familyQboId: null, reason: "blocked", actor: o.actor, ip: o.ip });
     await writeAudit({ actor: o.actor, action: "parent.block", permission: o.permission, targetType: "parent", targetId: p.id,
-      before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: true, reason, sessionsEnded }, ip: o.ip }, tx);
+      before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: true, reason, sessionsEnded, formsReset }, ip: o.ip }, tx);
     return { ok: true as const, sessionsEnded };
   });
 }

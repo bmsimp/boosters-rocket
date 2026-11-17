@@ -37,6 +37,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "forms.request.moved": "A student's form followed them to another family",
   "forms.request.read": "A form's signing record was opened by staff",
   "forms.request.restart": "A form was started again by staff",
+  "forms.request.signer_gone": "A form started again because a guardian it waited for can no longer sign for the family",
   "guardian.seed": "Test parent linked to a family by the proof-of-concept script",
   "guardian.activate": "Parent's family link became active at first sign-in",
   "mail.failed": "An email couldn't be sent",
