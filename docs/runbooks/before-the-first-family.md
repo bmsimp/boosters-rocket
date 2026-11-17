@@ -97,9 +97,9 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
     **Pass:** the page shows all three on. **If not:** note which can't be switched on (an organization's settings may
     decide it).
 12. **Look at the first dependency updates** a few days after pushing (the repository's **Pull requests**).
-    **Pass:** they come grouped (the packages, the Dockerfile's image, the installation's images, the workflows'
-    actions) and CI passes on each. **If not:** close any that fail and tell whoever maintains the portal. Read
-    [updates](updates.md) before merging one that moves Documenso.
+    **Pass:** each comes as its own pull request (one package, image or action at a time) and CI passes on each.
+    **If not:** close any that fail and tell whoever maintains the portal. Read [updates](updates.md) before merging
+    one that moves Documenso.
 
 ## 2. Check the portal's requests in the Intuit sandbox
 
