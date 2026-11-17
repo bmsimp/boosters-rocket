@@ -121,7 +121,8 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     const lock = await holdTheRosterLock();
     const result = await save({ ...SHOWN, phone: NEW_PHONE });
     await lock.release();
-    expect(result).toEqual({ ok: true, message: CONTACT_COPY.saved, current: { values: { ...SHOWN, phone: NEW_PHONE }, version: "1" } });
+    // The Family page reads the cache, so the parent is told it will catch up rather than left to think it didn't take.
+    expect(result).toEqual({ ok: true, message: CONTACT_COPY.savedShownSoon, current: { values: { ...SHOWN, phone: NEW_PHONE }, version: "1" } });
     expect(inQuickBooks(stub, R_PARENT)).toMatchObject({ SyncToken: "1", PrimaryPhone: { FreeFormNumber: NEW_PHONE } });
     expect(await cached(R_PARENT)).toMatchObject({ phone: RIVERA.parent.phone, syncToken: "0" });
     expect(await rosterRefreshAsked()).toBe(true);

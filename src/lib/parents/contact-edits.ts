@@ -26,6 +26,8 @@ const WRITE_TIMEOUT_MS = 8_000;
 
 export const CONTACT_COPY = {
   saved: "Saved. The club's books have your new details.",
+  // The cache was left for the worker's next read of the roster (a roster read or a staff change held it).
+  savedShownSoon: "Saved. The club's books have your new details. Your Family page will show them in a few minutes.",
   nothingChanged: "Those are the details the club already has, so there was nothing to change.",
   changed: "Your details changed in the club's books while you were editing, so nothing was saved. Here they are as they stand now. Please make your change again.",
   changedUnseen: "Your details changed in the club's books while you were editing, so nothing was saved. Please open this page again to see them as they stand now.",
@@ -240,7 +242,7 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
     return { ok: false, errors: [CONTACT_COPY.unsure] };
   }
   const updatedAt = isRow(answer.MetaData) && typeof answer.MetaData.LastUpdatedTime === "string" ? Date.parse(answer.MetaData.LastUpdatedTime) : NaN;
-  await db.transaction(async (tx) => {
+  const handedOff = await db.transaction(async (tx) => {
     // A roster refresh holds the roster lock from before it reads QuickBooks until it has stored what it read, so one
     // running now may have read this record before the change, and would put the old phone back over the new one.
     // The parent doesn't wait for it: the cache is left alone and the worker is asked to read the roster again at its
@@ -256,6 +258,7 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown, o: { timeout
     }
     await writeAudit({ actor: actorOf(ctx), action: "parent.contact.save", targetType: "qbo_customer", targetId: record.qboId,
       before: auditValues(before.form.values, change), after: { ...auditValues(after.form.values, change), ...(busy ? { cache: "refresh_asked" } : {}) }, ip: ctx.ip }, tx);
+    return busy;
   });
-  return { ok: true, message: CONTACT_COPY.saved, current: after.form };
+  return { ok: true, message: handedOff ? CONTACT_COPY.savedShownSoon : CONTACT_COPY.saved, current: after.form };
 }
