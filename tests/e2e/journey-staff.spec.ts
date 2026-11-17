@@ -46,7 +46,9 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
   await test.step("starts on the staff home and opens a family from the roster", async () => {
     await page.goto("/staff");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, E2E");
-    await expect(page.locator("[data-today]")).toHaveCount(2);
+    // The seed's waiting and stuck changes; once parent sign-ins are on (parents.spec.ts, in the phone pass), Sam's
+    // held address joins them.
+    await expect(page.locator("[data-today]").filter({ hasText: "stuck on its way to QuickBooks" })).toHaveCount(1);
     await noSidewaysScroll(page);
     await shot(page, "s01-home");
     await staffMenuTo(page, "Families", "Roster");
@@ -110,7 +112,9 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await row.getByText("Waive for Quetzalcoatl Family").click();
     await row.getByLabel(/^Why\?/).fill(WAIVER);
     await row.getByRole("button", { name: "Waive", exact: true }).click();
-    await expect(row).toContainText(WAIVER);
+    // Drawn again from what was saved (the reason typed is in the text box until then, so it can't be the sign).
+    await expect(row.getByRole("button", { name: "Remove waiver" })).toBeVisible();
+    await expect(row.locator(".when")).toContainText(WAIVER);
     await noSidewaysScroll(page);
     await shot(page, "s06-waived");
     await context.addCookies([parentSessionCookie()]);
