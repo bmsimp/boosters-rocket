@@ -3,7 +3,7 @@
 Two things send mail, and each is set up on its own:
 
 - **The portal** sends parents their sign-in codes, welcome emails, reminders and signed copies of forms. It is set up
-  on the portal's setup page (Step 2) and later under **Settings**, **Mail**. Parents can't sign in until it works.
+  on the portal's setup page (Step 3) and later under **Settings**, **Mail**. Parents can't sign in until it works.
 - **Documenso** sends only its own account mail: the confirmation of the first account, password resets and
   invitations to staff. It sends nothing about forms (the portal switches that off on every form). It is set up in
   `deploy/.env`.
@@ -14,11 +14,11 @@ Both can use the same mailbox. Choose a mailbox that belongs to the club, not to
 ## The portal: Microsoft 365
 
 The portal sends through Microsoft 365 as one mailbox, using the staff sign-in app's certificate, and Exchange Online
-lets it send as that mailbox and no other. It needs staff sign-in with Microsoft to be set up first (setup Step 1).
+lets it send as that mailbox and no other. It needs staff sign-in with Microsoft to be set up first (setup Step 2).
 
 1. On a Windows computer with PowerShell 7, install the Exchange Online module once:
    `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
-2. On the setup page's Step 2 (or **Settings**, **Mail**), choose **Microsoft 365** and follow the numbered steps
+2. On the setup page's Step 3 (or **Settings**, **Mail**), choose **Microsoft 365** and follow the numbered steps
    under **Microsoft 365: let the app send as one mailbox**. They have you download the script
    `New-BoosterRocketStaffApp.ps1`, unblock it (`Unblock-File .\New-BoosterRocketStaffApp.ps1`) and run it with
    `-SetUpMail -Mailbox <the club's mailbox>`, signed in as an Exchange administrator.
@@ -34,7 +34,7 @@ lets it send as that mailbox and no other. It needs staff sign-in with Microsoft
 Any mail service that offers SMTP works. You need its server name, port, a username and password, and the address mail
 comes from. The mail service's own help pages give the first two.
 
-1. On the setup page's Step 2 (or **Settings**, **Mail**), choose **SMTP**.
+1. On the setup page's Step 3 (or **Settings**, **Mail**), choose **SMTP**.
 2. Enter the **Host** and **Port**, and choose **Security**: **STARTTLS** for port 587, **TLS** for port 465. The
    portal never sends without encryption.
 3. Enter the **Username**, **Password** and **From address**. Many services need the from address to be the account's

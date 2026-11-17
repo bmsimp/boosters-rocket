@@ -73,7 +73,8 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 - **"Not checked."** Saved, but no call has worked yet: **Settings**, **Forms**, **Check the connection**.
 - **"The last call to Documenso failed."** Parents can't open a form to sign. The note gives the reason in words:
   - "couldn't be reached" or "took too long": `docker compose ps` (is `documenso` `healthy`?), then
-    `<DOCUMENSO_URL>/api/health` from a browser;
+    `<DOCUMENSO_URL>/api/health` from a browser. If both look fine, the machine can't reach its own address: run the
+    two checks in [the first installation, step 5, item 5](first-install.md#5-the-first-start);
   - "refused the API token": the token was deleted, or the forms account was removed or disabled in Documenso. Make a
     new token as the forms account and paste it under **Forms**.
 - **"The saved API token can't be opened with this server's encryption key."** `SETTINGS_ENCRYPTION_KEY` in

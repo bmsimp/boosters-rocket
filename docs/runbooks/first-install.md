@@ -53,7 +53,8 @@ Documenso seals every signed form with a certificate of the club's own. Follow
    chmod 600 .env
    ```
 2. Open `.env` in an editor (`nano .env`). Each line says what it is. Fill in every empty line:
-   - `APP_URL` and `DOCUMENSO_URL`: the two addresses, with `https://` and nothing after the name.
+   - `APP_URL` and `DOCUMENSO_URL`: the two addresses, with `https://` and nothing after the name, not even a `/`
+     (this installation's proxy refuses to start with one, and says which line).
    - `CLUB_TIME_ZONE`: for example `America/Chicago`.
    - `CLIENT_IP_HEADER`: `x-forwarded-for` if you will use this installation's own proxy (step 5). With a proxy of your
      own, see [A proxy of your own](#a-proxy-of-your-own) below.
@@ -104,6 +105,18 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    that names a missing setting means a line of `.env` is still empty.
 4. Check both addresses from your own computer's browser: the portal's address shows the setup page, and
    `<DOCUMENSO_URL>/api/health` shows `"status":"ok"`.
+5. Check that this machine can reach its own two addresses, with either kind of proxy. The portal calls Documenso at
+   `DOCUMENSO_URL`, and Documenso sends its webhook to `APP_URL`, both by their public names, from inside the machine.
+   A browser outside reaching them doesn't prove this: behind a router that doesn't send a machine's own traffic back
+   to it, these calls fail while every browser works. From `~/booster-rocket/deploy`:
+   ```bash
+   docker compose exec app node -e "fetch(process.argv[1] + '/api/health').then(r => console.log(r.status), e => console.log(e.cause?.code ?? e.message))" "<DOCUMENSO_URL>"
+   docker compose exec documenso node -e "fetch(process.argv[1] + '/api/health').then(r => console.log(r.status), e => console.log(e.cause?.code ?? e.message))" "<APP_URL>"
+   ```
+   Each prints `200`. Anything else (a timeout, `ECONNREFUSED`) means the names lead somewhere this machine can't
+   reach from inside. Ask whoever looks after the network to turn on "NAT loopback" (also called "hairpin NAT") on
+   the router, or to make the two names lead to this machine's own address inside the network; with a proxy of your
+   own, ask whoever runs it. Then run both again. Until both print `200`, forms can't be signed.
 
 ## 6. Setup
 
@@ -113,15 +126,17 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    ```
    It prints `Setup code: XXXX-XXXX-XXXX`. Running it again replaces the code.
 2. Open the portal's address in a browser. Enter the code and select **Unlock**.
-3. **Step 1, staff sign-in.** Set up Microsoft, Google or both: the page walks through registering the portal with
+3. **Step 1, the club.** Enter the club's name, its color and its time zone (the zone decides which day it is for
+   everything parents read as due), **Save**, then **Next: staff sign-in**. All three can be changed later under
+   **Settings**, **Club**.
+4. **Step 2, staff sign-in.** Set up Microsoft, Google or both: the page walks through registering the portal with
    them and checks what you paste. The redirect address it shows is built on `APP_URL`.
-4. **Step 2, outgoing mail.** Follow [outgoing mail](mail.md), then **Save** and **Send test email**. The next step
+5. **Step 3, outgoing mail.** Follow [outgoing mail](mail.md), then **Save** and **Send test email**. The next step
    opens only once a test email has gone out.
-5. **Step 3, first Admin.** Enter the email of the person who will be Admin, **Save email**, and sign in as them with
-   Microsoft or Google. Setup closes and the staff home opens: you are signed in as the Admin.
-6. Open **Health** in the staff menu. Every line should be there; [Health page warnings](health-warnings.md) says what
+6. **Step 4, first Admin.** Enter the name and the email of the person who will be Admin, **Save name and email**,
+   and sign in as them with Microsoft or Google. Setup closes and the staff home opens: you are signed in as the Admin.
+7. Open **Health** in the staff menu. Every line should be there; [Health page warnings](health-warnings.md) says what
    each one means. QuickBooks, Forms and parent sign-ins say "Not set up" or "Off" until the next steps.
-7. Open **Club** and set the club's name, color and time zone.
 
 ## 7. The rest of the set-up
 
@@ -158,14 +173,8 @@ Those ports answer on this machine only. Your proxy must, for both:
    repository list the usual ones. Find out what your proxy sets rather than guessing.
 4. Compress responses (gzip or better). Documenso compresses nothing, and its signing page is several megabytes.
 
-The portal and Documenso also call each other at their public addresses (the portal reads Documenso's API, Documenso
-sends its webhook to the portal), so this machine must be able to reach its own two addresses. Check from the machine:
-
-```bash
-docker compose exec app node -e "fetch(process.argv[1] + '/api/health').then(r => console.log(r.status))" "<DOCUMENSO_URL>"
-```
-
-It prints `200`. If it can't connect, the names resolve somewhere this machine can't reach; ask whoever runs the proxy.
+The portal and Documenso also call each other at their public addresses, so run the check in
+[the first start](#5-the-first-start), item 5, once your proxy is in place.
 
 ## Changing a password
 
@@ -184,7 +193,7 @@ page. Saved settings are kept, and Admins stay Admins:
 docker compose run --rm migrate node tools/scripts/setup-code.mjs --reopen
 ```
 
-It prints a new setup code. Open the portal's address, enter it, and fix Step 1.
+It prints a new setup code. Open the portal's address, enter it, and fix Step 2, staff sign-in.
 
 ## Stopping and starting
 
