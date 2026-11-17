@@ -32,6 +32,11 @@ const RUN_LOCK = 7461003;
 
 /** A family that couldn't be read for one of these reasons is counted and passed over; anything else stops the run, to carry on next time. */
 const PASS_OVER = new Set(["bad_answer", "fault", "bad_id", "not_a_family", "http_400"]);
+/**
+ * Runs in a row that may stop at the same family before the next one passes it over: a family whose read always fails
+ * (always too slow, say) would otherwise stop every run there, and the families after it would never be read again.
+ */
+export const STOPS_AT_ONE_FAMILY = 3;
 
 type RunState = {
   /** The job_run row of the run in hand, or null between runs. */
@@ -41,10 +46,14 @@ type RunState = {
   /** Where the run in hand started: after the family an earlier run stopped at, or null from the first. */
   startedAfter: string | null;
   read: number; failed: number;
+  /** Families this run passed over because the runs before it stopped at them (STOPS_AT_ONE_FAMILY). */
+  passedOver?: number;
   /** A staff member asked for a run: the next wake starts it. */
   requested: { by: string; label: string | null; at: string } | null;
+  /** The family the last runs stopped at, and how many runs in a row stopped there. */
+  stoppedAt: { qboId: string; times: number } | null;
 };
-const EMPTY: RunState = { runId: null, after: null, startedAfter: null, read: 0, failed: 0, requested: null };
+const EMPTY: RunState = { runId: null, after: null, startedAfter: null, read: 0, failed: 0, requested: null, stoppedAt: null };
 
 async function getState(tx?: Tx): Promise<RunState> {
   const [row] = await (tx ?? db).select().from(setting).where(eq(setting.key, RUN_KEY));
@@ -53,7 +62,9 @@ async function getState(tx?: Tx): Promise<RunState> {
     runId: typeof v.runId === "number" ? v.runId : null, after: typeof v.after === "string" ? v.after : null,
     startedAfter: typeof v.startedAfter === "string" ? v.startedAfter : null,
     read: typeof v.read === "number" ? v.read : 0, failed: typeof v.failed === "number" ? v.failed : 0,
+    ...(typeof v.passedOver === "number" ? { passedOver: v.passedOver } : {}),
     requested: v.requested && typeof v.requested.by === "string" ? v.requested : null,
+    stoppedAt: v.stoppedAt && typeof v.stoppedAt.qboId === "string" && typeof v.stoppedAt.times === "number" ? { qboId: v.stoppedAt.qboId, times: v.stoppedAt.times } : null,
   };
 }
 async function saveState(state: RunState, tx?: Tx): Promise<void> {
@@ -100,7 +111,8 @@ export type MoneyJobResult = { ran: false } | { ran: true; finished: boolean; ok
  *
  * A family whose answer is refused (an odd answer, an id that can't be sent) is counted and passed over. Anything else
  * (QuickBooks unreachable, slow or refusing, the connection gone, another company) ends the run as failed, saying how
- * far it got: the next run, 15 minutes later, carries on from the family it stopped at. One audit row per run, when it
+ * far it got: the next run, 15 minutes later, carries on from the family it stopped at. When STOPS_AT_ONE_FAMILY runs
+ * in a row have stopped at the same family, the next one passes it over, counted as not read. One audit row per run, when it
  * ends. Nothing here runs twice at once: a second caller finds the lock taken and does nothing.
  */
 export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: number } = {}): Promise<MoneyJobResult> {
@@ -120,7 +132,7 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
       if (!conn.connected || conn.needsAdmin || shape === null || source === null || source !== c?.realmId) return { ran: false };
       const [run] = await db.insert(jobRun).values({ job: MONEY_JOB, startedBy: state.requested?.by ?? "worker" }).returning();
       // A run that stopped part way left `after`: this one carries on from there.
-      state = { ...state, runId: run!.id, startedAfter: state.after, read: 0, failed: 0 };
+      state = { ...state, runId: run!.id, startedAfter: state.after, read: 0, failed: 0, passedOver: undefined };
       await saveState(state);
     }
     const runId = state.runId!;
@@ -134,20 +146,22 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
     // A run can be ended from outside while it reads (a change of QuickBooks company ends it and forgets its place):
     // then it writes nothing more, neither its place nor its outcome, which would carry the old company's ids over.
     const stillOpen = async () => (await db.select({ id: jobRun.id }).from(jobRun).where(and(eq(jobRun.id, runId), isNull(jobRun.outcome)))).length > 0;
-    const finish = async (outcome: "ok" | "failed", detail: string, after: string | null, code?: string) => {
+    const finish = async (outcome: "ok" | "failed", detail: string, after: string | null, code?: string, stoppedAt: RunState["stoppedAt"] = null) => {
       await db.transaction(async (tx) => {
         const ended = await tx.update(jobRun).set({ finishedAt: new Date(), outcome, detail }).where(and(eq(jobRun.id, runId), isNull(jobRun.outcome))).returning({ id: jobRun.id });
         if (ended.length === 0) return;
-        await saveState({ ...EMPTY, after }, tx);
+        await saveState({ ...EMPTY, after, stoppedAt }, tx);
         await writeAudit({ actor: WORKER_ACTOR, action: outcome === "ok" ? "money.read_all" : "money.read_all.failed", targetType: "job_run", targetId: String(runId),
           after: { families: total, read: state.read, couldNotRead: state.failed, ...(carriedOn ? { carriedOnFromAnEarlierRun: true } : {}),
-            ...(code ? { stoppedBy: code } : {}), ...(requestedBy ? { askedBy: { id: requestedBy.by, label: requestedBy.label } } : {}) } }, tx);
+            ...(code ? { stoppedBy: code } : {}), ...(state.passedOver ? { passedOverAfterStops: state.passedOver } : {}),
+            ...(requestedBy ? { askedBy: { id: requestedBy.by, label: requestedBy.label } } : {}) } }, tx);
       });
     };
     const done = () => `Read ${plural(state.read, "family", "families")}${state.failed ? `; ${plural(state.failed, "family", "families")} couldn't be read` : ""}`;
 
     if (unusable) {
-      await finish("failed", `${done()} of ${total}, then stopped: ${STOP_WORDS[unusable]} (${unusable}). The next run carries on from there.`, state.after, unusable);
+      // The connection, not a family: the count of stops at one family is kept as it was.
+      await finish("failed", `${done()} of ${total}, then stopped: ${STOP_WORDS[unusable]} (${unusable}). The next run carries on from there.`, state.after, unusable, state.stoppedAt);
       return { ran: true, finished: true, ok: false };
     }
     const pace = pacer(o.paceMs ?? PACE_MS);
@@ -157,12 +171,21 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
       let outcome: Awaited<ReturnType<typeof readFamilyForRun>>;
       try { outcome = await readFamilyForRun(familyQboId, { pace }); } catch { outcome = { ok: false, code: "unexpected" }; }
       if (!(await stillOpen())) return { ran: true, finished: true, ok: false };
+      let passedOver = false;
       if (!outcome.ok && !PASS_OVER.has(outcome.code)) {
-        const why = STOP_WORDS[outcome.code] ?? "QuickBooks couldn't be read";
-        await finish("failed", `${done()} of ${total}, then stopped: ${why} (${outcome.code.slice(0, 40)}). The next run carries on from there.`, state.after, outcome.code.slice(0, 40));
-        return { ran: true, finished: true, ok: false };
+        const times = state.stoppedAt?.qboId === familyQboId ? state.stoppedAt.times + 1 : 1;
+        if (times < STOPS_AT_ONE_FAMILY) {
+          const why = STOP_WORDS[outcome.code] ?? "QuickBooks couldn't be read";
+          await finish("failed", `${done()} of ${total}, then stopped: ${why} (${outcome.code.slice(0, 40)}). The next run carries on from there.`, state.after, outcome.code.slice(0, 40),
+            { qboId: familyQboId, times });
+          return { ran: true, finished: true, ok: false };
+        }
+        // The runs before this one stopped here too: this one counts the family as not read (its failed try is stamped
+        // on its row, as for any read) and goes on to the families after it.
+        passedOver = true;
       }
-      state = { ...state, after: familyQboId, read: state.read + (outcome.ok ? 1 : 0), failed: state.failed + (outcome.ok ? 0 : 1) };
+      state = { ...state, after: familyQboId, read: state.read + (outcome.ok ? 1 : 0), failed: state.failed + (outcome.ok ? 0 : 1),
+        stoppedAt: passedOver || state.stoppedAt?.qboId === familyQboId ? null : state.stoppedAt, ...(passedOver ? { passedOver: (state.passedOver ?? 0) + 1 } : {}) };
       await saveState(state);
     }
     await finish("ok", `${done()}${carriedOn ? ", carrying on from where the last run stopped" : ""}.`, null);

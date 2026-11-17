@@ -12,7 +12,7 @@ import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboConnection, setting } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
-import { askForMoneyRun, MONEY_JOB, moneyRunView, RUN_KEY, runMoneyJob } from "@/lib/money/sweep";
+import { askForMoneyRun, MONEY_JOB, moneyRunView, RUN_KEY, runMoneyJob, STOPS_AT_ONE_FAMILY } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { resetDb, seedStaff } from "../helpers/db";
 import { connectCompany, invoiceQueries, moneyRow, stubInvoice as inv } from "../helpers/money";
@@ -117,6 +117,33 @@ describe("the worker's read of every family", () => {
     stub.calls.length = 0;
     await runMoneyJob({ paceMs: 0, now: later(25 * HOUR) });
     expect(invoiceQueries(stub)).toHaveLength(3);
+  });
+
+  // The roadmap's known gap from step 4: a family whose read always failed stopped every run at it, and the families
+  // after it were never read again.
+  it(`stops at a family whose read keeps failing ${STOPS_AT_ONE_FAMILY - 1} runs in a row at most: the next passes it over, counted, and reads the rest`, async () => {
+    await threeFamilies();
+    // Every read of family 20's invoices finds QuickBooks out of reach; everything else answers.
+    stub.onApiRequest = (c) => { stub.dropApi = c.path.endsWith("/query") && (c.query.get("query") ?? "").includes("'20'"); };
+    let at = 0;
+    for (let stop = 1; stop < STOPS_AT_ONE_FAMILY; stop++) {
+      expect(await runMoneyJob({ paceMs: 0, now: later(at) })).toEqual({ ran: true, finished: true, ok: false });
+      expect((await runs()).at(-1)!.detail).toMatch(/then stopped: QuickBooks couldn't be read \(\w+\)\. The next run carries on from there\.$/);
+      at += 16 * MINUTE;
+    }
+    stub.calls.length = 0;
+    expect(await runMoneyJob({ paceMs: 0, now: later(at) })).toEqual({ ran: true, finished: true, ok: true });
+    expect(invoiceQueries(stub).map((q) => /'(\d+)'/.exec(q!)![1])).toEqual(["20", "30"]);
+    expect((await runs()).at(-1)).toMatchObject({ outcome: "ok", detail: "Read 1 family; 1 family couldn't be read, carrying on from where the last run stopped." });
+    expect((await audits("money.read_all")).map((r) => r.after)).toEqual([{ families: 3, read: 1, couldNotRead: 1, carriedOnFromAnEarlierRun: true, passedOverAfterStops: 1 }]);
+    expect(await moneyRow("30")).toMatchObject({ totalCents: 0 });
+    expect((await moneyRow("20"))!.readAt).toBeNull();
+    // The next day's run starts from the first family, and stops at 20 again as a first stop: the count began again.
+    expect(await runMoneyJob({ paceMs: 0, now: later(at + 25 * HOUR) })).toEqual({ ran: true, finished: true, ok: false });
+    // A family that answers again clears the count: once 20 can be read, nothing is passed over.
+    stub.onApiRequest = null; stub.dropApi = false;
+    expect(await runMoneyJob({ paceMs: 0, now: later(at + 26 * HOUR) })).toEqual({ ran: true, finished: true, ok: true });
+    expect((await audits("money.read_all")).at(-1)!.after).toEqual({ families: 3, read: 2, couldNotRead: 0, carriedOnFromAnEarlierRun: true });
   });
 
   it("passes over a family whose answer can't be used, counts it, and reads the rest", async () => {
