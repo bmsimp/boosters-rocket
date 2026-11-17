@@ -492,7 +492,7 @@ describe("what surrounds the parent pages", () => {
 
   it("the not-found page keeps the club bar and the tabs for a signed-in parent, and is plain for anyone else", async () => {
     const { a, b } = await seedTwoFamilies();
-    const READY = "This part of the portal isn";
+    const READY = "We can&#x27;t find that page";
     asParent(a.identity);
     const signedIn = await renderPage(NotFound);
     expect(signedIn).toContain(READY);
@@ -510,7 +510,11 @@ describe("what surrounds the parent pages", () => {
   it("the not-found page shows a visitor with no session nothing but its words", async () => {
     await seedTwoFamilies();
     const html = await renderPage(NotFound);
-    expect(html).toContain("This part of the portal isn");
+    expect(html).toContain("We can&#x27;t find that page");
+    // True for every cause, and never that the page is still to be built: every parent page is.
+    expect(html).toContain("The link may be out of date");
+    expect(html).toContain("ask the person running the shift");
+    expect(html).not.toMatch(/ready yet|still building/);
     expect(html).not.toMatch(/class="bar"|class="tabs"|Alderquist|Brackenmoor/);
   });
 });

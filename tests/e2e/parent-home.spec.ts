@@ -8,7 +8,7 @@ import { PARENT_NAV } from "../../src/app/components/parent-nav";
 // she could switch to. Nothing here changes the session or the roster, so both passes of the run find them as seeded.
 // The run has a phone pass and a desktop pass (playwright.config.ts): the tabs lead on a phone, the top nav at 760px and wider.
 const STUDENTS = ["Xochitl Quetzalcoatl", "Yaretzi Quetzalcoatl"];
-const NOT_READY = "This part of the portal isn't ready yet";
+const NOT_FOUND = "We can't find that page";
 const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 760;
 const mainNav = (page: Page) => page.locator(isPhone(page) ? "nav.tabs" : "nav.top-nav");
 const noSidewaysScroll = async (page: Page) =>
@@ -107,13 +107,13 @@ test("every tab and top-nav link leads to a real page", async ({ page }) => {
     // Asked for directly: a page, not the not-ready page.
     const res = await page.goto(href);
     expect(res?.status(), href).toBe(200);
-    await expect(page.getByRole("heading", { level: 1 })).not.toHaveText(NOT_READY);
+    await expect(page.getByRole("heading", { level: 1 })).not.toHaveText(NOT_FOUND);
     // Reached by its tab from Home.
     await page.goto("/");
     await mainNav(page).getByRole("link", { name: label, exact: true }).click();
     await expect(page).toHaveURL((url) => url.pathname === href);
     await expect(mainNav(page).getByRole("link", { name: label, exact: true })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { level: 1 })).not.toHaveText(NOT_READY);
+    await expect(page.getByRole("heading", { level: 1 })).not.toHaveText(NOT_FOUND);
     await noSidewaysScroll(page);
   }
 });
@@ -157,7 +157,7 @@ test("a signed-in parent who asks for a page that doesn't exist keeps the club b
     if (existsSync(`${PARENT_DIR}${path}/page.tsx`)) continue;
     const res = await page.goto(path);
     expect(res?.status(), path).toBe(404);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(NOT_READY);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(NOT_FOUND);
     await expect(page.locator("header.bar .club")).toHaveText("E2E Boosters");
     await expect(page.getByRole("link", { name: "Your account and display settings, Zelda Quetzalcoatl" })).toBeVisible();
     await expect(page.getByText("Viewing Quetzalcoatl Family.")).toBeVisible();

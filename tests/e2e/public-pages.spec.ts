@@ -29,11 +29,11 @@ test("no horizontal scroll on the sign-in page", async ({ page }) => {
   expect(overflow).toBe(false);
 });
 
-test("pages that aren't built yet get the plain not-ready page, not the framework default", async ({ page }) => {
+test("an address with no page gets the portal's own not-found page, not the framework default", async ({ page }) => {
   for (const path of ["/no-such-page"]) {
     const res = await page.goto(path);
     expect(res?.status()).toBe(404);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("This part of the portal isn't ready yet");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("We can't find that page");
     expect(await page.content()).not.toContain("Zelda");
   }
 });
