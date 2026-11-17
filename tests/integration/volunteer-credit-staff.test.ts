@@ -132,6 +132,8 @@ describe("a shift's check-in sheet", () => {
     const html = await renderPage(CheckInSheetPage, { params: { shiftId: shift.id } });
     const address = `${env.APP_URL.replace(/\/+$/, "")}/volunteer/check-in/${shift.checkinCode}`;
     expect(textOf(html)).toContain(`Or open: ${address}`);
+    // The address is long and random, so the sheet also says what to do when a phone can't scan.
+    expect(textOf(html)).toContain("If your phone can't scan the code, tell the person running the shift: they can record your check-in for you.");
     expect(textOf(html)).toContain("Marching band car wash");
     expect(textOf(html)).toContain("9:00 am to noon");
     expect(html).toMatch(/<svg class="checkin-qr"[^>]*viewBox="0 0 \d+ \d+"[^>]*>/);

@@ -32,6 +32,7 @@ export default async function CheckInSheetPage({ params }: { params: Promise<{ s
         <QrCode text={address} label={`Check-in code for ${sheet.event}, ${sheet.timeWords}`} />
         <p>Scan this with your phone&apos;s camera, sign in, and check in everyone from your family who is helping on this shift. The code opens your phone&apos;s web browser, so if you use the portal as an app, sign in there in your browser.</p>
         <p className="checkin-address">Or open: {address}</p>
+        <p>If your phone can&apos;t scan the code, tell the person running the shift: they can record your check-in for you.</p>
         <p className="hint">Check-in opens half an hour before the shift starts and closes when it ends.</p>
       </section>
       <section className="box checkin-tools" aria-labelledby="tools-h"><h2 id="tools-h">This code</h2>
