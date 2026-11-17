@@ -29,6 +29,8 @@ const NOT_AUDITED: Record<string, string> = {
   "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders and the buy-out check last ran, and their counts, for the Health page; what they send or change is audited",
   // Rows a page load makes so that something has an id: nothing is sent or signed.
   "src/lib/forms/my-forms.ts#loadMyForms": "a placeholder: the family's signature requests are made, not opened and with nothing sent, the first time its Forms page is read, so each has an id; the open that makes a document is audited (form.document.create)",
+  // A session's own upkeep.
+  "src/lib/parents/sessions.ts#renewParentSession": "a session's expiry pushed forward while the parent keeps using it; signing in, signing out and ending sessions are audited",
   // Rate-limit counts.
   "src/lib/parents/rate-limit.ts#takeRateLimit": "rate-limit counts: one row per try, cleaned up when they expire (CLEANED_TABLES); a refusal is audited by its caller",
   // Claims: a row held so that two requests or two runs never do one thing twice.
@@ -44,7 +46,8 @@ const NOT_AUDITED: Record<string, string> = {
 type Unit = { key: string; exported: boolean; takesTx: boolean; calls: Set<string>; callers: Set<string>; writes: string[] };
 
 function scan(): Map<string, Unit> {
-  const tables = new Set([...readFileSync(path.resolve("src/lib/db/schema.ts"), "utf8").matchAll(/export const (\w+) = pgTable\(/g)].map((m) => m[1]!));
+  // The tables of the schema: each pgTable, and the Better Auth tables, made inside authTables() and exported one by one.
+  const tables = new Set([...readFileSync(path.resolve("src/lib/db/schema.ts"), "utf8").matchAll(/export const (\w+) = (?:pgTable\(|(?:staff|parent)Auth\.\w+;)/g)].map((m) => m[1]!));
   const SQL_WRITE = /^\s*(insert\s+into|update\s+\w+\s+set|delete\s+from)\b/i;
   const isFn = (n: ts.Node): n is ts.FunctionLikeDeclaration =>
     ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n);
@@ -152,7 +155,9 @@ describe("every write to the database has its audit row", () => {
   it("finds the writes in the source", () => {
     expect(writing.length).toBeGreaterThan(120);
     // A few of each kind: a drizzle write in an audited function, one in a helper given the caller's transaction, and SQL.
-    for (const known of ["src/lib/parents/people.ts#blockPerson", "src/lib/forms/consent.ts#recordConsent", "src/lib/parents/switches.ts#setWelcome", "src/lib/parents/sessions.ts#endParentSessions"]) {
+    for (const known of ["src/lib/parents/people.ts#blockPerson", "src/lib/forms/consent.ts#recordConsent", "src/lib/parents/switches.ts#setWelcome", "src/lib/parents/sessions.ts#endParentSessions",
+      // A Better Auth table, exported one by one from authTables() rather than made with pgTable.
+      "src/lib/parents/sessions.ts#renewParentSession"]) {
       expect(writing.map((u) => u.key), known).toContain(known);
     }
     expect(auditing().has("src/lib/parents/people.ts#blockPerson")).toBe(true);
