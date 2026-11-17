@@ -16,7 +16,8 @@ import { runCheckAction } from "@/app/staff/(app)/settings/quickbooks/check/acti
 import CheckRequestsPage from "@/app/staff/(app)/settings/quickbooks/check/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import { AccessDenied } from "@/lib/guards";
-import { EXPECTATIONS } from "@/lib/quickbooks/sandbox-check/expectations";
+import { EXPECTATIONS, notRunWords } from "@/lib/quickbooks/sandbox-check/expectations";
+import { lastCheck, lastCheckWords } from "@/lib/quickbooks/sandbox-check/view";
 import { runSandboxCheck } from "@/lib/quickbooks/sandbox-check/run";
 import {
   checkCreateCustomer, checkCreateInvoice, checkMove, checkRename, checkSetActive, checkUpdateContact, checkUpdateEmail, checkVoidInvoice, type CheckRun,
@@ -26,6 +27,7 @@ import { refreshRoster } from "@/lib/roster/refresh";
 import { resetDb, seedStaff } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { REALM, staffWith, WORKER } from "../helpers/roster-writes";
+import { holdTheRosterLock } from "../helpers/reconcile";
 import { checkCompany, lastRun, readInvoice, recordsOf } from "../helpers/sandbox-check";
 import { seedSignedInParent } from "../helpers/parent";
 
@@ -134,7 +136,6 @@ const CASES: Case[] = [
   { name: "an invoice has no due date", set: (s) => { s.invoices.push(readInvoice("903", "10", { DueDate: undefined })); }, fails: ["invoice_fields"] },
   { name: "an invoice line names a product that isn't on the list", set: (s) => { s.invoices.push(readInvoice("903", "10", { Line: [{ DetailType: "SalesItemLineDetail", Amount: 5, SalesItemLineDetail: { ItemRef: { value: "99" } } }] })); }, fails: ["invoice_items"] },
   { name: "pay links are on another host", set: (s) => { s.quirks.invoiceLinkHost = "pay.example.net"; }, fails: ["pay_links"] },
-  { name: "the check's invoice carries no pay link", set: (s) => { s.quirks.invoiceLinkHost = null; }, fails: ["pay_links"] },
   { name: "no balance comes with a customer", set: (s) => { s.quirks.balances = false; }, fails: ["balance_with_jobs", "own_balance"] },
   { name: "a create leaves out the customer type", set: (s) => { s.quirks.createDrops = ["CustomerTypeRef"]; }, fails: ["create_family"] },
   { name: "a student isn't billed with its family", set: (s) => { s.quirks.createDrops = ["BillWithParent"]; }, fails: ["create_student"] },
@@ -199,6 +200,15 @@ describe("each request read as not answering as the portal expects", () => {
     expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
     const { byKey } = await lastRun();
     expect(byKey.invoices_list_form).toMatchObject({ outcome: "as_expected", learned: { form: "one_at_a_time", refusal: "http_400" } });
+  });
+
+  it("notes, and doesn't fail, a company that gives no Pay link: QuickBooks gives one only when it takes payments online", async () => {
+    await checkCompany(stub);
+    stub.quirks.invoiceLinkHost = null;
+    expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
+    const { byKey } = await lastRun();
+    expect(byKey.pay_links).toMatchObject({ outcome: "learned", code: "no_link", learned: { ownLinked: false } });
+    expect(EXPECTATIONS.find((x) => x.key === "pay_links")!.learned(byKey.pay_links!.learned)).toContain("this company may not");
   });
 
   it("notes what QuickBooks does about inactive customers either way", async () => {
@@ -340,10 +350,75 @@ describe("a run cut off part way", () => {
     expect(await audits("quickbooks.check.records.cleared")).toHaveLength(1);
   });
 
+  it("closes the name-in-use create whose answer was lost as making nothing, makes the rest inactive, and the next run passes", async () => {
+    await checkCompany(stub);
+    // The connection drops on the create that names family A a second time: the name the check already owns.
+    let familyA = 0;
+    stub.onApiRequest = (c) => {
+      stub.dropApi = false;
+      if (c.method === "POST" && /family A"/.test(c.body) && !/"Id"/.test(c.body) && ++familyA === 2) stub.dropApi = true;
+    };
+    expect(await run()).toMatchObject({ ok: true, outcome: "stopped" });
+    const { run: first } = await lastRun();
+    expect(first.stopCode).toBe("unreachable");
+    const rows = await recordsOf(first.id);
+    expect(rows.filter((m) => m.closedAt === null)).toEqual([]);
+    expect(rows.filter((m) => m.qboId === null).map((m) => m.lastCode)).toEqual(["name_of_listed"]);
+    expect(checkCustomers().filter((c) => c.Active !== false)).toEqual([]);
+    stub.onApiRequest = null; stub.dropApi = false;
+    expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
+  });
+
+  it("closes an earlier run's lost create that no customer carries the name of: QuickBooks made nothing", async () => {
+    await checkCompany(stub);
+    const [cut] = await db.insert(qboCheckRun).values({ realmId: REALM, environment: "sandbox", writes: true, tag: "2026-11-01 lost", startedBy: admin.id }).returning();
+    await db.insert(qboCheckRecord).values({ runId: cut!.id, realmId: REALM, kind: "family", name: "Booster Rocket check 2026-11-01 lost family A" });
+    expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
+    const [rec] = await recordsOf(cut!.id);
+    expect(rec).toMatchObject({ qboId: null, lastCode: "not_made" });
+    expect(rec!.closedAt).not.toBeNull();
+  });
+
   it("runs one at a time", async () => {
     await checkCompany(stub);
     const [a, b] = await Promise.all([run(false), run(false)]);
     expect([a, b].filter((x) => !x.ok)).toEqual([{ ok: false, reason: "running" }]);
+  });
+});
+
+describe("a run asked to try the changes that tried none is not a pass", () => {
+  it("says some changes weren't tried while a roster refresh holds the lock, on the page, the settings view and Health", async () => {
+    await checkCompany(stub);
+    const lock = await holdTheRosterLock();
+    try {
+      expect(await run()).toMatchObject({ ok: true, outcome: "incomplete" });
+    } finally { await lock.release(); }
+    expect(posts()).toEqual([]);
+    const { run: r, byKey } = await lastRun();
+    expect(r.outcome).toBe("incomplete");
+    for (const k of WRITE_KEYS) expect(byKey[k], k).toMatchObject({ outcome: "not_run", code: "roster_busy" });
+    const words = lastCheckWords(await lastCheck());
+    expect(words).not.toContain("every request answered as the portal expects");
+    expect(words).toContain(`${WRITE_KEYS.length} of the changes weren't tried`);
+    asStaff(admin);
+    expect(await renderPage(CheckRequestsPage)).toContain("Finished, but some changes weren&#x27;t tried");
+    expect((await healthReport()).find((l) => l.key === "quickbooks")!.notes).toContain(words);
+  });
+
+  it("says the company has no customer type to make the check's records with", async () => {
+    await checkCompany(stub);
+    stub.types = [];
+    expect(await run()).toMatchObject({ ok: true, outcome: "incomplete" });
+    const { byKey } = await lastRun();
+    expect(byKey.create_family).toMatchObject({ outcome: "not_run", code: "no_types" });
+    expect(notRunWords("no_types")).toContain("no active customer type");
+    expect(posts()).toEqual([]);
+  });
+
+  it("still passes a read-only run of a sandbox company: it wasn't asked to try the changes", async () => {
+    await checkCompany(stub);
+    expect(await run(false)).toMatchObject({ ok: true, outcome: "passed" });
+    expect(lastCheckWords(await lastCheck())).toContain("reads only: every request answered as the portal expects");
   });
 });
 

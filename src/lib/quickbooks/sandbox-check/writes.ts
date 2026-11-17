@@ -69,6 +69,14 @@ async function closeUnmade(run: CheckRun, rowId: string, code: string): Promise<
   await db.update(qboCheckRecord).set({ closedAt: new Date(), lastCode: code.slice(0, 60) }).where(and(eq(qboCheckRecord.id, rowId), isNull(qboCheckRecord.qboId)));
 }
 
+/**
+ * A listed create whose answer was lost, found to have made nothing: its name is a record the check already lists
+ * (`name_of_listed`), or a later run found no customer with it (`not_made`). Closed with no id, as a refused create is.
+ */
+export async function closeLostCreate(run: CheckRun, rowId: string, code: "name_of_listed" | "not_made"): Promise<void> {
+  await closeUnmade(run, rowId, code);
+}
+
 /** Sends a create of a listed record, and records what QuickBooks answered: its id, or that nothing was made. */
 async function create(run: CheckRun, rowId: string, send: () => Promise<Record<string, unknown>>): Promise<Record<string, unknown>> {
   let made: Record<string, unknown>;

@@ -5,6 +5,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin } from "@/lib/quickbooks/endpoints";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { getRosterSource } from "@/lib/roster/source";
+import { untriedChanges } from "./expectations";
 
 /**
  * What the check of the portal's requests shows (./run.ts): whether it can run against the connection now, its runs,
@@ -45,7 +46,7 @@ export async function checkReadiness(): Promise<Readiness> {
 
 export type RunView = {
   id: string; startedAt: string; finishedAt: string | null; startedBy: string | null; environment: QboEnvironment; writes: boolean; tag: string;
-  outcome: "passed" | "not_as_expected" | "stopped" | "cut_off" | null; stopCode: string | null; results: CheckResult[];
+  outcome: "passed" | "not_as_expected" | "incomplete" | "stopped" | "cut_off" | null; stopCode: string | null; results: CheckResult[];
   /** Whether it was run against the company connected now. */
   thisCompany: boolean;
 };
@@ -68,13 +69,13 @@ export async function checkPageView(): Promise<CheckPageView> {
   return { readiness, environment: c?.environment ?? null, latest: runs[0] ?? null, earlier: runs.slice(1), open };
 }
 
-export type LastCheck = { at: string; outcome: "passed" | "not_as_expected" | "stopped" | "cut_off"; environment: QboEnvironment; writes: boolean; notAsExpected: number } | null;
+export type LastCheck = { at: string; outcome: "passed" | "not_as_expected" | "incomplete" | "stopped" | "cut_off"; environment: QboEnvironment; writes: boolean; notAsExpected: number; notTried: number } | null;
 
 /** When the requests were last checked, and how it went: for the QuickBooks settings view and the Health page. */
 export async function lastCheck(): Promise<LastCheck> {
   const [r] = await db.select().from(qboCheckRun).where(isNotNull(qboCheckRun.finishedAt)).orderBy(desc(qboCheckRun.startedAt)).limit(1);
   if (!r?.outcome) return null;
-  return { at: r.finishedAt!.toISOString(), outcome: r.outcome, environment: r.environment, writes: r.writes, notAsExpected: r.results.filter((x) => x.outcome === "not_as_expected").length };
+  return { at: r.finishedAt!.toISOString(), outcome: r.outcome, environment: r.environment, writes: r.writes, notAsExpected: r.results.filter((x) => x.outcome === "not_as_expected").length, notTried: untriedChanges(r.results) };
 }
 
 /** The words for the last check, one sentence, as the settings view and the Health page say it. */
@@ -82,6 +83,7 @@ export function lastCheckWords(l: LastCheck): string {
   if (!l) return "The portal's requests to QuickBooks haven't been checked against a company yet.";
   const against = l.environment === "sandbox" ? (l.writes ? "an Intuit sandbox company, reads and changes" : "an Intuit sandbox company, reads only") : "the club's real books, reads only";
   if (l.outcome === "passed") return `Last checked against ${against}: every request answered as the portal expects.`;
+  if (l.outcome === "incomplete") return `Last checked against ${against}: every request tried answered as the portal expects, but ${l.notTried === 1 ? "1 of the changes wasn't" : `${l.notTried} of the changes weren't`} tried, so the check should be run again.`;
   if (l.outcome === "not_as_expected") return `Last checked against ${against}: ${l.notAsExpected === 1 ? "1 request didn't" : `${l.notAsExpected} requests didn't`} answer as the portal expects.`;
   return `The last check, against ${against}, didn't finish.`;
 }

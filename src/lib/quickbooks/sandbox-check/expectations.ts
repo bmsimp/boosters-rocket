@@ -117,8 +117,9 @@ export const EXPECTATIONS = [
   {
     key: "pay_links", group: "reads", title: "Pay links on invoices",
     expects: `An invoice that can be paid online carries ${LINK} to QuickBooks' own payment page, on intuit.com or a part of it, so the portal can show a Pay button.`,
-    learned: (l) => num(l.withLink) === 0 ? `None of the ${plural(num(l.checked), "invoice", "invoices")} looked at carried ${LINK}.`
-      : `${num(l.withLink)} of ${plural(num(l.checked), "invoice", "invoices")} carried ${LINK}, on ${words(list(l.hosts))}${num(l.unsafe) ? `; ${num(l.unsafe)} of the links weren't to QuickBooks' payment page, so they would get no Pay button` : ""}.`,
+    learned: (l) => `${num(l.withLink) === 0 ? `None of the ${plural(num(l.checked), "invoice", "invoices")} looked at carried ${LINK}.`
+      : `${num(l.withLink)} of ${plural(num(l.checked), "invoice", "invoices")} carried ${LINK}, on ${words(list(l.hosts))}${num(l.unsafe) ? `; ${num(l.unsafe)} of the links weren't to QuickBooks' payment page, so they would get no Pay button` : ""}.`}${l.ownLinked === false
+      ? " The check's own invoice came back without one. QuickBooks gives an invoice a Pay link only when the company takes payments online, so this company may not; that needs no change to the portal." : ""}`,
     ifNot: "Families would see no Pay button for invoices they could pay online.", codeChange: true, where: "INVOICE_INCLUDE in src/lib/quickbooks/client.ts and safePayLink() in src/lib/money/pay-link.ts",
   },
   {
@@ -314,6 +315,7 @@ export const NOT_RUN_WORDS: Record<string, string> = {
   no_item: "Not tried: the company has no active product or service to put on an invoice.",
   no_invoices: "Not tried: no invoice came back to look at.",
   no_customers: "Not tried: the company has no customer to ask about.",
+  no_types: "Not tried: the company has no active customer type to make the check's records with. Add one in QuickBooks, then run the check again.",
   roster_busy: "Not tried: the portal was reading the roster from QuickBooks just then. Run the check again in a minute.",
   stopped: "Not tried: the check stopped before it got here.",
 };
@@ -335,5 +337,9 @@ export const stopWords = (code: string | null): string => STOP_WORDS[code ?? ""]
 /** The words for an outcome, as the page shows it beside each request. */
 export const OUTCOME_WORDS: Record<CheckOutcome, string> = { as_expected: "As expected", not_as_expected: "Not as expected", learned: "Noted", not_run: "Not tried" };
 
-/** A run passed when no request answered other than expected. Requests not tried don't count against it. */
+/** No request answered other than expected. Requests not tried don't count against it, but see untriedChanges(). */
 export const allAsExpected = (results: CheckResult[]): boolean => results.every((r) => r.outcome !== "not_as_expected");
+
+/** How many of the changes weren't tried: a run asked to try them that leaves any untried hasn't shown they work. */
+export const untriedChanges = (results: CheckResult[]): number =>
+  results.filter((r) => r.outcome === "not_run" && EXPECTATIONS.some((x) => x.key === r.key && x.group === "writes")).length;

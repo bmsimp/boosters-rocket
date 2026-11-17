@@ -373,7 +373,8 @@ export type CheckResult = { key: string; outcome: CheckOutcome; code: string | n
 /**
  * One run of the check of the portal's QuickBooks requests (src/lib/quickbooks/sandbox-check/): when, by whom, against
  * which company and environment, and what each request did. The writes run only against an Intuit sandbox company
- * (`writes`). `outcome` is null while it runs; a run found unfinished by a later one is `cut_off`. Kept: a few rows a
+ * (`writes`). `outcome` is null while it runs; a run found unfinished by a later one is `cut_off`; one asked to try the
+ * writes that left any of them untried is `incomplete`, never `passed`. Kept: a few rows a
  * year, read by the check's page and the Health page.
  */
 export const qboCheckRun = pgTable("qbo_check_run", {
@@ -384,7 +385,7 @@ export const qboCheckRun = pgTable("qbo_check_run", {
   tag: text("tag").notNull(),                        // what the check's own records are named after: "2026-11-17 a1b2"
   startedBy: uuid("started_by"),                      // staff_user.id
   startedByLabel: text("started_by_label"),
-  outcome: text("outcome", { enum: ["passed", "not_as_expected", "stopped", "cut_off"] }),
+  outcome: text("outcome", { enum: ["passed", "not_as_expected", "incomplete", "stopped", "cut_off"] }),
   stopCode: text("stop_code"),                        // why a run stopped early: a short code
   results: jsonb("results").$type<CheckResult[]>().notNull().default(sql`'[]'::jsonb`),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),

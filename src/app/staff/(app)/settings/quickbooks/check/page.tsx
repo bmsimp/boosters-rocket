@@ -16,7 +16,8 @@ export const dynamic = "force-dynamic";
 const STATE = { as_expected: "done", learned: "done", not_as_expected: "todo", not_run: "waived" } as const;
 const AGAINST = (r: Pick<RunView, "environment" | "writes">) => (r.environment === "production" ? "The club's real books (reads only)" : r.writes ? "An Intuit sandbox company (reads and changes)" : "An Intuit sandbox company (reads only)");
 const RESULT_WORDS: Record<NonNullable<RunView["outcome"]>, string> = {
-  passed: "Every request answered as the portal expects", not_as_expected: "Some requests didn't answer as the portal expects", stopped: "Stopped before it finished", cut_off: "Cut off before it finished",
+  passed: "Every request answered as the portal expects", not_as_expected: "Some requests didn't answer as the portal expects",
+  incomplete: "Finished, but some changes weren't tried", stopped: "Stopped before it finished", cut_off: "Cut off before it finished",
 };
 
 /** What one request found, in words: what was learned, or why it wasn't tried, and what an unexpected answer means. */
@@ -89,6 +90,7 @@ export default async function CheckRequestsPage() {
             <dt>Result</dt><dd>{latest.outcome === null ? "Still running" : RESULT_WORDS[latest.outcome]}</dd>
           </dl>
           {(latest.outcome === "stopped" || latest.outcome === "cut_off") && <Notice tone="warning" live="none">{stopWords(latest.stopCode)}</Notice>}
+          {latest.outcome === "incomplete" && <Notice tone="warning" live="none">Some of the changes weren&apos;t tried, so this check doesn&apos;t show that they work. Each row under Changing that reads &ldquo;Not tried&rdquo; says why. Once that is put right, run the check again.</Notice>}
           <h3 className="table-head">Reading</h3>
           <Results run={latest} group="reads" caption="What the portal reads from QuickBooks" />
           <h3 className="table-head">Changing (sandbox only)</h3>

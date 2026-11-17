@@ -25,6 +25,7 @@ export const runCheckAction = staffAction(P, async (ctx): Promise<Result> => {
     ok: true,
     message: r.outcome === "passed" ? "The check is done: every request answered as the portal expects. The results are below."
       : r.outcome === "not_as_expected" ? "The check is done, and some requests didn't answer as the portal expects. The results are below."
-        : "The check stopped before it finished. The results below say where and why.",
+        : r.outcome === "incomplete" ? "The check is done, but some changes weren't tried. The results below say which and why; run it again once that is put right."
+          : "The check stopped before it finished. The results below say where and why.",
   };
 });

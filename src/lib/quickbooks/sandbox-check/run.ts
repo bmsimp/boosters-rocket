@@ -15,11 +15,11 @@ import { clubToday } from "@/lib/settings/club";
 import { CONTACT_FIELDS } from "@/lib/parents/contact-fields";
 import { safePayLink } from "@/lib/money/pay-link";
 import { toCents } from "@/lib/money/cents";
-import { allAsExpected, EXPECTATIONS, type ExpectationKey } from "./expectations";
+import { allAsExpected, EXPECTATIONS, untriedChanges, type ExpectationKey } from "./expectations";
 import { checkReadiness } from "./view";
 import {
   checkCreateCustomer, checkCreateInvoice, checkMove, checkRename, checkSetActive, checkUpdateContact, checkUpdateEmail, checkVoidInvoice,
-  noteCloseFailed, recordClosed, recordMade, type CheckKind, type CheckRun,
+  closeLostCreate, noteCloseFailed, recordClosed, recordMade, type CheckKind, type CheckRun,
 } from "./writes";
 
 /**
@@ -42,11 +42,16 @@ import {
 export const CHECK_LOCK = 7461007;
 /** How long a whole run may take before it stops. */
 const RUN_DEADLINE_MS = 5 * 60_000;
+/**
+ * How long making the run's records inactive may take, from when it starts. It has its own time: a run that reached
+ * its deadline still makes what it made inactive, rather than leaving active families for the next roster refresh.
+ */
+const CLEANUP_MS = 2 * 60_000;
 /** The amount of the check's invoice, in cents: one unit at $1.00. */
 const CHECK_UNIT_CENTS = 100;
 
 export type CheckAsk = { staffUserId: string; label: string | null; ip: string | null; writes: boolean };
-export type CheckAnswer = { ok: true; runId: string; outcome: "passed" | "not_as_expected" | "stopped" } | { ok: false; reason: "running" | "not_ready" };
+export type CheckAnswer = { ok: true; runId: string; outcome: "passed" | "not_as_expected" | "incomplete" | "stopped" } | { ok: false; reason: "running" | "not_ready" };
 
 type Raw = Record<string, unknown>;
 const isRow = (v: unknown): v is Raw => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -105,7 +110,9 @@ export async function runSandboxCheck(ask: CheckAsk): Promise<CheckAnswer> {
       stopCode = e instanceof Stopped ? e.code : "unexpected";
     }
     const ordered: CheckResult[] = EXPECTATIONS.map((x) => results.get(x.key) ?? { key: x.key, outcome: "not_run", code: ready.environment === "production" && x.group === "writes" ? "production" : "stopped", learned: {} });
-    const outcome = stopCode ? "stopped" : allAsExpected(ordered) ? "passed" : "not_as_expected";
+    // A run asked to try the changes passes only when it tried every one: one that answered every read as expected but
+    // tried none of the changes (the roster was being read, the company has no customer type or no product) says so.
+    const outcome = stopCode ? "stopped" : !allAsExpected(ordered) ? "not_as_expected" : ask.writes && ready.environment === "sandbox" && untriedChanges(ordered) > 0 ? "incomplete" : "passed";
     const open = await db.select({ id: qboCheckRecord.id }).from(qboCheckRecord).where(and(eq(qboCheckRecord.runId, run.id), isNull(qboCheckRecord.closedAt)));
     // What QuickBooks made: a create it refused is listed with no id, and closed.
     const made = await db.select({ id: qboCheckRecord.id }).from(qboCheckRecord).where(and(eq(qboCheckRecord.runId, run.id), isNotNull(qboCheckRecord.qboId)));
@@ -286,9 +293,12 @@ class Check {
     const present = links.filter((l): l is string => l !== null);
     const unsafe = present.filter((l) => safePayLink(l) === null).length;
     const hosts = [...new Set(present.map(hostOf))].sort().slice(0, 6);
-    const ownLinked = own?.invoice ? safePayLink(own.invoice.InvoiceLink) !== null : null;
-    const outcome: CheckOutcome = unsafe || ownLinked === false ? "not_as_expected" : ownLinked === true || present.length ? "as_expected" : "learned";
-    this.set("pay_links", outcome, { checked: pool.length, withLink: present.length, unsafe, hosts }, ownLinked === false ? "no_link" : null);
+    // A link the portal would refuse is what its code depends on. No link at all is how QuickBooks answers for a company
+    // that doesn't take payments online, which no change to the portal would mend: it is noted, not counted against it.
+    const ownLink = own?.invoice ? (typeof own.invoice.InvoiceLink === "string" && own.invoice.InvoiceLink.trim() ? own.invoice.InvoiceLink.trim() : null) : undefined;
+    const ownUnsafe = typeof ownLink === "string" && safePayLink(ownLink) === null;
+    const outcome: CheckOutcome = unsafe || ownUnsafe ? "not_as_expected" : ownLink === null ? "learned" : ownLink || present.length ? "as_expected" : "learned";
+    this.set("pay_links", outcome, { checked: pool.length, withLink: present.length, unsafe, hosts, ...(ownLink === null ? { ownLinked: false } : {}) }, ownLink === null ? "no_link" : null);
   }
 
   /* ---- Writes: only on records this run makes ---- */
@@ -507,10 +517,10 @@ class Check {
     return first ? { family: first, student: first, parent: first } : null;
   }
 
-  /** Makes every record of this run inactive, and voids its invoice: always, even after a step failed. */
+  /** Makes every record of this run inactive, and voids its invoice: always, even after a step failed or the run's time ran out. */
   private async closeAll(): Promise<void> {
     try {
-      const closed = await closeRecords(this.run, this.run.id);
+      const closed = await closeRecords({ ...this.run, signal: AbortSignal.timeout(CLEANUP_MS) }, this.run.id);
       this.set("all_inactive", closed.open ? "not_as_expected" : "as_expected", closed);
     } catch (e) {
       const stop = stopFor(e);
@@ -563,14 +573,24 @@ async function closeRecords(run: CheckRun, runId: string, customers?: Raw[]): Pr
   const rows = () => db.select().from(qboCheckRecord).where(and(eq(qboCheckRecord.realmId, run.realmId), eq(qboCheckRecord.runId, runId)));
   const ofRun = runId === run.id ? undefined : runId;
   const read = { signal: run.signal, realmId: run.realmId };
-  // A create whose answer was lost: its name is the check's own, and QuickBooks keeps names unique.
+  // A create whose answer was lost: its name is the check's own, and QuickBooks keeps names unique. A customer already
+  // listed as one of the check's records is never taken for it: the name in use is that record's (the check's own
+  // "name already in use" create names one on purpose), so this create made nothing. Nor is a name nobody has, once a
+  // later run looks: QuickBooks made nothing. Each row is settled on its own, so one can't stop the rest being closed.
   const lost = (await rows()).filter((r) => r.qboId === null && r.closedAt === null && r.kind !== "invoice");
   if (lost.length) {
     const list = customers?.length ? customers : await qboQueryAll("Customer", "Active in (true, false)");
     await stillTheCompany(run);
+    const listed = new Set((await db.select({ qboId: qboCheckRecord.qboId }).from(qboCheckRecord)
+      .where(and(eq(qboCheckRecord.realmId, run.realmId), isNotNull(qboCheckRecord.qboId)))).map((r) => r.qboId!));
     for (const r of lost) {
-      const found = list.filter((c) => c.DisplayName === r.name && idOf(c));
-      if (found.length === 1) await recordMade(run, r.id, idOf(found[0]!)!);
+      const named = list.filter((c) => c.DisplayName === r.name && idOf(c));
+      const unlisted = named.filter((c) => !listed.has(idOf(c)!));
+      try {
+        if (unlisted.length === 1) { await recordMade(run, r.id, idOf(unlisted[0]!)!); listed.add(idOf(unlisted[0]!)!); }
+        else if (named.length && !unlisted.length) await closeLostCreate(run, r.id, "name_of_listed");
+        else if (!named.length && ofRun) await closeLostCreate(run, r.id, "not_made");
+      } catch (e) { if (e instanceof QboError && stopFor(e)) throw e; }
     }
   }
   const all = await rows();
