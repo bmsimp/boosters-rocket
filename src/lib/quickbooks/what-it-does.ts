@@ -10,7 +10,8 @@ export const QUICKBOOKS_USE = {
     + "each only when that parent changes it in the portal; "
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive. "
     + "And one kind of invoice: when a guardian chooses to pay instead of volunteering, it creates that invoice, and voids it if they switch back before paying anything on it. "
-    + "It never deletes anything, never changes any other invoice, and never touches payments.",
+    + "It never deletes anything, never changes any other invoice, and never touches payments. "
+    + "In an Intuit sandbox company only, an Admin can also run a check of these requests: it makes a few test records named “Booster Rocket check”, tries each change on them, and makes them inactive at the end.",
 } as const;
 
 /** The audit actions of those changes, for the pages that say when one was last made. */

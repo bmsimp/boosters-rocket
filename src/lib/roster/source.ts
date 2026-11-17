@@ -7,6 +7,7 @@ import { clearSeasonRecords } from "@/lib/seasons/company-change";
 import { clearMoneyRecords } from "@/lib/money/company-change";
 import { clearVolunteerRecords } from "@/lib/volunteer/company-change";
 import { clearFormRecords } from "@/lib/forms/company-change";
+import { clearCheckRecords } from "@/lib/quickbooks/sandbox-check/view";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
 
 export const ROSTER_JOB = "roster.refresh";
@@ -33,7 +34,8 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
  * payment requirement is met by, with the worker's place in its read of every family (`clearMoneyRecords`), every
  * volunteer sign-up (`clearVolunteerRecords`), and every form made for a family to sign (`clearFormRecords`: the
  * requests and the consents with them), and every staff roster write in the queue, waiting or finished, whose ids are
- * that company's (`write_queue`, counted in the audit row). The same company, or a cache that says no company, keeps it all. The caller
+ * that company's (`write_queue`, counted in the audit row), and the records the check of the portal's requests made there
+ * (`clearCheckRecords`). The same company, or a cache that says no company, keeps it all. The caller
  * owns the transaction and holds ROSTER_LOCK.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
@@ -48,6 +50,8 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   await clearSeasonRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await clearMoneyRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await clearFormRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
+  // The records the check of the portal's requests made in that company (src/lib/quickbooks/sandbox-check/).
+  await clearCheckRecords(tx, { actor: o.actor, ip: o.ip });
   await tx.delete(setting).where(eq(setting.key, SHAPE_KEY));
   const writesDeleted = (await tx.delete(writeQueue).returning({ id: writeQueue.id })).length;
   await tx.delete(jobRun).where(o.keepRunId === undefined ? eq(jobRun.job, ROSTER_JOB) : and(eq(jobRun.job, ROSTER_JOB), ne(jobRun.id, o.keepRunId)));
