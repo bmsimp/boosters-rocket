@@ -111,7 +111,7 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
                         ...matrix.forms.map((f, i) => ({ key: f.id, header: f.title, cell: (row: MatrixRow) => <Cell cell={row.cells[i]!} title={f.title} who={row.name} /> })),
                       ]}
                       groups={matrix.families.map((fam) => ({ key: fam.qboId, rows: fam.rows, heading: (
-                        <><span>{fam.name}</span>{writes && <RemindButton label={`Remind ${fam.name}`} run={remindFamilyAction.bind(null, fam.qboId)} />}</>) }))} />
+                        <><span>{fam.name}</span>{writes && fam.remindable && <RemindButton label={`Remind ${fam.name}`} run={remindFamilyAction.bind(null, fam.qboId)} />}</>) }))} />
                   </div>
                 )}
             </section>

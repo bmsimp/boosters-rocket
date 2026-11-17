@@ -40,6 +40,19 @@ import { addToCache, fam, par, seedParentSettings, stu } from "../helpers/roster
 vi.setConfig({ testTimeout: 30_000 });
 type Staff = Awaited<ReturnType<typeof seedStaff>>;
 const NOBODY = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e5f";
+const NOBODY_OWED = "Nobody needs a reminder: everyone has signed, the form was waived, or it isn't ready to sign yet.";
+/**
+ * A form with no template ("Medical release QC31", per family) asked of family A and of a third family, the
+ * Cobblestones, whose every other form is waived or not theirs: their only outstanding form can't be signed yet.
+ */
+const COBBLE = "COBBLE-1";
+async function seedNotReadyForm(): Promise<string> {
+  await addToCache([fam(COBBLE, "Cobblestone Family")]);
+  const travel = await requirementIdOf("Travel consent");
+  await db.insert(requirementProgress).values({ requirementId: travel, subjectQboId: COBBLE, waivedAt: new Date(), waivedReason: "Staff-only reason QC31" });
+  const [{ stepId }] = await db.select({ stepId: requirement.stepId }).from(requirement).where(eq(requirement.id, travel)) as [{ stepId: string }];
+  return seedFormRequirement({ stepId, title: "Medical release QC31", appliesTo: "family", form: null, chosen: [FAMILY_A.family.qboId, COBBLE] });
+}
 const SYSTEM = { actor: { door: "system" as const, id: null, label: "test" }, ip: null };
 const withRole = async (email: string, patterns: string[]): Promise<Staff> => {
   const s = await seedStaff({ email, name: email });
@@ -137,6 +150,29 @@ describe("the matrix", () => {
     expect(student).toContain(FAMILY_A.family.name);
     // Anything it doesn't know in the address is dropped, not guessed at.
     expect(await pageOutcome(SignedFormsPage, { searchParams: { form: "x'; drop", state: "nope", q: ["a", "b"] } })).toHaveProperty("html");
+  });
+});
+
+describe("a form with no template in the matrix", () => {
+  it("reads Not ready yet, has its own filter, and offers no Remind for a family whose only outstanding forms have none", async () => {
+    await seedNotReadyForm();
+    asStaff(writer);
+    const html = await renderPage(SignedFormsPage, { searchParams: {} });
+    const text = textOf(html);
+    expect(text).toContain("Medical release QC31 No template attached yet");
+    expect(text).toContain("Cobblestone Family");
+    expect(html).toContain('<option value="not_ready">Not ready yet</option>');
+    // Not "Not opened yet": nothing can be opened. Family A still has forms a reminder can help with; the Cobblestones don't.
+    const ready = textOf(await renderPage(SignedFormsPage, { searchParams: { state: "not_ready" } })).split("Who has signed").at(-1)!; // the matrix, after the lede's words
+    expect(ready).toContain("Not ready yet");
+    expect(ready).toContain(FAMILY_A.family.name);
+    expect(ready).toContain("Cobblestone Family");
+    expect(ready).not.toContain(FAMILY_B.family.name);
+    const opened = textOf(await renderPage(SignedFormsPage, { searchParams: { state: "not_opened" } })).split("Who has signed").at(-1)!; // the matrix, after the lede's words
+    expect(opened).not.toContain("Cobblestone Family");
+    expect(text).toContain(`Remind ${FAMILY_A.family.name}`);
+    expect(text).toContain(`Remind ${FAMILY_B.family.name}`);
+    expect(text).not.toContain("Remind Cobblestone Family");
   });
 });
 
@@ -248,7 +284,20 @@ describe("reminders", () => {
     expect(r.ok).toBe(false);
     expect(mail.outbox).toEqual([]);
     await seedParentSettings({ signin: true });
-    expect(await remindRequestAction(a.forms!.ids.complete)).toEqual({ ok: true, message: "Nobody needs a reminder: everyone has signed, or the form was waived." });
+    expect(await remindRequestAction(a.forms!.ids.complete)).toEqual({ ok: true, message: NOBODY_OWED });
+  });
+
+  it("sends nothing, now or on a schedule, for a form with no template", async () => {
+    const medical = await seedNotReadyForm();
+    await addToCache([par("COBBLE-P", "Cora Cobblestone", COBBLE, "cora@cobble.example")]);
+    expect(await remindFamilyAction(COBBLE)).toEqual({ ok: true, message: NOBODY_OWED });
+    await db.update(requirement).set({ dueOn: "2026-12-15", formReminders: { before: [7], weeklyAfter: false } }).where(eq(requirement.id, medical));
+    await db.insert(setting).values({ key: "club", value: { timeZone: "America/Chicago" } }).onConflictDoUpdate({ target: setting.key, set: { value: { timeZone: "America/Chicago" } } });
+    await seedParentSettings({ signin: true, welcome: true });
+    expect(await runScheduledReminders(new Date("2026-12-08T15:01:00.000Z"))).toEqual({ rounds: 0, emailed: 0, failed: 0, alreadyToday: 0 }); // 7 days before, after 9 in Chicago
+    expect(await db.select().from(formReminderRound)).toEqual([]);
+    expect(mail.outbox).toEqual([]);
+    expect(await audits("forms.reminder.sent")).toEqual([]);
   });
 
   it("saves a form's schedule, and sends it at the first wake on or after 9 on the club's clock, once, while sign-ins and welcome emails are on", async () => {

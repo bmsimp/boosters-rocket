@@ -21,10 +21,11 @@ export const ATTACH_LIMIT_BYTES = 3_000_000;
 
 /* ---- The staff matrix ---- */
 
-export type CellState = "not_asked" | "not_opened" | "waiting" | "waiting_other" | "sealing" | "signed" | "declined" | "waived";
+export type CellState = "not_asked" | "not_ready" | "not_opened" | "waiting" | "waiting_other" | "sealing" | "signed" | "declined" | "waived";
 /** What staff read in each cell. A requirement that doesn't cover the student has an empty cell. */
 export const CELL_WORDS: Record<CellState, string> = {
   not_asked: "",
+  not_ready: "Not ready yet",
   not_opened: "Not opened yet",
   waiting: "Waiting for a guardian",
   waiting_other: "Waiting for the other guardian",
@@ -34,15 +35,20 @@ export const CELL_WORDS: Record<CellState, string> = {
   waived: "Waived",
 };
 /** The states staff can filter by, in the order the filter lists them. */
-export const FILTER_STATES: readonly Exclude<CellState, "not_asked">[] = ["not_opened", "waiting", "waiting_other", "sealing", "signed", "declined", "waived"];
+export const FILTER_STATES: readonly Exclude<CellState, "not_asked">[] = ["not_ready", "not_opened", "waiting", "waiting_other", "sealing", "signed", "declined", "waived"];
 /** How StateWords draws each: a signed form is done, a waived one waived, the rest still to do. */
 export const cellTone = (s: CellState): "done" | "waived" | "todo" => (s === "signed" ? "done" : s === "waived" ? "waived" : "todo");
 
+/** The cells a reminder can still help: someone has a form they could sign (and haven't). */
+export const REMINDABLE_STATES: readonly CellState[] = ["not_opened", "waiting", "waiting_other", "declined"];
+
 /**
  * One cell: what is recorded for one requirement and one family or student. A signed form reads "Signed" even when it
- * was waived as well; otherwise a waiver comes before the request's own state.
+ * was waived as well; otherwise a waiver comes before the request's own state. A form with no template (`ready`
+ * false) that nothing has been made for yet is "Not ready yet", as parents read it: it can't be opened, let alone
+ * signed. Anything a document has reached is said as it is.
  */
-export function cellState(o: { covered: boolean; waived: boolean; request: { state: SignatureRequestState; signers: readonly Pick<RequestSigner, "signedAt">[] } | null }): CellState {
+export function cellState(o: { covered: boolean; waived: boolean; ready?: boolean; request: { state: SignatureRequestState; signers: readonly Pick<RequestSigner, "signedAt">[] } | null }): CellState {
   if (!o.covered) return "not_asked";
   const state = o.request?.state ?? "not_opened";
   if (state === "complete") return "signed";
@@ -50,7 +56,7 @@ export function cellState(o: { covered: boolean; waived: boolean; request: { sta
   if (state === "signed") return "sealing";
   if (state === "declined") return "declined";
   if (state === "waiting") return o.request!.signers.some((s) => s.signedAt !== null) ? "waiting_other" : "waiting";
-  return "not_opened";
+  return o.ready === false ? "not_ready" : "not_opened";
 }
 
 /* ---- Reminders ---- */
