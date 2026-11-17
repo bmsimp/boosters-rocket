@@ -2,7 +2,7 @@
 import { ActionOutcome } from "@/app/components/notice";
 import { startTransition, useActionState, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
-import { PERMISSION_AREAS, PERMISSION_WORDS, readTwinOf } from "@/lib/permissions/words";
+import { PERMISSION_AREAS, PERMISSION_WORDS, readTwinOf, withReadTwins } from "@/lib/permissions/words";
 import type { Permission } from "@/lib/permissions/registry";
 import { deleteRoleAction, saveRoleChecklistAction } from "./actions";
 
@@ -22,7 +22,9 @@ function Outcome({ state }: { state: Done | null }) {
  */
 export function RoleForm({ role }: { role?: RoleView }) {
   const [name, setName] = useState(role?.name ?? "");
-  const [ticked, setTicked] = useState<Set<Permission>>(new Set(role?.granted ?? []));
+  // Started from what a save writes: a change the role holds brings its "see" permission, ticked here as it will be saved.
+  const [ticked, setTicked] = useState<Set<Permission>>(new Set(withReadTwins(role?.granted ?? [])));
+  const added = withReadTwins(role?.granted ?? []).filter((p) => !(role?.granted ?? []).includes(p));
   const [state, run, pending] = useActionState(async () => {
     const r = await safely(() => saveRoleChecklistAction(role?.id ?? null, name, [...ticked]), failed);
     if (r.ok && !role) { setName(""); setTicked(new Set()); }
@@ -42,6 +44,9 @@ export function RoleForm({ role }: { role?: RoleView }) {
         <input name="name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={60} autoComplete="off" /></label>
       {role?.patterns && (
         <p className="role-patterns" role="note">This role was written with patterns, so it also takes up new permissions by itself as they are added. The ticks below are what it gives today. Saving here keeps exactly these ticks, and the role will then no longer take up new permissions by itself.</p>
+      )}
+      {added.length > 0 && (
+        <p className="role-patterns" role="note">It doesn&apos;t give {added.map((p) => `“${PERMISSION_WORDS[p]}”`).join(" or ")} today, though a change it can make comes with it. Saving gives it.</p>
       )}
       {PERMISSION_AREAS.map((a) => (
         <fieldset key={a.area} className="checks role-area">

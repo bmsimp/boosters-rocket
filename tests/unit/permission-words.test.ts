@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ADMIN_ONLY, GRANTABLE, PERMISSIONS } from "@/lib/permissions/registry";
 import { expandRules } from "@/lib/permissions/rules";
-import { PERMISSION_AREAS, PERMISSION_WORDS, readTwinOf } from "@/lib/permissions/words";
+import { PERMISSION_AREAS, PERMISSION_WORDS, readTwinOf, withReadTwins } from "@/lib/permissions/words";
 import { checklistView, rulesFromChecklist } from "@/lib/permissions/checklist";
 
 describe("every permission has words", () => {
@@ -31,12 +31,21 @@ describe("every permission has words", () => {
   it("knows which Read a ReadWrite brings with it, as the rules do", () => {
     expect(readTwinOf("Settings.Club.ReadWrite")).toBe("Settings.Club.Read");
     expect(readTwinOf("Season.Progress.ReadWrite")).toBe("Season.Progress.Read");
-    expect(readTwinOf("Roster.Family.ReadWrite")).toBeNull(); // Roster.Family.Read doesn't exist
+    // Roster.Family.Read doesn't exist: the roster's changes are made from pages behind Roster.Read, so it comes along.
+    expect(readTwinOf("Roster.Family.ReadWrite")).toBe("Roster.Read");
     expect(readTwinOf("Roster.Read")).toBeNull();
     for (const p of GRANTABLE) {
       const twin = readTwinOf(p);
-      if (twin) expect(expandRules({ include: [p], exclude: [] }).has(twin), p).toBe(true);
+      if (!twin) continue;
+      const saved = rulesFromChecklist([p]);
+      expect(saved.ok && expandRules(saved.rules).has(twin), p).toBe(true);
     }
+  });
+
+  it("starts a role's ticks from what saving writes, so no box reads 'comes with' while it isn't granted", () => {
+    expect(withReadTwins(["Season.Steps.ReadWrite"]).sort()).toEqual(["Season.Steps.Read", "Season.Steps.ReadWrite"]);
+    expect(withReadTwins(["Roster.Family.ReadWrite"]).sort()).toEqual(["Roster.Family.ReadWrite", "Roster.Read"]);
+    expect(withReadTwins(["Roster.Read", "Finance.Balance.Read"])).toEqual(["Roster.Read", "Finance.Balance.Read"]);
   });
 });
 

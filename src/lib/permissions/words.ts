@@ -44,13 +44,33 @@ export const PERMISSION_AREAS: { area: string; permissions: readonly Permission[
 ];
 
 /**
+ * A change whose "see" permission has another name: its pages and actions all need that one too, so the checklist
+ * brings it (the roster's changes are made from the roster pages, behind Roster.Read).
+ */
+const SEE_WITH: Partial<Record<Permission, Permission>> = { "Roster.Family.ReadWrite": "Roster.Read" };
+
+/**
  * The permission a ticked one brings with it: a ReadWrite brings its Read (rules.ts gives X.Read to a role that names
- * X.ReadWrite), so the checklist shows the Read ticked too and saves both, and what is saved is what is granted.
+ * X.ReadWrite), or the "see" permission named in SEE_WITH, so the checklist shows it ticked too and saves both, and
+ * what is saved is what is granted.
  */
 export function readTwinOf(p: Permission): Permission | null {
+  const named = SEE_WITH[p];
+  if (named) return named;
   if (!p.endsWith(".ReadWrite")) return null;
   const twin = `${p.slice(0, -"ReadWrite".length)}Read`;
   return (GRANTABLE as readonly string[]).includes(twin) ? (twin as Permission) : null;
+}
+
+/**
+ * What a checklist save of these permissions writes: each with the permission it brings (readTwinOf). The Roles page
+ * starts its ticks from this, so a role written with patterns that holds a change without its "see" permission shows
+ * what saving will give it, not a box that reads "comes with" while it isn't granted.
+ */
+export function withReadTwins(granted: readonly Permission[]): Permission[] {
+  const out = new Set(granted);
+  for (const p of granted) { const twin = readTwinOf(p); if (twin) out.add(twin); }
+  return [...out];
 }
 
 /** The words for each Admin-only permission, for the Roles page's note on what a role can't be given. */
