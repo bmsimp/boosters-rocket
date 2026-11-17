@@ -32,6 +32,9 @@ test("a parent sees what the family owes, each open invoice, the total and what 
   await expect(lines).toHaveCount(2);
   // Soonest due first: here, the one whose date has passed. Said in words; the color only follows them.
   await expect(lines.nth(0)).toContainText("Invoice QZ-1042");
+  // The portal made it for the family's own buy-out (tests/e2e/buyout-seed.ts), so it says what it pays for; the other doesn't.
+  await expect(lines.nth(0)).toContainText("Paying instead of volunteering: Concession help");
+  await expect(lines.nth(1)).not.toContainText("Paying instead of volunteering");
   await expect(lines.nth(0).locator(".amount")).toHaveText("$100.00");
   await expect(lines.nth(0).locator(".when.late")).toHaveText(/^Was due \S.*\d{4}$/);
   await expect(lines.nth(1)).toContainText("Invoice QZ-1041, Xochitl Quetzalcoatl");

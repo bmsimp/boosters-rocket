@@ -3,6 +3,7 @@ import type { ParentCtx } from "@/lib/guards";
 import type { StoredInvoice } from "@/lib/db/schema";
 import { formatMoney } from "@/lib/money/cents";
 import { loadFamilyMoney, type FamilyMoney, type MoneyFigures } from "@/lib/money/family-money";
+import { buyoutTitleOf, type MyBuyoutInvoices } from "@/lib/money/my-buyout-invoices";
 import { CalendarDate } from "../components/calendar-date";
 import { LocalTime } from "../components/local-time";
 import { DueLine } from "./due-line";
@@ -26,13 +27,19 @@ export async function MoneyBox({ ctx }: { ctx: Pick<ParentCtx, "familyQboId"> })
 const invoiceName = (i: StoredInvoice) => `${i.number ? `Invoice ${i.number}` : "Invoice"}${i.forName ? `, ${i.forName}` : ""}`;
 const payName = (i: StoredInvoice) => `${i.number ? `invoice ${i.number}` : "this invoice"}${i.forName ? ` for ${i.forName}` : ""}`;
 
-function OpenLine({ invoice, today, current, filled }: { invoice: StoredInvoice; today: string; current: boolean; filled: boolean }) {
+/** Under an invoice the portal made for one of the family's own buy-outs: what it pays for. Payments passes them (loadMyBuyoutInvoices). */
+function BuyoutLine({ title }: { title: string | null }) {
+  return title ? <span className="when">Paying instead of volunteering: {title}</span> : null;
+}
+
+function OpenLine({ invoice, today, current, filled, buyouts }: { invoice: StoredInvoice; today: string; current: boolean; filled: boolean; buyouts?: MyBuyoutInvoices }) {
   const amount = formatMoney(invoice.balanceCents, invoice.currency);
   const style = filled ? "btn pay" : "btn btn-line pay";
   return (
     <li>
       <span>
         <span className="what">{invoiceName(invoice)}</span>
+        <BuyoutLine title={buyoutTitleOf(buyouts, invoice)} />
         {invoice.date && <span className="when">Invoice date <CalendarDate iso={invoice.date} /></span>}
         {invoice.dueDate && <DueLine due={invoice.dueDate} today={today} />}
       </span>
@@ -49,7 +56,7 @@ function OpenLine({ invoice, today, current, filled }: { invoice: StoredInvoice;
   );
 }
 
-function Figures({ f, today }: { f: MoneyFigures; today: string }) {
+function Figures({ f, today, buyouts }: { f: MoneyFigures; today: string; buyouts?: MyBuyoutInvoices }) {
   const total = f.currency === null ? null : formatMoney(f.totalCents, f.currency);
   // QuickBooks pays one invoice at a time: the soonest-due one that can be paid gets the filled button.
   const first = f.open.find((i) => i.payLink !== null)?.qboId;
@@ -67,7 +74,7 @@ function Figures({ f, today }: { f: MoneyFigures; today: string }) {
       {f.open.length > 0 ? (
         <>
           <ul className="lines">
-            {f.open.map((i) => <OpenLine key={i.qboId} invoice={i} today={today} current={f.current} filled={i.qboId === first} />)}
+            {f.open.map((i) => <OpenLine key={i.qboId} invoice={i} today={today} current={f.current} filled={i.qboId === first} buyouts={buyouts} />)}
           </ul>
           {total !== null
             ? <div className="sum"><span>Total</span><span className="num">{total}</span></div>
@@ -86,13 +93,16 @@ function Figures({ f, today }: { f: MoneyFigures; today: string }) {
   );
 }
 
-/** What the family owes. `more` adds the way to the Payments page (on Home). */
-export function MoneySection({ money, more = false }: { money: FamilyMoney; more?: boolean }) {
+/**
+ * What the family owes. `more` adds the way to the Payments page (on Home). `buyouts`, the family's own buy-out invoices
+ * (loadMyBuyoutInvoices(ctx.familyQboId)), names each one as the volunteering buy-out it is.
+ */
+export function MoneySection({ money, more = false, buyouts }: { money: FamilyMoney; more?: boolean; buyouts?: MyBuyoutInvoices }) {
   return (
     <section className="box money" aria-labelledby="money-h">
       <h2 id="money-h">{money.familyName ?? "What you owe"}</h2>
       {money.figures
-        ? <Figures f={money.figures} today={money.today} />
+        ? <Figures f={money.figures} today={money.today} buyouts={buyouts} />
         : <p className="help" role="status">We can&apos;t show what you owe right now. Please check back in a little while.</p>}
       {more && <div className="box-foot"><Link className="btn btn-line" href="/payments">See your payments</Link></div>}
     </section>
@@ -100,7 +110,7 @@ export function MoneySection({ money, more = false }: { money: FamilyMoney; more
 }
 
 /** Invoices paid in the last 12 months (the Payments page). Nothing when there are no figures to show. */
-export function PaidSection({ money }: { money: FamilyMoney }) {
+export function PaidSection({ money, buyouts }: { money: FamilyMoney; buyouts?: MyBuyoutInvoices }) {
   if (!money.figures) return null;
   const { paid } = money.figures;
   return (
@@ -112,6 +122,7 @@ export function PaidSection({ money }: { money: FamilyMoney }) {
             <li key={i.qboId}>
               <span>
                 <span className="what">{invoiceName(i)}</span>
+                <BuyoutLine title={buyoutTitleOf(buyouts, i)} />
                 {i.date && <span className="when">Invoice date <CalendarDate iso={i.date} /></span>}
               </span>
               <span className="amount num">{formatMoney(i.totalCents, i.currency)}<span className="paid">Paid</span></span>
