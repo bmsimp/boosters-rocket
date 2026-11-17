@@ -16,8 +16,9 @@ It reads each file back in full before it keeps it, keeps both or neither, keeps
 Documenso's database was in it.
 
 The files are made by the installation's Postgres, version 18. A backup made by Postgres 18 can't be loaded into an
-older Postgres (16 refuses the file); one made by Postgres 16, before the installation moved to 18, loads into 18 as
-any backup does ([updates](updates.md#backups-from-before-and-after-the-move)).
+older Postgres: 16 refuses it, and `scripts/restore.sh` says the file `was made by a newer version of Postgres than
+this server's`, which means the file is fine, not damaged. One made by Postgres 16, before the installation moved to
+18, loads into 18 as any backup does ([updates](updates.md#backups-from-before-and-after-the-move)).
 
 Three things are not in the files, and a backup can't bring the portal back without them. Keep them together,
 somewhere safe that is not this machine (the board's password manager):
