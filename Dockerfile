@@ -37,7 +37,7 @@ COPY drizzle ./drizzle
 COPY scripts/migrate.mjs scripts/seed-poc-guardian.mjs scripts/setup-code.mjs scripts/worker.mjs ./scripts/
 
 FROM node:26-slim AS run
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 TZ=America/Chicago
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 TZ=UTC
 WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
