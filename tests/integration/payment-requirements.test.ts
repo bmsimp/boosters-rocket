@@ -22,6 +22,7 @@ import HomePage from "@/app/(parent)/page";
 import RequirementProgressPage from "@/app/staff/(app)/seasons/progress/[requirementId]/page";
 import SeasonPage from "@/app/(parent)/season/page";
 import RequirementPage from "@/app/staff/(app)/seasons/[id]/requirements/[requirementId]/page";
+import StaffSeasonPage from "@/app/staff/(app)/seasons/[id]/page";
 import { addRequirementAction, createSeasonAction, setTicksAction } from "@/app/staff/(app)/seasons/actions";
 import { chooseItemAction, readItemsAction } from "@/app/staff/(app)/seasons/payment-actions";
 import { resetDb, seedStaff } from "../helpers/db";
@@ -228,6 +229,20 @@ describe("staff choose the product or service from QuickBooks", () => {
     expect(await chooseItemAction(checklist, tag, BAND_FEE)).toEqual({ ok: false, errors: ["Only a payment requirement is met by a product or service."] });
     expect(await chooseItemAction(trip, tag, null)).toMatchObject({ ok: true });
     expect(await itemOf(trip)).toBeNull();
+  });
+
+  it("says on the step's line which payment requirement has no product or service chosen yet, until one is", async () => {
+    const fall = await seeded();
+    setter = await withRole("setter@club.org", ["Season.Steps.*"]);
+    asStaff(setter);
+    const NO_ITEM = "No QuickBooks product or service chosen yet";
+    const step = async () => textOf(await renderPage(StaffSeasonPage, { params: { id: fall.seasonId } }));
+    const before = await step();
+    expect(before.match(new RegExp(NO_ITEM, "g"))).toHaveLength(1);
+    expect(before).toMatch(new RegExp(`Trip deposit Payment · Required · Each family · Everyone ${NO_ITEM}`));
+    await readItemsAction();
+    await chooseItemAction(fall.requirementIds["Trip deposit"]!, await currentRosterTag(), BAND_FEE);
+    expect(await step()).not.toContain(NO_ITEM);
   });
 
   it("is for staff who set seasons up: someone who can only read them can't read the list or choose", async () => {

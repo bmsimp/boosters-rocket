@@ -9,6 +9,7 @@ import { describeRequirement, getSeasonSetup } from "@/lib/seasons/setup";
 import { rosterListsNoStudents } from "@/lib/seasons/subjects";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { Notice } from "@/app/components/notice";
+import { StateWords } from "@/app/components/state-words";
 import { OneButton, RequirementForm, StepForm, TextAction, type KindChoice } from "../forms";
 import {
   addRequirementAction, addStepAction, clearCurrentSeasonAction, moveStepAction, removeStepAction, renameSeasonAction, setCurrentSeasonAction, updateStepAction,
@@ -78,6 +79,8 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
                 <Link className="what" href={`/staff/seasons/${season.id}/requirements/${r.id}`}>{r.title}</Link>
                 <span className="when">{describeRequirement(r)} · {r.covers === "everyone" ? "Everyone" : `A chosen list of ${r.coveredQboIds.length}`}</span>
                 {r.dueOn && <span className="when">Due <CalendarDate iso={r.dueOn} /></span>}
+                {/* A payment is met by invoices carrying its item: until one is chosen on its page, nothing can meet it. */}
+                {r.kind === "payment" && r.itemQboId === null && <span className="when"><StateWords state="todo" words="No QuickBooks product or service chosen yet" /></span>}
                 {seesProgress && <span className="when"><Link href={`/staff/seasons/progress/${r.id}`}>Who has done it</Link></span>}
               </div></li>))}</ul>
           )}
