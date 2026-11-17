@@ -1,0 +1,94 @@
+# Publishes the portal's image when a release is published on GitHub: builds it from the release's commit, runs the
+# same checks as CI's image job (scripts/smoke-image.sh, scripts/check-image-secrets.sh), then pushes it to the GitHub
+# Container Registry as ghcr.io/<owner>/<repository>, tagged with the release's version, the commit it was built from
+# (the Health page shows the same twelve characters) and, unless the release is a pre-release, stable.
+#
+# The owner and the repository come from the workflow's own context, so a fork publishes under its own name. The only
+# credential is the token GitHub gives this run, allowed to write packages and nothing else. Every action is pinned to
+# a commit; .github/dependabot.yml proposes new ones.
+name: release
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      REGISTRY: ghcr.io
+      TAG_NAME: ${{ github.event.release.tag_name }}
+      PRERELEASE: ${{ github.event.release.prerelease }}
+      LOCAL_IMAGE: booster-rocket-app:release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the version and the image's name
+        id: names
+        run: |
+          set -euo pipefail
+          # The release's tag is v1.2.3 or 1.2.3 (with an optional pre-release part), and must be the version in
+          # package.json, which is what the Health page shows.
+          if ! [[ "$TAG_NAME" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "The release's tag must be a version like v1.2.3." >&2
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          package="$(node -p "require('./package.json').version")"
+          if [ "$version" != "$package" ]; then
+            echo "The release is $version but package.json says $package. Make them the same before publishing." >&2
+            exit 1
+          fi
+          image="${REGISTRY}/${GITHUB_REPOSITORY,,}"
+          {
+            echo "version=$version"
+            echo "image=$image"
+            echo "commit=${GITHUB_SHA:0:12}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build the production image
+        env:
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          VERSION: ${{ steps.names.outputs.version }}
+        run: |
+          docker build \
+            --build-arg "APP_COMMIT=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${SOURCE}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            -t "$LOCAL_IMAGE" .
+
+      - name: Smoke-test the image
+        run: bash scripts/smoke-image.sh "$LOCAL_IMAGE"
+
+      - name: No env-file secrets in the image
+        run: bash scripts/check-image-secrets.sh
+
+      - name: Push to the GitHub Container Registry
+        env:
+          IMAGE: ${{ steps.names.outputs.image }}
+          VERSION: ${{ steps.names.outputs.version }}
+          COMMIT: ${{ steps.names.outputs.commit }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY" --username "$GITHUB_ACTOR" --password-stdin
+          tags=("$VERSION" "$COMMIT")
+          # A pre-release is published under its own version only: stable moves to full releases alone.
+          if [ "$PRERELEASE" != "true" ]; then tags+=(stable); fi
+          for tag in "${tags[@]}"; do
+            docker tag "$LOCAL_IMAGE" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+          docker logout "$REGISTRY"
+          echo "Published $IMAGE as ${tags[*]}."

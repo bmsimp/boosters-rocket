@@ -189,12 +189,19 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       says: parents.everEnabled ? "Switched off. No parent can sign in right now." : "Not switched on yet. No parent can sign in until an Admin switches them on." });
 
   const backupAge = backup ? now.getTime() - Date.parse(backup.at) : null;
-  const backedUp: Verdict = backupAge === null ? { state: "attention", word: "None recorded", says: "No backup has been recorded. On the server, run scripts/backup.sh with a folder to keep backups in, and set it to run every night." }
+  const backedUp: Verdict = backupAge === null ? { state: "attention", word: "None recorded", says: "No backup has been recorded. On the server, check that the backup service is running, or run scripts/backup.sh with a folder to keep backups in and set it to run every night." }
     : backupAge > BACKUP_OLD_MS ? { state: "attention", word: "Needs attention", says: "The last backup is more than 2 days old. Check that the nightly backup on the server is still running." }
-      : { state: "ok", word: "Recent", says: "Backed up. Keep the server's env file with the backups: without its encryption key, a backup can't bring back the QuickBooks connection or the sign-in settings." };
+      : { state: "ok", word: "Recent", says: "Backed up. Keep the server's env file, and Documenso's signing certificate with its passphrase, with the backups: without the env file's encryption key, a backup can't bring back the QuickBooks connection or the sign-in settings." };
+  // Whether Documenso's database was in it, as scripts/backup.sh recorded (a record from before it did says nothing).
+  const documensoNote = !backup || backup.documenso === "unknown" ? []
+    : backup.documenso === "none"
+      ? [forms.origin !== null
+        ? "Documenso's database wasn't part of this backup, though forms are signed in Documenso. Its templates and unfinished forms are only in its own database: back that up too."
+        : "Documenso's database wasn't part of this backup."]
+      : [`Documenso's database too: ${backup.documenso.file}${backup.documenso.bytes !== null ? `, ${bytesWords(backup.documenso.bytes)}` : ""}`];
   lines.push({
     key: "backup", title: "Last backup", ...backedUp, times: [{ label: "Last backup", at: backup?.at ?? null }], fix: null,
-    notes: backup?.file ? [`${backup.file}${backup.bytes !== null ? `, ${bytesWords(backup.bytes)}` : ""}`] : [],
+    notes: [...(backup?.file ? [`${backup.file}${backup.bytes !== null ? `, ${bytesWords(backup.bytes)}` : ""}`] : []), ...documensoNote],
   });
 
   lines.push({ key: "version", title: "Version", state: "ok", word: "", says: `Running ${BUILD_VERSION}.`, times: [], notes: [], fix: null });

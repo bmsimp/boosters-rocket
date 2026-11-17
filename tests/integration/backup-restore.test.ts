@@ -16,7 +16,8 @@ import { seedRosterRead } from "../helpers/roster-cache";
 /**
  * The restore that has been carried out (v1 spec §14): scripts/backup.sh really dumps this run's database, and
  * scripts/restore.sh really loads the dump into a scratch database, which is then compared with the original table
- * by table and row by row.
+ * by table and row by row. Documenso's database goes the same way: a stand-in for it (tables with Documenso's kind of
+ * names, the extension it needs, rows) is dumped in the same run as the portal's, then restored and compared too.
  *
  * The scripts reach Postgres the way an operator's would: through the database's container when this run's database
  * lives in one (the development machine), or with the pg_dump on this machine and PGHOST and its friends (CI, where
@@ -27,6 +28,7 @@ const SOURCE = databaseName(RUN_URL);
 const { name: SCRATCH, url: SCRATCH_URL } = scratchDatabase("restore");
 const BACKUP = path.resolve("scripts/backup.sh"), RESTORE = path.resolve("scripts/restore.sh");
 const DUMP_NAME = /^booster-rocket-\d{8}T\d{6}Z\.dump$/;
+const DOC_DUMP_NAME = /^documenso-\d{8}T\d{6}Z\.dump$/;
 
 function reach(): Record<string, string> {
   const u = new URL(RUN_URL);
@@ -43,8 +45,29 @@ function reach(): Record<string, string> {
 let via: Record<string, string>;
 let dir: string;
 const run = (script: string, args: string[], env: Record<string, string> = {}) =>
-  spawnSync("bash", [script, ...args], { encoding: "utf8", env: { ...process.env, ...via, BR_DB_NAME: SOURCE, BR_DB_WAIT: "20", ...env } });
+  spawnSync("bash", [script, ...args], { encoding: "utf8", env: { ...process.env, ...via, BR_DB_NAME: SOURCE, BR_DB_WAIT: "20", BR_DOCUMENSO_DB_NAME: "", ...env } });
 const dumps = () => readdirSync(dir).filter((f) => DUMP_NAME.test(f)).sort();
+const docDumps = () => readdirSync(dir).filter((f) => DOC_DUMP_NAME.test(f)).sort();
+/** Documenso's database in these tests: the scratch database, holding a stand-in until the portal's restore needs it. */
+const WITH_DOCUMENSO = { BR_DOCUMENSO_DB_NAME: SCRATCH };
+const runUser = () => decodeURIComponent(new URL(RUN_URL).username);
+
+/** A stand-in for Documenso's database: its kind of table names (quoted, mixed case), the extension it makes, rows. */
+async function makeDocumensoStandIn() {
+  const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
+  try { await admin.unsafe(`CREATE DATABASE "${SCRATCH}"`); } finally { await admin.end({ timeout: 5 }); }
+  const pg = postgres(SCRATCH_URL, { max: 1, onnotice: () => {} });
+  try {
+    await pg.unsafe(`create extension if not exists pgcrypto;
+      create table "User" (id serial primary key, email text not null unique, roles text[] not null default '{USER}');
+      create table "Envelope" (id text primary key default 'envelope_' || encode(gen_random_bytes(8), 'hex'), "externalId" text,
+        "userId" int not null references "User"(id), status text not null, "completedAt" timestamptz);
+      create table "DocumentData" (id text primary key, data text not null);
+      insert into "User" (email, roles) values ('forms@club.example.org', '{USER,ADMIN}');
+      insert into "Envelope" ("externalId", "userId", status, "completedAt") values ('req-1', 1, 'COMPLETED', '2026-11-15T06:45:12Z'), ('req-2', 1, 'PENDING', null);
+      insert into "DocumentData" (id, data) values ('d1', repeat('JVBERi0xLjcK', 2000));`);
+  } finally { await pg.end({ timeout: 5 }); }
+}
 
 /** Everything a database holds, as text: its tables, columns, indexes, constraints and sequences, and every row. */
 async function everythingIn(url: string) {
@@ -77,7 +100,9 @@ async function dropScratch() {
 
 describe("backup and restore, really done", { timeout: 300_000 }, () => {
   let before: Awaited<ReturnType<typeof everythingIn>>;
+  let documensoBefore: Awaited<ReturnType<typeof everythingIn>>;
   let dump: string;
+  let docDump: string;
 
   beforeAll(async () => {
     via = reach();
@@ -91,32 +116,90 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     await seedWorkingMail();
     await seedRosterRead({ realmId: "9130000000000001" });
     await db.insert(auditLog).values({ door: "staff", actorLabel: "admin@club.org", action: "parent.block", targetType: "parent", targetId: "p1", after: { reason: "a note staff wrote" }, ip: "203.0.113.7" });
+    await makeDocumensoStandIn();
   }, 300_000);
   afterAll(async () => { await dropScratch(); rmSync(dir, { recursive: true, force: true }); }, 300_000); // a drop waits for the server's checkpoint
 
-  it("backs up the database into the folder, says what else to keep, and prints no secret", async () => {
+  it("backs up both databases into the folder in one run, says what else to keep, and prints no secret", async () => {
     before = await everythingIn(RUN_URL);
+    documensoBefore = await everythingIn(SCRATCH_URL);
     expect(before.tables.length).toBeGreaterThan(20);
     expect(before.rows["public.parent"]!.count).toBeGreaterThanOrEqual(2);
-    const r = run(BACKUP, [dir]);
+    expect(documensoBefore.tables).toEqual(["public.DocumentData", "public.Envelope", "public.User"]);
+    const r = run(BACKUP, [dir], WITH_DOCUMENSO);
     expect(r.status, r.stderr).toBe(0);
     expect(dumps()).toHaveLength(1);
+    expect(docDumps()).toHaveLength(1);
+    // One run, one time: the two files carry the same stamp.
+    expect(docDumps()[0]!.replace("documenso-", "")).toBe(dumps()[0]!.replace("booster-rocket-", ""));
     dump = path.join(dir, dumps()[0]!);
+    docDump = path.join(dir, docDumps()[0]!);
     expect(statSync(dump).size).toBeGreaterThan(1000);
+    expect(statSync(docDump).size).toBeGreaterThan(1000);
     expect(readdirSync(dir).filter((f) => f.includes("partial"))).toEqual([]);
     const out = r.stdout + r.stderr;
     expect(out).toContain(`Backup written: ${dir}/${dumps()[0]}`);
+    expect(out).toContain(`Documenso's database written: ${dir}/${docDumps()[0]}`);
     expect(out).toMatch(/SETTINGS_ENCRYPTION_KEY/);
+    expect(out).toMatch(/signing certificate \(the \.p12 file\) and its passphrase/);
     expect(out).toMatch(/somewhere other than this server/);
     for (const secret of [process.env.BETTER_AUTH_SECRET!, process.env.SETTINGS_ENCRYPTION_KEY!, "postgres://", "PGPASSWORD"]) expect(out).not.toContain(secret);
   });
 
-  it("records when it succeeded, where the health page reads it", async () => {
+  it("records when it succeeded, and that Documenso's database was in it, where the health page reads it", async () => {
     const [row] = await db.select().from(setting).where(eq(setting.key, BACKUP_KEY));
-    expect(row?.value).toMatchObject({ file: path.basename(dump), bytes: statSync(dump).size });
+    const documenso = { file: path.basename(docDump), bytes: statSync(docDump).size };
+    expect(row?.value).toMatchObject({ file: path.basename(dump), bytes: statSync(dump).size, documenso });
     const last = await lastBackup();
-    expect(last).toMatchObject({ file: path.basename(dump), bytes: statSync(dump).size });
+    expect(last).toMatchObject({ file: path.basename(dump), bytes: statSync(dump).size, documenso });
     expect(Math.abs(Date.now() - Date.parse(last!.at))).toBeLessThan(120_000);
+  });
+
+  it("restores Documenso's backup, and everything in it is the same", async () => {
+    // The stand-in is replaced by its own backup: dropped, and made again from the file alone.
+    const r = run(RESTORE, [docDump, SCRATCH, "--replace"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`into the database ${SCRATCH} (3 tables, owned by ${runUser()}), replacing what was there`);
+    expect(r.stdout).toMatch(/signing certificate \(the \.p12 file\) and its passphrase/);
+    expect(await everythingIn(SCRATCH_URL)).toEqual(documensoBefore);
+    await dropScratch(); // the portal's restore below starts from no database at all
+  });
+
+  it("leaves Documenso's database out when told to, says so, and records that it did", async () => {
+    const elsewhere = mkdtempSync(path.join(tmpdir(), "br-backup-portal-only-"));
+    try {
+      const r = run(BACKUP, [elsewhere]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("Documenso's database was left out, as BR_DOCUMENSO_DB_NAME is empty.");
+      const made = readdirSync(elsewhere);
+      expect(made.filter((f) => DUMP_NAME.test(f))).toHaveLength(1);
+      expect(made.filter((f) => DOC_DUMP_NAME.test(f))).toEqual([]);
+      expect(await lastBackup()).toMatchObject({ file: made.find((f) => DUMP_NAME.test(f)), documenso: "none" });
+    } finally { rmSync(elsewhere, { recursive: true, force: true }); }
+  });
+
+  it("backs up nothing when the Documenso database it was told of isn't there, or isn't a name it can use", () => {
+    const had = readdirSync(dir).sort();
+    const r = run(BACKUP, [dir], { BR_DOCUMENSO_DB_NAME: "no_such_documenso_test" });
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain("Documenso's database no_such_documenso_test isn't on this server. Nothing was backed up.");
+    expect(run(BACKUP, [dir], { BR_DOCUMENSO_DB_NAME: "bad-name'" }).status).toBe(2);
+    expect(run(BACKUP, [dir], { BR_DOCUMENSO_DB_NAME: SOURCE }).status).toBe(2);
+    expect(readdirSync(dir).sort()).toEqual(had);
+  });
+
+  it("left unset, backs up a database named documenso if the server has one, and says when it hasn't", async () => {
+    const admin = postgres(adminDatabaseUrl(), { max: 1, onnotice: () => {} });
+    let present: boolean;
+    try { present = (await admin<{ n: number }[]>`select count(*)::int as n from pg_database where datname = 'documenso'`)[0]!.n === 1; } finally { await admin.end({ timeout: 5 }); }
+    const env: NodeJS.ProcessEnv = { ...process.env, ...via, BR_DB_NAME: SOURCE, BR_DB_WAIT: "20" };
+    delete env.BR_DOCUMENSO_DB_NAME;
+    const elsewhere = mkdtempSync(path.join(tmpdir(), "br-backup-unset-"));
+    try {
+      const r = spawnSync("bash", [BACKUP, elsewhere], { encoding: "utf8", env });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain(present ? "Documenso's database written:" : "This server has no database named documenso, so Documenso's database was not backed up.");
+    } finally { rmSync(elsewhere, { recursive: true, force: true }); }
   });
 
   it("restores into a database that doesn't exist yet, and everything in it is the same", async () => {
@@ -192,12 +275,22 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     const first = dumps().at(-1)!;
     const r = run(BACKUP, [dir, "--keep", "3"]);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toMatch(/Keeping the newest 3 backups in .*; removed 2 older\./);
+    expect(r.stdout).toMatch(/Keeping the newest 3 backups of each database in .*; removed 2 older\./);
     const left = dumps();
     expect(left).toHaveLength(3);
     expect(left[0]).toBe("booster-rocket-20220101T000000Z.dump");
     expect(left).toContain(first);
     expect(readdirSync(dir)).toEqual(expect.arrayContaining(["booster-rocket-before-the-big-change.dump", "notes.txt"]));
+  });
+
+  it("restores as the role it is told to, and refuses one that doesn't exist", () => {
+    const r = run(RESTORE, [dump, SCRATCH, "--replace", "--owner", runUser()]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`, owned by ${runUser()}), replacing what was there`);
+    const missing = run(RESTORE, [dump, SCRATCH, "--replace", "--owner", "no_such_role_here"]);
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("There is no database role named no_such_role_here on this server. Nothing was changed.");
+    for (const bad of [["--owner"], ["--owner", ""], ["--owner", "Robert'); drop"]]) expect(run(RESTORE, [dump, SCRATCH, "--replace", ...bad]).status, bad.join(" ")).toBe(2);
   });
 
   it("a dump that comes out cut short is not kept, and no older backup is removed for it", async () => {
@@ -213,7 +306,7 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
       "#!/usr/bin/env bash",
       `real=${JSON.stringify(real)}`,
       'case "$(basename "$0") $*" in',
-      '  *pg_dump*) whole="$(mktemp)"; "$real" "$@" > "$whole" || exit $?; head -c "$(( $(wc -c < "$whole") - 100 ))" "$whole"; echo cut >> "$BR_TEST_CUTS"; rm -f "$whole" ;;',
+      '  *pg_dump*"-d $BR_TEST_CUT --format=custom"*) whole="$(mktemp)"; "$real" "$@" > "$whole" || exit $?; head -c "$(( $(wc -c < "$whole") - 100 ))" "$whole"; echo cut >> "$BR_TEST_CUTS"; rm -f "$whole" ;;',
       '  *) exec "$real" "$@" ;;',
       "esac", ""].join("\n"));
     chmodSync(path.join(bin, tool), 0o755);
@@ -222,15 +315,27 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     expect(dumps().length).toBeGreaterThanOrEqual(3);
     const [recorded] = await db.select().from(setting).where(eq(setting.key, BACKUP_KEY));
 
-    const r = run(BACKUP, [dir, "--keep", "1"], { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, BR_TEST_CUTS: cuts });
+    const r = run(BACKUP, [dir, "--keep", "1"], { PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, BR_TEST_CUTS: cuts, BR_TEST_CUT: SOURCE });
     expect(readFileSync(cuts, "utf8"), "the stand-in tool was not the one the script ran").toBe("cut\n");
     expect(r.status, r.stdout + r.stderr).toBe(4);
-    expect(r.stderr).toContain("The backup that was written can't be read back. It was not kept, and no older backup was removed.");
+    expect(r.stderr).toContain("The backup of the portal's database that was written can't be read back. It was not kept, and no older backup was removed.");
     expect(r.stdout).not.toContain("Backup written");
     // Nothing new in the folder, nothing left half-written, and every backup that was there is still there, though
     // only one was to be kept. The Health page still names the last backup that was good.
     expect(readdirSync(dir).filter((f) => f !== "bin" && f !== "cuts.log").sort()).toEqual(had);
     expect((await db.select().from(setting).where(eq(setting.key, BACKUP_KEY)))[0]?.value).toEqual(recorded?.value);
+
+    // Documenso's dump cut short and the portal's whole: neither is kept, since a backup is both or nothing.
+    await dropScratch();
+    await makeDocumensoStandIn();
+    rmSync(cuts);
+    const r2 = run(BACKUP, [dir, "--keep", "1"], { ...WITH_DOCUMENSO, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`, BR_TEST_CUTS: cuts, BR_TEST_CUT: SCRATCH });
+    expect(readFileSync(cuts, "utf8"), "the stand-in tool was not the one the script ran").toBe("cut\n");
+    expect(r2.status, r2.stdout + r2.stderr).toBe(4);
+    expect(r2.stderr).toContain("The backup of Documenso's database that was written can't be read back. It was not kept, and no older backup was removed.");
+    expect(readdirSync(dir).filter((f) => f !== "bin" && f !== "cuts.log").sort()).toEqual(had);
+    expect((await db.select().from(setting).where(eq(setting.key, BACKUP_KEY)))[0]?.value).toEqual(recorded?.value);
+    await dropScratch();
     rmSync(bin, { recursive: true }); rmSync(cuts);
   });
 

@@ -1,0 +1,52 @@
+# Dependency updates, as pull requests a volunteer can read and merge after CI passes. Grouped so a month brings a few
+# pull requests, not dozens: one for the portal's packages, one for the images, one for the workflows' actions.
+# Security fixes come as soon as they are published, also grouped, whatever the schedule.
+#
+# Before merging an image update for Documenso, read its release notes and the upgrade notes in
+# docs/runbooks/updates.md: the portal was verified against one version of it.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      packages:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      images:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: monthly
+    groups:
+      images:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(deps)
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore(deps)
