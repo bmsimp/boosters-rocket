@@ -505,6 +505,12 @@ work another. Any time before the pilot.
     itself still waits on the queue as before.
 17. The lead's choice, not the owner's (2026-11-17): a credit (a negative balance) is left to QuickBooks. The portal's
     own check stops only an amount owed; whatever QuickBooks refuses is told in words.
+18. The lead's choice, not the owner's (2026-11-17): when a family is made inactive, its own last write is sent with
+    the version QuickBooks has just after its students and parents were made inactive, read again at that moment,
+    rather than the one the page showed (QuickBooks may raise a family's version when a customer under it changes).
+    The family's version must still be the page's when the action begins, and the write changes only whether it is
+    active, so nothing anyone changed is overwritten. The check's "Making a family inactive once everyone under it is
+    inactive" row says whether QuickBooks raises it.
 
 ## Results
 
