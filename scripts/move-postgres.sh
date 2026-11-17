@@ -287,7 +287,6 @@ if [ -n "$OLD_NAME" ] && ! docker volume inspect "$OLD_NAME" >/dev/null 2>&1; th
   exit 0
 fi
 probe
-FIRST_FINGERPRINT="$FINGERPRINT"
 case "$STATE_OLD/$STATE_NEW" in
   no/moved|no/other) say "This installation already runs on Postgres 18, and the volume $OLD_VOLUME holds no Postgres 16 data to move. Nothing was changed."; exit 0 ;;
   no/empty) say "The volume $OLD_VOLUME holds no Postgres 16 data, so there is nothing to move: a new installation simply starts. Nothing was changed."; exit 0 ;;
@@ -310,7 +309,6 @@ changed. To bring the Postgres 16 data across, run this again with --again at th
   *) die 3 "The database service gave an answer this script doesn't know (old=$STATE_OLD new=$STATE_NEW). Nothing was changed." ;;
 esac
 [ "$STATE_NEW" != "moving" ] || say "A move was started before and didn't finish: starting again from the Postgres 16 data."
-if [ -z "$FIRST_FINGERPRINT" ] || [ "$FIRST_FINGERPRINT" = "-" ]; then die 3 "The Postgres 16 data's control file couldn't be read. Nothing was changed."; fi
 
 # 1. Nothing may use the database while it moves.
 say "Stopping what uses the database: ${USERS[*]}."
@@ -319,6 +317,13 @@ writers="$(writers_of_old)"
 [ -z "$writers" ] || die 2 "Another Postgres is running on the Postgres 16 data:$writers. It may be the previous version of Booster
 Rocket, started from another window or another folder. Nothing was changed. Stop it first (docker stop$writers),
 then run this again. Never go back to the previous version while a move is running."
+# The old data's fingerprint, taken now that nothing runs on it: a Postgres 16 that was running (the previous version,
+# as on the proof of concept's host) rewrote its control file as it stopped.
+probe
+FIRST_FINGERPRINT="$FINGERPRINT"
+if [ "$STATE_OLD" != "yes" ] || [ -z "$FIRST_FINGERPRINT" ] || [ "$FIRST_FINGERPRINT" = "-" ]; then
+  die 3 "The Postgres 16 data's control file couldn't be read. Nothing was changed."
+fi
 
 # 2. A copy of the old data, made through a read-only mount; Postgres 16 runs on the copy, read only, with no network.
 say "Copying the Postgres 16 data (volume $OLD_VOLUME, read only) into $COPY_VOLUME."

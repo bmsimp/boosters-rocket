@@ -194,7 +194,9 @@ volumes:
     expect(without.status).toBe(2);
     expect(without.stderr).toContain("--again");
 
-    // When the backup of what Postgres 18 holds can't be made, nothing is replaced.
+    // When the backup of what Postgres 18 holds can't be made, nothing is replaced. The previous version is running, as
+    // on the proof of concept's host: the move stops it first, and the old data's fingerprint is taken after that.
+    await s.startOld();
     writeFileSync(kept(), "in the way");
     const blocked = s.move("--again");
     expect(blocked.status, blocked.stderr).toBe(4);
