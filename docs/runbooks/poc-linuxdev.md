@@ -544,8 +544,12 @@ which Postgres 16 can't load (the previous version's `scripts/restore.sh` calls 
 3. Copy the Postgres 18 backups aside, before Postgres 16's deploys (which keep the newest 14 in the same folder)
    remove them: `mkdir -p ~/booster-rocket-postgres-18-backups && cp -p ~/booster-rocket-backups/*.dump ~/booster-rocket-postgres-18-backups/`
 4. `git log --oneline` and `git checkout <the commit before the move>`.
-5. `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d db app worker`. If the deploy in step 5 built a
-   portal newer than the one that ran on Postgres 16, also run `scripts/poc/deploy.sh --rollback`.
+5. Build that commit's portal and start it on Postgres 16. Not `scripts/poc/deploy.sh --rollback`: the move stopped
+   the app, so the image the move's step 5 replaced was not kept, and the one `--rollback` holds is older still.
+   ```bash
+   APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f docker-compose.poc.yml --env-file .env.poc build app
+   docker compose -f docker-compose.poc.yml --env-file .env.poc up -d db app worker
+   ```
 
 To come forward again: `git checkout main`, then step 4 of the move with `--again` at the end. It first backs up what
 Postgres 18 holds into `~/booster-rocket-moving-to-postgres-18/postgres-18-before-again` and prints the file's name.

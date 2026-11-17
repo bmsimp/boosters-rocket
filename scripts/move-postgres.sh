@@ -90,6 +90,9 @@ case "$SETUP" in
     COMPOSE=(docker compose)
     USERS=(app worker documenso backup migrate db)
     OLD_KEY="db-data"
+    GUIDE='docs/runbooks/updates.md, "Moving to a new major version of Postgres"'
+    GUIDE_ROOM='docs/runbooks/updates.md, "Before the move"'
+    GUIDE_BACK='docs/runbooks/updates.md, "Going back to Postgres 16"'
     ;;
   poc)
     cd "$REPO"
@@ -97,6 +100,9 @@ case "$SETUP" in
     COMPOSE=(docker compose -f docker-compose.poc.yml --env-file .env.poc)
     USERS=(worker app db)
     OLD_KEY="pgdata"
+    GUIDE='docs/runbooks/poc-linuxdev.md, section 8, "Moving the database to Postgres 18"'
+    GUIDE_ROOM="$GUIDE, step 1"
+    GUIDE_BACK="$GUIDE, after step 7"
     ;;
   dev)
     cd "$REPO"
@@ -108,6 +114,8 @@ case "$SETUP" in
     COMPOSE=(docker compose -f docker-compose.yml)
     USERS=(db)
     OLD_KEY="pgdata"
+    GUIDE='AGENTS.md, Tests, "Moving the local database to Postgres 18"'
+    GUIDE_ROOM="$GUIDE" GUIDE_BACK="$GUIDE"
     ;;
   *) usage ;;
 esac
@@ -332,7 +340,7 @@ docker image inspect "$OLD_IMAGE" >/dev/null 2>&1 || docker pull -q "$OLD_IMAGE"
 docker volume create --label "$LABEL" "$COPY_VOLUME" >/dev/null || die 3 "A volume for the copy couldn't be made. Nothing was changed."
 docker run --rm --name "$COPIER" --label "$LABEL" --network none -v "$OLD_VOLUME:/old:ro" -v "$COPY_VOLUME:/copy" \
   --entrypoint bash "$OLD_IMAGE" -c 'cp -a /old/. /copy/' >/dev/null \
-  || die 4 "The Postgres 16 data couldn't be copied (is the disk full? docs/runbooks/updates.md, \"Before the move\"). The old data is untouched."
+  || die 4 "The Postgres 16 data couldn't be copied (is the disk full? $GUIDE_ROOM). The old data is untouched."
 probe
 [ "$FINGERPRINT" = "$FIRST_FINGERPRINT" ] || die 4 "The Postgres 16 data changed while it was being copied: something started Postgres 16 on it (the
 previous version, from another window?). The old data was not written to by the move. Stop that, then run this again."
@@ -349,7 +357,7 @@ if [ -n "$others" ]; then
 $(indent <<<"$others")
 Nothing was changed. These would stay in the Postgres 16 data only, and be gone once it is removed. If they are no
 longer needed (a booster_restore_check left by a restore check is one), run this again with --leave-others at the end.
-If one is needed, back it up first: docs/runbooks/updates.md, \"Before the move\"."
+If one is needed, back it up first ($GUIDE_ROOM)."
   fi
   say "Leaving behind, in the Postgres 16 data only:"
   indent <<<"$others"
@@ -406,7 +414,7 @@ $(printf '  %s\n' "${KEPT[@]}")"
   Postgres 18's newest record in the portal: $NEWEST_18
   Postgres 16's newest record in the portal: $NEWEST_16
 $kept_words
-Nothing else was changed. Choose which copy the club keeps (docs/runbooks/updates.md, \"Going back to Postgres 16\"):
+Nothing else was changed. Choose which copy the club keeps ($GUIDE_BACK):
   - the Postgres 16 data: run this again with --again --discard-18 at the end. The work done on Postgres 18 is then
     kept only in the backup above.
   - the Postgres 18 data: that section says how to load the backup above after the move."
