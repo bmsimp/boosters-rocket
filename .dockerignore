@@ -18,6 +18,7 @@ tests
 playwright.config.ts
 vitest.config.mts
 scripts/seed-e2e.ts
+scripts/walk-forms-by-hand-local-documenso.ts
 test-results
 playwright-report
 coverage
