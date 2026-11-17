@@ -58,7 +58,8 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
       <p className="lede">{form.subject.who === "student" ? <>For {form.subject.name}</> : <>For your family, {form.subject.name}</>} · {form.stepName} · <Link href="/forms">Back to Forms</Link></p>
 
       <section className="box" aria-labelledby="form-h">
-        <h2 id="form-h">{step.kind === "complete" ? "Signed" : step.kind === "consent" ? CONSENT_TEXT.heading : "This form"}</h2>
+        {/* The state says "Signed" once, with its icon: the heading and the thanks don't say it again. */}
+        <h2 id="form-h">{step.kind === "consent" ? CONSENT_TEXT.heading : "This form"}</h2>
         {waived ? <StateWords state="waived" words={form.line.words} />
           : <StateWords state={step.kind === "complete" ? "done" : "todo"} words={stateWords} />}
         {due && <p className="help">{due.lead} <CalendarDate iso={form.line.dueOn!} />{due.tail}</p>}
@@ -89,7 +90,7 @@ export default async function FormPage({ params }: { params: Promise<{ id: strin
 
         {step.kind === "complete" && (
           <>
-            <p className="paid-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M4 12.5l5 5 11-11" /></svg>This form is signed. Thank you!</p>
+            <p className="help">Thank you! There&apos;s nothing more to do for this form.</p>
             {parts > 0 ? (
               <div className="box-foot">{Array.from({ length: parts }, (_, i) => (
                 <a key={i} className="btn btn-line" href={`/forms/${form.row.id}/signed${i === 0 ? "" : `?part=${i + 1}`}`} download="signed-form.pdf">

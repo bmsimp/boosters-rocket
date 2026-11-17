@@ -399,7 +399,7 @@ describe("a student moved to another family", () => {
     expect(await mySignedDownloads(bCtx, [a.forms!.ids.complete])).toEqual(new Map());
     asParent(b.identity);
     const page = await renderPage(FormPage, { params: { id: a.forms!.ids.complete } });
-    expect(textOf(page)).toContain("This form is signed");
+    expect(textOf(page)).toContain("Signed Thank you!");
     expect(page).not.toContain(FAMILY_A.parent.name);
     expect(page).not.toContain("Download the signed form");
     expect(page).not.toContain(`/forms/${a.forms!.ids.complete}/signed`);
