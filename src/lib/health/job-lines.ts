@@ -4,7 +4,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { buyout, jobRun, setting } from "@/lib/db/schema";
-import { BUYOUT_CHECK_MARK, readMark, REMINDERS_MARK, type JobMark } from "@/lib/jobs/marks";
+import { BUYOUT_CHECK_MARK, failedLast, readMark, REMINDERS_MARK } from "@/lib/jobs/marks";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import type { HealthLine } from "./report";
 
@@ -14,7 +14,6 @@ export const BUYOUT_CHECK_LATE_MS = 15 * 60_000;
 const BUYOUTS_CHECKED_KEY = "buyouts.checked";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-const failedLast = (m: JobMark | null) => Boolean(m?.failedAt && (!m.okAt || m.failedAt > m.okAt));
 
 /** The volunteer reminders: the day before a shift, and the nudges before a volunteer due date. */
 export async function volunteerRemindersLine(o: { signin: boolean; welcome: boolean; mailWorking: boolean }): Promise<HealthLine> {
