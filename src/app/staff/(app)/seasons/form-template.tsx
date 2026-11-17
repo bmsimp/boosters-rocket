@@ -29,6 +29,7 @@ export async function FormTemplateBox({ requirementId, appliesTo, canChange }: {
           <dt>Last changed in Documenso</dt><dd><LocalTime iso={setting.templateUpdatedAt} />, when it was attached</dd>
         </dl>
       ) : <p>No template is attached yet, so parents read that this form isn&apos;t ready.</p>}
+      <p className="hint">Have the club&apos;s lawyer read the form&apos;s words before families sign it. The portal checks the template&apos;s fields, not what it says, and gives no legal advice.</p>
       {!ready && <Notice tone="info">Forms aren&apos;t set up yet. An Admin connects the club&apos;s Documenso under <a href="/staff/settings/forms">Forms settings</a>; then a template can be attached.</Notice>}
       {canChange && ready && (
         // Folded like the page's other forms, and left to the browser to open and close: drawn again after a

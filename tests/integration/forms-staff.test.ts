@@ -197,6 +197,8 @@ describe("attaching a template to a form requirement", () => {
     const read = await page();
     expect(textOf(read)).toContain("The form to sign No template is attached yet, so parents read that this form isn't ready.");
     expect(read).not.toContain("Attach a template");
+    // v1 spec 9.4: clubs should have a lawyer review their form text, and the portal says so where a form is set up.
+    expect(textOf(read)).toContain("Have the club's lawyer read the form's words before families sign it. The portal checks the template's fields, not what it says, and gives no legal advice.");
     expect(stub.calls).toEqual([]);
     expect(await page(fall.requirementIds["Uniform fitting attended"]!)).not.toContain("The form to sign");
 
