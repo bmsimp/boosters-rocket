@@ -23,7 +23,7 @@ import { resetDb, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { addToCache, stu } from "../helpers/roster-cache";
 import { seedSeason } from "../helpers/season";
-import { TWO_FAMILY_EVENT, seedEvent, seedShift, seedSignup } from "../helpers/volunteer";
+import { TWO_FAMILY_EVENT, seedEvent, seedShift, seedSignup, shiftAround } from "../helpers/volunteer";
 
 /**
  * Volunteering as a parent does it (v1 spec §11.2, §12 invariant 7): the Volunteer page and a shift's page, signing up
@@ -327,6 +327,17 @@ describe("cancelling", () => {
     const page = textOf(await renderPage(VolunteerPage));
     expect(page).toContain("It's less than 720 hours before the shift, so it can't be cancelled here. If you can't make it, please contact Robin Lead.");
     expect(page).not.toContain("Cancel my sign-up");
+  });
+
+  it("once the shift has started, the page says to check in there, not that it is too close to cancel", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const at = shiftAround(new Date(), 30, 90);
+    const shift = await seedEvent({ onDate: at.onDate, contactName: "Robin Lead", contactEmail: null, shifts: [{ startsAt: at.startsAt, endsAt: at.endsAt }] });
+    await seedSignup({ shiftId: shift.shifts[0]!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
+    asParent(a.identity);
+    const page = textOf(await renderPage(VolunteerPage));
+    expect(page).toContain("This shift has started. To check in, scan the club's check-in code at the shift. If you can't make it, please contact Robin Lead.");
+    expect(page).not.toContain("before the shift, so it can't be cancelled");
   });
 
   it("refuses family B's sign-up to family A's parent, as one that isn't there, and changes nothing", async () => {
