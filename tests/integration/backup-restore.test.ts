@@ -40,7 +40,7 @@ function reach(): Record<string, string> {
   if (spawnSync("pg_dump", ["--version"], { encoding: "utf8" }).status === 0) {
     return { BR_DB_CONTAINER: "", PGHOST: u.hostname, PGPORT: u.port || "5432", PGUSER: user, PGPASSWORD: decodeURIComponent(u.password) };
   }
-  throw new Error(`The backup test can't reach Postgres's own tools: the container "${container}" doesn't hold the database "${SOURCE}", and pg_dump isn't installed here. Install the PostgreSQL client tools (16 or newer), or set BR_TEST_DB_CONTAINER.`);
+  throw new Error(`The backup test can't reach Postgres's own tools: the container "${container}" doesn't hold the database "${SOURCE}", and pg_dump isn't installed here. Install the PostgreSQL client tools of the server's own major version (18) or newer, or set BR_TEST_DB_CONTAINER.`);
 }
 
 let via: Record<string, string>;

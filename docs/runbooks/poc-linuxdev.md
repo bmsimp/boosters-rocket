@@ -449,7 +449,7 @@ PIN (https://developers.cloudflare.com/cloudflare-one/integrations/identity-prov
    | Code | Meaning | What to do |
    |---|---|---|
    | 2 | Refused: local changes, `.env.poc` missing, not mode 600 or without an `APP_URL` line, or another deploy is running; or the database must first be moved to a new Postgres (the message says so, and the running site was left alone) | Read the message; fix; run again. For the database: [Moving the database to Postgres 18](#moving-the-database-to-postgres-18) |
-   | 3 | Migrations failed; running app untouched | Read the migrate output above the message; check `DB_PASSWORD` (end of section 2) |
+   | 3 | Migrations failed; running app untouched | Read the migrate output above the message; check `DB_PASSWORD` (end of section 2). If it says `dependency failed to start: container booster-rocket-db-1 is unhealthy` on the first deploy of the commit that moves to Postgres 18, the old copy of `deploy.sh` replaced the database before it found out: the site is down and the database refuses to start, and nothing is lost. Follow [Moving the database to Postgres 18](#moving-the-database-to-postgres-18) from step 4 |
    | 4 | App did not become healthy in time | `docker logs booster-rocket-app`; then `scripts/poc/deploy.sh --rollback` if needed |
    | 5 | Nothing to roll back to | None (nothing was changed) |
    | 6 | `git pull` failed | Check network and SSH key; nothing was changed |
@@ -477,10 +477,11 @@ The proof of concept ran Postgres 16, its data in the volume `booster-rocket-pgd
 `docker-compose.poc.yml` runs Postgres 18 with its data in a new volume, `booster-rocket-postgres`, and mounts
 `booster-rocket-pgdata` read only beside it. Until the data is moved, the database refuses to start (its log, and
 `scripts/poc/deploy.sh`, say `Postgres was NOT started, and no data was changed or deleted` and name this section),
-so the portal never starts on an empty database. The move leaves `booster-rocket-pgdata` exactly where it is: do not
-remove it. Do these in order, on linuxdev, as the person who deploys:
+so the portal never starts on an empty database. The move only reads `booster-rocket-pgdata`, through a read-only
+mount, to copy it, and leaves it exactly where it is: do not remove it. Never run the previous version, or a second
+move, from another window while a move runs. Do these in order, on linuxdev, as the person who deploys:
 
-1. See what runs now and how big the data is; the disk needs at least three times that free:
+1. See what runs now and how big the data is; the disk needs at least four times that free:
    ```bash
    cd ~/booster-rocket
    docker compose -f docker-compose.poc.yml --env-file .env.poc ps
@@ -499,17 +500,23 @@ remove it. Do these in order, on linuxdev, as the person who deploys:
    git pull --ff-only
    git log --oneline -1
    ```
-   (If `scripts/poc/deploy.sh` was run first and stopped with code 2 or 8, nothing is lost: carry on from step 4.)
+   (If `scripts/poc/deploy.sh` was run first, it may have stopped with code 3, `Migrations failed`, and left the site
+   down with the database refusing to start. Nothing is lost: carry on from step 4. If it stopped with code 2 or 8, the
+   site is still up on Postgres 16, and nothing is lost either: carry on from step 4.)
 4. Move the data:
    ```bash
    scripts/move-postgres.sh poc ~/booster-rocket-moving-to-postgres-18
    ```
-   It stops the worker, the app and the database; starts Postgres 16 on `booster-rocket-pgdata`, counts every table's
-   rows and backs the database up into `~/booster-rocket-moving-to-postgres-18`; starts Postgres 18 on
+   It stops the worker, the app and the database; copies `booster-rocket-pgdata` into a volume of its own
+   (`booster-rocket-move-copy-16`, removed when it ends) and starts Postgres 16 on that copy, read only; counts every
+   table's rows and backs the database up into `~/booster-rocket-moving-to-postgres-18`; starts Postgres 18 on
    `booster-rocket-postgres`, loads the backup and counts every table again. **Success** is the line
    `booster: <n> tables, every one with the same number of rows as before.` followed by
-   `The move is done: Postgres 18 holds the data.` and exit code 0 (`echo $?`). Any other ending says what went wrong:
-   nothing is lost, and running the same command again starts again from the Postgres 16 data.
+   `The move is done: Postgres 18 holds the data. ...`, `Now deploy, ...` naming step 5, and exit code 0 (`echo $?`).
+   Any other ending says what went wrong: nothing is lost, and running the same command again starts again from the
+   Postgres 16 data. If it stops at the start with `The Postgres 16 server also holds what the move doesn't carry`
+   and names a database or role, nothing was changed: one left by a restore check (section 10) isn't needed, so run
+   the same command with `--leave-others` at the end; anything else, back it up with `pg_dump` first.
 5. Deploy as usual (section 8, step 1), which builds, backs up with Postgres 18 into `~/booster-rocket-backups`,
    migrates and starts the app and the worker:
    ```bash
@@ -527,18 +534,30 @@ remove it. Do these in order, on linuxdev, as the person who deploys:
 7. Record the date, the commit and the row counts line in section 11. Leave `booster-rocket-pgdata` and
    `~/booster-rocket-moving-to-postgres-18` in place: removing them is the owner's decision, and going back needs them.
 
-Going back to Postgres 16, while `booster-rocket-pgdata` is still there (anything done in the portal since the move
-is not in it, and a backup made by Postgres 18 can't be loaded into 16):
+Going back to Postgres 16, while `booster-rocket-pgdata` is still there. Anything done in the portal since the move
+is not in it: it stays in `booster-rocket-postgres` and in the Postgres 18 backups in `~/booster-rocket-backups`,
+which Postgres 16 can't load.
 
 1. `docker compose -f docker-compose.poc.yml --env-file .env.poc stop`
-2. Only if a move was cut off: `docker stop booster-rocket-move-postgres-16 booster-rocket-move-postgres-18` (it says
-   `No such container` otherwise).
-3. `git log --oneline` and `git checkout <the commit before the move>`.
-4. `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d db app worker`. If the deploy in step 5 built a
+2. Always, even if no move was cut off (it stops whatever a move left behind and changes nothing else; it says
+   `Nothing of a move was left here.` when there is nothing): `scripts/move-postgres.sh poc --stop`
+3. Copy the Postgres 18 backups aside, before Postgres 16's deploys (which keep the newest 14 in the same folder)
+   remove them: `mkdir -p ~/booster-rocket-postgres-18-backups && cp -p ~/booster-rocket-backups/*.dump ~/booster-rocket-postgres-18-backups/`
+4. `git log --oneline` and `git checkout <the commit before the move>`.
+5. `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d db app worker`. If the deploy in step 5 built a
    portal newer than the one that ran on Postgres 16, also run `scripts/poc/deploy.sh --rollback`.
 
-To come forward again: `git checkout main`, then step 4 of the move with `--again` at the end (it brings the Postgres
-16 data across again and replaces what Postgres 18 holds), then step 5.
+To come forward again: `git checkout main`, then step 4 of the move with `--again` at the end. It first backs up what
+Postgres 18 holds into `~/booster-rocket-moving-to-postgres-18/postgres-18-before-again` and prints the file's name.
+If Postgres 18 holds work done after the move, it stops there (exit code 2), changes nothing else, and shows when the
+move was made and the newest record in each copy:
+- to keep the Postgres 16 data (what was done since going back), run it again with `--again --discard-18` at the end,
+  then step 5; the work done on Postgres 18 is then only in that backup;
+- to keep the Postgres 18 data instead, do the same, then before step 5 load that backup over what was moved:
+  ```bash
+  docker compose -f docker-compose.poc.yml --env-file .env.poc up -d db
+  BR_DB_CONTAINER=booster-rocket-db-1 scripts/restore.sh ~/booster-rocket-moving-to-postgres-18/postgres-18-before-again/<booster-rocket file> booster --replace
+  ```
 
 ## 9. The test checklist
 

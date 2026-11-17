@@ -43,7 +43,7 @@ key already has access). One compose file, **`docker-compose.poc.yml`**, defines
 
 | Service | What it is | Networks | Ports |
 |---|---|---|---|
-| `db` | Postgres 16, named volume `booster-rocket-pgdata`, healthcheck | `internal` | none |
+| `db` | Postgres 16, named volume `booster-rocket-pgdata`, healthcheck. Since 2026-11-17 the compose file runs Postgres 18 with its data in `booster-rocket-postgres`, and mounts `booster-rocket-pgdata` read only beside it until a person removes it; the host's data is moved by hand (`docs/runbooks/poc-linuxdev.md`, section 8, "Moving the database to Postgres 18") | `internal` | none |
 | `app` | The Booster Rocket image built from the repo's `Dockerfile`, healthcheck on `/api/health` | `internal`, `edge` | none |
 | `migrate` | One-off, profile `tools`: same image as `app`, runs migrations and exits | `internal` | none |
 
