@@ -111,9 +111,11 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
-    if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: false }, triedAt);
+    // Once a try may have reached QuickBooks, the item stays `sent`: a later try that sent nothing (a 429, a token that
+    // couldn't be had) or was refused says nothing about the earlier one, which may still have been made.
+    if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: item.sent }, triedAt);
     const next = afterFailedTry(item.tries + 1, item.createdAt, now);
-    return settle(item, { ...next, code: e.code, sent: failure.sent }, triedAt);
+    return settle(item, { ...next, code: e.code, sent: item.sent || failure.sent }, triedAt);
   }
   const { cached } = await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id,
     inside: (tx) => markDone(item, "sent", typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null, item.tries + 1, tx) });

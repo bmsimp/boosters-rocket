@@ -135,6 +135,31 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
   });
 
+  it("stays one that may have been made when a resend after it sends nothing: the next try looks again after a later roster read", async () => {
+    const item = await seedQueued(RENAME, { sent: true, code: "timeout", createdAt: ago(10 * MIN), nextTryAt: ago(5 * MIN) });
+    // The roster read shows it isn't there; the resend is throttled before QuickBooks acts on it.
+    stub.onApiRequest = (c) => { if (c.method === "POST") stub.rateLimitNext = 1; };
+    await runWriteQueue();
+    stub.onApiRequest = null;
+    expect(posts()).toHaveLength(1);
+    expect(inStub("12").DisplayName).toBe("Leo Rivera");
+    expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: true, lastCode: "http_429" });
+    expect((await auditsOf("roster.write.retry"))[0]!.after).toMatchObject({ code: "http_429", sent: true });
+    // Its next try reads the roster again first, as for any write that may have been made.
+    await db.update(writeQueue).set({ nextTryAt: ago(MIN) }).where(eq(writeQueue.id, item.id));
+    const before = await refreshes();
+    await runWriteQueue();
+    expect(await refreshes()).toBe(before + 1);
+    expect(await queueItem(item.id)).toMatchObject({ state: "done" });
+  });
+
+  it("stays one that may have been made when QuickBooks refuses its resend outright", async () => {
+    const item = await seedQueued(RENAME, { sent: true, code: "timeout" });
+    stub.updateFault = "6000";
+    await runWriteQueue();
+    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", sent: true, lastCode: "fault_6000" });
+  });
+
   it("waits for a roster read that works: while QuickBooks can't be read, nothing is sent", async () => {
     const item = await seedQueued(RENAME, { sent: true, code: "timeout" });
     stub.failQueryFrom = 1;
