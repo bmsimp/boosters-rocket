@@ -200,6 +200,8 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "volunteer.buyout.flagged": "A buy-out flagged for staff to look at",
   "volunteer.buyout.unflagged": "A buy-out's flag taken off: its invoice is where it belongs",
   "volunteer.buyout.limit": "Buy-out choices refused: too many in a short time",
+  "volunteer.buyout.closed": "Staff closed a buy-out: nothing was sent to QuickBooks",
+  "volunteer.buyout.family.read": "Staff opened a family's buy-outs",
 };
 
 /** The words for an action, or null when it has none yet. */

@@ -3,7 +3,7 @@
 // sent again. Its rules are pure, in ./write-rules.ts; the send and what follows it are ./writes.ts's.
 import "server-only";
 import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import { buyout, jobRun, qboCustomer, setting, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
@@ -253,14 +253,20 @@ export async function giveUp(id: string, rawNote: string, o: QueueOp): Promise<D
   const note = rawNote.trim();
   if (!note) return { ok: false, errors: ["Say why, in a few words. The note is kept in the audit log."] };
   if (note.length > NOTE_MAX) return { ok: false, errors: [`The note is too long (${NOTE_MAX} characters at most).`] };
-  return db.transaction(async (tx) => {
-    const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
-    if (!item) return GONE;
-    await tx.update(writeQueue).set({ state: "given_up", note, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() }).where(eq(writeQueue.id, id));
-    // A buy-out whose invoice write is given up waits for the treasurer: its outcome in QuickBooks isn't known.
-    if (isBuyoutWrite(item.request)) await tx.update(buyout).set({ state: "stuck", flag: "given_up", flaggedAt: new Date(), updatedAt: new Date() }).where(and(eq(buyout.id, item.request.buyoutId), inArray(buyout.state, ["being_invoiced", "being_voided", "stuck"])));
-    await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,
-      before: { state: item.state, tries: item.tries, code: item.lastCode, op: item.request.op }, after: { state: "given_up", note } }, tx);
-    return { ok: true as const, message: "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it." };
-  });
+  return db.transaction((tx) => giveUpIn(tx, id, note, o));
+}
+
+/**
+ * The giving up itself, in the caller's transaction, with a note already checked: giveUp() above, and a buy-out staff
+ * close (src/lib/buyouts/close.ts), which gives up its stuck item in the same transaction as it ends the buy-out.
+ */
+export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Promise<Done> {
+  const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
+  if (!item) return GONE;
+  await tx.update(writeQueue).set({ state: "given_up", note, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() }).where(eq(writeQueue.id, id));
+  // A buy-out whose invoice write is given up waits for the treasurer: its outcome in QuickBooks isn't known.
+  if (isBuyoutWrite(item.request)) await tx.update(buyout).set({ state: "stuck", flag: "given_up", flaggedAt: new Date(), updatedAt: new Date() }).where(and(eq(buyout.id, item.request.buyoutId), inArray(buyout.state, ["being_invoiced", "being_voided", "stuck"])));
+  await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,
+    before: { state: item.state, tries: item.tries, code: item.lastCode, op: item.request.op }, after: { state: "given_up", note } }, tx);
+  return { ok: true as const, message: "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it." };
 }
