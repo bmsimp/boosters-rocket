@@ -283,6 +283,23 @@ describe("signing up", () => {
   });
 });
 
+describe("the rate limit on signing up", () => {
+  it("refuses a guardian's 31st sign-up press in 15 minutes, takes no place, and audits the first refusal once", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { shifts: [shift] } = await seedEvent({ name: "Fish fry", shifts: [{ places: 3 }] });
+    const ctx = ctxOf(a.identity), family = await famOf(a);
+    for (let i = 0; i < 30; i++) expect(await signUpForShift(ctx, family, NO_SUCH, "me")).toEqual(NOT_OFFERED);
+    const limited = { ok: false, errors: ["That's a lot of sign-ups in a few minutes. Please wait a little, then try again."] };
+    expect(await signUpForShift(ctx, family, shift!.id, "me")).toEqual(limited);
+    expect(await signUpForShift(ctx, family, shift!.id, "me")).toEqual(limited);
+    expect(await signups()).toEqual([]);
+    expect(await audits("volunteer.signup.refused")).toMatchObject([{ targetId: a.identity.parentId, after: { code: "rate_limited" }, ip: "203.0.113.50" }]);
+    // Another guardian has a count of their own.
+    const b = await seedSignedInParent(FAMILY_B);
+    expect((await signUpForShift(ctxOf(b.identity), await famOf(b), shift!.id, "me")).ok).toBe(true);
+  });
+});
+
 describe("cancelling", () => {
   // The shift starts at 18:00 on March 10 in the club's zone; the cut-off is 48 hours before.
   const seedOwn = async () => {

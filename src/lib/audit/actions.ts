@@ -159,6 +159,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "volunteer.checkin.add": "Staff added a missed volunteer check-in",
   "volunteer.checkin.create": "A parent checked in at a volunteer shift",
   "volunteer.checkin.refused": "Volunteer check-ins refused: too many in a few minutes",
+  "volunteer.signup.refused": "Volunteer sign-ups refused: too many in a few minutes",
   "volunteer.credit.family.read": "Staff opened a family's volunteer credit",
   "volunteer.credit.outside.add": "Staff credited volunteering done outside the portal",
   "volunteer.credit.remove": "Staff removed volunteer credit",

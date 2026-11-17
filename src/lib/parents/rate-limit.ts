@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
 
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
-  | "volunteer_checkin_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent";
+  | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -27,6 +27,10 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // Checking in at a volunteer shift (src/lib/volunteer/check-in.ts), counted per person: a guardian checks in
   // themselves and a student or two, a press each, so this sits well above a family's busiest evening.
   volunteer_checkin_parent: { max: 30, windowMs: WINDOW_MS },
+  // Signing up for a volunteer shift (src/lib/volunteer/my-volunteer.ts), counted per person: each place taken emails
+  // the guardian a confirmation and locks the shift's row. A guardian signing up themselves and a few students for a
+  // season's shifts in one sitting stays well under it.
+  volunteer_signup_parent: { max: 30, windowMs: WINDOW_MS },
   // A parent's change of their own sign-in address (email-change.ts), counted per person. Each ask mails two
   // addresses, one of them typed by the parent, so it is kept low; each confirmation reads and may write the club's
   // QuickBooks. Nobody changes their address more than once or twice, and a link that met a busy moment is tried again.
