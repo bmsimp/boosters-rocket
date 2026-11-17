@@ -17,7 +17,9 @@ import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
  * It fails on: the page scrolling sideways, text clipped by its box or drawn over other text, a tap target under
  * 44 by 44 (a link inside a sentence excepted), and everything axe-core finds for WCAG 2.0, 2.1 and 2.2 A and AA
  * (which includes every control and image without an accessible name). Color contrast is checked in every mode but
- * forced colors, where the system draws the colors. Each failure names the page, the width, the mode and the element.
+ * forced colors, where the system draws the colors. A Tab walk through the page (KEYBOARD_WALKS) fails a stop with
+ * no visible focus ring, or one left under the phone's tab bar. Each failure names the page, the width, the mode and
+ * the element.
  *
  * It runs in the desktop project only, at its own two widths: the phone project would do the same work again.
  * It changes nothing but the club's color, for the gold pass, and puts that back.
