@@ -175,6 +175,19 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    **Pass:** the change goes from Waiting to done on its own, and QuickBooks has it once, not twice.
    **If not:** note the change and what Reconciliation said; [Health page warnings](health-warnings.md#quickbooks) says
    what to do with a stuck one.
+9. **A student moved in QuickBooks itself.** Give a test student an unsigned form and a place on a shift still to come,
+   then in QuickBooks move the student under another test family, and press **Refresh** on the Roster page.
+   **Pass:** the new family's Forms page offers the student's form to sign; the old family's guardian gets "Your place
+   has been freed" for the shift; the audit log shows "What follows a student who moved to another family was
+   recorded" with the cause `roster.refresh#` and a number. **If not:** note what each family's pages show.
+10. **Closing a buy-out sends nothing.** With a refused or flagged buy-out on Reconciliation, choose **Close this
+    buy-out**, give a reason and **Close it**; then open the family's **Its volunteer buy-outs** page.
+    **Pass:** the page says how the buy-out ended, the family can choose again, and in QuickBooks no invoice was made,
+    voided or changed. On a phone and a laptop, the confirm, the reason field and **Close it** / **Keep it** read well
+    and are easy to tap. **If not:** note what changed in QuickBooks.
+11. **The products and services after a daily run.** After the next daily read of every family, open a payment
+    requirement's page. **Pass:** it still names its product or service, as the list read by **Read the list from
+    QuickBooks** did. **If not:** note what it names.
 
 ## 3. Real phones
 
@@ -245,9 +258,11 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     **If not:** note the phone, what the camera offered and where it went.
 18. **Reminders in a real mail client.** On this host only (its families are test families), switch parent sign-ins
     and welcome emails on, and give a test family a shift tomorrow, a volunteer requirement due soon, and a form with
-    a reminder schedule.
-    **Pass:** the day-before reminder, the due-date nudge and the scheduled form reminder each arrive after 9:00 in the
-    club's time zone, and read well in Gmail or Outlook on a phone. **If not:** note which didn't arrive, and the
+    a reminder schedule, and an unpaid payment requirement and an unticked checklist item both due in 14 days.
+    **Pass:** the day-before reminder, the due-date nudge, the scheduled form reminder and the payment and checklist
+    reminder each arrive after 9:00 in the club's time zone, and read well in Gmail or Outlook on a phone; the payment
+    and checklist reminder's links open Season and Payments after signing in. Health's "Payment and checklist
+    reminders" and "Volunteer reminders" lines say when they last looked. **If not:** note which didn't arrive, and the
     Health page's mail line.
 19. **A screen reader on each phone:** VoiceOver on the iPhone, TalkBack on Android (or Narrator on Windows). Sign up
     for a shift, cancel it, then check in at a shift.
@@ -452,6 +467,13 @@ work another. Any time before the pilot.
     your family right now." and "Sign in to see your students and what's owed."
 12. Whether opening the audit log, filtered to one person's records, should itself be written in the audit log. Today
     only an export is.
+13. Before an update changes a database that holds data, `deploy/`'s start stops unless the last good backup is less
+    than 26 hours old ([updates, "When the start stops for a backup"](updates.md#when-the-start-stops-for-a-backup)).
+    The 26 hours was chosen while building. To try it: on an installation with data, start a new version with no
+    backup from the last 26 hours; `docker compose logs migrate` shows the refusal, and after
+    `docker compose run --rm backup --now` the start goes ahead.
+14. Payment and checklist items are reminded 14 and 3 days before their due date, with no schedule of their own, and
+    a payment's reminder says its amount only from figures read in the last few minutes, so most say "Not paid yet".
 
 ## Results
 
