@@ -297,7 +297,10 @@ describe("the queue and the company", () => {
 
 describe("the worker", () => {
   it("reads the roster again when a family was made inactive, and then forgets the ask", async () => {
-    await db.insert(setting).values({ key: REFRESH_ASK_KEY, value: { at: new Date().toISOString() } }); // asked after the last read
+    // Asked after the last read, and before the read this wake makes: times set apart on purpose, since a read that
+    // starts in the ask's own millisecond doesn't answer it.
+    await db.update(jobRun).set({ startedAt: ago(2 * MIN) }).where(eq(jobRun.job, ROSTER_JOB));
+    await db.insert(setting).values({ key: REFRESH_ASK_KEY, value: { at: ago(MIN).toISOString() } });
     expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
     expect(await refreshes()).toBe(2);
     expect(await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY))).toEqual([]);

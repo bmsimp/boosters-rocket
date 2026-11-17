@@ -268,7 +268,7 @@ export type CustomerCheck = {
 export const familyMoney = pgTable("family_money", {
   familyQboId: text("family_qbo_id").primaryKey(),
   realmId: text("realm_id"),                                         // the QuickBooks company the figures were read from
-  readAt: timestamp("read_at", { withTimezone: true }),
+  readAt: timestamp("read_at", { withTimezone: true }),              // when the read that gave the figures first asked QuickBooks
   invoices: jsonb("invoices").$type<StoredInvoice[]>(),              // open invoices, then those paid in the last 12 months
   totalCents: bigint("total_cents", { mode: "number" }),             // the sum of the open invoices
   balanceWithJobsCents: bigint("balance_with_jobs_cents", { mode: "number" }), // QuickBooks' own figure, a cross-check only; null when it would count customers the total leaves out

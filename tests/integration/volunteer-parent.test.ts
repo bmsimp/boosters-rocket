@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, qboCustomer, requirement, setting, volunteerSignup } from "@/lib/db/schema";
+import { auditLog, qboCustomer, requirement, setting, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -434,5 +434,18 @@ describe("a change of QuickBooks company", () => {
     expect(await signups()).toEqual([]);
     const [audit] = await audits("volunteer.signups.cleared");
     expect(audit!.after).toEqual({ reason: "different_company", realmId: "9130000000000002", signups: 2, cancelledSignups: 1, credits: 2, removedCredits: 0, reminders: 0, buyouts: 2 });
+  });
+});
+
+describe("the order shifts are listed in", () => {
+  it("is decided for shifts that start together and were made together, as an event's copy makes them", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { event } = await seedEvent({ inDays: 5, shifts: [] });
+    // One statement, so both have the same time made; the later id is written first, so the order the rows happen to
+    // come back in is not the order by id.
+    const [early, late] = ["00000000-0000-4000-8000-0000000000a1", "00000000-0000-4000-8000-0000000000a2"];
+    await db.insert(volunteerShift).values([late, early].map((id, i) => ({ id, eventId: event.id, startsAt: "18:00", endsAt: "21:00", places: 4, role: i === 0 ? "Gate" : "Tickets" })));
+    const listed = (await loadMyVolunteering(ctxOf(a.identity))).events.find((e) => e.id === event.id)!;
+    expect(listed.shifts.map((s) => s.id)).toEqual([early, late]);
   });
 });

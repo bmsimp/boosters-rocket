@@ -41,6 +41,16 @@ describe("asking the worker to read the roster again at its next wake (a parent'
     expect(await rosterRefreshAsked(minutes(2))).toBe(false);
   });
 
+  it("is not answered by a read that started in the ask's own millisecond, and the next wake reads again", async () => {
+    const at = minutes(-5);
+    await ask(at);
+    // The same instant on purpose: that read may have asked QuickBooks before the change landed there.
+    await aRun(at, "ok");
+    expect(await rosterRefreshAsked(minutes(-4))).toBe(true);
+    await aRun(new Date(at.getTime() + 1), "ok");
+    expect(await rosterRefreshAsked(minutes(-4))).toBe(false);
+  });
+
   it("a read that failed after the ask is tried again after the worker's usual 15 minutes", async () => {
     await ask();
     await aRun(minutes(1), "failed");
@@ -52,9 +62,10 @@ describe("asking the worker to read the roster again at its next wake (a parent'
     await seedConnected(stub);
     expect((await runDueJobs()).ran.map((r) => r.job)).toContain(ROSTER_JOB); // the first read of the day
     expect((await runDueJobs(minutes(2))).ran.map((r) => r.job)).not.toContain(ROSTER_JOB);
-    // That read started a minute ago; the ask is now. A read records the real time it started, whatever `now` says.
+    // That read started a minute ago; the ask half a minute ago, so the read the wake makes now (a read records the real
+    // time it started, whatever `now` says) starts after it, never in the same millisecond.
     await db.update(jobRun).set({ startedAt: minutes(-1) }).where(eq(jobRun.job, ROSTER_JOB));
-    await ask();
+    await ask(minutes(-0.5));
     expect((await runDueJobs(minutes(3))).ran).toContainEqual({ job: ROSTER_JOB, ok: true });
     expect((await runDueJobs(minutes(4))).ran.map((r) => r.job)).not.toContain(ROSTER_JOB);
     expect(await rosterRuns()).toHaveLength(2);

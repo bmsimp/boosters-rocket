@@ -18,7 +18,7 @@ import { MONEY_JOB } from "@/lib/money/run-keys";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { afterStudentMoved } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
-import { resetDb } from "../helpers/db";
+import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { CHENOWETH, RIVERA, stubInvoice } from "../helpers/money";
 import { MONEY_REALM, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -136,6 +136,29 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     expect(await row(other.id)).toMatchObject({ state: "paid", flag: null });
     expect((await audits("volunteer.buyout.paid")).map((a) => a.before)).toEqual(expect.arrayContaining([{ state: "invoiced", flag: "missing" }, { state: "invoiced", flag: "other_customer" }]));
     expect(await loadBuyoutsToLook()).toEqual([]);
+  });
+
+  it("flags and audits once when two wakes follow the same run at once", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement(), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9903" });
+    await moneyRun([]);
+    // The buy-out's row is held, so both wakes have read it unflagged and are at its update before either writes.
+    let release!: () => void, holding!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const holds = new Promise<void>((resolve) => { holding = resolve; });
+    const holder = db.transaction(async (tx) => {
+      await tx.select().from(buyout).where(eq(buyout.id, b.id)).for("update");
+      holding();
+      await held;
+    });
+    await holds;
+    const one = checkBuyoutInvoices(), two = checkBuyoutInvoices();
+    await untilALockIsAwaited(15_000, 2);
+    release();
+    const [first, second] = await Promise.all([one, two, holder]);
+    expect(first.flagged + second.flagged).toBe(1);
+    expect(await row(b.id)).toMatchObject({ state: "invoiced", flag: "missing" });
+    expect(await audits("volunteer.buyout.flagged")).toHaveLength(1);
   });
 
   it("judges only a family that run read: older figures may be from before the invoice was made", async () => {

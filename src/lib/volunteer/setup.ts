@@ -60,7 +60,8 @@ export async function getEventSetup(eventId: string, now: Date = new Date()): Pr
   const [e] = await db.select().from(volunteerEvent).where(eq(volunteerEvent.id, eventId));
   if (!e) return null;
   const [shifts, zone, [from]] = await Promise.all([
-    db.select().from(volunteerShift).where(eq(volunteerShift.eventId, e.id)).orderBy(asc(volunteerShift.startsAt), asc(volunteerShift.createdAt)),
+    // Then by id: an event's copy makes all its shifts at one time (copyEvent), and two may start together.
+    db.select().from(volunteerShift).where(eq(volunteerShift.eventId, e.id)).orderBy(asc(volunteerShift.startsAt), asc(volunteerShift.createdAt), asc(volunteerShift.id)),
     getClubSettings().then((c) => c.timeZone),
     e.copiedFrom ? db.select({ id: volunteerEvent.id, name: volunteerEvent.name, onDate: volunteerEvent.onDate }).from(volunteerEvent).where(eq(volunteerEvent.id, e.copiedFrom)) : Promise.resolve([]),
   ]);
@@ -111,7 +112,8 @@ export async function shiftsCountingToward(requirementId: string): Promise<{ eve
   const rows = await db.select({ eventId: volunteerEvent.id, eventName: volunteerEvent.name, onDate: volunteerEvent.onDate, startsAt: volunteerShift.startsAt, endsAt: volunteerShift.endsAt,
     shiftCancelled: volunteerShift.cancelledAt, eventCancelled: volunteerEvent.cancelledAt })
     .from(volunteerShiftRequirement).innerJoin(volunteerShift, eq(volunteerShift.id, volunteerShiftRequirement.shiftId)).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
-    .where(eq(volunteerShiftRequirement.requirementId, requirementId)).orderBy(asc(volunteerEvent.onDate), asc(volunteerShift.startsAt));
+    .where(eq(volunteerShiftRequirement.requirementId, requirementId))
+    .orderBy(asc(volunteerEvent.onDate), asc(volunteerShift.startsAt), asc(volunteerEvent.createdAt), asc(volunteerShift.createdAt), asc(volunteerShift.id));
   return rows.map((r) => ({ eventId: r.eventId, eventName: r.eventName, onDate: r.onDate, startsAt: clockOf(r.startsAt), endsAt: clockOf(r.endsAt), cancelled: r.shiftCancelled !== null || r.eventCancelled !== null }));
 }
 
