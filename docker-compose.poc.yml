@@ -3,15 +3,23 @@ name: booster-rocket
 
 services:
   db:
-    image: postgres:16
+    # Postgres 18 keeps its data in /var/lib/postgresql/18/docker, on the volume booster-rocket-postgres. The volume
+    # booster-rocket-pgdata is where Postgres 16 kept it: mounted read only, so scripts/postgres-guard.sh refuses to
+    # start an empty database while data there hasn't been moved (docs/runbooks/poc-linuxdev.md says how to move it).
+    image: postgres:18
     restart: unless-stopped
+    entrypoint: ["bash", "/opt/booster-rocket/postgres-guard.sh"]
+    command: ["postgres"]
     environment:
       POSTGRES_DB: booster
       POSTGRES_USER: booster
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       TZ: America/Chicago
+      BR_MOVE_RUNBOOK: 'docs/runbooks/poc-linuxdev.md, section 8, "Moving the database to Postgres 18"'
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./scripts/postgres-guard.sh:/opt/booster-rocket/postgres-guard.sh:ro
+      - postgres:/var/lib/postgresql
+      - pgdata:/old-data:ro
     networks: [internal]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U booster -d booster"]
@@ -67,6 +75,9 @@ services:
     restart: "no"
 
 volumes:
+  postgres:
+    name: booster-rocket-postgres
+  # Postgres 16's data, kept until a person removes it (docs/runbooks/poc-linuxdev.md).
   pgdata:
     name: booster-rocket-pgdata
 

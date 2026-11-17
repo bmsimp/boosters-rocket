@@ -19,7 +19,7 @@ docker run --rm "$IMAGE" test -f tools/scripts/backup-check.mjs || fail "backup-
 docker run --rm "$IMAGE" test -f scripts/setup/New-BoosterRocketStaffApp.ps1 || fail "setup scripts missing from the image"
 
 docker network create "$NET" >/dev/null
-docker run -d --name "$NET-db" --network "$NET" -e POSTGRES_USER=b -e POSTGRES_PASSWORD=b -e POSTGRES_DB=b postgres:16 >/dev/null
+docker run -d --name "$NET-db" --network "$NET" -e POSTGRES_USER=b -e POSTGRES_PASSWORD=b -e POSTGRES_DB=b postgres:18 >/dev/null
 ready=0
 for _ in $(seq 1 30); do docker exec "$NET-db" pg_isready -h 127.0.0.1 -U b -d b >/dev/null 2>&1 && { ready=1; break; }; sleep 1; done
 [ "$ready" = 1 ] || fail "throwaway Postgres never became ready"

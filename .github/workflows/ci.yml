@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18
         env: { POSTGRES_USER: booster, POSTGRES_PASSWORD: booster, POSTGRES_DB: booster_test }
         ports: ["5433:5432"]
         options: >-
@@ -19,7 +19,7 @@ jobs:
         with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh scripts/backup.sh scripts/restore.sh scripts/backup-schedule.sh deploy/proxy-start.sh
+      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh scripts/backup.sh scripts/restore.sh scripts/backup-schedule.sh scripts/move-postgres.sh scripts/postgres-guard.sh deploy/proxy-start.sh
       - name: PowerShell lint
         shell: pwsh
         run: |
