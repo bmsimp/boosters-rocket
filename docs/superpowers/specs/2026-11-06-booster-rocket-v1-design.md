@@ -1,7 +1,7 @@
 # Booster Rocket v1 — Design
 
 **Date:** 2026-11-06
-**Status:** Built, on the branch `parent-portal`: every section, steps 1 to 6 of the roadmap (docs/superpowers/plans/2026-11-07-v1-roadmap.md), all done by 2026-11-16. Step 7 reviews the whole portal against it (docs/conformance.md). Not deployed for a club yet: the checks only a person can make come first (docs/runbooks/before-the-first-family.md). Later specs in this folder override the parts of this one that they name.
+**Status:** Built on the branch `parent-portal`: steps 1 to 6 of the roadmap (docs/superpowers/plans/2026-11-07-v1-roadmap.md) were done by 2026-11-16, and step 7 holds the whole portal against this spec, requirement by requirement (docs/conformance.md says where each stands). Not deployed for a club yet: the checks only a person can make come first (docs/runbooks/before-the-first-family.md). Later specs in this folder override the parts of this one that they name.
 **Revised in part:** parent sign-in, people and outgoing mail (docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md, which lists the sections it changes); the QuickBooks connection and roster (2026-11-10-quickbooks-connection-and-roster-design.md); parents from QuickBooks (2026-11-11-parents-from-quickbooks-design.md); forms in Documenso (2026-11-15-documenso-verification.md, section 9 and the corrections in its section 1a). The roadmap's owner decisions of 2026-11-14 widen it: parents edit their own phone and address, and the portal can be installed as an app.
 **First deployment:** planned for FZN Band Boosters (`portal.fznband.org`); not installed there yet.
 

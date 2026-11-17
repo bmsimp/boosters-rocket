@@ -20,7 +20,7 @@ QuickBooks Online.
 
 ## Status
 
-Every part of the v1 design is built, and the whole portal is being reviewed against it. It is not
+The v1 design is built, step by step, and the whole portal is being reviewed against it. It is not
 yet ready for a club's real families: nothing has been pushed or deployed since the proof of
 concept, the portal's requests to QuickBooks have not yet been tried against a real company, and
 no real phone has signed a form. [Before the first family](docs/runbooks/before-the-first-family.md)
