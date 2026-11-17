@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-14 to 2026-11-15 (three agent sessions; the second was cut off by a machine reboot)
 **Spec checked against:** `docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md`, sections 3, 9, 14 and 15
+**Status:** Done. Forms were built on it (the roadmap's steps 4 and 5), and `deploy/compose.yml` runs the version it tested. Its section 9, the checks only the owner can do, is in docs/runbooks/before-the-first-family.md, part 4.
 **Tested:** Documenso v2.22.0, image `documenso/documenso@sha256:f9976d2142d34ee89506e161b0a5ec859a0c327f3fe0a398b46d3941fc8dd35e`
 (Docker Hub tags `v2.22.0` and `latest` on 2026-11-14; git commit `d32d0491`; released 2026-11-13), unmodified, no licence key.
 

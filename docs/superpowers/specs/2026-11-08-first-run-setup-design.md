@@ -1,8 +1,8 @@
 # First-run setup page — Design
 
 **Date:** 2026-11-08
-**Status:** Draft for review
-**Superseded in part:** Step 2 is now Outgoing mail, not Parent sign-in. See docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md.
+**Status:** Built by plan `2026-11-08-first-run-setup.md` and used on the proof of concept on 2026-11-09. The steps have changed since: setup now asks for the club first (2026-11-16), so it reads Your club, Staff sign-in, Outgoing mail, First Admin.
+**Superseded in part:** the parent sign-in step is now Outgoing mail (Step 3 since the club step came first). See docs/superpowers/specs/2026-11-10-parent-email-code-sign-in-design.md.
 **Superseded in part:** Microsoft sign-in uses app-generated certificates, not client secrets. See docs/superpowers/specs/2026-11-09-certificate-credentials-design.md.
 **Builds on:** `docs/superpowers/specs/2026-11-06-booster-rocket-v1-design.md` (v1 spec), Plan 1 (foundation) and
 the proof of concept (`docs/superpowers/specs/2026-11-08-poc-linuxdev-design.md`), all on `main`.

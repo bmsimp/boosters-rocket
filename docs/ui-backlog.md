@@ -16,12 +16,23 @@ accessibility across the portal. All three were merged on 2026-11-16; what they 
 - **Lists that are still lines** (2026-11-16). A family's roster page (students, parents, portal sign-ins), a family's
   progress page, a family's volunteer credit and a season's requirements are still `.lines` lists. Each is short and
   has a shape of its own, so they were left as lists; if they grow, they take the table primitive like the others.
+- **Some lone links on older staff pages are short** (2026-11-16, the review of step 6). The Health page's link on each
+  line ("Open Balances" and the like), "Who has done it" on a season's page and on a requirement's page, and the setup
+  page's step links are ordinary inline links, under 44px tall. Table links and every disclosure's summary are 44px
+  now (`tests/e2e/staff-pages.spec.ts` measures those two kinds only); these take `.link-line` or a button.
 
 ### Settings and Parent sign-ins (step 6 settings slice, still open)
-- **The clean-up preview won't scale** (2026-11-12, `/staff/settings/parents/setup`, step 1). It is a heading per
-  problem and a comma-separated list of names under it. A real roster with dozens of names per heading needs lists
-  that open, with counts in the headings. Not done in step 6: the settings slice gave the page its back link, its
-  wording and notices, not new lists.
+- **The clean-up preview won't scale** (2026-11-12, `/staff/settings/parents/setup`, step 1). Each problem is a
+  heading with its count, and the names under it are one comma-separated line (the held addresses, a list). A real
+  roster with dozens of names per heading needs lists that open. Not done in step 6: the settings slice gave the page
+  its back link, its wording, its counts and notices, not new lists. The owner reads it before the first family
+  (`docs/runbooks/before-the-first-family.md`, part 6).
+
+### Club settings (found during the 2026-11-16 handoff pass)
+- **A club can't supply its logo** (2026-11-16, `/staff/settings/club`). `PRODUCT.md` has each club supply a logo
+  (the v1 spec says only "branding"); the Club settings take a name, a short name and a color, and every club shows
+  its monogram (the short name in a circle) in the club bar and on the app icon. `DESIGN.md` lists the logo as not yet
+  designed.
 
 ### Parent pages (found by the 2026-11-16 accessibility pass)
 - **A form's page is titled "Form" and a shift's "Sign up for a shift"** (2026-11-16, `/forms/[id]`,
