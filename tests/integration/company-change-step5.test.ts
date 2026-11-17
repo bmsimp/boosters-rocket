@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   formReminderClaim, formReminderRound, parentEmailChange, signatureRequest, signedFormEvidence, signedFormFile, volunteerCredit,
-  volunteerReminder, volunteerSignup, writeQueue,
+  requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
@@ -32,6 +32,7 @@ describe("connecting a different company after step 5", () => {
     await db.insert(formReminderClaim).values({ requirementId: req!.requirementId, parentId: a.identity.parentId, onDate: "2026-11-16" });
     await db.insert(formReminderRound).values({ requirementId: req!.requirementId, onDate: "2026-11-16" });
     await db.insert(volunteerReminder).values({ kind: "due_14", key: `${a.identity.familyQboId}|2026-11-30|${a.identity.parentId}`, familyQboId: a.identity.familyQboId, triedAt: new Date(), outcome: "sent" });
+    await db.insert(requirementReminder).values({ kind: "due_14", familyQboId: a.identity.familyQboId, parentId: a.identity.parentId, dueOn: "2026-11-30", triedAt: new Date(), outcome: "sent" });
     await db.insert(writeQueue).values({ realmId: "1111", request: { op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, targetQboId: "12", state: "waiting", sent: false });
     const before = {
       credit: (await db.select().from(volunteerCredit)).length, emails: (await db.select().from(parentEmailChange)).length,
@@ -49,6 +50,7 @@ describe("connecting a different company after step 5", () => {
     expect(await db.select().from(formReminderRound)).toEqual([]);
     expect(await db.select().from(volunteerCredit)).toEqual([]);
     expect(await db.select().from(volunteerReminder)).toEqual([]);
+    expect(await db.select().from(requirementReminder)).toEqual([]);
     expect(await db.select().from(volunteerSignup)).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
     expect(await db.select().from(parentEmailChange)).toEqual([]);

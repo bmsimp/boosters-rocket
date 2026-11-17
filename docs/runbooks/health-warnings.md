@@ -120,6 +120,19 @@ installation with. `docker compose ps` shows what is running, and `docker compos
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.
   With this installation's own proxy it is `x-forwarded-for`.
 
+## Payment and checklist reminders
+
+- **"Off."** Families are emailed 14 days and 3 days before a required payment or checklist item is due only while
+  parent sign-ins and welcome emails are both switched on: **Settings**, **Parent sign-ins**. It is a choice, the
+  Admin's sign that the club is ready to email families.
+- **"It hasn't looked yet."** Normal on a new installation, or before 9:00 club time on the first day: the worker looks
+  each day from then. If it stays that way, check the worker line.
+- **"The last reminder email couldn't be sent."** The worker tries it again 15 minutes later, while it is still the day
+  to send it. Look at the outgoing mail line: its note has the mail service's reason.
+- A payment's reminder says the amount only from figures QuickBooks gave within the last few minutes, so most say
+  "Not paid yet" and point to the Payments page. No reminder goes for a payment whose figures are more than 2 days old,
+  or that has no invoice yet: check the "Every family's invoices" line if families say they weren't reminded.
+
 ## Last backup
 
 - **"None recorded."** No backup has reached the portal. `docker compose ps` should show `backup` as `Up`, and
