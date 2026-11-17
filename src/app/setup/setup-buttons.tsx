@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { staffAuthClient } from "@/lib/auth/client";
+import { Notice } from "@/app/components/notice";
 
 const FAILED = "We couldn't start sign-in just then. Please try again in a moment.";
 
@@ -14,7 +15,7 @@ export function SetupStaffSignIn({ provider, label }: { provider: "microsoft" | 
       if (r?.error) setFailed(true);
     } catch { setFailed(true); }
   };
-  return <><button type="button" className="btn" onClick={go}>{label}</button>{failed && <p role="alert" className="errors inline-alert">{FAILED}</p>}</>;
+  return <><button type="button" className="btn" onClick={go}>{label}</button>{failed && <Notice tone="problem">{FAILED}</Notice>}</>;
 }
 
 export function SetupStaffSignOut() {
