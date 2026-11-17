@@ -11,18 +11,9 @@ import path from "node:path";
  *  - a link to a file of the repository that doesn't exist, or to a heading that file doesn't have;
  *  - a page address in backticks (`/staff/health`, `/volunteer/check-in/<code>`, `<APP_URL>/api/...`) that no page or
  *    route handler under src/app answers.
- * A page or file another slice of the same step builds is in FROM_OTHER_SLICES until its branch is merged: it may be
- * missing, and once it exists it is checked like any other.
  */
 const root = path.resolve(__dirname, "../..");
 const DOCS = ["docs/runbooks/before-the-first-family.md", "README.md"];
-
-/** Built by another slice of step 7, merged by the integrator. Take an entry out once its branch is merged. */
-const FROM_OTHER_SLICES: Record<string, string> = {
-  "/staff/settings/quickbooks/check": "the check of the portal's requests (the sandbox check slice)",
-  "docs/conformance.md": "the conformance slice's matrix of the v1 spec",
-  "docs/walkthrough.md": "the walk slice's walkthrough of every page",
-};
 
 /** Named in the documents but not part of the repository, each with why. */
 const NOT_IN_REPO: Record<string, string> = {
@@ -131,19 +122,19 @@ describe.each(DOCS)("%s", (doc) => {
   const named = namedIn(doc);
 
   it("names only files the repository has", () => {
-    const missing = named.files.filter((f) => !exists(f) && !(f in NOT_IN_REPO) && !(f in FROM_OTHER_SLICES));
+    const missing = named.files.filter((f) => !exists(f) && !(f in NOT_IN_REPO));
     expect(missing).toEqual([]);
   });
 
   it("names only pages the portal answers", () => {
-    const missing = named.pages.filter((p) => !answers(p) && !(p in FROM_OTHER_SLICES));
+    const missing = named.pages.filter((p) => !answers(p));
     expect(missing).toEqual([]);
   });
 
   it("links only to files and headings that are there", () => {
     const broken: string[] = [];
     for (const { target, anchor } of named.links) {
-      if (!exists(target)) { if (!(target in FROM_OTHER_SLICES)) broken.push(target); continue; }
+      if (!exists(target)) { broken.push(target); continue; }
       if (anchor && target.endsWith(".md") && !anchorsOf(target).has(anchor)) broken.push(`${target}#${anchor}`);
     }
     expect(broken).toEqual([]);
