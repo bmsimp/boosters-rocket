@@ -53,7 +53,7 @@ test("an Admin makes a role by ticking what it lets people do, changes it, and d
   await expect(fresh.getByLabel(/^See the club settings/)).toBeDisabled();
   await expect(fresh.getByText("See the audit log")).toHaveCount(0); // Admin-only permissions are not offered
   await fresh.getByRole("button", { name: "Make role" }).click();
-  await expect(fresh.getByRole("status")).toHaveText("Role made.");
+  await expect(fresh.getByRole("status")).toHaveText("Done Role made.");
 
   const box = page.getByRole("region", { name, exact: true });
   await expect(box).toBeVisible();
@@ -63,7 +63,7 @@ test("an Admin makes a role by ticking what it lets people do, changes it, and d
   await box.getByLabel("Change club settings", { exact: true }).uncheck();
   await box.getByLabel("See what every family owes, and ask for a fresh read from QuickBooks").check();
   await box.getByRole("button", { name: "Save role" }).click();
-  await expect(box.getByRole("status")).toHaveText("Saved.");
+  await expect(box.getByRole("status")).toHaveText("Done Saved.");
   await page.reload();
   const saved = page.getByRole("region", { name, exact: true });
   await expect(saved.getByLabel("See what every family owes, and ask for a fresh read from QuickBooks")).toBeChecked();
