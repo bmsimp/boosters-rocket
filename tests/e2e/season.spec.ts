@@ -147,8 +147,11 @@ test("staff open one family's season from a requirement's list, and the visit is
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);
   const uniforms = page.getByRole("region", { name: "2. Uniforms" });
   await expect(uniforms).toContainText("The step this family is on.");
-  await expect(uniforms).toContainText(`Xochitl Quetzalcoatl${FITTING}Done`);
-  await expect(uniforms).toContainText(`Yaretzi Quetzalcoatl${FITTING}Not done yet`);
+  // A table with a heading row for each student: the fitting's state on each one's row.
+  const fitting = (student: string) => uniforms.getByRole("rowgroup").filter({ has: page.getByRole("rowheader", { name: student }) })
+    .getByRole("row").filter({ hasText: FITTING }).locator(".state");
+  await expect(fitting("Xochitl Quetzalcoatl")).toHaveText("Done");
+  await expect(fitting("Yaretzi Quetzalcoatl")).toHaveText("Not done yet");
   // One family's page: nothing asked of another family alone, and nobody else's name.
   await expect(page.getByRole("main")).not.toContainText(/Tuba locker|Percussion truck|Cast on his arm|Rivera|Wolfgang/);
   await noSidewaysScroll(page);
