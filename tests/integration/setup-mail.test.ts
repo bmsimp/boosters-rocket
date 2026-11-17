@@ -35,6 +35,22 @@ describe("the Outgoing mail setup step", () => {
     expect(await mailWorking()).toBe(true);
   });
 
+  it("names its own steps by the numbers they have on the page, with Microsoft 365's step and without it", async () => {
+    const { prerender } = await import("react-dom/static");
+    const html = async () => new Response((await prerender(await SetupPage({ searchParams: Promise.resolve({ step: "mail" }) }))).prelude).text();
+    const textOf = (h: string) => h.replaceAll("<!-- -->", "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    // Staff sign in with Google only: no Microsoft 365 step, so saving is step 1 and the test is step 2.
+    const google = await html();
+    let page = textOf(google);
+    expect(page).toContain("Step 1: Choose how the portal sends");
+    expect(page).toContain("Step 2: Send a test email Save the settings in step 1 first.");
+    expect(google).not.toContain('type="radio"'); // only SMTP to choose: no lone radio to draw
+    await seedProvider("staff-microsoft", { tenantId: "0f8fad5b-d9cb-469f-a165-70867728950e", clientId: "11111111-2222-3333-4444-555555555555" });
+    page = textOf(await html());
+    expect(page).toContain("Step 2: Choose how the portal sends");
+    expect(page).toContain("Step 3: Send a test email Save the settings in step 2 first.");
+  });
+
   it("won't go on to the first Admin until mail works", async () => {
     expect(await redirectOf(goToStepAction("mail"))).toBe("/setup?step=mail");
     expect(await redirectOf(goToStepAction("admin"))).toBe("/setup?step=mail&error=mail_first");

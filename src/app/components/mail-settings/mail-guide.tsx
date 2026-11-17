@@ -34,11 +34,11 @@ export async function MailGuide({ summary, save, test }: { summary: MailSummary;
         </section>
       )}
       <section className="box" aria-labelledby="mail-save-h"><h2 id="mail-save-h">Step {n("mail-save-h")}: Choose how the portal sends</h2>
-        <MailSaveForm summary={summary} save={save} />
+        <MailSaveForm summary={summary} save={save} testStep={n("mail-test-h")} />
         <SmtpHelp />
       </section>
       <section className="box" aria-labelledby="mail-test-h"><h2 id="mail-test-h">Step {n("mail-test-h")}: Send a test email</h2>
-        <MailTestForm summary={summary} test={test} />
+        <MailTestForm summary={summary} test={test} saveStep={n("mail-save-h")} />
       </section>
     </>
   );
