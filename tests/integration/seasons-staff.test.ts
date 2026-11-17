@@ -569,15 +569,15 @@ describe("ticks and waivers", () => {
       { name: "Wrap-up", requirements: [{ title: "Banquet RSVP", appliesTo: "family", ticked: ["10", "20"] }] }, { name: "Empty" }] });
     const old = await seedSeason({ name: "Fall 2025", current: false, steps: [{ name: "Old step", requirements: [{ title: "Old item", appliesTo: "family" }] }] });
     const text = textOf(await renderPage(ProgressPage));
-    expect(text).toContain("Fall 2026 The current season.");
+    expect(text).toContain("Fall 2026 Note The current season.");
     expect(text).toContain("Uniform fitting attended Required Each student 1 of 3 done, 1 waived Guard gloves Optional Each student 0 of 1 done");
     expect(text.indexOf("1. Uniforms")).toBeLessThan(text.indexOf("Uniform fitting attended Required"));
     expect(text).toContain("Banquet RSVP Required Each family 2 of 2 done");
-    expect(text).toContain("3. Empty Nothing is asked in this step.");
+    expect(text).toContain("3. Empty Note Nothing is asked in this step.");
     expect(text).toMatch(/Other seasons .* Fall 2025 No/);
     expect(text).not.toContain("Old item");
     const asked = textOf(await renderPage(ProgressPage, { searchParams: { season: old.seasonId } }));
-    expect(asked).toContain("Fall 2025 Not the current season: parents don't see it.");
+    expect(asked).toContain("Fall 2025 Note Not the current season: parents don't see it.");
     expect(asked).toContain("Old item Required Each family 0 of 2 done");
     // The season in the address is checked before it is looked up.
     expect(await pageOutcome(ProgressPage, { searchParams: { season: NO_SUCH } })).toEqual({ notFound: true });
@@ -617,10 +617,12 @@ describe("one family's season, for staff", () => {
     const html = await renderPage(FamilyProgressPage, { params: { familyId: "10" } });
     const text = textOf(html);
     expect(text).toContain("Rivera Family Where this family stands in Fall 2026, the current season.");
-    expect(text).toContain("1. Join Done The family Handbook read Done");
-    expect(text).toContain("2. Uniforms The step this family is on. 1 thing left to do Leo Rivera Uniform fitting attended Done");
-    expect(text).toMatch(/Maya Rivera Uniform fitting attended Not done yet Due 2026-09-01 Guard gloves Optional Waived Waived .{1,30}? UTC : Brings &lt;b&gt;her&lt;\/b&gt; own/);
-    expect(text).toContain("3. Wrap-up Nothing is asked of this family in this step.");
+    // Each step is a table with a heading row for the family and for each student (DESIGN.md, Tables: groups).
+    expect(text).toContain("1. Join Done What Join asks of the family and of each student Requirement Required Where it stands Due The family Handbook read Required Done No due date");
+    expect(text).toContain("2. Uniforms Note The step this family is on. 1 thing left to do");
+    expect(text).toContain("Leo Rivera Uniform fitting attended Required Done No due date");
+    expect(text).toMatch(/Maya Rivera Uniform fitting attended Required Not done yet 2026-09-01 Guard gloves Optional Waived Waived .{1,30}? UTC : Brings &lt;b&gt;her&lt;\/b&gt; own No due date/);
+    expect(text).toContain("3. Wrap-up Note Nothing is asked of this family in this step.");
     expect(html).not.toContain("<b>her</b>");
     // Each requirement leads to the page where it is ticked off or waived; nothing is changed from here.
     expect(html).toContain(`href="/staff/seasons/progress/${fall.requirementIds["Uniform fitting attended"]}"`);
@@ -645,7 +647,7 @@ describe("one family's season, for staff", () => {
     expect(list).not.toContain("<b>Family</b>");
     const text = textOf(await renderPage(FamilyProgressPage, { params: { familyId: "10" }, searchParams: { season: old.seasonId } }));
     expect(text).toContain("Where this family stands in Fall 2025, which parents don't see.");
-    expect(text).toContain("1. Old step Done The family Old item Done");
+    expect(text).toContain("1. Old step Done What Old step asks of the family and of each student Requirement Required Where it stands Due The family Old item Required Done");
     expect(text).not.toContain("Handbook read");
   });
 

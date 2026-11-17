@@ -10,31 +10,38 @@ import { defaultProgressSeasonId, loadFamilyProgress, type FamilyProgress } from
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
 import { StateWords } from "@/app/components/state-words";
+import { DataTable, type Column } from "@/app/components/data-table";
+import { Notice } from "@/app/components/notice";
 
 export const metadata = { title: "Family progress" };
 export const dynamic = "force-dynamic";
 
+type Asked = Line & { subjectQboId: string };
+
 /**
- * What one step asks of the family itself or of one student, each requirement with its state in words. The title leads
- * to the requirement's own progress page, where it is ticked off or waived. Names, titles and reasons are text only.
+ * What one step asks of the family itself and of each student, as one table with a heading row for each of them:
+ * each requirement with its state in words. The title leads to the requirement's own progress page, where it is ticked
+ * off or waived. Names, titles and reasons are text only.
  */
-function Asked({ who, subjectQboId, lines, waivers }: { who: string; subjectQboId: string; lines: Line[]; waivers: FamilyProgress["waivers"] }) {
+function StepTable({ stepName, groups, waivers }: { stepName: string; groups: { key: string; who: string; lines: Asked[] }[]; waivers: FamilyProgress["waivers"] }) {
+  const columns: Column<Asked>[] = [
+    { key: "title", header: "Requirement", rowHeader: true, cell: (line) => <Link href={`/staff/seasons/progress/${line.requirementId}`}>{line.title}</Link> },
+    { key: "required", header: "Required", cell: (line) => (line.required ? "Required" : "Optional") },
+    { key: "state", header: "Where it stands", cell: (line) => {
+      const waiver = waivers.get(pairKey(line.requirementId, line.subjectQboId));
+      return (
+        <>
+          <StateWords state={line.state} words={line.words} />
+          {waiver && <span className="t-line">Waived <LocalTime iso={waiver.at} />{waiver.by ? ` by ${waiver.by}` : ""}: {waiver.reason}</span>}
+        </>
+      );
+    } },
+    { key: "due", header: "Due", cell: (line) => (line.dueOn ? <CalendarDate iso={line.dueOn} /> : "No due date") },
+  ];
   return (
-    <div className="family-reqs">
-      <h3>{who}</h3>
-      <ul className="lines progress-rows">{lines.map((line) => {
-        const waiver = waivers.get(pairKey(line.requirementId, subjectQboId));
-        return (
-          <li key={line.requirementId}><div>
-            <Link className="what" href={`/staff/seasons/progress/${line.requirementId}`}>{line.title}</Link>
-            {!line.required && <span className="when">Optional</span>}
-            <StateWords state={line.state} words={line.words} />
-            {line.dueOn && <span className="when">Due <CalendarDate iso={line.dueOn} /></span>}
-            {waiver && <span className="when">Waived <LocalTime iso={waiver.at} />{waiver.by ? ` by ${waiver.by}` : ""}: {waiver.reason}</span>}
-          </div></li>
-        );
-      })}</ul>
-    </div>
+    <DataTable caption={`What ${stepName} asks of the family and of each student`} captionHidden className="progress-rows" columns={columns}
+      rowKey={(line) => `${line.subjectQboId}|${line.requirementId}`}
+      groups={groups.map((g) => ({ key: g.key, heading: g.who, rows: g.lines }))} />
   );
 }
 
@@ -62,20 +69,25 @@ export default async function FamilyProgressPage({ params, searchParams }: {
       <p className="lede">Where this family stands in {season.name}{season.isCurrent ? ", the current season" : ", which parents don't see"}. Open a requirement to tick it off or waive it.{" "}
         <Link href={`/staff/seasons/progress?season=${season.id}`}>Back to {season.name}</Link></p>
 
-      {steps.length === 0 && <section className="box" aria-labelledby="none-h"><h2 id="none-h">No steps yet</h2><p>This season has no steps yet.</p></section>}
+      {steps.length === 0 && <Notice tone="info" live="none">This season has no steps yet.</Notice>}
 
       {steps.map((step, i) => {
         const students = step.students.filter((s) => s.lines.length > 0);
         const left = linesLeft(step.family) + step.students.reduce((sum, s) => sum + linesLeft(s.lines), 0);
-        const anything = step.family.length > 0 || students.length > 0;
+        const groups = [
+          ...(step.family.length > 0 ? [{ key: family.qboId, who: "The family", lines: step.family.map((l) => ({ ...l, subjectQboId: family.qboId })) }] : []),
+          ...students.map((s) => ({ key: s.qboId, who: s.name, lines: s.lines.map((l) => ({ ...l, subjectQboId: s.qboId })) })),
+        ];
         return (
           <section className="box" key={step.id} aria-labelledby={`step-${step.id}`}>
             <h2 id={`step-${step.id}`}>{i + 1}. {step.name}</h2>
-            {i === currentIndex && <p>The step this family is on.</p>}
-            {!anything ? <p>Nothing is asked of this family in this step.</p>
-              : <StateWords state={left === 0 ? "done" : "todo"} words={left === 0 ? "Done" : `${left} ${left === 1 ? "thing" : "things"} left to do`} />}
-            {step.family.length > 0 && <Asked who="The family" subjectQboId={family.qboId} lines={step.family} waivers={waivers} />}
-            {students.map((s) => <Asked key={s.qboId} who={s.name} subjectQboId={s.qboId} lines={s.lines} waivers={waivers} />)}
+            {i === currentIndex && <Notice tone="info" live="none">The step this family is on.</Notice>}
+            {groups.length === 0 ? <Notice tone="info" live="none">Nothing is asked of this family in this step.</Notice> : (
+              <>
+                <StateWords state={left === 0 ? "done" : "todo"} words={left === 0 ? "Done" : `${left} ${left === 1 ? "thing" : "things"} left to do`} />
+                <StepTable stepName={step.name} groups={groups} waivers={waivers} />
+              </>
+            )}
           </section>
         );
       })}

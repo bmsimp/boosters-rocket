@@ -53,7 +53,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
         <Notice tone="warning">The roster can&apos;t be shown right now, so nobody is listed. Check QuickBooks under Roster.</Notice>
       ) : (
         <section className="box" aria-labelledby="who-h"><h2 id="who-h">Who has done it</h2>
-          <p>{counts.asked === 0 ? `It is asked of no ${noun} on the roster right now.` : `${counts.done} of ${counts.asked} done${counts.waived ? `, ${counts.waived} waived` : ""}, ${counts.todo} still to do.`}</p>
+          <Notice tone={counts.asked > 0 && counts.todo === 0 ? "done" : "info"} live="none">{counts.asked === 0 ? `It is asked of no ${noun} on the roster right now.` : `${counts.done} of ${counts.asked} done${counts.waived ? `, ${counts.waived} waived` : ""}, ${counts.todo} still to do.`}</Notice>
           {counts.asked > 0 && (
             <form method="get" role="search" className="stack">
               <label className="field"><span>Find by name</span><input name="q" type="search" defaultValue={typed} autoComplete="off" /></label>
