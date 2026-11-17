@@ -675,6 +675,9 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
 .mail-steps a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; margin-right: var(--s3); }
 .mail-steps .state { display: inline-flex; }
 
+/* Setup: each step's Next button and the address box stand clear of the box or form above them, as boxes do. */
+.setup-page > .box, .setup-page > form, .setup-page > .stack { margin-top: var(--cell); }
+
 /* A club color picked on the setup's club step or the Club page, shown on a sample of the club bar. */
 .club-preview { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: 0 var(--s4); background: var(--club); color: var(--club-on);
   border: 2px solid var(--ink); }
