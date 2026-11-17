@@ -113,6 +113,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "roster.write.stuck": "A waiting change to QuickBooks is stuck: staff must look at it",
   "season.create": "Season made",
   "season.current.set": "Current season chosen or cleared",
+  "season.due_reminders.sent": "Reminders before a payment's or a checklist item's due date emailed",
   "season.progress.family.read": "A family's season progress opened",
   "season.records.cleared": "Season ticks, waivers and chosen lists cleared after a company change",
   "season.rename": "Season renamed",

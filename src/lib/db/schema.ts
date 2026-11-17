@@ -514,6 +514,27 @@ export const requirementProgress = pgTable("requirement_progress", {
   check("requirement_progress_waiver_reason", sql`(${t.waivedAt} is null) = (${t.waivedReason} is null)`),
 ]);
 
+/**
+ * The reminders before a required payment's or checklist item's due date (src/lib/seasons/due-reminders.ts), one row
+ * per email: to one guardian of one family, about that family's requirements due on `due_on`, sent 14 or 3 days before
+ * it (`kind`). Claimed before it is sent, so two wakes never send it twice; `outcome` is null while the send is under
+ * way, and a failed one may be claimed again after a while. The family is a QuickBooks id of the connected company: a
+ * company change deletes every row (clearSeasonRecords()). Deleted after a year by the daily clean-up.
+ */
+export const requirementReminder = pgTable("requirement_reminder", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["due_14", "due_3"] }).notNull(),
+  familyQboId: text("family_qbo_id").notNull(),
+  parentId: uuid("parent_id").notNull(),
+  dueOn: date("due_on", { mode: "string" }).notNull(),     // the club's date
+  triedAt: timestamp("tried_at", { withTimezone: true }).notNull(),
+  outcome: text("outcome", { enum: ["sent", "failed"] }),
+  createdAt: created(),
+}, (t) => [
+  uniqueIndex("requirement_reminder_uq").on(t.kind, t.familyQboId, t.dueOn, t.parentId),
+  index("requirement_reminder_created_ix").on(t.createdAt),
+]);
+
 /* ---- Volunteering (v1 spec §11). An event's date and a shift's times are the club's own wall-clock time, read in the club's time zone (src/lib/volunteer/clock.ts). ---- */
 
 /**

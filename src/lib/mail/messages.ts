@@ -186,6 +186,28 @@ export function volunteerDueMessage(b: Brand, to: string, o: { dueWords: string;
   return { to, subject: `Volunteering due ${o.dueWords}`, text: text(lines), html: html(b, lines) };
 }
 
+/* ---- Due dates of payments and checklist items (v1 spec §10.1.9). Each goes to one guardian of the family, about that
+   family's own requirements due on one day: titles, who each is for, and where each stands. Nothing about any other
+   family, and no note staff wrote. ---- */
+
+/** One requirement in a due-date reminder, its parts already in words: the title, the student it is for (null: the family), and how it stands. */
+export type RequirementDueWords = { title: string; forName: string | null; standing: string };
+/**
+ * A reminder before a due date: what the family still has to do, kindly, with the date and the way to it. `payments`
+ * is the Payments page, given when a payment is among them; `season` is the Season page.
+ */
+export function requirementDueMessage(b: Brand, to: string, o: { dueWords: string; daysLeft: number; items: RequirementDueWords[]; season: string; payments: string | null }): MailMessage {
+  const one = o.items.length === 1;
+  const lines = [
+    `A friendly reminder: ${one ? "something" : "a few things"} the club asks of your family ${one ? "is" : "are"} due ${o.dueWords}, ${o.daysLeft} days from now.`,
+    ...o.items.map((i) => `${i.title}${i.forName ? ` for ${i.forName}` : ""}: ${i.standing}.`),
+    ...(o.payments ? [`You can see what's owed and pay on the Payments page: ${o.payments}`] : []),
+    `Everything the club asks this season is here: ${o.season}`,
+    "If you've taken care of this in the last day or so, thank you, and you can ignore this email.",
+  ];
+  return { to, subject: one ? `Due ${o.dueWords}: ${o.items[0]!.title}` : `Due ${o.dueWords}: ${o.items.length} things for the club`, text: text(lines), html: html(b, lines) };
+}
+
 export function testMessage(b: Brand, to: string): MailMessage {
   const lines = [`This is a test from the ${b.clubName} portal. Outgoing mail works.`];
   return { to, subject: `Test email from ${b.clubName}`, text: text(lines), html: html(b, lines) };

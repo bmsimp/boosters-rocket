@@ -155,6 +155,13 @@
       "when": 1794893223861,
       "tag": "0021_sandbox_check",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794902919459,
+      "tag": "0022_requirement_reminders",
+      "breakpoints": true
     }
   ]
 }

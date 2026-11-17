@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, requirementReminder, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -34,7 +34,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * whose rows expire gets its delete below and a boundary test.
  */
 export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run",
-  "form_reminder_claim", "form_reminder_round", "write_queue", "staff_auth_verification", "parent_auth_verification"] as const;
+  "form_reminder_claim", "form_reminder_round", "requirement_reminder", "write_queue", "staff_auth_verification", "parent_auth_verification"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
@@ -85,7 +85,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   while the cache holds no customers at all, which says the roster is missing, not that every family left.
  * - Job history older than JOB_HISTORY_DAYS, except each job's newest run and its newest run that worked: the health
  *   page and the "is it due" check read those.
- * - Reminder claims and scheduled rounds older than REMINDER_CLAIM_DAYS: they only stop a second reminder the same day.
+ * - Reminder claims and scheduled rounds older than REMINDER_CLAIM_DAYS, the forms' and the due-date reminders': they
+ *   only stop a second reminder the same day.
  *   A signed form's evidence is never deleted.
  * - Staff roster writes that went through or were given up more than FINISHED_WRITES_DAYS ago. Waiting and stuck ones
  *   stay until they finish.
@@ -125,7 +126,8 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
 
   const yearAgo = new Date(now.getTime() - REMINDER_CLAIM_DAYS * 86_400_000);
   const reminderClaims = n(await tx.delete(formReminderClaim).where(lt(formReminderClaim.createdAt, yearAgo)).returning({ id: formReminderClaim.id }))
-    + n(await tx.delete(formReminderRound).where(lt(formReminderRound.createdAt, yearAgo)).returning({ id: formReminderRound.id }));
+    + n(await tx.delete(formReminderRound).where(lt(formReminderRound.createdAt, yearAgo)).returning({ id: formReminderRound.id }))
+    + n(await tx.delete(requirementReminder).where(lt(requirementReminder.createdAt, yearAgo)).returning({ id: requirementReminder.id }));
   const writes = n(await tx.delete(writeQueue).where(and(inArray(writeQueue.state, ["done", "given_up"]),
     lt(writeQueue.finishedAt, new Date(now.getTime() - FINISHED_WRITES_DAYS * 86_400_000)))).returning({ id: writeQueue.id }));
 
