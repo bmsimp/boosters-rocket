@@ -7,10 +7,10 @@ import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { clearRosterOfOtherCompanyLocked, getRosterSource, ROSTER_JOB, setRosterSource } from "./source";
-import { studentMoves, type StudentMove } from "./moves";
+import { studentMoves, studentsUnderFamilies, type StudentMove } from "./moves";
 import { logReconcileFailure, reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
-import { formsForMovedStudent } from "@/lib/forms/moved";
-import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
+import { formsForMovedStudent, requestsHeldElsewhere } from "@/lib/forms/moved";
+import { placesHeldElsewhere, volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 
 export { ROSTER_LOCK, ROSTER_JOB };
 
@@ -155,8 +155,13 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         await setRosterSource(sp, realmId);
         // A student QuickBooks moved to another family since the last read is followed up as a move made in the portal
         // is. One the portal moved is in the old cache under the new family already, so it is no move here, and a move
-        // is found once: the next read sees the student where this one stored them.
-        const moves = before.length === 0 ? [] : studentMoves(await getShape(sp), before, rows);
+        // is found once: the next read sees the student where this one stored them. A move that reached the new family
+        // over more than one read (moved while inactive, or through a stray) is found by where the student's forms and
+        // places still to come are held; a followed move leaves none held elsewhere.
+        const shape = await getShape(sp);
+        const under = ours ? studentsUnderFamilies(shape, rows) : new Map<string, string>();
+        const held = under.size === 0 ? [] : [...(await requestsHeldElsewhere(sp, under)), ...(await placesHeldElsewhere(sp, under))];
+        const moves = before.length === 0 ? [] : studentMoves(shape, before, rows, held);
         const owed: (() => Promise<unknown>)[] = [];
         try { for (const m of moves) owed.push(await followMovedStudent(sp, m, cause)); } catch { throw new FollowUpFailed(); }
         try { await reconcileAccess(sp, { cause }); } catch (e) { logReconcileFailure(e); throw new ReconcileFailed(); }

@@ -148,6 +148,39 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     expect(mail.outbox).toEqual([]);
   });
 
+  it("a move made over two refreshes is followed when the student is active under the new family: moved while inactive, made active later", async () => {
+    const leo = await seedLeo();
+    // Moved to the Chen family while inactive: nothing to follow yet.
+    moveInQuickBooks(LEO, CHEN, { active: false });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toEqual([]);
+    // Taken back into use under the Chen family: the forms and the place still to come follow from where they are held.
+    moveInQuickBooks(LEO, CHEN, { active: true });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
+    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    expect(await requestNow(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete" });
+    expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
+    // The place done stays with the family it was earned for, and is never taken for a move again.
+    expect((await signup(leo.done.id)).cancelledAt).toBeNull();
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toHaveLength(1);
+    expect(mail.outbox).toHaveLength(1);
+  });
+
+  it("a move through a stray (off the family first, under the new one at the next read) is followed once", async () => {
+    const leo = await seedLeo();
+    moveInQuickBooks(LEO, null);
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toEqual([]);
+    moveInQuickBooks(LEO, CHEN);
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, formsReset: 1, placesGivenUp: 1 }) })]);
+    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toHaveLength(1);
+  });
+
   it("a student moved to something that isn't a family is followed by nothing: a school, a parent, no one", async () => {
     const leo = await seedLeo();
     for (const to of ["30", "21", null]) {

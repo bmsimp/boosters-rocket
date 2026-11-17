@@ -5,7 +5,7 @@
 // transaction: the worker does it from form_withdrawal) and the request goes back to not opened under the new family,
 // with the old family's consents taken away. Imports no staff-only module (tests/integration/page-guards.test.ts).
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { formWithdrawal, signatureConsent, signatureRequest, signedFormEvidence, type RequestSigner, type SignatureRequestState } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -54,3 +54,15 @@ export async function formsForMovedStudent(tx: Tx, o: { studentQboId: string; fr
   return { moved: plans.filter((p) => p.do === "move").length, reset: plans.filter((p) => p.do === "reset").length, toWithdraw };
 }
 
+
+/**
+ * The students' form requests held under another family than the one each is under now (`under`: student to family,
+ * studentsUnderFamilies() in src/lib/roster/moves.ts), for a roster refresh to follow a move it didn't see in one read.
+ * A request the follow-up moved is under the new family, so none is held elsewhere once a move is followed.
+ */
+export async function requestsHeldElsewhere(tx: Tx, under: ReadonlyMap<string, string>): Promise<{ studentQboId: string; familyQboId: string }[]> {
+  if (under.size === 0) return [];
+  const rows = await tx.selectDistinct({ studentQboId: signatureRequest.subjectQboId, familyQboId: signatureRequest.familyQboId }).from(signatureRequest)
+    .where(ne(signatureRequest.subjectQboId, signatureRequest.familyQboId));
+  return rows.filter((r) => under.has(r.studentQboId) && under.get(r.studentQboId) !== r.familyQboId);
+}

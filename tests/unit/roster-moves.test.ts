@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { studentMoves, type Placed } from "@/lib/roster/moves";
+import { studentMoves, studentsUnderFamilies, type Placed } from "@/lib/roster/moves";
 
 const p = (qboId: string, typeQboId: string | null, parentQboId: string | null = null, active = true): Placed => ({ qboId, typeQboId, parentQboId, active });
 const layered = { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" } as const;
@@ -73,5 +73,28 @@ describe("the students a refresh finds moved to another family", () => {
     expect(found).toHaveLength(40);
     expect(found.map((m) => Number(m.studentQboId))).toEqual([...found.map((m) => Number(m.studentQboId))].sort((a, b) => a - b));
     expect(found.every((m) => m.fromFamilyQboId !== m.toFamilyQboId)).toBe(true);
+  });
+
+  it("a move made over two refreshes is found by where the student's records are held: moved while inactive, or through a stray", () => {
+    const leoHeldByRivera = [{ studentQboId: "12", familyQboId: "10" }];
+    // Moved under 20 while inactive: no pair of rosters shows it, then made active under 20.
+    const inactiveUnder20 = moved({ "12": { parentQboId: "20", active: false } });
+    expect(studentMoves(layered, inactiveUnder20, moved({ "12": { parentQboId: "20" } }))).toEqual([]);
+    expect(studentMoves(layered, inactiveUnder20, moved({ "12": { parentQboId: "20" } }), leoHeldByRivera)).toEqual([{ studentQboId: "12", fromFamilyQboId: "10", toFamilyQboId: "20" }]);
+    // Taken off to a stray first, then put under 20.
+    const stray = moved({ "12": { parentQboId: null } });
+    expect(studentMoves(layered, stray, moved({ "12": { parentQboId: "20" } }), leoHeldByRivera)).toEqual([{ studentQboId: "12", fromFamilyQboId: "10", toFamilyQboId: "20" }]);
+  });
+
+  it("records held under the family a student is under, or a student not active under a family, are no move; one move is found once", () => {
+    const after = moved({ "12": { parentQboId: "20" } });
+    expect(studentMoves(layered, after, after, [{ studentQboId: "12", familyQboId: "20" }])).toEqual([]);
+    expect(studentMoves(layered, company, moved({ "12": { active: false, parentQboId: "20" } }), [{ studentQboId: "12", familyQboId: "10" }])).toEqual([]);
+    expect(studentMoves(layered, company, moved({ "12": { parentQboId: "30" } }), [{ studentQboId: "12", familyQboId: "10" }])).toEqual([]);
+    // Found by the cache and by the records alike: one move.
+    expect(studentMoves(layered, company, after, [{ studentQboId: "12", familyQboId: "10" }, { studentQboId: "12", familyQboId: "10" }]))
+      .toEqual([{ studentQboId: "12", fromFamilyQboId: "10", toFamilyQboId: "20" }]);
+    expect(studentMoves({ kind: "flat", memberTypeIds: ["1", "3"] }, after, after, [{ studentQboId: "12", familyQboId: "10" }])).toEqual([]);
+    expect([...studentsUnderFamilies(layered, after)].sort()).toEqual([["12", "20"], ["13", "10"]]);
   });
 });

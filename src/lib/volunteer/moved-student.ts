@@ -3,7 +3,7 @@
 // still to start are given up, their guardians told; what the student has already done stays with the family it was
 // earned for, so a check-in keeps its credit there, and the new family takes nothing over.
 import "server-only";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { volunteerEvent, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -45,4 +45,26 @@ export async function volunteerForMovedStudent(tx: Tx, move: { studentQboId: str
     return { kind: "removed", signup: x, facts: factsOf(r.event, r.shift), why: "moved" };
   });
   return { cancelled: giving.length, tell: () => sendNotices(notices, { zone, actor, ip: o.ip ?? null, targetType: "student", targetId: move.studentQboId }) };
+}
+
+/**
+ * The students' places on shifts still to start held under another family than the one each is under now (`under`:
+ * student to family, studentsUnderFamilies() in src/lib/roster/moves.ts): the places a move's follow-up would give up,
+ * for a roster refresh to follow a move it didn't see in one read. A followed move leaves none: its places still to
+ * start are given up, and the places done stay with the family they were earned for, which this leaves out.
+ */
+export async function placesHeldElsewhere(tx: Tx, under: ReadonlyMap<string, string>, now: Date = new Date()): Promise<{ studentQboId: string; familyQboId: string }[]> {
+  if (under.size === 0) return [];
+  const rows = (await tx.select({ s: volunteerSignup, shift: volunteerShift, event: volunteerEvent }).from(volunteerSignup)
+    .innerJoin(volunteerShift, eq(volunteerShift.id, volunteerSignup.shiftId)).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
+    .where(and(isNotNull(volunteerSignup.studentQboId), isNull(volunteerSignup.cancelledAt))))
+    .filter((r) => r.s.studentQboId !== null && under.has(r.s.studentQboId) && under.get(r.s.studentQboId) !== r.s.familyQboId);
+  if (rows.length === 0) return [];
+  const zone = (await getClubSettings()).timeZone;
+  const credited = await creditedSignups(rows.map((r) => r.s.id), tx);
+  const ids = new Set(placesToGiveUp(rows.map((r) => ({ id: r.s.id, start: shiftInstants(r.event.onDate, r.shift.startsAt, r.shift.endsAt, zone).start,
+    cancelled: r.shift.cancelledAt !== null || r.event.cancelledAt !== null, checkedIn: credited.has(r.s.id) })), now));
+  const out = new Map<string, { studentQboId: string; familyQboId: string }>();
+  for (const r of rows) if (ids.has(r.s.id)) out.set(`${r.s.studentQboId}|${r.s.familyQboId}`, { studentQboId: r.s.studentQboId!, familyQboId: r.s.familyQboId });
+  return [...out.values()];
 }
