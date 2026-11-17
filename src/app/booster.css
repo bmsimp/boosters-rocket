@@ -601,6 +601,7 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
 .today { list-style: none; padding: 0; margin-top: var(--s3); }
 .today li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s1) var(--s4);
   padding: var(--s3) 0; border-top: 1px solid var(--hair); }
+.today li > div { flex: 1 1 20rem; min-width: 0; } /* the words take the line, so every link sits at its end on a laptop, however long its words */
 .today li .state { font-size: 1rem; }
 .today .when { display: block; font-size: 0.875rem; color: var(--ink-2); margin-top: 2px; }
 .today li a { display: inline-flex; align-items: center; min-height: 44px; color: var(--club-text); font-weight: 700; }
