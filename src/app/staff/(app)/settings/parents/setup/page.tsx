@@ -121,7 +121,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
           {!p.settings.welcome && <p><b>{n(p.welcomeNow, "person", "people")} would be emailed now.</b> After that, each new person is emailed once. They go out a few each minute.</p>}
           <h3>The email</h3>
           <p>Subject: {sample.subject}</p>
-          <pre>{sample.text}</pre>
+          <pre className="email-sample">{sample.text}</pre>
           {p.settings.welcome ? <SwitchButton quiet label="Switch welcome emails off" pendingLabel="Switching off…" act={setWelcomeAction.bind(null, false)} />
             : !p.settings.signin ? <Notice tone="info">Switch parent sign-ins on first (step 2).</Notice>
             : <SwitchButton label="Switch welcome emails on" pendingLabel="Switching on…" act={setWelcomeAction.bind(null, true)} />}

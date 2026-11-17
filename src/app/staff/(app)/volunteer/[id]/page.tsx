@@ -61,7 +61,7 @@ export default async function VolunteerEventPage({ params }: { params: Promise<{
           <h2 id={`shift-${s.id}`}>{shiftTimeWords(s.startsAt, s.endsAt)}{s.role ? `, ${s.role}` : ""}</h2>
           <p>{s.cancelled ? "Cancelled. " : ""}{s.signups.length} of {s.places} {s.places === 1 ? "place" : "places"} filled · {hoursWords(s.minutes)} {s.minutes === 60 ? "hour" : "hours"}</p>
           <p className="hint">{s.requirementIds.length === 0 ? "Counts toward no requirement." : `Counts toward: ${s.requirementIds.map(labelOf).join("; ")}.`}</p>
-          {canPrint && !s.cancelled && <p><Link href={`/staff/volunteer/check-in/${s.id}`}>Check-in code to print</Link></p>}
+          {canPrint && !s.cancelled && <p><Link className="link-line" href={`/staff/volunteer/check-in/${s.id}`}>Check-in code to print</Link></p>}
           {s.signups.length === 0 ? <p>Nobody has signed up yet.</p> : (
             <DataTable caption="Who has signed up for this shift" captionHidden rows={s.signups} rowKey={(x) => x.id} columns={[
               { key: "who", header: "Who", rowHeader: true, cell: (x) => x.fillerName },
