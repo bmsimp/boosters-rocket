@@ -187,6 +187,22 @@ describe("seasons", () => {
     expect((await audits("season.create"))[0]!.after).toMatchObject({ start: "last", steps: ["Join", "Wrap-up"], requirements: 2, copiedFrom: { id: last.seasonId, name: "Fall 2026" } });
   });
 
+  it("copies what each kind is met or billed by: a buy-out's price and item, a form's template, signers and reminder schedule (v1 spec §10.1)", async () => {
+    const last = await seedSeason({ name: "Fall 2026", steps: [{ name: "Join", requirements: [
+      { title: "Two shifts", appliesTo: "family" }, { title: "Medical release", appliesTo: "student" }] }] });
+    const form = { templateId: "envelope_medical", templateTitle: "Medical release", templateUpdatedAt: "2026-08-01T00:00:00.000Z", signerRoles: 2 as const,
+      signers: "every" as const, attachedAt: "2026-08-02T00:00:00.000Z" };
+    await db.update(requirement).set({ kind: "volunteer", amount: 2, amountUnit: "shifts", buyoutUnitCents: 2500, itemQboId: "31" }).where(eq(requirement.id, last.requirementIds["Two shifts"]!));
+    await db.update(requirement).set({ kind: "form", form, formReminders: { before: [7, 1], weeklyAfter: true } }).where(eq(requirement.id, last.requirementIds["Medical release"]!));
+    expect((await createSeasonAction("Fall 2027", "last")).ok).toBe(true);
+    const copy = (await seasons()).find((s) => s.name === "Fall 2027")!;
+    const copied = await db.select().from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).where(eq(seasonStep.seasonId, copy.id)).orderBy(asc(requirement.position));
+    expect(copied.map((r) => ({ title: r.requirement.title, kind: r.requirement.kind, buyoutUnitCents: r.requirement.buyoutUnitCents, itemQboId: r.requirement.itemQboId,
+      form: r.requirement.form, formReminders: r.requirement.formReminders }))).toEqual([
+      { title: "Two shifts", kind: "volunteer", buyoutUnitCents: 2500, itemQboId: "31", form: null, formReminders: null },
+      { title: "Medical release", kind: "form", buyoutUnitCents: null, itemQboId: null, form, formReminders: { before: [7, 1], weeklyAfter: true } }]);
+  });
+
   it("refuses a copy when there is nothing to copy, and a name that is empty or too long", async () => {
     expect(await createSeasonAction("Fall", "last")).toEqual({ ok: false, errors: ["There is no season to copy yet."] });
     expect(await createSeasonAction("   ", "empty")).toEqual({ ok: false, errors: ["The season needs a name."] });
