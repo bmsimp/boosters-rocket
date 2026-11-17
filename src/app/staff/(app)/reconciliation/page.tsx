@@ -54,7 +54,7 @@ function Writes({ items, caption, canChange }: { items: QueueView[]; caption: st
 export default async function ReconciliationPage() {
   const ctx = await requireStaffPage("Roster.Read");
   const money = can(ctx.effective, "Finance.Balance.Read");
-  const [writes, roster, balances] = await Promise.all([loadOpenWrites(), loadRosterPage(), money ? loadBalances() : Promise.resolve(null)]);
+  const [writes, roster, balances] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null)]);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting");
   const hasPage = new Set(!roster.roster ? [] : roster.roster.kind === "flat" ? roster.roster.members.map((m) => m.qboId) : roster.roster.families.map((f) => f.customer.qboId));

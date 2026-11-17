@@ -59,7 +59,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const detailed = can(ctx.effective, "Parents.ReadWrite");
   const signins = await familySignins(qboId, { detailed });
   const customer = entry.kind === "family" ? entry.family.customer : entry.member;
-  const waiting = await loadOpenWrites({ familyQboId: qboId });
+  const waiting = await loadOpenWrites({ familyQboId: qboId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's version.
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null;
   const records = entry.kind === "family" ? [entry.family.customer, ...entry.family.students, ...entry.family.parents] : [entry.member];

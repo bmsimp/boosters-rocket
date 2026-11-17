@@ -212,6 +212,20 @@ describe("the Reconciliation page (Roster.Read)", () => {
     expect((await db.select().from(auditLog)).length).toBe(before);
   });
 
+  it("says a queued buy-out invoice's amount only to staff who may see money, here and on the family's page", async () => {
+    await db.insert(writeQueue).values({ realmId: REALM, request: { op: "invoice_create", buyoutId: "00000000-0000-4000-8000-0000000000b1", customerQboId: "10", itemQboId: "4343",
+      units: 2, unitCents: 3719, familyQboId: "10" }, familyQboId: "10", sent: false, tries: 1, lastCode: "http_429", nextTryAt: new Date(), askedByLabel: "a guardian" });
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: "10" } })]) {
+      expect(html).toContain("for a volunteer buy-out");
+      expect(html).not.toContain("$74.38");
+    }
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Finance.Balance.Read"]));
+    for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: "10" } })]) {
+      expect(html).toContain("$74.38 for a volunteer buy-out");
+    }
+  });
+
   it("offers Try again now and Give up to staff who may change the roster, and the money worth a look to staff who may see money", async () => {
     await seedQueued(RENAME, { familyQboId: "10" });
     await seedWorthALook();
