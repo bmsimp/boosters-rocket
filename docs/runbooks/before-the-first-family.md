@@ -192,7 +192,8 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     away on that phone. **If not:** a screenshot.
 13. **Home on a phone.** **Pass:** it reads in order (greeting, the money box under the family's name, students,
     details), the season ruler's step names fit or hide cleanly, the current set shows the club color, each student's
-    dot is readable, and the tabs and **Switch family** are easy to tap. **If not:** a screenshot.
+    dot is readable, and the tabs are easy to tap (and, for a parent in two families, **Switch family** on Family).
+    **If not:** a screenshot.
 14. **Display modes.** On Display, try dark, high contrast and the largest text size, then open Home, Volunteer, a
     shift and a form's page.
     **Pass:** the filled account circle on Display is readable against the club color; nothing scrolls sideways, the
@@ -254,7 +255,8 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
    **Pass:** both addresses answer over https with a certificate (with this installation's own proxy, Caddy gets
    them); the preview bar's text on a light color is dark and readable; setup ends with you signed in as the Admin; the
    first backup holds both databases; the installed app's icon and title use the club's new name.
-   **If not:** the step's own **If something stops** advice, then note the step and the message.
+   **If not:** `docker compose logs <name>` for the part that stopped, as the first start says, then note the step and
+   the message.
 2. **The machine reaches its own two addresses,** the check in [the first start, item 5](first-install.md#5-the-first-start).
    **Pass:** both commands print `200`. **If not:** the "NAT loopback" fix that item gives; until both print `200`,
    forms can't be signed.
@@ -290,13 +292,14 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
    **Pass:** attaching each to its form requirement is accepted. **If not:** the page says what is missing; add it in
    Documenso and attach again.
 10. **The lawyer's look.** Have the club's lawyer read the consent text parents agree to before signing
-    (`src/lib/forms/consent.ts`, version 2026-11-16; a form's page shows it above **I agree to sign electronically**), and one
-    sealed PDF with its certificate page and the audit log (a staff member downloads them from Signed forms, the
-    form's evidence page).
+    (`src/lib/forms/consent.ts`, version 2026-11-16; a form's page shows it above **I agree to sign
+    electronically**), and one sealed PDF with its certificate page and the audit log (a staff member downloads them
+    from Signed forms, the form's evidence page).
     **Pass:** the lawyer is content, in writing. **If not:** what they want changed in the words is a change to the
     portal for whoever maintains it (a new consent version).
 11. **Sign a form on each phone:** the iPhone in Safari, the iPhone's installed app, Android in Chrome. Open a form,
-    **I agree to sign electronically**, sign with a finger in the frame. Leave Safari's "Prevent Cross-Site Tracking" on (its default).
+    **I agree to sign electronically**, sign with a finger in the frame. Leave Safari's "Prevent Cross-Site Tracking"
+    on (its default).
     **Pass:** the page says "Signed". On the form's certificate page in Documenso, the address is the phone's public
     address. **If not:** note the phone and the step; a frame that loads and then can't be signed usually means the
     Forms address isn't exactly Documenso's own.
@@ -325,8 +328,10 @@ The proof-of-concept host has no Documenso. Forms need a full installation from 
     proven end to end, start a second Documenso against the restored database.
     **Pass:** each says `Restored ...`. **If not:** its message and exit code.
 
-The Documenso verification's own list of owner checks (its section 9) is covered by items 3, 10, 11, 12, 6 and 17 above;
-its item about a managed database host doesn't apply to this installation, which runs its own Postgres.
+The Documenso verification's own owner checks (its section 9, in `docs/superpowers/specs/2026-11-15-documenso-verification.md`)
+are here: its 1 and 2 (signing on an iPhone and on Android) and 4 (the phone's address on the certificate page) are
+item 11, its 3 (Entra) item 17, its 5 (Adobe Reader's signature panel) item 12, its 7 (timestamps) item 6 and its 8
+(the lawyer) item 10. Its 6, about a managed database service, doesn't apply: this installation runs its own Postgres.
 
 ## 5. Intuit's production assessment
 
