@@ -158,10 +158,13 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
     await page.keyboard.press("Enter");
     await expect(page.getByRole("status")).toContainText("we've sent a 6-digit code");
     await expect(page.getByLabel("6-digit code")).toBeFocused();
-    // A wrong code is said as an alert, and the focus stays in the field to try again.
+    // A wrong code is said as an alert, and the focus stays in the field to try again. The page's own alert, by its
+    // words: Next.js keeps an empty role=alert of its own on every page (its route announcer), which a bare
+    // getByRole("alert") finds at once, while the button still says Checking… and a second Enter is ignored.
     await page.keyboard.type("000000");
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText("That code didn't work. Check the newest email from us, or request a new code.");
+    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible(); // no longer Checking…
     await expect(page.getByLabel("6-digit code")).toBeFocused();
     await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.type(await codeFor(sql, sink, "zelda@example.com"));
