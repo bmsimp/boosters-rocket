@@ -63,11 +63,11 @@ describe("scripts/migrate.mjs --backup-check", { timeout: 120_000 }, () => {
   });
   afterAll(async () => {
     rmSync(folder, { recursive: true, force: true });
-    await admin(`DROP DATABASE IF EXISTS ${FRESH} WITH (FORCE)`);
+    await dropScratchDatabase(FRESH);
   }, DATABASE_WORK);
 
-  const admin = async (sql: string) => { const pg = postgres(ADMIN_URL, { max: 1, onnotice: () => {} }); try { await pg.unsafe(sql); } finally { await pg.end(); } };
-  const fresh = async () => { await admin(`DROP DATABASE IF EXISTS ${FRESH} WITH (FORCE)`); await admin(`CREATE DATABASE ${FRESH}`); };
+  // Made again, empty and marked as this run's (makeScratchDatabase drops the one this run made before).
+  const fresh = async () => { await makeScratchDatabase("migrate_script"); };
   const migrate = (o: { dir?: string; check?: boolean; env?: Record<string, string> } = {}) => spawnSync("node", ["scripts/migrate.mjs", ...(o.check === false ? [] : ["--backup-check"])],
     { env: { ...process.env, DATABASE_URL: FRESH_URL, MIGRATE_WITHOUT_RECENT_BACKUP: "", ...(o.dir ? { MIGRATIONS_DIR: o.dir } : {}), ...o.env }, encoding: "utf8" });
   const db = async <T>(f: (pg: postgres.Sql) => Promise<T>) => { const pg = postgres(FRESH_URL, { max: 1, onnotice: () => {} }); try { return await f(pg); } finally { await pg.end(); } };
