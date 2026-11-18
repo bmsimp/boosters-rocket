@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { asAppFamilyId, asAppStudentId } from "@/lib/families/ids";
 import type { Requirement } from "@/lib/seasons/progress";
 import { amountWords, countsFor, placesWords, shiftCredit, volunteerStanding, whoMustWords } from "@/lib/volunteer/rules";
 import { calendarFile, foldLine, icsText } from "@/lib/volunteer/calendar";
@@ -15,12 +16,14 @@ describe("how volunteering counts", () => {
 
   it("is met by anyone in the family for a per-family requirement, and by that student alone for a per-student one", () => {
     const family = req({ appliesTo: "family" }), student = req({ appliesTo: "student" });
-    expect(countsFor(family, { kind: "guardian" }, "FAM", "FAM")).toBe(true);
-    expect(countsFor(family, { kind: "student", studentQboId: "S1" }, "FAM", "FAM")).toBe(true);
-    expect(countsFor(family, { kind: "guardian" }, "FAM", "OTHER")).toBe(false);
-    expect(countsFor(student, { kind: "student", studentQboId: "S1" }, "FAM", "S1")).toBe(true);
-    expect(countsFor(student, { kind: "student", studentQboId: "S1" }, "FAM", "S2")).toBe(false);
-    expect(countsFor(student, { kind: "guardian" }, "FAM", "S1")).toBe(false);
+    // By the app's own ids (stage 2 of the app-owned families spec).
+    const [FAM, OTHER, S1, S2] = [asAppFamilyId("FAM"), asAppFamilyId("OTHER"), asAppStudentId("S1"), asAppStudentId("S2")];
+    expect(countsFor(family, { kind: "guardian" }, FAM, FAM)).toBe(true);
+    expect(countsFor(family, { kind: "student", studentId: S1 }, FAM, FAM)).toBe(true);
+    expect(countsFor(family, { kind: "guardian" }, FAM, OTHER)).toBe(false);
+    expect(countsFor(student, { kind: "student", studentId: S1 }, FAM, S1)).toBe(true);
+    expect(countsFor(student, { kind: "student", studentId: S1 }, FAM, S2)).toBe(false);
+    expect(countsFor(student, { kind: "guardian" }, FAM, S1)).toBe(false);
     expect(whoMustWords(family, null)).toBe("Anyone in your family can do it");
     expect(whoMustWords(student, "Leo Rivera")).toBe("Leo Rivera must do it");
   });

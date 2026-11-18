@@ -23,6 +23,9 @@ const DATABASE_WORK = 300_000;
 const { name: NAME, url: DB_URL } = scratchDatabase("migrate_seasons");
 const folders: string[] = [];
 const REALM = "4620000000000001";
+const OTHER_REALM = "4620000000000999";
+/** Customers that also have a family and a student record linked in OTHER_REALM. */
+const CUSTOMERS_ELSEWHERE = ["F1", "F2", "F-GONE", "S1", "S2", "S-GONE"];
 const PARENT = "7c0a9a1e-0000-4000-8000-000000000001";
 
 /** The migrations folder as it was up to `last` (by index), for the database as it was before this slice. */
@@ -96,6 +99,16 @@ describe("migrations 0024 and 0025: the season's records name the app's own fami
     });
     // Migration 0023 makes the app's records and links from that, as on the proof-of-concept host.
     await migrateWith(migrationsUpTo(23));
+    // Links of the same customer ids in another company (left from before a change of company, say): the fill must
+    // take this company's record of each, never another company's, so every check below reads through this company.
+    await q(async (pg) => {
+      for (const customer of CUSTOMERS_ELSEWHERE) {
+        const [f] = await pg`INSERT INTO family (name, active) VALUES (${`Elsewhere ${customer}`}, false) RETURNING id`;
+        await pg`INSERT INTO accounting_link (system, realm_id, customer_id, family_id, origin) VALUES ('quickbooks', ${OTHER_REALM}, ${customer}, ${f!.id}, 'carried_over')`;
+        const [s] = await pg`INSERT INTO student (name, active) VALUES (${`Elsewhere ${customer}`}, false) RETURNING id`;
+        await pg`INSERT INTO accounting_link (system, realm_id, customer_id, student_id, origin) VALUES ('quickbooks', ${OTHER_REALM}, ${customer}, ${s!.id}, 'carried_over')`;
+      }
+    });
   }, DATABASE_WORK);
 
   afterAll(async () => {
@@ -140,7 +153,7 @@ describe("migrations 0024 and 0025: the season's records name the app's own fami
       for (const r of rows) expect(r.id).toBe(progressIds[`${r.title}|${r.customer}`]);
       // The records of customers the roster no longer holds are inactive, as 0023 made them.
       const gone = await q((pg) => pg`SELECT l.customer_id, coalesce(f.active, s.active) AS active FROM accounting_link l
-        LEFT JOIN family f ON f.id = l.family_id LEFT JOIN student s ON s.id = l.student_id WHERE l.customer_id IN ('F-GONE', 'S-GONE') ORDER BY l.customer_id`);
+        LEFT JOIN family f ON f.id = l.family_id LEFT JOIN student s ON s.id = l.student_id WHERE l.customer_id IN ('F-GONE', 'S-GONE') AND l.realm_id = ${REALM} ORDER BY l.customer_id`);
       expect(gone.map((g) => [g.customer_id, g.active])).toEqual([["F-GONE", false], ["S-GONE", false]]);
     });
 
@@ -156,8 +169,8 @@ describe("migrations 0024 and 0025: the season's records name the app's own fami
     });
 
     it("refuses a season record that names no record, both kinds, or neither, and a family's removal while one names it", async () => {
-      const [ash] = await q((pg) => pg`SELECT family_id FROM accounting_link WHERE customer_id = 'F1' AND family_id IS NOT NULL`);
-      const [kid] = await q((pg) => pg`SELECT student_id FROM accounting_link WHERE customer_id = 'S1' AND student_id IS NOT NULL`);
+      const [ash] = await q((pg) => pg`SELECT family_id FROM accounting_link WHERE customer_id = 'F1' AND family_id IS NOT NULL AND realm_id = ${REALM}`);
+      const [kid] = await q((pg) => pg`SELECT student_id FROM accounting_link WHERE customer_id = 'S1' AND student_id IS NOT NULL AND realm_id = ${REALM}`);
       const NOBODY = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e5f";
       const uniform = requirementIds.uniform!, locker = requirementIds.locker!;
       await expect(q((pg) => pg`INSERT INTO requirement_progress (requirement_id, student_id, met_at) VALUES (${uniform}, ${NOBODY}, now())`)).rejects.toThrow(/requirement_progress_student_id_student_id_fk/);

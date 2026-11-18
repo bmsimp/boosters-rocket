@@ -16,6 +16,13 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
   { line: `    UNION ALL SELECT c."subject_qbo_id", r."applies_to" FROM "requirement_cover" c JOIN "requirement" r ON r."id" = c."requirement_id"`, by: "0025_seasons_app_ids_finish" },
   { line: `    UNION ALL SELECT p."subject_qbo_id", r."applies_to" FROM "requirement_progress" p JOIN "requirement" r ON r."id" = p."requirement_id"`, by: "0025_seasons_app_ids_finish" },
   { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "requirement_reminder"`, by: "0025_seasons_app_ids_finish" },
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "volunteer_signup"`, by: "0027_volunteer_app_ids_finish" },
+  { line: `    UNION ALL SELECT "student_qbo_id", 'student' FROM "volunteer_signup"`, by: "0027_volunteer_app_ids_finish" },
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "volunteer_credit"`, by: "0027_volunteer_app_ids_finish" },
+  { line: `    UNION ALL SELECT "student_qbo_id", 'student' FROM "volunteer_credit"`, by: "0027_volunteer_app_ids_finish" },
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "volunteer_reminder"`, by: "0027_volunteer_app_ids_finish" },
+  // The name hint a sign-up's student gave: the sign-up names its student's record now, which keeps the name it has.
+  { line: `    UNION ALL SELECT "student_qbo_id", "filler_name", 3, "created_at", "id" FROM "volunteer_signup" WHERE "student_qbo_id" IS NOT NULL AND btrim("filler_name") <> ''`, by: "0027_volunteer_app_ids_finish" },
 ];
 
 /**

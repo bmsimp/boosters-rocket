@@ -33,6 +33,7 @@ import { formSetting, requestNow, seedConsent, seedEvidence, seedFormRequirement
 import { identityNow, seedParentIn } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup } from "../helpers/volunteer";
+import { recordOfCustomer } from "../helpers/app-records";
 import { seedBuyout, seedBuyoutRequirement, queueOf } from "../helpers/buyouts";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -114,14 +115,16 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     // The place still to come is given up; the one done keeps its credit with the family it was earned for.
     expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
     expect((await signup(leo.done.id)).cancelledAt).toBeNull();
-    expect((await db.select().from(volunteerCredit).where(eq(volunteerCredit.id, leo.credit.id)))[0]).toMatchObject({ familyQboId: RIVERA, removedAt: null });
+    expect((await db.select().from(volunteerCredit).where(eq(volunteerCredit.id, leo.credit.id)))[0]).toMatchObject({ familyId: await recordOfCustomer(RIVERA, "family"), removedAt: null });
 
     const [row] = await followed();
     expect(await followed()).toHaveLength(1);
     expect(row).toMatchObject({ door: "system", actorLabel: "roster", targetType: "qbo_customer", targetId: LEO,
       after: { fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, cause: `roster.refresh#${run.id}`, formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1, buyouts: "daily_check" } });
     expect(await auditsOf("forms.request.moved")).toHaveLength(2);
-    expect(await auditsOf("volunteer.signup.moved")).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cancelled: 1, guardiansTold: 1 }) })]);
+    // The places name the app's own student, and so does their new audit row.
+    expect(await auditsOf("volunteer.signup.moved")).toEqual([expect.objectContaining({ targetType: "student", targetId: String(await recordOfCustomer(LEO, "student")),
+      after: expect.objectContaining({ familyId: String(await recordOfCustomer(CHEN, "family")), cancelled: 1, guardiansTold: 1 }) })]);
     // Ana, who took the place, is told once, after the commit, about her own sign-up, and never where Leo went.
     expect(mail.outbox.map((m) => [m.to, m.subject])).toEqual([["ana@example.com", "Your place has been freed: Fall fair"]]);
     expect(mail.seen).toEqual(["ok"]);

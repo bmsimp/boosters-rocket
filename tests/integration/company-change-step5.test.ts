@@ -30,10 +30,12 @@ import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
  * marked as the earlier company's and cut from its request (tests/integration/signed-forms-staff.test.ts shows the
  * archive and that no parent of the new company reaches it).
  *
- * From stage 2 the seasons are the exception too: their ticks, waivers, chosen lists and reminder claims name the
- * app's own families and students, so connecting a different company is refused until stage 4 ships (open question
- * 18), and nothing the portal runs reaches the clear. The last describe proves that part; the clear itself is kept for
- * the areas that have not moved yet, whose part stays below until their own slice.
+ * From stage 2 the seasons and volunteering are the exception too: their ticks, waivers, chosen lists and reminder
+ * claims, and every sign-up, credit and volunteer reminder claim, name the app's own families and students, so
+ * connecting a different company is refused until stage 4 ships (open question 18), and nothing the portal runs
+ * reaches the clear. The last describe proves that part; the clear itself is kept for the areas that have not moved
+ * yet, whose part stays below until their own slice. Called directly, it still empties volunteering first, before the
+ * app's own records it names (the first test).
  */
 const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
 
@@ -53,7 +55,8 @@ describe("connecting a different company after step 5", () => {
     const [req] = await db.select().from(signatureRequest).limit(1);
     await db.insert(formReminderClaim).values({ requirementId: req!.requirementId, parentId: a.identity.parentId, onDate: "2026-11-16" });
     await db.insert(formReminderRound).values({ requirementId: req!.requirementId, onDate: "2026-11-16" });
-    await db.insert(volunteerReminder).values({ kind: "due_14", key: `${a.identity.familyQboId}|2026-11-30|${a.identity.parentId}`, familyQboId: a.identity.familyQboId, triedAt: new Date(), outcome: "sent" });
+    const famA = await recordOfCustomer(a.spec.family.qboId, "family");
+    await db.insert(volunteerReminder).values({ kind: "due_14", key: `${String(famA)}|2026-11-30|${a.identity.parentId}`, familyId: famA, triedAt: new Date(), outcome: "sent" });
     await db.insert(writeQueue).values({ realmId: "1111", request: { op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, targetQboId: "12", state: "waiting", sent: false });
     const before = {
       credit: (await db.select().from(volunteerCredit)).length, emails: (await db.select().from(parentEmailChange)).length,
@@ -117,14 +120,17 @@ describe("connecting a different company after step 5", () => {
   });
 });
 
-describe("the seasons, from stage 2 until stage 4: a different company is refused, and every season record stays", () => {
+describe("the seasons and volunteering, from stage 2 until stage 4: a different company is refused, and every record stays", () => {
   const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
   const audits = async (...actions: string[]) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => actions.includes(r.action));
-  /** Every season record, ids and times and all, and the app's own records they name. */
+  /** Every season and volunteering record, ids and times and all, and the app's own records they name. */
   const seasonRecords = async () => ({
     progress: await db.select().from(requirementProgress).orderBy(asc(requirementProgress.id)),
     covers: await db.select().from(requirementCover).orderBy(asc(requirementCover.requirementId), asc(requirementCover.familyId), asc(requirementCover.studentId)),
     reminders: await db.select().from(requirementReminder).orderBy(asc(requirementReminder.id)),
+    signups: await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id)),
+    credits: await db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.id)),
+    volunteerReminders: await db.select().from(volunteerReminder).orderBy(asc(volunteerReminder.id)),
     families: await db.select().from(family).orderBy(asc(family.id)),
     students: await db.select().from(student).orderBy(asc(student.id)),
     links: await db.select().from(accountingLink).orderBy(asc(accountingLink.id)),
@@ -144,10 +150,12 @@ describe("the seasons, from stage 2 until stage 4: a different company is refuse
     staff = await seedStaff({ email: "admin@example.org", admin: true });
   });
 
-  it("refuses to connect another company, keeps the season's ticks, waivers, chosen lists and reminder claims, and connects the same one again", { timeout: 30_000 }, async () => {
+  it("refuses to connect another company, keeps the season's and volunteering's records, and connects the same one again", { timeout: 30_000 }, async () => {
     const { a, b } = await seedTwoFamilies();
-    // A due-date reminder claim, carried by the app's own family (src/lib/seasons/due-reminders.ts).
-    await db.insert(requirementReminder).values({ kind: "due_14", familyId: await recordOfCustomer(a.spec.family.qboId, "family"), parentId: a.identity.parentId, dueOn: "2026-11-30", triedAt: new Date(), outcome: "sent" });
+    // A due-date reminder claim of each, carried by the app's own family (src/lib/seasons/due-reminders.ts, src/lib/volunteer/reminders.ts).
+    const famA = await recordOfCustomer(a.spec.family.qboId, "family");
+    await db.insert(requirementReminder).values({ kind: "due_14", familyId: famA, parentId: a.identity.parentId, dueOn: "2026-11-30", triedAt: new Date(), outcome: "sent" });
+    await db.insert(volunteerReminder).values({ kind: "due_14", key: `${String(famA)}|2026-11-30|${a.identity.parentId}`, familyId: famA, triedAt: new Date(), outcome: "sent" });
     await seedConnected(stub, { realmId: "1111" });
     const before = await seasonRecords();
     // Something of each is there to keep: both families' ticks and waivers, their chosen lists, the claim.
@@ -156,6 +164,10 @@ describe("the seasons, from stage 2 until stage 4: a different company is refuse
     expect(before.covers.length).toBeGreaterThanOrEqual(4);
     expect(before.reminders).toHaveLength(1);
     expect(b.season!.markers.length).toBeGreaterThan(0);
+    // Both families' places on the shared shift, A's check-in and B's credit from outside the portal, the claim.
+    expect(before.signups.length).toBeGreaterThanOrEqual(2);
+    expect(before.credits.length).toBeGreaterThanOrEqual(2);
+    expect(before.volunteerReminders).toHaveLength(1);
 
     // The Admin disconnects, and signs in to Intuit with another company: refused before anything is stored or cleared.
     await disconnect({ actor: { door: "staff", id: staff.id, label: staff.email }, ip: null });
@@ -165,13 +177,13 @@ describe("the seasons, from stage 2 until stage 4: a different company is refuse
     expect(await getRosterSource()).toBe("1111");
     expect(await seasonRecords()).toEqual(before);
     expect((await audits("quickbooks.connect_refused")).map((r) => r.after)).toEqual([{ reason: "roster_company" }]);
-    expect(await audits("roster.cleared", "season.records.cleared", "accounting.links.cleared", "parent.access.cleared")).toEqual([]);
+    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "parent.access.cleared")).toEqual([]);
 
     // The same company again: connected, and every record is as it was.
     expect(await connect("1111")).toEqual({ ok: true });
     expect((await db.select().from(qboConnection))[0]!.realmId).toBe("1111");
     expect(await seasonRecords()).toEqual(before);
-    expect(await audits("roster.cleared", "season.records.cleared", "accounting.links.cleared")).toEqual([]);
+    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared")).toEqual([]);
   });
 
   it("refuses to read another company's roster over this one's, asking QuickBooks nothing, and keeps every season record", { timeout: 30_000 }, async () => {
@@ -185,6 +197,7 @@ describe("the seasons, from stage 2 until stage 4: a different company is refuse
     expect(await getRosterSource()).toBe("1111");
     expect(await seasonRecords()).toEqual(before);
     expect((await audits("roster.refresh.failed")).map((r) => r.after)).toEqual([{ code: "roster_company" }]);
-    expect(await audits("roster.cleared", "season.records.cleared", "accounting.links.cleared")).toEqual([]);
+    expect(before.signups.length).toBeGreaterThanOrEqual(2);
+    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared")).toEqual([]);
   });
 });

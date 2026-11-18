@@ -1,14 +1,39 @@
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { requirement, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { accountingLink, requirement, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { getRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
+import { recordOfCustomer, syncAppRecords } from "./app-records";
 import type { ParentFamilySpec } from "./parent";
 import type { SeededSeason } from "./season";
 
 /**
  * Volunteer events for tests, written straight into the tables as the staff pages would have left them. Dates are
  * counted from today in UTC (the club's zone until a test sets one), so an event `inDays` ahead is still to come
- * whenever the test runs.
+ * whenever the test runs. Families and students are given by their QuickBooks ids, as the fixtures know them, and
+ * stored as the app's own records volunteering keeps (stage 2 of the app-owned families spec): each found through its
+ * link of its kind, in the company the roster was read from. One with no record yet brings the records into step with
+ * the roster cache as it stands, as a roster read would; one the roster doesn't hold is made inactive
+ * (recordOfCustomer()). So a test that seeds a sign-up or credit seeds a roster company first (seedSignedInParent() does).
  */
+async function linked(customerId: string, kind: "family" | "student"): Promise<boolean> {
+  const realmId = await getRosterSource();
+  if (realmId === null) return false;
+  const [l] = await db.select({ id: accountingLink.id }).from(accountingLink).where(and(eq(accountingLink.realmId, realmId), eq(accountingLink.customerId, customerId),
+    isNotNull(kind === "family" ? accountingLink.familyId : accountingLink.studentId)));
+  return l !== undefined;
+}
+/** The app family of a customer, as a sign-up or credit names it. */
+export async function familyRecord(customerId: string): Promise<AppFamilyId> {
+  if (!(await linked(customerId, "family"))) await syncAppRecords();
+  return recordOfCustomer(customerId, "family");
+}
+/** The app student of a customer, as a sign-up or credit names it. */
+export async function studentRecord(customerId: string): Promise<AppStudentId> {
+  if (!(await linked(customerId, "student"))) await syncAppRecords();
+  return recordOfCustomer(customerId, "student");
+}
 export const dayFromNow = (inDays: number) => calendarDayIn("UTC", new Date(Date.now() + inDays * 86_400_000));
 
 export type SeedShift = { startsAt?: string; endsAt?: string; places?: number; role?: string | null; requirementIds?: string[]; cancelled?: boolean; checkinCode?: string };
@@ -33,8 +58,9 @@ export async function seedShift(eventId: string, s: SeedShift = {}) {
 /** A place on a shift, as a guardian's sign-up leaves it: for themselves (`parentId`) or for a student. */
 export async function seedSignup(o: { shiftId: string; familyQboId: string; signedUpBy: string; student?: { qboId: string; name: string }; guardianName?: string; cancelled?: boolean }) {
   const [row] = await db.insert(volunteerSignup).values({
-    shiftId: o.shiftId, familyQboId: o.familyQboId, signedUpBy: o.signedUpBy, fillerKind: o.student ? "student" : "guardian",
-    fillerParentId: o.student ? null : o.signedUpBy, studentQboId: o.student?.qboId ?? null, fillerName: o.student?.name ?? o.guardianName ?? "A guardian",
+    shiftId: o.shiftId, familyId: await familyRecord(o.familyQboId), signedUpBy: o.signedUpBy, fillerKind: o.student ? "student" : "guardian",
+    fillerParentId: o.student ? null : o.signedUpBy, studentId: o.student ? await studentRecord(o.student.qboId) : null,
+    fillerName: o.student?.name ?? o.guardianName ?? "A guardian",
     cancelledAt: o.cancelled ? new Date() : null, cancelledByDoor: o.cancelled ? "parent" : null,
   }).returning();
   return row!;
@@ -45,13 +71,14 @@ export async function seedSignup(o: { shiftId: string; familyQboId: string; sign
  * or volunteering done outside the portal toward one requirement, with a note only staff see.
  */
 export async function seedCheckIn(o: { signupId: string; familyQboId: string; by: string; minutes?: number; kind?: "checkin" | "staff_checkin"; removed?: { by: string; reason: string } }) {
-  const [row] = await db.insert(volunteerCredit).values({ kind: o.kind ?? "checkin", signupId: o.signupId, familyQboId: o.familyQboId, minutes: o.minutes ?? 180, shifts: 1,
+  const [row] = await db.insert(volunteerCredit).values({ kind: o.kind ?? "checkin", signupId: o.signupId, familyId: await familyRecord(o.familyQboId), minutes: o.minutes ?? 180, shifts: 1,
     createdByDoor: (o.kind ?? "checkin") === "checkin" ? "parent" : "staff", createdBy: o.by,
     ...(o.removed ? { removedAt: new Date(), removedBy: o.removed.by, removedReason: o.removed.reason } : {}) }).returning();
   return row!;
 }
 export async function seedOutsideCredit(o: { familyQboId: string; requirementId: string; studentQboId?: string; minutes?: number; shifts?: number; note?: string; by?: string }) {
-  const [row] = await db.insert(volunteerCredit).values({ kind: "outside", familyQboId: o.familyQboId, studentQboId: o.studentQboId ?? null, requirementId: o.requirementId,
+  const [row] = await db.insert(volunteerCredit).values({ kind: "outside", familyId: await familyRecord(o.familyQboId),
+    studentId: o.studentQboId ? await studentRecord(o.studentQboId) : null, requirementId: o.requirementId,
     minutes: o.minutes ?? 0, shifts: o.shifts ?? 0, note: o.note ?? "Helped at the spring concert", createdByDoor: "staff", createdBy: o.by ?? "00000000-0000-4000-8000-00000000c0de" }).returning();
   return row!;
 }
@@ -70,6 +97,8 @@ export type FamilyVolunteer = {
   page: string[];
   /** What this family's parent must find on the shift's check-in page: their own person on it, and whether checked in. */
   checkIn: string[];
+  /** What this family's parent must find on the shift's own page: that someone of the family is on it, and who (B's is "you"). */
+  shift: string[];
   /** What staff wrote for staff (an outside credit's note): no parent page shows it, the family's own included. */
   staffOnly: string[];
 };
@@ -96,10 +125,10 @@ export async function seedTwoFamilyVolunteering(a: { spec: ParentFamilySpec; par
   const page = [TWO_FAMILY_EVENT, "2 of 4 places filled"];
   return {
     a: { shiftId: shift!.id, code: shift!.checkinCode, markers: [forA.id, checkedIn.id], page: [...page, `${student.name} is doing this one`, "Checked in"],
-      checkIn: [student.name, "Checked in"], staffOnly: [] },
+      checkIn: [student.name, "Checked in"], shift: ["Signed up from your family", `${student.name} (checked in)`], staffOnly: [] },
     b: { shiftId: shift!.id, code: shift!.checkinCode, markers: [forB.id, ...(outside ? [outside.id, note, "Added by the club"] : [])],
       page: [...page, "You&#x27;re doing this one", ...(outside ? ["Added by the club", `2 hours toward ${TWO_FAMILY_HOURS}`] : [])],
-      checkIn: ["You", "Not checked in yet"], staffOnly: outside ? [note] : [] },
+      checkIn: ["You", "Not checked in yet"], shift: ["Signed up from your family"], staffOnly: outside ? [note] : [] },
   };
 }
 

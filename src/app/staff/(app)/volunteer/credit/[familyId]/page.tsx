@@ -69,7 +69,7 @@ export default async function FamilyCreditPage({ params }: { params: Promise<{ f
             { key: "title", header: "Requirement", rowHeader: true, cell: (r) => `${r.title}${r.required ? "" : " (optional)"}` },
             { key: "due", header: "Due", cell: (r) => (r.dueOn ? <CalendarDate iso={r.dueOn} /> : "No due date") },
             { key: "stands", header: "Where it stands", cell: (r) => r.subjects.map((s) => (
-              <span className="t-line" key={s.qboId}>{r.appliesTo === "student" ? `${s.who}: ` : ""}{s.waived ? "Waived" : s.words}</span>)) },
+              <span className="t-line" key={s.id}>{r.appliesTo === "student" ? `${s.who}: ` : ""}{s.waived ? "Waived" : s.words}</span>)) },
           ]} />
         )}
         <p className="hint">Credit fills required requirements before optional ones, a student&apos;s own before the family&apos;s, the soonest due first, and never beyond what each needs.</p>
@@ -82,7 +82,7 @@ export default async function FamilyCreditPage({ params }: { params: Promise<{ f
 
       <section className="box" aria-labelledby="outside-h"><h2 id="outside-h">Credit volunteering done outside the portal</h2>
         <p>For help the club counts that wasn&apos;t a shift here. The family sees &ldquo;Added by the club&rdquo; and the amount; only staff see the note.</p>
-        <OutsideCreditForm requirements={options} students={family.students.map((s) => ({ value: s.qboId, label: s.name }))} save={addOutsideCreditAction.bind(null, rosterTag, family.qboId)} />
+        <OutsideCreditForm requirements={options} students={family.students.map((s) => ({ value: String(s.id), label: s.name }))} save={addOutsideCreditAction.bind(null, rosterTag, String(family.id))} />
       </section>
 
       {detail.removed.length > 0 && (

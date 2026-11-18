@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { requirement, requirementProgress, volunteerCredit, volunteerSignup } from "@/lib/db/schema";
+import { qboCustomer, requirement, requirementProgress, volunteerCredit, volunteerSignup } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
 import type { Requirement } from "@/lib/seasons/progress";
 import { checkIn, loadCheckInForMe } from "@/lib/volunteer/check-in";
@@ -10,10 +10,11 @@ import { loadMyVolunteering } from "@/lib/volunteer/my-volunteer";
 import { allocateFamilies } from "@/lib/volunteer/credit";
 import { signedUpAmounts } from "@/lib/volunteer/signed-up";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
-import { FAMILY_A, seedSignedInParent, type SeededParent } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, seedSignedInParent, type SeededParent } from "../helpers/parent";
+import { moveInCache } from "../helpers/roster-cache";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup, shiftAround } from "../helpers/volunteer";
-import { subjectColumns } from "../helpers/app-records";
+import { recordOfCustomer, subjectColumns, syncAppRecords } from "../helpers/app-records";
 
 /**
  * Three rules of how volunteering counts (v1 spec §11.4) that the review of step 5 found broken: a requirement staff
@@ -22,7 +23,8 @@ import { subjectColumns } from "../helpers/app-records";
  */
 vi.setConfig({ testTimeout: 30_000 });
 const [LEO] = FAMILY_A.students;
-const key = (requirementId: string, subject: string) => `${requirementId}|${subject}`;
+/** A slot's key, by the app's own record (slotKey() in src/lib/volunteer/allocation.ts). */
+const key = (requirementId: string, subject: unknown) => `${requirementId}|${String(subject)}`;
 let a: SeededParent, stepId: string;
 const ctx = (): ParentCtx => ({ ...a.identity, ip: "203.0.113.50" });
 const live = () => db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.createdAt));
@@ -48,9 +50,11 @@ describe("a waived requirement", () => {
       const s = await seedSignup({ shiftId: shift.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: LEO! });
       await seedCheckIn({ signupId: s.id, familyQboId: FAMILY_A.family.qboId, by: a.identity.parentId });
     }
-    const credit = (await allocateFamilies([FAMILY_A.family.qboId])).get(FAMILY_A.family.qboId)!;
-    expect(credit.allocation.filled.get(key(family.id, FAMILY_A.family.qboId))).toBe(2);
-    expect(credit.allocation.filled.has(key(leos.id, LEO!.qboId))).toBe(false);
+    // Volunteering keeps the app's own families and students (stage 2 of the app-owned families spec).
+    const [familyId, leoId] = [await recordOfCustomer(FAMILY_A.family.qboId, "family"), await recordOfCustomer(LEO!.qboId, "student")];
+    const credit = (await allocateFamilies([familyId])).get(String(familyId))!;
+    expect(credit.allocation.filled.get(key(family.id, familyId))).toBe(2);
+    expect(credit.allocation.filled.has(key(leos.id, leoId))).toBe(false);
     expect(credit.allocation.given.map((g) => g.requirementId)).toEqual([family.id, family.id]);
   });
 });
@@ -105,7 +109,40 @@ describe("a place on a shift that is over", () => {
     const { shifts: [past] } = await seedEvent({ inDays: -21, shifts: [{ requirementIds: [family.id] }] });
     const { shifts: [coming] } = await seedEvent({ inDays: 10, shifts: [{ requirementIds: [family.id] }] });
     for (const shift of [past!, coming!]) await seedSignup({ shiftId: shift.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
-    const amounts = await signedUpAmounts([family], [FAMILY_A.family.qboId], key);
-    expect(amounts.get(key(family.id, FAMILY_A.family.qboId))).toBe(1);
+    const familyId = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    const amounts = await signedUpAmounts([family], { families: [familyId], students: [] }, key);
+    expect(amounts.get(key(family.id, familyId))).toBe(1);
+  });
+});
+
+describe("a place a student fills", () => {
+  it("stops counting toward the family's requirement once the student leaves the roster, though no move is followed", async () => {
+    const family = await volunteerRequirement("2 shifts", { appliesTo: "family", amount: 2, position: 0 });
+    const { shifts: [coming] } = await seedEvent({ inDays: 10, shifts: [{ requirementIds: [family.id] }] });
+    await seedSignup({ shiftId: coming!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: LEO! });
+    const familyId = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    const asked = { families: [familyId], students: [] };
+    expect((await signedUpAmounts([family], asked, key)).get(key(family.id, familyId))).toBe(1);
+    // Made inactive in QuickBooks, still under the family: the roster read that sees it brings the records into step.
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, LEO!.qboId));
+    await syncAppRecords();
+    expect((await signedUpAmounts([family], asked, key)).has(key(family.id, familyId))).toBe(false);
+    // The same for staff, who read everyone.
+    expect((await signedUpAmounts([family], null, key)).has(key(family.id, familyId))).toBe(false);
+  });
+
+  it("taken by the old family, on a shift under way, never counts toward the student's own requirement under the new family", async () => {
+    await seedSignedInParent(FAMILY_B);
+    const own = await volunteerRequirement("Leo: 1 shift", { appliesTo: "student", amount: 1, position: 0 });
+    const t = shiftAround(new Date(), 10, 120);
+    const { shifts: [now] } = await seedEvent({ onDate: t.onDate, shifts: [{ startsAt: t.startsAt, endsAt: t.endsAt, requirementIds: [own.id] }] });
+    await seedSignup({ shiftId: now!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: LEO! });
+    const leoId = await recordOfCustomer(LEO!.qboId, "student");
+    expect((await signedUpAmounts([own], null, key)).get(key(own.id, leoId))).toBe(1);
+    // Moved as a roster read leaves it (a place under way is not given up by the move's follow-up).
+    await moveInCache([LEO!.qboId], FAMILY_B.family.qboId);
+    expect((await signedUpAmounts([own], null, key)).has(key(own.id, leoId))).toBe(false);
+    const familyB = await recordOfCustomer(FAMILY_B.family.qboId, "family");
+    expect((await signedUpAmounts([own], { families: [familyB], students: [leoId] }, key)).has(key(own.id, leoId))).toBe(false);
   });
 });

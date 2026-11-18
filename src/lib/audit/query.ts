@@ -92,32 +92,45 @@ const likeText = (s: string) => `%${s.replace(/[\\%_]/g, "\\$&")}%`;
 const endsWithKey = (s: string) => `%:${s.replace(/[\\%_]/g, "\\$&")}`;
 
 /**
- * The QuickBooks customers an app family or student record (a uuid) is linked to, in the company the roster was read
- * from, when the filter names one: "family:<id>", "student:<id>", or the id alone. Open question 17 of the app-owned
- * families spec: audit rows are never rewritten, and rows written before an area moved to the app's ids name the
- * customer, so a search for the record also finds those.
+ * The target types an audit row may name a QuickBooks customer under, by the kind of record the customer was. A family:
+ * "qbo_customer" (the roster's own rows), and "family", which holds two kinds of id: a customer's in the rows the
+ * season's and volunteering's family pages wrote before those areas moved, and in money.balance_mismatch, which still
+ * writes the family's customer until the money cache moves (src/lib/money/family-money.ts); and the app family's own id
+ * in the rows written since the areas moved, which the filter's exact match finds. A student: "qbo_customer", and
+ * "student" (a moved student's volunteer places, by customer before volunteering moved, by the record since). A row of
+ * any other type whose id happens to be the same number (a job run, a product, a check's run) is never a customer's.
  */
-async function customersOfRecord(record: AuditFilters["record"]): Promise<{ id: string; customers: string[] } | null> {
+export const CUSTOMER_TARGET_TYPES = { family: ["qbo_customer", "family"], student: ["qbo_customer", "student"] } as const;
+
+/**
+ * The QuickBooks customers an app family or student record (a uuid) is linked to, in the company the roster was read
+ * from, by the kind of record they are linked to, when the filter names one: "family:<id>", "student:<id>", or the id
+ * alone. Open question 17 of the app-owned families spec: audit rows are never rewritten, and rows written before an
+ * area moved to the app's ids name the customer, so a search for the record also finds those.
+ */
+async function customersOfRecord(record: AuditFilters["record"]): Promise<{ id: string; families: string[]; students: string[] } | null> {
   if (!record) return null;
   const [type, id] = "either" in record ? [null, record.either] : [record.type, record.id];
   if (!isUuid(id) || (type !== null && type !== "family" && type !== "student")) return null;
   const realmId = await getRosterSource();
-  if (realmId === null) return { id, customers: [] };
+  if (realmId === null) return { id, families: [], students: [] };
   const kind = type === "family" ? sql`${accountingLink.familyId}::text = ${id}` : type === "student" ? sql`${accountingLink.studentId}::text = ${id}`
     : sql`(${accountingLink.familyId}::text = ${id} or ${accountingLink.studentId}::text = ${id})`;
-  const links = await db.select({ customerId: accountingLink.customerId }).from(accountingLink)
+  const links = await db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId }).from(accountingLink)
     .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), kind));
-  return { id, customers: [...new Set(links.map((l) => l.customerId))] };
+  return { id, families: [...new Set(links.filter((l) => l.familyId !== null).map((l) => l.customerId))], students: [...new Set(links.filter((l) => l.familyId === null).map((l) => l.customerId))] };
 }
 
 /**
- * The rows a family or student record's older names find: a row naming one of its customers, and a tick's or waiver's
- * row, whose target is "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
+ * The rows a family or student record's older names find: a row naming one of its customers under a target type that
+ * names a customer of that kind (CUSTOMER_TARGET_TYPES), and a tick's or waiver's row, whose target is
+ * "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
  */
-function recordsOlderNames(r: { id: string; customers: string[] }): SQL | undefined {
-  const keys = [r.id, ...r.customers];
+function recordsOlderNames(r: { id: string; families: string[]; students: string[] }): SQL | undefined {
+  const keys = [r.id, ...r.families, ...r.students];
   return or(
-    ...(r.customers.length ? [inArray(auditLog.targetId, r.customers)] : []),
+    ...(r.families.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.family]), inArray(auditLog.targetId, r.families))] : []),
+    ...(r.students.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.student]), inArray(auditLog.targetId, r.students))] : []),
     and(eq(auditLog.targetType, "requirement_progress"), or(...keys.map((k) => sql`${auditLog.targetId} like ${endsWithKey(k)} escape '\\'`))),
   );
 }

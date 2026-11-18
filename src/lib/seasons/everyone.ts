@@ -9,10 +9,11 @@ import { accountingLink, requirementCover, requirementProgress } from "@/lib/db/
 import { QUICKBOOKS } from "@/lib/families/ids";
 import { LINK_COLUMNS, linkMapsFrom, recordsCompany, type LinkMaps } from "@/lib/families/links";
 import { CUSTOMER_RECORDED_COLUMNS, linkOfSubject } from "./by-customer";
-import type { CustomerRecorded, CustomerRequirement } from "./customer-keys";
+import type { CustomerRecorded } from "./customer-keys";
 import type { Recorded, Viewing } from "./kinds";
 import type { Facts, Requirement, SubjectId } from "./progress";
-import { RECORDED_COLUMNS, coversFrom, customerFactsFrom, factsFrom, recordedFrom, type CustomerFacts } from "./recorded";
+import { factsFrom } from "./recorded";
+import { RECORDED_COLUMNS, coversFrom, recordedFrom } from "./season-rows";
 
 /** Every family and student record's link, in the records' company (src/lib/families/links.ts reads it the same way). */
 export async function everyLink(tx?: Tx): Promise<LinkMaps> {
@@ -39,7 +40,7 @@ export async function everyonesFacts(requirements: readonly Requirement[], viewi
   return factsFrom(requirements, null, recorded, links, viewing);
 }
 
-/** The whole chosen list of each of these requirements, as customer ids (./by-customer.ts reads one family's). */
+/** The whole chosen list of each of these requirements, as customer ids: for the forms' matrix and reminders, still keyed by QuickBooks ids. */
 export async function everyCustomerCover(requirementIds: readonly string[], tx?: Tx): Promise<Map<string, string[]>> {
   const covers = new Map<string, string[]>();
   if (requirementIds.length === 0) return covers;
@@ -51,16 +52,11 @@ export async function everyCustomerCover(requirementIds: readonly string[], tx?:
   return covers;
 }
 
-/** Every tick and waiver of these requirements, by customer. */
+/** Every tick and waiver of these requirements, by customer: for the forms' matrix and reminders, still keyed by QuickBooks ids. */
 export async function everyCustomerRecorded(requirementIds: readonly string[], tx?: Tx): Promise<CustomerRecorded[]> {
   if (requirementIds.length === 0) return [];
   const realmId = await recordsCompany(tx);
   if (realmId === null) return [];
   return (tx ?? db).select(CUSTOMER_RECORDED_COLUMNS).from(requirementProgress)
     .innerJoin(accountingLink, linkOfSubject(realmId, requirementProgress)).where(inArray(requirementProgress.requirementId, [...requirementIds]));
-}
-
-/** loadCustomerFacts() for everyone, by customer: for the staff and worker code of the areas still keyed by QuickBooks ids. */
-export async function everyonesCustomerFacts(requirements: readonly CustomerRequirement[], viewing: Viewing): Promise<{ facts: CustomerFacts; recorded: CustomerRecorded[] }> {
-  return customerFactsFrom(requirements, null, await everyCustomerRecorded(requirements.map((r) => r.id)), viewing);
 }
