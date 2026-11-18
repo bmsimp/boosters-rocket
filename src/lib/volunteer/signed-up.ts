@@ -4,9 +4,9 @@
 // app's own (stage 2 of the app-owned families spec). It imports no staff-only module
 // (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { student, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import type { RequirementFields, SubjectId, SubjectsAsked } from "@/lib/seasons/progress";
 import { getClubSettings } from "@/lib/settings/club";
 import { shiftInstants, shiftMinutes } from "./clock";
@@ -15,7 +15,9 @@ import { countsFor, shiftCredit, type Filler } from "./rules";
 /**
  * How much each family or student is signed up for toward each of these volunteer requirements, keyed by `pairKey`
  * (src/lib/seasons/kinds.ts passes its own in): every place they hold, on a shift and an event still on, that counts
- * toward the requirement for them, is not checked in yet and hasn't ended. With `asked` (a parent's own family and
+ * toward the requirement for them, is not checked in yet and hasn't ended. A place a student fills counts only while
+ * the student's own record is active and in the family the place was taken from (AGENTS.md, Volunteering): a student
+ * who left the roster, or moved, takes the place out of every count. With `asked` (a parent's own family and
  * students) only sign-ups made from that family are read; null is everyone, for staff.
  */
 export async function signedUpAmounts(requirements: readonly RequirementFields[], asked: SubjectsAsked | null, pairKey: (requirementId: string, subject: SubjectId) => string,
@@ -32,8 +34,11 @@ export async function signedUpAmounts(requirements: readonly RequirementFields[]
     .innerJoin(volunteerSignup, eq(volunteerSignup.shiftId, volunteerShift.id))
     // A place already checked in is credit now (./credit.ts), no longer something the family is signed up for.
     .leftJoin(volunteerCredit, and(eq(volunteerCredit.signupId, volunteerSignup.id), isNull(volunteerCredit.removedAt)))
+    .leftJoin(student, eq(student.id, volunteerSignup.studentId))
     .where(and(
       isNull(volunteerCredit.id),
+      // A guardian's own place, or a student's while the student is still active and in the place's own family.
+      or(isNull(volunteerSignup.studentId), and(eq(student.active, true), eq(student.familyId, volunteerSignup.familyId))),
       inArray(volunteerShiftRequirement.requirementId, requirements.map((r) => r.id)),
       isNull(volunteerShift.cancelledAt), isNull(volunteerEvent.cancelledAt), isNull(volunteerSignup.cancelledAt),
       // A parent's own family's sign-ups alone: a place another family took for a student who has since moved in is theirs, not this family's.
