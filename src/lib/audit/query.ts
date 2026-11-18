@@ -141,6 +141,25 @@ function formRowsOf(r: RecordNames): SQL {
 }
 
 /**
+ * A buy-out's rows (target "buyout") name its family and student in their body, not their target. Before buy-outs moved
+ * to the app's ids: the choice named its subject's customer (`subjectQboId`: the family's for a per-family buy-out, the
+ * student's for a per-student one), the daily check's flag and the close the family's (`familyQboId`), and a move's flag
+ * the families it went from and to (`fromFamilyQboId`, `toFamilyQboId`). Since: the records (`familyId`, `studentId`,
+ * and a move's `toFamilyId`), in `after` or, for the close, `before`.
+ */
+function buyoutRowsOf(r: RecordNames): SQL {
+  // The key is one of those written here, never a value from the address: written into the query as a text literal.
+  type Key = "familyId" | "studentId" | "toFamilyId" | "familyQboId" | "subjectQboId" | "fromFamilyQboId" | "toFamilyQboId";
+  const said = (side: "before" | "after", key: Key) => sql`(${side === "before" ? auditLog.before : auditLog.after}) ->> ${sql.raw(`'${key}'`)}`;
+  const family = r.kind === "student" ? [] : [eq(said("after", "familyId"), r.id), eq(said("before", "familyId"), r.id), eq(said("after", "toFamilyId"), r.id),
+    ...(r.families.length ? (["familyQboId", "subjectQboId", "fromFamilyQboId", "toFamilyQboId"] as const).map((k) => inArray(said("after", k), r.families))
+      .concat([inArray(said("before", "familyQboId"), r.families)]) : [])];
+  const student = r.kind === "family" ? [] : [eq(said("after", "studentId"), r.id), eq(said("before", "studentId"), r.id),
+    ...(r.students.length ? [inArray(said("after", "subjectQboId"), r.students)] : [])];
+  return and(eq(auditLog.targetType, "buyout"), or(...family, ...student))!;
+}
+
+/**
  * The rows a family or student record's older names find: a row naming one of its customers under a target type that
  * names a customer of that kind (CUSTOMER_TARGET_TYPES), and a tick's or waiver's row, whose target is
  * "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
@@ -149,6 +168,7 @@ function recordsOlderNames(r: RecordNames): SQL | undefined {
   const keys = [r.id, ...r.families, ...r.students];
   return or(
     formRowsOf(r),
+    buyoutRowsOf(r),
     ...(r.families.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.family]), inArray(auditLog.targetId, r.families))] : []),
     ...(r.students.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.student]), inArray(auditLog.targetId, r.students))] : []),
     and(eq(auditLog.targetType, "requirement_progress"), or(...keys.map((k) => sql`${auditLog.targetId} like ${endsWithKey(k)} escape '\\'`))),

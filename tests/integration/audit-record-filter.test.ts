@@ -107,3 +107,53 @@ describe("the audit page's filter for one family or student", () => {
     expect(await targets(`signature_request:${FORM_MOVED}`)).toEqual([`signature_request:${FORM_MOVED}`]);
   });
 });
+
+/**
+ * Buy-outs, which moved after forms: a buy-out's rows name its family and student in their body, by customer before
+ * (the choice its subject's, the daily check's flag and the close the family's, a move's flag both families') and by
+ * record since; a family's buy-outs page was read by its customer, and is read by its record now.
+ */
+describe("the audit page's filter for a family's or student's buy-out rows", () => {
+  let rivera = "", chen = "", leo = "", kai = "";
+  const [CHOSEN_OLD, CHOSEN_STUDENT_OLD, FLAGGED_OLD, MOVED_OLD, CLOSED_OLD] = [1, 2, 3, 4, 5].map((n) => `7d1f0b2a-4444-4c3d-8e9f-00000000000${n}`) as [string, string, string, string, string];
+  const [CHOSEN_NEW, CHOSEN_STUDENT_NEW, MOVED_NEW, CLOSED_NEW, CHEN_NEW] = [1, 2, 3, 4, 5].map((n) => `7d1f0b2a-5555-4c3d-8e9f-00000000000${n}`) as [string, string, string, string, string];
+  beforeEach(async () => {
+    await resetDb();
+    await db.transaction((tx) => setRosterSource(tx, "4620000000000001"));
+    await seedShape();
+    await seedCache([fam("10", "Rivera Family"), stu("12", "Leo Rivera", "10"), fam("20", "Chen Family"), stu("22", "Kai Chen", "20")]);
+    [rivera, chen, leo, kai] = [String(await recordOfCustomer("10", "family")), String(await recordOfCustomer("20", "family")),
+      String(await recordOfCustomer("12", "student")), String(await recordOfCustomer("22", "student"))];
+    // Before buy-outs moved: by the customers.
+    await bodied("volunteer.buyout.chosen", "buyout", CHOSEN_OLD, { after: { state: "being_invoiced", subjectQboId: "10", customerQboId: "10" } });
+    await bodied("volunteer.buyout.chosen", "buyout", CHOSEN_STUDENT_OLD, { after: { state: "being_invoiced", subjectQboId: "12", customerQboId: "12" } });
+    await bodied("volunteer.buyout.flagged", "buyout", FLAGGED_OLD, { after: { flag: "missing", familyQboId: "10" } });
+    await bodied("volunteer.buyout.flagged", "buyout", MOVED_OLD, { after: { flag: "student_moved", fromFamilyQboId: "10", toFamilyQboId: "20" } });
+    await bodied("volunteer.buyout.closed", "buyout", CLOSED_OLD, { before: { state: "refused", familyQboId: "10" } });
+    await row("volunteer.buyout.family.read", "qbo_customer", "10");
+    // Since: by the records.
+    await bodied("volunteer.buyout.chosen", "buyout", CHOSEN_NEW, { after: { state: "being_invoiced", familyId: rivera, studentId: null, customerQboId: "10" } });
+    await bodied("volunteer.buyout.chosen", "buyout", CHOSEN_STUDENT_NEW, { after: { state: "being_invoiced", familyId: rivera, studentId: leo, customerQboId: "12" } });
+    await bodied("volunteer.buyout.flagged", "buyout", MOVED_NEW, { after: { flag: "student_moved", familyId: rivera, studentId: leo, toFamilyId: chen } });
+    await bodied("volunteer.buyout.closed", "buyout", CLOSED_NEW, { before: { state: "refused", familyId: rivera, studentId: null } });
+    await bodied("volunteer.buyout.chosen", "buyout", CHEN_NEW, { after: { state: "being_invoiced", familyId: chen, studentId: kai, customerQboId: "22" } });
+    await row("volunteer.buyout.family.read", "family", rivera);
+    // Rows of other kinds whose ids are the same numbers: never the family's or the student's.
+    await row("roster.refresh", "job_run", "10");
+  });
+
+  it("finds a family's buy-out rows by its customer before and its record since, and nothing of another family's", async () => {
+    const rivers = [CHOSEN_OLD, CHOSEN_STUDENT_OLD, FLAGGED_OLD, MOVED_OLD, CLOSED_OLD].filter((id) => id !== CHOSEN_STUDENT_OLD)
+      .concat([CHOSEN_NEW, CHOSEN_STUDENT_NEW, MOVED_NEW, CLOSED_NEW]).map((id) => `buyout:${id}`).concat([`family:${rivera}`, "qbo_customer:10"]).sort();
+    expect(await targets(`family:${rivera}`)).toEqual(rivers);
+    expect(await targets(rivera)).toEqual(rivers);
+    // The Chen family: its own choice, and the moves that named it as the family the student went to.
+    expect(await targets(`family:${chen}`)).toEqual([`buyout:${MOVED_OLD}`, `buyout:${MOVED_NEW}`, `buyout:${CHEN_NEW}`].sort());
+  });
+
+  it("finds a student's buy-out rows by the student's customer before and record since, and never a family's alone", async () => {
+    expect(await targets(`student:${leo}`)).toEqual([`buyout:${CHOSEN_STUDENT_OLD}`, `buyout:${CHOSEN_STUDENT_NEW}`, `buyout:${MOVED_NEW}`].sort());
+    expect(await targets(`student:${kai}`)).toEqual([`buyout:${CHEN_NEW}`]);
+    expect(await targets("buyout:" + CLOSED_NEW)).toEqual([`buyout:${CLOSED_NEW}`]);
+  });
+});
