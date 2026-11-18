@@ -9,6 +9,7 @@ import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { clearRosterOfOtherCompanyLocked, getRosterSource, ROSTER_JOB, setRosterSource } from "./source";
 import { studentMoves, studentsUnderFamilies, type StudentMove } from "./moves";
 import { logReconcileFailure, reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
+import { AppRecordsFailed, appRecordsAudit, noAppRecordChanges } from "@/lib/families/in-step";
 import { formsForMovedStudent, requestsHeldElsewhere } from "@/lib/forms/moved";
 import { placesHeldElsewhere, volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 
@@ -131,6 +132,8 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     if (prepared === "company_changed") return fail("The QuickBooks company changed during the read. (company_changed)", "company_changed");
     const { typeRows, customerRows } = prepared;
     const cause = `roster.refresh#${run!.id}`;
+    // What the read changed in the app's own records (src/lib/families/in-step.ts), for the run's audit row.
+    let appRecords = noAppRecordChanges();
     try {
       // A savepoint: a failure here undoes the cache changes and the parent-access changes together, so the roster and
       // who can sign in never disagree (parents spec §2), and the failed run can still be recorded.
@@ -164,13 +167,18 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         const moves = before.length === 0 ? [] : studentMoves(shape, before, rows, held);
         const owed: (() => Promise<unknown>)[] = [];
         try { for (const m of moves) owed.push(await followMovedStudent(sp, m, cause)); } catch { throw new FollowUpFailed(); }
-        try { await reconcileAccess(sp, { cause }); } catch (e) { logReconcileFailure(e); throw new ReconcileFailed(); }
+        try { ({ appRecords } = await reconcileAccess(sp, { cause })); } catch (e) {
+          if (e instanceof AppRecordsFailed) { logReconcileFailure(e.cause, "app records"); throw e; }
+          logReconcileFailure(e); throw new ReconcileFailed();
+        }
         tells = owed;
       });
     } catch (e) {
       tells = [];
       return e instanceof ReconcileFailed
         ? fail("The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)", "reconcile_failed")
+        : e instanceof AppRecordsFailed
+          ? fail("The portal's own family and student records couldn't be brought up to date, so the roster was left as it was. (app_records_failed)", "app_records_failed")
         : e instanceof NoCustomersInAnswer
           ? fail("QuickBooks sent a roster with no customers in it, so the roster was left as it was. (no_customers)", "no_customers")
           : e instanceof FollowUpFailed
@@ -178,7 +186,8 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
             : fail("The roster couldn't be saved. (save_failed)", "save_failed");
     }
     await tx.update(jobRun).set({ finishedAt: new Date(), outcome: "ok", detail: `${customerRows.length} customers, ${typeRows.length} customer types` }).where(eq(jobRun.id, run!.id));
-    await writeAudit({ actor: o.actor, action: "roster.refresh", targetType: "job_run", targetId: String(run!.id), after: { customers: customerRows.length, types: typeRows.length }, ip: o.ip }, tx);
+    await writeAudit({ actor: o.actor, action: "roster.refresh", targetType: "job_run", targetId: String(run!.id),
+      after: { customers: customerRows.length, types: typeRows.length, ...appRecordsAudit(appRecords) }, ip: o.ip }, tx);
     return { ok: true, customers: customerRows.length, types: typeRows.length };
   });
   // Mail only after the commit, one guardian at a time. A notice that fails is the notices' own to record; it never

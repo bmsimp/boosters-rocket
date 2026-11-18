@@ -100,6 +100,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "roster.cleared": "Roster cleared after a company change",
   "roster.customer.create": "A family, student, parent or member made in QuickBooks by staff",
   "roster.customer.deactivate": "A family, student, parent or member made inactive in QuickBooks by staff",
+  "roster.customer.read_again": "A customer that changed in QuickBooks while staff were changing it, read again into the roster",
   "roster.customer.rename": "A family, student, parent or member renamed in QuickBooks by staff",
   "roster.family.deactivate": "Staff asked to make a family and everyone under it inactive in QuickBooks: who was made inactive, and where it stopped",
   "roster.family.read": "A family's record opened",

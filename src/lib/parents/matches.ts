@@ -4,6 +4,7 @@ import { familyMatch, heldAddress, parent } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { appRecordsAudit } from "@/lib/families/in-step";
 import { getRosterSource } from "@/lib/roster/source";
 import type { StaffOp } from "./people";
 import { loadDecision, reconcileAccess } from "./reconcile";
@@ -128,8 +129,8 @@ export async function decideMatch(oldFamilyQboId: string, newFamilyQboId: string
       welcomesRestored += done.length;
     }
     await save("matched", newFamilyQboId);
-    await audit({ decision: "matched", oldFamilyQboId, newFamilyQboId, approvalsCarried, approvalsSkipped, welcomesRestored });
-    await reconcileAccess(tx, { cause: "match" });
+    const r = await reconcileAccess(tx, { cause: "match" });
+    await audit({ decision: "matched", oldFamilyQboId, newFamilyQboId, approvalsCarried, approvalsSkipped, welcomesRestored, ...appRecordsAudit(r.appRecords) });
     return { ok: true };
   });
 }

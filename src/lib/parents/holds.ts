@@ -3,6 +3,7 @@ import { db } from "@/lib/db/client";
 import { heldAddress } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { appRecordsAudit } from "@/lib/families/in-step";
 import type { StaffOp } from "./people";
 import { loadDecision, reconcileAccess } from "./reconcile";
 
@@ -39,10 +40,10 @@ export async function decideHold(email: string, decision: HoldDecision, shownFam
       ? { approvedFamilyQboIds: union(row!.approvedFamilyQboIds, all), rejectedFamilyQboIds: row!.rejectedFamilyQboIds.filter((f) => !all.includes(f)) }
       : { approvedFamilyQboIds: row!.approvedFamilyQboIds, rejectedFamilyQboIds: union(row!.rejectedFamilyQboIds, heldNow) };
     await tx.update(heldAddress).set({ ...next, note: checked.note, decidedBy: o.actor.id, decidedAt: new Date(), updatedAt: new Date() }).where(eq(heldAddress.email, email));
+    const r = await reconcileAccess(tx, { cause: "hold" });
     await writeAudit({ actor: o.actor, action: "parent.hold.decided", permission: o.permission, targetType: "held_address", targetId: email, ip: o.ip,
       before: { approved: row!.approvedFamilyQboIds, rejected: row!.rejectedFamilyQboIds },
-      after: { decision, familyQboIds: decision === "same_person" ? union([], all) : union([], heldNow), note: checked.note } }, tx);
-    await reconcileAccess(tx, { cause: "hold" });
+      after: { decision, familyQboIds: decision === "same_person" ? union([], all) : union([], heldNow), note: checked.note, ...appRecordsAudit(r.appRecords) } }, tx);
     return { ok: true };
   });
 }
@@ -57,9 +58,9 @@ export async function reverseHold(email: string, rawNote: string, o: StaffOp): P
     if (!row || (!row.approvedFamilyQboIds.length && !row.rejectedFamilyQboIds.length)) return { ok: false, errors: ["There is no decision on that address to reverse."] };
     await tx.update(heldAddress).set({ approvedFamilyQboIds: [], rejectedFamilyQboIds: [], note: checked.note, decidedBy: o.actor.id, decidedAt: new Date(), updatedAt: new Date() })
       .where(eq(heldAddress.email, email));
+    const r = await reconcileAccess(tx, { cause: "hold" });
     await writeAudit({ actor: o.actor, action: "parent.hold.decided", permission: o.permission, targetType: "held_address", targetId: email, ip: o.ip,
-      before: { approved: row.approvedFamilyQboIds, rejected: row.rejectedFamilyQboIds }, after: { decision: "reversed", note: checked.note } }, tx);
-    await reconcileAccess(tx, { cause: "hold" });
+      before: { approved: row.approvedFamilyQboIds, rejected: row.rejectedFamilyQboIds }, after: { decision: "reversed", note: checked.note, ...appRecordsAudit(r.appRecords) } }, tx);
     return { ok: true };
   });
 }

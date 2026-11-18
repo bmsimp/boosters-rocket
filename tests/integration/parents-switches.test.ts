@@ -10,6 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { db } from "@/lib/db/client";
 import { sql } from "drizzle-orm";
 import { auditLog, guardian, heldAddress, jobRun, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
+import { noAppRecordChanges } from "@/lib/families/in-step";
 import * as reconcileModule from "@/lib/parents/reconcile";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { ROSTER_JOB } from "@/lib/roster/source";
@@ -61,7 +62,7 @@ describe("the parent switches", () => {
   it("rolls back and saves nothing when the roster stops being usable while switching on", async () => {
     await ready();
     // reconcileAccess is spied to report ran: false, as it would if the roster became unusable after the readiness check.
-    const spy = vi.spyOn(reconcileModule, "reconcileAccess").mockResolvedValueOnce({ ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 });
+    const spy = vi.spyOn(reconcileModule, "reconcileAccess").mockResolvedValueOnce({ ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0, appRecords: noAppRecordChanges() });
     try {
       expect(await setSignins(true, admin)).toEqual({ ok: false, errors: ["The roster changed while this was being switched on. Check the preview and try again."] });
     } finally { spy.mockRestore(); }

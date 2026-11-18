@@ -4,7 +4,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, setting, qboCustomerType, qboCustomer } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { QboOp } from "@/lib/quickbooks/connection";
-import { keepAppRecordsInStep } from "@/lib/families/in-step";
+import { appRecordsAudit, keepAppRecordsInStep } from "@/lib/families/in-step";
 
 export const SHAPE_KEY = "membership.shape";
 /** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */
@@ -99,8 +99,8 @@ export async function saveShape(input: MembershipShape, o: QboOp): Promise<void>
     await tx.delete(familyMoney);
     // It also decides who in the cache is a family or a student: the app's own records follow it here, not only at the
     // refresh the caller starts next, which may not run.
-    await keepAppRecordsInStep(tx);
+    const appRecords = await keepAppRecordsInStep(tx);
     await writeAudit({ actor: o.actor, action: "settings.membership.save", permission: o.permission, targetType: "setting", targetId: SHAPE_KEY, ip: o.ip,
-      before: before ? { shape: before, words: describeShape(before, types) } : null, after: { shape, words: describeShape(shape, types) } }, tx);
+      before: before ? { shape: before, words: describeShape(before, types) } : null, after: { shape, words: describeShape(shape, types), ...appRecordsAudit(appRecords) } }, tx);
   });
 }
