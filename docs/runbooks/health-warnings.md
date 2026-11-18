@@ -144,6 +144,13 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
   after a form is completed: the worker fetches the sealed PDF, certificate and audit log a few at a time.
 - **"... waited more than an hour for the signed copy to be kept."** The worker can't fetch them: check that Documenso
   answers (the line above) and that the worker runs.
+- **"... signed forms can't be filed until their families are linked in the roster's QuickBooks company"**, with the
+  note "N signed forms can't be filed". Not a Documenso problem: the family or student the form was signed for has no
+  link to a customer in the QuickBooks company the roster was read from, so the portal can't record whose form it is,
+  and asks Documenso nothing for it until that is mended. Open **Settings**, **QuickBooks**: check that QuickBooks is
+  connected to the company the roster was read from (the QuickBooks line on this page), then read the roster again.
+  The form stays signed in Documenso, and is filed by the worker once the link is there. If the line stays after a
+  good roster read, report it: the portal keeps every family's link.
 - **"... came back from Documenso with a different file than the one kept."** The portal keeps the first copy and
   wrote `forms.evidence.mismatch` in the audit log. Tell the board: a signed document should never change. Keep the
   backups from before that date.

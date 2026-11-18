@@ -84,6 +84,24 @@ const shown = (f: Pick<Fetched, "kind" | "position" | "sha256"> & { size: number
 export type StoreOutcome = "stored" | "same" | "mismatch" | "gone";
 
 /**
+ * Why evidence fetched (or about to be) can't be kept, in the portal's own records rather than in Documenso:
+ * `no_link`, the request's family or student has no link in the roster's company (or the roster names none), so the
+ * evidence couldn't keep whose form it was; `moved_while_fetched`, the request moved to another family while its files
+ * were being fetched. Recorded as the request's evidence error and said on the Health page's forms line.
+ */
+export type NotStoredCode = "no_link" | "moved_while_fetched";
+export class EvidenceNotStored extends Error {
+  constructor(readonly code: NotStoredCode) { super(code); }
+}
+
+/** True when the request's records have links in the roster's company, so its evidence can keep their customers. */
+async function linksStand(row: RequestRow): Promise<boolean> {
+  if ((await getRosterSource()) === null) return false;
+  const names = await namesOf(row);
+  return names.familyQboId !== null && names.subjectQboId !== null;
+}
+
+/**
  * Keeps what was fetched, in one transaction with the audit row, and only then clears `evidence_owed`. A request that
  * already has its evidence (two wakes fetched it at once, or it was fetched again) keeps the first copy: the sealed
  * PDFs and the originals are compared by hash, and one that differs is audited as a mismatch and shown on the Health
@@ -94,13 +112,13 @@ export async function storeEvidence(row: RequestRow, got: Evidence, at: Date = n
   const consents = await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, row.id)).orderBy(asc(signatureConsent.agreedAt));
   const realmId = await getRosterSource();
   // The evidence names the roster's company and keeps its customers as they are now: with no company, or a record with
-  // no link in it, nothing is stored (the job notes a failure and tries again later).
-  if (realmId === null || names.familyQboId === null || names.subjectQboId === null) throw new Error("no_link");
+  // no link in it, nothing is stored (runEvidenceJob() checks this before fetching anything; this is the last word).
+  if (realmId === null || names.familyQboId === null || names.subjectQboId === null) throw new EvidenceNotStored("no_link");
   return db.transaction(async (tx): Promise<StoreOutcome> => {
     const [current] = await tx.select().from(signatureRequest).where(eq(signatureRequest.id, row.id)).for("update");
     if (!current || current.state !== "complete" || current.envelopeId !== row.envelopeId) return "gone";
     // Moved to another family while this was fetched: its names and customers are read again on the next try.
-    if (String(current.familyId) !== String(row.familyId) || String(current.studentId) !== String(row.studentId)) throw new Error("moved_while_fetched");
+    if (String(current.familyId) !== String(row.familyId) || String(current.studentId) !== String(row.studentId)) throw new EvidenceNotStored("moved_while_fetched");
     const clear = () => tx.update(signatureRequest).set({ evidenceOwed: false, evidenceTries: 0, evidenceError: null, evidenceNextAt: null, updatedAt: at }).where(eq(signatureRequest.id, row.id));
     const [kept] = await tx.select().from(signedFormEvidence).where(eq(signedFormEvidence.requestId, row.id));
     if (kept) {
@@ -161,6 +179,13 @@ export async function runEvidenceJob(now: Date = new Date()): Promise<EvidenceRu
       .orderBy(sql`${signatureRequest.completedAt} asc nulls first`, asc(signatureRequest.id)).limit(EVIDENCE_PER_WAKE);
     for (const row of due) {
       run.fetched++;
+      // Nothing is asked of Documenso for evidence that couldn't be kept: the request's records have no link in the
+      // roster's company. That is the roster's to mend, not Documenso's, and its code says so.
+      if (!(await linksStand(row))) {
+        run.failed++;
+        await noteFailure(row, "no_link", now);
+        continue;
+      }
       const got = await fetchEvidence(config, row);
       if (!got.ok) {
         run.failed++;
@@ -174,9 +199,9 @@ export async function runEvidenceJob(now: Date = new Date()): Promise<EvidenceRu
         const outcome = await storeEvidence(row, got.evidence, now);
         if (outcome === "stored") run.stored++;
         if (outcome === "mismatch") run.mismatches++;
-      } catch {
+      } catch (e) {
         run.failed++;
-        await noteFailure(row, "unexpected", now);
+        await noteFailure(row, e instanceof EvidenceNotStored ? e.code : "unexpected", now);
       }
     }
     run.withdrawn = await withdrawLeftDocuments(config);
@@ -220,12 +245,17 @@ async function withdrawLeftDocuments(config: DocumensoConfig): Promise<number> {
   return done;
 }
 
-/** For the Health page: complete forms whose evidence isn't kept yet, how many waited more than an hour, and any hash mismatch. */
-export async function evidenceHealth(now: Date = new Date()): Promise<{ waiting: number; late: number; oldestCompletedAt: Date | null; mismatches: number }> {
+/**
+ * For the Health page: complete forms whose evidence isn't kept yet, how many waited more than an hour, how many of
+ * those last failed because their family or student has no link in the roster's company (`noLink`), and any hash mismatch.
+ */
+export async function evidenceHealth(now: Date = new Date()): Promise<{ waiting: number; late: number; oldestCompletedAt: Date | null; mismatches: number; noLink: number }> {
   const [owed] = await db.select({ n: count(), oldest: min(signatureRequest.completedAt) }).from(signatureRequest)
     .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete")));
   const [late] = await db.select({ n: count() }).from(signatureRequest)
     .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete"), lte(signatureRequest.completedAt, new Date(now.getTime() - EVIDENCE_LATE_MS))));
   const [mismatched] = await db.select({ n: count() }).from(signedFormEvidence).where(isNotNull(signedFormEvidence.mismatchAt));
-  return { waiting: owed?.n ?? 0, late: late?.n ?? 0, oldestCompletedAt: owed?.oldest ?? null, mismatches: mismatched?.n ?? 0 };
+  const [unlinked] = await db.select({ n: count() }).from(signatureRequest)
+    .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete"), eq(signatureRequest.evidenceError, "no_link")));
+  return { waiting: owed?.n ?? 0, late: late?.n ?? 0, oldestCompletedAt: owed?.oldest ?? null, mismatches: mismatched?.n ?? 0, noLink: unlinked?.n ?? 0 };
 }
