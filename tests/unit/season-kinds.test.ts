@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { KIND_LABELS, KIND_RULES, NO_RULE_YET, REQUIREMENT_KINDS, availableKinds, isAvailableKind, pairKey, type Recorded } from "@/lib/seasons/kinds";
-import type { Requirement } from "@/lib/seasons/progress";
+import { KIND_LABELS, KIND_RULES, NO_RULE_YET, REQUIREMENT_KINDS, availableKinds, isAvailableKind } from "@/lib/seasons/kinds";
+import { customerPairKey, type CustomerRecorded, type CustomerRequirement } from "@/lib/seasons/customer-keys";
 
-/** The registry of how each kind of requirement is met (v1 spec 10.2): one entry per kind, checklist filled in. */
-const item: Requirement = { id: "r1", kind: "checklist", title: "Uniform fitting", required: true, appliesTo: "student", amount: null, amountUnit: null, dueOn: null, covers: "everyone", coveredQboIds: [] };
-const row = (o: Partial<Recorded>): Recorded => ({ requirementId: "r1", subjectQboId: "LEO", metAt: null, metBy: null, waivedAt: null, waivedBy: null, waivedReason: null, ...o });
+/**
+ * The registry of how each kind of requirement is met (v1 spec 10.2): one entry per kind, checklist filled in. The rules
+ * are asked by customer until the areas they read move to the app's ids (src/lib/seasons/customer-keys.ts).
+ */
+const item: CustomerRequirement = { id: "r1", kind: "checklist", title: "Uniform fitting", required: true, appliesTo: "student", amount: null, amountUnit: null, dueOn: null, covers: "everyone", coveredQboIds: [] };
+const row = (o: Partial<CustomerRecorded>): CustomerRecorded => ({ requirementId: "r1", subjectQboId: "LEO", metAt: null, metBy: null, waivedAt: null, waivedBy: null, waivedReason: null, ...o });
 
 describe("the kinds of requirement", () => {
   it("has one entry for each of the four kinds, each with a name for staff", () => {
@@ -41,6 +44,6 @@ describe("the kinds of requirement", () => {
       row({ subjectQboId: "MAYA", waivedAt: new Date(), waivedReason: "borrowed one" }),
       row({ subjectQboId: "NICO", metAt: new Date(), waivedAt: new Date(), waivedReason: "both" }),
     ] });
-    expect([...standings]).toEqual([[pairKey("r1", "LEO"), { met: true, words: "Done" }], [pairKey("r1", "NICO"), { met: true, words: "Done" }]]);
+    expect([...standings]).toEqual([[customerPairKey("r1", "LEO"), { met: true, words: "Done" }], [customerPairKey("r1", "NICO"), { met: true, words: "Done" }]]);
   });
 });

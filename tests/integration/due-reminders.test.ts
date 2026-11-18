@@ -20,6 +20,7 @@ import { resetDb, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { ageMoney } from "../helpers/money";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { TRIP_DEPOSIT_ITEM } from "../helpers/season";
+import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 
 /**
  * The reminders before a required payment's or checklist item's due date (src/lib/seasons/due-reminders.ts): 14 and 3
@@ -70,10 +71,11 @@ async function season() {
     const [row] = await db.insert(requirement).values({ ...values, ...r, position: 60 + position }).returning();
     ids[r.title] = row!.id;
   }
+  // Ticks and waivers name the app's own records (stage 2 of the app-owned families spec).
   await db.insert(requirementProgress).values([
-    { requirementId: ids[MEDICAL]!, subjectQboId: FAMILY_A.family.qboId, metAt: new Date() },
-    { requirementId: ids[LOCKER]!, subjectQboId: AZALEA!.qboId, metAt: new Date() },
-    { requirementId: ids[LOCKER]!, subjectQboId: BARNABY!.qboId, waivedAt: new Date(), waivedReason: WAIVER_REASON },
+    { requirementId: ids[MEDICAL]!, ...(await subjectColumns(FAMILY_A.family.qboId, "family")), metAt: new Date() },
+    { requirementId: ids[LOCKER]!, ...(await subjectColumns(AZALEA!.qboId, "student")), metAt: new Date() },
+    { requirementId: ids[LOCKER]!, ...(await subjectColumns(BARNABY!.qboId, "student")), waivedAt: new Date(), waivedReason: WAIVER_REASON },
   ]);
   await switches({ welcome: true });
   return { a, b, ids };
@@ -199,6 +201,9 @@ describe("the reminders before a due date", () => {
     expect(to(b)).toHaveLength(2);
     expect(await sendDueReminders(at("2027-03-10T10:30:00Z"))).toEqual({ sent: 0, failed: 0 });
     expect((await db.select().from(requirementReminder)).map((r) => r.outcome)).toEqual(["sent", "sent", "sent"]);
+    // Each claim names the app's own family (stage 2 of the app-owned families spec).
+    const [famA, famB] = [await recordOfCustomer(FAMILY_A.family.qboId, "family"), await recordOfCustomer(FAMILY_B.family.qboId, "family")];
+    expect((await db.select().from(requirementReminder)).map((r) => r.familyId === famA ? "A" : r.familyId === famB ? "B" : "?").sort()).toEqual(["A", "B", "B"]);
     // What the Health page reads: the day, and what went and failed on it.
     expect(await lastDueReminders()).toMatchObject({ day: "2027-03-10", sent: 3, failed: 2, lastSentAt: "2027-03-10T09:46:00.000Z", lastFailedAt: "2027-03-10T09:30:00.000Z" });
   });
@@ -232,7 +237,9 @@ describe("the reminders before a due date", () => {
     expect(mail.outbox.filter((m) => m.subject.startsWith("Due "))).toHaveLength(3);
   });
 
-  it("forgets every claim when a different QuickBooks company is connected: the ids would name other families", async () => {
+  // Connecting a different company is refused until stage 4 of the app-owned families spec ships (company-change-step5),
+  // so only this clear, which nothing the portal runs reaches, removes the claims, with the records they name.
+  it("forgets every claim in the clear a change of company would run, before the families they name", async () => {
     await season();
     expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 3, failed: 0 });
     expect(await db.select().from(requirementReminder)).toHaveLength(3);

@@ -7,11 +7,17 @@ import { secretBox, SecretBoxError } from "@/lib/crypto/secret-box";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { errorNeedsAdmin, qboEndpoints, QboError, QBO_SCOPE } from "./endpoints";
 import { QBO_AAD, qboGet, sealTokens, tokenRequest, type TokenSet } from "./client";
-import { clearRosterOfOtherCompany } from "@/lib/roster/source";
+import { clearRosterOfOtherCompany, getRosterSource } from "@/lib/roster/source";
 
 export type QboOp = { actor: Actor; ip: string | null; permission?: string };
 export type QboAppDraft = { clientId: string; clientSecret: string | null; environment: QboEnvironment };
-export type ConnectRefusal = "state" | "denied" | "other_company" | "intuit" | "not_configured";
+/**
+ * Why a connect was refused. `roster_company`: the portal's families were read from another company, and until the
+ * mapping screen ships (stage 4 of docs/superpowers/specs/2026-11-18-app-owned-families-design.md) only that company can
+ * be connected again (open question 18): the seasons now keep their ticks, waivers and chosen lists against those
+ * families, which a change of company would have to take away.
+ */
+export type ConnectRefusal = "state" | "denied" | "other_company" | "roster_company" | "intuit" | "not_configured";
 export type QboConnectionView = {
   configured: boolean; clientId: string | null; environment: QboEnvironment | null; connected: boolean; companyName: string | null;
   connectedAt: string | null; lastTokenRefreshAt: string | null; refreshExpiresAt: string | null; lastError: string | null; lastErrorAt: string | null;
@@ -108,6 +114,16 @@ export async function beginConnect(staffUserId: string): Promise<{ ok: true; url
   return { ok: true, url: `${qboEndpoints().authorize}?${q}` };
 }
 
+/**
+ * Whether this company may be connected: the one the roster cache was read from, or any while the cache names none (a
+ * first connect). A different company is refused from stage 2 of the app-owned families spec until stage 4 ships
+ * (open question 18), so the change-of-company clear (clearRosterOfOtherCompanyLocked()) never runs.
+ */
+async function sameRosterCompany(realmId: string, tx: Tx): Promise<boolean> {
+  const source = await getRosterSource(tx);
+  return source === null || source === realmId;
+}
+
 /** Finishes a connect when Intuit sends the Admin back (spec §3 Rules for the connection). */
 export async function completeConnect(
   p: { code: string | null; state: string | null; realmId: string | null; error: string | null },
@@ -129,6 +145,8 @@ export async function completeConnect(
     await tx.update(qboConnection).set({ stateHash: null, stateStaffUserId: null, stateExpiresAt: null, updatedAt: new Date() });
     if (p.error || !p.code || !p.realmId || !/^\d{1,32}$/.test(p.realmId)) return { ok: false, reason: "denied" };
     if (c.realmId && c.realmId !== p.realmId) return { ok: false, reason: "other_company" };
+    // Only the company the roster was read from, until stage 4: nothing is exchanged or stored for another.
+    if (!(await sameRosterCompany(p.realmId!, tx))) return { ok: false, reason: "roster_company" };
     try {
       return { ok: true, clientId: c.clientId, environment: c.environment, clientSecret: secretBox().open({ ciphertext: c.clientSecretCiphertext, keyId: c.clientSecretKeyId }, QBO_AAD.secret) };
     } catch (e) {
@@ -171,12 +189,15 @@ export async function completeConnect(
     // The tokens belong to the app and environment the code was exchanged under; the keys may have changed since.
     if (c.clientId !== claim.clientId || c.environment !== claim.environment) return "state" as const;
     if (c.realmId && c.realmId !== p.realmId) return "other_company" as const;
+    if (!(await sameRosterCompany(p.realmId!, tx))) return "roster_company" as const;
     await tx.update(qboConnection).set({ realmId: p.realmId, connectedAt: new Date(), connectedBy: o.staffUserId, ...sealTokens(tokens) });
     return "stored" as const;
   }).catch(async (e: unknown) => { await storeFailed(); throw e; });
   if (stored !== "stored") return refuse(stored, { revoked: await revokeIssued() });
-  // 3b. A different company from the one the cache was read from: clear what belonged to that one before anything reads
-  // the new one. Run after the row lock above is released, never inside it (see clearRosterOfOtherCompany).
+  // 3b. A different company from the one the cache was read from would clear what belonged to that one before anything
+  // reads the new one. Until stage 4 one is refused above, so this finds the same company (or none) and clears nothing;
+  // it stays, so the store and the clear can't come apart. Run after the row lock above is released, never inside it
+  // (see clearRosterOfOtherCompany).
   await clearRosterOfOtherCompany(p.realmId!, { actor: o.actor, ip: o.ip });
   // 4. The company's name, for people. The connection stands even if this read fails.
   let companyName: string | null = null;

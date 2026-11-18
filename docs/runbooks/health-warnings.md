@@ -42,6 +42,13 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     moved to another family couldn't be brought up to date" (`follow_up_failed`). Whichever it is, the roster, and every
     parent's access, stay as they were until a refresh succeeds; press **Refresh** on the Roster page once. If it fails
     the same way again, that is a fault in the portal for whoever maintains it.
+  - "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect
+    QuickBooks, then connect the company the roster was read from." (`roster_company`): the connection holds a different
+    company from the one the portal's families came from, stored before the portal refused that (or by hand). Until
+    families can be linked to another company's customers (the mapping screen, a later update), the portal reads only
+    the company it read first, and asks QuickBooks nothing meanwhile; the roster and every family's records stay as
+    they were. **Settings**, **QuickBooks**, open **Disconnect**, **Disconnect QuickBooks**, then **Change** and connect
+    the first company again ([Reconnecting QuickBooks: The same company](quickbooks-reconnect.md#the-same-company)).
   - "The roster hasn't been refreshed from QuickBooks in more than 2 days": the worker isn't running (see Worker).
   - "The membership shape names a customer type QuickBooks no longer has": someone renamed or removed a customer type in
     QuickBooks. **Settings**, **QuickBooks**, **Change**, step 3: choose the shape again.
@@ -65,10 +72,9 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     connected to the club's real books, run the check there when convenient (Settings, QuickBooks, **Check the portal's
     requests**): against the real books it only reads. The checks that make changes are run on a separate installation
     connected to an Intuit sandbox company, such as the proof-of-concept host, never by switching this installation's
-    company. Connecting a different company, even for a moment, ends every parent's access, switches parent sign-ins
-    and welcome emails off and deletes the club's ticks, waivers, volunteer sign-ups, buy-outs and forms being signed,
-    and connecting the real books again brings none of it back: see [Reconnecting QuickBooks: Connecting a different
-    company](quickbooks-reconnect.md#connecting-a-different-company), which starts with a backup.
+    company. Until the mapping screen ships, the portal refuses a company other than the one its families were read
+    from anyway: see [Reconnecting QuickBooks: Connecting a different
+    company](quickbooks-reconnect.md#connecting-a-different-company).
 
 ## Every family's invoices
 
@@ -149,7 +155,8 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 ## Parent sign-ins
 
 - **"Off"** / **"Not switched on yet."** No parent can sign in. It is a choice: **Settings**, **Parent sign-ins**
-  switches them on (once QuickBooks and mail work). Connecting a different QuickBooks company switches them off.
+  switches them on (once QuickBooks and mail work). Reconnecting the same QuickBooks company leaves them as they are; a
+  different company can't be connected until the mapping screen ships.
 - **"Needs attention"**, with "The latest sign-ins have no address: the proxy in front of the portal doesn't send the
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.

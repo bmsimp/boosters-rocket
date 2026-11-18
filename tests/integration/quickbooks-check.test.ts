@@ -24,6 +24,7 @@ import {
 } from "@/lib/quickbooks/sandbox-check/writes";
 import { healthReport } from "@/lib/health/report";
 import { refreshRoster } from "@/lib/roster/refresh";
+import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 import { resetDb, seedStaff } from "../helpers/db";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { REALM, staffWith, WORKER } from "../helpers/roster-writes";
@@ -372,8 +373,8 @@ describe("a run cut off part way", () => {
     await run();
     const { run: r } = await lastRun();
     expect((await recordsOf(r.id)).length).toBeGreaterThan(0);
-    await db.update(qboConnection).set({ realmId: "9130000000000777" });
-    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    // The clear a change of company would run (until stage 4 a different company is refused before it can: open question 18).
+    expect(await clearRosterOfOtherCompany("9130000000000777", { actor: WORKER.actor, ip: null })).toBe(true);
     expect(await db.select().from(qboCheckRecord)).toEqual([]);
     expect(await db.select().from(qboCheckRun)).toHaveLength(1);
     expect(await audits("quickbooks.check.records.cleared")).toHaveLength(1);

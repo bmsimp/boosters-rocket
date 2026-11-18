@@ -42,9 +42,10 @@ const signedForA = (o: { items?: number } = {}) => signedInStub(stub, { requirem
 
 beforeEach(async () => {
   await resetDb(); stub.reset(); mail.outbox.length = 0; mail.fail = false;
+  // The roster's company first: seedSignedInParent() marks one only when none is set, and makes the app's records in it.
+  await db.insert(setting).values({ key: SOURCE_KEY, value: { realmId: REALM } });
   a = await seedSignedInParent(FAMILY_A);
   b = await seedSignedInParent(FAMILY_B);
-  await db.insert(setting).values({ key: SOURCE_KEY, value: { realmId: REALM } });
   await connectForms(stub);
   await seedWorkingMail();
   const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });

@@ -6,7 +6,6 @@ import { setRosterSource } from "@/lib/roster/source";
 import type { MembershipShape } from "@/lib/roster/shape";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { fam, par, seedCache, seedShape, stu, type CacheCustomer } from "../helpers/roster-cache";
-import { seedSeason } from "../helpers/season";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
 import { appRecordsFillStatements } from "../helpers/app-records-fill";
 import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
@@ -45,19 +44,19 @@ const member = (qboId: string, displayName: string, o: Partial<CacheCustomer> = 
 
 /**
  * Records of the current company naming customers the cache doesn't hold, of each kind the function reads, one naming
- * a roster family as a student and a roster student as a family, and evidence of an earlier company.
+ * a roster family as a student and a roster student as a family, and evidence of an earlier company. The season's
+ * chosen lists, ticks and reminder claims name the app's own records since stage 2 (migrations 0024 and 0025), so
+ * they name no customer for the fill to make a record of, and are not among these (RE_KEYED_SINCE_0023).
  */
 async function seedRecordsNamingOthers() {
-  const season = await seedSeason({ name: "Fill season", steps: [{ name: "Join", requirements: [
-    { title: "Locker key", appliesTo: "family", chosen: ["F-COVER-GONE", "S1"], ticked: ["F-COVER-GONE"] },
-    // F2 is a family on the roster: a tick of a per-student requirement names it as a student.
-    { title: "Uniform", appliesTo: "student", ticked: ["S-GONE", "S1", "F2"] },
-  ] }] });
-  expect(season.requirementIds["Uniform"]).toBeTruthy();
   const { shifts: [shift] } = await seedEvent({ inDays: 10 });
   const signer = await person("Signup Guardian");
   await seedSignup({ shiftId: shift!.id, familyQboId: "F1", signedUpBy: signer.id, student: { qboId: "S-GONE", name: "Gone Kid Name" } });
+  // F2 is a family on the roster: a sign-up for a student names it as a student.
+  await seedSignup({ shiftId: shift!.id, familyQboId: "F1", signedUpBy: signer.id, student: { qboId: "F2", name: "Birch As A Student" } });
   await db.insert(familyMoney).values({ familyQboId: "F-MONEY", realmId: null, failedAt: new Date(), failedCode: "timeout" });
+  // S1 is a student on the roster: a family's figures name it as a family.
+  await db.insert(familyMoney).values({ familyQboId: "S1", realmId: null, failedAt: new Date(), failedCode: "timeout" });
   await db.insert(writeQueue).values([
     { realmId: REALM, request: { op: "rename", role: "student", qboId: "S-QUEUE", syncToken: "0", name: "New", was: "Old" }, targetQboId: "S-QUEUE", familyQboId: "F1", state: "waiting", sent: false },
     { realmId: "OTHER-REALM", request: { op: "rename", role: "student", qboId: "S-OTHER-REALM", syncToken: "0", name: "New", was: "Old" }, targetQboId: "S-OTHER-REALM", familyQboId: "F-OTHER-REALM", state: "waiting", sent: false },
@@ -100,18 +99,17 @@ describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => 
     expect(byFill).toEqual(byFunction);
     // And what that is, so the two can't agree by both making nothing.
     expect(byFunction.families).toEqual([
-      { customer: "F-COVER-GONE", name: null, active: false },
       { customer: "F-EVID", name: "Evidence Family", active: false },
       { customer: "F-GONE", name: null, active: false },
       { customer: "F-MONEY", name: null, active: false },
       { customer: "F1", name: "Ash Family", active: true },
       { customer: "F2", name: "Birch Family", active: false },
-      { customer: "S1", name: "Ash Kid", active: false },         // named as a family by a cover: its own inactive family record
+      { customer: "S1", name: "Ash Kid", active: false },         // named as a family by a family's figures: its own inactive family record
       { customer: "S3", name: "Birch Kid", active: false },       // named as a family by a guardian row
       { customer: "X1", name: "Lincoln High", active: false },
     ]);
     expect(byFunction.students).toEqual([
-      { customer: "F2", name: "Birch Family", active: false, family: null }, // named as a student by a tick
+      { customer: "F2", name: "Birch Family", active: false, family: null }, // named as a student by a sign-up
       { customer: "S-GONE", name: "Gone Kid Name", active: false, family: null },
       { customer: "S-QUEUE", name: null, active: false, family: null },
       { customer: "S1", name: "Ash Kid", active: true, family: "F1" },

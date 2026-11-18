@@ -1,10 +1,12 @@
 // The app's own families, students and links in tests (stage 1 of the app-owned families spec): the one function that
 // keeps them in step, run as the portal runs it, and ways to read them back by the customers they are linked to.
-import { asc } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, student } from "@/lib/db/schema";
 import { keepAppRecordsInStep } from "@/lib/families/in-step";
 import { noAppRecordChanges, type AppRecordChanges } from "@/lib/families/changes";
+import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
+import { getRosterSource } from "@/lib/roster/source";
 
 /** Runs keepAppRecordsInStep() in its own transaction, as the roster read does inside its own. */
 export const syncAppRecords = (): Promise<AppRecordChanges> => db.transaction((tx) => keepAppRecordsInStep(tx));
@@ -26,6 +28,36 @@ export async function whatAFreshRunWouldChange(): Promise<AppRecordChanges> {
     if (!(e instanceof RolledBack)) throw e;
   }
   return out.changes!;
+}
+
+/**
+ * The app's own record of a customer, of one kind, in the company the roster was read from: the one its link of that
+ * kind names. One the records don't hold yet (a customer the roster no longer holds, which a season record names) is
+ * made inactive with its link, as migration 0023 made one, named by nobody: so a test can seed a season record of a
+ * customer that has left the roster. Throws while the roster names no company: there are no records then.
+ */
+export async function recordOfCustomer(customerId: string, kind: "family"): Promise<AppFamilyId>;
+export async function recordOfCustomer(customerId: string, kind: "student"): Promise<AppStudentId>;
+export async function recordOfCustomer(customerId: string, kind: "family" | "student"): Promise<AppFamilyId | AppStudentId>;
+export async function recordOfCustomer(customerId: string, kind: "family" | "student"): Promise<AppFamilyId | AppStudentId> {
+  const realmId = await getRosterSource();
+  if (realmId === null) throw new Error(`recordOfCustomer(${customerId}): the roster names no company, so there are no app records to name. Seed a roster read first (seedRosterRead(), seedFamilyMoney() or setRosterSource()).`);
+  const [l] = await db.select().from(accountingLink).where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), eq(accountingLink.customerId, customerId),
+    isNotNull(kind === "family" ? accountingLink.familyId : accountingLink.studentId)));
+  if (l) return (kind === "family" ? l.familyId : l.studentId)!;
+  if (kind === "family") {
+    const [f] = await db.insert(family).values({ name: null, active: false }).returning({ id: family.id });
+    await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId, customerId, familyId: f!.id, origin: "carried_over" });
+    return f!.id;
+  }
+  const [s] = await db.insert(student).values({ name: null, active: false }).returning({ id: student.id });
+  await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId, customerId, studentId: s!.id, origin: "carried_over" });
+  return s!.id;
+}
+
+/** The columns a season row (a chosen list's entry, a tick or waiver) names a customer's app record by, for a requirement of this kind. */
+export async function subjectColumns(customerId: string, kind: "family" | "student"): Promise<{ familyId: AppFamilyId; studentId: null } | { familyId: null; studentId: AppStudentId }> {
+  return kind === "family" ? { familyId: await recordOfCustomer(customerId, "family"), studentId: null } : { familyId: null, studentId: await recordOfCustomer(customerId, "student") };
 }
 
 /** By code unit, so the order is the same on every machine: "F-1" before "F1" before "F2". */

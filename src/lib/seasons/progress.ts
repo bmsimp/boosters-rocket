@@ -5,11 +5,20 @@
  * what day it is for the club.
  */
 import type { RequirementKind } from "@/lib/db/schema";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+
+/**
+ * Who a requirement is asked of, by the app's own id: a family for a per-family requirement, a student for a
+ * per-student one (stage 2 of the app-owned families spec). Never a QuickBooks id: the areas still keyed by those read a
+ * season through ./by-customer.ts.
+ */
+export type SubjectId = AppFamilyId | AppStudentId;
 
 export type AppliesTo = "family" | "student";
 export type AmountUnit = "shifts" | "hours";
 
-export type Requirement = {
+/** A requirement's own settings, whoever reads it. */
+export type RequirementFields = {
   id: string;
   kind: RequirementKind;
   /** In the club's own words. */
@@ -23,22 +32,25 @@ export type Requirement = {
   /** A calendar date (YYYY-MM-DD) in the club's time zone. */
   dueOn: string | null;
   covers: "everyone" | "chosen";
-  /** With `covers: "chosen"`: the families (per family) or students (per student) it is asked of, by QuickBooks id. */
-  coveredQboIds: readonly string[];
+};
+
+export type Requirement = RequirementFields & {
+  /** With `covers: "chosen"`: the families (per family) or students (per student) it is asked of, by the app's own id. */
+  coveredIds: readonly SubjectId[];
 };
 
 export type Step = { id: string; name: string; startsOn: string | null; endsOn: string | null; requirements: readonly Requirement[] };
 
-/** A family as the roster lists it now: its QuickBooks id and its active students. A club that doesn't list students has none. */
-export type FamilyRoster = { familyQboId: string; students: readonly { qboId: string; name: string }[] };
+/** A family as the roster lists it now: its own id and its active students'. A club that doesn't list students has none. */
+export type FamilyRoster = { familyId: AppFamilyId; students: readonly { id: AppStudentId; name: string }[] };
 
 /** How a requirement stands for one family or student, as its kind judges it (./kinds.ts), in the words a parent reads. */
 export type Standing = { met: boolean; words: string };
 
 /** What is recorded, as the rules ask for it. */
 export type Facts = {
-  standing(requirement: Requirement, subjectQboId: string): Standing;
-  waived(requirementId: string, subjectQboId: string): boolean;
+  standing(requirement: Requirement, subject: SubjectId): Standing;
+  waived(requirementId: string, subject: SubjectId): boolean;
 };
 
 export type LineState = "done" | "waived" | "todo";
@@ -52,7 +64,7 @@ export type Line = {
   dueOn: string | null;
 };
 
-export type StudentStanding = { qboId: string; name: string; lines: Line[]; /** Every required item asked of this student is met or waived. */ done: boolean };
+export type StudentStanding = { id: AppStudentId; name: string; lines: Line[]; /** Every required item asked of this student is met or waived. */ done: boolean };
 export type StepStanding = {
   id: string; name: string; startsOn: string | null; endsOn: string | null;
   /** The requirements asked once of the family. */
@@ -72,8 +84,8 @@ export type SeasonStanding = {
 export const WAIVED_WORDS = "Waived";
 
 /** Whether a requirement is asked of this family (per family) or this student (per student). */
-export function isCovered(requirement: Pick<Requirement, "covers" | "coveredQboIds">, subjectQboId: string): boolean {
-  return requirement.covers === "everyone" || requirement.coveredQboIds.includes(subjectQboId);
+export function isCovered(requirement: Pick<Requirement, "covers" | "coveredIds">, subject: SubjectId): boolean {
+  return requirement.covers === "everyone" || requirement.coveredIds.includes(subject);
 }
 
 /**
@@ -81,15 +93,15 @@ export function isCovered(requirement: Pick<Requirement, "covers" | "coveredQboI
  * active students for a per-student one. Only those it covers. A student who joins mid-season is simply in the list
  * from then on, with nothing recorded yet.
  */
-export function subjectsOf(requirement: Requirement, family: FamilyRoster): string[] {
-  const all = requirement.appliesTo === "family" ? [family.familyQboId] : family.students.map((s) => s.qboId);
+export function subjectsOf(requirement: Requirement, family: FamilyRoster): SubjectId[] {
+  const all: SubjectId[] = requirement.appliesTo === "family" ? [family.familyId] : family.students.map((s) => s.id);
   return all.filter((id) => isCovered(requirement, id));
 }
 
 /** How a requirement stands for one family or student. Met comes first: a waiver on something that was done anyway changes nothing. */
-export function lineFor(requirement: Requirement, subjectQboId: string, facts: Facts): Line {
-  const standing = facts.standing(requirement, subjectQboId);
-  const state: LineState = standing.met ? "done" : facts.waived(requirement.id, subjectQboId) ? "waived" : "todo";
+export function lineFor(requirement: Requirement, subject: SubjectId, facts: Facts): Line {
+  const standing = facts.standing(requirement, subject);
+  const state: LineState = standing.met ? "done" : facts.waived(requirement.id, subject) ? "waived" : "todo";
   return {
     requirementId: requirement.id, title: requirement.title, kind: requirement.kind, required: requirement.required,
     state, words: state === "waived" ? WAIVED_WORDS : standing.words, dueOn: state === "todo" ? requirement.dueOn : null,
@@ -106,12 +118,12 @@ export const linesLeft = (lines: readonly Line[]): number => lines.filter((l) =>
  * family's own items are the family's. The step is done when all of it is.
  */
 export function stepStanding(step: Step, family: FamilyRoster, facts: Facts): StepStanding {
-  const forSubject = (applies: AppliesTo, subjectQboId: string) =>
-    step.requirements.filter((r) => r.appliesTo === applies && isCovered(r, subjectQboId)).map((r) => lineFor(r, subjectQboId, facts));
-  const own = forSubject("family", family.familyQboId);
+  const forSubject = (applies: AppliesTo, subject: SubjectId) =>
+    step.requirements.filter((r) => r.appliesTo === applies && isCovered(r, subject)).map((r) => lineFor(r, subject, facts));
+  const own = forSubject("family", family.familyId);
   const students = family.students.map((s) => {
-    const lines = forSubject("student", s.qboId);
-    return { qboId: s.qboId, name: s.name, lines, done: linesDone(lines) };
+    const lines = forSubject("student", s.id);
+    return { id: s.id, name: s.name, lines, done: linesDone(lines) };
   });
   return { id: step.id, name: step.name, startsOn: step.startsOn, endsOn: step.endsOn, family: own, students, done: linesDone(own) && students.every((s) => s.done) };
 }

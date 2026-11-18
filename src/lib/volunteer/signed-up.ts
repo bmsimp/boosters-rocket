@@ -6,7 +6,7 @@ import "server-only";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
-import type { Requirement } from "@/lib/seasons/progress";
+import type { RequirementFields } from "@/lib/seasons/progress";
 import { getClubSettings } from "@/lib/settings/club";
 import { shiftInstants, shiftMinutes } from "./clock";
 import { countsFor, shiftCredit, type Filler } from "./rules";
@@ -17,7 +17,7 @@ import { countsFor, shiftCredit, type Filler } from "./rules";
  * toward the requirement for them, is not checked in yet and hasn't ended. With `subjectQboIds` (a parent's own
  * family and students) only sign-ups made from that family are read; null is everyone, for staff.
  */
-export async function signedUpAmounts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string,
+export async function signedUpAmounts(requirements: readonly RequirementFields[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string,
   now: Date = new Date()): Promise<Map<string, number>> {
   const amounts = new Map<string, number>();
   if (requirements.length === 0 || subjectQboIds?.length === 0) return amounts;

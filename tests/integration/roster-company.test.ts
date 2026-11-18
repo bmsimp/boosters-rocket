@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun, qboConnection, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
+import { auditLog, jobRun, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { loadRosterPage } from "@/lib/roster/queries";
@@ -50,22 +50,23 @@ describe("the roster belongs to the connected company", () => {
     expect(await source()).toEqual({ realmId: A });
   });
 
-  it("connecting a different company clears the old company's cache, shape and roster runs before the first read", { timeout: 30_000 }, async () => {
+  // From stage 2 of the app-owned families spec until stage 4 ships (open question 18): the seasons keep their records
+  // against the app's families read from this company, so another company is refused rather than cleared for.
+  it("refuses to connect a different company, and keeps the cache, the shape and the runs", { timeout: 30_000 }, async () => {
     expect((await loadRosterPage()).roster).not.toBeNull();
+    const runsBefore = await rosterRuns();
     await disconnect(op);
-    expect(await connect(B)).toEqual({ ok: true });
-    const page = await loadRosterPage();
-    expect(page).toMatchObject({ connected: true, roster: null, shape: null, attention: [], lastRun: null, lastOkAt: null, types: [] });
-    expect(await getShape()).toBeNull();
-    expect(await db.select().from(qboCustomer)).toEqual([]);
-    expect(await db.select().from(qboCustomerType)).toEqual([]);
-    expect(await rosterRuns()).toEqual([]);
-    expect(await source()).toEqual({ realmId: B });
-    const cleared = await audits("roster.cleared");
-    expect(cleared).toHaveLength(1);
-    expect(cleared[0]).toMatchObject({ door: "staff", actorId: admin.id, after: { reason: "different_company" } });
-    expect((await runDueJobs()).ran).toContainEqual({ job: ROSTER_JOB, ok: true });
-    expect(await source()).toEqual({ realmId: B });
+    expect(await connect(B)).toEqual({ ok: false, reason: "roster_company" });
+    expect((await db.select().from(qboConnection))[0]).toMatchObject({ realmId: null, refreshTokenCiphertext: null });
+    expect(await getShape()).toEqual(FZN_SHAPE);
+    expect(await db.select().from(qboCustomer)).toHaveLength(9);
+    expect(await rosterRuns()).toEqual(runsBefore);
+    expect(await source()).toEqual({ realmId: A });
+    expect(await audits("roster.cleared")).toEqual([]);
+    expect((await audits("quickbooks.connect_refused")).map((r) => r.after)).toEqual([{ reason: "roster_company" }]);
+    // Nothing for the worker to read until a company is connected again: the cache stays this company's.
+    expect((await runDueJobs()).ran.map((r) => r.job)).not.toContain(ROSTER_JOB);
+    expect(await source()).toEqual({ realmId: A });
   });
 
   it("reconnecting the same company keeps the cache, the shape and the runs", { timeout: 30_000 }, async () => {
@@ -98,15 +99,19 @@ describe("the roster belongs to the connected company", () => {
     expect((await loadRosterPage()).roster).not.toBeNull();
   });
 
-  it("a new company with no customers replaces another company's cache, even when the clearing step never ran", async () => {
+  it("reads no other company's roster over this one's, even when a connection to it was stored without the refusal", async () => {
     await db.update(qboConnection).set({ realmId: B });
     stub.customers = [];
-    // The cache holds company A's customers, and that is no reason to doubt company B's empty answer.
-    expect(await refreshRoster(worker)).toEqual({ ok: true, customers: 0, types: 5 });
-    expect(await db.select().from(qboCustomer)).toEqual([]);
-    expect(await source()).toEqual({ realmId: B });
-    expect(await audits("roster.cleared")).toHaveLength(1);
+    const calls = stub.apiCalls().length;
+    expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "failed",
+      error: "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)" });
+    expect(stub.apiCalls()).toHaveLength(calls); // nothing was asked of QuickBooks
+    expect(await db.select().from(qboCustomer)).toHaveLength(9);
+    expect(await source()).toEqual({ realmId: A });
+    expect(await audits("roster.cleared")).toEqual([]);
+    expect((await audits("roster.refresh.failed")).at(-1)).toMatchObject({ after: { code: "roster_company" } });
   });
+
 
   it("a cache that doesn't say which company it came from is not replaced by an answer with no customers", async () => {
     await db.delete(setting).where(eq(setting.key, "roster.source"));

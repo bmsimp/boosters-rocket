@@ -5,6 +5,7 @@ import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { describeRequirement } from "@/lib/seasons/setup";
 import { loadRequirementProgress, type ProgressRow } from "@/lib/seasons/staff-progress";
+import { recordNameWords } from "@/lib/families/words";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
 import { StateWords } from "@/app/components/state-words";
@@ -41,7 +42,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
   // A plain substring of the name or the family's name: nothing typed is a pattern.
   const shown = (rows ?? []).filter((row) => !q || row.name.toLowerCase().includes(q) || row.familyName.toLowerCase().includes(q));
   // "Everyone shown" is the list as it is filtered now; someone already as asked is left alone.
-  const shownIds = shown.map((row) => row.qboId), anyUnticked = shown.some((row) => !row.metAt), anyTicked = shown.some((row) => row.metAt);
+  const shownIds = shown.map((row) => String(row.id)), anyUnticked = shown.some((row) => !row.metAt), anyTicked = shown.some((row) => row.metAt);
   const noun = r.appliesTo === "family" ? "families" : "students";
   return (
     <main className="wrap single">
@@ -68,7 +69,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
           )}
           {counts.asked > 0 && shown.length === 0 && <Notice tone="info">Nobody matches &quot;{typed}&quot;.</Notice>}
           {shown.length > 0 && <DataTable caption={typed ? `Matching "${typed}"` : `Every ${r.appliesTo === "family" ? "family" : "student"} it is asked of`} captionHidden
-            className="progress-rows" rows={shown} rowKey={(row) => row.qboId} columns={[
+            className="progress-rows" rows={shown} rowKey={(row) => String(row.id)} columns={[
               { key: "name", header: r.appliesTo === "family" ? "Family" : "Student", rowHeader: true, cell: (row) => row.name },
               ...(r.appliesTo === "student" ? [{ key: "family", header: "Family", cell: (row: ProgressRow) => row.familyName }] : []),
               { key: "state", header: "Where it stands", cell: (row) => <Standing row={row} /> },
@@ -77,12 +78,12 @@ export default async function RequirementProgressPage({ params, searchParams }: 
               ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (row: ProgressRow) => (
                 <div className="row-actions">
                   {ticked && (row.metAt
-                    ? <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.qboId], false)} />
-                    : <OneButton label="Tick" pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.qboId], true)} />)}
+                    ? <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [String(row.id)], false)} />
+                    : <OneButton label="Tick" pendingLabel="Ticking…" act={setTicksAction.bind(null, r.id, rosterTag, [String(row.id)], true)} />)}
                   {row.waivedAt
-                    ? <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, row.qboId)} />
+                    ? <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, String(row.id))} />
                     : <details className="more"><summary>Waive for {row.name}</summary>
-                        <TextAction field="Why? (kept in the audit log; the family doesn't see it)" label="Waive" pendingLabel="Waiving…" maxLength={500} multiline act={waiveAction.bind(null, r.id, rosterTag, row.qboId)} />
+                        <TextAction field="Why? (kept in the audit log; the family doesn't see it)" label="Waive" pendingLabel="Waiving…" maxLength={500} multiline act={waiveAction.bind(null, r.id, rosterTag, String(row.id))} />
                       </details>}
                 </div>) } satisfies Column<ProgressRow>] : []),
             ]} />}
@@ -92,15 +93,15 @@ export default async function RequirementProgressPage({ params, searchParams }: 
       {left.length > 0 && (
         <section className="box" aria-labelledby="left-h"><h2 id="left-h">No longer asked</h2>
           <p>Ticks and waivers recorded for someone who has left the roster, or whom the chosen list no longer names. They are kept, and families don&apos;t see them.</p>
-          <DataTable caption="Ticks and waivers kept for someone no longer asked" captionHidden rows={left} rowKey={(row) => row.subjectQboId} columns={[
-            { key: "name", header: "Who", rowHeader: true, cell: (row) => row.name ?? `QuickBooks customer ${row.subjectQboId}` },
+          <DataTable caption="Ticks and waivers kept for someone no longer asked" captionHidden rows={left} rowKey={(row) => String(row.subjectId)} columns={[
+            { key: "name", header: "Who", rowHeader: true, cell: (row) => recordNameWords(row.name, row.kind) },
             { key: "recorded", header: "Recorded", cell: (row) => (
               <>{row.metAt && <span className="t-line">Ticked <LocalTime iso={row.metAt} /></span>}
                 {row.waivedAt && <span className="t-line">Waived <LocalTime iso={row.waivedAt} />: {row.waivedReason}</span>}</>) },
             ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (row: (typeof left)[number]) => (
               <div className="row-actions">
-                {row.metAt && <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [row.subjectQboId], false)} />}
-                {row.waivedAt && <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, row.subjectQboId)} />}
+                {row.metAt && <OneButton label="Untick" pendingLabel="Unticking…" act={setTicksAction.bind(null, r.id, rosterTag, [String(row.subjectId)], false)} />}
+                {row.waivedAt && <OneButton label="Remove waiver" pendingLabel="Removing…" act={removeWaiverAction.bind(null, r.id, rosterTag, String(row.subjectId))} />}
               </div>) }] : []),
           ]} />
         </section>

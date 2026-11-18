@@ -166,7 +166,9 @@ describe("the daily clean-up deletes only what is past use", () => {
 
   it("due-date reminder claims older than a year go, one a second inside it stays", async () => {
     const year = REMINDER_CLAIM_DAYS * DAY, parentId = crypto.randomUUID();
-    const claim = (dueOn: string, ago: number) => db.insert(schema.requirementReminder).values({ kind: "due_3", familyQboId: "F", parentId, dueOn, triedAt: at(ago), outcome: "sent", createdAt: at(ago) }).returning();
+    // A claim names the app's own family (stage 2 of the app-owned families spec), which it can't outlive.
+    const [family] = await db.insert(schema.family).values({ name: "Claim Family", active: true }).returning();
+    const claim = (dueOn: string, ago: number) => db.insert(schema.requirementReminder).values({ kind: "due_3", familyId: family!.id, parentId, dueOn, triedAt: at(ago), outcome: "sent", createdAt: at(ago) }).returning();
     await claim("2025-11-01", -year - SEC);
     const [edge] = await claim("2025-11-02", -year + SEC);
     const [recent] = await claim("2026-11-02", -DAY);

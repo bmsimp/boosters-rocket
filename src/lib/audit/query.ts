@@ -1,6 +1,9 @@
-import { and, asc, count, desc, eq, gt, gte, lt, lte, max, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, inArray, lt, lte, max, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog } from "@/lib/db/schema";
+import { accountingLink, auditLog } from "@/lib/db/schema";
+import { QUICKBOOKS } from "@/lib/families/ids";
+import { getRosterSource } from "@/lib/roster/source";
+import { isUuid } from "@/lib/seasons/ids";
 
 /**
  * Reading the audit log for the staff page and its export (Audit.Log.Read, Admin only: the rows hold notes staff write
@@ -86,16 +89,50 @@ export function filtersQuery(f: AuditFilters, extra: Record<string, string | num
 export const hasFilters = (f: AuditFilters): boolean => Boolean(f.action || f.who || f.from || f.to || f.record);
 
 const likeText = (s: string) => `%${s.replace(/[\\%_]/g, "\\$&")}%`;
+const endsWithKey = (s: string) => `%:${s.replace(/[\\%_]/g, "\\$&")}`;
 
-function where(f: AuditFilters): SQL | undefined {
+/**
+ * The QuickBooks customers an app family or student record (a uuid) is linked to, in the company the roster was read
+ * from, when the filter names one: "family:<id>", "student:<id>", or the id alone. Open question 17 of the app-owned
+ * families spec: audit rows are never rewritten, and rows written before an area moved to the app's ids name the
+ * customer, so a search for the record also finds those.
+ */
+async function customersOfRecord(record: AuditFilters["record"]): Promise<{ id: string; customers: string[] } | null> {
+  if (!record) return null;
+  const [type, id] = "either" in record ? [null, record.either] : [record.type, record.id];
+  if (!isUuid(id) || (type !== null && type !== "family" && type !== "student")) return null;
+  const realmId = await getRosterSource();
+  if (realmId === null) return { id, customers: [] };
+  const kind = type === "family" ? sql`${accountingLink.familyId}::text = ${id}` : type === "student" ? sql`${accountingLink.studentId}::text = ${id}`
+    : sql`(${accountingLink.familyId}::text = ${id} or ${accountingLink.studentId}::text = ${id})`;
+  const links = await db.select({ customerId: accountingLink.customerId }).from(accountingLink)
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), kind));
+  return { id, customers: [...new Set(links.map((l) => l.customerId))] };
+}
+
+/**
+ * The rows a family or student record's older names find: a row naming one of its customers, and a tick's or waiver's
+ * row, whose target is "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
+ */
+function recordsOlderNames(r: { id: string; customers: string[] }): SQL | undefined {
+  const keys = [r.id, ...r.customers];
+  return or(
+    ...(r.customers.length ? [inArray(auditLog.targetId, r.customers)] : []),
+    and(eq(auditLog.targetType, "requirement_progress"), or(...keys.map((k) => sql`${auditLog.targetId} like ${endsWithKey(k)} escape '\\'`))),
+  );
+}
+
+async function where(f: AuditFilters): Promise<SQL | undefined> {
   const parts: (SQL | undefined)[] = [];
   if (f.action) parts.push(eq(auditLog.action, f.action));
   if (f.who) parts.push(or(sql`${auditLog.actorLabel} ilike ${likeText(f.who)} escape '\\'`, eq(auditLog.actorId, f.who)));
   if (f.from) parts.push(gte(auditLog.at, f.from));
   if (f.to) parts.push(lt(auditLog.at, f.to));
   if (f.record) {
-    parts.push("either" in f.record ? or(eq(auditLog.targetId, f.record.either), eq(auditLog.targetType, f.record.either))
-      : and(eq(auditLog.targetType, f.record.type), eq(auditLog.targetId, f.record.id)));
+    const exact = "either" in f.record ? or(eq(auditLog.targetId, f.record.either), eq(auditLog.targetType, f.record.either))
+      : and(eq(auditLog.targetType, f.record.type), eq(auditLog.targetId, f.record.id));
+    const record = await customersOfRecord(f.record);
+    parts.push(record ? or(exact, recordsOlderNames(record)) : exact);
   }
   return parts.length ? and(...parts) : undefined;
 }
@@ -111,7 +148,7 @@ export type AuditPage = {
 
 /** One page, newest first. `before` gives the rows older than that id; `after` the rows newer than it; neither, the newest. */
 export async function auditPage(f: AuditFilters, cursor: { before?: number | null; after?: number | null } = {}, size = AUDIT_PAGE_SIZE): Promise<AuditPage> {
-  const filter = where(f);
+  const filter = await where(f);
   let rows: AuditRow[];
   if (cursor.after) {
     rows = (await db.select().from(auditLog).where(and(filter, gt(auditLog.id, cursor.after))).orderBy(asc(auditLog.id)).limit(size)).reverse();
@@ -139,15 +176,16 @@ export async function auditActions(): Promise<string[]> {
  * audit row included).
  */
 export async function auditExportScope(f: AuditFilters): Promise<{ rows: number; upTo: number }> {
-  const [r] = await db.select({ n: count(), top: max(auditLog.id) }).from(auditLog).where(where(f));
+  const [r] = await db.select({ n: count(), top: max(auditLog.id) }).from(auditLog).where(await where(f));
   return { rows: r?.n ?? 0, upTo: r?.top ?? 0 };
 }
 
 /** Every matching row up to `upTo`, newest first, a batch at a time. */
 export async function* auditExportRows(f: AuditFilters, upTo: number, batch = 1000): AsyncGenerator<AuditRow[]> {
   let before = upTo + 1;
+  const filter = await where(f);
   for (;;) {
-    const rows = await db.select().from(auditLog).where(and(where(f), lt(auditLog.id, before), lte(auditLog.id, upTo))).orderBy(desc(auditLog.id)).limit(batch);
+    const rows = await db.select().from(auditLog).where(and(filter, lt(auditLog.id, before), lte(auditLog.id, upTo))).orderBy(desc(auditLog.id)).limit(batch);
     if (rows.length === 0) return;
     yield rows;
     before = rows.at(-1)!.id;

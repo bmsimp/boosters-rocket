@@ -5,7 +5,7 @@ import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
 import { isUuid } from "@/lib/seasons/ids";
 import { pairKey } from "@/lib/seasons/kinds";
-import { linesLeft, type Line } from "@/lib/seasons/progress";
+import { linesLeft, type Line, type SubjectId } from "@/lib/seasons/progress";
 import { defaultProgressSeasonId, loadFamilyProgress, type FamilyProgress } from "@/lib/seasons/staff-progress";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
@@ -16,7 +16,7 @@ import { Notice } from "@/app/components/notice";
 export const metadata = { title: "Family progress" };
 export const dynamic = "force-dynamic";
 
-type Asked = Line & { subjectQboId: string };
+type Asked = Line & { subjectId: SubjectId };
 
 /**
  * What one step asks of the family itself and of each student, as one table with a heading row for each of them:
@@ -28,7 +28,7 @@ function StepTable({ stepName, groups, waivers }: { stepName: string; groups: { 
     { key: "title", header: "Requirement", rowHeader: true, cell: (line) => <Link href={`/staff/seasons/progress/${line.requirementId}`}>{line.title}</Link> },
     { key: "required", header: "Required", cell: (line) => (line.required ? "Required" : "Optional") },
     { key: "state", header: "Where it stands", cell: (line) => {
-      const waiver = waivers.get(pairKey(line.requirementId, line.subjectQboId));
+      const waiver = waivers.get(pairKey(line.requirementId, line.subjectId));
       return (
         <>
           <StateWords state={line.state} words={line.words} />
@@ -40,7 +40,7 @@ function StepTable({ stepName, groups, waivers }: { stepName: string; groups: { 
   ];
   return (
     <DataTable caption={`What ${stepName} asks of the family and of each student`} captionHidden className="progress-rows" columns={columns}
-      rowKey={(line) => `${line.subjectQboId}|${line.requirementId}`}
+      rowKey={(line) => `${String(line.subjectId)}|${line.requirementId}`}
       groups={groups.map((g) => ({ key: g.key, heading: g.who, rows: g.lines }))} />
   );
 }
@@ -51,7 +51,8 @@ export default async function FamilyProgressPage({ params, searchParams }: {
 }) {
   const ctx = await requireStaffPage("Season.Progress.Read");
   const [{ familyId }, sp] = await Promise.all([params, searchParams]);
-  // Both come from the address, so both are checked before anything is looked up.
+  // Both come from the address, so both are checked before anything is looked up. The family is named by its QuickBooks
+  // id, as the address always has; loadFamilyProgress() finds the app's own family for it, in one place.
   let qboId: string;
   try { qboId = decodeURIComponent(familyId); } catch { notFound(); }
   const asked = typeof sp.season === "string" ? sp.season : null;
@@ -59,9 +60,9 @@ export default async function FamilyProgressPage({ params, searchParams }: {
   const seasonId = asked ?? await defaultProgressSeasonId();
   const progress = seasonId ? await loadFamilyProgress(qboId, seasonId, can(ctx.effective, "Finance.Balance.Read") ? "all" : "none") : null;
   if (!progress) notFound();
-  // A staff read of one family's data (spec §5): recorded before anything is shown.
+  // A staff read of one family's data (spec §5): recorded before anything is shown, naming the app's own family.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "season.progress.family.read", permission: "Season.Progress.Read",
-    targetType: "qbo_customer", targetId: progress.family.qboId, ip: ctx.ip, after: { season: progress.season.name } });
+    targetType: "family", targetId: String(progress.family.id), ip: ctx.ip, after: { season: progress.season.name } });
   const { family, season, steps, currentIndex, waivers } = progress;
   return (
     <main className="wrap single season-page">
@@ -75,8 +76,8 @@ export default async function FamilyProgressPage({ params, searchParams }: {
         const students = step.students.filter((s) => s.lines.length > 0);
         const left = linesLeft(step.family) + step.students.reduce((sum, s) => sum + linesLeft(s.lines), 0);
         const groups = [
-          ...(step.family.length > 0 ? [{ key: family.qboId, who: "The family", lines: step.family.map((l) => ({ ...l, subjectQboId: family.qboId })) }] : []),
-          ...students.map((s) => ({ key: s.qboId, who: s.name, lines: s.lines.map((l) => ({ ...l, subjectQboId: s.qboId })) })),
+          ...(step.family.length > 0 ? [{ key: String(family.id), who: "The family", lines: step.family.map((l): Asked => ({ ...l, subjectId: family.id })) }] : []),
+          ...students.map((s) => ({ key: String(s.id), who: s.name, lines: s.lines.map((l): Asked => ({ ...l, subjectId: s.id })) })),
         ];
         return (
           <section className="box" key={step.id} aria-labelledby={`step-${step.id}`}>

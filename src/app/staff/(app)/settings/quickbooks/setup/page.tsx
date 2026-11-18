@@ -24,6 +24,10 @@ const REFUSED: Record<string, string> = {
   state: "That return from Intuit didn't match a sign-in started here, or it was more than 10 minutes old. Start again.",
   denied: "Intuit didn't give the portal access. Start again and choose Connect when Intuit asks.",
   other_company: "That is a different QuickBooks company from the one already connected. Disconnect first if you mean to switch companies.",
+  // Until the mapping screen ships (stage 4 of the app-owned families spec): the seasons are kept for the families read from the first company.
+  roster_company: "That is a different QuickBooks company from the one the portal's families were read from, so it wasn't connected and nothing was changed. "
+    + "For now the portal can only connect that same company again: each family's ticks, waivers and chosen lists are kept for the families read from it. "
+    + "Start again, and in Intuit choose the company the club used before. Moving to another company will be possible in a later update.",
   intuit: "Intuit refused the request. Check the Client ID, the Client secret and the choice of sandbox or production in step 1, and that the redirect address is on the Intuit app.",
 };
 

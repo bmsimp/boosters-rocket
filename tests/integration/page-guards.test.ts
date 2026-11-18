@@ -126,6 +126,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/seasons/setup", names: "all", why: "a requirement's chosen list names other families and students" },
   { module: "@/lib/seasons/subjects", names: "all", why: "loadSubjects() loads every family in the club" },
   { module: "@/lib/seasons/staff-progress", names: "all", why: "it reads every family's ticks and waivers, with the reasons" },
+  { module: "@/lib/seasons/everyone", names: "all", why: "the season's reads for every family at once: every chosen list, tick and waiver with its reason, and every record's link" },
   { module: "@/lib/money/balances", names: "all", why: "loadBalances() loads every family's money" },
   { module: "@/lib/money/sweep", names: "all", why: "the worker's run reads every family's invoices" },
   { module: "@/lib/money/items", names: "all", why: "it is the staff choice of what a payment requirement is met by" },
@@ -356,6 +357,12 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/seasons/recorded.ts",
   "src/lib/seasons/kinds.ts",
   "src/lib/seasons/progress.ts",
+  // The season read by customer, for the areas still keyed by QuickBooks ids (stage 2 of the app-owned families spec).
+  "src/lib/seasons/by-customer.ts",
+  "src/lib/seasons/customer-keys.ts",
+  // The lookups through a link, which a parent's season finds the session's app family by.
+  "src/lib/families/links.ts",
+  "src/lib/families/ids.ts",
   "src/lib/volunteer/my-volunteer.ts",
   "src/lib/volunteer/signed-up.ts",
   "src/lib/volunteer/rules.ts",

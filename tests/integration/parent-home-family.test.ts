@@ -159,7 +159,8 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
   it("shows nothing of a cache read from another company while QuickBooks is connected, as the staff roster does", async () => {
     const a = await seedSignedInParent();
     await seedConnected(stub, { realmId: REALM });
-    // Connected, and the cache doesn't say which company it came from.
+    // Connected, and the cache doesn't say which company it came from (seedSignedInParent() says it was read from REALM).
+    await db.delete(setting).where(eq(setting.key, "roster.source"));
     await seedRosterRead();
     expect(await loadMyFamily(ctxOf(a.identity))).toBeNull();
     expect((await loadRosterPage()).roster).toBeNull();

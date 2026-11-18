@@ -9,6 +9,7 @@ import { connectCompany, RIVERA } from "./money";
 import { MONEY_REALM, seedSignedInParent, type ParentFamilySpec, type SeededParent } from "./parent";
 import type { QboStub } from "./qbo-stub";
 import type { SeededSeason } from "./season";
+import { subjectColumns } from "./app-records";
 
 /** The QuickBooks product or service the test buy-outs are billed with. */
 export const BUYOUT_ITEM = "4343";
@@ -26,7 +27,8 @@ export async function seedBuyoutRequirement(o: { title?: string; appliesTo?: "fa
   const [r] = await db.insert(requirement).values({ stepId, kind: "volunteer", title: o.title ?? "Concession shifts", required: o.required ?? true, appliesTo: o.appliesTo ?? "family",
     amount: o.amount ?? 2, amountUnit: o.unit ?? "shifts", covers: o.chosen ? "chosen" : "everyone", position: 50,
     buyoutUnitCents: o.unitCents === undefined ? 5000 : o.unitCents, itemQboId: o.item === undefined ? BUYOUT_ITEM : o.item }).returning();
-  if (o.chosen?.length) await db.insert(requirementCover).values(o.chosen.map((subjectQboId) => ({ requirementId: r!.id, subjectQboId })));
+  // A chosen list names the app's own records (stage 2 of the app-owned families spec), given here by QuickBooks id.
+  for (const subjectQboId of o.chosen ?? []) await db.insert(requirementCover).values({ requirementId: r!.id, ...(await subjectColumns(subjectQboId, o.appliesTo ?? "family")) });
   return r!.id;
 }
 

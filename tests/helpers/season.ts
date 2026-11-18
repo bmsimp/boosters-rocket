@@ -2,19 +2,24 @@ import { db } from "@/lib/db/client";
 import { requirement, requirementCover, requirementProgress, season, seasonStep } from "@/lib/db/schema";
 import { formatMoney } from "@/lib/money/cents";
 import type { ParentFamilySpec } from "./parent";
+import { subjectColumns, syncAppRecords } from "./app-records";
 
 /**
  * Seasons for tests, written straight into the tables as staff's pages would have left them. Checklist items unless
- * `kind` says payment, which is met by the QuickBooks product or service `item` (src/lib/seasons/kinds.ts).
+ * `kind` says payment, which is met by the QuickBooks product or service `item` (src/lib/seasons/kinds.ts). Families and
+ * students are given by their QuickBooks ids, as the fixtures know them, and stored as the app's own records the season
+ * keeps (stage 2 of the app-owned families spec): each found through its link of the requirement's kind, in the
+ * company the roster was read from, or made inactive when the roster doesn't hold it (recordOfCustomer()). So a test
+ * that names anyone seeds a roster read (or money) first.
  */
 export type SeedRequirement = {
   title: string; appliesTo: "family" | "student"; required?: boolean; dueOn?: string;
   kind?: "checklist" | "payment";
   /** A payment requirement's QuickBooks product or service (requirement.item_qbo_id). */
   item?: string;
-  /** A chosen list of QuickBooks ids; left out, the requirement is asked of everyone. */
+  /** A chosen list, by QuickBooks ids; left out, the requirement is asked of everyone. */
   chosen?: string[];
-  /** The families or students it is ticked off for. */
+  /** The families or students it is ticked off for, by QuickBooks ids. */
   ticked?: string[];
   waived?: { qboId: string; reason: string }[];
 };
@@ -23,6 +28,9 @@ export type SeededSeason = { seasonId: string; stepIds: Record<string, string>; 
 
 /** One season with its steps, requirements, chosen lists, ticks and waivers. Ids come back by step name and requirement title. */
 export async function seedSeason(o: { name: string; current?: boolean; steps: SeedStep[] }): Promise<SeededSeason> {
+  const namesAnyone = o.steps.some((step) => (step.requirements ?? []).some((r) => r.chosen?.length || r.ticked?.length || r.waived?.length));
+  // The records of everyone in the roster cache as it stands, so the ids below find them.
+  if (namesAnyone) await syncAppRecords();
   const [s] = await db.insert(season).values({ name: o.name, isCurrent: o.current ?? true }).returning();
   const seeded: SeededSeason = { seasonId: s!.id, stepIds: {}, requirementIds: {} };
   for (const [position, step] of o.steps.entries()) {
@@ -32,11 +40,11 @@ export async function seedSeason(o: { name: string; current?: boolean; steps: Se
       const [row] = await db.insert(requirement).values({ stepId: made!.id, kind: r.kind ?? "checklist", itemQboId: r.item ?? null, title: r.title, required: r.required ?? true, appliesTo: r.appliesTo,
         dueOn: r.dueOn ?? null, covers: r.chosen ? "chosen" : "everyone", position: at }).returning();
       seeded.requirementIds[r.title] = row!.id;
-      if (r.chosen?.length) await db.insert(requirementCover).values(r.chosen.map((subjectQboId) => ({ requirementId: row!.id, subjectQboId })));
+      for (const subjectQboId of r.chosen ?? []) await db.insert(requirementCover).values({ requirementId: row!.id, ...(await subjectColumns(subjectQboId, r.appliesTo)) });
       const subjects = new Set([...(r.ticked ?? []), ...(r.waived ?? []).map((w) => w.qboId)]);
       for (const subjectQboId of subjects) {
         const waiver = r.waived?.find((w) => w.qboId === subjectQboId);
-        await db.insert(requirementProgress).values({ requirementId: row!.id, subjectQboId, metAt: r.ticked?.includes(subjectQboId) ? new Date() : null,
+        await db.insert(requirementProgress).values({ requirementId: row!.id, ...(await subjectColumns(subjectQboId, r.appliesTo)), metAt: r.ticked?.includes(subjectQboId) ? new Date() : null,
           waivedAt: waiver ? new Date() : null, waivedReason: waiver?.reason ?? null });
       }
     }

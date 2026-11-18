@@ -27,6 +27,7 @@ import { seedFamilyMoney, seedParentIn, type SeededParent } from "../helpers/par
 import { startQboStub, STUB_PAID_VOID_FAULT, type QboStub } from "../helpers/qbo-stub";
 import { BUYOUT_ITEM, buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedCheckIn, seedEvent, seedOutsideCredit, seedShift, seedSignup } from "../helpers/volunteer";
+import { subjectColumns } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -170,7 +171,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const before = await shown(p, req);
     expect(before.quote.ok).toBe(true);
     const { requirementProgress } = await import("@/lib/db/schema");
-    await db.insert(requirementProgress).values({ requirementId: req, subjectQboId: FAMILY, waivedAt: new Date(), waivedReason: "Coach's family" });
+    await db.insert(requirementProgress).values({ requirementId: req, ...(await subjectColumns(FAMILY, "family")), waivedAt: new Date(), waivedReason: "Coach's family" });
     const now = await shown(p, req);
     expect(now).toMatchObject({ standing: "Waived", met: true, may: "nothing", quote: { ok: false, why: "met" }, stamp: null });
     asParent(p.identity);

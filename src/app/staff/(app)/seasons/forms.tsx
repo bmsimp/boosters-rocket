@@ -155,10 +155,10 @@ export function RequirementForm({ kinds, kind, initial, perStudent = true, add, 
   );
 }
 
-/** Who a requirement is asked of: everyone, or those ticked in a list from the roster. */
+/** Who a requirement is asked of: everyone, or those ticked in a list from the roster, by the app's own ids. */
 export function CoverageForm({ covers, chosen, candidates, noun, save }: {
-  covers: "everyone" | "chosen"; chosen: string[]; candidates: { qboId: string; label: string }[]; noun: "families" | "students";
-  save: (covers: "everyone" | "chosen", subjectQboIds: string[]) => Promise<Done>;
+  covers: "everyone" | "chosen"; chosen: string[]; candidates: { id: string; label: string }[]; noun: "families" | "students";
+  save: (covers: "everyone" | "chosen", subjectIds: string[]) => Promise<Done>;
 }) {
   const [mode, setMode] = useState(covers);
   const [picked, setPicked] = useState(() => new Set(chosen));
@@ -172,7 +172,7 @@ export function CoverageForm({ covers, chosen, candidates, noun, save }: {
         <fieldset className="field checks">
           <legend>Choose {noun} ({picked.size} chosen)</legend>
           {candidates.length === 0 ? <p>The roster lists no {noun} to choose from.</p>
-            : candidates.map((c) => <label key={c.qboId}><input type="checkbox" checked={picked.has(c.qboId)} onChange={() => toggle(c.qboId)} /> {c.label}</label>)}
+            : candidates.map((c) => <label key={c.id}><input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} /> {c.label}</label>)}
         </fieldset>
       )}
       <Outcome state={state} />

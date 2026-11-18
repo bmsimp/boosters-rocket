@@ -69,17 +69,17 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    `docker exec booster-rocket-db-1 psql -U booster -d booster -c "drop database booster_restore_check"`.
    **Pass:** it says `Restored ... (<number> tables ...)`. **If not:** its message and exit code (2 refused, 3 the
    server couldn't be reached, 4 the restore failed and nothing was changed).
-8. **Run checks 18 to 25** of [the proof of concept's checklist](poc-linuxdev.md#9-the-test-checklist): parent sign-ins
-   from QuickBooks, an address under two families, the match review, an inactive parent, blocking, welcome emails and a
-   second sandbox company. They need edits in the Intuit sandbox and a mailbox you can read.
+8. **Run checks 18 to 24** of [the proof of concept's checklist](poc-linuxdev.md#9-the-test-checklist): parent sign-ins
+   from QuickBooks, an address under two families, an inactive parent, blocking and welcome emails. They need edits in
+   the Intuit sandbox and a mailbox you can read.
    **Pass:** each step does what its line says; add a row for each to that runbook's Results table.
    **If not:** note the step and what you saw; that runbook's Troubleshooting table covers the usual causes.
-   **Then put the host back on the first sandbox company,** since check 25 leaves it on the second one, with the roster
-   cleared and parent sign-ins and welcome emails switched off, and part 2 needs the first one's families: on Settings,
-   QuickBooks, **Disconnect**, then connect the first sandbox company (the one with Family, Student and Parent customer
-   types; [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company) has the steps), choose its
-   membership shape again, then switch parent sign-ins back on (Settings, Parent sign-ins, **Change**).
-   **Pass:** Roster lists the sandbox families, and a test parent can sign in.
+   **Check 25, a second sandbox company, and the match review that follows it, wait for the mapping screen:** until
+   families can be linked to another company's customers, the portal refuses any company but the one its families were
+   read from ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)), so the host stays on
+   the first sandbox company, the one part 2 needs. Don't try it: it is refused and changes nothing, and the roster
+   refresh stops while another company's connection is stored.
+   **Pass:** Roster still lists the first sandbox company's families, and a test parent can sign in.
 9. **Export the audit log once** (Audit in the staff menu, **Export ... (CSV)**) after a parent whose name has an accent
    has signed in, and open the file in Excel or Google Sheets.
    **Pass:** the accent shows as it should, and the columns read well. **If not:** note which program and what it
@@ -404,9 +404,11 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 
 ## 6. Connect the club's real books, and read the clean-up preview
 
-1. **Connect the real books** by [Intuit, part 4](intuit.md#4-connect-the-clubs-real-books), on the installation
-   families will use. Read [reconnecting QuickBooks, a different company](quickbooks-reconnect.md#connecting-a-different-company)
-   first: connecting the real books deletes everything held from the sandbox.
+1. **Connect the real books** by [Intuit, part 4](intuit.md#4-connect-the-clubs-real-books), as the first company of
+   the installation families will use. That installation must never have read a sandbox company's customers: until the
+   mapping screen ships it would refuse the real books
+   ([reconnecting QuickBooks, a different company](quickbooks-reconnect.md#connecting-a-different-company)). The
+   proof-of-concept host stays on the sandbox; the club's installation is a fresh one ([first install](first-install.md)).
    **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster lists the
    club's families with the counts QuickBooks has. **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
 2. **Check the portal's requests against the real books.** Settings, QuickBooks, **Check the portal's requests**,
@@ -469,8 +471,9 @@ work another. Any time before the pilot.
    QuickBooks holds none. Today coverage is everyone, or a hand-picked list of families or students.
 2. A waiver's reason stays hidden from the family (they read "Waived"); parents read "set" where staff read "step";
    all four season permissions are ordinary ones a custom role can hold.
-3. Connecting a different QuickBooks company deletes every tick, waiver, chosen list, volunteer sign-up, buy-out and
-   signature request (each stays in the audit log), and keeps every signed form's evidence as the earlier company's.
+3. Until the mapping screen ships, a QuickBooks company other than the one the portal's families were read from is
+   refused, so nothing a season holds (ticks, waivers, chosen lists, reminders sent) can be lost to a change of company.
+   The lead's decision, with no exception for an installation that holds no season records yet.
 4. The cancelling cut-off for a shift is 48 hours before it; a staff tick no longer counts for volunteering; a declined
    form still gets reminders.
 5. A parent in two families can't change their own sign-in email (they ask the club).

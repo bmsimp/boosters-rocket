@@ -67,11 +67,24 @@ describe("what a volunteer copies off the machine", () => {
 
 describe("what the runbooks tell an Admin to do with QuickBooks", () => {
   const health = section(read("docs/runbooks/health-warnings.md"), "QuickBooks");
-  it("never tells an installation on the real books to connect the sandbox: that is a change of company, which clears the club's data", () => {
+  it("never tells an installation on the real books to connect the sandbox: a change of company is refused until the mapping screen ships", () => {
     expect(health).not.toMatch(/connect the Intuit sandbox company/i);
     expect(health).not.toMatch(/then reconnect the real company/i);
     expect(health).toMatch(/never by switching this installation's\s+company/);
-    expect(health).toContain("(quickbooks-reconnect.md#connecting-a-different-company), which starts with a backup");
+    expect(health).toContain("(quickbooks-reconnect.md#connecting-a-different-company)");
+    // The refused read says to disconnect first, and the runbook has its entry (roster_company).
+    expect(read("src/lib/roster/refresh.ts")).toContain("Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)");
+    expect(health).toContain("(`roster_company`)");
+  });
+
+  it("says a different company is refused for now, and sends a sandbox trial to the proof-of-concept host", () => {
+    const reconnect = section(read("docs/runbooks/quickbooks-reconnect.md"), "Connecting a different company");
+    expect(reconnect).toMatch(/\*\*Not possible yet\.\*\*/);
+    expect(reconnect).toMatch(/proof-of-concept host/);
+    expect(section(read("docs/runbooks/intuit.md"), "2. Try it on a sandbox company first")).toMatch(/proof-of-concept host/);
+    for (const doc of ["docs/runbooks/quickbooks-reconnect.md", "docs/runbooks/intuit.md", "docs/runbooks/health-warnings.md", "docs/runbooks/before-the-first-family.md", "docs/runbooks/poc-linuxdev.md"]) {
+      expect(read(doc), doc).not.toMatch(/connecting a different (QuickBooks )?company (deletes|clears|ends|switches)/i);
+    }
   });
 
   it("names the button a disconnected company shows, Change: Disconnect keeps the app's keys", () => {
@@ -96,10 +109,11 @@ describe("the owner's runbook, in its order", () => {
     expect(run).toBeGreaterThan(backup);
   });
 
-  it("puts the host back on the first sandbox company, with sign-ins on, after check 25 and before part 2 needs it", () => {
-    const checks = part1.slice(part1.indexOf("8. **Run checks 18 to 25**"), part1.indexOf("9. **Export"));
-    expect(checks).toMatch(/connect the first sandbox company/);
-    expect(checks).toMatch(/switch parent sign-ins back on/);
+  it("leaves check 25, a second sandbox company, for the mapping screen, so the host stays on the first one part 2 needs", () => {
+    const checks = part1.slice(part1.indexOf("8. **Run checks 18 to 24**"), part1.indexOf("9. **Export"));
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks).toMatch(/Check 25, a second sandbox company, and the match review that follows it, wait for the mapping screen/);
+    expect(checks).not.toMatch(/connect the first sandbox company/);
   });
 
   it("asks GitHub for Dependabot's security updates, which only the repository's settings switch on", () => {

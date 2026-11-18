@@ -17,6 +17,8 @@ import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../he
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
+import { subjectColumns } from "../helpers/app-records";
+import { moveFamilyInCache, moveInCache } from "../helpers/roster-cache";
 
 /**
  * A guardian signs a form: the engine under the Forms pages (src/lib/forms/signing.ts), against a Documenso stub that
@@ -623,7 +625,8 @@ describe("what each guardian reads", () => {
     tokenIn(await agreeAndOpen(ctx, id));
     stub.sign(stub.documentFor(id)!.id, FAMILY_A.parent.email);
     expect((await checkMyForm(ctx, id)).state).toBe("complete");
-    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, student.qboId));
+    // Moved as a roster read that finds it leaves it: the app's own student record follows (the reconcile's).
+    await moveInCache([student.qboId], FAMILY_B.family.qboId);
     const season = (await loadMySeason(ctxB, (await loadMyFamily(ctxB))!.students))!;
     const line = season.steps[0]!.students.find((s) => s.qboId === student.qboId)!.lines[0]!;
     expect(line).toMatchObject({ state: "todo", words: "Not signed yet" });
@@ -647,7 +650,7 @@ describe("a form is looked up within the session's family", () => {
     // A's own row, but the requirement is now asked only of family B: it is no longer A's form to open.
     const { requirement, requirementCover } = await import("@/lib/db/schema");
     await db.update(requirement).set({ covers: "chosen" }).where(eq(requirement.id, requirementId));
-    await db.insert(requirementCover).values({ requirementId, subjectQboId: FAMILY_B.students[0]!.qboId });
+    await db.insert(requirementCover).values({ requirementId, ...(await subjectColumns(FAMILY_B.students[0]!.qboId, "student")) });
     expect(await findMyForm(ctx, mine)).toBeNull();
     expect((await findMyForm(ctxB, theirs))?.row.id).toBe(theirs);
   });
@@ -688,7 +691,7 @@ describe("a form is looked up within the session's family", () => {
     const opened = (await loadMyForms(ctx, family))!.groups.find((g) => g.subjectQboId === second!.qboId)!.forms[0]!.requestId!;
     tokenIn(await agreeAndOpen(ctx, opened));
     // Both students move to family B in QuickBooks.
-    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.parentQboId, FAMILY_A.family.qboId));
+    await moveFamilyInCache(FAMILY_A.family.qboId, FAMILY_B.family.qboId);
     const forB = (await loadMyForms(ctxB, (await loadMyFamily(ctxB))!))!;
     const of = (qboId: string) => forB.groups.find((g) => g.subjectQboId === qboId)!.forms.find((f) => f.line.requirementId === requirementId)!;
     // The unopened request passes to the new family; the one with a document made for family A's guardian does not.

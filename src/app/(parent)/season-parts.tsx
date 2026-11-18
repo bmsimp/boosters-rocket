@@ -1,5 +1,5 @@
-import type { MySeason } from "@/lib/seasons/my-season";
-import { linesLeft, type Line, type StepStanding } from "@/lib/seasons/progress";
+import type { MySeason, MyStepStanding } from "@/lib/seasons/my-season";
+import { linesLeft, type Line } from "@/lib/seasons/progress";
 import { dueState } from "@/lib/money/due";
 import { CalendarDate } from "../components/calendar-date";
 import { StateWords } from "../components/state-words";
@@ -101,7 +101,7 @@ export function DoneCount({ lines }: { lines: Line[] }) {
 }
 
 /** The step Home shows: the current one, or null when the season has none to show. */
-export const currentStep = (season: MySeason | null): StepStanding | null =>
+export const currentStep = (season: MySeason | null): MyStepStanding | null =>
   season && season.currentIndex !== null ? season.steps[season.currentIndex] ?? null : null;
 
 /** True when the season asks anything at all of this family, in any step. */

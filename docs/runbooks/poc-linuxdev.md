@@ -294,14 +294,13 @@ section 3, because they use the staff app. Deploy this version (the one with the
    recreates only the app. Run `scripts/poc/deploy.sh` once more (or
    `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker`); every deploy after that starts it.
 
-**Switching companies.** Disconnecting and then connecting a different QuickBooks company (for example, moving from the
-sandbox to the band's real books) clears the roster and the membership shape, which must be chosen again in step 3.
-It also closes every parent sign-in link and signs parents out, switches parent sign-ins and welcome emails off,
-and keeps a list of the old company's families, and who could sign in to them, for the match review under
-**Parent sign-ins**. That list is deleted 90 days after the switch, or sooner by an Admin. Everything else the portal
-holds about the old company's customers goes too (money figures, seasons' ticks, volunteering, forms being signed,
-changes waiting), and signed forms' evidence is kept: [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)
-has the whole list.
+**Switching companies.** Not possible for now. Since the seasons keep their records against the portal's own families
+(stage 2 of the app-owned families spec), a QuickBooks company other than the one the roster was read from is refused
+until the mapping screen ships: step 2 says "That is a different QuickBooks company from the one the portal's families
+were read from", nothing is stored, and the host stays on the sandbox company it read first. A connection to another
+company stored before the refusal stops the roster refresh (`roster_company`) until it is disconnected and the first
+company connected again. Reconnecting the same company works as before. The club's real books go on an installation of
+their own, never this host: [reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company).
 
 The worker is verified to keep running with no input attached and to stop cleanly on `docker stop` (exit code 0,
 `worker stopped` in its log). That was checked on linuxdev on 2026-11-11 with the script alone in a `node:26-slim`
@@ -585,7 +584,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 12. Open a family -> its parents' email and phone show, and the audit log has `roster.family.read` for it.
 - [ ] 13. The next day -> the QuickBooks page shows the worker checked in within the last few minutes and **Last renewed** is less than a day old; `docker logs booster-rocket-worker` shows `ran quickbooks.token_refresh: ok` and `ran roster.refresh: ok`.
 - [ ] 14. **Disconnect**, then set up again -> the roster says it is no longer current while disconnected, and is current again after reconnecting. The audit log has `quickbooks.disconnect` and a second `quickbooks.connect`.
-- [ ] 15. **Disconnect**, then connect a second sandbox company -> the old company's families are gone: **Roster** says "The membership shape hasn't been chosen yet." and the QuickBooks page shows the shape as "Not chosen yet." until it is chosen again in step 3. The audit log has `roster.cleared`.
+- [ ] 15. Waits for the mapping screen, as check 25 does (see "Switching companies" in section 5). When it ships: **Disconnect**, then connect a second sandbox company -> the old company's families are gone: **Roster** says "The membership shape hasn't been chosen yet." and the QuickBooks page shows the shape as "Not chosen yet." until it is chosen again in step 3. The audit log has `roster.cleared`.
 - [ ] 16. Customer query order: in the sandbox's API explorer, or with a query in the style of the plan's check script (`q("...")`), run `select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000` and confirm it is accepted (HTTP 200, customers in `Id` order). The portal sends this query for every page of a roster read, so a club with more than 1000 customers loses none between pages.
 - [ ] 17. Inactive customer types: make one customer type inactive in the sandbox, run `select * from CustomerType`, and note whether the inactive type still appears in the list (record it in section 11).
 - [ ] 18. Parent sign-ins, **Set up**, **Step 1: What would happen** (section 5, "Parent sign-ins from QuickBooks") -> the hand-seeded sign-ins on `POC-FAMILY-1` are listed under **Sign-ins that would end**, and the numbers match the sandbox.
@@ -595,7 +594,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 22. Make that Parent customer inactive in the sandbox, then **Refresh now** -> the parent is signed out of that family, and the audit log has `parent.access.ended` with reason `inactive`.
 - [ ] 23. Open the person from **Parents**: **Block** with a reason in **Why? (staff only)** -> the box says Blocked with the reason, and their next code request gets the usual message and no email; **Unblock** -> they can sign in again. The audit log has `parent.read`, `parent.block` and `parent.unblock`.
 - [ ] 24. Step 3, **Switch welcome emails on** -> one welcome email arrives within two minutes, and `docker logs booster-rocket-worker` shows `ran parents.welcome: ok`.
-- [ ] 25. **Disconnect**, then connect the second sandbox company -> the audit log has `parent.access.cleared`; **Parent sign-ins** shows sign-ins switched off and welcome emails off, and a box for the previous QuickBooks company. **Review matches** appears there once the new company's roster is read and a membership shape is chosen (the second sandbox company has no customer types, so this part may not be possible there).
+- [ ] 25. Waits for the mapping screen: a second sandbox company is refused until then (see "Switching companies" in section 5). When it ships: **Disconnect**, then connect the second sandbox company -> the audit log has `parent.access.cleared`; **Parent sign-ins** shows sign-ins switched off and welcome emails off, and a box for the previous QuickBooks company. **Review matches** appears there once the new company's roster is read and a membership shape is chosen (the second sandbox company has no customer types, so this part may not be possible there). Today: **Disconnect**, then try to connect the second sandbox company -> step 2 says "That is a different QuickBooks company from the one the portal's families were read from, so it wasn't connected and nothing was changed."; connect the first one again, and Roster lists its families as before.
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
 shows only to people who hold the audit-read permission; Admin does). Each row shows time, door
@@ -641,6 +640,8 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | Step 2 of the QuickBooks steps comes back with "That return from Intuit didn't match a sign-in started here, or it was more than 10 minutes old. Start again." | More than 10 minutes passed, or the button was pressed in two tabs | Start step 2 again |
 | Step 2 comes back with "Intuit refused the request. Check the Client ID, the Client secret and the choice of sandbox or production in step 1, and that the redirect address is on the Intuit app." | The Client ID, secret or sandbox/production choice is wrong, or the redirect address isn't on the Intuit app under the same keys | Fix step 1, and check the redirect address on the Intuit app (section 5 step 1) |
 | Step 2 comes back with "That is a different QuickBooks company from the one already connected. Disconnect first if you mean to switch companies." | A company is already connected | **Disconnect** on the QuickBooks page first, then set up again |
+| Step 2 comes back with "That is a different QuickBooks company from the one the portal's families were read from, so it wasn't connected and nothing was changed." | The company chosen in Intuit isn't the one the roster was read from; until the mapping screen ships only that one can be connected | Set up again and choose the first company in Intuit |
+| The roster refresh fails with "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)" | A connection to another company was stored before the portal refused it | **Disconnect**, then connect the first company again |
 | The staff home says "QuickBooks needs attention" with "The roster hasn't been refreshed from QuickBooks in more than 2 days." | The worker isn't running | `docker ps`, then `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker` |
 | The staff home says "The QuickBooks connection couldn't be refreshed: Intuit no longer accepts this connection. Connect QuickBooks again." | The connection lapsed or was revoked at Intuit | Go through step 2 of the QuickBooks steps again |
 | The staff home says "The last roster refresh failed: The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)" (the roster pages say the same after "The latest try failed:") | The step that works out who can sign in failed inside the refresh | The roster and who can sign in are as they were before the refresh. Read `docker logs booster-rocket-app` for a line like `[roster] reconcile failed { name: 'DrizzleQueryError', code: '23505', constraint: 'parent_email_uq' }` (the error's class name, the database's SQLSTATE code and the constraint; never the message or an address) and report it |

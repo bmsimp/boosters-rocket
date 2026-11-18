@@ -30,7 +30,8 @@ import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedTwoFamilies, type SeededParent } from "../helpers/parent";
-import { addToCache, fam, par, seedParentSettings, stu } from "../helpers/roster-cache";
+import { addToCache, fam, moveInCache, par, seedParentSettings, stu } from "../helpers/roster-cache";
+import { subjectColumns } from "../helpers/app-records";
 
 /**
  * Signed forms for staff (v1 spec §9.3): the matrix, one request and one signed form's evidence (each audited when
@@ -49,7 +50,7 @@ const COBBLE = "COBBLE-1";
 async function seedNotReadyForm(): Promise<string> {
   await addToCache([fam(COBBLE, "Cobblestone Family")]);
   const travel = await requirementIdOf("Travel consent");
-  await db.insert(requirementProgress).values({ requirementId: travel, subjectQboId: COBBLE, waivedAt: new Date(), waivedReason: "Staff-only reason QC31" });
+  await db.insert(requirementProgress).values({ requirementId: travel, ...(await subjectColumns(COBBLE, "family")), waivedAt: new Date(), waivedReason: "Staff-only reason QC31" });
   const [{ stepId }] = await db.select({ stepId: requirement.stepId }).from(requirement).where(eq(requirement.id, travel)) as [{ stepId: string }];
   return seedFormRequirement({ stepId, title: "Medical release QC31", appliesTo: "family", form: null, chosen: [FAMILY_A.family.qboId, COBBLE] });
 }
@@ -133,7 +134,7 @@ describe("the matrix", () => {
   it("filters by one form, one state, and a family or student name, and shows a waiver as Waived", async () => {
     asStaff(reader);
     const travel = await requirementIdOf("Travel consent");
-    await db.insert(requirementProgress).values({ requirementId: travel, subjectQboId: FAMILY_B.family.qboId, waivedAt: new Date(), waivedReason: "Staff-only reason QZ19" });
+    await db.insert(requirementProgress).values({ requirementId: travel, ...(await subjectColumns(FAMILY_B.family.qboId, "family")), waivedAt: new Date(), waivedReason: "Staff-only reason QZ19" });
     const oneHtml = await renderPage(SignedFormsPage, { searchParams: { form: travel } });
     const one = textOf(oneHtml);
     expect(textOf(/<table[^>]*class="table matrix"[^>]*>[\s\S]*?(<thead[\s\S]*?<\/thead>)/.exec(oneHtml)![1]!).trim()).toBe("Family and students Travel consent");
@@ -442,7 +443,7 @@ describe("a student moved to another family", () => {
   it("gives the new family nothing of who signed a form it brought along: no names, no download, no PDF", async () => {
     const s2 = FAMILY_A.students[1]!;
     await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: s2.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
-    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, s2.qboId));
+    await moveInCache([s2.qboId], FAMILY_B.family.qboId); // as a roster read leaves it: the app's records follow
     const bCtx = { ...b.identity, ip: null };
     expect(await findMySignedPdf(bCtx, a.forms!.ids.complete)).toBeNull();
     expect(await mySignedDownloads(bCtx, [a.forms!.ids.complete])).toEqual(new Map());

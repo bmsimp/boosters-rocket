@@ -1,3 +1,4 @@
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { SHAPE_KEY, type MembershipShape } from "@/lib/roster/shape";
@@ -31,6 +32,21 @@ export async function addToCache(customers: CacheCustomer[], types = P_TYPES): P
     qboId: c.qboId, displayName: c.displayName, active: c.active ?? true, parentQboId: c.parentQboId ?? null, typeQboId: c.typeQboId,
     email: c.email ?? null, phone: c.phone ?? null, syncToken: "0" })));
   await syncAppRecords();
+}
+
+/**
+ * Moves students to another family in the cache, as a roster read that found the move in QuickBooks leaves it: the
+ * app's own records follow (the student's record is in the new family), as the reconcile at the end of the read does.
+ * It follows nothing of the student's forms or places: a test that wants those calls the follow-ups itself.
+ */
+export async function moveInCache(studentQboIds: string[], toFamilyQboId: string): Promise<void> {
+  await db.update(qboCustomer).set({ parentQboId: toFamilyQboId }).where(inArray(qboCustomer.qboId, studentQboIds));
+  await syncAppRecords();
+}
+/** Every student the cache holds under one family, moved to another (moveInCache()). */
+export async function moveFamilyInCache(fromFamilyQboId: string, toFamilyQboId: string): Promise<void> {
+  const under = await db.select({ qboId: qboCustomer.qboId }).from(qboCustomer).where(eq(qboCustomer.parentQboId, fromFamilyQboId));
+  await moveInCache(under.map((c) => c.qboId), toFamilyQboId);
 }
 
 /** Saves the membership shape as an Admin would have, and brings the app's own records into step with it, as saveShape() does. */

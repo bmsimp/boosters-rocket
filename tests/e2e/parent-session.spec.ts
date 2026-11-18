@@ -98,11 +98,14 @@ test("every invoice the seed gives another family is searched for", async () => 
 
 test("every requirement and waiver the seed gives another family alone is searched for", async () => {
   // As above, for the season: a requirement whose chosen list names nobody of the Quetzalcoatl family must be findable
-  // by its title, and a waiver recorded for anyone outside that family by its reason.
-  const mine = sql`SELECT qbo_id FROM qbo_customer WHERE qbo_id = ${PARENT_SESSION_FAMILY} OR parent_qbo_id = ${PARENT_SESSION_FAMILY}`;
+  // by its title, and a waiver recorded for anyone outside that family by its reason. The season names the app's own
+  // family and students (stage 2 of the app-owned families spec): the family's is the one its customer's link names.
+  const family = sql`SELECT family_id FROM accounting_link WHERE customer_id = ${PARENT_SESSION_FAMILY} AND family_id IS NOT NULL`;
+  const students = sql`SELECT id FROM student WHERE family_id IN (${family})`;
+  const ours = (t: string) => sql`(coalesce(${sql(t)}.family_id IN (${family}), false) OR coalesce(${sql(t)}.student_id IN (${students}), false))`;
   const titles = await sql`SELECT r.title FROM requirement r WHERE r.covers = 'chosen'
-    AND NOT EXISTS (SELECT 1 FROM requirement_cover c WHERE c.requirement_id = r.id AND c.subject_qbo_id IN (${mine}))`;
-  const reasons = await sql`SELECT waived_reason FROM requirement_progress WHERE waived_reason IS NOT NULL AND subject_qbo_id NOT IN (${mine})`;
+    AND NOT EXISTS (SELECT 1 FROM requirement_cover c WHERE c.requirement_id = r.id AND ${ours("c")})`;
+  const reasons = await sql`SELECT p.waived_reason FROM requirement_progress p WHERE p.waived_reason IS NOT NULL AND NOT ${ours("p")}`;
   expect(titles.length).toBeGreaterThanOrEqual(3);
   expect(reasons.length).toBeGreaterThanOrEqual(1);
   const unsearched = [...titles.map((r) => r.title as string), ...reasons.map((r) => r.waived_reason as string)].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)));

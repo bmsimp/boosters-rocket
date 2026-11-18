@@ -5,12 +5,14 @@ import { asc, count, desc, eq, inArray } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { requirement, requirementCover, requirementProgress, season, seasonStep, type RequirementKind } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { dropUnopenedForms, formsHolding, formsHoldingWords } from "@/lib/forms/removal";
 import { linkedShifts, placesHolding, placesHoldingWords } from "@/lib/volunteer/removal";
 import { KIND_LABELS, isAvailableKind } from "./kinds";
 import { isCalendarDate, type AmountUnit, type AppliesTo, type Requirement } from "./progress";
-import { loadCovers, toRequirement, type RequirementRow } from "./recorded";
-import { candidatesFor, loadSubjects } from "./subjects";
+import { toRequirement, type RequirementRow } from "./recorded";
+import { everyCover } from "./everyone";
+import { candidatesFor, loadSeasonFamilies, type SeasonSubject } from "./subjects";
 import { lockRosterAs, ROSTER_MOVED } from "./roster-lock";
 
 export type SeasonOp = { actor: Actor; ip: string | null; permission?: string };
@@ -51,7 +53,7 @@ export async function getSeasonSetup(seasonId: string, tx?: Tx): Promise<SeasonS
   if (!s) return null;
   const steps = await stepsOf(s.id, tx);
   const rows = await requirementsOf(steps.map((x) => x.id), tx);
-  const covers = await loadCovers(rows.map((r) => r.id), null, tx);
+  const covers = await everyCover(rows.map((r) => r.id), tx);
   return { id: s.id, name: s.name, isCurrent: s.isCurrent, steps: steps.map((x) => ({
     id: x.id, name: x.name, position: x.position, startsOn: x.startsOn, endsOn: x.endsOn,
     requirements: rows.filter((r) => r.stepId === x.id).map((r) => ({ ...toRequirement(r, covers.get(r.id) ?? []), position: r.position, itemQboId: r.itemQboId })),
@@ -68,7 +70,7 @@ export async function getRequirementSetup(requirementId: string, tx?: Tx): Promi
     .from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).innerJoin(season, eq(seasonStep.seasonId, season.id)).where(eq(requirement.id, requirementId));
   if (!row) return null;
   const [covers, [recorded], inStep] = await Promise.all([
-    loadCovers([row.r.id], null, tx),
+    everyCover([row.r.id], tx),
     q.select({ n: count() }).from(requirementProgress).where(eq(requirementProgress.requirementId, row.r.id)),
     requirementsOf([row.step.id], tx),
   ]);
@@ -116,7 +118,9 @@ export async function createSeason(rawName: string, start: "empty" | "template" 
           amount: r.amount, amountUnit: r.amountUnit, dueOn: null, covers: r.covers, position,
           itemQboId: keptOf.get(r.id)?.itemQboId ?? null, buyoutUnitCents: keptOf.get(r.id)?.buyoutUnitCents ?? null,
           form: keptOf.get(r.id)?.form ?? null, formReminders: keptOf.get(r.id)?.formReminders ?? null }).returning({ id: requirement.id });
-        if (r.covers === "chosen" && r.coveredQboIds.length) await tx.insert(requirementCover).values(r.coveredQboIds.map((subjectQboId) => ({ requirementId: row!.id, subjectQboId })));
+        // The chosen list goes as it is: the same app records, whoever is on the roster now.
+        const chosen = r.covers === "chosen" ? await tx.select({ familyId: requirementCover.familyId, studentId: requirementCover.studentId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id)) : [];
+        if (chosen.length) await tx.insert(requirementCover).values(chosen.map((c) => ({ requirementId: row!.id, familyId: c.familyId, studentId: c.studentId })));
         copied++;
       }
     }
@@ -320,34 +324,39 @@ export async function updateRequirement(requirementId: string, input: Requiremen
   });
 }
 
+/** A chosen list's entry as its row holds it: exactly one of the two (requirement_cover_one_subject). */
+type CoverRow = { familyId: AppFamilyId | null; studentId: AppStudentId | null };
+const coverText = (c: CoverRow) => String(c.familyId ?? c.studentId);
+const coverOf = (s: SeasonSubject): CoverRow => (s.kind === "family" ? { familyId: s.id, studentId: null } : { familyId: null, studentId: s.id });
+
 /**
  * Who a requirement is asked of: everyone, or a list picked from the roster (families for a per-family requirement,
- * students for a per-student one). Every id must be on the roster now. Someone already listed who has since left the
- * roster stays listed, so they are covered again if they come back.
+ * students for a per-student one), by the app's own ids. Every id must be on the roster now. Someone already listed
+ * who has since left the roster stays listed, so they are covered again if they come back.
  */
-export async function setCoverage(requirementId: string, rosterTag: string, covers: "everyone" | "chosen", subjectQboIds: readonly string[], o: SeasonOp): Promise<Done> {
-  const chosen = [...new Set(subjectQboIds)];
+export async function setCoverage(requirementId: string, rosterTag: string, covers: "everyone" | "chosen", subjectIds: readonly string[], o: SeasonOp): Promise<Done> {
+  const chosen = [...new Set(subjectIds)];
   if (covers === "chosen" && chosen.length === 0) return refuse("Choose at least one, or ask it of everyone.");
   if (chosen.length > COVER_MAX) return refuse("That list is too long.");
   return db.transaction(async (tx) => {
     // Under the roster lock, and against the company the page was shown: the list is checked against the roster it is kept with.
     if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
-    const families = covers === "chosen" ? await loadSubjects() : [];
+    const families = covers === "chosen" ? await loadSeasonFamilies() : [];
     if (families === null) return refuse("The roster can't be shown right now, so a list can't be chosen. Check QuickBooks under Roster.");
     const [r] = await tx.select().from(requirement).where(eq(requirement.id, requirementId)).for("update");
     if (!r) return refuse(GONE);
-    const before = (await tx.select({ subjectQboId: requirementCover.subjectQboId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id))).map((c) => c.subjectQboId).sort();
-    let after: string[] = [];
+    const before = await tx.select({ familyId: requirementCover.familyId, studentId: requirementCover.studentId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id));
+    let after: CoverRow[] = [];
     if (covers === "chosen") {
-      const onRoster = new Set(candidatesFor(r.appliesTo, families).map((s) => s.qboId));
+      const onRoster = new Map(candidatesFor(r.appliesTo, families).map((s) => [String(s.id), s]));
       if (chosen.some((id) => !onRoster.has(id))) return refuse("Someone in that list isn't on the roster any more. Reload the page and choose again.");
-      after = [...new Set([...chosen, ...before.filter((id) => !onRoster.has(id))])].sort();
+      after = [...chosen.map((id) => coverOf(onRoster.get(id)!)), ...before.filter((c) => !onRoster.has(coverText(c)))];
     }
     await tx.delete(requirementCover).where(eq(requirementCover.requirementId, r.id));
-    if (after.length) await tx.insert(requirementCover).values(after.map((subjectQboId) => ({ requirementId: r.id, subjectQboId })));
+    if (after.length) await tx.insert(requirementCover).values(after.map((c) => ({ requirementId: r.id, familyId: c.familyId, studentId: c.studentId })));
     await tx.update(requirement).set({ covers, updatedAt: new Date() }).where(eq(requirement.id, r.id));
     await writeAudit({ actor: o.actor, action: "season.requirement.cover", permission: o.permission, targetType: "requirement", targetId: r.id, ip: o.ip,
-      before: { covers: r.covers, subjectQboIds: before }, after: { covers, subjectQboIds: after } }, tx);
+      before: { covers: r.covers, subjectIds: before.map(coverText).sort() }, after: { covers, subjectIds: after.map(coverText).sort() } }, tx);
     return { ok: true as const };
   });
 }
@@ -366,10 +375,10 @@ export async function removeRequirement(requirementId: string, o: SeasonOp): Pro
     if (places > 0) return refuse(placesHoldingWords(r.title, places));
     const shifts = (await linkedShifts([r.id], tx)).get(r.id);
     await dropUnopenedForms([r.id], tx);
-    const covered = (await tx.select({ subjectQboId: requirementCover.subjectQboId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id))).map((c) => c.subjectQboId).sort();
+    const covered = (await tx.select({ familyId: requirementCover.familyId, studentId: requirementCover.studentId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id))).map(coverText).sort();
     await tx.delete(requirement).where(eq(requirement.id, r.id)); // its chosen list goes with it
     await writeAudit({ actor: o.actor, action: "season.requirement.remove", permission: o.permission, targetType: "requirement", targetId: r.id, ip: o.ip,
-      before: { ...requirementFacts(r), subjectQboIds: covered, ...(shifts ? { shiftIds: shifts } : {}) } }, tx);
+      before: { ...requirementFacts(r), subjectIds: covered, ...(shifts ? { shiftIds: shifts } : {}) } }, tx);
     return { ok: true as const };
   });
 }

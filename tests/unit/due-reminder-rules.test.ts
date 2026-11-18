@@ -3,14 +3,15 @@ import type { StoredInvoice } from "@/lib/db/schema";
 import { checklistVerdict, dueToday, FIGURES_TELL_MS, isReminded, owedReminders, paymentVerdict, type Verdict } from "@/lib/seasons/due-reminder-rules";
 import { paymentStanding } from "@/lib/money/payment-rule";
 import { requirementDueMessage } from "@/lib/mail/messages";
-import type { Requirement } from "@/lib/seasons/progress";
+import type { Requirement, SubjectId } from "@/lib/seasons/progress";
+import { asAppFamilyId, asAppStudentId } from "@/lib/families/ids";
 
 /**
  * The reminders before a payment's or a checklist item's due date, as pure rules (src/lib/seasons/due-reminder-rules.ts):
  * the day, from 9:00 on the club's clock; which requirements; which families and students; and what a payment may say.
  */
 const req = (o: Partial<Requirement> & Pick<Requirement, "id" | "title">): Requirement => ({ kind: "checklist", required: true, appliesTo: "family", amount: null, amountUnit: null,
-  dueOn: "2027-03-24", covers: "everyone", coveredQboIds: [], ...o });
+  dueOn: "2027-03-24", covers: "everyone", coveredIds: [], ...o });
 const invoice = (o: Partial<StoredInvoice>): StoredInvoice => ({ qboId: "1", number: "1001", customerQboId: "F1", forName: null, date: "2027-01-01", dueDate: null,
   totalCents: 12500, balanceCents: 12500, currency: "USD", payLink: null, itemQboIds: ["77"], ...o });
 const NOW = Date.parse("2027-03-10T12:00:00Z");
@@ -77,8 +78,8 @@ describe("what a checklist item and a payment say", () => {
 
 describe("who is owed a reminder", () => {
   const families = [
-    { qboId: "F1", students: [{ qboId: "S11", name: "Ana One" }, { qboId: "S12", name: "Ben One" }] },
-    { qboId: "F2", students: [{ qboId: "S21", name: "Cy Two" }] },
+    { id: asAppFamilyId("F1"), students: [{ id: asAppStudentId("S11"), name: "Ana One" }, { id: asAppStudentId("S12"), name: "Ben One" }] },
+    { id: asAppFamilyId("F2"), students: [{ id: asAppStudentId("S21"), name: "Cy Two" }] },
   ];
   const due = [{ kind: "due_14" as const, days: 14, dueOn: "2027-03-24" }, { kind: "due_3" as const, days: 3, dueOn: "2027-03-13" }];
 
@@ -87,22 +88,22 @@ describe("who is owed a reminder", () => {
       req({ id: "fee", title: "Band fee", kind: "payment" }),
       req({ id: "locker", title: "Locker returned", appliesTo: "student" }),
       req({ id: "medical", title: "Medical form", dueOn: "2027-03-13" }),
-      req({ id: "chosen", title: "Drum key", covers: "chosen", coveredQboIds: ["F2"] }),
+      req({ id: "chosen", title: "Drum key", covers: "chosen", coveredIds: [asAppFamilyId("F2")] }),
       req({ id: "optional", title: "Raffle tickets", required: false }),
       req({ id: "later", title: "Not today", dueOn: "2027-03-25" }),
       req({ id: "form", title: "A form", kind: "form" }),
     ];
     // F1 has paid the fee; Ben's locker is waived (or ticked: the verdict says); F2 has handed in the medical form.
     const done = new Set(["fee|F1", "locker|S12", "medical|F2"]);
-    const verdict = (r: Requirement, s: string): Verdict => (done.has(`${r.id}|${s}`) ? { remind: false } : { remind: true, words: r.kind === "payment" ? "Not paid yet" : "Not done yet" });
+    const verdict = (r: Requirement, s: SubjectId): Verdict => (done.has(`${r.id}|${String(s)}`) ? { remind: false } : { remind: true, words: r.kind === "payment" ? "Not paid yet" : "Not done yet" });
     expect(owedReminders({ due, requirements, families, verdict })).toEqual([
-      { kind: "due_14", days: 14, dueOn: "2027-03-24", familyQboId: "F1", items: [
+      { kind: "due_14", days: 14, dueOn: "2027-03-24", familyId: asAppFamilyId("F1"), items: [
         { requirementId: "locker", kind: "checklist", title: "Locker returned", forName: "Ana One", words: "Not done yet" }] },
-      { kind: "due_14", days: 14, dueOn: "2027-03-24", familyQboId: "F2", items: [
+      { kind: "due_14", days: 14, dueOn: "2027-03-24", familyId: asAppFamilyId("F2"), items: [
         { requirementId: "fee", kind: "payment", title: "Band fee", forName: null, words: "Not paid yet" },
         { requirementId: "locker", kind: "checklist", title: "Locker returned", forName: "Cy Two", words: "Not done yet" },
         { requirementId: "chosen", kind: "checklist", title: "Drum key", forName: null, words: "Not done yet" }] },
-      { kind: "due_3", days: 3, dueOn: "2027-03-13", familyQboId: "F1", items: [
+      { kind: "due_3", days: 3, dueOn: "2027-03-13", familyId: asAppFamilyId("F1"), items: [
         { requirementId: "medical", kind: "checklist", title: "Medical form", forName: null, words: "Not done yet" }] },
     ]);
   });

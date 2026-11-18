@@ -15,6 +15,7 @@ import { resetDb } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { addToCache, seedCache, seedShape, stu } from "../helpers/roster-cache";
 import { TWO_FAMILY_SEASON, seedSeason } from "../helpers/season";
+import { recordOfCustomer } from "../helpers/app-records";
 
 /**
  * The season as a parent sees it: the query that reads one family's standing, the ruler and requirement lines on Home,
@@ -76,6 +77,27 @@ describe("loadMySeason: the current season for the session's family alone", () =
     for (const marker of b.markers) expect(JSON.stringify(mixed)).not.toContain(marker);
   });
 
+  it("finds the session's family through its own link: family B's app ids in any field bring nothing of B", async () => {
+    const { a, b } = await seedTwoFamilies();
+    const bFamily = String(await recordOfCustomer(FAMILY_B.family.qboId, "family"));
+    const bStudents = await Promise.all(FAMILY_B.students.map(async (s) => ({ qboId: String(await recordOfCustomer(s.qboId, "student")), name: s.name })));
+    // Family A's session, handed family B's own records' ids where QuickBooks ids are asked for: nobody of B is read.
+    const got = (await loadMySeason(ctxOf(a.identity), bStudents))!;
+    expect(got.steps.flatMap((s) => s.students)).toEqual([]);
+    for (const marker of b.markers) expect(JSON.stringify(got)).not.toContain(marker);
+    // A session naming family B's app id as its family has no family of that customer: no season at all.
+    expect(await loadMySeason({ ...ctxOf(a.identity), familyQboId: bFamily }, bStudents)).toBeNull();
+    // And B's own session still reads B's: the ids are B's own, found through B's link.
+    expect((await mySeason(b))!.steps[1]!.students.map((s) => s.name)).toEqual([BARNABY!.name, BRISEIS!.name]);
+  });
+
+  it("shows nothing while the session's family record is inactive, whatever the roster cache says", async () => {
+    const { a } = await seedTwoFamilies();
+    const { family } = await import("@/lib/db/schema");
+    await db.update(family).set({ active: false }).where(eq(family.id, await recordOfCustomer(FAMILY_A.family.qboId, "family")));
+    expect(await mySeason(a)).toBeNull();
+  });
+
   it("is null when no season is current, and takes the one that is", async () => {
     const a = await seedSignedInParent();
     expect(await mySeason(a)).toBeNull();
@@ -101,7 +123,7 @@ describe("loadMySeason: the current season for the session's family alone", () =
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, AZALEA!.qboId));
     expect((await mySeason(a))!.steps[0]!.students.map((s) => s.name)).toEqual(["Anselm Alderquist", AURELIO!.name]);
     const kept = await db.select().from(requirementProgress).where(eq(requirementProgress.requirementId, seeded.requirementIds[fitting]!));
-    expect(kept.map((r) => r.subjectQboId).sort()).toEqual([AURELIO!.qboId, AZALEA!.qboId].sort());
+    expect(kept.map((r) => String(r.studentId)).sort()).toEqual([String(await recordOfCustomer(AURELIO!.qboId, "student")), String(await recordOfCustomer(AZALEA!.qboId, "student"))].sort());
   });
 
   it("follows the club's dates, on the club's own day, when a step has any", async () => {

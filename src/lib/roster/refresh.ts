@@ -102,6 +102,14 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       await writeAudit({ actor: o.actor, action: "roster.refresh.failed", targetType: "job_run", targetId: String(run!.id), after: { code }, ip: o.ip }, tx);
       return { ok: false, reason: "failed", error: detail };
     };
+    // The cache came from another company than the connected one (connected before connecting another was refused, or
+    // stored by hand): until stage 4 of the app-owned families spec ships, that company's roster is never read over it
+    // (open question 18). The seasons keep their records against the families read from the first company, and the
+    // change-of-company clear would take them away. Nothing is asked of QuickBooks.
+    const from = await getRosterSource(tx);
+    if (from !== null && from !== realmId) {
+      return fail("The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)", "roster_company");
+    }
     let types: Raw[], customers: Raw[];
     try {
       types = await qboCustomerTypes();
@@ -142,9 +150,10 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         // Whether the cache about to be replaced is this company's: a first read of a company, and another company's
         // cache cleared below, have no move to follow.
         const ours = (await getRosterSource(sp)) === realmId;
-        // The cache came from another company and connecting didn't clear it (it failed, or the process stopped): clear
-        // it now, with that company's parent access, in the same savepoint as the swap. Its shape goes with it, so the
-        // rows are stored with no contact details, as with no shape, and the reconcile below does nothing.
+        // The cache came from another company and connecting didn't clear it: clear it now, with that company's parent
+        // access, in the same savepoint as the swap. Its shape goes with it, so the rows are stored with no contact
+        // details, as with no shape, and the reconcile below does nothing. Until stage 4 another company's cache is
+        // refused above, so this clears nothing; it stays for when stage 4 allows a change of company again.
         const cleared = await clearRosterOfOtherCompanyLocked(sp, realmId, { actor: o.actor, ip: o.ip, keepRunId: run!.id });
         // Another company's cache was just cleared, and a new company may truly have no customers yet. Otherwise the
         // customers in the cache are this company's, and an answer without one of them is not believed.
