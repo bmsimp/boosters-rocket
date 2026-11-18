@@ -11,6 +11,7 @@ import { seedTwoFamilyVolunteering, type FamilyVolunteer } from "./volunteer";
 import { seedTwoFamilyForms, type FamilyForms } from "./forms";
 import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
 import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
+import { syncAppRecords } from "./app-records";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -157,7 +158,8 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
  * told about them. The club has a current season (seedTwoFamilySeason): each family has its own ticks and a waiver, and
  * a requirement asked of it alone, whose title, id and waiver reason are among its markers. Each also has forms to sign
  * (seedTwoFamilyForms): a request in every state, and one form asked of it alone. And one volunteer shift that both
- * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers.
+ * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Last, the app's
+ * own records and links for both families (stage 1 of the app-owned families spec), as a roster read makes them.
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
   const a = await seedSignedInParent(FAMILY_A);
@@ -186,6 +188,9 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const buyouts = await seedTwoFamilyBuyouts({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
   a.buyout = buyouts.a; a.markers.push(...buyouts.a.markers);
   b.buyout = buyouts.b; b.markers.push(...buyouts.b.markers);
+  // The app's own families, students and links for both, made by the function the roster read runs
+  // (src/lib/families/in-step.ts), so a test that reads them finds them.
+  await syncAppRecords();
   return { a, b };
 }
 

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  formReminderClaim, formReminderRound, parentEmailChange, signatureRequest, signedFormEvidence, signedFormFile, volunteerCredit,
+  accountingLink, family, formReminderClaim, formReminderRound, guardian, parentEmailChange, signatureRequest, signedFormEvidence, signedFormFile, student, volunteerCredit,
   requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
@@ -13,7 +13,8 @@ import { seedTwoFamilies } from "../helpers/parent";
  * Everything step 5 stores against a QuickBooks id goes when a different company is connected (AGENTS.md: the same id
  * may name another customer there), in clearRosterOfOtherCompanyLocked() or the clear functions it calls: the form
  * reminder claims and rounds, volunteer credit and its reminder claims, the staff write queue and parents' email
- * change requests. Signed-form evidence is the one exception: it is the club's record, kept with every byte and hash,
+ * change requests, and the app's own families, students and links (stage 1 of the app-owned families spec), made from
+ * that company's customers. Signed-form evidence is the one exception: it is the club's record, kept with every byte and hash,
  * marked as the earlier company's and cut from its request (tests/integration/signed-forms-staff.test.ts shows the
  * archive and that no parent of the new company reaches it).
  */
@@ -43,6 +44,11 @@ describe("connecting a different company after step 5", () => {
     expect(before.emails).toBeGreaterThanOrEqual(2);
     expect(before.evidence.map((e) => e.id).sort()).toEqual([a.forms!.evidence.id, b.forms!.evidence.id].sort());
     expect(reqId).toBeTruthy();
+    // seedTwoFamilies() made the app's own records of both families, linked in this company.
+    expect((await db.select().from(family)).length).toBeGreaterThanOrEqual(2);
+    expect((await db.select().from(student)).length).toBeGreaterThanOrEqual(4);
+    expect((await db.select().from(accountingLink)).every((l) => l.realmId === "1111")).toBe(true);
+    expect((await db.select().from(guardian)).every((g) => g.familyId !== null)).toBe(true);
 
     expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
 
@@ -55,6 +61,12 @@ describe("connecting a different company after step 5", () => {
     expect(await db.select().from(writeQueue)).toEqual([]);
     expect(await db.select().from(parentEmailChange)).toEqual([]);
     expect(await db.select().from(signatureRequest)).toEqual([]);
+    // Nothing of the earlier company's is left in the app's own records: no link, no family or student, and no sign-in
+    // in a family of it.
+    expect(await db.select().from(accountingLink)).toEqual([]);
+    expect(await db.select().from(family)).toEqual([]);
+    expect(await db.select().from(student)).toEqual([]);
+    expect((await db.select().from(guardian)).map((g) => g.familyId)).toEqual([null, null]);
 
     const kept = await db.select().from(signedFormEvidence);
     expect(kept.map((e) => e.id).sort()).toEqual(before.evidence.map((e) => e.id).sort());
