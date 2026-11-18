@@ -372,6 +372,21 @@ signing in with a password or a passkey.
 
 ## 11. Open questions for the owner
 
+**How to read this list.** There are 36, and most are a builder's defaults. The lead's sorting, which the owner can
+overrule: eight are the owner's to decide, because they change what families or staff experience or how safe a
+sign-in is. The other twenty-eight stand as recommended unless he objects to one.
+
+| The owner's to decide | In one line | Recommended |
+|---|---|---|
+| 2 | Links carried over from today's roster were confirmed by nobody. | Count them as "carried over", with their own status, for an admin to review. |
+| 11 | Making someone inactive can't simply wait in the queue, as piece 3 said, because of the balance rule. | QuickBooks takes that one change before the app does. |
+| 8, 9, 36 | A sign-in email changed by staff, or taken from QuickBooks, could hand a sign-in to someone else. | Only by the confirm-by-link step; under Strict, with the reset's care. |
+| 21 | Switching to Strict while some guardians still have sessions made by an emailed code alone. | The switch ends those sessions; their password then leads to adding a passkey or app. |
+| 22 | Who may reset a guardian's sign-in. Under Strict it is the only way back for someone who lost everything. | Admins only, with a reason, a call back to the guardian, and a notice to the other Admins. |
+| 24 | A guardian who has a passkey or app, on a new device without it. | No emailed code for them: a passkey, the app or a backup code. Otherwise a passkey is no safer than the mailbox. |
+| 27 | Password rules, and a breached-password check that asks an outside service. | 12 characters or more, no symbol rules, the check kept (it never sends the password). |
+| 32, 19 | The order: sign-in after stage 3; and stage 3 not shipping without a way to link new families. | Sign-in as its own release after stage 3; bring two linking pieces forward into stage 3. |
+
 | # | Question | Recommendation | Why |
 |---|---|---|---|
 | 1 | The linking permission's name, and who holds it at first. | "Link families to accounting": Admin at first, grantable to a custom role such as Treasurer, not Admin-only. Aligning a difference takes it too. | Piece 2, which you approved, says "a role such as treasurer can hold". Aligning is the same trust. |
