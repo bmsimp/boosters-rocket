@@ -146,7 +146,8 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
   await sql`DELETE FROM rate_limit_event`;
   // The seed's state for the check-in: Zelda's place on the shift on now, not checked in yet.
   await sql`DELETE FROM volunteer_credit WHERE kind = 'checkin' AND removed_at IS NULL
-    AND signup_id IN (SELECT id FROM volunteer_signup WHERE shift_id = ${E2E_VOLUNTEER.openShift} AND family_qbo_id = 'E2E-FAMILY')`;
+    AND signup_id IN (SELECT s.id FROM volunteer_signup s JOIN accounting_link l ON l.family_id = s.family_id
+      WHERE s.shift_id = ${E2E_VOLUNTEER.openShift} AND l.customer_id = 'E2E-FAMILY')`;
   sink.messages.length = 0;
 
   await test.step("1. signs in with an emailed code: Enter sends it, the code field takes the focus, Enter signs in", async () => {

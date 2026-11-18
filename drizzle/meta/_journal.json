@@ -183,6 +183,20 @@
       "when": 1795028202758,
       "tag": "0025_seasons_app_ids_finish",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795034281124,
+      "tag": "0026_volunteer_app_ids_additive",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795034366040,
+      "tag": "0027_volunteer_app_ids_finish",
+      "breakpoints": true
     }
   ]
 }

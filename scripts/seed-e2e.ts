@@ -227,8 +227,12 @@ async function main() {
   await sql`INSERT INTO volunteer_shift (id, event_id, starts_at, ends_at, places, role, checkin_code) VALUES
           (${E2E_VOLUNTEER.griddle}, ${E2E_VOLUNTEER.event}, '07:00', '09:00', 4, 'Griddle', ${E2E_VOLUNTEER.griddleCode}),
           (${E2E_VOLUNTEER.cleanup}, ${E2E_VOLUNTEER.event}, '09:00', '11:00', 2, 'Cleanup', DEFAULT)`;
-  await sql`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, student_qbo_id, filler_name)
-          VALUES (${E2E_VOLUNTEER.griddle}, 'E2E-10', ${crypto.randomUUID()}, 'student', 'E2E-12', 'Leo Rivera')`;
+  // The sign-ups name the app's own family and student (stage 2 of the app-owned families spec), which the fill at the
+  // end makes: kept here by QuickBooks id, and stored once the fill has run, as migration 0026 stores them.
+  type SignupRow = { shiftId: string; family: string; signedUpBy: string; student: string | null; fillerParentId: string | null; fillerName: string };
+  const signupRows: SignupRow[] = [
+    { shiftId: E2E_VOLUNTEER.griddle, family: "E2E-10", signedUpBy: crypto.randomUUID(), student: "E2E-12", fillerParentId: null, fillerName: "Leo Rivera" },
+  ];
   // Checking in (v1 spec §11.4, tests/e2e/check-in.spec.ts): a shift whose window is open whenever the browser run
   // happens, worked out from the club's clock (UTC here) now, and one that is over. Zelda has a place on each; the
   // spec checks her in on the first, and passes whether she is checked in already or not, as both passes of a run read
@@ -242,9 +246,9 @@ async function main() {
   await sql`INSERT INTO volunteer_shift (id, event_id, starts_at, ends_at, places, role, checkin_code) VALUES
           (${E2E_VOLUNTEER.openShift}, ${E2E_VOLUNTEER.openEvent}, ${clock(opened)}, ${clock(closes)}, 6, 'Popcorn', ${E2E_VOLUNTEER.openCode}),
           (${E2E_VOLUNTEER.closedShift}, ${E2E_VOLUNTEER.closedEvent}, '10:00', '11:00', 6, 'Rinse crew', ${E2E_VOLUNTEER.closedCode})`;
-  await sql`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, filler_parent_id, filler_name) VALUES
-          (${E2E_VOLUNTEER.openShift}, 'E2E-FAMILY', ${p!.id}, 'guardian', ${p!.id}, 'Zelda Quetzalcoatl'),
-          (${E2E_VOLUNTEER.closedShift}, 'E2E-FAMILY', ${p!.id}, 'guardian', ${p!.id}, 'Zelda Quetzalcoatl')`;
+  for (const shiftId of [E2E_VOLUNTEER.openShift, E2E_VOLUNTEER.closedShift]) {
+    signupRows.push({ shiftId, family: "E2E-FAMILY", signedUpBy: p!.id as string, student: null, fillerParentId: p!.id as string, fillerName: "Zelda Quetzalcoatl" });
+  }
 
   // Forms (v1 spec §9). Forms are NOT set up: no Documenso address or token is stored, so nothing in the e2e run can
   // call a Documenso, and the pages show what is stored. Three optional form requirements in Join, which the
@@ -317,18 +321,29 @@ async function main() {
   // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
-  // The season's chosen lists, ticks and waivers, by the app's own record of each customer, of the kind its requirement
-  // asks for, in the roster's company: as migration 0024 stores them. A customer with no such record stops the seed.
+  // The season's chosen lists, ticks and waivers, and the volunteer sign-ups, by the app's own record of each customer,
+  // of the kind each names it as, in the roster's company: as migrations 0024 and 0026 store them. A customer with no
+  // such record stops the seed.
   await sql.begin(async (tx) => {
+    const recordOf = async (kind: "family" | "student", customer: string, what: string): Promise<string> => {
+      const [link] = kind === "family"
+        ? await tx`SELECT family_id AS id FROM accounting_link WHERE system = 'quickbooks' AND realm_id = '9130000000000001' AND customer_id = ${customer} AND family_id IS NOT NULL`
+        : await tx`SELECT student_id AS id FROM accounting_link WHERE system = 'quickbooks' AND realm_id = '9130000000000001' AND customer_id = ${customer} AND student_id IS NOT NULL`;
+      if (!link) throw new Error(`seed-e2e: no ${kind} record of ${customer} for ${what}`);
+      return link.id as string;
+    };
     for (const r of seasonRows) {
-      const [link] = r.kind === "family"
-        ? await tx`SELECT family_id AS id FROM accounting_link WHERE system = 'quickbooks' AND realm_id = '9130000000000001' AND customer_id = ${r.customer} AND family_id IS NOT NULL`
-        : await tx`SELECT student_id AS id FROM accounting_link WHERE system = 'quickbooks' AND realm_id = '9130000000000001' AND customer_id = ${r.customer} AND student_id IS NOT NULL`;
-      if (!link) throw new Error(`seed-e2e: no ${r.kind} record of ${r.customer} for the season's ${r.table === "cover" ? "chosen list" : "tick or waiver"}`);
-      const family = r.kind === "family" ? link.id : null, student = r.kind === "student" ? link.id : null;
+      const id = await recordOf(r.kind, r.customer, `the season's ${r.table === "cover" ? "chosen list" : "tick or waiver"}`);
+      const family = r.kind === "family" ? id : null, student = r.kind === "student" ? id : null;
       if (r.table === "cover") await tx`INSERT INTO requirement_cover (requirement_id, family_id, student_id) VALUES (${r.requirementId}, ${family}, ${student})`;
       else await tx`INSERT INTO requirement_progress (requirement_id, family_id, student_id, met_at, waived_at, waived_reason)
               VALUES (${r.requirementId}, ${family}, ${student}, ${r.ticked ? new Date() : null}, ${r.reason ? new Date() : null}, ${r.reason ?? null})`;
+    }
+    for (const r of signupRows) {
+      const family = await recordOf("family", r.family, "a volunteer sign-up");
+      const student = r.student === null ? null : await recordOf("student", r.student, "a volunteer sign-up");
+      await tx`INSERT INTO volunteer_signup (shift_id, family_id, signed_up_by, filler_kind, filler_parent_id, student_id, filler_name)
+              VALUES (${r.shiftId}, ${family}, ${r.signedUpBy}, ${student === null ? "guardian" : "student"}, ${r.fillerParentId}, ${student}, ${r.fillerName})`;
     }
   });
   await sql.end();

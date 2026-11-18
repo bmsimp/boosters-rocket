@@ -13,7 +13,7 @@ import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { FAMILY_A, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup, shiftAround } from "../helpers/volunteer";
-import { subjectColumns } from "../helpers/app-records";
+import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 
 /**
  * Three rules of how volunteering counts (v1 spec §11.4) that the review of step 5 found broken: a requirement staff
@@ -22,7 +22,8 @@ import { subjectColumns } from "../helpers/app-records";
  */
 vi.setConfig({ testTimeout: 30_000 });
 const [LEO] = FAMILY_A.students;
-const key = (requirementId: string, subject: string) => `${requirementId}|${subject}`;
+/** A slot's key, by the app's own record (slotKey() in src/lib/volunteer/allocation.ts). */
+const key = (requirementId: string, subject: unknown) => `${requirementId}|${String(subject)}`;
 let a: SeededParent, stepId: string;
 const ctx = (): ParentCtx => ({ ...a.identity, ip: "203.0.113.50" });
 const live = () => db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.createdAt));
@@ -48,9 +49,11 @@ describe("a waived requirement", () => {
       const s = await seedSignup({ shiftId: shift.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: LEO! });
       await seedCheckIn({ signupId: s.id, familyQboId: FAMILY_A.family.qboId, by: a.identity.parentId });
     }
-    const credit = (await allocateFamilies([FAMILY_A.family.qboId])).get(FAMILY_A.family.qboId)!;
-    expect(credit.allocation.filled.get(key(family.id, FAMILY_A.family.qboId))).toBe(2);
-    expect(credit.allocation.filled.has(key(leos.id, LEO!.qboId))).toBe(false);
+    // Volunteering keeps the app's own families and students (stage 2 of the app-owned families spec).
+    const [familyId, leoId] = [await recordOfCustomer(FAMILY_A.family.qboId, "family"), await recordOfCustomer(LEO!.qboId, "student")];
+    const credit = (await allocateFamilies([familyId])).get(String(familyId))!;
+    expect(credit.allocation.filled.get(key(family.id, familyId))).toBe(2);
+    expect(credit.allocation.filled.has(key(leos.id, leoId))).toBe(false);
     expect(credit.allocation.given.map((g) => g.requirementId)).toEqual([family.id, family.id]);
   });
 });
@@ -105,7 +108,8 @@ describe("a place on a shift that is over", () => {
     const { shifts: [past] } = await seedEvent({ inDays: -21, shifts: [{ requirementIds: [family.id] }] });
     const { shifts: [coming] } = await seedEvent({ inDays: 10, shifts: [{ requirementIds: [family.id] }] });
     for (const shift of [past!, coming!]) await seedSignup({ shiftId: shift.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
-    const amounts = await signedUpAmounts([family], [FAMILY_A.family.qboId], key);
-    expect(amounts.get(key(family.id, FAMILY_A.family.qboId))).toBe(1);
+    const familyId = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    const amounts = await signedUpAmounts([family], { families: [familyId], students: [] }, key);
+    expect(amounts.get(key(family.id, familyId))).toBe(1);
   });
 });

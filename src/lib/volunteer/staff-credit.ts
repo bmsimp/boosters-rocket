@@ -1,20 +1,21 @@
 // Staff only: check-in codes, corrections to volunteer credit, and one family's credit as staff see it (v1 spec §11.4).
 // Notes and reasons staff write are read here and nowhere a parent goes. Every write is one transaction with its audit
-// row (before and after); a write that names QuickBooks ids, or rests on them, takes the roster lock with the page's
-// roster tag first (lockRosterAs), so no refresh or change of company runs in between. Never imported by parent code
+// row (before and after); a write that names families or students, or rests on them, takes the roster lock with the
+// page's roster tag first (lockRosterAs), so no refresh (which brings the app's records into step) or change of company
+// runs in between. Families and students are the app's own records (stage 2 of the app-owned families spec): the
+// roster is turned into them once, by loadSeasonFamilies(), and a family's page keeps its address by QuickBooks id,
+// turned into the app's family in one place (seasonFamilyAt()). Never imported by parent code
 // (tests/integration/page-guards.test.ts).
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { parent, requirement, season, seasonStep, staffUser, volunteerCredit, volunteerEvent, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
-// moves to the app's ids.
-import { loadCustomerCovers } from "@/lib/seasons/by-customer";
-import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
-import { loadCustomerFacts } from "@/lib/seasons/recorded";
+import { isCovered, type SubjectId, type SubjectsAsked } from "@/lib/seasons/progress";
+import { loadFacts, toRequirement } from "@/lib/seasons/recorded";
+import { loadCovers } from "@/lib/seasons/season-rows";
 import { lockRosterAs, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { loadSubjects, type FamilySubject } from "@/lib/seasons/subjects";
+import { loadSeasonFamilies, seasonFamilyAt, type SeasonFamily } from "@/lib/seasons/subjects";
 import { getClubSettings } from "@/lib/settings/club";
 import { newCheckInCode } from "./check-in";
 import { clockOf, dateWords, shiftInstants, shiftMinutes, shiftTimeWords } from "./clock";
@@ -56,8 +57,8 @@ export async function renewCheckInCode(shiftId: string, o: VolunteerOp): Promise
 
 /* ---- Corrections ---- */
 
-const creditFacts = (c: typeof volunteerCredit.$inferSelect) => ({ kind: c.kind, familyQboId: c.familyQboId, signupId: c.signupId, requirementId: c.requirementId,
-  studentQboId: c.studentQboId, minutes: c.minutes, shifts: c.shifts, note: c.note, createdAt: c.createdAt.toISOString() });
+const creditFacts = (c: typeof volunteerCredit.$inferSelect) => ({ kind: c.kind, familyId: String(c.familyId), signupId: c.signupId, requirementId: c.requirementId,
+  studentId: c.studentId === null ? null : String(c.studentId), minutes: c.minutes, shifts: c.shifts, note: c.note, createdAt: c.createdAt.toISOString() });
 
 /**
  * A check-in that was missed, added by staff for one live sign-up once its shift has started (and not for one the club
@@ -75,12 +76,12 @@ export async function addMissedCheckIn(signupId: string, rosterTag: string, o: V
     if (shift.cancelledAt || event.cancelledAt) return refuse("The club cancelled this shift, so a check-in can't be added for it.");
     const when = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (when.start.getTime() > now.getTime()) return refuse("This shift hasn't started yet. A missed check-in can be added once it has.");
-    const families = await loadSubjects();
-    if (!families?.some((f) => f.qboId === s.familyQboId)) return refuse("This sign-up's family isn't on the roster now, so it can't be credited.");
+    const families = await loadSeasonFamilies();
+    if (!families?.some((f) => String(f.id) === String(s.familyId))) return refuse("This sign-up's family isn't on the roster now, so it can't be credited.");
     const [live] = await tx.select({ id: volunteerCredit.id }).from(volunteerCredit).where(and(eq(volunteerCredit.signupId, s.id), isNull(volunteerCredit.removedAt)));
     if (live) return refuse("This person is checked in already.");
     const minutes = shiftMinutes(when);
-    const [made] = await tx.insert(volunteerCredit).values({ kind: "staff_checkin", signupId: s.id, familyQboId: s.familyQboId, minutes, shifts: 1, createdByDoor: "staff", createdBy: o.actor.id! }).returning();
+    const [made] = await tx.insert(volunteerCredit).values({ kind: "staff_checkin", signupId: s.id, familyId: s.familyId, minutes, shifts: 1, createdByDoor: "staff", createdBy: o.actor.id! }).returning();
     await writeAudit({ actor: o.actor, action: "volunteer.checkin.add", permission: o.permission, targetType: "volunteer_credit", targetId: made!.id, ip: o.ip,
       before: { checkedIn: false }, after: { ...creditFacts(made!), shiftId: shift.id, event: event.name, onDate: event.onDate, fillerName: s.fillerName } }, tx);
     return { ok: true as const };
@@ -104,7 +105,11 @@ export async function removeCredit(creditId: string, reason: string, rosterTag: 
   });
 }
 
-export type OutsideInput = { familyQboId: string; requirementId: string; who: string; amount: string; note: string };
+/**
+ * Credit for volunteering done outside the portal, as the page sends it: the family and (for a per-student
+ * requirement) the student by the app's own ids, each found among the roster's records before anything is written.
+ */
+export type OutsideInput = { familyId: string; requirementId: string; who: string; amount: string; note: string };
 
 /** "2", "1.5" or "0.25" as a number of hours or shifts: digits, and at most two after the point. */
 const amountOf = (typed: string): number | null => (/^\d{1,4}(\.\d{1,2})?$/.test(typed.trim()) ? Number(typed.trim()) : null);
@@ -120,16 +125,17 @@ export async function addOutsideCredit(input: OutsideInput, rosterTag: string, o
   if (note.length > NOTE_MAX) return refuse(`The note is too long (${NOTE_MAX} characters at most).`);
   return db.transaction(async (tx) => {
     if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
-    const families = await loadSubjects();
-    const family = families?.find((f) => f.qboId === input.familyQboId);
+    const families = await loadSeasonFamilies();
+    const family = families?.find((f) => String(f.id) === input.familyId);
     if (!family) return refuse("That family isn't on the roster now. Reload the page.");
     const [row] = await tx.select().from(requirement).where(and(eq(requirement.id, input.requirementId), eq(requirement.kind, "volunteer")));
     if (!row) return refuse("That requirement isn't there any more, or isn't a volunteering one. Reload the page.");
-    const student = row.appliesTo === "student" ? family.students.find((s) => s.qboId === input.who) ?? null : null;
+    const student = row.appliesTo === "student" ? family.students.find((s) => String(s.id) === input.who) ?? null : null;
     if (row.appliesTo === "student" ? !student : input.who !== "family") return refuse(row.appliesTo === "student" ? "Choose which of the family's students did it." : "Choose who did it.");
-    const subject = student?.qboId ?? family.qboId;
-    const covers = row.covers === "chosen" ? await loadCustomerCovers([row.id], [subject], tx) : new Map<string, string[]>();
-    if (!isCustomerCovered(toCustomerRequirement(row, covers.get(row.id) ?? []), subject)) return refuse(`${row.title} isn't asked of ${student?.name ?? family.name}, so credit can't count toward it.`);
+    const subject: SubjectId = student?.id ?? family.id;
+    const asked: SubjectsAsked = student ? { families: [], students: [student.id] } : { families: [family.id], students: [] };
+    const covers = row.covers === "chosen" ? await loadCovers([row.id], asked, tx) : new Map<string, SubjectId[]>();
+    if (!isCovered(toRequirement(row, covers.get(row.id) ?? []), subject)) return refuse(`${row.title} isn't asked of ${student?.name ?? family.name}, so credit can't count toward it.`);
     const n = amountOf(input.amount);
     const unit = row.amountUnit ?? "shifts";
     if (unit === "shifts" ? n === null || !Number.isInteger(n) || n < 1 || n > SHIFTS_MAX : n === null || n <= 0 || n > HOURS_MAX) {
@@ -137,7 +143,7 @@ export async function addOutsideCredit(input: OutsideInput, rosterTag: string, o
     }
     const minutes = unit === "hours" ? Math.round(n! * 60) : 0, shifts = unit === "shifts" ? n! : 0;
     if (minutes + shifts === 0) return refuse("That's less than a minute. Enter more.");
-    const [made] = await tx.insert(volunteerCredit).values({ kind: "outside", familyQboId: family.qboId, studentQboId: student?.qboId ?? null, requirementId: row.id, minutes, shifts, note,
+    const [made] = await tx.insert(volunteerCredit).values({ kind: "outside", familyId: family.id, studentId: student?.id ?? null, requirementId: row.id, minutes, shifts, note,
       createdByDoor: "staff", createdBy: o.actor.id! }).returning();
     await writeAudit({ actor: o.actor, action: "volunteer.credit.outside.add", permission: o.permission, targetType: "volunteer_credit", targetId: made!.id, ip: o.ip,
       before: null, after: { ...creditFacts(made!), requirement: row.title, who: student?.name ?? family.name } }, tx);
@@ -163,7 +169,7 @@ export async function removeSignup(signupId: string, o: VolunteerOp, now: Date =
     const told = stillToEnd && !shift.cancelledAt && !event.cancelledAt ? (await signupsOn([shift.id], tx)).filter((x) => x.signupId === s.id) : [];
     await tx.update(volunteerSignup).set({ cancelledAt: now, cancelledByDoor: "staff", cancelledBy: o.actor.id }).where(eq(volunteerSignup.id, s.id));
     await writeAudit({ actor: o.actor, action: "volunteer.signup.remove", permission: o.permission, targetType: "volunteer_signup", targetId: s.id, ip: o.ip,
-      before: { familyQboId: s.familyQboId, shiftId: s.shiftId, event: event.name, onDate: event.onDate, startsAt: clockOf(shift.startsAt), fillerName: s.fillerName, removed: false },
+      before: { familyId: String(s.familyId), shiftId: s.shiftId, event: event.name, onDate: event.onDate, startsAt: clockOf(shift.startsAt), fillerName: s.fillerName, removed: false },
       after: { removed: true, guardianTold: told.length > 0 } }, tx);
     const notices: Notice[] = told.map((x) => ({ kind: "removed", signup: x, facts: factsOf(event, shift), why: "staff" }));
     return { ok: true as const, notices, eventId: event.id };
@@ -176,16 +182,17 @@ export async function removeSignup(signupId: string, o: VolunteerOp, now: Date =
 
 /* ---- One family's credit, for staff ---- */
 
+/** `qboId` is only the address of the family's page, which still names the family by its QuickBooks id. */
 export type CreditFamilyRow = { qboId: string; name: string; credits: number };
 
 /** Every active family on the roster, with how many live credits it has, by name. Null when the roster can't be shown. A list like the roster's: not audited. */
 export async function creditFamilies(): Promise<CreditFamilyRow[] | null> {
-  const families = await loadSubjects();
+  const families = await loadSeasonFamilies();
   if (!families) return null;
-  const rows = await db.select({ familyQboId: volunteerCredit.familyQboId }).from(volunteerCredit).where(isNull(volunteerCredit.removedAt));
+  const rows = await db.select({ familyId: volunteerCredit.familyId }).from(volunteerCredit).where(isNull(volunteerCredit.removedAt));
   const count = new Map<string, number>();
-  for (const r of rows) count.set(r.familyQboId, (count.get(r.familyQboId) ?? 0) + 1);
-  return families.map((f) => ({ qboId: f.qboId, name: f.name, credits: count.get(f.qboId) ?? 0 })).sort((a, b) => a.name.localeCompare(b.name));
+  for (const r of rows) count.set(String(r.familyId), (count.get(String(r.familyId)) ?? 0) + 1);
+  return families.map((f) => ({ qboId: f.qboId, name: f.name, credits: count.get(String(f.id)) ?? 0 })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export type StaffCreditLine = {
@@ -199,10 +206,11 @@ export type StaffCreditLine = {
 };
 export type StaffRequirementLine = {
   id: string; title: string; required: boolean; appliesTo: "family" | "student"; unit: "shifts" | "hours"; amount: number | null; dueOn: string | null;
-  subjects: { qboId: string; who: string; words: string; waived: boolean }[];
+  /** The family or each student it is asked of, by the app's own id as text. */
+  subjects: { id: string; who: string; words: string; waived: boolean }[];
 };
 export type FamilyCreditDetail = {
-  family: FamilySubject; rosterTag: string;
+  family: SeasonFamily; rosterTag: string;
   requirements: StaffRequirementLine[];
   credits: StaffCreditLine[];
   removed: StaffCreditLine[];
@@ -211,37 +219,37 @@ export type FamilyCreditDetail = {
 /**
  * One family's volunteer credit as staff see it: each credit, notes and all, with where the rule spent it; each
  * volunteer requirement of the current season asked of the family or its students, with how it stands; and the
- * credit staff removed, with why. `rosterTag` is read before the roster, for the page's forms. The read is audited
- * before anything is returned. Null for a family the roster doesn't show now.
+ * credit staff removed, with why. The family comes by the QuickBooks id in its page's address and is turned into the
+ * app's family once (seasonFamilyAt()). `rosterTag` is read before the roster, for the page's forms. The read is
+ * audited, naming the app's family, before anything is returned. Null for a family the roster doesn't show now.
  */
 export async function familyCreditDetail(familyQboId: string, rosterTag: string, o: VolunteerOp): Promise<FamilyCreditDetail | null> {
-  const families = await loadSubjects();
-  const family = families?.find((f) => f.qboId === familyQboId);
+  const family = await seasonFamilyAt(familyQboId);
   if (!family) return null;
-  await writeAudit({ actor: o.actor, action: "volunteer.credit.family.read", permission: o.permission, targetType: "family", targetId: family.qboId, ip: o.ip });
-  const subjects = [family.qboId, ...family.students.map((s) => s.qboId)];
-  const nameOf = (qboId: string | null) => (qboId === family.qboId ? family.name : family.students.find((s) => s.qboId === qboId)?.name ?? "A student no longer in this family");
+  await writeAudit({ actor: o.actor, action: "volunteer.credit.family.read", permission: o.permission, targetType: "family", targetId: String(family.id), ip: o.ip });
+  const asked: SubjectsAsked = { families: [family.id], students: family.students.map((s) => s.id) };
+  const nameOf = (id: SubjectId | null) => (String(id) === String(family.id) ? family.name : family.students.find((s) => String(s.id) === String(id))?.name ?? "A student no longer in this family");
 
   // The current season's volunteer requirements asked of the family or one of its students.
   const rows = await db.select({ r: requirement }).from(requirement).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId))
     .where(and(eq(season.isCurrent, true), eq(requirement.kind, "volunteer"))).orderBy(asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
-  const covers = await loadCustomerCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), subjects);
-  const asked = rows.map((x) => toCustomerRequirement(x.r, covers.get(x.r.id) ?? []))
-    .map((r) => ({ r, who: (r.appliesTo === "family" ? [family.qboId] : family.students.map((s) => s.qboId)).filter((s) => isCustomerCovered(r, s)) }))
+  const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), asked);
+  const askedOf = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []))
+    .map((r) => ({ r, who: (r.appliesTo === "family" ? [family.id as SubjectId] : family.students.map((s) => s.id as SubjectId)).filter((s) => isCovered(r, s)) }))
     .filter((x) => x.who.length > 0);
-  const { facts } = await loadCustomerFacts(asked.map((x) => x.r), subjects, { amounts: "none", parentId: null });
-  const requirements: StaffRequirementLine[] = asked.map(({ r, who }) => ({
+  const { facts } = await loadFacts(askedOf.map((x) => x.r), asked, { amounts: "none", parentId: null });
+  const requirements: StaffRequirementLine[] = askedOf.map(({ r, who }) => ({
     id: r.id, title: r.title, required: r.required, appliesTo: r.appliesTo, unit: r.amountUnit ?? "shifts", amount: r.amount, dueOn: r.dueOn,
-    subjects: who.map((s) => ({ qboId: s, who: nameOf(s), words: facts.standing(r, s).words, waived: facts.waived(r.id, s) })),
+    subjects: who.map((s) => ({ id: String(s), who: nameOf(s), words: facts.standing(r, s).words, waived: facts.waived(r.id, s) })),
   }));
 
   // Every credit of the family, live and removed, with where the live ones are spent.
-  const allocation = (await allocateFamilies([family.qboId], asked.map((x) => x.r.id))).get(family.qboId);
+  const allocation = (await allocateFamilies([family.id], askedOf.map((x) => x.r.id))).get(String(family.id));
   const titles = new Map((allocation?.requirements ?? []).map((r) => [r.id, r]));
   const credits = await db.select({ c: volunteerCredit, s: volunteerSignup, shift: volunteerShift, event: volunteerEvent, req: requirement }).from(volunteerCredit)
     .leftJoin(volunteerSignup, eq(volunteerSignup.id, volunteerCredit.signupId)).leftJoin(volunteerShift, eq(volunteerShift.id, volunteerSignup.shiftId))
     .leftJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId)).leftJoin(requirement, eq(requirement.id, volunteerCredit.requirementId))
-    .where(eq(volunteerCredit.familyQboId, family.qboId)).orderBy(desc(volunteerCredit.createdAt), desc(volunteerCredit.id));
+    .where(eq(volunteerCredit.familyId, family.id)).orderBy(desc(volunteerCredit.createdAt), desc(volunteerCredit.id));
   const people = [...new Set(credits.flatMap(({ c }) => [c.createdBy, c.removedBy]).filter((id): id is string => id !== null))];
   const [staff, parents] = people.length === 0 ? [[], []] : await Promise.all([
     db.select({ id: staffUser.id, name: staffUser.name }).from(staffUser).where(inArray(staffUser.id, people)),
@@ -252,11 +260,11 @@ export async function familyCreditDetail(familyQboId: string, rosterTag: string,
     const spent = (allocation?.allocation.given ?? []).filter((g) => g.creditId === c.id).map((g) => {
       const r = titles.get(g.requirementId);
       const amount = g.shifts > 0 ? amountWords("shifts", g.shifts) : amountWords("hours", Math.round((g.minutes / 60) * 100) / 100);
-      return `${amount} toward ${r?.title ?? "a requirement"}${r?.appliesTo === "student" ? ` (${nameOf(g.subjectQboId)})` : ""}`;
+      return `${amount} toward ${r?.title ?? "a requirement"}${r?.appliesTo === "student" ? ` (${nameOf(g.subjectId)})` : ""}`;
     });
     const removed = c.removedAt ? { at: c.removedAt.toISOString(), by: byName(c.removedBy, "staff"), reason: c.removedReason ?? "" } : null;
     if (c.kind === "outside") {
-      return { id: c.id, kind: c.kind, label: "Done outside the portal", what: req?.title ?? "A requirement that is gone", who: nameOf(c.studentQboId ?? c.familyQboId),
+      return { id: c.id, kind: c.kind, label: "Done outside the portal", what: req?.title ?? "A requirement that is gone", who: nameOf(c.studentId ?? c.familyId),
         amount: creditAmountWords(req?.amountUnit ?? null, c), at: c.createdAt.toISOString(), by: byName(c.createdBy, "staff"), note: c.note, spent, removed };
     }
     return { id: c.id, kind: c.kind, label: c.kind === "checkin" ? "Checked in" : "Check-in added by staff",
@@ -266,4 +274,3 @@ export async function familyCreditDetail(familyQboId: string, rosterTag: string,
   });
   return { family, rosterTag, requirements, credits: lines.filter((l) => !l.removed), removed: lines.filter((l) => l.removed) };
 }
-

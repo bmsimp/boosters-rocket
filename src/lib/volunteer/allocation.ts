@@ -25,36 +25,38 @@
  * waived one none, and the credit flows on. A buy-out's price was fixed when it was chosen; credit earned later does
  * not lower it.
  */
-import type { Requirement } from "@/lib/seasons/progress";
+import type { AppFamilyId } from "@/lib/families/ids";
+import type { Requirement, SubjectId } from "@/lib/seasons/progress";
 import { countsFor, type Filler } from "./rules";
 
 /** A volunteer requirement as the rule orders it. `order` is its place in its season (steps, then requirements), lower first. */
 export type CreditRequirement = Pick<Requirement, "id" | "required" | "appliesTo" | "amount" | "amountUnit" | "dueOn"> & { order: number };
-/** One requirement for one family (per family) or one student (per student) of that family. */
-export type Slot = { requirement: CreditRequirement; subjectQboId: string };
+/** One requirement for one family (per family) or one student (per student) of that family, by the app's own id. */
+export type Slot = { requirement: CreditRequirement; subjectId: SubjectId };
 
 /** Where a credit came from, as far as it decides what the credit can count toward. */
 export type CreditSource =
   /** A check-in, by the guardian or added by staff: the requirements its shift counts toward, and who filled the place. */
   | { kind: "shift"; requirementIds: readonly string[]; filler: Filler }
   /** Volunteering done outside the portal, credited by staff toward one requirement, for the family or one student. */
-  | { kind: "outside"; requirementId: string; subjectQboId: string };
+  | { kind: "outside"; requirementId: string; subjectId: SubjectId };
 
 /** One credit. A check-in is worth its shift's length in minutes or one shift; an outside credit is in its requirement's unit. */
 export type Credit = { id: string; minutes: number; shifts: number; source: CreditSource };
 
 /** Part of a credit given to one requirement for one family or student: minutes toward one counted in hours, or shifts. */
-export type Given = { creditId: string; requirementId: string; subjectQboId: string; minutes: number; shifts: number };
+export type Given = { creditId: string; requirementId: string; subjectId: SubjectId; minutes: number; shifts: number };
 
 export type Allocation = {
   given: Given[];
-  /** How much each slot has, in its requirement's unit (shifts, or hours), by `${requirementId}|${subjectQboId}`. */
+  /** How much each slot has, in its requirement's unit (shifts, or hours), by slotKey(). */
   filled: Map<string, number>;
   /** What is left of each credit, given to nothing. */
   left: Map<string, { minutes: number; shifts: number }>;
 };
 
-export const slotKey = (requirementId: string, subjectQboId: string) => `${requirementId}|${subjectQboId}`;
+/** A slot's key: `${requirementId}|${subject}`, the form of pairKey() in src/lib/seasons/kinds.ts. */
+export const slotKey = (requirementId: string, subject: SubjectId) => `${requirementId}|${String(subject)}`;
 
 /** The order slots are filled in: required first, then per-student before per-family, then earliest due date (none last), then the season's order. */
 export function compareSlots(a: Slot, b: Slot): number {
@@ -63,21 +65,22 @@ export function compareSlots(a: Slot, b: Slot): number {
   if (x.appliesTo !== y.appliesTo) return x.appliesTo === "student" ? -1 : 1;
   if (x.dueOn !== y.dueOn) return x.dueOn === null ? 1 : y.dueOn === null ? -1 : x.dueOn < y.dueOn ? -1 : 1;
   if (x.order !== y.order) return x.order - y.order;
-  return a.subjectQboId < b.subjectQboId ? -1 : a.subjectQboId > b.subjectQboId ? 1 : 0;
+  const p = String(a.subjectId), q = String(b.subjectId);
+  return p < q ? -1 : p > q ? 1 : 0;
 }
 
 /** Whether a credit can count toward this requirement for this family or student. */
-export function canCountToward(credit: Credit, slot: Slot, familyQboId: string): boolean {
+export function canCountToward(credit: Credit, slot: Slot, familyId: AppFamilyId): boolean {
   const s = credit.source;
-  if (s.kind === "outside") return s.requirementId === slot.requirement.id && s.subjectQboId === slot.subjectQboId;
-  return s.requirementIds.includes(slot.requirement.id) && countsFor(slot.requirement, s.filler, familyQboId, slot.subjectQboId);
+  if (s.kind === "outside") return s.requirementId === slot.requirement.id && String(s.subjectId) === String(slot.subjectId);
+  return s.requirementIds.includes(slot.requirement.id) && countsFor(slot.requirement, s.filler, familyId, slot.subjectId);
 }
 
 /**
  * Spends one family's credits on its requirements by the rule above. `credits` are in the order they were earned;
  * `slots` in any order (they are sorted here). A removed credit is not passed in.
  */
-export function allocateCredit(familyQboId: string, slots: readonly Slot[], credits: readonly Credit[]): Allocation {
+export function allocateCredit(familyId: AppFamilyId, slots: readonly Slot[], credits: readonly Credit[]): Allocation {
   const state = credits.map((c) => ({ credit: c, minutes: c.minutes, shifts: c.shifts, asMinutes: false, asShift: false }));
   const given: Given[] = [];
   const filled = new Map<string, number>();
@@ -90,13 +93,13 @@ export function allocateCredit(familyQboId: string, slots: readonly Slot[], cred
       // The slots still to fill after this one, and how many of them each credit could count toward.
       const later = ordered.slice(at + 1).filter((l) => (l.requirement.amount ?? 0) > 0);
       const demand = (c: (typeof state)[number]) => {
-        const can = later.filter((l) => canCountToward(c.credit, l, familyQboId));
+        const can = later.filter((l) => canCountToward(c.credit, l, familyId));
         return [can.filter((l) => l.requirement.required).length, can.length] as const;
       };
       const ranked = state.map((c, earned) => ({ c, earned, d: demand(c) }))
         .sort((x, y) => x.d[0] - y.d[0] || x.d[1] - y.d[1] || x.earned - y.earned).map((x) => x.c);
       for (const c of ranked) {
-        if (!canCountToward(c.credit, slot, familyQboId)) continue;
+        if (!canCountToward(c.credit, slot, familyId)) continue;
         if (r.amountUnit === "hours") {
           const need = amount * 60 - have;
           if (need <= 0) break;
@@ -107,7 +110,7 @@ export function allocateCredit(familyQboId: string, slots: readonly Slot[], cred
           // A credit split into minutes can't be a whole shift any more.
           c.shifts = 0;
           have += take;
-          given.push({ creditId: c.credit.id, requirementId: r.id, subjectQboId: slot.subjectQboId, minutes: take, shifts: 0 });
+          given.push({ creditId: c.credit.id, requirementId: r.id, subjectId: slot.subjectId, minutes: take, shifts: 0 });
         } else {
           const need = amount - have;
           if (need <= 0) break;
@@ -118,11 +121,11 @@ export function allocateCredit(familyQboId: string, slots: readonly Slot[], cred
           // A check-in given as a shift is spent: its minutes go with it.
           if (c.credit.source.kind === "shift") c.minutes = 0;
           have += take;
-          given.push({ creditId: c.credit.id, requirementId: r.id, subjectQboId: slot.subjectQboId, minutes: 0, shifts: take });
+          given.push({ creditId: c.credit.id, requirementId: r.id, subjectId: slot.subjectId, minutes: 0, shifts: take });
         }
       }
     }
-    filled.set(slotKey(r.id, slot.subjectQboId), r.amountUnit === "hours" ? have / 60 : have);
+    filled.set(slotKey(r.id, slot.subjectId), r.amountUnit === "hours" ? have / 60 : have);
   }
   return { given, filled, left: new Map(state.map((c) => [c.credit.id, { minutes: c.minutes, shifts: c.shifts }])) };
 }

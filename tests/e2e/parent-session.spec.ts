@@ -114,11 +114,17 @@ test("every requirement and waiver the seed gives another family alone is search
 });
 
 test("every volunteer sign-up the seed gives another family is searched for", async () => {
-  // As above, for volunteering: a sign-up of another family must be findable by its family's id or the name of whoever fills it.
-  const rows = await sql`SELECT family_qbo_id, student_qbo_id, filler_name FROM volunteer_signup WHERE family_qbo_id <> ${PARENT_SESSION_FAMILY}`;
+  // As above, for volunteering: a sign-up of another family must be findable by its student's customer id or the name of
+  // whoever fills it. Sign-ups name the app's own family and student (stage 2 of the app-owned families spec): another
+  // family's is one whose family isn't the one the Quetzalcoatl family's customer is linked to, read back as the
+  // customers their links name.
+  const family = sql`SELECT family_id FROM accounting_link WHERE customer_id = ${PARENT_SESSION_FAMILY} AND family_id IS NOT NULL`;
+  const rows = await sql`SELECT fl.customer_id AS family_customer, sl.customer_id AS student_customer, s.filler_name FROM volunteer_signup s
+    JOIN accounting_link fl ON fl.family_id = s.family_id LEFT JOIN accounting_link sl ON sl.student_id = s.student_id
+    WHERE s.family_id NOT IN (${family})`;
   expect(rows.length).toBeGreaterThanOrEqual(1);
-  const unsearched = rows.filter((r) => !OTHER_FAMILIES.some((s) => (r.filler_name as string).includes(s) || (typeof r.student_qbo_id === "string" && r.student_qbo_id.includes(s))))
-    .map((r) => `${r.filler_name} (a sign-up of ${r.family_qbo_id})`);
+  const unsearched = rows.filter((r) => !OTHER_FAMILIES.some((s) => (r.filler_name as string).includes(s) || (typeof r.student_customer === "string" && r.student_customer.includes(s))))
+    .map((r) => `${r.filler_name} (a sign-up of ${r.family_customer})`);
   expect(unsearched, `scripts/seed-e2e.ts gives another family these volunteer sign-ups, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
     + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
 });

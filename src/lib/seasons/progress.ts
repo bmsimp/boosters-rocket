@@ -14,6 +14,9 @@ import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
  */
 export type SubjectId = AppFamilyId | AppStudentId;
 
+/** The families and students a read is for: a parent's own family and its students, or one family's for staff. */
+export type SubjectsAsked = { families: readonly AppFamilyId[]; students: readonly AppStudentId[] };
+
 export type AppliesTo = "family" | "student";
 export type AmountUnit = "shifts" | "hours";
 

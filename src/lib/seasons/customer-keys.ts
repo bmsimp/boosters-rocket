@@ -1,6 +1,7 @@
 /**
- * A season as the areas still keyed by QuickBooks ids read it (stage 2 of the app-owned families spec): volunteering,
- * forms, buy-outs and money. The season keeps the app's own ids (./progress.ts); these are its requirements, chosen
+ * A season as the areas still keyed by QuickBooks ids read it (stage 2 of the app-owned families spec): forms and money
+ * (volunteering has moved, and buy-outs read the season by the app's ids through their own link lookup, in
+ * src/lib/buyouts/my-buyouts.ts). The season keeps the app's own ids (./progress.ts); these are its requirements, chosen
  * lists and ticks with each family or student given as the customer its link names, for those areas' rules and pages.
  * Pure: the reads that translate are ./by-customer.ts, and the boundaries that use them are listed in AGENTS.md
  * (Seasons). Each goes when its area moves to the app's ids.

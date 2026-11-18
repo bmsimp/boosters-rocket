@@ -5,10 +5,11 @@
  * reaching its amount; until then a parent reads how much is needed, how much is done and how much they are signed up
  * for. Nothing here reads the database or the clock.
  */
-import type { Requirement, Standing } from "@/lib/seasons/progress";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import type { Requirement, Standing, SubjectId } from "@/lib/seasons/progress";
 
-/** Who fills a place: the guardian who signed up, or one of the family's students. */
-export type Filler = { kind: "guardian" } | { kind: "student"; studentQboId: string };
+/** Who fills a place: the guardian who signed up, or one of the family's students, by the app's own id. */
+export type Filler = { kind: "guardian" } | { kind: "student"; studentId: AppStudentId };
 
 /** How much one shift of this length counts toward a requirement: 1 for one counted in shifts, its hours for one counted in hours. */
 export const shiftCredit = (requirement: Pick<Requirement, "amountUnit">, minutes: number): number =>
@@ -22,10 +23,13 @@ export function amountWords(unit: Requirement["amountUnit"], n: number): string 
 }
 const figure = (n: number) => String(Math.round(n * 100) / 100);
 
-/** Whether a place filled by `filler` of `familyQboId` counts toward this requirement for `subjectQboId` (the family for a per-family requirement, a student for a per-student one). */
-export function countsFor(requirement: Pick<Requirement, "appliesTo">, filler: Filler, familyQboId: string, subjectQboId: string): boolean {
-  if (requirement.appliesTo === "family") return subjectQboId === familyQboId;
-  return filler.kind === "student" && filler.studentQboId === subjectQboId;
+/**
+ * Whether a place filled by `filler` of the family `familyId` counts toward this requirement for `subject` (the family
+ * for a per-family requirement, a student for a per-student one). All by the app's own ids.
+ */
+export function countsFor(requirement: Pick<Requirement, "appliesTo">, filler: Filler, familyId: AppFamilyId, subject: SubjectId): boolean {
+  if (requirement.appliesTo === "family") return String(subject) === String(familyId);
+  return filler.kind === "student" && String(filler.studentId) === String(subject);
 }
 
 /**

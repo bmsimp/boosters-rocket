@@ -22,13 +22,15 @@ import { cancelSignupAction, signUpAction } from "@/app/(parent)/volunteer/actio
 import { resetDb, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { addToCache, moveInCache, stu } from "../helpers/roster-cache";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { TWO_FAMILY_EVENT, seedEvent, seedShift, seedSignup, shiftAround } from "../helpers/volunteer";
 
 /**
  * Volunteering as a parent does it (v1 spec §11.2, §12 invariant 7): the Volunteer page and a shift's page, signing up
  * and cancelling. Of other families a parent gets the number of places filled and nothing else. Every id that comes
- * from the browser (a shift, a sign-up, the student who fills a place) is tried with the other family's.
+ * from the browser (a shift, a sign-up, the student who fills a place, by the app's own id) is tried with the other
+ * family's. Sign-ups name the app's own families and students (stage 2 of the app-owned families spec).
  */
 const ctxOf = (identity: ParentIdentity): ParentCtx => ({ ...identity, ip: "203.0.113.50" });
 const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'");
@@ -42,6 +44,10 @@ const NOT_OFFERED = { ok: false, errors: ["That shift isn't open for sign-up any
 const NO_SUCH = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e5f";
 const [AURELIO, AZALEA] = FAMILY_A.students, [BARNABY] = FAMILY_B.students;
 const famOf = async (who: SeededParent) => (await loadMyFamily(ctxOf(who.identity)))!;
+/** The app's own records of a fixture's family or student: what a sign-up names, and what a page sends for a student. */
+const familyId = (qboId: string) => recordOfCustomer(qboId, "family");
+const studentId = (qboId: string) => recordOfCustomer(qboId, "student");
+const studentChoice = async (s: { qboId: string }) => String(await studentId(s.qboId));
 /** An event on a fixed day, for tests that pass the time it is. */
 const MARCH_10 = "2027-03-10";
 
@@ -89,11 +95,13 @@ describe("signing up", () => {
     const r = await signUpAction(shift!.id, "me");
     expect(r).toEqual({ ok: true, message: "You're signed up. Thank you! We've emailed you the details, with a calendar file." });
     const [row] = await signups();
-    expect(row).toMatchObject({ shiftId: shift!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, fillerKind: "guardian", fillerParentId: a.identity.parentId,
-      studentQboId: null, fillerName: FAMILY_A.parent.name, cancelledAt: null });
+    expect(row).toMatchObject({ shiftId: shift!.id, familyId: await familyId(FAMILY_A.family.qboId), signedUpBy: a.identity.parentId, fillerKind: "guardian", fillerParentId: a.identity.parentId,
+      studentId: null, fillerName: FAMILY_A.parent.name, cancelledAt: null });
     const [audit] = await audits("volunteer.signup.create");
     expect(audit).toMatchObject({ door: "parent", actorId: a.identity.parentId, targetType: "volunteer_signup", targetId: row!.id, ip: "203.0.113.50" });
-    expect(audit!.after).toMatchObject({ familyQboId: FAMILY_A.family.qboId, shiftId: shift!.id, event: "Fish fry", filler: { parentId: a.identity.parentId, name: FAMILY_A.parent.name } });
+    // New audit rows name the app's own family (open question 17).
+    expect(audit!.after).toMatchObject({ familyId: String(await familyId(FAMILY_A.family.qboId)), shiftId: shift!.id, event: "Fish fry", filler: { parentId: a.identity.parentId, name: FAMILY_A.parent.name } });
+    expect(JSON.stringify(audit!.after)).not.toContain(FAMILY_A.family.qboId);
     expect(revalidatedPaths()).toContain("/");
     expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
     const [m] = mail.outbox;
@@ -128,12 +136,14 @@ describe("signing up", () => {
     const view = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
     expect(view.choices.map((c) => [c.value, c.label, c.countsToward.map((t) => `${t.counts} toward ${t.title}: ${t.whoMust}; ${t.standing}`)])).toEqual([
       ["me", `Me (${FAMILY_A.parent.name})`, ["1 shift toward Family shifts: Anyone in your family can do it; 0 of 2 shifts done"]],
-      [AURELIO!.qboId, AURELIO!.name, ["1 shift toward Family shifts: Anyone in your family can do it; 0 of 2 shifts done", `3 hours toward Student hours: ${AURELIO!.name} must do it; 0 of 6 hours done`]],
-      [AZALEA!.qboId, AZALEA!.name, ["1 shift toward Family shifts: Anyone in your family can do it; 0 of 2 shifts done", `3 hours toward Student hours: ${AZALEA!.name} must do it; 0 of 6 hours done`]],
+      [await studentChoice(AURELIO!), AURELIO!.name, ["1 shift toward Family shifts: Anyone in your family can do it; 0 of 2 shifts done", `3 hours toward Student hours: ${AURELIO!.name} must do it; 0 of 6 hours done`]],
+      [await studentChoice(AZALEA!), AZALEA!.name, ["1 shift toward Family shifts: Anyone in your family can do it; 0 of 2 shifts done", `3 hours toward Student hours: ${AZALEA!.name} must do it; 0 of 6 hours done`]],
     ]);
     asParent(a.identity);
-    expect(await signUpAction(shift!.id, AURELIO!.qboId)).toMatchObject({ ok: true, message: expect.stringContaining(`${AURELIO!.name} is signed up. Thank you!`) });
-    expect((await signups())[0]).toMatchObject({ fillerKind: "student", studentQboId: AURELIO!.qboId, fillerName: AURELIO!.name, fillerParentId: null, signedUpBy: a.identity.parentId });
+    // The page sends the student's app id, never a QuickBooks id.
+    expect(view.choices.map((c) => c.value).join(" ")).not.toContain(AURELIO!.qboId);
+    expect(await signUpAction(shift!.id, await studentChoice(AURELIO!))).toMatchObject({ ok: true, message: expect.stringContaining(`${AURELIO!.name} is signed up. Thank you!`) });
+    expect((await signups())[0]).toMatchObject({ fillerKind: "student", studentId: await studentId(AURELIO!.qboId), fillerName: AURELIO!.name, fillerParentId: null, signedUpBy: a.identity.parentId });
     // The season now says what the family is signed up for: the family's shift, and Aurelio's hours, not Azalea's.
     const season = (await loadMySeason(ctxOf(a.identity), (await famOf(a)).students))!;
     expect(season.steps[0]!.family.map((l) => [l.title, l.words])).toEqual([["Family shifts", "0 of 2 shifts done, signed up for 1"], ["Not linked", "0 of 1 shift done"]]);
@@ -155,7 +165,8 @@ describe("signing up", () => {
     expect(season.steps[0]!.students.find((s) => s.name === BARNABY!.name)!.lines.map((l) => l.words)).toEqual(["0 of 6 hours done"]);
     const view = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
     expect(view.mine).toEqual([]);
-    expect(view.choices.find((c) => c.value === BARNABY!.qboId)!.taken).toBe(true);
+    const barnaby = await studentChoice(BARNABY!);
+    expect(view.choices.find((c) => c.value === barnaby)!.taken).toBe(true);
     expect((await loadShiftForMe(ctxOf(b.identity), await famOf(b), shift!.id))!.mine).toEqual([]);
   });
 
@@ -206,14 +217,14 @@ describe("signing up", () => {
     await seedSignup({ shiftId: full!.id, familyQboId: "SOMEONE-ELSE", signedUpBy: NO_SUCH, guardianName: "Someone" });
     asParent(a.identity);
     expect(await signUpAction(full!.id, "me")).toEqual({ ok: false, errors: ["Sorry, that shift is full now. Every place has been taken."] });
-    expect(await signUpAction(open!.id, AZALEA!.qboId)).toMatchObject({ ok: true });
-    expect(await signUpAction(open!.id, AZALEA!.qboId)).toEqual({ ok: false, errors: [`${AZALEA!.name} is signed up for this shift already.`] });
+    expect(await signUpAction(open!.id, await studentChoice(AZALEA!))).toMatchObject({ ok: true });
+    expect(await signUpAction(open!.id, await studentChoice(AZALEA!))).toEqual({ ok: false, errors: [`${AZALEA!.name} is signed up for this shift already.`] });
     expect(await signUpAction(open!.id, "me")).toMatchObject({ ok: true });
     expect(await signUpAction(open!.id, "me")).toEqual({ ok: false, errors: ["You're signed up for this shift already."] });
     const today = await seedEvent({ onDate: MARCH_10, shifts: [{ startsAt: "10:00", endsAt: "12:00" }] });
     const at = new Date("2027-03-10T10:00:00Z");
     expect(await signUpForShift(ctxOf(a.identity), await famOf(a), today.shifts[0]!.id, "me", new Date(at.getTime() - 1000))).toMatchObject({ ok: true });
-    expect(await signUpForShift(ctxOf(a.identity), await famOf(a), today.shifts[0]!.id, AURELIO!.qboId, at)).toEqual({ ok: false, errors: ["That shift has started, so it's too late to sign up for it."] });
+    expect(await signUpForShift(ctxOf(a.identity), await famOf(a), today.shifts[0]!.id, await studentChoice(AURELIO!), at)).toEqual({ ok: false, errors: ["That shift has started, so it's too late to sign up for it."] });
     expect((await live()).length).toBe(4);
   });
 
@@ -222,11 +233,12 @@ describe("signing up", () => {
     const { shifts: [stand1, stand2, later] } = await seedEvent({ shifts: [{ startsAt: "18:00", endsAt: "21:00" }, { startsAt: "18:00", endsAt: "21:00" }, { startsAt: "21:00", endsAt: "22:00" }] });
     const elsewhere = await seedEvent({ name: "Bake sale", shifts: [{ startsAt: "20:00", endsAt: "23:00" }] });
     asParent(a.identity);
-    expect(await signUpAction(stand1!.id, AURELIO!.qboId)).toMatchObject({ ok: true });
-    expect(await signUpAction(stand2!.id, AURELIO!.qboId)).toEqual({ ok: false, errors: [`${AURELIO!.name} is signed up for another shift at that time.`] });
-    expect(await signUpAction(elsewhere.shifts[0]!.id, AURELIO!.qboId)).toEqual({ ok: false, errors: [`${AURELIO!.name} is signed up for another shift at that time.`] });
-    expect(await signUpAction(later!.id, AURELIO!.qboId)).toMatchObject({ ok: true }); // starts as the first ends
-    expect(await signUpAction(stand2!.id, AZALEA!.qboId)).toMatchObject({ ok: true }); // someone else may
+    const [aurelio, azalea] = [await studentChoice(AURELIO!), await studentChoice(AZALEA!)];
+    expect(await signUpAction(stand1!.id, aurelio)).toMatchObject({ ok: true });
+    expect(await signUpAction(stand2!.id, aurelio)).toEqual({ ok: false, errors: [`${AURELIO!.name} is signed up for another shift at that time.`] });
+    expect(await signUpAction(elsewhere.shifts[0]!.id, aurelio)).toEqual({ ok: false, errors: [`${AURELIO!.name} is signed up for another shift at that time.`] });
+    expect(await signUpAction(later!.id, aurelio)).toMatchObject({ ok: true }); // starts as the first ends
+    expect(await signUpAction(stand2!.id, azalea)).toMatchObject({ ok: true }); // someone else may
     expect(await signUpAction(stand1!.id, "me")).toMatchObject({ ok: true });
     expect(await signUpAction(stand2!.id, "me")).toEqual({ ok: false, errors: ["You're signed up for another shift at that time."] });
     expect((await live()).length).toBe(4);
@@ -239,7 +251,8 @@ describe("signing up", () => {
     const { shifts: [open] } = await seedEvent();
     asParent(a.identity);
     for (const shiftId of [NO_SUCH, cancelledShift!.id, ofCancelledEvent!.id]) expect(await signUpAction(shiftId, "me")).toEqual(NOT_OFFERED);
-    for (const [shiftId, who] of [["not-a-uuid", "me"], [open!.id, ""], [open!.id, { qboId: AURELIO!.qboId }], [open!.id, "x".repeat(65)], [open!.id, null], [123, "me"]] as const) {
+    // A student by QuickBooks id is not what a page sends either: it sends the app's id.
+    for (const [shiftId, who] of [["not-a-uuid", "me"], [open!.id, ""], [open!.id, { qboId: AURELIO!.qboId }], [open!.id, AURELIO!.qboId], [open!.id, "x".repeat(65)], [open!.id, null], [123, "me"]] as const) {
       expect(await signUpAction(shiftId as never, who as never)).toEqual(NOT_FROM_PAGE);
     }
     for (const id of [NO_SUCH, cancelledShift!.id, ofCancelledEvent!.id, "nope"]) expect(await loadShiftForMe(ctxOf(a.identity), await famOf(a), id)).toBeNull();
@@ -251,14 +264,22 @@ describe("signing up", () => {
     await addToCache([stu("QBO-ALDERQUIST-STUDENT-7999", "Gone Alderquist (deleted)", FAMILY_A.family.qboId, { active: false })]);
     const { shifts: [shift] } = await seedEvent({ name: "Bake sale" });
     asParent(a.identity);
-    for (const who of [BARNABY!.qboId, FAMILY_B.parent.qboId, FAMILY_B.family.qboId, "QBO-ALDERQUIST-STUDENT-7999", FAMILY_A.family.qboId, FAMILY_A.parent.qboId, b.identity.parentId]) {
+    // Family B's own records, by the app's ids as a page would send them, an inactive student of A's, A's family as a
+    // student, and the same by QuickBooks id: none fills a place for A.
+    const appIds = [String(await studentId(BARNABY!.qboId)), String(await familyId(FAMILY_B.family.qboId)), String(await studentId("QBO-ALDERQUIST-STUDENT-7999")),
+      String(await familyId(FAMILY_A.family.qboId))];
+    for (const who of [...appIds, BARNABY!.qboId, FAMILY_B.parent.qboId, FAMILY_B.family.qboId, "QBO-ALDERQUIST-STUDENT-7999", FAMILY_A.family.qboId, FAMILY_A.parent.qboId, b.identity.parentId]) {
       expect(await signUpAction(shift!.id, who), who).toEqual(NOT_FROM_PAGE);
     }
     expect((await signups()).filter((s) => s.shiftId === shift!.id)).toEqual([]);
-    // A student QuickBooks has moved to another family since the page was drawn is refused too.
+    // A student QuickBooks has moved to another family since the page was drawn is refused too, both while only the cache
+    // has heard of it and once the app's records have followed.
     const family = await famOf(a);
+    const azalea = await studentChoice(AZALEA!);
     await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, AZALEA!.qboId));
-    expect(await signUpForShift(ctxOf(a.identity), family, shift!.id, AZALEA!.qboId)).toEqual(NOT_FROM_PAGE);
+    expect(await signUpForShift(ctxOf(a.identity), family, shift!.id, azalea)).toEqual(NOT_FROM_PAGE);
+    await syncAppRecords();
+    expect(await signUpForShift(ctxOf(a.identity), family, shift!.id, azalea)).toEqual(NOT_FROM_PAGE);
     expect((await signups()).filter((s) => s.shiftId === shift!.id)).toEqual([]);
   });
 
@@ -266,10 +287,11 @@ describe("signing up", () => {
     const a = await seedSignedInParent(FAMILY_A), b = await seedSignedInParent(FAMILY_B);
     const [famA, famB] = [await famOf(a), await famOf(b)];
     let shiftId = "";
+    const [kidsA, kidsB] = [await Promise.all(FAMILY_A.students.map(studentChoice)), await Promise.all(FAMILY_B.students.map(studentChoice))];
     const people = [
       () => signUpForShift(ctxOf(a.identity), famA, shiftId, "me"), () => signUpForShift(ctxOf(b.identity), famB, shiftId, "me"),
-      ...FAMILY_A.students.map((s) => () => signUpForShift(ctxOf(a.identity), famA, shiftId, s.qboId)),
-      ...FAMILY_B.students.map((s) => () => signUpForShift(ctxOf(b.identity), famB, shiftId, s.qboId)),
+      ...kidsA.map((s) => () => signUpForShift(ctxOf(a.identity), famA, shiftId, s)),
+      ...kidsB.map((s) => () => signUpForShift(ctxOf(b.identity), famB, shiftId, s)),
     ];
     for (const [round, places] of [1, 1, 1, 2, 3].entries()) {
       // Each round on its own day: one person can't hold two places at the same time.
@@ -371,7 +393,7 @@ describe("cancelling", () => {
     const { a, mine } = await seedOwn();
     const early = new Date("2027-03-01T12:00:00Z");
     expect((await loadMyVolunteering(ctxOf(a.identity), early)).signups.map((s) => s.id)).toEqual([mine.id]);
-    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, AURELIO!.qboId));
+    await moveInCache([AURELIO!.qboId], FAMILY_B.family.qboId); // as a roster read leaves it: the app's records follow
     const view = await loadMyVolunteering(ctxOf(a.identity), early);
     expect(view.signups).toEqual([]);
     expect(JSON.stringify(view)).not.toContain(AURELIO!.name);
@@ -379,6 +401,7 @@ describe("cancelling", () => {
     expect((await live()).map((s) => s.id)).toContain(mine.id);
     // The same for a student made inactive.
     await db.update(qboCustomer).set({ parentQboId: FAMILY_A.family.qboId, active: false }).where(eq(qboCustomer.qboId, AURELIO!.qboId));
+    await syncAppRecords(); // as the roster read that saw it does
     expect((await loadMyVolunteering(ctxOf(a.identity), early)).signups).toEqual([]);
   });
 

@@ -21,6 +21,7 @@ import { checkInAction } from "@/app/(parent)/volunteer/actions";
 import { resetDb } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { TWO_FAMILY_HOURS, seedEvent, seedSignup, shiftAround } from "../helpers/volunteer";
+import { recordOfCustomer } from "../helpers/app-records";
 
 /**
  * Checking in with a shift's code (v1 spec §11.4) and the invariant the spec names for it (§12 invariant 8): a
@@ -86,8 +87,10 @@ describe("invariant 8: a check-in code credits only the signed-in family's own s
     // Pressing twice gives one credit.
     expect(await checkInAction(tonight.checkinCode, forA.id)).toEqual({ ok: true, message: "Already checked in. Thank you for helping!" });
     const made = (await credits()).filter((c) => !before.some((x) => x.id === c.id));
-    expect(made).toMatchObject([{ kind: "checkin", signupId: forA.id, familyQboId: FAMILY_A.family.qboId, minutes: 130, shifts: 1, createdByDoor: "parent", createdBy: a.identity.parentId }]);
-    expect((await audits("volunteer.checkin.create")).map((r) => r.targetId)).toEqual([made[0]!.id]);
+    // The credit names the app's own family, and so does its audit row (stage 2 of the app-owned families spec).
+    const aFamily = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    expect(made).toMatchObject([{ kind: "checkin", signupId: forA.id, familyId: aFamily, studentId: null, minutes: 130, shifts: 1, createdByDoor: "parent", createdBy: a.identity.parentId }]);
+    expect((await audits("volunteer.checkin.create")).map((r) => [r.targetId, (r.after as { familyId: string }).familyId])).toEqual([[made[0]!.id, String(aFamily)]]);
     expect(revalidatedPaths()).toContain("/");
     // B's place is untouched: B checks in for themselves.
     expect((await credits()).some((c) => c.signupId === forB.id)).toBe(false);

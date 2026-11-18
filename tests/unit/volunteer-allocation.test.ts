@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { asAppFamilyId, asAppStudentId, type AppStudentId } from "@/lib/families/ids";
+import type { SubjectId } from "@/lib/seasons/progress";
 import { allocateCredit, compareSlots, slotKey, type Credit, type CreditRequirement, type Slot } from "@/lib/volunteer/allocation";
 
 /**
@@ -6,16 +8,17 @@ import { allocateCredit, compareSlots, slotKey, type Credit, type CreditRequirem
  * states it: required before optional, per student before per family, then the earliest due date, then the season's
  * order; credits a later requirement needs least first, then in the order they were earned, each spent once, shifts whole and hours by the minute.
  */
-const FAM = "FAM", S1 = "S1", S2 = "S2";
+// The app's own family and students (stage 2 of the app-owned families spec): ids as the rule reads them.
+const FAM = asAppFamilyId("FAM"), S1 = asAppStudentId("S1"), S2 = asAppStudentId("S2");
 const req = (id: string, o: Partial<CreditRequirement> = {}): CreditRequirement => ({ id, required: true, appliesTo: "family", amount: 2, amountUnit: "shifts", dueOn: null, order: 0, ...o });
-const slot = (r: CreditRequirement, subjectQboId = r.appliesTo === "family" ? FAM : S1): Slot => ({ requirement: r, subjectQboId });
+const slot = (r: CreditRequirement, subjectId: SubjectId = r.appliesTo === "family" ? FAM : S1): Slot => ({ requirement: r, subjectId });
 let n = 0;
 /** A check-in: a shift of `minutes` linked to these requirements, filled by the guardian or a student. */
-const checkIn = (requirementIds: string[], minutes = 180, student?: string): Credit =>
-  ({ id: `c${++n}`, minutes, shifts: 1, source: { kind: "shift", requirementIds, filler: student ? { kind: "student", studentQboId: student } : { kind: "guardian" } } });
-const outside = (requirementId: string, subjectQboId: string, amount: { minutes?: number; shifts?: number }): Credit =>
-  ({ id: `o${++n}`, minutes: amount.minutes ?? 0, shifts: amount.shifts ?? 0, source: { kind: "outside", requirementId, subjectQboId } });
-const filled = (a: ReturnType<typeof allocateCredit>, r: CreditRequirement, subject = r.appliesTo === "family" ? FAM : S1) => a.filled.get(slotKey(r.id, subject));
+const checkIn = (requirementIds: string[], minutes = 180, student?: AppStudentId): Credit =>
+  ({ id: `c${++n}`, minutes, shifts: 1, source: { kind: "shift", requirementIds, filler: student ? { kind: "student", studentId: student } : { kind: "guardian" } } });
+const outside = (requirementId: string, subjectId: SubjectId, amount: { minutes?: number; shifts?: number }): Credit =>
+  ({ id: `o${++n}`, minutes: amount.minutes ?? 0, shifts: amount.shifts ?? 0, source: { kind: "outside", requirementId, subjectId } });
+const filled = (a: ReturnType<typeof allocateCredit>, r: CreditRequirement, subject: SubjectId = r.appliesTo === "family" ? FAM : S1) => a.filled.get(slotKey(r.id, subject));
 
 describe("the order requirements are filled in", () => {
   it("puts required before optional, per student before per family, then the earliest due date, none last, then the season's order", () => {
@@ -65,9 +68,9 @@ describe("how credit fills requirements", () => {
     expect(filled(a, shifts)).toBe(2);
     expect(filled(a, hours)).toBe(4);
     expect(a.given).toEqual([
-      { creditId: credits[0]!.id, requirementId: "shifts", subjectQboId: FAM, minutes: 0, shifts: 1 },
-      { creditId: credits[1]!.id, requirementId: "shifts", subjectQboId: FAM, minutes: 0, shifts: 1 },
-      { creditId: credits[2]!.id, requirementId: "hours", subjectQboId: FAM, minutes: 240, shifts: 0 },
+      { creditId: credits[0]!.id, requirementId: "shifts", subjectId: FAM, minutes: 0, shifts: 1 },
+      { creditId: credits[1]!.id, requirementId: "shifts", subjectId: FAM, minutes: 0, shifts: 1 },
+      { creditId: credits[2]!.id, requirementId: "hours", subjectId: FAM, minutes: 240, shifts: 0 },
     ]);
     // A check-in given as a shift is spent whole, minutes and all.
     expect(a.left.get(credits[1]!.id)).toEqual({ minutes: 0, shifts: 0 });

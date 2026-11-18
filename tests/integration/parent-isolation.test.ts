@@ -71,7 +71,8 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   "/volunteer": (family) => [family.spec.family.name, ...family.volunteer!.page, ...family.buyout!.page],
   // The family's own buy-out: the requirement and where it stands, A's invoiced and B's paid.
   "/volunteer/pay-instead/[requirementId]/[choice]": (family) => family.buyout!.page,
-  "/volunteer/shifts/[id]": () => ["2 of 4 places filled", "Rinse crew"],
+  // The shift, the one count every family sees, and who from the family is on it (found by the app's own records).
+  "/volunteer/shifts/[id]": (family) => ["2 of 4 places filled", "Rinse crew", ...family.volunteer!.shift],
   // The shift, the family's name, and its own person on it, checked in or not.
   "/volunteer/check-in/[code]": (family) => ["Rinse crew", family.spec.family.name, ...family.volunteer!.checkIn],
   // Every form the season asks of the family and of each student, each with its state in words.

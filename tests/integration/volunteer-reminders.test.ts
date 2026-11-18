@@ -12,11 +12,11 @@ import { db } from "@/lib/db/client";
 import { auditLog, parent, requirement, requirementProgress, setting, volunteerReminder } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { getParentSettings, putParentSettings } from "@/lib/parents/settings";
-import { REMINDER_BATCH, REMINDERS_JOB, sendVolunteerReminders } from "@/lib/volunteer/reminders";
+import { REMINDER_BATCH, REMINDERS_JOB, nudgeKey, sendVolunteerReminders } from "@/lib/volunteer/reminders";
 import { resetDb, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { seedEvent, seedOutsideCredit, seedSignup } from "../helpers/volunteer";
-import { subjectColumns } from "../helpers/app-records";
+import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 
 /**
  * The volunteer reminders the worker sends (v1 spec §11.3): the day before a shift, from 9:00 on the club's clock, to
@@ -169,6 +169,23 @@ describe("the nudges before a due date", () => {
     for (const m of to(b)) for (const name of [FAMILY_A.family.name, AZALEA!.name]) expect(m.text).not.toContain(name);
     expect(await sendVolunteerReminders(at("2027-03-10T12:00:00Z"))).toEqual({ sent: 0, failed: 0 });
     expect(await audits("volunteer.reminders.sent")).toMatchObject([{ after: { kind: "due", sent: 3, failed: 0 } }]);
+    // Each claim names the app's own family, in its column and in its key (stage 2 of the app-owned families spec).
+    const [famA, famB] = [await recordOfCustomer(FAMILY_A.family.qboId, "family"), await recordOfCustomer(FAMILY_B.family.qboId, "family")];
+    const claims = (await db.select().from(volunteerReminder)).map((c) => [c.kind, c.key, String(c.familyId)]).sort();
+    expect(claims).toEqual([
+      ["due_14", nudgeKey(famB, "2027-03-24", b.identity.parentId), String(famB)],
+      ["due_3", nudgeKey(famA, "2027-03-13", a.identity.parentId), String(famA)],
+      ["due_3", nudgeKey(famB, "2027-03-13", b.identity.parentId), String(famB)],
+    ].sort());
+  });
+
+  it("never sends a nudge again whose claim was carried over from before volunteering moved to the app's ids", async () => {
+    const { a } = await due();
+    // As migration 0027 leaves a claim already sent: its key rewritten to the app's own family.
+    const famA = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    await db.insert(volunteerReminder).values({ kind: "due_3", key: nudgeKey(famA, "2027-03-13", a.identity.parentId), familyId: famA, triedAt: at("2027-03-10T08:00:00Z"), outcome: "sent" });
+    expect(await sendVolunteerReminders(at("2027-03-10T09:30:00Z"))).toEqual({ sent: 2, failed: 0 });
+    expect(to(a)).toEqual([]);
   });
 
   it("goes only while parent sign-ins and welcome emails are both on, and not before 9:00", async () => {

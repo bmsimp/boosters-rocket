@@ -272,7 +272,7 @@ describe("shifts", () => {
   it("emails nobody about a shift that is over, saves its edits quietly, and won't cancel it", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     const { event, shifts: [over] } = await seedEvent({ onDate: dayFromNow(-3), location: "North stand", shifts: [{ startsAt: "09:00", endsAt: "12:00" }] });
-    const [signup] = await db.insert(volunteerSignup).values({ shiftId: over!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, fillerKind: "guardian", fillerParentId: a.identity.parentId, fillerName: FAMILY_A.parent.name }).returning();
+    const [signup] = await db.insert(volunteerSignup).values({ shiftId: over!.id, familyId: await recordOfCustomer(FAMILY_A.family.qboId, "family"), signedUpBy: a.identity.parentId, fillerKind: "guardian", fillerParentId: a.identity.parentId, fillerName: FAMILY_A.parent.name }).returning();
     const as = { name: event.name, onDate: event.onDate, location: "South stand", description: event.description, contactName: event.contactName, contactEmail: event.contactEmail ?? "" };
     expect(await updateEventAction(event.id, as)).toEqual({ ok: true, message: "Saved." });
     expect(await updateShiftAction(over!.id, { startsAt: "09:30", endsAt: "12:00", places: over!.places, role: "", requirementIds: [] })).toMatchObject({ ok: true });

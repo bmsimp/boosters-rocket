@@ -2,24 +2,26 @@
 // place; and nudges 14 and 3 days before a required volunteer requirement is due, to the guardians of each family that
 // hasn't met it. A few go per wake, each claimed before it is sent (volunteer_reminder), so two wakes never send the
 // same email. Each email is about the guardian's own family alone: no other family is named, and no staff note shown.
+// Families and students are the app's own records (stage 2 of the app-owned families spec), as the season's are: the
+// roster is turned into them once (loadSeasonFamilies()), and a claim names the app's family.
 import "server-only";
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { guardian, parent, requirement, season, seasonStep, volunteerEvent, volunteerReminder, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import type { AppFamilyId } from "@/lib/families/ids";
+import { studentsStillIn } from "@/lib/families/session-family";
 import { currentBrand, sendMail } from "@/lib/mail/send";
 import { volunteerDueMessage, volunteerReminderMessage, type VolunteerDueWords } from "@/lib/mail/messages";
 import { mailWorking } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
-// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
-// moves to the app's ids.
-import { everyCustomerCover, everyonesCustomerFacts } from "@/lib/seasons/everyone";
-import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
-import { loadSubjects } from "@/lib/seasons/subjects";
+import { everyCover, everyonesFacts } from "@/lib/seasons/everyone";
+import { isCovered, type SubjectId } from "@/lib/seasons/progress";
+import { toRequirement } from "@/lib/seasons/recorded";
+import { loadSeasonFamilies } from "@/lib/seasons/subjects";
 import { getClubSettings } from "@/lib/settings/club";
 import { dateWords, daysAfter, reminderDay } from "./clock";
 import { contactWords, shiftWords, volunteerLink } from "./notices";
-import { studentsStillUnder } from "./my-volunteer";
 import { whoMustWords } from "./rules";
 import { factsOf } from "./setup";
 
@@ -32,12 +34,15 @@ export const REMINDER_RETRY_MS = 15 * 60_000;
 export const NUDGES = [{ kind: "due_14" as const, days: 14 }, { kind: "due_3" as const, days: 3 }];
 const ACTOR: Actor = { door: "system", id: null, label: "volunteer reminders" };
 
+/** A due-date nudge's claim key: the app's family, the due date and the guardian (migration 0027 rewrote the older ones to this). */
+export const nudgeKey = (familyId: AppFamilyId, dueOn: string, parentId: string) => `${String(familyId)}|${dueOn}|${parentId}`;
+
 /**
  * Takes one email for sending, in one statement: it succeeds for one wake only, and again only after a failure that
  * is at least REMINDER_RETRY_MS old. A row with no outcome is a send under way.
  */
-async function claim(kind: "day_before" | "due_14" | "due_3", key: string, familyQboId: string, now: Date): Promise<string | null> {
-  const [row] = await db.insert(volunteerReminder).values({ kind, key, familyQboId, triedAt: now })
+async function claim(kind: "day_before" | "due_14" | "due_3", key: string, familyId: AppFamilyId, now: Date): Promise<string | null> {
+  const [row] = await db.insert(volunteerReminder).values({ kind, key, familyId, triedAt: now })
     .onConflictDoUpdate({ target: [volunteerReminder.kind, volunteerReminder.key], set: { triedAt: now, outcome: null },
       setWhere: sql`${volunteerReminder.outcome} = 'failed' and ${volunteerReminder.triedAt} < ${new Date(now.getTime() - REMINDER_RETRY_MS).toISOString()}::timestamptz` })
     .returning({ id: volunteerReminder.id });
@@ -60,24 +65,24 @@ async function dayBefore(tomorrow: string, now: Date): Promise<{ sent: number; f
   const rows = await db.select({ s: volunteerSignup, shift: volunteerShift, event: volunteerEvent, email: parent.email }).from(volunteerSignup)
     .innerJoin(volunteerShift, eq(volunteerShift.id, volunteerSignup.shiftId)).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
     .innerJoin(parent, eq(parent.id, volunteerSignup.signedUpBy))
-    .innerJoin(guardian, and(eq(guardian.parentId, volunteerSignup.signedUpBy), eq(guardian.familyQboId, volunteerSignup.familyQboId)))
+    .innerJoin(guardian, and(eq(guardian.parentId, volunteerSignup.signedUpBy), eq(guardian.familyId, volunteerSignup.familyId)))
     .where(and(eq(volunteerEvent.onDate, tomorrow), isNull(volunteerEvent.cancelledAt), isNull(volunteerShift.cancelledAt), isNull(volunteerSignup.cancelledAt),
       ne(guardian.status, "disabled"), eq(parent.blocked, false)))
     .orderBy(asc(volunteerShift.startsAt), asc(volunteerSignup.createdAt));
   // A student who has moved to another family, or is no longer active, takes the place out of the old family's list.
   const moved = new Set<string>();
-  for (const family of new Set(rows.filter((r) => r.s.studentQboId).map((r) => r.s.familyQboId))) {
-    const ids = rows.filter((r) => r.s.familyQboId === family && r.s.studentQboId).map((r) => r.s.studentQboId!);
-    const still = await studentsStillUnder(family, ids);
-    for (const id of ids) if (!still.has(id)) moved.add(`${family}|${id}`);
+  for (const family of new Map(rows.filter((r) => r.s.studentId).map((r) => [String(r.s.familyId), r.s.familyId])).values()) {
+    const ids = rows.filter((r) => String(r.s.familyId) === String(family) && r.s.studentId).map((r) => r.s.studentId!);
+    const still = await studentsStillIn(family, ids);
+    for (const id of ids) if (!still.has(String(id))) moved.add(`${String(family)}|${String(id)}`);
   }
-  const current = rows.filter((r) => !r.s.studentQboId || !moved.has(`${r.s.familyQboId}|${r.s.studentQboId}`));
+  const current = rows.filter((r) => !r.s.studentId || !moved.has(`${String(r.s.familyId)}|${String(r.s.studentId)}`));
   const keyOf = (r: (typeof rows)[number]) => `${r.s.id}|${r.event.onDate}`;
   const done = await taken("day_before", current.map(keyOf), now);
   let sent = 0, failed = 0;
   const brand = await currentBrand();
   for (const r of current.filter((x) => !done.has(keyOf(x))).slice(0, REMINDER_BATCH)) {
-    const id = await claim("day_before", keyOf(r), r.s.familyQboId, now);
+    const id = await claim("day_before", keyOf(r), r.s.familyId, now);
     if (!id) continue;
     const facts = factsOf(r.event, r.shift);
     const who = r.s.fillerKind === "guardian" && r.s.fillerParentId === r.s.signedUpBy ? { self: true as const } : { self: false as const, name: r.s.fillerName };
@@ -102,29 +107,30 @@ async function nudges(today: string, now: Date): Promise<{ sent: number; failed:
     .where(and(eq(season.isCurrent, true), eq(requirement.kind, "volunteer"), eq(requirement.required, true), inArray(requirement.dueOn, due.map((d) => d.dueOn))))
     .orderBy(asc(seasonStep.position), asc(requirement.position));
   if (rows.length === 0) return { sent: 0, failed: 0 };
-  const families = await loadSubjects();
+  const families = await loadSeasonFamilies();
   if (!families || families.length === 0) return { sent: 0, failed: 0 };
-  const covers = await everyCustomerCover(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id));
-  const requirements = rows.map((x) => toCustomerRequirement(x.r, covers.get(x.r.id) ?? []));
-  const { facts } = await everyonesCustomerFacts(requirements, { amounts: "none", parentId: null });
+  const covers = await everyCover(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id));
+  const requirements = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []));
+  const { facts } = await everyonesFacts(requirements, { amounts: "none", parentId: null });
   // What each family still has to do, by nudge: never another family's, and never a waiver's reason.
-  const owed: { kind: "due_14" | "due_3"; dueOn: string; days: number; familyQboId: string; items: VolunteerDueWords[] }[] = [];
+  const owed: { kind: "due_14" | "due_3"; dueOn: string; days: number; familyId: AppFamilyId; items: VolunteerDueWords[] }[] = [];
   for (const d of due) {
     const theirs = requirements.filter((r) => r.dueOn === d.dueOn);
     for (const f of families) {
       const items = theirs.flatMap((r) => {
-        const subjects = r.appliesTo === "family" ? [{ qboId: f.qboId, name: null as string | null }] : f.students.map((s) => ({ qboId: s.qboId, name: s.name as string | null }));
-        return subjects.filter((s) => isCustomerCovered(r, s.qboId) && !facts.waived(r.id, s.qboId) && !facts.standing(r, s.qboId).met)
-          .map((s) => ({ title: r.title, whoMust: whoMustWords(r, s.name), standing: facts.standing(r, s.qboId).words }));
+        const subjects: { id: SubjectId; name: string | null }[] = r.appliesTo === "family" ? [{ id: f.id, name: null }] : f.students.map((s) => ({ id: s.id, name: s.name }));
+        return subjects.filter((s) => isCovered(r, s.id) && !facts.waived(r.id, s.id) && !facts.standing(r, s.id).met)
+          .map((s) => ({ title: r.title, whoMust: whoMustWords(r, s.name), standing: facts.standing(r, s.id).words }));
       });
-      if (items.length > 0) owed.push({ kind: d.kind, dueOn: d.dueOn, days: d.days, familyQboId: f.qboId, items });
+      if (items.length > 0) owed.push({ kind: d.kind, dueOn: d.dueOn, days: d.days, familyId: f.id, items });
     }
   }
   if (owed.length === 0) return { sent: 0, failed: 0 };
-  const people = await db.select({ familyQboId: guardian.familyQboId, parentId: parent.id, email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyQboId, [...new Set(owed.map((o) => o.familyQboId))]), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
-    .orderBy(asc(guardian.familyQboId), asc(parent.createdAt), asc(parent.id));
-  const emails = owed.flatMap((o) => people.filter((p) => p.familyQboId === o.familyQboId).map((p) => ({ ...o, parentId: p.parentId, email: p.email, key: `${o.familyQboId}|${o.dueOn}|${p.parentId}` })));
+  const people = await db.select({ familyId: guardian.familyId, parentId: parent.id, email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+    .where(and(inArray(guardian.familyId, [...new Map(owed.map((o) => [String(o.familyId), o.familyId])).values()]), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+    .orderBy(asc(guardian.familyId), asc(parent.createdAt), asc(parent.id));
+  const emails = owed.flatMap((o) => people.filter((p) => String(p.familyId) === String(o.familyId))
+    .map((p) => ({ ...o, parentId: p.parentId, email: p.email, key: nudgeKey(o.familyId, o.dueOn, p.parentId) })));
   let sent = 0, failed = 0, tried = 0;
   const brand = await currentBrand();
   for (const kind of ["due_14", "due_3"] as const) {
@@ -132,7 +138,7 @@ async function nudges(today: string, now: Date): Promise<{ sent: number; failed:
     const done = await taken(kind, mine.map((e) => e.key), now);
     for (const e of mine.filter((x) => !done.has(x.key))) {
       if (tried >= REMINDER_BATCH) break;
-      const id = await claim(kind, e.key, e.familyQboId, now);
+      const id = await claim(kind, e.key, e.familyId, now);
       if (!id) continue;
       tried++;
       const out = await sendMail(volunteerDueMessage(brand, e.email, { dueWords: dateWords(e.dueOn), daysLeft: e.days, items: e.items, link: volunteerLink() }), { purpose: "volunteer_reminder", actor: ACTOR });

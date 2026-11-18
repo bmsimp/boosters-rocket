@@ -5,8 +5,8 @@ import { isUuid } from "@/lib/seasons/ids";
 import { addMissedCheckIn, addOutsideCredit, NOTE_MAX, REASON_MAX, removeCredit, type OutsideInput } from "@/lib/volunteer/staff-credit";
 
 // Correcting volunteer credit (v1 spec §11.4) needs Volunteer.Credit.ReadWrite. Each id a page sends (a sign-up, a
-// credit, a family, a student, a requirement) is checked again in the library, under the roster lock, against the
-// roster tag the page was shown; a value no page sends gets one plain refusal.
+// credit, a family or a student by the app's own id, a requirement) is checked again in the library, under the roster
+// lock, against the roster tag the page was shown; a value no page sends gets one plain refusal.
 const CREDIT = "Volunteer.Credit.ReadWrite" as const;
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: CREDIT });
@@ -14,7 +14,6 @@ const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffU
 const refresh = () => revalidatePath("/", "layout");
 const NOT_FROM_PAGE: Done = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const tag = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(v);
-const qboId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 64;
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
 
 export const addCheckInAction = staffAction(CREDIT, async (ctx, signupId: string, rosterTag: string): Promise<Done> => {
@@ -33,17 +32,18 @@ export const removeCreditAction = staffAction(CREDIT, async (ctx, creditId: stri
   return { ok: true, message: "Removed. It no longer counts toward anything." };
 });
 
-type OutsideFields = Omit<OutsideInput, "familyQboId">;
+type OutsideFields = Omit<OutsideInput, "familyId">;
 const outsideFields = (v: unknown): v is OutsideFields => {
   if (typeof v !== "object" || v === null) return false;
   const f = v as Record<string, unknown>;
-  return isUuid(f.requirementId) && qboId(f.who) && str(f.amount, 12) && str(f.note, NOTE_MAX * 2);
+  // Who did it: "family", or one of the family's students by the app's own id.
+  return isUuid(f.requirementId) && (f.who === "family" || isUuid(f.who)) && str(f.amount, 12) && str(f.note, NOTE_MAX * 2);
 };
 
-export const addOutsideCreditAction = staffAction(CREDIT, async (ctx, rosterTag: string, familyQboId: string, fields: OutsideFields): Promise<Done> => {
-  if (!tag(rosterTag) || !qboId(familyQboId) || !outsideFields(fields)) return NOT_FROM_PAGE;
+export const addOutsideCreditAction = staffAction(CREDIT, async (ctx, rosterTag: string, familyId: string, fields: OutsideFields): Promise<Done> => {
+  if (!tag(rosterTag) || !isUuid(familyId) || !outsideFields(fields)) return NOT_FROM_PAGE;
   // Only the fields named here go on: an object from the browser can carry anything else.
-  const r = await addOutsideCredit({ familyQboId, requirementId: fields.requirementId, who: fields.who, amount: fields.amount, note: fields.note }, rosterTag, op(ctx));
+  const r = await addOutsideCredit({ familyId, requirementId: fields.requirementId, who: fields.who, amount: fields.amount, note: fields.note }, rosterTag, op(ctx));
   if (!r.ok) return r;
   refresh();
   return { ok: true, message: "Credited. The family sees it as added by the club; only staff see the note." };

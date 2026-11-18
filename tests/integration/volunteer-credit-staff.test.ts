@@ -28,12 +28,15 @@ import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { TWO_FAMILY_HOURS, seedCheckIn, seedEvent, seedSignup, shiftAround } from "../helpers/volunteer";
+import { recordOfCustomer } from "../helpers/app-records";
 
 /**
  * The staff side of check-in and credit (v1 spec §11.4): each shift's check-in sheet, a missed check-in added or one
  * removed, one person's sign-up removed, a family's credit and volunteering done outside the portal. For every page
  * and action: the guard and its permission, each id checked under the roster lock, and the audit row with before and
- * after. Notes and reasons are for staff: a parent reads "Added by the club" and nothing more.
+ * after. Notes and reasons are for staff: a parent reads "Added by the club" and nothing more. Sign-ups and credit name
+ * the app's own families and students (stage 2 of the app-owned families spec), and so do the pages' forms and new
+ * audit rows; a family's page keeps its address by QuickBooks id.
  */
 type Staff = Awaited<ReturnType<typeof seedStaff>>;
 const BROWSER = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
@@ -44,6 +47,10 @@ const audits = async (action?: string) => (await db.select().from(auditLog).orde
 const credits = () => db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.createdAt));
 const live = async () => (await credits()).filter((c) => c.removedAt === null);
 const [AURELIO] = FAMILY_A.students;
+/** The app's own records of the fixtures, as sign-ups, credit and the pages' forms name them. */
+const familyOf = (qboId: string) => recordOfCustomer(qboId, "family");
+const studentOf = (qboId: string) => recordOfCustomer(qboId, "student");
+const idOf = async (record: Promise<unknown>) => String(await record);
 
 const withRole = async (email: string, name: string, patterns: string[]): Promise<Staff> => {
   const s = await seedStaff({ email, name });
@@ -70,9 +77,10 @@ const shared = async () => {
   const { a, b } = await seedTwoFamilies();
   const [shift] = await db.select().from(volunteerShift).where(eq(volunteerShift.id, a.volunteer!.shiftId));
   const signups = await db.select().from(volunteerSignup).where(eq(volunteerSignup.shiftId, shift!.id));
-  const forA = signups.find((s) => s.familyQboId === FAMILY_A.family.qboId)!, forB = signups.find((s) => s.familyQboId === FAMILY_B.family.qboId)!;
+  const [famA, famB] = [await idOf(familyOf(FAMILY_A.family.qboId)), await idOf(familyOf(FAMILY_B.family.qboId))];
+  const forA = signups.find((s) => String(s.familyId) === famA)!, forB = signups.find((s) => String(s.familyId) === famB)!;
   const [hours] = await db.select().from(requirement).where(eq(requirement.title, TWO_FAMILY_HOURS));
-  return { a, b, shift: shift!, eventId: shift!.eventId, forA, forB, hours: hours!, tag: await currentRosterTag() };
+  return { a, b, shift: shift!, eventId: shift!.eventId, forA, forB, famA, famB, hours: hours!, tag: await currentRosterTag() };
 };
 /** A shift of a new event that started 10 minutes ago, with A's parent signed up. */
 const startedShift = async (a: SeededParent, requirementIds: string[] = []) => {
@@ -89,10 +97,10 @@ describe("the credit permission, pages and actions", () => {
   });
 
   it("refuses each page and action to staff without its permission, and to a parent, and changes nothing", async () => {
-    const { a, shift, forB, hours, tag } = await shared();
+    const { a, shift, forB, famA, hours, tag } = await shared();
     const [credit] = await live();
     const creditActions = [() => addCheckInAction(forB.id, tag), () => removeCreditAction(credit!.id, tag, "Mistake"),
-      () => addOutsideCreditAction(tag, FAMILY_A.family.qboId, { requirementId: hours.id, who: "family", amount: "1", note: "Raked leaves" })];
+      () => addOutsideCreditAction(tag, famA, { requirementId: hours.id, who: "family", amount: "1", note: "Raked leaves" })];
     const eventActions = [() => renewCheckInCodeAction(shift.id), () => removeSignupAction(forB.id)];
     const creditPages = [() => pageOutcome(CreditPage), () => pageOutcome(FamilyCreditPage, { params: { familyId: FAMILY_A.family.qboId } })];
     const sheet = () => pageOutcome(CheckInSheetPage, { params: { shiftId: shift.id } });
@@ -118,10 +126,13 @@ describe("the credit permission, pages and actions", () => {
   });
 
   it("refuses anything a page could not send", async () => {
-    const { forB, hours, tag } = await shared();
+    const { forB, famA, hours, tag } = await shared();
     for (const r of [await addCheckInAction("nope", tag), await addCheckInAction(forB.id, "bad tag!"), await removeCreditAction("nope", tag, "x"), await removeCreditAction(NO_SUCH, tag, 7 as never),
-      await addOutsideCreditAction(tag, FAMILY_A.family.qboId, null as never), await addOutsideCreditAction(tag, 12 as never, { requirementId: hours.id, who: "family", amount: "1", note: "n" }),
-      await addOutsideCreditAction(tag, FAMILY_A.family.qboId, { requirementId: "nope", who: "family", amount: "1", note: "n" }),
+      await addOutsideCreditAction(tag, famA, null as never), await addOutsideCreditAction(tag, 12 as never, { requirementId: hours.id, who: "family", amount: "1", note: "n" }),
+      await addOutsideCreditAction(tag, famA, { requirementId: "nope", who: "family", amount: "1", note: "n" }),
+      // A family or student by QuickBooks id is not what the page sends: it sends the app's own ids.
+      await addOutsideCreditAction(tag, FAMILY_A.family.qboId, { requirementId: hours.id, who: "family", amount: "1", note: "n" }),
+      await addOutsideCreditAction(tag, famA, { requirementId: hours.id, who: AURELIO!.qboId, amount: "1", note: "n" }),
       await renewCheckInCodeAction("nope"), await removeSignupAction("nope")]) expect(r).toEqual(BROWSER);
   });
 });
@@ -175,8 +186,9 @@ describe("check-ins on a shift's sign-up list", () => {
     expect(await addCheckInAction(signup.id, tag)).toEqual({ ok: true, message: "Checked in. It counts as if they had checked in themselves." });
     expect(await addCheckInAction(signup.id, tag)).toEqual({ ok: false, errors: ["This person is checked in already."] });
     const made = (await live()).find((c) => c.signupId === signup.id)!;
-    expect(made).toMatchObject({ kind: "staff_checkin", familyQboId: FAMILY_A.family.qboId, minutes: 130, shifts: 1, createdByDoor: "staff", createdBy: writer.id });
-    expect((await audits("volunteer.checkin.add"))[0]).toMatchObject({ permission: "Volunteer.Credit.ReadWrite", targetId: made.id, before: { checkedIn: false }, after: { signupId: signup.id, event: "Tonight's concessions" } });
+    expect(made).toMatchObject({ kind: "staff_checkin", familyId: await familyOf(FAMILY_A.family.qboId), minutes: 130, shifts: 1, createdByDoor: "staff", createdBy: writer.id });
+    expect((await audits("volunteer.checkin.add"))[0]).toMatchObject({ permission: "Volunteer.Credit.ReadWrite", targetId: made.id, before: { checkedIn: false },
+      after: { signupId: signup.id, familyId: await idOf(familyOf(FAMILY_A.family.qboId)), event: "Tonight's concessions" } });
     expect(textOf(await renderPage(VolunteerEventPage, { params: { id: event.id } }))).toContain("Checked in (added by Wren Writer)");
     // The family reads it as a check-in like any other.
     asParent(a.identity);
@@ -208,15 +220,15 @@ describe("check-ins on a shift's sign-up list", () => {
   });
 
   it("refuses a correction from a page that was shown another company's roster", async () => {
-    const { a, forA } = await shared();
+    const { a, forA, famA } = await shared();
+    const { signup } = await startedShift(a);
     await db.transaction((tx) => setRosterSource(tx, "1111"));
     const shown = await currentRosterTag();
     await db.transaction((tx) => setRosterSource(tx, "2222"));
-    const { signup } = await startedShift(a);
     const credit = (await live()).find((c) => c.signupId === forA.id)!;
     const before = JSON.stringify(await credits());
     for (const r of [await addCheckInAction(signup.id, shown), await removeCreditAction(credit.id, shown, "Mistake"),
-      await addOutsideCreditAction(shown, FAMILY_A.family.qboId, { requirementId: (await db.select().from(requirement).where(eq(requirement.title, TWO_FAMILY_HOURS)))[0]!.id, who: "family", amount: "1", note: "Raked leaves" })]) {
+      await addOutsideCreditAction(shown, famA, { requirementId: (await db.select().from(requirement).where(eq(requirement.title, TWO_FAMILY_HOURS)))[0]!.id, who: "family", amount: "1", note: "Raked leaves" })]) {
       expect(r).toEqual({ ok: false, errors: [ROSTER_MOVED] });
     }
     expect(JSON.stringify(await credits())).toBe(before);
@@ -234,7 +246,7 @@ describe("removing one person's sign-up", () => {
     expect(row).toMatchObject({ cancelledByDoor: "staff", cancelledBy: writer.id });
     expect(row!.cancelledAt).not.toBeNull();
     expect((await audits("volunteer.signup.remove"))[0]).toMatchObject({ permission: "Volunteer.Event.ReadWrite", targetId: forB.id,
-      before: { familyQboId: FAMILY_B.family.qboId, fillerName: FAMILY_B.parent.name, removed: false }, after: { removed: true, guardianTold: true } });
+      before: { familyId: await idOf(familyOf(FAMILY_B.family.qboId)), fillerName: FAMILY_B.parent.name, removed: false }, after: { removed: true, guardianTold: true } });
     expect(mail.outbox.map((m) => [m.to, m.subject])).toEqual([[FAMILY_B.parent.email, "Your place has been freed: Marching band car wash"]]);
     const [m] = mail.outbox;
     expect(m!.text).toContain("The club has taken your place off a shift at Marching band car wash (Rinse crew), so you don't need to come.");
@@ -249,11 +261,12 @@ describe("removing one person's sign-up", () => {
 
 describe("a family's credit page", () => {
   it("is audited before it shows anything, shows each credit with its note and where it is spent, and answers 404 for a family the roster doesn't show", async () => {
-    const { b } = await shared();
-    for (const familyId of ["no-such-family", "x".repeat(65)]) expect(await pageOutcome(FamilyCreditPage, { params: { familyId } })).toEqual({ notFound: true });
+    const { b, famB } = await shared();
+    for (const familyId of ["no-such-family", "x".repeat(65), famB]) expect(await pageOutcome(FamilyCreditPage, { params: { familyId } })).toEqual({ notFound: true });
     expect(await audits("volunteer.credit.family.read")).toEqual([]);
     const page = textOf(await renderPage(FamilyCreditPage, { params: { familyId: FAMILY_B.family.qboId } }));
-    expect(await audits("volunteer.credit.family.read")).toMatchObject([{ actorId: writer.id, permission: "Volunteer.Credit.ReadWrite", targetType: "family", targetId: FAMILY_B.family.qboId }]);
+    // The page's address names the family by its QuickBooks id; the audit row names the app's own family.
+    expect(await audits("volunteer.credit.family.read")).toMatchObject([{ actorId: writer.id, permission: "Volunteer.Credit.ReadWrite", targetType: "family", targetId: famB }]);
     expect(page).toContain(FAMILY_B.family.name);
     expect(page).toContain(`Done outside the portal: ${TWO_FAMILY_HOURS}`);
     expect(page).toContain(`Note (staff only): ${b.volunteer!.staffOnly[0]}`);
@@ -266,27 +279,32 @@ describe("a family's credit page", () => {
   });
 
   it("credits volunteering done outside the portal: the requirement, who did it, the amount in its unit and a note, each checked", async () => {
-    const { a, b, hours, tag } = await shared();
-    const add = (f: Partial<{ familyQboId: string; requirementId: string; who: string; amount: string; note: string }>) =>
-      addOutsideCreditAction(tag, f.familyQboId ?? FAMILY_A.family.qboId, { requirementId: f.requirementId ?? hours.id, who: f.who ?? "family", amount: f.amount ?? "1.5", note: f.note ?? "Painted the set" });
+    const { a, b, famA, famB, hours, tag } = await shared();
+    const add = (f: Partial<{ familyId: string; requirementId: string; who: string; amount: string; note: string }>) =>
+      addOutsideCreditAction(tag, f.familyId ?? famA, { requirementId: f.requirementId ?? hours.id, who: f.who ?? "family", amount: f.amount ?? "1.5", note: f.note ?? "Painted the set" });
     // A per-student requirement in shifts, asked of every student.
     const spring = await seedSeason({ name: "Spring", current: false, steps: [{ name: "Help" }] });
     const [own] = await db.insert(requirement).values({ stepId: spring.stepIds.Help!, kind: "volunteer", title: "Own shifts", appliesTo: "student", amount: 2, amountUnit: "shifts", position: 0 }).returning();
     const ownId = own!.id;
     const checklist = (await db.select().from(requirement).where(eq(requirement.kind, "checklist")))[0]!;
+    const [aurelio, barnaby] = [await idOf(studentOf(AURELIO!.qboId)), await idOf(studentOf(FAMILY_B.students[0]!.qboId))];
     const refusals: [Parameters<typeof add>[0], string][] = [
       [{ note: "  " }, "Add a note saying what was done. Only staff see it."],
-      [{ familyQboId: "no-such-family" }, "That family isn't on the roster now. Reload the page."],
+      [{ familyId: NO_SUCH }, "That family isn't on the roster now. Reload the page."],
+      // A student's record named as the family.
+      [{ familyId: aurelio }, "That family isn't on the roster now. Reload the page."],
       [{ requirementId: checklist.id }, "That requirement isn't there any more, or isn't a volunteering one. Reload the page."],
       [{ requirementId: NO_SUCH }, "That requirement isn't there any more, or isn't a volunteering one. Reload the page."],
-      [{ who: AURELIO!.qboId }, "Choose who did it."],
+      [{ who: aurelio }, "Choose who did it."],
       [{ requirementId: ownId, who: "family", amount: "1" }, "Choose which of the family's students did it."],
       // A student of the other family, named on family A's page.
-      [{ requirementId: ownId, who: FAMILY_B.students[0]!.qboId, amount: "1" }, "Choose which of the family's students did it."],
+      [{ requirementId: ownId, who: barnaby, amount: "1" }, "Choose which of the family's students did it."],
+      // Family B's own record named as the student.
+      [{ requirementId: ownId, who: famB, amount: "1" }, "Choose which of the family's students did it."],
       [{ amount: "0" }, "Enter the hours as a number more than 0 and up to 200, such as 2 or 1.5."],
       [{ amount: "1.255" }, "Enter the hours as a number more than 0 and up to 200, such as 2 or 1.5."],
       [{ amount: "two" }, "Enter the hours as a number more than 0 and up to 200, such as 2 or 1.5."],
-      [{ requirementId: ownId, who: AURELIO!.qboId, amount: "1.5" }, "Enter a whole number of shifts, from 1 to 50."],
+      [{ requirementId: ownId, who: aurelio, amount: "1.5" }, "Enter a whole number of shifts, from 1 to 50."],
     ];
     for (const [f, error] of refusals) expect(await add(f!), JSON.stringify(f)).toEqual({ ok: false, errors: [error] });
     // A chosen list that doesn't name the family.
@@ -295,13 +313,13 @@ describe("a family's credit page", () => {
     await db.update(requirement).set({ covers: "everyone" }).where(eq(requirement.id, hours.id));
     const before = await credits();
     expect(await add({ amount: " 1.5 ", note: " Painted the set  for the show " })).toEqual({ ok: true, message: "Credited. The family sees it as added by the club; only staff see the note." });
-    expect(await add({ requirementId: ownId, who: AURELIO!.qboId, amount: "2" })).toMatchObject({ ok: true });
+    expect(await add({ requirementId: ownId, who: aurelio, amount: "2" })).toMatchObject({ ok: true });
     const made = (await credits()).filter((c) => !before.some((x) => x.id === c.id));
-    expect(made).toMatchObject([
-      { kind: "outside", familyQboId: FAMILY_A.family.qboId, studentQboId: null, requirementId: hours.id, minutes: 90, shifts: 0, note: "Painted the set for the show", createdByDoor: "staff", createdBy: writer.id },
-      { kind: "outside", familyQboId: FAMILY_A.family.qboId, studentQboId: AURELIO!.qboId, requirementId: ownId, minutes: 0, shifts: 2 },
+    expect(made.map((c) => ({ ...c, familyId: String(c.familyId), studentId: c.studentId === null ? null : String(c.studentId) }))).toMatchObject([
+      { kind: "outside", familyId: famA, studentId: null, requirementId: hours.id, minutes: 90, shifts: 0, note: "Painted the set for the show", createdByDoor: "staff", createdBy: writer.id },
+      { kind: "outside", familyId: famA, studentId: aurelio, requirementId: ownId, minutes: 0, shifts: 2 },
     ]);
-    expect((await audits("volunteer.credit.outside.add"))[0]).toMatchObject({ before: null, after: { requirement: TWO_FAMILY_HOURS, who: FAMILY_A.family.name, minutes: 90, note: "Painted the set for the show" } });
+    expect((await audits("volunteer.credit.outside.add"))[0]).toMatchObject({ before: null, after: { familyId: famA, studentId: null, requirement: TWO_FAMILY_HOURS, who: FAMILY_A.family.name, minutes: 90, note: "Painted the set for the show" } });
     // The family reads "Added by the club" and the amount, never the note; the other family reads nothing of it.
     asParent(a.identity);
     const page = textOf(await renderPage(VolunteerPage));
@@ -329,7 +347,7 @@ describe("a different QuickBooks company", () => {
   it("clears every credit and reminder claim with the sign-ups, removed ones too, and counts them in its audit row", async () => {
     const { b, forB } = await shared();
     await seedCheckIn({ signupId: forB.id, familyQboId: FAMILY_B.family.qboId, by: b.identity.parentId, removed: { by: writer.id, reason: "Mistake" } });
-    await db.insert(volunteerReminder).values({ kind: "day_before", key: `${forB.id}|2027-01-01`, familyQboId: FAMILY_B.family.qboId, triedAt: new Date(), outcome: "sent" });
+    await db.insert(volunteerReminder).values({ kind: "day_before", key: `${forB.id}|2027-01-01`, familyId: await familyOf(FAMILY_B.family.qboId), triedAt: new Date(), outcome: "sent" });
     const codes = (await db.select().from(volunteerShift)).map((s) => s.checkinCode);
     await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: { door: "staff", id: null, label: "admin" }, ip: null })).toBe(true);
@@ -361,8 +379,10 @@ describe("a student moved to another family (for the roster writes slice)", () =
     expect(mail.outbox.map((m) => [m.to, m.subject])).toEqual([[FAMILY_A.parent.email, "Your place has been freed: Spring fling"]]);
     expect(mail.outbox[0]!.text).toContain(`${AURELIO!.name}'s place on a shift at Spring fling (Concessions) has been freed, because ${AURELIO!.name} is no longer listed with your family in the club's records.`);
     expect(mail.outbox[0]!.text).not.toContain(FAMILY_B.family.name);
-    expect((await audits("volunteer.signup.moved"))[0]).toMatchObject({ targetId: AURELIO!.qboId, before: { familyQboId: FAMILY_A.family.qboId }, after: { familyQboId: FAMILY_B.family.qboId, cancelled: 1, guardiansTold: 1 } });
-    expect((await live()).find((c) => c.signupId === forA.id)).toMatchObject({ familyQboId: FAMILY_A.family.qboId });
+    // The move comes by QuickBooks ids, as the roster has it; the new audit row names the app's own records.
+    expect((await audits("volunteer.signup.moved"))[0]).toMatchObject({ targetType: "student", targetId: await idOf(studentOf(AURELIO!.qboId)),
+      before: { familyId: await idOf(familyOf(FAMILY_A.family.qboId)) }, after: { familyId: await idOf(familyOf(FAMILY_B.family.qboId)), cancelled: 1, guardiansTold: 1 } });
+    expect((await live()).find((c) => c.signupId === forA.id)).toMatchObject({ familyId: await familyOf(FAMILY_A.family.qboId) });
     // Nothing to give up the second time.
     expect((await db.transaction((tx) => volunteerForMovedStudent(tx, { studentQboId: AURELIO!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }))).cancelled).toBe(0);
   });

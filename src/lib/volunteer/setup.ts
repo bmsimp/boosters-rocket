@@ -4,8 +4,9 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { guardian, parent, qboCustomer, requirement, season, seasonStep, staffUser, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import { family, guardian, parent, requirement, season, seasonStep, staffUser, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { recordNameWords } from "@/lib/families/words";
 import { isCalendarDate } from "@/lib/seasons/progress";
 import { clubToday, getClubSettings } from "@/lib/settings/club";
 import { normalizeEmail } from "@/lib/email";
@@ -43,7 +44,8 @@ export async function listEvents(): Promise<{ upcoming: EventSummary[]; past: Ev
 
 /** A sign-up's live check-in, when it has one: by the guardian with the code, or added by staff (with who). */
 export type StaffCheckIn = { creditId: string; kind: "checkin" | "staff_checkin"; at: string; byStaff: string | null };
-export type StaffSignup = { id: string; fillerName: string; fillerKind: "guardian" | "student"; familyName: string; familyQboId: string; signedUpByName: string; signedUpAt: string; checkIn: StaffCheckIn | null };
+/** `familyId` is the app's own family the place was taken from; its name is the record's while the family is active. */
+export type StaffSignup = { id: string; fillerName: string; fillerKind: "guardian" | "student"; familyName: string; familyId: string; signedUpByName: string; signedUpAt: string; checkIn: StaffCheckIn | null };
 export type StaffShift = {
   id: string; startsAt: string; endsAt: string; minutes: number; places: number; role: string | null; cancelled: boolean;
   /** Its start or end has passed by the club's clock: a missed check-in can be added once it has started. */
@@ -68,8 +70,8 @@ export async function getEventSetup(eventId: string, now: Date = new Date()): Pr
   const ids = shifts.map((s) => s.id);
   const [links, signups, credits] = ids.length === 0 ? [[], [], []] : await Promise.all([
     db.select().from(volunteerShiftRequirement).where(inArray(volunteerShiftRequirement.shiftId, ids)),
-    db.select({ s: volunteerSignup, familyName: qboCustomer.displayName, signerName: parent.name }).from(volunteerSignup)
-      .leftJoin(qboCustomer, eq(qboCustomer.qboId, volunteerSignup.familyQboId))
+    db.select({ s: volunteerSignup, familyName: family.name, familyActive: family.active, signerName: parent.name }).from(volunteerSignup)
+      .leftJoin(family, eq(family.id, volunteerSignup.familyId))
       .leftJoin(parent, eq(parent.id, volunteerSignup.signedUpBy))
       .where(and(inArray(volunteerSignup.shiftId, ids), isNull(volunteerSignup.cancelledAt))).orderBy(asc(volunteerSignup.createdAt)),
     db.select({ c: volunteerCredit, staffName: staffUser.name }).from(volunteerCredit).innerJoin(volunteerSignup, eq(volunteerSignup.id, volunteerCredit.signupId))
@@ -90,8 +92,9 @@ export async function getEventSetup(eventId: string, now: Date = new Date()): Pr
         id: s.id, startsAt: clockOf(s.startsAt), endsAt: clockOf(s.endsAt), minutes: shiftMinutes(when),
         places: s.places, role: s.role, cancelled: s.cancelledAt !== null, started: when.start.getTime() <= now.getTime(), ended: when.end.getTime() <= now.getTime(),
         requirementIds: links.filter((l) => l.shiftId === s.id).map((l) => l.requirementId),
-        signups: signups.filter((x) => x.s.shiftId === s.id).map((x) => ({ id: x.s.id, fillerName: x.s.fillerName, fillerKind: x.s.fillerKind, familyQboId: x.s.familyQboId,
-          familyName: x.familyName ?? "A family no longer on the roster", signedUpByName: x.signerName ?? "A parent no longer in the portal", signedUpAt: x.s.createdAt.toISOString(),
+        // A family no longer on the roster keeps its record, inactive: staff read it as gone, as before.
+        signups: signups.filter((x) => x.s.shiftId === s.id).map((x) => ({ id: x.s.id, fillerName: x.s.fillerName, fillerKind: x.s.fillerKind, familyId: String(x.s.familyId),
+          familyName: x.familyActive ? recordNameWords(x.familyName ?? null, "family") : "A family no longer on the roster", signedUpByName: x.signerName ?? "A parent no longer in the portal", signedUpAt: x.s.createdAt.toISOString(),
           checkIn: checkInOf(x.s.id) })),
       };
     }),
@@ -180,7 +183,8 @@ export async function signupsOn(shiftIds: string[], tx: Tx): Promise<(SignupFact
   const rows = await tx.select({ id: volunteerSignup.id, shiftId: volunteerSignup.shiftId, fillerKind: volunteerSignup.fillerKind, fillerName: volunteerSignup.fillerName,
     fillerParentId: volunteerSignup.fillerParentId, signedUpBy: volunteerSignup.signedUpBy, email: parent.email })
     .from(volunteerSignup).innerJoin(parent, eq(parent.id, volunteerSignup.signedUpBy))
-    .innerJoin(guardian, and(eq(guardian.parentId, volunteerSignup.signedUpBy), eq(guardian.familyQboId, volunteerSignup.familyQboId)))
+    // The guardian's membership of the place's own family (guardian.family_id: the app's family each row is in).
+    .innerJoin(guardian, and(eq(guardian.parentId, volunteerSignup.signedUpBy), eq(guardian.familyId, volunteerSignup.familyId)))
     .where(and(inArray(volunteerSignup.shiftId, shiftIds), isNull(volunteerSignup.cancelledAt), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
   return rows.map((r) => ({ shiftId: r.shiftId, signupId: r.id, to: r.email,
     who: r.fillerKind === "guardian" && r.fillerParentId === r.signedUpBy ? { self: true as const } : { self: false as const, name: r.fillerName } }));

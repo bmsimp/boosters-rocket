@@ -689,19 +689,21 @@ export const volunteerShiftRequirement = pgTable("volunteer_shift_requirement", 
 }, (t) => [uniqueIndex("volunteer_shift_requirement_uq").on(t.shiftId, t.requirementId), index("volunteer_shift_requirement_requirement_ix").on(t.requirementId)]);
 
 /**
- * One place on a shift, taken by a guardian for themselves or for one of their students (v1 spec §11.2). The family
- * and the student are QuickBooks ids of the connected company: a company change deletes every row. `signed_up_by` is
- * the guardian who took it (parent.id), and `filler_name` the name of whoever fills it, as it was then. A cancelled
+ * One place on a shift, taken by a guardian for themselves or for one of their students (v1 spec §11.2). `family_id`
+ * is the app's own family it was taken from, and `student_id` the app's own student who fills it (stage 2 of the
+ * app-owned families spec; migrations 0026 and 0027): a place belongs to that family only while its student is still
+ * active and in it (src/lib/volunteer/my-volunteer.ts), so one whose student moved is nobody's. `signed_up_by` is the
+ * guardian who took it (parent.id), and `filler_name` the name of whoever fills it, as it was then. A cancelled
  * sign-up keeps its row and frees its place. One person holds one place on a shift at most.
  */
 export const volunteerSignup = pgTable("volunteer_signup", {
   id: uuid("id").primaryKey().defaultRandom(),
   shiftId: uuid("shift_id").notNull().references(() => volunteerShift.id, { onDelete: "restrict" }),
-  familyQboId: text("family_qbo_id").notNull(),
+  familyId: uuid("family_id").notNull().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   signedUpBy: uuid("signed_up_by").notNull(),          // parent.id
   fillerKind: text("filler_kind", { enum: ["guardian", "student"] }).notNull(),
   fillerParentId: uuid("filler_parent_id"),            // parent.id, when a guardian fills it
-  studentQboId: text("student_qbo_id"),                // when a student fills it
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // when a student fills it
   fillerName: text("filler_name").notNull(),
   cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
   cancelledByDoor: text("cancelled_by_door", { enum: ["parent", "staff"] }),
@@ -709,11 +711,11 @@ export const volunteerSignup = pgTable("volunteer_signup", {
   createdAt: created(),
 }, (t) => [
   index("volunteer_signup_shift_ix").on(t.shiftId),
-  index("volunteer_signup_family_ix").on(t.familyQboId),
-  index("volunteer_signup_student_ix").on(t.studentQboId),
+  index("volunteer_signup_family_id_ix").on(t.familyId),
+  index("volunteer_signup_student_id_ix").on(t.studentId),
   uniqueIndex("volunteer_signup_guardian_uq").on(t.shiftId, t.fillerParentId).where(sql`cancelled_at is null and filler_kind = 'guardian'`),
-  uniqueIndex("volunteer_signup_student_uq").on(t.shiftId, t.studentQboId).where(sql`cancelled_at is null and filler_kind = 'student'`),
-  check("volunteer_signup_filler", sql`(${t.fillerKind} = 'guardian' and ${t.fillerParentId} is not null and ${t.studentQboId} is null) or (${t.fillerKind} = 'student' and ${t.studentQboId} is not null and ${t.fillerParentId} is null)`),
+  uniqueIndex("volunteer_signup_student_id_uq").on(t.shiftId, t.studentId).where(sql`cancelled_at is null and filler_kind = 'student'`),
+  check("volunteer_signup_filler_record", sql`(${t.fillerKind} = 'guardian' and ${t.fillerParentId} is not null and ${t.studentId} is null) or (${t.fillerKind} = 'student' and ${t.studentId} is not null and ${t.fillerParentId} is null)`),
 ]);
 
 /**
@@ -724,14 +726,15 @@ export const volunteerSignup = pgTable("volunteer_signup", {
  * toward, and the amount in that requirement's unit (`minutes` for hours, `shifts` for shifts); its `note` is for staff
  * only. How credit fills requirements is src/lib/volunteer/allocation.ts. A removed credit keeps its row, with who and
  * why (the reason is for staff only), and counts for nothing. A sign-up holds one live credit at most. The family and
- * the student are QuickBooks ids of the connected company: a company change deletes every row.
+ * the student are the app's own records (migrations 0026 and 0027): credit stays with the family it was earned for.
  */
 export const volunteerCredit = pgTable("volunteer_credit", {
   id: uuid("id").primaryKey().defaultRandom(),
   kind: text("kind", { enum: ["checkin", "staff_checkin", "outside"] }).notNull(),
   signupId: uuid("signup_id").references(() => volunteerSignup.id, { onDelete: "restrict" }),
-  familyQboId: text("family_qbo_id").notNull(),
-  studentQboId: text("student_qbo_id"),                // outside credit for one student; a check-in's filler is its sign-up's
+  familyId: uuid("family_id").notNull().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
+  // Outside credit for one student; a check-in's filler is its sign-up's.
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(),
   requirementId: uuid("requirement_id").references(() => requirement.id, { onDelete: "cascade" }),
   minutes: integer("minutes").notNull(),
   shifts: integer("shifts").notNull(),
@@ -743,28 +746,29 @@ export const volunteerCredit = pgTable("volunteer_credit", {
   removedReason: text("removed_reason"),               // staff only
   createdAt: created(),
 }, (t) => [
-  index("volunteer_credit_family_ix").on(t.familyQboId),
+  index("volunteer_credit_family_id_ix").on(t.familyId),
+  index("volunteer_credit_student_id_ix").on(t.studentId),
   uniqueIndex("volunteer_credit_signup_uq").on(t.signupId).where(sql`removed_at is null`),
-  check("volunteer_credit_source", sql`(${t.kind} in ('checkin', 'staff_checkin') and ${t.signupId} is not null and ${t.requirementId} is null and ${t.studentQboId} is null) or (${t.kind} = 'outside' and ${t.signupId} is null and ${t.requirementId} is not null)`),
+  check("volunteer_credit_source_record", sql`(${t.kind} in ('checkin', 'staff_checkin') and ${t.signupId} is not null and ${t.requirementId} is null and ${t.studentId} is null) or (${t.kind} = 'outside' and ${t.signupId} is null and ${t.requirementId} is not null)`),
   check("volunteer_credit_amount", sql`${t.minutes} >= 0 and ${t.shifts} >= 0 and ${t.minutes} + ${t.shifts} > 0`),
 ]);
 
 /**
  * The volunteer reminders the worker sends (v1 spec §11.3), one row per email, claimed before it is sent so two
  * wakes never send it twice: the day-before reminder of one sign-up (`key` is the sign-up and the shift's date), and a
- * due-date nudge to one guardian of one family (`key` is the family, the due date, the guardian and which nudge).
- * `outcome` is null while the send is under way; a failed one may be claimed again after a while. The family is a
- * QuickBooks id of the connected company: a company change deletes every row.
+ * due-date nudge to one guardian of one family (`key` is the app's family, the due date and the guardian; `kind` says
+ * which nudge). `outcome` is null while the send is under way; a failed one may be claimed again after a while. The
+ * family is the app's own record (migrations 0026 and 0027, which carried every claim over with its key rewritten).
  */
 export const volunteerReminder = pgTable("volunteer_reminder", {
   id: uuid("id").primaryKey().defaultRandom(),
   kind: text("kind", { enum: ["day_before", "due_14", "due_3"] }).notNull(),
   key: text("key").notNull(),
-  familyQboId: text("family_qbo_id").notNull(),
+  familyId: uuid("family_id").notNull().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   triedAt: timestamp("tried_at", { withTimezone: true }).notNull(),
   outcome: text("outcome", { enum: ["sent", "failed"] }),
   createdAt: created(),
-}, (t) => [uniqueIndex("volunteer_reminder_kind_key_uq").on(t.kind, t.key)]);
+}, (t) => [uniqueIndex("volunteer_reminder_kind_key_uq").on(t.kind, t.key), index("volunteer_reminder_family_id_ix").on(t.familyId)]);
 
 /**
  * A family's or one student's choice to pay instead of volunteering (v1 spec §11.5), and its QuickBooks invoice: the
