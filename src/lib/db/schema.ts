@@ -326,10 +326,13 @@ export type RosterWrite =
  * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
  * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company
  * the queue row names, from the roster cache when the guardian chose; `buyoutId` is the portal's own `buyout.id`, which
- * the invoice carries in its private note so the portal can find it again.
+ * the invoice carries in its private note so the portal can find it again. `billEmail` is the sign-in address of the
+ * guardian who chose the buy-out, taken from their session when they chose (decided by the owner on 2026-11-17:
+ * QuickBooks gives a Pay link only to an invoice that carries an email address). Every try sends that address, never
+ * one looked up again. A create queued before then has none, and is sent without one, as it was then.
  */
 export type BuyoutWrite =
-  | { op: "invoice_create"; buyoutId: string; customerQboId: string; itemQboId: string; units: number; unitCents: number; familyQboId: string }
+  | { op: "invoice_create"; buyoutId: string; customerQboId: string; itemQboId: string; units: number; unitCents: number; familyQboId: string; billEmail?: string }
   | { op: "invoice_void"; buyoutId: string; invoiceQboId: string; customerQboId: string; familyQboId: string; why: "switched_back" | "student_moved" };
 /** Everything the write queue holds: the staff roster writes and the buy-out invoice writes. */
 export type QueuedWrite = RosterWrite | BuyoutWrite;

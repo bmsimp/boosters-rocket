@@ -90,11 +90,38 @@ const BUYOUT_SEND = "sendBuyoutWrite";
 const MAY_BUYOUT_SEND = [BUYOUT_WRITER, "src/lib/roster/queue.ts"];
 const BUYOUT_ASKS = ["confirmMyBuyout", "switchMyBuyoutBack"];
 const MAY_BUYOUT_ASK = [BUYOUT_WRITER, "src/app/(parent)/volunteer/pay-instead/actions.ts"];
+/** Where the queued create's type is written: it carries the bill-to address from the confirm to every try. */
+const SCHEMA = "src/lib/db/schema.ts";
+/**
+ * The bill-to address (InvoiceCreate.billEmail) in the buy-out writer, decided by the owner on 2026-11-17: named twice
+ * and nowhere else in it. Once to put the session's own sign-in address on the queued create, in confirmMyBuyout(),
+ * and once to send the address that item carries, in sendBuyoutWrite(). Never from an argument, a lookup or the browser.
+ */
+const BUYOUT_BILL_EMAIL = { put: "billEmail: ctx.email", sent: "billEmail: w.billEmail" } as const;
+function buyoutBillEmailProblems(source: string): string[] {
+  const text = code(source), problems: string[] = [];
+  const uses = [...text.matchAll(/\bbillEmail\b[^,)}\n]*/g)].map((m) => ({ at: m.index, what: m[0].trim() }));
+  if (uses.map((u) => u.what).sort().join(" | ") !== [BUYOUT_BILL_EMAIL.put, BUYOUT_BILL_EMAIL.sent].sort().join(" | ")) problems.push(`billEmail is given as ${uses.map((u) => u.what).join(" | ")}`);
+  if (/BillEmail/.test(text)) problems.push("the writer builds a body field itself");
+  const within = (name: string) => {
+    const at = text.indexOf(`export async function ${name}(`), next = text.indexOf("\nexport ", at + 1);
+    return { from: at, to: next < 0 ? text.length : next };
+  };
+  const put = uses.find((u) => u.what === BUYOUT_BILL_EMAIL.put), sent = uses.find((u) => u.what === BUYOUT_BILL_EMAIL.sent);
+  const confirm = within("confirmMyBuyout"), send = within(BUYOUT_SEND);
+  if (!put || confirm.from < 0 || put.at < confirm.from || put.at > confirm.to) problems.push("the address is not put on the queued create inside confirmMyBuyout");
+  if (!sent || send.from < 0 || sent.at < send.from || sent.at > send.to) problems.push(`the address is not sent from the queued item inside ${BUYOUT_SEND}`);
+  const confirmText = text.slice(confirm.from, confirm.to);
+  if (!confirmText.startsWith("export async function confirmMyBuyout(ctx: ParentCtx, ")) problems.push("confirmMyBuyout does not take the session's ParentCtx first");
+  if (/\bctx\s*=[^=>]|\bctx\.email\s*=[^=]|\b(?:const|let|var)\s+ctx\b/.test(confirmText)) problems.push("confirmMyBuyout gives ctx or its email another value");
+  return problems;
+}
 /** Which body each invoice write sends. */
 const INVOICE_BODY = { qboCreateInvoice: "create", qboVoidInvoice: "void" } as const;
 /** The fields the invoice writes' bodies can carry, in the order INVOICE_WRITES writes them. */
 // `BillEmail` (with its `Address`) was added on purpose on 2026-11-17, named in that slice's brief: the check of the
-// portal's requests sends one on its Pay link probe; no buy-out sends one (the test below holds that).
+// portal's requests sends one on its Pay link probe. After its second run the owner decided, the same day, that a
+// buy-out invoice carries the sign-in address of the guardian who chose it; nobody else gives one (the test below).
 const INVOICE_BODY_FIELDS = ["CustomerRef", "Line", "DetailType", "Amount", "SalesItemLineDetail", "ItemRef", "Qty", "UnitPrice", "PrivateNote", "AllowOnlineACHPayment", "EmailStatus",
   "BillEmail", "Address", "Id", "SyncToken"];
 
@@ -524,12 +551,32 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       for (const name of INVOICE_WRITE_FUNCTIONS) expect(send, name).toMatch(new RegExp(`\\b${name}\\(`));
     });
 
-    it("send a bill-to email address only from the check of the portal's requests, never for a buy-out", () => {
-      // The one optional field of the create (InvoiceCreate.billEmail): given by the check's Pay link probe alone, until
-      // the owner decides what a buy-out invoice should carry.
+    it("send a bill-to email address only from the check of the portal's requests and the buy-out writer, which sends the chooser's own", () => {
+      // The one optional field of the create (InvoiceCreate.billEmail). The check's Pay link probe gives its own address
+      // at example.com; since the owner's decision of 2026-11-17 the buy-out writer gives the sign-in address of the
+      // guardian who chose the buy-out, from their session, kept with the queued create (its type, in the schema). Nobody else.
       const giving = everything.filter((s) => s.file !== CLIENT && /\bbillEmail\b/.test(code(s.text))).map((s) => s.file).sort();
-      expect(giving).toEqual([CHECK_WRITER, `${CHECK_FOLDER}run.ts`].sort());
-      expect(writer).not.toMatch(/\bbillEmail\b|BillEmail/);
+      expect(giving, "billEmail is a bill-to address QuickBooks keeps. A new giver is a decision for a slice brief, not a fix made in passing.")
+        .toEqual([CHECK_WRITER, `${CHECK_FOLDER}run.ts`, BUYOUT_WRITER, SCHEMA].sort());
+      // In the schema it is the queued create's field alone.
+      const schema = code(everything.find((s) => s.file === SCHEMA)!.text);
+      expect([...schema.matchAll(/\bbillEmail\b/g)]).toHaveLength(1);
+      expect(schema).toMatch(/\{ op: "invoice_create"; [^}\n]*; billEmail\?: string \}/);
+      // In the buy-out writer: the session's own address put on the queued create, and that item's address sent.
+      const source = everything.find((s) => s.file === BUYOUT_WRITER)!.text;
+      expect(buyoutBillEmailProblems(source)).toEqual([]);
+      const refused = [
+        source.replace(BUYOUT_BILL_EMAIL.put, "billEmail: String(stamp)"),                       // from the browser
+        source.replace(BUYOUT_BILL_EMAIL.put, "billEmail: customer.email"),                      // looked up
+        source.replace(BUYOUT_BILL_EMAIL.sent, "billEmail: b.chosenByLabel"),                    // looked up again at each try
+        source.replace(`${BUYOUT_BILL_EMAIL.sent} }`, "billEmail: w.billEmail, BillEmail: { Address: w.billEmail } }"),
+        source.replace("  if (!t) return no(BUYOUT_COPY.notFromPage);", "  if (!t) return no(BUYOUT_COPY.notFromPage);\n  ctx.email = String(key);"), // the session's address replaced
+        `${source}\nexport async function alsoBill(item: Item) { return qboCreateInvoice({ ...item.request, billEmail: "anyone@example.org" } as never, { realmId: "1", mayWait: true }); }\n`,
+      ];
+      for (const s of refused) {
+        expect(s, `case ${refused.indexOf(s)} didn't change the module`).not.toBe(source);
+        expect(buyoutBillEmailProblems(s), `case ${refused.indexOf(s)}`).not.toEqual([]);
+      }
     });
 
     it("refuse a body that could carry another field, or go elsewhere", () => {

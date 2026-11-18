@@ -164,9 +164,9 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    **Pass:** the invoice reaches Payments with a **Pay** button; pay it in QuickBooks, ask for a read on Balances, and
    the requirement goes from "Buy-out invoiced" to "Paid instead". Choose another and switch back before paying: the
    invoice is voided in QuickBooks. Note whether online payment needed more than the ACH flag the portal sets (if the
-   invoice has no **Pay** button, it did). On 2026-11-17 the check's own invoice, made exactly this way, came back
-   with no Pay link: until the owner decides whether a buy-out invoice carries the family's email address (see the
-   check's "A Pay link on a buy-out invoice" row), expect no **Pay** button here, and say so in Results.
+   invoice has no **Pay** button, it did). The invoice carries, as its bill-to address, the sign-in email of the
+   parent who chose it (in the sandbox, QuickBooks gave a Pay link only to an invoice with an email address), and
+   nothing is emailed: check that no email from QuickBooks reaches that parent.
    **If not:** Reconciliation lists a buy-out that needs a look; note what it says.
 7. **An email change on a phone.** As a parent: Family, **Change my sign-in email**, a new address you can read. Open
    the emailed link on the phone while signed out.
@@ -510,7 +510,8 @@ work another. Any time before the pilot.
     rather than the one the page showed (QuickBooks may raise a family's version when a customer under it changes).
     The family's version must still be the page's when the action begins, and the write changes only whether it is
     active, so nothing anyone changed is overwritten. The check's "Making a family inactive once everyone under it is
-    inactive" row says whether QuickBooks raises it.
+    inactive" row says whether QuickBooks raises it: on its second run (2026-11-17) it left the family's version as it
+    was.
 
 ## Results
 
@@ -519,3 +520,4 @@ Add a row for each item each time you do it.
 | Date | Part and item | Pass, fail or skipped | What you saw |
 |---|---|---|---|
 | 2026-11-17 | 2.1 | Fail (34 of 37 rows as expected) | On the proof-of-concept host against an Intuit sandbox company. "Making a family inactive": not as expected, refused with code 800; the check's clean-up later made all five of its records inactive, students and parents first. "Making a customer with an open balance inactive": noted, refused with code 6220. "Pay links on invoices": noted, 8 of 9 invoices carried a Pay link (on developer.intuit.com, the sandbox's); the one without was the check's own, made as a buy-out invoice is made. The owner then decided: a family is made inactive in one action, everyone under it first, and nobody with a balance is made inactive. The check now expects 800 and 6220, and adds a Pay link probe; run it again. |
+| 2026-11-17 | 2.1 | Pass (every request as expected) | Run again at 6:03 PM against the Intuit sandbox company: every request answered as the portal expects. "A Pay link on a buy-out invoice": made as a buy-out invoice was made then, with no email address, the invoice came back without a Pay link; made again carrying a bill-to email address, it came back with one, its email status still not set (nothing was emailed). So QuickBooks gives a Pay link only to an invoice that carries an email address. "Making a family inactive once everyone under it is inactive": making the customer under the family inactive left the family's own version as it was. The owner then decided ("go with your recommendation"): a buy-out invoice carries, as its bill-to email, the sign-in address of the guardian who chose the buy-out; nothing is emailed by the portal or by QuickBooks. |

@@ -47,9 +47,14 @@ async function shown(p: SeededParent, requirementId: string, key = "family") {
   return one;
 }
 const later = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+/** What the buy-out's and the queue's audit rows say, before and after, as one string. */
+const buyoutAuditBodies = async () => JSON.stringify((await db.select({ action: auditLog.action, before: auditLog.before, after: auditLog.after }).from(auditLog))
+  .filter((r) => /^(volunteer\.buyout|roster\.write)\./.test(r.action)));
+/** The bill-to address of each invoice the portal asked QuickBooks to make, in order. */
+const billedTo = () => invoicePosts().filter((c) => c.query.get("operation") === null).map((c) => (JSON.parse(c.body) as { BillEmail?: { Address?: string } }).BillEmail?.Address ?? null);
 
 describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
-  it("makes one invoice in QuickBooks, for the family, with the item, the amount and the buy-out's id, and no email", async () => {
+  it("makes one invoice in QuickBooks, for the family, with the item, the amount, the buy-out's id and the chooser's address, and emails nothing", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ amount: 3, unitCents: 2500 });
     // A shift already credited: two are left, so the quote is two at $25.00.
@@ -64,7 +69,11 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(b).toMatchObject({ state: "invoiced", subjectQboId: FAMILY, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000, invoiceQboId: "5001" });
     expect(invoicePosts()).toHaveLength(1);
     const sent = JSON.parse(invoicePosts()[0]!.body);
+    // The bill-to address is the confirming guardian's own sign-in address (the owner's decision of 2026-11-17), and
+    // the email status stays not set, so nothing is emailed.
+    expect(p.identity.email).toBe(RIVERA.parent.email);
     expect(sent).toEqual({ CustomerRef: { value: FAMILY }, PrivateNote: `Booster Rocket buy-out ${b!.id}`, AllowOnlineACHPayment: true, EmailStatus: "NotSet",
+      BillEmail: { Address: RIVERA.parent.email },
       Line: [{ DetailType: "SalesItemLineDetail", Amount: 50, SalesItemLineDetail: { ItemRef: { value: BUYOUT_ITEM }, Qty: 2, UnitPrice: 25 } }] });
     expect(invoicePosts()[0]!.query.get("operation")).toBeNull();
     // Nothing else was sent: no send of the invoice by email, no other write.
@@ -72,12 +81,13 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     // The family's figures are behind QuickBooks now, so its next page load reads it.
     const [money] = await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, FAMILY));
     expect(money!.staleAt).not.toBeNull();
-    // It does: the invoice is then among the family's open invoices. With no Pay button, as the sandbox answered on
-    // 2026-11-17: QuickBooks gave the invoice made this way no Pay link (it carries no bill-to email; the stub's
-    // quirks.linkNeedsEmail). What a buy-out invoice should carry is for the owner to decide.
+    // It does: the invoice is then among the family's open invoices, with its Pay link. The sandbox gave a link only to
+    // an invoice carrying a bill-to email address (2026-11-17; the stub's quirks.linkNeedsEmail), and this one carries one.
     const after = await loadFamilyMoney(FAMILY);
     expect(after.figures?.current).toBe(true);
-    expect(after.figures?.open.map((i) => [i.qboId, i.totalCents, i.payLink ?? null])).toEqual([["5001", 5000, null]]);
+    expect(after.figures?.open.map((i) => [i.qboId, i.totalCents, i.payLink ?? null])).toEqual([["5001", 5000, "https://connect.intuit.com/t/scs-v1-stub-5001"]]);
+    // The address is in no audit row's before or after (the actor is the guardian, as on every row a parent's action writes).
+    expect(await buyoutAuditBodies()).not.toContain(RIVERA.parent.email);
     // Audited: the choice, with what was asked for, and the invoice made.
     const [chosen] = await audits("volunteer.buyout.chosen");
     expect(chosen!.after).toMatchObject({ customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000 });
@@ -207,6 +217,101 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const again = await shown(p, req);
     expect(again).toMatchObject({ may: "choose", refusedBefore: true, buyout: null });
     expect((await loadBuyoutsToLook()).map((x) => x.state)).toEqual(["refused"]);
+  });
+
+  it("bills the sign-in address of the guardian who confirms, and no other guardian's", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    // The family's second guardian, with an address of their own, is the one who chooses.
+    const other = await seedParentIn({ familyQboId: FAMILY, name: "Ottoline Riverquill", email: "ottoline.riverquill@family-r.example" });
+    expect(other.identity.email).toBe("ottoline.riverquill@family-r.example");
+    const choice = await shown({ ...p, identity: other.identity }, req);
+    asParent(other.identity);
+    expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
+    expect(billedTo()).toEqual(["ottoline.riverquill@family-r.example"]);
+    expect(JSON.stringify(invoicePosts().map((c) => c.body))).not.toContain(RIVERA.parent.email);
+    // The queued create carries that address alone, and the invoice QuickBooks made has it, with a Pay link.
+    const [b] = await buyoutsOf(FAMILY);
+    expect((await queueOf(b!.id))[0]!.request).toMatchObject({ op: "invoice_create", billEmail: "ottoline.riverquill@family-r.example" });
+    expect(stub.invoices[0]).toMatchObject({ BillEmail: { Address: "ottoline.riverquill@family-r.example" }, EmailStatus: "NotSet", InvoiceLink: expect.stringMatching(/^https:\/\/connect\.intuit\.com\//) });
+  });
+
+  it("sends, from the worker, the address the guardian had when they chose, even after it has changed", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    const choice = await shown(p, req);
+    stub.rateLimitNext = 1; // the try made at once is throttled: nothing is made, and the create waits on the queue
+    asParent(p.identity);
+    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.waiting("$100.00") });
+    const [b] = await buyoutsOf(FAMILY);
+    expect((await queueOf(b!.id))[0]).toMatchObject({ state: "waiting", sent: false, request: { op: "invoice_create", billEmail: RIVERA.parent.email } });
+    expect(stub.invoices).toEqual([]);
+    // The guardian's sign-in address changes before the worker's try.
+    const { parent } = await import("@/lib/db/schema");
+    await db.update(parent).set({ email: "rosalind.new@family-r.example" }).where(eq(parent.id, p.identity.parentId));
+    const logged = (["log", "info", "warn", "error", "debug"] as const).map((k) => vi.spyOn(console, k));
+    try {
+      expect(await runWriteQueue(later(2))).toEqual({ ran: true, ok: true });
+      for (const spy of logged) for (const args of spy.mock.calls) expect(JSON.stringify(args)).not.toMatch(/rosalind/);
+    } finally { for (const spy of logged) spy.mockRestore(); }
+    expect(stub.invoices).toHaveLength(1);
+    expect(stub.invoices[0]).toMatchObject({ BillEmail: { Address: RIVERA.parent.email } });
+    expect(billedTo().every((a) => a === RIVERA.parent.email)).toBe(true);
+    expect(JSON.stringify(invoicePosts().map((c) => c.body))).not.toContain("rosalind.new@family-r.example");
+    expect((await buyoutsOf(FAMILY))[0]).toMatchObject({ state: "invoiced", invoiceQboId: "5001" });
+    // Neither address is in what the audit rows say.
+    const said = await buyoutAuditBodies();
+    expect(said).not.toContain(RIVERA.parent.email);
+    expect(said).not.toContain("rosalind.new@family-r.example");
+  });
+
+  it("shows the buy-out's invoice with its Pay button on Payments once it is made, as the pay-instead page says", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ title: "Concession shifts QR80" });
+    await seedFamilyMoney(RIVERA);
+    const choice = await shown(p, req);
+    asParent(p.identity);
+    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.done("$100.00") });
+    const { default: PaymentsPage } = await import("@/app/(parent)/payments/page");
+    const payments = (await renderPage(PaymentsPage)).replaceAll("<!-- -->", "");
+    expect(payments).toContain('href="https://connect.intuit.com/t/scs-v1-stub-5001"');
+    expect(payments).toContain("Pay $100.00, ");
+    expect(payments).toContain("Paying instead of volunteering: Concession shifts QR80");
+    const page = await renderPage(PayInsteadPage, { params: { requirementId: req, choice: "family" } });
+    expect(page).toContain("Buy-out invoiced");
+    expect(page).toContain("with a Pay button");
+  });
+
+  it("refuses the buy-out, queues nothing, and tells staff about the address, when QuickBooks won't take the guardian's address", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    const choice = await shown(p, req);
+    stub.invoiceFault = "2210"; // as the check saw QuickBooks answer for a field that isn't an address
+    asParent(p.identity);
+    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
+    const [b] = await buyoutsOf(FAMILY);
+    expect(b).toMatchObject({ state: "refused", lastCode: "fault_2210", invoiceQboId: null });
+    expect((await queueOf(b!.id)).map((i) => i.state)).toEqual(["given_up"]);
+    const [look] = await loadBuyoutsToLook();
+    expect(look).toMatchObject({ state: "refused", code: "fault_2210" });
+    expect(look!.words).toContain("bill-to address");
+    expect(look!.words).not.toContain(RIVERA.parent.email);
+    expect(await buyoutAuditBodies()).not.toContain(RIVERA.parent.email);
+    expect((await shown(p, req))).toMatchObject({ may: "choose", refusedBefore: true });
+  });
+
+  it("refuses the buy-out without sending anything when the guardian's address is one QuickBooks can't take", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement();
+    const choice = await shown(p, req);
+    // Longer than the portal sends (InvoiceCreate.billEmail: at most 100 characters).
+    asParent({ ...p.identity, email: `${"r".repeat(95)}@family-r.example` });
+    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
+    expect(invoicePosts()).toEqual([]);
+    const [b] = await buyoutsOf(FAMILY);
+    expect(b).toMatchObject({ state: "refused", lastCode: "bad_email" });
+    expect((await queueOf(b!.id)).map((i) => i.state)).toEqual(["given_up"]);
+    expect((await loadBuyoutsToLook())[0]!.words).toContain("bill-to address");
   });
 
   it("refuses at once, and records nothing, when only an Admin can mend the connection", async () => {

@@ -120,8 +120,8 @@ export const EXPECTATIONS = [
     learned: (l) => `${num(l.withLink) === 0 ? `None of the ${plural(num(l.checked), "invoice", "invoices")} looked at carried ${LINK}.`
       : `${num(l.withLink)} of ${plural(num(l.checked), "invoice", "invoices")} carried ${LINK}, on ${words(list(l.hosts))}${num(l.unsafe) ? `; ${num(l.unsafe)} of the links weren't to QuickBooks' payment page, so they would get no Pay button` : ""}.`}${l.ownLinked !== false ? ""
       : num(l.withLink) > 0
-        ? " The check's own invoice, made the way the portal makes a buy-out invoice, came back without one, though other invoices of this company carry one: so the company does take payments online. The Pay link probe, under Changing, says what makes the difference."
-        : " The check's own invoice, made the way the portal makes a buy-out invoice, came back without one too. QuickBooks may give a Pay link only when the company takes payments online, or only to an invoice that carries a customer's email address: the Pay link probe, under Changing, says which."}`,
+        ? " The check's own invoice, made with no email address on it, came back without one, though other invoices of this company carry one: so the company does take payments online. The Pay link probe, under Changing, says what makes the difference."
+        : " The check's own invoice, made with no email address on it, came back without one too. QuickBooks may give a Pay link only when the company takes payments online, or only to an invoice that carries a customer's email address: the Pay link probe, under Changing, says which."}`,
     ifNot: "Families would see no Pay button for invoices they could pay online.", codeChange: true, where: "INVOICE_INCLUDE in src/lib/quickbooks/client.ts and safePayLink() in src/lib/money/pay-link.ts",
   },
   {
@@ -271,10 +271,11 @@ export const EXPECTATIONS = [
   },
   {
     key: "pay_link_probe", group: "writes", title: "A Pay link on a buy-out invoice",
-    expects: "The check makes its invoice a second time, the same but carrying a bill-to email address (the check's own, at example.com) with its email status still not set, so nothing is emailed, and notes whether each came back with a Pay link. It voids the second at once.",
+    expects: "The check makes its invoice a second time, the same but carrying a bill-to email address (the check's own, at example.com) with its email status still not set, so nothing is emailed, as the portal makes a buy-out invoice: it carries the sign-in address of the guardian who chose it. It notes whether each came back with a Pay link, and voids the second at once.",
     learned: (l) => !yes(l.found) ? "The second invoice didn't come back when the student's invoices were read."
-      : `Made as a buy-out invoice is made today, it came back ${yes(l.plainLinked) ? "with" : "without"} ${LINK}. With a bill-to email address, it came back ${yes(l.emailLinked) ? "with" : "without"} one${l.emailStatus === "NotSet" ? ", and its email status still not set" : `, and its email status ${typeof l.emailStatus === "string" && l.emailStatus ? `came back as ${l.emailStatus}` : "came back as nothing"}`}.${
-        !yes(l.plainLinked) && yes(l.emailLinked) ? " So QuickBooks gives a Pay link only to an invoice with an email address: whether a buy-out invoice should carry the family's is for the owner to decide." : ""}`,
+      : `Made with no email address, it came back ${yes(l.plainLinked) ? "with" : "without"} ${LINK}. With a bill-to email address, as a buy-out invoice is made, it came back ${yes(l.emailLinked) ? "with" : "without"} one${l.emailStatus === "NotSet" ? ", and its email status still not set" : `, and its email status ${typeof l.emailStatus === "string" && l.emailStatus ? `came back as ${l.emailStatus}` : "came back as nothing"}`}.${
+        !yes(l.plainLinked) && yes(l.emailLinked) ? " So QuickBooks gives a Pay link only to an invoice with an email address, which is why the portal gives each buy-out invoice the sign-in address of the guardian who chose it (nothing is emailed)."
+          : !yes(l.emailLinked) ? " So a buy-out invoice, which carries the sign-in address of the guardian who chose it, may come with no Pay button in this company." : ""}`,
     ifNot: "QuickBooks might email a family an invoice the portal made, or give it a link that isn't to its payment page.", codeChange: true, where: "INVOICE_WRITES.create in src/lib/quickbooks/client.ts",
   },
   {
