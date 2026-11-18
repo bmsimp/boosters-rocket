@@ -4,6 +4,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, setting, qboCustomerType, qboCustomer } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { QboOp } from "@/lib/quickbooks/connection";
+import { keepAppRecordsInStep } from "@/lib/families/in-step";
 
 export const SHAPE_KEY = "membership.shape";
 /** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */
@@ -78,7 +79,8 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
 
 /**
  * Saves the shape and, in the same transaction, drops email and phone from every customer the new shape doesn't name
- * (spec §1 Rules) and forgets what each family was last seen to owe (`family_money`). It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
+ * (spec §1 Rules), forgets what each family was last seen to owe (`family_money`) and brings the app's own records in
+ * line with the new shape (keepAppRecordsInStep()). It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
  * a refresh afterward to bring the rest of the cache up to date. A shape `getShape` wouldn't read back is refused (it
  * throws): saved, it would show as "no shape" while its audit row said otherwise.
  */
@@ -95,6 +97,9 @@ export async function saveShape(input: MembershipShape, o: QboOp): Promise<void>
     // The shape decides whose invoices are a family's, so what each family was last seen to owe was added up under the
     // old one. It goes, and each family's figures are read from QuickBooks again when its parent next looks.
     await tx.delete(familyMoney);
+    // It also decides who in the cache is a family or a student: the app's own records follow it here, not only at the
+    // refresh the caller starts next, which may not run.
+    await keepAppRecordsInStep(tx);
     await writeAudit({ actor: o.actor, action: "settings.membership.save", permission: o.permission, targetType: "setting", targetId: SHAPE_KEY, ip: o.ip,
       before: before ? { shape: before, words: describeShape(before, types) } : null, after: { shape, words: describeShape(shape, types) } }, tx);
   });

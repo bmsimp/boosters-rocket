@@ -9,6 +9,7 @@ import { decideAccess, type AccessDecision, type HoldSets } from "./access-rules
 import { getParentSettings, type ParentSettings } from "./settings";
 import { deleteUnusedSigninCodes, endFamilySessions, endParentSessions } from "./sessions";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
+import { keepAppRecordsInStep } from "@/lib/families/in-step";
 
 export const RECONCILE_ACTOR: Actor = { door: "system", id: null, label: "reconcile" };
 /** Thrown by the roster refresh when the reconcile inside it fails, so the refresh can say which part failed. */
@@ -53,13 +54,22 @@ export async function loadDecision(tx?: Tx, o: { requireActiveStudents?: boolean
 }
 
 /**
- * Brings the stored people and family links in line with the rules (spec §2), applying only the differences. The
- * caller holds ROSTER_LOCK and owns the transaction; nothing here sends mail. While parent sign-ins are off it changes
- * nothing. A link follows its QuickBooks customer (`sourceQboId`): when that customer's address changes, the person's
- * address is changed in place if nobody else has the new one and they have no other link (which signs them out);
- * otherwise the link moves. `assumeSignin` proceeds as if sign-ins were on, for a dry run that is rolled back.
+ * Brings the stored people and family links in line with the rules (spec §2), applying only the differences, then the
+ * app's own records and links in line with the cache and those links (keepAppRecordsInStep(), src/lib/families/in-step.ts),
+ * whether or not sign-ins are on. Every roster read, staff roster write and confirmed change of address calls this
+ * after it changes the cache, so this one call keeps both in step. The caller holds ROSTER_LOCK and owns the
+ * transaction; nothing here sends mail. While parent sign-ins are off it changes no sign-in. A link follows its
+ * QuickBooks customer (`sourceQboId`): when that customer's address changes, the person's address is changed in place
+ * if nobody else has the new one and they have no other link (which signs them out); otherwise the link moves.
+ * `assumeSignin` proceeds as if sign-ins were on, for a dry run that is rolled back.
  */
 export async function reconcileAccess(tx: Tx, o: { cause: string; report?: EndedReport; assumeSignin?: boolean }): Promise<ReconcileResult> {
+  const r = await reconcileSignins(tx, o);
+  await keepAppRecordsInStep(tx);
+  return r;
+}
+
+async function reconcileSignins(tx: Tx, o: { cause: string; report?: EndedReport; assumeSignin?: boolean }): Promise<ReconcileResult> {
   const r: ReconcileResult = { ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 };
   const loaded = await loadDecision(tx);
   if (!loaded || !(loaded.settings.signin || o.assumeSignin)) return r;

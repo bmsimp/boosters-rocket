@@ -162,6 +162,13 @@
       "when": 1794902919459,
       "tag": "0022_requirement_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795021395287,
+      "tag": "0023_app_records",
+      "breakpoints": true
     }
   ]
 }

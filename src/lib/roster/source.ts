@@ -8,6 +8,7 @@ import { clearMoneyRecords } from "@/lib/money/company-change";
 import { clearVolunteerRecords } from "@/lib/volunteer/company-change";
 import { clearFormRecords } from "@/lib/forms/company-change";
 import { clearCheckRecords } from "@/lib/quickbooks/sandbox-check/view";
+import { clearAppRecords } from "@/lib/families/company-change";
 import { ROSTER_LOCK, SHAPE_KEY } from "./shape";
 
 export const ROSTER_JOB = "roster.refresh";
@@ -34,8 +35,8 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
  * payment requirement is met by, with the worker's place in its read of every family (`clearMoneyRecords`), every
  * volunteer sign-up (`clearVolunteerRecords`), and every form made for a family to sign (`clearFormRecords`: the
  * requests and the consents with them), and every staff roster write in the queue, waiting or finished, whose ids are
- * that company's (`write_queue`, counted in the audit row), and the records the check of the portal's requests made there
- * (`clearCheckRecords`). The same company, or a cache that says no company, keeps it all. The caller
+ * that company's (`write_queue`, counted in the audit row), the records the check of the portal's requests made there
+ * (`clearCheckRecords`), and the app's own families, students and links made from its customers (`clearAppRecords`). The same company, or a cache that says no company, keeps it all. The caller
  * owns the transaction and holds ROSTER_LOCK.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
@@ -43,6 +44,8 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   if (from === null || from === realmId) return false;
   // Parent access first: the snapshot it keeps takes the family names from the cache deleted below.
   await clearParentAccess(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
+  // The app's own families, students and links, made from that company's customers (src/lib/families/).
+  await clearAppRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomer);
   await clearVolunteerRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomerType);

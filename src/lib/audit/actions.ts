@@ -5,6 +5,8 @@
  */
 export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "access.refused": "Refused: no permission for that page or action",
+  "accounting.link.carried_over": "The portal's own families and students made from the roster, each linked to its QuickBooks customer, with counts",
+  "accounting.links.cleared": "The portal's own families, students and their QuickBooks links cleared after a company change",
   "admin.bootstrap": "First Admin made",
   "audit.export": "Audit log exported",
   "certificate.activate": "Sign-in certificate put into use",

@@ -32,6 +32,7 @@ import { seedParentIn } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
+import { NO_CHANGES, appRecordsByCustomer, whatAFreshRunWouldChange } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -251,6 +252,12 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect(saved).toEqual([{ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
       after: { email: NEW, field: NEW, portal: "reconciled", emailChanged: 1, ended: 0, granted: 0, sessionsEnded: 0 } }]);
     expect((await audits()).map((a) => a.action)).toContain("parent.email.changed");
+    // The app's own records followed the change in its transaction (src/lib/families/in-step.ts): the sign-in is in its
+    // family and linked to its own record, and a fresh run finds nothing to change.
+    const records = await appRecordsByCustomer();
+    expect(records.memberships).toContainEqual({ guardianId: r.identity.guardianId, family: R_FAMILY });
+    expect(records.links).toContainEqual(expect.objectContaining({ customer: R_PARENT, kind: "membership", guardianId: r.identity.guardianId }));
+    expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
   });
 
   it("two presses of the button at once make one change, audited once", async () => {
