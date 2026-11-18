@@ -469,10 +469,11 @@ class Check {
       const ownNumber = typeof stu?.Balance === "number", matches = toCents(stu?.Balance) === CHECK_UNIT_CENTS && toCents(fam?.Balance ?? 0) === 0;
       this.set("own_balance", ownNumber && matches ? "as_expected" : "not_as_expected", { number: ownNumber, matches });
     });
-    // The Pay link probe (2026-11-17): the sandbox gave the check's own invoice, made as a buy-out invoice is made, no Pay
-    // link while other invoices had one. The same invoice again, carrying the check's own address at example.com as its
-    // bill-to email, with its email status still not set, says whether that is the difference. Voided at once; the
-    // student's balance is the first invoice's alone again for the steps that follow.
+    // The Pay link probe (2026-11-17): the sandbox gave the check's own invoice, made with no email address, no Pay link
+    // while other invoices had one. The same invoice again, carrying the check's own address at example.com as its
+    // bill-to email, with its email status still not set, says whether that is the difference: on the second run it was,
+    // and a buy-out invoice now carries the sign-in address of the guardian who chose it. Voided at once; the student's
+    // balance is the first invoice's alone again for the steps that follow.
     if (itemId) await this.step("pay_link_probe", [m.invoice, m.student], async () => {
       const linkOf = (i: Raw | null) => (typeof i?.InvoiceLink === "string" && i.InvoiceLink.trim() ? i.InvoiceLink.trim() : null);
       const plain = await studentInvoice();
@@ -485,8 +486,8 @@ class Check {
       const plainLink = linkOf(plain), emailLink = linkOf(withEmail);
       const emailStatus = typeof withEmail?.EmailStatus === "string" && /^[A-Za-z]{1,20}$/.test(withEmail.EmailStatus) ? withEmail.EmailStatus : "";
       const unsafe = [plainLink, emailLink].some((l) => l !== null && safePayLink(l) === null);
-      // What it finds is noted, not counted against the portal: the portal sends no bill-to email yet. An email status
-      // other than "not set", or a link that isn't to QuickBooks' payment page, would be.
+      // Whether each came back with a link is noted, not counted against the portal. An email status other than "not
+      // set" (QuickBooks would email the family), or a link that isn't to QuickBooks' payment page, would be.
       this.set("pay_link_probe", !withEmail || unsafe || emailStatus !== "NotSet" ? "not_as_expected" : "learned",
         { found: withEmail !== null, plainLinked: plainLink !== null, emailLinked: emailLink !== null, emailStatus });
     });

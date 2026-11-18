@@ -223,6 +223,8 @@ describe("the health page", () => {
     }
     expect(QUICKBOOKS_USE.reads).toMatch(/families and members.*what each family owes/);
     expect(QUICKBOOKS_USE.writes).toMatch(/phone and mailing address.*email address they sign in with.*new families, students, parents and members.*inactive.*never deletes/);
+    // A buy-out invoice carries the chooser's sign-in address so it can be paid online, and nothing is emailed (2026-11-17).
+    expect(QUICKBOOKS_USE.writes).toMatch(/pay instead of volunteering.*sign-in email address as its bill-to address, so it can be paid online; nothing is emailed/);
     expect(health).toContain("Last change made in QuickBooks: never");
 
     // A parent's save, and a staff change to the roster, are audited under these actions (tests/integration/contact-edits.test.ts,

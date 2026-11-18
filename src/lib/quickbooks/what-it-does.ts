@@ -11,6 +11,7 @@ export const QUICKBOOKS_USE = {
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive "
     + "(a family together with everyone under it, and never anyone with an open balance). "
     + "And one kind of invoice: when a guardian chooses to pay instead of volunteering, it creates that invoice, and voids it if they switch back before paying anything on it. "
+    + "The invoice carries that guardian's sign-in email address as its bill-to address, so it can be paid online; nothing is emailed, by the portal or by QuickBooks. "
     + "It never deletes anything, never changes any other invoice, and never touches payments. "
     + "In an Intuit sandbox company only, an Admin can also run a check of these requests: it makes a few test records named “Booster Rocket check”, tries each change on them, and makes them inactive at the end.",
 } as const;
