@@ -16,7 +16,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password",
 
 import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, formWithdrawal, jobRun, parent, qboCustomer, setting, signatureConsent, signedFormEvidence, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, formWithdrawal, guardian, jobRun, parent, parentAuthUser, qboCustomer, setting, signatureConsent, signedFormEvidence, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
 import * as volunteerMoved from "@/lib/volunteer/moved-student";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
@@ -30,7 +30,7 @@ import FormPage from "@/app/(parent)/forms/[id]/page";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
 import { findMySignedPdf } from "@/lib/forms/my-evidence";
 import { remindNow } from "@/lib/signed-forms/reminders";
-import { resetDb, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { connectForms, formSetting, requestByCustomer, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { identityNow, seedParentIn } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
@@ -313,6 +313,10 @@ describe("not followed when the cache a refresh replaces isn't this company's", 
     // Before a company's first read there are no app records, so no form or place can be held anywhere (a request
     // names its family's and student's records, made only from a roster read): there is no earlier state of the
     // company to compare with, and nothing held elsewhere. The first read, with Leo under the Chen family, follows nothing.
+    // The refresh's own guard for this (the cache it replaces isn't this company's, so nothing counts as held elsewhere)
+    // has no state left to meet until stage 4: records and a request exist only once a company's roster is read, and a
+    // read over another company's cache is refused before it reads anything (the next test). It stays in the refresh
+    // for when stage 4 lets a company change again, and its test comes back with it.
     const season = await seedSeason({ name: "Before", steps: [{ name: "Join" }] });
     const req = await seedFormRequirement({ stepId: season.stepIds["Join"]!, title: "Medical release", appliesTo: "student", form: formSetting({ id: "envelope_tmplmedical" }) });
     const company = fznCompany();
@@ -482,7 +486,13 @@ describe("what each family reads after a student QuickBooks moved", () => {
     expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: OKAFOR, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
 
     // The new family's guardian reads it as signed, without the old family's guardian or the PDF they signed.
-    const obi = await seedParentIn({ familyQboId: OKAFOR, name: "Obi Okafor", email: "obi@example.com", sourceQboId: "71" });
+    // The read itself made the new family's guardian, from its parent record (parent sign-ins are on): the person, their
+    // sign-in and their link to the family. They sign in as the portal made them.
+    const [obiPerson] = await db.select().from(parent).where(eq(parent.email, "obi@example.com"));
+    expect(obiPerson).toBeTruthy();
+    const [obiUser] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, obiPerson!.id));
+    expect((await db.select().from(guardian).where(eq(guardian.parentId, obiPerson!.id)))).toEqual([expect.objectContaining({ familyQboId: OKAFOR, familyId: okafor, sourceQboId: "71" })]);
+    const obi = { session: await seedParentSession(obiUser!.id, { familyQboId: OKAFOR }) };
     asParent(await identityNow(obi.session.id));
     const theirs = await renderPage(FormPage, { params: { id: leo.signed } });
     expect(theirs).toContain("Photo consent");
@@ -500,7 +510,10 @@ describe("what each family reads after a student QuickBooks moved", () => {
 
     // No reminder is owed to the new family for the form already signed.
     mail.outbox = [];
-    await remindNow({ kind: "family", familyId: String(okafor) }, { actor: WORKER.actor, ip: null });
+    const reminded = await remindNow({ kind: "family", familyId: String(okafor) }, { actor: WORKER.actor, ip: null });
+    expect(reminded).toMatchObject({ ok: true });
+    // What the family does owe goes: the unfinished form, started again for them. The signed one owes nothing.
+    expect(mail.outbox.map((m) => [m.to, m.subject])).toEqual([["obi@example.com", "Please sign: Medical release"]]);
     expect(mail.outbox.filter((m) => m.subject.includes("Photo consent"))).toEqual([]);
 
     // A second read finds nothing more to follow and changes no request.
