@@ -257,7 +257,7 @@ describe("the Parent sign-ins settings", () => {
 
   it("the QuickBooks page warns before a disconnect when parents can sign in", async () => {
     await ready();
-    const warning = "1 person can sign in to the portal now. Connecting a different QuickBooks company afterwards ends all of that access";
+    const warning = "1 person can sign in to the portal now. Until families can be linked to another company&#x27;s customers, only this same QuickBooks company can be connected again";
     expect(renderToStaticMarkup(await QuickBooksSettingsPage())).not.toContain("can sign in to the portal now");
     await setSigninsAction(true);
     const html = renderToStaticMarkup(await QuickBooksSettingsPage());

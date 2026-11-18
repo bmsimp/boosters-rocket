@@ -23,7 +23,7 @@ export default async function QuickBooksSettingsPage() {
   await requireStaffPage("Settings.QuickBooks.ReadWrite");
   const [conn, page, wake, problems, settings, people, checked] = await Promise.all([connectionView(), loadRosterPage(), lastWake(), quickbooksProblems(), getParentSettings(), peopleWithAccess(), lastCheck()]);
   const when = (iso: string | null) => (iso ? <LocalTime iso={iso} /> : "Not yet");
-  const warning = settings.signin && people > 0 ? `${people} ${people === 1 ? "person" : "people"} can sign in to the portal now. Connecting a different QuickBooks company afterwards ends all of that access, switches parent sign-ins and welcome emails off, and needs them set up again. Reconnecting this same company changes nothing.` : undefined;
+  const warning = settings.signin && people > 0 ? `${people} ${people === 1 ? "person" : "people"} can sign in to the portal now. Until families can be linked to another company's customers, only this same QuickBooks company can be connected again after a disconnect, and reconnecting it changes nothing for them.` : undefined;
   return (
     <main className="wrap single">
       <BackToSettings />

@@ -4,7 +4,8 @@ The portal's connection to QuickBooks lasts as long as the worker keeps renewing
 renews it for good. Sometimes it has to be made again: Intuit asks for it every so often, the person who connected it
 left, or the Intuit app's keys changed. This is done by an Admin, in the portal, under **Settings**, **QuickBooks**.
 
-There are two different things here, and they do very different things to the portal.
+There are two different things here: reconnecting the same company, and connecting a different one, which the portal
+refuses for now.
 
 ## The same company
 
@@ -24,29 +25,29 @@ signed forms and everything else stay as they are.
 
 ## Connecting a different company
 
-Everything the portal holds about the old company's customers belongs to another set of books, so connecting a
-different company (for example, moving from Intuit's sandbox to the club's real books) clears it. The portal warns on
-the QuickBooks page before you disconnect. It:
+**Not possible yet.** The portal now keeps each family's season (ticks, waivers, who a requirement is asked of, the
+reminders already sent) against its own records of the families and students it read from the first company. Until
+families can be linked to another company's customers, on a mapping screen still to come, the portal refuses any
+QuickBooks company other than the one its families were read from, so none of that is lost by mistake. Reconnecting
+that same company works as always ([The same company](#the-same-company)).
 
-- clears the roster and the membership shape, which must be chosen again;
-- ends every parent's access: each parent's link to a family is closed and parents are signed out; parent sign-ins and
-  welcome emails are switched off until an Admin switches them on again;
-- deletes each family's stored invoices and money figures, the item list, the seasons' ticks, waivers and chosen lists,
-  every volunteer sign-up, credit, reminder and buy-out, every form being signed with its consents and reminders,
-  parents' pending email changes, and staff changes and buy-out invoices waiting to reach QuickBooks (a buy-out invoice
-  already made stays in the old company's books, like any invoice);
-- keeps every signed form's evidence (the club's record), marked as the earlier company's and shown to no parent: staff
-  find it on the Forms page under "Earlier company";
-- keeps a list of the old company's families, and who could sign in to them, for the match review under **Parent
-  sign-ins**, deleted after 90 days or sooner by an Admin.
+What you see if you try:
 
-Each of those deletions stays in the audit log. Steps:
+- After **Sign in to Intuit** with another company, the QuickBooks steps say "That is a different QuickBooks company
+  from the one the portal's families were read from, so it wasn't connected and nothing was changed." Nothing was
+  stored: **Change**, sign in to Intuit again and choose the company the club used before.
+- If a connection to another company was stored before the portal refused it, the roster refresh stops with "The
+  roster was read from another QuickBooks company than the one connected now, so it wasn't read." The portal asks
+  that company nothing. Open **Disconnect**, **Disconnect QuickBooks**, then **Change** and connect the first company
+  again.
 
-1. Take a backup first: on the server, in `~/booster-rocket/deploy`, `docker compose run --rm backup --now`.
-2. In the portal: **Settings**, **QuickBooks**, open **Disconnect**, read the warning, then **Disconnect QuickBooks**.
-3. **Change** (the app's keys are kept after a disconnect, so the button reads Change, not Set up): the app's keys for that company (Production keys for real books), **Sign in to Intuit**, choose the new
-   company, approve.
-4. Choose the membership shape, **Preview**, check the counts and names, **Save this shape**.
-5. Check **Roster**, then switch parent sign-ins back on under **Settings**, **Parent sign-ins** and go through the
-   match review (**Review matches** there).
-6. Set up the season's requirements again where they were cleared, and tell families what to expect.
+So:
+
+- **To try the portal against an Intuit sandbox company,** use the proof-of-concept host (or another installation of
+  its own), never the installation families will use: once an installation has read a sandbox's customers, it can't
+  move to the club's real books until the mapping screen ships.
+- **To start the club on its real books,** connect them as the first company of the installation families will use
+  ([Intuit, part 4](intuit.md#4-connect-the-clubs-real-books)).
+- **Moving to another company** (new books, or another QuickBooks subscription) waits for the mapping screen. When it
+  ships, this section gets its steps back, starting with a backup (`docker compose run --rm backup --now` in
+  `~/booster-rocket/deploy`).
