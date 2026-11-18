@@ -30,7 +30,7 @@ import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedTwoFamilies, type SeededParent } from "../helpers/parent";
-import { addToCache, fam, par, seedParentSettings, stu } from "../helpers/roster-cache";
+import { addToCache, fam, moveInCache, par, seedParentSettings, stu } from "../helpers/roster-cache";
 import { subjectColumns } from "../helpers/app-records";
 
 /**
@@ -443,7 +443,7 @@ describe("a student moved to another family", () => {
   it("gives the new family nothing of who signed a form it brought along: no names, no download, no PDF", async () => {
     const s2 = FAMILY_A.students[1]!;
     await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: s2.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
-    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, s2.qboId));
+    await moveInCache([s2.qboId], FAMILY_B.family.qboId); // as a roster read leaves it: the app's records follow
     const bCtx = { ...b.identity, ip: null };
     expect(await findMySignedPdf(bCtx, a.forms!.ids.complete)).toBeNull();
     expect(await mySignedDownloads(bCtx, [a.forms!.ids.complete])).toEqual(new Map());

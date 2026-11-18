@@ -315,14 +315,16 @@ describe("not followed when the cache a refresh replaces isn't this company's", 
     expect(await requestNow(open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
   });
 
-  it("a refresh that clears another company's cache follows nothing", async () => {
+  // Until stage 4 of the app-owned families spec, a refresh over another company's cache is refused before it reads
+  // anything (open question 18), so it clears nothing and follows nothing. (The rule that a cleared cache has no move to
+  // follow stays in the refresh for when stage 4 lets a company change again.)
+  it("a refresh over another company's cache is refused, and follows nothing", async () => {
     await connectRoster(stub);
     await seedLeo();
-    // The cache says it came from another company: this refresh clears it, with its forms and places, and follows no move.
     await db.transaction((tx) => setRosterSource(tx, "9130000000000999"));
     moveInQuickBooks(LEO, CHEN);
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await auditsOf("roster.cleared")).toHaveLength(1);
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(roster_company)") });
+    expect(await auditsOf("roster.cleared")).toEqual([]);
     expect(await followed()).toEqual([]);
     expect(await auditsOf("forms.request.moved")).toEqual([]);
     expect(await auditsOf("volunteer.signup.moved")).toEqual([]);

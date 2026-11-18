@@ -21,7 +21,7 @@ import ShiftPage from "@/app/(parent)/volunteer/shifts/[id]/page";
 import { cancelSignupAction, signUpAction } from "@/app/(parent)/volunteer/actions";
 import { resetDb, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
-import { addToCache, stu } from "../helpers/roster-cache";
+import { addToCache, moveInCache, stu } from "../helpers/roster-cache";
 import { seedSeason } from "../helpers/season";
 import { TWO_FAMILY_EVENT, seedEvent, seedShift, seedSignup, shiftAround } from "../helpers/volunteer";
 
@@ -150,7 +150,7 @@ describe("signing up", () => {
     const [hours] = await db.insert(requirement).values({ stepId: Object.values(seeded.stepIds)[0]!, kind: "volunteer", title: "Student hours", appliesTo: "student", amount: 6, amountUnit: "hours", position: 0 }).returning();
     const { shifts: [shift] } = await seedEvent({ shifts: [{ startsAt: "09:00", endsAt: "12:00", requirementIds: [hours!.id] }] });
     await seedSignup({ shiftId: shift!.id, familyQboId: FAMILY_B.family.qboId, signedUpBy: b.identity.parentId, student: BARNABY! });
-    await db.update(qboCustomer).set({ parentQboId: FAMILY_A.family.qboId }).where(eq(qboCustomer.qboId, BARNABY!.qboId));
+    await moveInCache([BARNABY!.qboId], FAMILY_A.family.qboId); // as a roster read leaves it: the app's records follow
     const season = (await loadMySeason(ctxOf(a.identity), (await famOf(a)).students))!;
     expect(season.steps[0]!.students.find((s) => s.name === BARNABY!.name)!.lines.map((l) => l.words)).toEqual(["0 of 6 hours done"]);
     const view = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;

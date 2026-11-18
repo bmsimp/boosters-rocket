@@ -46,13 +46,13 @@ const q = async <T>(f: (pg: postgres.Sql) => Promise<T>) => {
 };
 const columnsOf = (table: string) => q(async (pg) => (await pg`SELECT column_name FROM information_schema.columns WHERE table_name = ${table}`).map((c) => c.column_name as string).sort());
 
-/** Every season row as the customer and kind of the record it names, through that record's link. */
+/** Every season row as the customer and kind of the record it names, through that record's link, by code unit ("F-GONE" before "F1"). */
 const asCustomers = (table: "requirement_cover" | "requirement_progress") => q((pg) => pg.unsafe(`
   SELECT r.title, l.customer_id AS customer, CASE WHEN t.family_id IS NOT NULL THEN 'family' ELSE 'student' END AS kind
     ${table === "requirement_progress" ? ", t.id, t.met_at IS NOT NULL AS ticked, t.waived_reason" : ""}
   FROM ${table} t JOIN requirement r ON r.id = t.requirement_id
     JOIN accounting_link l ON (l.family_id = t.family_id OR l.student_id = t.student_id) AND l.realm_id = '${REALM}'
-  ORDER BY r.title, l.customer_id`));
+  ORDER BY r.title, l.customer_id COLLATE "C"`));
 
 let progressIds: Record<string, string> = {};
 let claimIds: string[] = [];
