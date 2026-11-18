@@ -772,18 +772,22 @@ export const volunteerReminder = pgTable("volunteer_reminder", {
 
 /**
  * A family's or one student's choice to pay instead of volunteering (v1 spec §11.5), and its QuickBooks invoice: the
- * only invoice the portal ever creates. `subject_qbo_id` is the family for a per-family requirement and the student for
- * a per-student one; `customer_qbo_id` is who the invoice is billed to (the family customer, or the student's own), read
- * from the roster cache for the session's family. The price is fixed when the guardian confirms: credit earned later
- * does not lower it. One live buy-out at most per requirement and subject (`buyout_live_uq`), so a guardian can never
- * make two invoices for one requirement. `flag` is set for the treasurer (the daily check, a move, a paid invoice the
- * portal would not void) and shown on the Reconciliation page. Never expires; a company change deletes every row.
+ * only invoice the portal ever creates. `family_id` is the app's own family that chose it; a per-student requirement's
+ * names the app's own student it is for (`student_id`), and a per-family one's none, its subject being the family
+ * (stage 2 of the app-owned families spec; migrations 0030 and 0031). What it bills stays QuickBooks': `customer_qbo_id`
+ * is who the invoice is billed to (the family customer, or the student's own), read from the roster cache for the
+ * session's family, with the item, the invoice and the company it is in. The price is fixed when the guardian confirms:
+ * credit earned later does not lower it. One live buy-out at most per requirement and family where it is the family's
+ * (`buyout_family_live_uq`), and per requirement and student whichever family chose it (`buyout_student_live_uq`), so a
+ * guardian can never make two invoices for one requirement. `flag` is set for the treasurer (the daily check, a move, a
+ * paid invoice the portal would not void) and shown on the Reconciliation page. Never expires; a company change deletes
+ * every row. The row keeps the requirement, the family and the student from being deleted.
  */
 export const buyout = pgTable("buyout", {
   id: uuid("id").primaryKey().defaultRandom(),
   requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "restrict" }),
-  familyQboId: text("family_qbo_id").notNull(),
-  subjectQboId: text("subject_qbo_id").notNull(),
+  familyId: uuid("family_id").notNull().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student requirement's student; null for a per-family one
   customerQboId: text("customer_qbo_id").notNull(),
   itemQboId: text("item_qbo_id").notNull(),
   unitCents: integer("unit_cents").notNull(),
@@ -805,8 +809,12 @@ export const buyout = pgTable("buyout", {
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
-  uniqueIndex("buyout_live_uq").on(t.requirementId, t.subjectQboId).where(sql`state not in ('voided', 'refused')`),
-  index("buyout_family_ix").on(t.familyQboId),
+  // One live buy-out per requirement and subject: a per-family one's by its family, a per-student one's by its student
+  // across every family (a student another family's live buy-out still holds is offered no choice).
+  uniqueIndex("buyout_family_live_uq").on(t.requirementId, t.familyId).where(sql`state not in ('voided', 'refused') and student_id is null`),
+  uniqueIndex("buyout_student_live_uq").on(t.requirementId, t.studentId).where(sql`state not in ('voided', 'refused') and student_id is not null`),
+  index("buyout_family_id_ix").on(t.familyId),
+  index("buyout_student_id_ix").on(t.studentId),
   index("buyout_state_ix").on(t.state),
   check("buyout_amount", sql`${t.unitCents} > 0 and ${t.units} > 0 and ${t.amountCents} = ${t.unitCents} * ${t.units}`),
 ]);

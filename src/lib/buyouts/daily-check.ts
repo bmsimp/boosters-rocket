@@ -8,11 +8,13 @@ import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { buyout, jobRun, qboCustomer, setting } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
+import { linksOf } from "@/lib/families/links";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
 import { judgeInvoice } from "./rules";
+import { buyoutRecords } from "./standing";
 import { markBuyoutMoneyStale, queueVoid } from "./writes";
 
 export const BUYOUT_CHECK_JOB = "buyouts.check";
@@ -42,15 +44,22 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
   if ((seen?.value as { runId?: unknown } | undefined)?.runId === run.id) return NOT_RUN;
   const source = await getRosterSource();
   const rows = source === null ? [] : await db.select().from(buyout).where(and(eq(buyout.state, "invoiced"), eq(buyout.realmId, source)));
-  const money = await moneyRows([...new Set(rows.map((b) => b.familyQboId))]);
+  // The family that chose each buy-out is the app's record; its stored figures are still kept by its customer, found
+  // through the record's link (until the money slice), and the roster still says where a student is by QuickBooks ids
+  // (until stage 3), so a move is read as the cache has it: the invoice's customer no longer under the family's own.
+  const links = await linksOf({ families: [...new Set(rows.map((b) => b.familyId))], students: [] });
+  const money = await moneyRows([...new Set(links.customerOfFamily.values())]);
   const customers = rows.length === 0 ? [] : await db.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer)
     .where(inArray(qboCustomer.qboId, [...new Set(rows.map((b) => b.customerQboId))]));
   let paid = 0, flagged = 0, voided = 0, voiding = 0, unflagged = 0;
   for (const b of rows) {
     if (!b.invoiceQboId) continue;
-    const perStudent = b.subjectQboId !== b.familyQboId;
+    // A family with no link in the roster's company can't be compared with anything: it is left for a later run.
+    const familyQboId = links.customerOfFamily.get(b.familyId);
+    if (familyQboId === undefined) continue;
+    const perStudent = b.studentId !== null;
     const c = customers.find((x) => x.qboId === b.customerQboId);
-    const stillTheFamilys = Boolean(c?.active && c.parentQboId === b.familyQboId);
+    const stillTheFamilys = Boolean(c?.active && c.parentQboId === familyQboId);
     if (perStudent && !stillTheFamilys) {
       // Moved in QuickBooks: the roster cache says so, whatever the figures hold. Its void goes on the queue once; a
       // void that found something paid has flagged it, and it is left for the treasurer.
@@ -58,7 +67,7 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
       if (await db.transaction((tx) => queueVoid(tx, b, "student_moved", { actor: WORKER_ACTOR, label: "student moved", nextTryAt: new Date() }))) voiding++;
       continue;
     }
-    const row = money.get(b.familyQboId);
+    const row = money.get(familyQboId);
     // Only a family this run read, from this company: older figures may be from before the invoice was made, and so
     // may figures marked behind since they were read.
     if (!row?.readAt || !row.invoices || row.realmId !== source || row.readAt < run.startedAt || (row.staleAt && row.staleAt >= row.readAt)) continue;
@@ -106,7 +115,7 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
       if (!marked) return;
       flagged++;
       await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.flagged", targetType: "buyout", targetId: b.id, before: { flag: b.flag },
-        after: { flag: verdict, familyQboId: b.familyQboId, requirementId: b.requirementId, invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, runId: run.id } }, tx);
+        after: { flag: verdict, ...buyoutRecords(b), requirementId: b.requirementId, invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, runId: run.id } }, tx);
     });
   }
   const value = { runId: run.id };

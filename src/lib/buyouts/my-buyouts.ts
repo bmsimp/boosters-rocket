@@ -1,10 +1,13 @@
 // Privacy: the one module a parent's buy-out pages read through (v1 spec §11.5, §12 invariant 1). The family is the
-// session's (ctx.familyQboId) and nothing else: the requirements are the current season's volunteer ones that ask
-// something of that family or its own active students, and the buy-outs read are that family's own. What the browser
-// sends back is the requirement id and a choice key made here from the family's own list of subjects ("family", or
-// "s1", "s2" for its students in id order), never a QuickBooks id; both are looked up again within the session's family.
-// Of another family's buy-outs only this is read: whether one still stands for one of this family's own students (a
-// student who moved here in QuickBooks), so no choice is offered that could never be set up. Nothing of it is shown.
+// session's (ctx.familyQboId), turned into its own active app family and students once (sessionFamily(), the volunteer
+// pages' one definition of the session's family), and nothing else: the requirements are the current season's
+// volunteer ones that ask something of that family or its own active students, and the buy-outs read are that family's
+// own, by its records (stage 2 of the app-owned families spec). What the browser sends back is the requirement id and a
+// choice key made here from the family's own list of subjects ("family", or "s1", "s2" for its students in the order of
+// their QuickBooks ids), never an id; both are looked up again within the session's family. Of another family's
+// buy-outs only this is read: whether one still stands for one of this family's own students (a student who moved here
+// in QuickBooks), so no choice is offered that could never be set up. Nothing of it is shown. What a buy-out bills stays
+// QuickBooks': the customer, the family's own or the student's own, read from the roster cache for the session's family.
 // It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
 import { createHmac } from "node:crypto";
@@ -15,10 +18,8 @@ import { buyout, qboCustomer, requirement, season, seasonStep, type BuyoutState 
 import type { ParentCtx } from "@/lib/guards";
 import type { MyFamily } from "@/lib/parents/my-family";
 import { isUuid } from "@/lib/seasons/ids";
-// The season and volunteering keep the app's own ids, and buy-outs are still kept by customer: a boundary of stage 2 of
-// the app-owned families spec (AGENTS.md, Seasons). The family's customers are turned into its app records once
-// (sessionFamily(), as the volunteer pages do), and the requirements' lists, standings and credit are read by those records.
-import { sessionFamily } from "@/lib/families/session-family";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { sessionFamily, type SessionFamily } from "@/lib/families/session-family";
 import { pairKey } from "@/lib/seasons/kinds";
 import { isCovered, type Requirement, type SubjectId, type SubjectsAsked } from "@/lib/seasons/progress";
 import { loadFacts, toRequirement } from "@/lib/seasons/recorded";
@@ -28,7 +29,7 @@ import { getRosterSource } from "@/lib/roster/source";
 import { guardianMay, LIVE_STATES, quoteBuyout, buyoutOffered, type Quote } from "./rules";
 import { buyoutFacts } from "./standing";
 
-/** What a parent's page is given about one requirement and one subject: words, amounts and what they may do. No QuickBooks id. */
+/** What a parent's page is given about one requirement and one subject: words, amounts and what they may do. No id but the requirement's. */
 export type MyBuyout = {
   requirementId: string; title: string; unit: "shifts" | "hours";
   /** The choice key the page sends back: "family", or "s1", "s2" for the family's students. */
@@ -47,20 +48,26 @@ export type MyBuyout = {
   /** A buy-out the club couldn't set up, the last time one was tried: the page says so calmly. */
   refusedBefore: boolean;
 };
-/** What the server alone keeps of a choice, for the confirm: the subject and who the invoice is billed to. Never sent to a page. */
-export type BuyoutTarget = { view: MyBuyout; subjectQboId: string; customerQboId: string; itemQboId: string; realmId: string; requirement: Requirement };
+/**
+ * What the server alone keeps of a choice, for the confirm: the session's app family, the app's student a per-student
+ * requirement's choice is for (null for the family's own), and who the invoice is billed to. Never sent to a page.
+ */
+export type BuyoutTarget = { view: MyBuyout; familyId: AppFamilyId; studentId: AppStudentId | null; customerQboId: string; itemQboId: string; realmId: string; requirement: Requirement };
 
 const KEY = /^(family|s[1-9]\d{0,2})$/;
 export const isChoiceKey = (v: unknown): v is string => typeof v === "string" && KEY.test(v);
 
 /**
- * The quote's stamp: which requirement, subject, item and price the guardian was shown, sealed with the server's key so
- * nothing in it can be read or made in the browser. The confirm works the quote out again and refuses when it differs.
+ * The quote's stamp: which requirement, customer billed, item and price the guardian was shown, sealed with the
+ * server's key so nothing in it can be read or made in the browser. The confirm works the quote out again and refuses
+ * when it differs. It seals the QuickBooks ids of what is billed (the session's family customer and the subject's own
+ * customer), as it did before buy-outs named the app's records, so a quote shown before then confirms the same.
  */
-export const quoteStamp = (familyQboId: string, requirementId: string, subjectQboId: string, itemQboId: string, q: Quote): string | null =>
-  q.ok ? createHmac("sha256", env.BETTER_AUTH_SECRET).update(`buyout-quote:${familyQboId}|${requirementId}|${subjectQboId}|${itemQboId}|${q.unitCents}|${q.units}|${q.amountCents}`).digest("base64url").slice(0, 22) : null;
+export const quoteStamp = (familyQboId: string, requirementId: string, customerQboId: string, itemQboId: string, q: Quote): string | null =>
+  q.ok ? createHmac("sha256", env.BETTER_AUTH_SECRET).update(`buyout-quote:${familyQboId}|${requirementId}|${customerQboId}|${itemQboId}|${q.unitCents}|${q.units}|${q.amountCents}`).digest("base64url").slice(0, 22) : null;
 
-type Subject = { key: string; qboId: string; who: string };
+/** One of the family's subjects: its key, its own customer (who would be billed), its app record, and who it is in words. */
+type Subject = { key: string; qboId: string; record: SubjectId; studentId: AppStudentId | null; who: string };
 
 /** The family's active students as loadMyFamily() gave them, kept only where the roster cache holds them directly under the session's family, in id order. */
 async function myStudents(ctx: Pick<ParentCtx, "familyQboId">, family: Pick<MyFamily, "students">): Promise<{ qboId: string; name: string }[]> {
@@ -73,19 +80,27 @@ async function myStudents(ctx: Pick<ParentCtx, "familyQboId">, family: Pick<MyFa
 }
 
 /**
- * Who in the family a requirement asks, each with its key: the family once, or each of its students it covers. `recordOf`
- * gives a customer's app record of the requirement's kind; one with none is asked nothing.
+ * Who in the family a requirement asks, each with its key: the family once, or each of its students it covers. A
+ * student's key is its place among the students myStudents() gives; one with no record of its own in the family is
+ * asked nothing.
  */
-function subjectsOf(r: Requirement, familyQboId: string, students: { qboId: string; name: string }[], recordOf: (r: Requirement, qboId: string) => SubjectId | undefined): Subject[] {
-  const covered = (qboId: string) => { const record = recordOf(r, qboId); return record !== undefined && isCovered(r, record); };
-  if (r.appliesTo === "family") return covered(familyQboId) ? [{ key: "family", qboId: familyQboId, who: "Your family" }] : [];
-  return students.flatMap((s, i) => (covered(s.qboId) ? [{ key: `s${i + 1}`, qboId: s.qboId, who: s.name }] : []));
+function subjectsOf(r: Requirement, familyQboId: string, records: SessionFamily, students: { qboId: string; name: string }[]): Subject[] {
+  if (r.appliesTo === "family") {
+    return isCovered(r, records.familyId) ? [{ key: "family", qboId: familyQboId, record: records.familyId, studentId: null, who: "Your family" }] : [];
+  }
+  return students.flatMap((s, i) => {
+    const record = records.students.find((x) => x.qboId === s.qboId)?.id;
+    return record !== undefined && isCovered(r, record) ? [{ key: `s${i + 1}`, qboId: s.qboId, record, studentId: record, who: s.name }] : [];
+  });
 }
+
+/** Whether a buy-out is for this subject: the family's own (no student), or this student's. */
+const isFor = (b: { studentId: AppStudentId | null }, s: Subject) => b.studentId === s.studentId;
 
 /**
  * Every buy-out choice the current season gives the session's family: each volunteer requirement that offers a buy-out,
  * or has one standing for the family, for the family or for each of its students it asks. `only` narrows it to one
- * requirement. In the season's order.
+ * requirement. In the season's order. None while the family has no active record.
  */
 async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, family: Pick<MyFamily, "students">, only?: string): Promise<BuyoutTarget[]> {
   const rows = await db.select({ r: requirement }).from(requirement).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId))
@@ -93,43 +108,41 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
     .orderBy(asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
   if (rows.length === 0) return [];
   const students = await myStudents(ctx, family);
-  const subjectIds = [ctx.familyQboId, ...students.map((s) => s.qboId)];
   // The family and its students as the app's records, by the one definition of the session's family the volunteer
   // pages use (sessionFamily(): its active record, and its own students' records); nothing of a family whose record is
   // inactive is asked about.
   const records = await sessionFamily(ctx.familyQboId, students);
-  const studentRecords = new Map((records?.students ?? []).map((s) => [s.qboId, s.id]));
-  const asked: SubjectsAsked = { families: records ? [records.familyId] : [], students: [...studentRecords.values()] };
-  const recordOf = (r: Requirement, qboId: string): SubjectId | undefined => (r.appliesTo === "family" ? (records && qboId === ctx.familyQboId ? records.familyId : undefined) : studentRecords.get(qboId));
+  if (records === null) return [];
+  const own = records.students.map((s) => s.id);
+  const asked: SubjectsAsked = { families: [records.familyId], students: own };
   const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), asked);
   const requirements = rows.map((x) => ({ row: x.r, r: toRequirement(x.r, covers.get(x.r.id) ?? []) }));
   const ids = requirements.map((x) => x.r.id);
-  // The family's own buy-outs only: the session's family id is the only one asked about.
-  const mine = await db.select().from(buyout).where(and(eq(buyout.familyQboId, ctx.familyQboId), inArray(buyout.requirementId, ids)));
+  // The family's own buy-outs only: the session's family record is the only family asked about.
+  const mine = await db.select().from(buyout).where(and(eq(buyout.familyId, records.familyId), inArray(buyout.requirementId, ids)));
   // A live buy-out another family chose for one of this family's own students (moved here in QuickBooks): it holds the
-  // one live place for that requirement and student (buyout_live_uq), so a choice here could never be set up.
-  const elsewhere = students.length === 0 ? [] : await db.select({ requirementId: buyout.requirementId, subjectQboId: buyout.subjectQboId }).from(buyout)
-    .where(and(inArray(buyout.requirementId, ids), inArray(buyout.subjectQboId, students.map((s) => s.qboId)), ne(buyout.familyQboId, ctx.familyQboId), inArray(buyout.state, [...LIVE_STATES])));
+  // one live place for that requirement and student (buyout_student_live_uq), so a choice here could never be set up.
+  // Only that it stands is read.
+  const elsewhere = own.length === 0 ? [] : await db.select({ requirementId: buyout.requirementId, studentId: buyout.studentId }).from(buyout)
+    .where(and(inArray(buyout.requirementId, ids), inArray(buyout.studentId, own), ne(buyout.familyId, records.familyId), inArray(buyout.state, [...LIVE_STATES])));
   const [facts, confirmed, standing, source] = await Promise.all([
-    buyoutFacts(ids, subjectIds), confirmedAmounts(requirements.map((x) => x.r), asked, pairKey),
+    buyoutFacts(ids, asked, pairKey), confirmedAmounts(requirements.map((x) => x.r), asked, pairKey),
     loadFacts(requirements.map((x) => x.r), asked, { amounts: "fresh", parentId: ctx.parentId }), getRosterSource(),
   ]);
   const out: BuyoutTarget[] = [];
   for (const { row, r } of requirements) {
     const terms = { kind: r.kind, amount: r.amount, amountUnit: r.amountUnit, buyoutUnitCents: row.buyoutUnitCents, itemQboId: row.itemQboId };
-    for (const s of subjectsOf(r, ctx.familyQboId, students, recordOf)) {
-      // Buy-outs by customer (`${requirementId}|${customer}`, buyoutFacts()); the season and credit by the app's record.
-      const fact = facts.get(`${r.id}|${s.qboId}`) ?? null;
-      const record = recordOf(r, s.qboId)!;
-      const live = fact ? mine.find((b) => b.requirementId === r.id && b.subjectQboId === s.qboId && LIVE_STATES.includes(b.state)) ?? null : null;
+    for (const s of subjectsOf(r, ctx.familyQboId, records, students)) {
+      const fact = facts.get(pairKey(r.id, s.record)) ?? null;
+      const live = fact ? mine.find((b) => b.requirementId === r.id && isFor(b, s) && LIVE_STATES.includes(b.state)) ?? null : null;
       if (!buyoutOffered(terms) && !live) continue;
-      if (!live && elsewhere.some((e) => e.requirementId === r.id && e.subjectQboId === s.qboId)) continue;
+      if (!live && elsewhere.some((e) => e.requirementId === r.id && isFor(e, s))) continue;
       // A requirement staff waived needs nothing (v1 spec §10.2): there is nothing to buy, as when credit has met it.
-      const shown = !live && standing.facts.waived(r.id, record) ? { met: true, words: "Waived" } : standing.facts.standing(r, record);
-      const quote = shown.met ? { ok: false as const, why: "met" as const } : quoteBuyout(terms, confirmed.get(pairKey(r.id, record)) ?? 0);
-      const last = mine.filter((b) => b.requirementId === r.id && b.subjectQboId === s.qboId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+      const shown = !live && standing.facts.waived(r.id, s.record) ? { met: true, words: "Waived" } : standing.facts.standing(r, s.record);
+      const quote = shown.met ? { ok: false as const, why: "met" as const } : quoteBuyout(terms, confirmed.get(pairKey(r.id, s.record)) ?? 0);
+      const last = mine.filter((b) => b.requirementId === r.id && isFor(b, s)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
       out.push({
-        subjectQboId: s.qboId, customerQboId: s.qboId, itemQboId: row.itemQboId ?? "", realmId: source ?? "", requirement: r,
+        familyId: records.familyId, studentId: s.studentId, customerQboId: s.qboId, itemQboId: row.itemQboId ?? "", realmId: source ?? "", requirement: r,
         view: {
           requirementId: r.id, title: r.title, unit: r.amountUnit ?? "shifts", key: s.key, who: s.who, standing: shown.words, met: shown.met,
           quote, stamp: row.itemQboId ? quoteStamp(ctx.familyQboId, r.id, s.qboId, row.itemQboId, quote) : null,

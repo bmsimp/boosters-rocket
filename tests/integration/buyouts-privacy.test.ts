@@ -9,17 +9,21 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, family, writeQueue } from "@/lib/db/schema";
+import { loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoices";
 import { BUYOUT_COPY } from "@/lib/buyouts/writes";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { buyoutFacts } from "@/lib/buyouts/standing";
+import { pairKey } from "@/lib/seasons/kinds";
 import { confirmBuyoutAction, switchBackAction } from "@/app/(parent)/volunteer/pay-instead/actions";
 import { resetDb } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { connectCompany } from "../helpers/money";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedBuyoutRequirement } from "../helpers/buyouts";
+import { recordOfCustomer } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -79,10 +83,33 @@ describe("family A can't reach family B's buy-outs", () => {
     for (const m of b.markers) expect(shownToA, m).not.toContain(m);
   });
 
+  it("shows and does nothing for a family whose own record is inactive, asking QuickBooks nothing and changing nothing", async () => {
+    const { a } = await seedTwoFamilies();
+    await connectCompany(stub);
+    const familyA = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    expect((await viewOf(a, FAMILY_A.students)).map((x) => x.requirementId)).toContain(a.buyout!.requirementId);
+    expect([...(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).keys()]).toEqual(["9174"]);
+    // Made inactive some way the reconcile doesn't follow (a type changed in QuickBooks, say): the session still names its customer.
+    await db.update(family).set({ active: false }).where(eq(family.id, familyA));
+    const before = await everything();
+    expect(await viewOf(a, FAMILY_A.students)).toEqual([]);
+    expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
+    asParent(a.identity);
+    expect(await confirmBuyoutAction(a.buyout!.requirementId, a.buyout!.key, "any-stamp-0000000000")).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await switchBackAction(a.buyout!.requirementId, a.buyout!.key)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    const after = await everything();
+    expect(after.buyouts).toEqual(before.buyouts);
+    expect(after.queue).toEqual([]);
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
   it("reads a family's standing from its own buy-outs alone", async () => {
     const { a, b } = await seedTwoFamilies();
-    const facts = await buyoutFacts([a.buyout!.requirementId, b.buyout!.requirementId], [FAMILY_A.family.qboId, ...FAMILY_A.students.map((s) => s.qboId)]);
-    expect([...facts.keys()]).toEqual([`${a.buyout!.requirementId}|${FAMILY_A.family.qboId}`]);
-    expect(facts.get(`${a.buyout!.requirementId}|${FAMILY_A.family.qboId}`)).toEqual({ state: "invoiced", invoicePaid: false });
+    // Asked by family A's own records, as its pages ask: B's buy-out is never in the answer.
+    const familyA = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    const asked = { families: [familyA], students: await Promise.all(FAMILY_A.students.map((s) => recordOfCustomer(s.qboId, "student"))) };
+    const facts = await buyoutFacts([a.buyout!.requirementId, b.buyout!.requirementId], asked, pairKey);
+    expect([...facts.keys()]).toEqual([pairKey(a.buyout!.requirementId, familyA)]);
+    expect(facts.get(pairKey(a.buyout!.requirementId, familyA))).toEqual({ state: "invoiced", invoicePaid: false });
   });
 });

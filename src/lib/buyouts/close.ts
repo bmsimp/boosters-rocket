@@ -1,7 +1,7 @@
 // Staff only: closing a buy-out from Reconciliation or its family's buy-outs page (v1 spec §11.5), called only from
 // src/app/staff/(app)/reconciliation/buyout-actions.ts. It sends nothing to QuickBooks and never voids or changes an
 // invoice (on a "missing" flag from stored figures alone it first reads the customer's invoices, a GET): it ends the buy-out in the portal, as voided with its own end reason (`closed_by_staff`), so it leaves the
-// live index (`buyout_live_uq`) and the family can choose again or volunteer. It is allowed only where ./closing.ts says
+// live indexes (`buyout_family_live_uq`, `buyout_student_live_uq`) and the family can choose again or volunteer. It is allowed only where ./closing.ts says
 // no unpaid invoice of the buy-out stands. It gives up a stuck queue item through the queue's own giving up, so it is
 // never imported by parent code (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import "server-only";
@@ -14,6 +14,7 @@ import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { takePlace } from "@/lib/volunteer/my-volunteer";
 import { closeTag, itemsOf, verdictOf } from "./staff";
+import { buyoutRecords } from "./standing";
 import { invoiceStandsLive } from "./writes";
 
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -70,7 +71,7 @@ export async function closeBuyout(id: string, shownTag: string, rosterTag: strin
     }
     await tx.update(buyout).set({ state: "voided", endReason: "closed_by_staff", flag: null, flaggedAt: null, updatedAt: new Date() }).where(eq(buyout.id, b.id));
     await writeAudit({ actor: o.actor, action: "volunteer.buyout.closed", permission: o.permission, ip: o.ip, targetType: "buyout", targetId: b.id,
-      before: { state: b.state, flag: b.flag, code: b.lastCode, invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, familyQboId: b.familyQboId, requirementId: b.requirementId },
+      before: { state: b.state, flag: b.flag, code: b.lastCode, invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, ...buyoutRecords(b), requirementId: b.requirementId },
       after: { state: "voided", why: "closed_by_staff", close: verdict.why, ...(readGone ? { readLive: "gone" } : {}), note, givenUp: given } }, tx);
     return { ok: true, message: CLOSE_COPY.done };
   });

@@ -212,12 +212,17 @@ async function main() {
             VALUES (${r.id}, ${stepIds["Wrap-up"]!}, 'volunteer', ${r.title}, false, 'family', ${r.amount}, ${r.unit}, ${r.chosen ? "chosen" : "everyone"}, ${requirements.length + i}, ${HELP_ITEM}, ${r.unitCents})`;
     if (r.chosen) seasonRows.push({ table: "cover", requirementId: r.id, kind: "family", customer: r.chosen });
   }
-  await sql`INSERT INTO buyout (id, requirement_id, family_qbo_id, subject_qbo_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, invoice_qbo_id, invoice_sync_token, realm_id, chosen_by, chosen_by_label)
-          VALUES (${E2E_BUYOUT.buyout}, ${E2E_BUYOUT.invoiced}, 'E2E-FAMILY', 'E2E-FAMILY', 'E2E-FAMILY', ${HELP_ITEM}, 5000, 2, 10000, 'invoiced', '902', '0', '9130000000000001', ${p!.id}, 'zelda@example.com')`;
+  // The buy-outs name the app's own family (stage 2 of the app-owned families spec), which the fill at the end makes:
+  // stored once it has run, as migration 0030 stores them. Both requirements are per-family, so neither names a student.
   // The Rivera family's buy-out of its trailer shifts, which QuickBooks refused: on Reconciliation for staff to close
   // (tests/e2e/buyout-close.spec.ts). Refused, it holds no live place, so the Rivera family's choice is as it was.
-  await sql`INSERT INTO buyout (id, requirement_id, family_qbo_id, subject_qbo_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, last_code, realm_id, chosen_by, chosen_by_label)
-          VALUES (${E2E_BUYOUT.refused}, ${E2E_BUYOUT.other}, 'E2E-10', 'E2E-10', 'E2E-10', ${HELP_ITEM}, 2000, 1, 2000, 'refused', 'fault_6000', '9130000000000001', ${crypto.randomUUID()}, 'a guardian')`;
+  const zeldaParent = p!.id as string, riveraGuardian = crypto.randomUUID();
+  const storeBuyouts = async (tx: postgres.TransactionSql, familyOf: (customer: string) => Promise<string>) => {
+    await tx`INSERT INTO buyout (id, requirement_id, family_id, student_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, invoice_qbo_id, invoice_sync_token, realm_id, chosen_by, chosen_by_label)
+            VALUES (${E2E_BUYOUT.buyout}, ${E2E_BUYOUT.invoiced}, ${await familyOf("E2E-FAMILY")}, null, 'E2E-FAMILY', ${HELP_ITEM}, 5000, 2, 10000, 'invoiced', '902', '0', '9130000000000001', ${zeldaParent}, 'zelda@example.com')`;
+    await tx`INSERT INTO buyout (id, requirement_id, family_id, student_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, last_code, realm_id, chosen_by, chosen_by_label)
+            VALUES (${E2E_BUYOUT.refused}, ${E2E_BUYOUT.other}, ${await familyOf("E2E-10")}, null, 'E2E-10', ${HELP_ITEM}, 2000, 1, 2000, 'refused', 'fault_6000', '9130000000000001', ${riveraGuardian}, 'a guardian')`;
+  };
   // Volunteering (v1 spec §11): one event 20 days ahead with two shifts, their ids fixed so the specs can ask for them
   // (tests/e2e/volunteer.spec.ts, PARAMS in tests/e2e/parent-session.spec.ts). The Rivera family has signed Leo up for
   // the griddle, so the Quetzalcoatl family sees "1 of 4 places filled" and never who. The volunteer spec signs Zelda up
@@ -327,10 +332,9 @@ async function main() {
   // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
-  // The season's chosen lists, ticks and waivers, the volunteer sign-ups and the form requests and evidence, by the app's
-  // own record of each customer, of the kind each names it as, in the roster's company: as migrations 0024, 0026 and
-  // 0028 store them. A customer with no
-  // such record stops the seed.
+  // The season's chosen lists, ticks and waivers, the volunteer sign-ups, the form requests and evidence and the buy-outs,
+  // by the app's own record of each customer, of the kind each names it as, in the roster's company: as migrations 0024,
+  // 0026, 0028 and 0030 store them. A customer with no such record stops the seed.
   await sql.begin(async (tx) => {
     const recordOf = async (kind: "family" | "student", customer: string, what: string): Promise<string> => {
       const [link] = kind === "family"
@@ -353,6 +357,7 @@ async function main() {
               VALUES (${r.shiftId}, ${family}, ${r.signedUpBy}, ${student === null ? "guardian" : "student"}, ${r.fillerParentId}, ${student}, ${r.fillerName})`;
     }
     await storeForms(tx, (customer) => recordOf("family", customer, "a form request"));
+    await storeBuyouts(tx, (customer) => recordOf("family", customer, "a buy-out"));
   });
   await sql.end();
 }

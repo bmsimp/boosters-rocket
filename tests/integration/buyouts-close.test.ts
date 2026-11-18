@@ -33,6 +33,7 @@ import { MONEY_REALM, seedFamilyMoney, seedSignedInParent, type SeededParent } f
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { staffWith } from "../helpers/roster-writes";
+import { recordOfCustomer } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -49,11 +50,11 @@ const standing = async (p: SeededParent, req: string) =>
   (await loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, family)).find((b) => b.requirementId === req)!;
 
 /** A queue item for a buy-out, as the write queue leaves one. */
-async function seedItem(b: { id: string; customerQboId: string; familyQboId: string }, o: { op?: "invoice_create" | "invoice_void"; state?: "waiting" | "stuck" | "done" | "given_up"; sent?: boolean } = {}) {
+async function seedItem(b: { id: string; customerQboId: string }, o: { op?: "invoice_create" | "invoice_void"; state?: "waiting" | "stuck" | "done" | "given_up"; sent?: boolean } = {}) {
   const request: BuyoutWrite = (o.op ?? "invoice_create") === "invoice_create"
-    ? { op: "invoice_create", buyoutId: b.id, customerQboId: b.customerQboId, itemQboId: "4343", units: 2, unitCents: 5000, familyQboId: b.familyQboId }
-    : { op: "invoice_void", buyoutId: b.id, invoiceQboId: "5001", customerQboId: b.customerQboId, familyQboId: b.familyQboId, why: "switched_back" };
-  const [item] = await db.insert(writeQueue).values({ realmId: "9130000000000001", request, familyQboId: b.familyQboId, state: o.state ?? "stuck", sent: o.sent ?? false,
+    ? { op: "invoice_create", buyoutId: b.id, customerQboId: b.customerQboId, itemQboId: "4343", units: 2, unitCents: 5000, familyQboId: FAMILY }
+    : { op: "invoice_void", buyoutId: b.id, invoiceQboId: "5001", customerQboId: b.customerQboId, familyQboId: FAMILY, why: "switched_back" };
+  const [item] = await db.insert(writeQueue).values({ realmId: "9130000000000001", request, familyQboId: FAMILY, state: o.state ?? "stuck", sent: o.sent ?? false,
     tries: 8, lastCode: "http_429", nextTryAt: o.state === "waiting" ? new Date() : null, askedByLabel: "a guardian" }).returning();
   return item!;
 }
@@ -80,7 +81,7 @@ describe("staff close a buy-out (v1 spec §11.5)", () => {
     expect(stub.apiCalls()).toEqual([]);
     const [a] = await audits("volunteer.buyout.closed");
     expect(a).toMatchObject({ actorId: staff.id, permission: "Roster.Family.ReadWrite", targetType: "buyout", targetId: b.id,
-      before: { state: "refused", flag: null, code: "fault_6000", invoiceQboId: null, amountCents: 10000, familyQboId: FAMILY },
+      before: { state: "refused", flag: null, code: "fault_6000", invoiceQboId: null, amountCents: 10000, familyId: String(await recordOfCustomer(FAMILY, "family")), studentId: null },
       after: { state: "voided", why: "closed_by_staff", close: "refused", note: "Sorted out with the family by phone.", givenUp: [] } });
     // Off Reconciliation's list.
     expect(await loadBuyoutsToLook()).toEqual([]);
@@ -260,7 +261,8 @@ describe("a family's buy-outs page (Roster.Read)", () => {
     asStaff(reader);
     const html = await renderPage(FamilyBuyoutsPage, { params: { id: FAMILY } });
     const [read] = await audits("volunteer.buyout.family.read");
-    expect(read).toMatchObject({ actorId: reader.id, permission: "Roster.Read", targetType: "qbo_customer", targetId: FAMILY });
+    // Naming the app's family, as the season's and volunteering's family pages do.
+    expect(read).toMatchObject({ actorId: reader.id, permission: "Roster.Read", targetType: "family", targetId: String(await recordOfCustomer(FAMILY, "family")) });
     expect(html).toContain(RIVERA.family.name);
     expect(html).toContain("Concession shifts");
     expect(html).toContain("Refused by QuickBooks: nothing was billed");

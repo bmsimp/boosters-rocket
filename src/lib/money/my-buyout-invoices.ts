@@ -1,11 +1,13 @@
 // Parent-facing: which of one family's invoices are its own volunteer buy-outs, so Payments can say so beside the
-// invoice's number. It takes the family's id, which the caller takes from the session (ctx.familyQboId), and reads that
-// family's buy-outs alone: nothing the browser sends names an invoice. In the staff-only import scan with the rest of
-// src/lib/money (tests/integration/page-guards.test.ts).
+// invoice's number. It takes the family's id, which the caller takes from the session (ctx.familyQboId), turns it into
+// the family's own active app record (activeFamilyOf(): nothing of an inactive one), and reads that family's buy-outs
+// alone: nothing the browser sends names an invoice. In the staff-only import scan with the rest of src/lib/money
+// (tests/integration/page-guards.test.ts).
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { buyout, requirement, type StoredInvoice } from "@/lib/db/schema";
 import { LIVE_STATES } from "@/lib/buyouts/rules";
+import { activeFamilyOf } from "@/lib/families/session-family";
 import { getRosterSource } from "@/lib/roster/source";
 
 /** An invoice the portal made for this family's buy-out: the customer it was raised on, and the requirement it pays instead of. */
@@ -20,11 +22,11 @@ export type MyBuyoutInvoices = ReadonlyMap<string, BuyoutInvoice>;
  * other. A buy-out another family chose, for a student who has since moved here, is not this family's either.
  */
 export async function loadMyBuyoutInvoices(familyQboId: string): Promise<MyBuyoutInvoices> {
-  const realmId = await getRosterSource();
-  if (!realmId) return new Map();
+  const [realmId, familyId] = await Promise.all([getRosterSource(), activeFamilyOf(familyQboId)]);
+  if (!realmId || familyId === null) return new Map();
   const rows = await db.select({ invoiceQboId: buyout.invoiceQboId, customerQboId: buyout.customerQboId, requirementTitle: requirement.title })
     .from(buyout).innerJoin(requirement, eq(requirement.id, buyout.requirementId))
-    .where(and(eq(buyout.familyQboId, familyQboId), eq(buyout.realmId, realmId), isNotNull(buyout.invoiceQboId), inArray(buyout.state, [...LIVE_STATES])));
+    .where(and(eq(buyout.familyId, familyId), eq(buyout.realmId, realmId), isNotNull(buyout.invoiceQboId), inArray(buyout.state, [...LIVE_STATES])));
   return new Map(rows.map((r) => [r.invoiceQboId!, { customerQboId: r.customerQboId, requirementTitle: r.requirementTitle }]));
 }
 

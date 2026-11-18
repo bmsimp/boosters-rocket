@@ -79,8 +79,7 @@ export async function allocateFamilies(familyIds: readonly AppFamilyId[] | null,
   }));
   // A requirement staff waived for the family or a student needs nothing, so it takes no credit and what it would have
   // taken flows on to the others. Only when it was waived is read, never why. So does one whose buy-out is paid
-  // (v1 spec §11.4: never beyond the amount needed; allocation.ts). Buy-outs are still kept by customer, and are read
-  // through the boundary in ./bought.ts.
+  // (v1 spec §11.4: never beyond the amount needed; allocation.ts), read by the same records (./bought.ts).
   const waived = new Set((await loadRecorded(requirements.map((r) => r.id), asked, tx)).filter((w) => w.waivedAt !== null).map((w) => slotKey(w.requirementId, w.subjectId)));
   const bought = await buyoutsByRecord(requirements, asked, slotKey, tx);
   const paidFor = (key: string) => { const f = bought.get(key); return Boolean(f && (f.state === "paid" || f.invoicePaid)); };

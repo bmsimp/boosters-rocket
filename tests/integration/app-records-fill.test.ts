@@ -44,8 +44,8 @@ const member = (qboId: string, displayName: string, o: Partial<CacheCustomer> = 
 /**
  * Records of the current company naming customers the cache doesn't hold, of each kind the function reads, one naming
  * a roster family as a student and a roster student as a family, and evidence of an earlier company. The season's
- * chosen lists, ticks and reminder claims, volunteering's sign-ups, credit and reminder claims, and form requests and
- * the current company's signed-form evidence, name the app's own records since stage 2 (migrations 0024 to 0029), so
+ * chosen lists, ticks and reminder claims, volunteering's sign-ups, credit and reminder claims, form requests and the
+ * current company's signed-form evidence, and buy-outs, name the app's own records since stage 2 (migrations 0024 to 0031), so
  * they name no customer for the fill to make a record of, and are not among these (RE_KEYED_SINCE_0023). An earlier
  * company's evidence still names customers, and is never read.
  */
