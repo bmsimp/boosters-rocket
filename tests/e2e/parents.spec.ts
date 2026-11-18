@@ -106,9 +106,12 @@ test("the staff home and the Parents page show the held address; a refusal keeps
     await expect(decided).toContainText("Same person in Okafor Family, Lee Family.");
     await expect(decided).toContainText("Sam confirmed by phone.");
     const rows = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.hold.decided', 'parent.access.granted') ORDER BY id`;
-    expect(rows.map((r) => r.action)).toEqual(["parent.hold.decided", "parent.access.granted", "parent.access.granted"]);
-    expect(rows[0]!.after).toMatchObject({ decision: "same_person", familyQboIds: ["E2E-40", "E2E-50"], note: "Sam confirmed by phone." });
+    // The reconcile runs first and the decision's row comes last, so it can say what the decision did to the app's own
+    // records (src/lib/parents/holds.ts): the two sign-ins it opened, then the decision.
+    expect(rows.map((r) => r.action)).toEqual(["parent.access.granted", "parent.access.granted", "parent.hold.decided"]);
+    expect(rows[0]!.after).toMatchObject({ cause: "hold" });
     expect(rows[1]!.after).toMatchObject({ cause: "hold" });
+    expect(rows[2]!.after).toMatchObject({ decision: "same_person", familyQboIds: ["E2E-40", "E2E-50"], note: "Sam confirmed by phone." });
 
     // Put it back, so the second pass of the run starts from the same place.
     await decided.getByText("Reverse this decision").click();
