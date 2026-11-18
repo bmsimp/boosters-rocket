@@ -38,10 +38,11 @@ export function movedStudentPlan(rows: readonly { id: string; state: SignatureRe
  * them too, for a caller that would rather withdraw them itself after the commit.
  *
  * The move comes by QuickBooks ids, as the roster has it; a student or old family with no app record has no requests.
- * A new family the records don't hold yet (one QuickBooks made in the same roster read, whose record the read makes
- * after this) can't be given a request: a complete one then stays where it is, and an unfinished one is still reset
- * and its document withdrawn, under the old family, where the new family's Forms page takes it over as it takes over
- * any request nothing was made for (loadMyForms()). The next roster read finds the complete one held elsewhere
+ * Both callers bring the records into step first (a roster read runs its reconcile before its follow-ups, and a staff
+ * move goes to a family already on the roster), so the new family has its record. Should one ever have none, it can't
+ * be given a request: a complete one then stays where it is, and an unfinished one is still reset and its document
+ * withdrawn, under the old family, where the new family's Forms page takes it over as it takes over any request
+ * nothing was made for (loadMyForms()); the next roster read finds the complete one held elsewhere
  * (requestsHeldElsewhere()) and moves it then.
  */
 export async function formsForMovedStudent(tx: Tx, o: { studentQboId: string; fromFamilyQboId: string; toFamilyQboId: string; actor?: Actor; ip?: string | null }): Promise<{ moved: number; reset: number; toWithdraw: string[] }> {

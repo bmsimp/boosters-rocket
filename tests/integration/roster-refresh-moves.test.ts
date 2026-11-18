@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { asParent, renderPage } from "../helpers/signed-in";
+import { asParent, pageOutcome, renderPage } from "../helpers/signed-in";
 
 // Every request goes to the QuickBooks stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -28,8 +28,10 @@ import { MONEY_JOB } from "@/lib/money/run-keys";
 import FormsPage from "@/app/(parent)/forms/page";
 import FormPage from "@/app/(parent)/forms/[id]/page";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
+import { findMySignedPdf } from "@/lib/forms/my-evidence";
+import { remindNow } from "@/lib/signed-forms/reminders";
 import { resetDb, seedWorkingMail } from "../helpers/db";
-import { formSetting, requestByCustomer, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
+import { connectForms, formSetting, requestByCustomer, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { identityNow, seedParentIn } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup } from "../helpers/volunteer";
@@ -308,15 +310,22 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
 
 describe("not followed when the cache a refresh replaces isn't this company's", () => {
   it("the first read of a company follows nothing, wherever its students are", async () => {
-    // A request left from before, under the Rivera family, for a student QuickBooks has under the Chen family.
+    // Before a company's first read there are no app records, so no form or place can be held anywhere (a request
+    // names its family's and student's records, made only from a roster read): there is no earlier state of the
+    // company to compare with, and nothing held elsewhere. The first read, with Leo under the Chen family, follows nothing.
     const season = await seedSeason({ name: "Before", steps: [{ name: "Join" }] });
     const req = await seedFormRequirement({ stepId: season.stepIds["Join"]!, title: "Medical release", appliesTo: "student", form: formSetting({ id: "envelope_tmplmedical" }) });
-    const open = await seedRequest({ requirementId: req, familyQboId: RIVERA, subjectQboId: LEO, state: "waiting" });
     const company = fznCompany();
     Object.assign(company.customers.find((c) => c.Id === LEO)!, { ParentRef: { value: CHEN } });
     await connectRoster(stub, { company });
     expect(await followed()).toEqual([]);
-    expect(await requestByCustomer(open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
+    expect(await auditsOf("forms.request.moved")).toEqual([]);
+    expect(await db.select().from(formWithdrawal)).toEqual([]);
+    // Leo's record is in the Chen family; a form opened for him there, and read again with nothing changed, stays put.
+    const open = await seedRequest({ requirementId: req, familyQboId: CHEN, subjectQboId: LEO, state: "waiting", envelopeId: "envelope_firstread" });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toEqual([]);
+    expect(await requestByCustomer(open)).toMatchObject({ familyQboId: CHEN, state: "waiting", envelopeId: "envelope_firstread" });
   });
 
   // Until stage 4 of the app-owned families spec, a refresh over another company's cache is refused before it reads
@@ -447,5 +456,57 @@ describe("what each family reads after a student QuickBooks moved", () => {
     expect(mine(volunteer)).not.toContain("Fall fair");
     expect(mine(volunteer)).not.toContain("Leo Rivera");
     expect(volunteer).toContain("0 of 4 places filled");
+  });
+
+  it("a family QuickBooks made in the same read as a student's move into it gets the student's forms at once, and a second read changes nothing", async () => {
+    const ana = await seedParentIn({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+    await connectRoster(stub);
+    const leo = await seedLeo();
+    // Forms are set up (nothing here calls Documenso), so reminders could go.
+    await connectForms({ origin: "http://127.0.0.1:9", token: "api_never_called" });
+    // In QuickBooks, between two reads: the Okafor family is made, with its parent, and Leo moved into it.
+    const OKAFOR = "70";
+    stub.customers.push({ Id: OKAFOR, DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } },
+      { Id: "71", DisplayName: "Obi Okafor", Active: true, SyncToken: "0", CustomerTypeRef: { value: "2" }, ParentRef: { value: OKAFOR }, Job: true,
+        PrimaryEmailAddr: { Address: "obi@example.com" } });
+    moveInQuickBooks(LEO, OKAFOR);
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    const okafor = await recordOfCustomer(OKAFOR, "family");
+
+    // The complete form and its evidence are the new family's at once; the unfinished one starts again there, its document queued for withdrawal.
+    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: OKAFOR, state: "complete" });
+    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, leo.evidence.id)))[0]).toMatchObject({ familyId: okafor, familyQboId: RIVERA });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: OKAFOR, state: "not_opened", envelopeId: null });
+    expect((await db.select().from(formWithdrawal)).map((w) => w.envelopeId)).toContain("envelope_qbmovedopen");
+    expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
+    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: OKAFOR, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
+
+    // The new family's guardian reads it as signed, without the old family's guardian or the PDF they signed.
+    const obi = await seedParentIn({ familyQboId: OKAFOR, name: "Obi Okafor", email: "obi@example.com", sourceQboId: "71" });
+    asParent(await identityNow(obi.session.id));
+    const theirs = await renderPage(FormPage, { params: { id: leo.signed } });
+    expect(theirs).toContain("Photo consent");
+    expect(theirs).toContain("Signed");
+    expect(theirs).not.toContain("Ana Rivera");
+    expect(await findMySignedPdf({ ...(await identityNow(obi.session.id)), ip: null }, leo.signed)).toBeNull();
+
+    // The old family sees and downloads neither, and has no place for Leo.
+    const anaNow = await identityNow(ana.session.id);
+    asParent(anaNow);
+    for (const id of [leo.signed, leo.open]) expect(await pageOutcome(FormPage, { params: { id } })).toEqual({ notFound: true });
+    for (const id of [leo.signed, leo.open]) expect(await findMySignedPdf({ ...anaNow, ip: null }, id)).toBeNull();
+    expect(await renderPage(FormsPage)).not.toContain("Photo consent");
+    expect(mine(await renderPage(VolunteerPage))).not.toContain("Leo Rivera");
+
+    // No reminder is owed to the new family for the form already signed.
+    mail.outbox = [];
+    await remindNow({ kind: "family", familyId: String(okafor) }, { actor: WORKER.actor, ip: null });
+    expect(mail.outbox.filter((m) => m.subject.includes("Photo consent"))).toEqual([]);
+
+    // A second read finds nothing more to follow and changes no request.
+    const requestsNow = [await requestByCustomer(leo.signed), await requestByCustomer(leo.open)];
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await followed()).toHaveLength(1);
+    expect([await requestByCustomer(leo.signed), await requestByCustomer(leo.open)]).toEqual(requestsNow);
   });
 });
