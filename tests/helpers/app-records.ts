@@ -3,12 +3,13 @@
 import { asc } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, student } from "@/lib/db/schema";
-import { keepAppRecordsInStep, type AppRecordChanges } from "@/lib/families/in-step";
+import { keepAppRecordsInStep, noAppRecordChanges, type AppRecordChanges } from "@/lib/families/in-step";
 
 /** Runs keepAppRecordsInStep() in its own transaction, as the roster read does inside its own. */
 export const syncAppRecords = (): Promise<AppRecordChanges> => db.transaction((tx) => keepAppRecordsInStep(tx));
 
-export const NO_CHANGES: AppRecordChanges = { families: { made: 0, changed: 0, removed: 0 }, students: { made: 0, changed: 0, removed: 0 }, memberships: { linked: 0, unlinked: 0, pointed: 0 } };
+/** What a run that finds the records in step returns. */
+export const NO_CHANGES: AppRecordChanges = noAppRecordChanges();
 
 class RolledBack extends Error {}
 
@@ -47,8 +48,14 @@ export async function appRecordsByCustomer() {
     .map((g) => ({ guardianId: g.id, family: ofFamily(g.familyId) }));
   const linked = links.map((l) => ({ system: l.system, realmId: l.realmId, customer: l.customerId,
     kind: l.familyId !== null ? "family" : l.studentId !== null ? "student" : "membership", guardianId: l.guardianId, origin: l.origin, linkedBy: l.linkedBy }))
-    .sort((a, b) => byText(a.customer, b.customer));
+    .sort((a, b) => byText(a.customer, b.customer) || byText(a.kind, b.kind) || byText(a.guardianId, b.guardianId));
   return { families, students, memberships, links: linked };
+}
+
+/** Each family and student record's id by its kind and customer ("family:10", "student:12"): to prove an id is kept. */
+export async function recordIds(): Promise<Record<string, string>> {
+  return Object.fromEntries((await db.select().from(accountingLink)).filter((l) => l.guardianId === null)
+    .map((l) => [l.familyId !== null ? `family:${l.customerId}` : `student:${l.customerId}`, String(l.familyId ?? l.studentId)]));
 }
 
 /** Every row of the three tables and each guardian row's family, ids and times and all: for "nothing changed". */

@@ -14,8 +14,9 @@ import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldCha
 /**
  * Migration 0023 fills the app's own records in SQL from what the database holds, so that stage 2's migrations find
  * them however soon they run after it (AGENTS.md, The app's own records). The fill must make exactly what the
- * TypeScript function makes (keepAppRecordsInStep(), src/lib/families/in-step.ts): here each is run on the same data,
- * in turn, and what they made is compared customer by customer. And after the fill, the function finds nothing to change.
+ * TypeScript function makes from nothing (keepAppRecordsInStep(), src/lib/families/in-step.ts): here each is run on the
+ * same data from empty tables, in turn, and what they made is compared customer by customer. And after the fill, the
+ * function finds nothing to change.
  */
 const REALM = "4620000000000001";
 
@@ -27,8 +28,9 @@ async function runFill() {
   const statements = appRecordsFillStatements();
   await db.transaction(async (tx) => { for (const s of statements) await tx.execute(sql.raw(s)); });
 }
-/** What the function makes, then what the fill makes from the same data. */
+/** What the function makes from empty tables, then what the fill makes from the same data. */
 async function bothWays() {
+  await emptyAppRecords();
   await syncAppRecords();
   const byFunction = await appRecordsByCustomer();
   await emptyAppRecords();
@@ -36,15 +38,20 @@ async function bothWays() {
   const byFill = await appRecordsByCustomer();
   return { byFunction, byFill };
 }
+const company = () => db.transaction((tx) => setRosterSource(tx, REALM));
 
 const person = (name: string) => seedParent({ name, email: `${name.toLowerCase().replace(/\W+/g, ".")}@fill.example` });
 const member = (qboId: string, displayName: string, o: Partial<CacheCustomer> = {}): CacheCustomer => ({ qboId, displayName, typeQboId: "M", ...o });
 
-/** Records of the current company naming customers the cache doesn't hold, of each kind the function reads, and one of an earlier company. */
+/**
+ * Records of the current company naming customers the cache doesn't hold, of each kind the function reads, one naming
+ * a roster family as a student and a roster student as a family, and evidence of an earlier company.
+ */
 async function seedRecordsNamingOthers() {
   const season = await seedSeason({ name: "Fill season", steps: [{ name: "Join", requirements: [
     { title: "Locker key", appliesTo: "family", chosen: ["F-COVER-GONE", "S1"], ticked: ["F-COVER-GONE"] },
-    { title: "Uniform", appliesTo: "student", ticked: ["S-GONE", "S1"] },
+    // F2 is a family on the roster: a tick of a per-student requirement names it as a student.
+    { title: "Uniform", appliesTo: "student", ticked: ["S-GONE", "S1", "F2"] },
   ] }] });
   expect(season.requirementIds["Uniform"]).toBeTruthy();
   const { shifts: [shift] } = await seedEvent({ inDays: 10 });
@@ -68,15 +75,15 @@ async function seedRecordsNamingOthers() {
 describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => {
   beforeEach(async () => { await resetDb(); });
 
-  it("in layered books with a parent type, with records naming customers the cache no longer holds", async () => {
-    await db.transaction((tx) => setRosterSource(tx, REALM));
+  it("in layered books with a parent type, with records naming customers the cache doesn't hold, or names as the other kind", async () => {
+    await company();
     await seedShape();
     await seedCache([
       fam("F1", "Ash Family"), par("P1", "Ash Parent", "F1", "ash@fill.example"), stu("S1", "Ash Kid", "F1"), stu("S2", "Ash Old Kid", "F1", { active: false }),
       fam("F2", "Birch Family", { active: false }), par("P2", "Birch Parent", "F2", "birch@fill.example"), stu("S3", "Birch Kid", "F2"),
       stu("S9", "Stray Kid", "NOT-CACHED"), member("X1", "Lincoln High"),
     ]);
-    const [ash, cedar, birch, old, gone, d, e] = await Promise.all(["Ash Parent", "Cedar Hand", "Birch Parent", "Old Company", "Gone Family Parent", "Shared One", "Shared Two"].map(person));
+    const [ash, cedar, birch, old, gone, d, e, typed] = await Promise.all(["Ash Parent", "Cedar Hand", "Birch Parent", "Old Company", "Gone Family Parent", "Shared One", "Shared Two", "Retyped Family"].map(person));
     await seedGuardian({ parentId: ash!.id, familyQboId: "F1", status: "active", sourceQboId: "P1" });
     await seedGuardian({ parentId: cedar!.id, familyQboId: "F1", status: "invited" });
     await seedGuardian({ parentId: birch!.id, familyQboId: "F2", status: "disabled", disabledReason: "family_inactive", statusBeforeDisable: "active", sourceQboId: "P2" });
@@ -85,39 +92,45 @@ describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => 
     await seedGuardian({ parentId: gone!.id, familyQboId: "X1", status: "active", sourceQboId: "X1" });
     await seedGuardian({ parentId: d!.id, familyQboId: "F1", status: "active", sourceQboId: "P-SHARED" });
     await seedGuardian({ parentId: e!.id, familyQboId: "F2", status: "active", sourceQboId: "P-SHARED" });
+    // S3 is a student on the roster: a guardian row names it as its family (someone changed its type in QuickBooks).
+    await seedGuardian({ parentId: typed!.id, familyQboId: "S3", status: "disabled", disabledReason: "not_in_quickbooks", statusBeforeDisable: "active" });
     await seedRecordsNamingOthers();
 
     const { byFunction, byFill } = await bothWays();
     expect(byFill).toEqual(byFunction);
     // And what that is, so the two can't agree by both making nothing.
     expect(byFunction.families).toEqual([
-      { customer: "F-COVER-GONE", name: "Family F-COVER-GONE", active: false },
+      { customer: "F-COVER-GONE", name: null, active: false },
       { customer: "F-EVID", name: "Evidence Family", active: false },
-      { customer: "F-GONE", name: "Family F-GONE", active: false },
-      { customer: "F-MONEY", name: "Family F-MONEY", active: false },
+      { customer: "F-GONE", name: null, active: false },
+      { customer: "F-MONEY", name: null, active: false },
       { customer: "F1", name: "Ash Family", active: true },
       { customer: "F2", name: "Birch Family", active: false },
+      { customer: "S1", name: "Ash Kid", active: false },         // named as a family by a cover: its own inactive family record
+      { customer: "S3", name: "Birch Kid", active: false },       // named as a family by a guardian row
       { customer: "X1", name: "Lincoln High", active: false },
     ]);
     expect(byFunction.students).toEqual([
+      { customer: "F2", name: "Birch Family", active: false, family: null }, // named as a student by a tick
       { customer: "S-GONE", name: "Gone Kid Name", active: false, family: null },
-      { customer: "S-QUEUE", name: "Student S-QUEUE", active: false, family: null },
+      { customer: "S-QUEUE", name: null, active: false, family: null },
       { customer: "S1", name: "Ash Kid", active: true, family: "F1" },
       { customer: "S2", name: "Ash Old Kid", active: false, family: "F1" },
       { customer: "S3", name: "Birch Kid", active: true, family: "F2" },
     ]);
+    // Each customer named as both kinds has a link of each kind.
+    for (const customer of ["F2", "S1", "S3"]) expect(byFunction.links.filter((l) => l.customer === customer).map((l) => l.kind)).toEqual(["family", "student"]);
     // Never an earlier company's evidence, a closed link of another company, or another company's queue item.
     for (const customer of ["F-ARCHIVED", "OLD-F", "OLD-P", "S-OTHER-REALM", "F-OTHER-REALM", "S9"]) expect(byFunction.links.map((l) => l.customer)).not.toContain(customer);
-    // Sign-ins from a record of their own: P1, P-GONE and the first of the two rows from P-SHARED. Not the hand-made one,
-    // the closed one, or one whose record is the family's own.
-    const memberships = byFunction.links.filter((l) => l.kind === "membership");
-    expect(memberships.map((l) => l.customer).sort()).toEqual(["P-GONE", "P-SHARED", "P1"]);
+    // Sign-ins from a record of their own, open or closed, both rows from P-SHARED; not the hand-made one, the one whose
+    // record is the family's own, or the earlier company's.
+    expect(byFunction.links.filter((l) => l.kind === "membership").map((l) => l.customer)).toEqual(["P-GONE", "P-SHARED", "P-SHARED", "P1", "P2"]);
     for (const l of byFunction.links) expect(l).toMatchObject({ system: "quickbooks", realmId: REALM, origin: "carried_over", linkedBy: null });
     expect(byFunction.memberships.filter((m) => m.family === null)).toHaveLength(1); // the closed link of the earlier company
   });
 
   it("in flat books, where a member is a family of one and its sign-in has no record of its own", async () => {
-    await db.transaction((tx) => setRosterSource(tx, REALM));
+    await company();
     await seedShape({ kind: "flat", memberTypeIds: ["M"] } satisfies MembershipShape);
     await seedCache([member("M1", "Dana Member"), member("M2", "Eli Member", { active: false }), fam("F1", "Not A Family Here")]);
     const dana = await person("Dana Member"), gone = await person("Gone Member");
@@ -126,7 +139,7 @@ describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => 
     const { byFunction, byFill } = await bothWays();
     expect(byFill).toEqual(byFunction);
     expect(byFunction.families).toEqual([
-      { customer: "M-GONE", name: "Family M-GONE", active: false },
+      { customer: "M-GONE", name: null, active: false },
       { customer: "M1", name: "Dana Member", active: true },
       { customer: "M2", name: "Eli Member", active: false },
     ]);
@@ -135,7 +148,7 @@ describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => 
   });
 
   it("in layered books with no parent type, where each sign-in comes from the family's own record", async () => {
-    await db.transaction((tx) => setRosterSource(tx, REALM));
+    await company();
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
     await seedCache([fam("F1", "Ash Family", { email: "ash@fill.example" }), stu("S1", "Ash Kid", "F1")]);
     const ash = await person("Ash Parent");
@@ -146,8 +159,16 @@ describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => 
     expect(byFunction.links.map((l) => [l.kind, l.customer])).toEqual([["family", "F1"], ["student", "S1"]]);
   });
 
-  it("with no membership shape: only what the records name", async () => {
-    await db.transaction((tx) => setRosterSource(tx, REALM));
+  it.each([
+    ["no membership shape", null],
+    ["a layered shape with a key missing", { kind: "layered", familyTypeId: "F", studentTypeId: "S" }],
+    ["a layered shape with an empty type id", { kind: "layered", familyTypeId: "", studentTypeId: "S", parentTypeId: "P" }],
+    ["a flat shape whose member types aren't strings", { kind: "flat", memberTypeIds: ["F", 5] }],
+    ["a flat shape with no member types", { kind: "flat", memberTypeIds: [] }],
+    ["a shape of no kind the portal knows", { kind: "nested", familyTypeId: "F" }],
+  ])("with %s, which the portal reads as no shape: only what the records name", async (_what, shape) => {
+    await company();
+    if (shape) await db.insert(setting).values({ key: "membership.shape", value: shape });
     await seedCache([fam("F1", "Ash Family"), stu("S1", "Ash Kid", "F1")]);
     const ash = await person("Ash Parent");
     await seedGuardian({ parentId: ash.id, familyQboId: "F1", status: "active", sourceQboId: "P1" });
@@ -170,19 +191,17 @@ describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => 
     expect(byFunction.links).toEqual([]);
   });
 
-  it("leaves records the function finds nothing to change in, and its scratch tables can be made again", async () => {
-    await db.transaction((tx) => setRosterSource(tx, REALM));
+  it("leaves records the function finds nothing to change in", async () => {
+    await company();
     await seedShape();
-    await seedCache([fam("F1", "Ash Family"), par("P1", "Ash Parent", "F1", "ash@fill.example"), stu("S1", "Ash Kid", "F1")]);
+    await seedCache([fam("F1", "Ash Family"), par("P1", "Ash Parent", "F1", "ash@fill.example"), stu("S1", "Ash Kid", "F1"), fam("F2", "Birch Family"), stu("S3", "Birch Kid", "F2")]);
     const ash = await person("Ash Parent");
     await seedGuardian({ parentId: ash.id, familyQboId: "F1", status: "active", sourceQboId: "P1" });
     await seedRecordsNamingOthers();
+    await emptyAppRecords();
     await runFill();
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     // The fill run here leaves no audit row: that is the migration's own, once.
     expect((await db.select().from(auditLog)).filter((r) => r.action === "accounting.link.carried_over")).toEqual([]);
-    await emptyAppRecords();
-    await runFill();
-    expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
   });
 });

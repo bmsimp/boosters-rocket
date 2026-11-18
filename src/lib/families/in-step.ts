@@ -1,7 +1,7 @@
 // Reads every family's customers, sign-ins and records to keep the app's own records in step: staff and worker code
 // only, never imported by a parent page (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { accountingLink, family, guardian, qboCustomer, student } from "@/lib/db/schema";
 import { getShape } from "@/lib/roster/shape";
@@ -71,110 +71,124 @@ async function loadPlanInput(tx: Tx, realmId: string): Promise<Omit<PlanInput, "
   return { shape, customers, refs, hints, guardians };
 }
 
+/** What one run made or changed. Nothing is ever removed: a record nothing needs is made inactive, which is a change. */
 export type AppRecordChanges = {
-  families: { made: number; changed: number; removed: number };
-  students: { made: number; changed: number; removed: number };
-  memberships: { linked: number; unlinked: number; pointed: number };
+  families: { made: number; changed: number };
+  students: { made: number; changed: number };
+  memberships: { linked: number; relinked: number; pointed: number };
 };
+
+export const noAppRecordChanges = (): AppRecordChanges => ({ families: { made: 0, changed: 0 }, students: { made: 0, changed: 0 }, memberships: { linked: 0, relinked: 0, pointed: 0 } });
+
+/** Whether a run made or changed anything: then the audit row of the change that ran it says what (appRecordsAudit()). */
+export const changedAppRecords = (c: AppRecordChanges): boolean =>
+  [c.families.made, c.families.changed, c.students.made, c.students.changed, c.memberships.linked, c.memberships.relinked, c.memberships.pointed].some((n) => n > 0);
+
+/** The part of an audit row's `after` that says what a run made or changed: nothing when it changed nothing. */
+export const appRecordsAudit = (c: AppRecordChanges): { appRecords?: AppRecordChanges } => (changedAppRecords(c) ? { appRecords: c } : {});
+
+/** Thrown when bringing the records into step fails, so the roster read can say which part failed (app_records_failed). */
+export class AppRecordsFailed extends Error {}
 
 const inChunks = async <T>(rows: T[], f: (chunk: T[]) => Promise<unknown>) => { for (let i = 0; i < rows.length; i += CHUNK) await f(rows.slice(i, i + CHUNK)); };
 
 /**
  * Makes the app's own records and links agree with the roster cache and what the current company's records name
  * (./plan.ts says what that is): the one definition of "in step" until stage 3 makes the app the source. It changes
- * only what differs, so a second run changes nothing, and each record keeps its id while its customer stays the same
- * kind. A cache that names no company has no records at all. Every link it makes is carried over from the roster, now,
- * with nobody named. It writes no audit row of its own: it follows the change that called it, whose audit row is in the
- * same transaction (the roster read, a staff roster write, the reconcile, a parent's change of address, a shape save).
+ * only what differs, so a second run changes nothing. It never deletes a record or a link: one nothing needs any more
+ * is made inactive and keeps its id and its link, and is the same record, active again, when its customer is named
+ * again. Only a change of company removes them (clearAppRecords(), ./company-change.ts). A cache that names no company
+ * leaves every record inactive. Every link it makes is carried over from the roster, now, with nobody named.
  *
- * The caller owns the transaction and holds the roster lock (ROSTER_LOCK) exclusively: reconcileAccess()
- * (src/lib/parents/reconcile.ts) calls it last, for every roster read, staff roster write, reconcile and confirmed
- * change of address; saveShape() calls it after a new membership shape.
+ * It writes no audit row of its own and returns what it made and changed: the change that ran it puts that on its own
+ * audit row, in the same transaction, whenever anything changed (appRecordsAudit()). Its callers are reconcileAccess()
+ * (src/lib/parents/reconcile.ts), which runs it last and returns its counts, for every roster read, staff roster write,
+ * read-again, reconcile and confirmed change of a parent's sign-in email; and saveShape() after a new membership shape.
+ * The caller owns the transaction and holds the roster lock (ROSTER_LOCK) exclusively.
  */
 export async function keepAppRecordsInStep(tx: Tx): Promise<AppRecordChanges> {
+  try {
+    return await bringIntoStep(tx);
+  } catch (e) {
+    throw new AppRecordsFailed("The portal's own family records couldn't be brought up to date.", { cause: e });
+  }
+}
+
+async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
   const realmId = await getRosterSource(tx);
-  const changes: AppRecordChanges = { families: { made: 0, changed: 0, removed: 0 }, students: { made: 0, changed: 0, removed: 0 }, memberships: { linked: 0, unlinked: 0, pointed: 0 } };
+  const changes = noAppRecordChanges();
 
   const links = await tx.select().from(accountingLink).orderBy(accountingLink.id).for("update");
   const families = await tx.select().from(family).orderBy(family.id).for("update");
   const students = await tx.select().from(student).orderBy(student.id).for("update");
   const memberships = await tx.select({ id: guardian.id, familyId: guardian.familyId }).from(guardian);
-  // The name each of this company's customers' records has now: what the portal last knew one the cache no longer holds as.
-  const nameOfFamily = new Map(families.map((f) => [f.id, f.name])), nameOfStudent = new Map(students.map((s) => [s.id, s.name]));
-  const known = new Map<string, string>();
-  for (const l of links) {
-    if (realmId === null || l.system !== QUICKBOOKS || l.realmId !== realmId) continue;
-    const name = l.familyId !== null ? nameOfFamily.get(l.familyId) : l.studentId !== null ? nameOfStudent.get(l.studentId) : undefined;
-    if (name !== undefined) known.set(l.customerId, name);
+
+  // This company's links by kind: the record of each customer, and each guardian row's link. Another company's links
+  // are left as they are: a change of company removes them, and no lookup reads them.
+  const ours = links.filter((l) => realmId !== null && l.system === QUICKBOOKS && l.realmId === realmId);
+  const familyIdOf = new Map<string, AppFamilyId>(), studentIdOf = new Map<string, AppStudentId>();
+  const linkOfRow = new Map<string, { id: string; customerId: string }>();
+  for (const l of ours) {
+    if (l.familyId !== null) familyIdOf.set(l.customerId, l.familyId);
+    else if (l.studentId !== null) studentIdOf.set(l.customerId, l.studentId);
+    else if (l.guardianId !== null) linkOfRow.set(l.guardianId, { id: l.id, customerId: l.customerId });
   }
+  // The name each record has now: what the portal last knew a customer the cache no longer holds as.
+  const nameOfFamily = new Map(families.map((f) => [f.id, f.name])), nameOfStudent = new Map(students.map((s) => [s.id, s.name]));
+  const known = { families: new Map<string, string>(), students: new Map<string, string>() };
+  for (const [customerId, id] of familyIdOf) { const name = nameOfFamily.get(id); if (name) known.families.set(customerId, name); }
+  for (const [customerId, id] of studentIdOf) { const name = nameOfStudent.get(id); if (name) known.students.set(customerId, name); }
   const plan = realmId === null ? EMPTY_PLAN : planAppRecords({ ...(await loadPlanInput(tx, realmId)), known });
 
-  // The links that stay: this company's, to a record of the kind the plan has for that customer, or to the guardian
-  // row the plan links that customer to. Every other link goes, and every record left without one.
-  const familyIdOf = new Map<string, AppFamilyId>(), studentIdOf = new Map<string, AppStudentId>(), linkedRows = new Set<string>();
-  const keptFamilies = new Map<AppFamilyId, string>(), keptStudents = new Map<AppStudentId, string>(); // record -> its customer
-  const goingLinks: string[] = [];
-  for (const l of links) {
-    const ours = realmId !== null && l.system === QUICKBOOKS && l.realmId === realmId;
-    if (ours && l.familyId !== null && plan.families.has(l.customerId)) { familyIdOf.set(l.customerId, l.familyId); keptFamilies.set(l.familyId, l.customerId); }
-    else if (ours && l.studentId !== null && plan.students.has(l.customerId)) { studentIdOf.set(l.customerId, l.studentId); keptStudents.set(l.studentId, l.customerId); }
-    else if (ours && l.guardianId !== null && plan.membershipLinks.get(l.guardianId) === l.customerId) linkedRows.add(l.guardianId);
-    else { goingLinks.push(l.id); if (l.guardianId !== null) changes.memberships.unlinked++; }
-  }
-  const goingFamilies = families.filter((f) => !keptFamilies.has(f.id)).map((f) => f.id);
-  const goingStudents = students.filter((s) => !keptStudents.has(s.id)).map((s) => s.id);
-
-  // New records get their ids now, so a student can name a family made in this same run.
+  // 1. Families: new ones with their links; every existing one as the plan has it, or inactive when it isn't there.
   const newFamilies = [...plan.families].filter(([customerId]) => !familyIdOf.has(customerId))
     .map(([customerId, f]) => { const id = asAppFamilyId(randomUUID()); familyIdOf.set(customerId, id); return { id, customerId, ...f }; });
-  const newStudents = [...plan.students].filter(([customerId]) => !studentIdOf.has(customerId))
-    .map(([customerId, s]) => { const id = asAppStudentId(randomUUID()); studentIdOf.set(customerId, id); return { id, customerId, ...s }; });
-  const familyFor = (customerId: string | null | undefined) => (customerId ? familyIdOf.get(customerId) ?? null : null);
-
-  // 1. The links that go, so a customer can be linked again as another kind below. A guardian row that changes family
-  //    lets go of the old one first, so no family that goes is still named.
-  await inChunks(goingLinks, (ids) => tx.delete(accountingLink).where(inArray(accountingLink.id, ids)));
-  const pointed = memberships.map((m) => ({ id: m.id, was: m.familyId, now: familyFor(plan.memberships.get(m.id)) })).filter((m) => m.was !== m.now);
-  const letGo = pointed.filter((m) => m.was !== null).map((m) => m.id);
-  await inChunks(letGo, (ids) => tx.update(guardian).set({ familyId: null }).where(inArray(guardian.id, ids)));
-
-  // 2. New families, with their links.
   await inChunks(newFamilies, (rows) => tx.insert(family).values(rows.map((f) => ({ id: f.id, name: f.name, active: f.active }))));
   await inChunks(newFamilies, (rows) => tx.insert(accountingLink).values(rows.map((f) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: f.customerId, familyId: f.id, origin: "carried_over" as const }))));
   changes.families.made = newFamilies.length;
-
-  // 3. Students that stay take their name, state and family; those that go, go; then the families that go.
-  for (const s of students) {
-    const customerId = keptStudents.get(s.id);
-    if (customerId === undefined) continue;
-    const want = plan.students.get(customerId)!;
-    const familyId = familyFor(want.familyCustomerId);
-    if (s.name === want.name && s.active === want.active && s.familyId === familyId) continue;
-    await tx.update(student).set({ name: want.name, active: want.active, familyId, updatedAt: new Date() }).where(eq(student.id, s.id));
-    changes.students.changed++;
-  }
-  await inChunks(goingStudents, (ids) => tx.delete(student).where(inArray(student.id, ids)));
-  changes.students.removed = goingStudents.length;
-  await inChunks(goingFamilies, (ids) => tx.delete(family).where(inArray(family.id, ids)));
-  changes.families.removed = goingFamilies.length;
+  const customerOfFamily = new Map([...familyIdOf].map(([customerId, id]) => [id, customerId]));
   for (const f of families) {
-    const customerId = keptFamilies.get(f.id);
-    if (customerId === undefined) continue;
-    const want = plan.families.get(customerId)!;
-    if (f.name === want.name && f.active === want.active) continue;
-    await tx.update(family).set({ name: want.name, active: want.active, updatedAt: new Date() }).where(eq(family.id, f.id));
+    const customerId = customerOfFamily.get(f.id);
+    const want = customerId === undefined ? undefined : plan.families.get(customerId);
+    const next = want ?? { name: f.name, active: false };
+    if (f.name === next.name && f.active === next.active) continue;
+    await tx.update(family).set({ name: next.name, active: next.active, updatedAt: new Date() }).where(eq(family.id, f.id));
     changes.families.changed++;
   }
+  const familyFor = (customerId: string | null | undefined) => (customerId ? familyIdOf.get(customerId) ?? null : null);
 
-  // 4. New students, with their links.
+  // 2. Students the same way, each in the family the roster holds them under, and in none when it doesn't.
+  const newStudents = [...plan.students].filter(([customerId]) => !studentIdOf.has(customerId))
+    .map(([customerId, s]) => { const id = asAppStudentId(randomUUID()); studentIdOf.set(customerId, id); return { id, customerId, ...s }; });
   await inChunks(newStudents, (rows) => tx.insert(student).values(rows.map((s) => ({ id: s.id, name: s.name, active: s.active, familyId: familyFor(s.familyCustomerId) }))));
   await inChunks(newStudents, (rows) => tx.insert(accountingLink).values(rows.map((s) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: s.customerId, studentId: s.id, origin: "carried_over" as const }))));
   changes.students.made = newStudents.length;
+  const customerOfStudent = new Map([...studentIdOf].map(([customerId, id]) => [id, customerId]));
+  for (const s of students) {
+    const customerId = customerOfStudent.get(s.id);
+    const want = customerId === undefined ? undefined : plan.students.get(customerId);
+    const next = want ? { name: want.name, active: want.active, familyId: familyFor(want.familyCustomerId) } : { name: s.name, active: false, familyId: null };
+    if (s.name === next.name && s.active === next.active && s.familyId === next.familyId) continue;
+    await tx.update(student).set({ ...next, updatedAt: new Date() }).where(eq(student.id, s.id));
+    changes.students.changed++;
+  }
 
-  // 5. Each guardian row in its family, and linked to the record its sign-in came from.
-  for (const m of pointed) if (m.now !== null) await tx.update(guardian).set({ familyId: m.now }).where(eq(guardian.id, m.id));
-  changes.memberships.pointed = pointed.length;
-  const newLinks = [...plan.membershipLinks].filter(([guardianId]) => !linkedRows.has(guardianId));
+  // 3. Each guardian row in its family, and linked to the record its sign-in came from. A row whose sign-in no longer
+  //    comes from a record of its own keeps the link it had: it says where the sign-in came from.
+  for (const m of memberships) {
+    const now = familyFor(plan.memberships.get(m.id));
+    if (m.familyId === now) continue;
+    await tx.update(guardian).set({ familyId: now }).where(eq(guardian.id, m.id));
+    changes.memberships.pointed++;
+  }
+  const newLinks: [string, string][] = [];
+  for (const [guardianId, customerId] of plan.membershipLinks) {
+    const had = linkOfRow.get(guardianId);
+    if (!had) { newLinks.push([guardianId, customerId]); continue; }
+    if (had.customerId === customerId) continue;
+    await tx.update(accountingLink).set({ customerId, linkedAt: new Date(), updatedAt: new Date() }).where(eq(accountingLink.id, had.id));
+    changes.memberships.relinked++;
+  }
   await inChunks(newLinks, (rows) => tx.insert(accountingLink).values(rows.map(([guardianId, customerId]) => ({ system: QUICKBOOKS, realmId: realmId!, customerId, guardianId, origin: "carried_over" as const }))));
   changes.memberships.linked = newLinks.length;
   return changes;

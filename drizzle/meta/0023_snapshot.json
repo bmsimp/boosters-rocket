@@ -1,5 +1,5 @@
 {
-  "id": "048c5ca6-34f0-4f38-bc21-59bff24ed87b",
+  "id": "84b482e2-731d-4c75-922e-77ee11544ac2",
   "prevId": "01f2de5a-a776-4f93-bb99-fcb30bdc669d",
   "version": "7",
   "dialect": "postgresql",
@@ -86,8 +86,8 @@
         }
       },
       "indexes": {
-        "accounting_link_customer_uq": {
-          "name": "accounting_link_customer_uq",
+        "accounting_link_family_customer_uq": {
+          "name": "accounting_link_family_customer_uq",
           "columns": [
             {
               "expression": "system",
@@ -109,12 +109,13 @@
             }
           ],
           "isUnique": true,
+          "where": "family_id is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "accounting_link_family_uq": {
-          "name": "accounting_link_family_uq",
+        "accounting_link_student_customer_uq": {
+          "name": "accounting_link_student_customer_uq",
           "columns": [
             {
               "expression": "system",
@@ -129,7 +130,35 @@
               "nulls": "last"
             },
             {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "student_id is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "accounting_link_family_uq": {
+          "name": "accounting_link_family_uq",
+          "columns": [
+            {
               "expression": "family_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "system",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "realm_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -144,6 +173,12 @@
           "name": "accounting_link_student_uq",
           "columns": [
             {
+              "expression": "student_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "system",
               "isExpression": false,
               "asc": true,
@@ -151,12 +186,6 @@
             },
             {
               "expression": "realm_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "student_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -171,6 +200,12 @@
           "name": "accounting_link_guardian_uq",
           "columns": [
             {
+              "expression": "guardian_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "system",
               "isExpression": false,
               "asc": true,
@@ -178,12 +213,6 @@
             },
             {
               "expression": "realm_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "guardian_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -714,7 +743,7 @@
           "name": "name",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "active": {
           "name": "active",
@@ -4979,7 +5008,7 @@
           "name": "name",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "active": {
           "name": "active",
