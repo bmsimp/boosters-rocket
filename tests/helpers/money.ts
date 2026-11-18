@@ -5,6 +5,7 @@ import { MONEY_KEY } from "@/lib/money/settings";
 import { setRosterSource } from "@/lib/roster/source";
 import { MONEY_REALM, type ParentFamilySpec } from "./parent";
 import { seedConnected, type QboStub } from "./qbo-stub";
+import { syncAppRecords } from "./app-records";
 
 /**
  * For tests that let the portal read invoices from the stub QuickBooks (tests/helpers/qbo-stub.ts). The families here
@@ -30,6 +31,8 @@ export const stubInvoice = (Id: string, customer: string, extra: Record<string, 
 export async function connectCompany(stub: QboStub, realmId = MONEY_REALM): Promise<void> {
   await seedConnected(stub, { realmId });
   await db.transaction((tx) => setRosterSource(tx, realmId));
+  // The cache now names a company: the app's own records follow, as a roster read of it would leave them.
+  await syncAppRecords();
 }
 
 export const moneyRow = async (familyQboId: string) => (await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId)))[0];

@@ -146,6 +146,8 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
   const session = await seedParentSession(person.authUserId, { familyQboId: spec.family.qboId });
   const state = await resolveParentSession({ id: session.id, userId: person.authUserId, familyQboId: spec.family.qboId });
   if (state.status !== "ok") throw new Error(`seedSignedInParent: the portal would not sign ${spec.parent.name} in to ${spec.family.name} (session state "${state.status}")`);
+  // The link and the session name the family: the app's own records follow, as the reconcile that made the link would.
+  await syncAppRecords();
   return { identity: state.identity, spec, session, markers: markersOf(spec, state.identity, session) };
 }
 
@@ -197,7 +199,8 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
 /**
  * A signed-in parent for a family the test has put in the roster cache itself, in whatever membership shape: the
  * portal person, an active link to `familyQboId` (naming the QuickBooks record it came from, or made by hand when
- * `sourceQboId` is left out) and a session with that family chosen. Switches sign-ins on. For the two standard
+ * `sourceQboId` is left out) and a session with that family chosen, with the app's own records brought into step.
+ * Switches sign-ins on. For the two standard
  * families use seedSignedInParent() and seedTwoFamilies(), which also give the markers.
  */
 export async function seedParentIn(o: { familyQboId: string; name: string; email: string; phone?: string | null; sourceQboId?: string | null }): Promise<{ identity: ParentIdentity; session: { id: string; token: string } }> {
@@ -205,6 +208,7 @@ export async function seedParentIn(o: { familyQboId: string; name: string; email
   const person = await seedParent({ name: o.name, email: o.email, phone: o.phone ?? null, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId ?? null });
   const session = await seedParentSession(person.authUserId, { familyQboId: o.familyQboId });
+  await syncAppRecords();
   return { identity: await identityNow(session.id), session };
 }
 
