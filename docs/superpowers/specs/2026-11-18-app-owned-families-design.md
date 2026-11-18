@@ -6,8 +6,15 @@ specs it names below. It goes into AGENTS.md's list of specs only once the owner
 §8.2 (whose invoices a family sees), §11.5 where a buy-out's customer is read from the roster cache, and the parts of
 §12 that name QuickBooks ids; in `2026-11-10-quickbooks-connection-and-roster-design.md`, the cache as the roster (§2)
 and the read-only roster pages (§5); in `2026-11-11-parents-from-quickbooks-design.md`, §1 to §6 (who gets access, the
-reconcile, held addresses, the match review); in `2026-11-10-parent-email-code-sign-in-design.md`, only where a sign-in
-is tied to a family's QuickBooks ID.
+reconcile, held addresses, the match review); in `2026-11-10-parent-email-code-sign-in-design.md`, where a sign-in
+is tied to a family's QuickBooks ID, and how a parent signs in (section 6, Signing in): the emailed code no longer
+signs anyone in by itself. From that spec go its goal that a parent never has a password, "multi-factor sign-in for
+parents" in Not in scope, the code as the way in (§1, The pages) and the welcome email's "We'll email you a code each
+time" (§2). Stay: the person record and guardian rows (as this spec changes them), addresses trimmed and
+lower-cased, the code's own rules (hashed, single use, 10 minutes, 5 tries), its rate limits and audit rows, the code
+step that survives a reload, the page asked for, the session (90 days, renewed by use, and what ends it), answers
+that never say whether an address is known, the family chooser, the code email with no link in it, and outgoing mail
+(§3). What the code then serves: Open questions, 29.
 **Builds on:** everything built for v1 on `parent-portal` (merged to `main` at `8f3e513`).
 
 Words used here. A **guardian** is a person who signs in (the code's *parent*). A guardian's place in one family is a
@@ -32,10 +39,12 @@ He then approved the design as the lead laid it out in six pieces ("3 and 4 look
 and 6). Sections 3 to 9 follow them.
 
 In one paragraph: the portal keeps its own families, students and guardians, with its own ids, and decides from them
-who can sign in. QuickBooks stays the record for invoices, payments, balances and products. Each family is tied to its
-QuickBooks customer by a link an admin confirms on a mapping screen, which suggests matches by email address. A change
-made in the app is saved in the app, then sent on to QuickBooks. Seasons, volunteering, forms and buy-outs point at
-the app's ids, so connecting a different company no longer wipes them.
+who can sign in. Guardians sign in with a password, a passkey on offer and a second step on a new device, at a
+Standard or Strict level the club chooses (section 6, Signing in). QuickBooks stays the record for invoices,
+payments, balances and products. Each family is tied to its QuickBooks customer by a link an admin confirms on a
+mapping screen, which suggests matches by email address. A change made in the app is saved in the app, then sent on
+to QuickBooks. Seasons, volunteering, forms and buy-outs point at the app's ids, so connecting a different company no
+longer wipes them.
 
 ## 2. What stays true
 
@@ -53,10 +62,12 @@ the app's ids, so connecting a different company no longer wipes them.
   by a QuickBooks number.
 - **Names, emails and memos are shown as text only,** wherever they came from.
 - **A page sends the browser only what it shows.** A link's customer id never reaches a parent's browser.
-- **A refusal says the same thing whatever the reason.** An unlinked family's money words do not say why.
+- **A refusal says the same thing whatever the reason.** An unlinked family's money words do not say why. Signing
+  in, setting up a password and resetting one never say whether an address is known, as the emailed code never has.
 - **Unchanged:** staff notes stay for staff; the offline page is the only thing kept on a phone; family data is never
   cached; no secret reaches the browser. Any reason an admin writes on the mapping screen is for staff only. Each
-  accounting system's credentials are sealed, as QuickBooks' are.
+  accounting system's credentials are sealed, as QuickBooks' are. *(Proposed:)* a staff member's reason for resetting
+  a guardian's sign-in is for staff only too.
 
 **The money rules:** never the wrong company (no live read unless the accounting system is connected to the company
 the link was made in); answers read strictly (only a well-formed empty answer means "none", and an empty customer list
@@ -181,7 +192,8 @@ screen and the differences. Nobody's sign-in changes because of what it reads.
 ## 6. Logins
 
 - A guardian's sign-in email is the app's record.
-- Staff add a guardian to a family with a name and email; the parent signs in with the emailed code as today.
+- Staff add a guardian to a family with a name and email; the welcome email carries a set-up link, and the parent
+  signs in as "Signing in", below, says.
 - A parent changes their own email in the app with the same confirm-by-link step; the app then sends it on.
 - A guardian can sign in while they are an active guardian of an active family in the app, whatever QuickBooks holds.
   Blocking stays.
@@ -190,8 +202,52 @@ screen and the differences. Nobody's sign-in changes because of what it reads.
 
 **What leaves.** The owner retired deriving logins from QuickBooks and the two-family review. The lead's reading is
 that what only serves them goes too: held addresses, the clean-up preview's dry run, and the previous-company snapshot
-and match review. Sign-in codes, sessions, the family chooser and welcome emails stay; the sign-in switches are Open
-questions, 15.
+and match review. Sessions, the family chooser and welcome emails stay; the emailed sign-in code stops being a way in
+by itself ("Signing in", below); the sign-in switches are Open questions, 15.
+
+### Signing in
+
+The owner, on 2026-11-18: "since the app now owns everything other than payments, let's also revisit passwords. Easy
+Auth should be able to handle that in a secure way, correct? I don't like the idea of such a weak authentication like
+email code. Ideally, passwords plus MFA and passkeys". The lead answered that the portal's sign-in library is Better
+Auth; he did not correct that. Offered a passkey, or a password plus an authenticator app, for every parent:
+"familiarity for most would suggest that requiring a passkey out of the gate is going to cause too much friction on
+sign up. Unless you know a way to make this seamless". To the lead's shape below: "ok I like this."
+
+- **Sign-up.** The welcome email carries a one-time set-up link; the parent taps it and chooses a password. One screen.
+- **The passkey, offered.** Right after signing in, one prompt: "Sign in with Face ID or your fingerprint next time?",
+  with **Turn on** and **Not now**. Turn on is one tap; that device then signs in with a tap, and the passkey counts as
+  the second step. Not now carries on; the offer comes back at later sign-ins (Open questions, 31).
+- **The second step.** A device that has passed it is remembered. On a new device, a parent with no passkey gets a
+  code by email. An authenticator app is in sign-in settings for anyone who wants one.
+
+**Standard or Strict.** A parent with no passkey is only as safe as their mailbox, where the password reset and the
+emailed code both go. So it is a club setting:
+
+| | Signs in with | Can email alone get someone in? |
+|---|---|---|
+| **Standard** (a club starts here) | A password, plus an emailed code on a new device; a passkey offered | Yes, for a guardian with no passkey or app |
+| **Strict** | A password, plus a passkey or an authenticator app | Never |
+
+The Parents page shows how many guardians have a passkey; an Admin switches to Strict once most do. Other clubs choose
+for themselves. A guardian with neither when it switches: Open questions, 21.
+
+**Passkeys anywhere.** The owner asked: "Does this also account for passkeys stored in password managers like Bitwarden
+if they sign up on a PC and not a mobile phone since the idea is both desktop website and mobile browser/app". To the
+lead's yes, with what it needs, he said "ok add it to the spec":
+- several passkeys per guardian, each named ("Sam's iPhone", "Bitwarden"), listed and removable;
+- one may live anywhere: a phone, a computer, a password manager or a security key;
+- on a computer the offer says "passkey", naming Face ID, fingerprint, Windows Hello or a password manager as examples;
+- a passkey belongs to the portal's address: if a club changes it, parents fall back to password and second step and
+  add their passkeys again, and setup warns about that.
+
+**What stays.** Staff sign in with Microsoft or Google, whose second step is the identity provider's. Parent sessions
+last 90 days, renewed by use; blocking ends them; a guardian in two families chooses one.
+
+**Checked on real devices before it is relied on:** the offer inside the installed app on iPhone and Android; Bitwarden
+on a desktop and on a phone; Windows Hello; remembered devices alongside 90-day sessions.
+
+Not decided: Open questions, 21 to 32. Builder detail: Appendix A, Signing in.
 
 ## 7. Money, and the accounting interface
 
@@ -232,7 +288,11 @@ terms ("a family (a QuickBooks customer)", "a student (a sub-customer)") and pos
 new words; its third principle, "QuickBooks is the truth", still holds for the books.
 
 **The owner's runbook, meanwhile.** Real phones (part 3), the Documenso installation (part 4) and Intuit's assessment
-(part 5) can carry on. The sandbox journeys about roster changes wait: part 1's step 8 (the proof of concept's checks
+(part 5) can carry on. *(Proposed:)* once the sign-in release is on the proof-of-concept host, real phones gains the
+passkey checks (the offer inside the installed app on iPhone and Android, Bitwarden on a desktop and on a phone, Windows
+Hello, remembered devices alongside 90-day sessions), and its check 3, signing in from the installed app with a code
+read in Mail, becomes setting a password from the welcome email and meeting the second step. The sandbox journeys
+about roster changes wait: part 1's step 8 (the proof of concept's checks
 18 to 25, sign-ins from QuickBooks and a change of company), and part 2's checks 4, 7, 8, 9 and 12 (a parent's details, the email change, a staff change that waits, a student moved in QuickBooks,
 making a family inactive). Connecting the real books (part 6) waits, with parts 7 and 8 after it. The owner has not
 said about the rest of part 2 (payments and buy-outs).
@@ -273,6 +333,15 @@ reminders, the money cache.
 - *Not half done:* the session's family id and every parent query change in one release; a session that can't be
   carried over is ended. A refused change shows on Reconciliation until stage 4.
 
+**Sign-in** *(proposed: its own release after stage 3, before or after stage 4; Open questions, 32)*.
+- *Done:* the set-up link, passwords, the second step and remembered devices, passkeys, the authenticator app, the
+  Standard and Strict setting, and the staff reset. The emailed code stops being a way in by itself in the same
+  release in which passwords start.
+- *Users see:* parents choose a password from the welcome email, are offered a passkey, and meet an emailed code on a
+  new device; staff see on Parents how many guardians have a passkey; an Admin sees the setting.
+- *Not half done:* nobody is left without a way in: a guardian signed in keeps their session, and one who isn't sets a
+  password by the set-up link (Open questions, 30).
+
 **Stage 4: the mapping screen.**
 - *Done:* the optional import, suggestions, bulk confirm, differences and align, customers with no family. A change of
   company clears links and the money cache; families are linked again on the screen.
@@ -289,6 +358,8 @@ reminders, the money cache.
 
 A spreadsheet import; parents registering themselves or inviting a second guardian; more than one accounting system at
 once; staff raising other invoices; a second accounting system (the interface only makes room for one).
+*(Proposed:)* parents signing in with a Google, Apple or Microsoft account, or with a code by text message; staff
+signing in with a password or a passkey.
 
 ## 11. Open questions for the owner
 
@@ -314,6 +385,18 @@ once; staff raising other invoices; a second accounting system (the interface on
 | 18 | A change of company between stages. | Refuse a different company from stage 2 until stage 4 ships; reconnecting the same one works. Stage 1 needs no refusal: its clear still wipes everything. | Until stage 4 there is no screen to link families again. |
 | 19 | Stage 3 on its own: a new family, and a customer added in QuickBooks. | Bring two pieces forward: a family staff add while QuickBooks is connected is created there too and linked, as confirmed by that staff member if they hold the linking permission (unlinked otherwise); and Reconciliation lists customers with no family, with "Create a family from this". Otherwise ship stages 3 and 4 together. | Today a new family has money at once; without these, stage 3 leaves new families without money and QuickBooks' new customers with no way in. |
 | 20 | The data on the proof-of-concept host. | Let stage 1 carry it over, after a backup; test the import on a fresh database beside it. | It is the only installed data: the best test of stage 1. |
+| 21 | Switching to Strict: a guardian with no passkey or authenticator app yet. | The switch shows how many guardians have neither and asks the Admin to confirm; only an Admin switches, as with the other parent sign-in settings. Their open sessions stay. At their next sign-in their password leads only to adding a passkey or an authenticator app, never to the family's pages. One who has forgotten their password needs a staff reset (22). | Nobody who knows their password is locked out, and email alone still gets nobody in. The cost: until a guardian adds one, a stolen password is enough for them; the count on the Parents page shows that window closing. |
+| 22 | How staff reset a guardian's sign-in. | A new permission, Admin-only. A reset needs a reason (staff only), ends every session, removes the password, authenticator app, backup codes, remembered devices and passkeys, and mails a new set-up link to the guardian's sign-in address, with words saying to call the club if they didn't ask. Staff never see or set a password. Audited. A runbook tells staff to call the guardian back on a number the club already holds before resetting. Under Strict the set-up link leads to adding a passkey or app before anything else. | Under Strict a reset is the way back in, so it is also the way a caller could talk their way in: the one path where an email gets someone in, and only after an Admin chose to send it. It gets the care the mail settings get, which are Admin-only because whoever holds them could read every code. |
+| 23 | "Forgot my password" in each mode. | One page for both. It always says the same thing, and mails a reset link only to an address on file. Standard: a new password, then the second step as at any sign-in, which for a guardian with no passkey or app is the emailed code. Said plainly: for that guardian, whoever can read their mailbox can reset the password and read the code, so the mailbox is their whole protection. Strict: the reset sets a new password, and signing in still needs a passkey or app; a guardian who has lost both asks the club (22). Either way a reset ends every session and forgets remembered devices. | It is the trade-off in the shape you liked, kept open under Standard and closed under Strict. |
+| 24 | Standard: a guardian with a passkey or app, on a new device that has neither. | Their second step is a passkey (a phone's passkey can sign in on a computer through the browser; to be checked on real devices), the app or a backup code. The emailed code is only for a guardian with none of these. One who has lost them all asks the club (22). | The shape gives the emailed code to "a parent with no passkey"; giving it to everyone would leave a passkey no safer than the mailbox. |
+| 25 | Backup codes. | Ten, each working once as a second step, shown once when a guardian adds an authenticator app or a first passkey, and made again from sign-in settings. Under Strict the guardian confirms they saved them. | Without them a lost phone under Strict means a staff reset, the riskiest way in (22). |
+| 26 | How long a device is remembered, and signing out everywhere. | 90 days from its last use, renewed by use, like sessions (the library's default is 30 days). "Sign out everywhere" in sign-in settings ends every session and forgets every remembered device; so do a password change, a reset and blocking. Signing out on one device ends that session and keeps the device remembered. | With 90-day sessions a parent rarely signs in; a 30-day memory would ask for the code nearly every time they do. |
+| 27 | Password rules and limits on tries. | At least 12 characters and at most 128, any characters, no rules about symbols or mixing, never a forced change; refused when found in known breaches. The breach check sends only the first five characters of the password's fingerprint to an outside service, never the password; when it can't be reached, the password is taken and the audit row says it wasn't checked. Tries: 5 wrong passwords per address in 15 minutes, then a wait, in the same words for any address; per network address, high, as the code's are for a registration night; a second-step code keeps the code's 5 tries. | Length and the breach check are what current guidance (NIST SP 800-63B) asks for; symbol rules make passwords weaker in practice. A wait shown only for known addresses would say which are known. The breach service is a new outside service: you may prefer no check. |
+| 28 | Does changing a password or sign-in email, removing a passkey or the app, or seeing backup codes ask for the second step again? | Yes: the password and the second step again, or a passkey, when the last was more than 10 minutes ago. Adding a passkey right after signing in needs nothing more. | A 90-day session on an unlocked phone should not be enough to take the sign-in over. |
+| 29 | What becomes of today's emailed sign-in code. | The lead's reading: it stops being a way in by itself, and its machinery (hashed, single use, 10 minutes, 5 tries, its rate limits and audit rows, the step that survives a reload) serves the set-up link and the second step under Standard. Recommended: that, with the portal's code used for the second step rather than the library's own emailed code. | It is built, tested and walked on phones; two emailed codes would be two sets of rules. |
+| 30 | Guardians who already have sign-ins, on the proof-of-concept host. | They keep their sessions. Their next sign-in starts with "Set up or reset my password", which mails a set-up link; Resend welcome sends the new welcome. | Nobody has a password yet, so every guardian starts as a new one does. Only test parents are there. |
+| 31 | How often the passkey offer comes back after Not now. | At most once a month on a device, at sign-in only; after the third Not now, only from sign-in settings. | The shape keeps it to one prompt; asked at every sign-in it would become the nagging the second step avoids. |
+| 32 | Where sign-in sits among the stages. | Its own release after stage 3, before or after stage 4 (section 9). | Before stage 3 QuickBooks still decides sign-ins: when an address changes in QuickBooks, the roster read changes the guardian's sign-in email to match (or closes the sign-in and opens one for a new person), so anyone who can edit QuickBooks could send a guardian's password reset to themselves. From stage 3 the sign-in email is the app's, changed only by confirm-by-link (8, 9). It hangs on the person record, which exists today, and needs nothing from stage 4. Not in stage 3's release itself, which already changes the session's family. |
 
 ## 12. Risks
 
@@ -329,6 +412,10 @@ once; staff raising other invoices; a second accounting system (the interface on
 | A person with a balance is made inactive. | The balance is read first, and QuickBooks takes the change before the app does (Open questions, 11). |
 | Stage 3 leaves new families without money. | Open questions, 19. |
 | The interface grows for systems nobody asked for. | Stage 5 draws it around QuickBooks only. |
+| Someone talks a staff member into resetting a guardian's sign-in; under Strict that is the way in. | *(Proposed:)* only an Admin resets, with a reason, audited; the set-up link goes only to the guardian's own sign-in address, with words saying to call the club; the runbook says to call back on a number the club holds (Open questions, 22). |
+| A parent is locked out: a lost phone under Strict, Strict switched on before they had a passkey, or a breach check that can't be reached. | *(Proposed:)* backup codes, the count shown before switching, a password that leads to adding a passkey, a breach check that lets the password through when it can't be reached, and the staff reset (Open questions, 21, 22, 25, 27). |
+| A club changes its address, and every passkey stops working. | Parents fall back to password and second step and add passkeys again; setup warns about it (section 6). |
+| A fake email copies the set-up or reset email, which carry a link, as the code email never has. | *(Proposed:)* the emails say the club never asks for a password by email or phone; a passkey can't be given away to a fake page. |
 
 ---
 
@@ -379,11 +466,59 @@ Retired items not among the owner's three ("deriving logins from QuickBooks", "t
 | The money reads, the daily read of every family, the Pay link check | Whose invoices a family sees: from its links | QuickBooks' customer list acting as the roster |
 | Buy-outs, their daily check and closing | The staff Families pages: they edit the app's records | The previous-company snapshot and the match review (lead's reading) |
 | All the season, volunteer and forms logic | The roster writes: the app first, then sent on | The clean-up preview's dry run (lead's reading) |
-| Sign-in codes, sessions, the chooser, welcome emails | The roster read: it fills the customer list and finds differences | Following QuickBooks moves at each read (lead's reading) |
+| Sign-in codes (what they serve: Open questions, 29), sessions, the chooser, welcome emails | The roster read: it fills the customer list and finds differences | Following QuickBooks moves at each read (lead's reading) |
 | The privacy tests, re-pointed at the app's ids | A parent's contact and email changes: the app first | The "changed in QuickBooks" notes on staff pages (lead's reading) |
 | | A change of company: clears links, the money cache and QuickBooks' copies | |
 | | Setup and settings: an accounting system is optional | |
+| | The parent door: a password, the second step and passkeys; the emailed code no longer a way in by itself (section 6, Signing in) | |
 | | Each re-keyed area (stage 2) | |
+
+### Signing in
+
+What the lead verified in the installed library (better-auth 1.7.25, 2026-11-18), with what was then read in
+`node_modules/better-auth/dist/plugins/two-factor` and `haveibeenpwned` and in the library's public documentation:
+
+- **Passwords** are built in (`emailAndPassword`), switched off today on both doors (`parent-auth.ts`,
+  `staff-auth.ts`). The library hashes with scrypt, keeps the hash in its account table (`parent_auth_account`, a
+  credential row), and allows 8 to 128 characters unless told otherwise. Its reset request answers the same for any
+  address and keeps a token in its verification table, for an hour by default.
+- **The breach check** (`haveIBeenPwned`) ships with the library. It sends the first five characters of the
+  password's SHA-1 to `api.pwnedpasswords.com` and, by default, refuses the password when that service can't be
+  reached (Open questions, 27). It is the portal's first request to that host: the client bundle and the host-name
+  tripwire are unaffected, but a runbook that names it puts it in `SITES`.
+- **Two-factor** ships with the library: an authenticator app (`totp`, 6 digits, 30 seconds), backup codes (ten, ten
+  characters, stored encrypted), a code sent as a second step (`otp`, 6 digits, 3 minutes and 5 tries by default) and
+  trusted devices. A trusted device is a signed cookie plus a row in the verification table, 30 days by default
+  (`trustDeviceMaxAge`), renewed at each sign-in on it. Its challenge runs only on the library's own sign-in paths
+  (`/sign-in/email` and two others) and only for a user who has turned two-factor on, so Standard's code on every new
+  device and Strict's rule are the portal's own logic around the plugin. The app's secret and the backup codes are
+  encrypted with the library's own secret (`BETTER_AUTH_SECRET`), not the portal's sealed-settings key: changing that
+  secret loses every authenticator app. The library makes backup codes when the app is turned on, so offering them
+  with a passkey alone (Open questions, 25) is the portal's own work.
+- **Passkeys** are a separate package of the same project, `@better-auth/passkey`, published at 1.7.25: the one new
+  dependency, which the owner asked for by asking for passkeys. It is not installed. Its documentation says a user may
+  have several, each with an optional name that can be changed, listed and deleted by id; a passkey is tied to the
+  site's `rpID` and `origin` (the portal's address); security keys are allowed. Not verified: its table's exact
+  columns, how it treats an unnamed passkey, whether a passkey sign-in passes the two-factor plugin's challenge, and how
+  it behaves inside the installed app on each phone.
+
+**New tables, by what they hold.** One row per guardian for two-factor (the app's secret, the backup codes, wrong
+tries and a lock time) and a flag on the auth user that it is on; one row per passkey (its name, public key and
+credential id, the authenticator model, when added; the exact columns not verified); remembered devices and set-up
+and reset tokens in the existing verification table; the club's level in the parent settings. `signin_code` stays,
+for the second step under Standard and the code that survives a reload, if Open questions, 29 is answered as
+recommended; a set-up link's token is hashed and single use like the code.
+
+**Tripwires a builder will meet.** `PARENT_DISABLED_PATHS` (`/sign-in/email`, the reset and change-password routes,
+the session lists and revokes are closed today, being unaudited writes: each opened on purpose, or wrapped by the
+portal's own audited routes); `RATE_LIMITS` and `tests/integration/rate-limit.test.ts` (password tries per address and
+per network address, set-up and reset requests, second-step codes); `ACTION_NAMES` and the audit-actions test; the
+audit-rows test (the library's writes are covered by the portal's routes or listed in `NOT_AUDITED` with why);
+`parent-a11y.spec.ts`, which names the sign-in steps (the set-up, password, second-step and passkey pages join them) and
+checks every parent page, sign-in settings included; `keyboard-journeys.spec.ts` journey 1; `safeReturnPath()` and
+`NOT_PARENT_SECTIONS` for any new top-level folder; `scripts/check-client-bundle.mjs`, since the app's secret is shown
+once to its own guardian and never otherwise reaches the browser; the clean-up test (expired tokens, codes and
+remembered devices); the permission-words test for the reset permission.
 
 ### Audit actions *(names proposed)*
 
@@ -397,6 +532,12 @@ Retired items not among the owner's three ("deriving logins from QuickBooks", "t
 | A family made from a customer | `accounting.family.from_customer` |
 | A difference aligned, either way | `accounting.difference.send`, `accounting.difference.take` |
 | The links cleared by a change of company, with counts | `accounting.links.cleared` |
+| A password chosen from a set-up or reset link; a reset asked for (refused ones too, by reason, as `signin.code_refused` is) | `parent.password.set`, `parent.password.reset_asked` |
+| A wrong password; a second step passed or failed (the emailed code keeps its `signin.code_*` rows) | `signin.password_wrong`, `signin.second_step`, `signin.second_step_wrong` |
+| A passkey added, renamed or removed; the authenticator app turned on or off; backup codes made | `parent.passkey.add`, `parent.passkey.rename`, `parent.passkey.remove`, `parent.authenticator.on`, `parent.authenticator.off`, `parent.backup_codes.make` |
+| Signed out everywhere | `parent.sessions.end_all` |
+| A staff member reset a guardian's sign-in, with the reason | `parent.signin.reset` |
+| The club's level changed, Standard or Strict | `parents.signin_level.change` |
 
 ### Documents that will need rewriting once approved
 
@@ -410,6 +551,9 @@ Retired items not among the owner's three ("deriving logins from QuickBooks", "t
   billing target, §12, and the parents-from-QuickBooks rows.
 - **Runbooks:** reconnecting QuickBooks, first install (starting with no accounting system), Health warnings (the
   roster line), the owner's runbook as section 8 says, and the walkthrough's roster and sign-in journeys.
+- **For sign-in:** AGENTS.md's line on the parent email-code spec and its sign-in rate limits;
+  `docs/conformance.md`'s sign-in rows; `docs/accessibility-checks.md`'s sign-in journey; first install and Health
+  warnings, for the address a passkey belongs to and the breach check.
 
 ## Appendix B: where the code makes this harder than it reads
 
@@ -468,6 +612,14 @@ Retired items not among the owner's three ("deriving logins from QuickBooks", "t
   after.
 - *Detail:* `ctx.familyQboId` becomes the app's family id, with `parent_auth_session` and every parent query, in one
   release.
+
+**Sign-in** *(proposed)*.
+- *Guarded by:* tests that sign-in, set-up and reset answer the same for a known, unknown, blocked and closed address;
+  that under Strict no path through email alone reaches a family's page; that a reset ends every session and forgets
+  remembered devices; the tripwires in Appendix A, Signing in; `tests/e2e/parent-sign-in.spec.ts` and the parent
+  journey changed for the password and second step.
+- *Detail:* adds `@better-auth/passkey` 1.7.25 and turns on `emailAndPassword`, `haveIBeenPwned` and `twoFactor` on
+  the parent door only; the staff door is unchanged.
 
 **Stage 4.**
 - *Guarded by:* a test that no confirm links a customer already linked to another family; tests for each status and
