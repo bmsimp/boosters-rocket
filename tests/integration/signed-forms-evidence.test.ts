@@ -217,9 +217,10 @@ describe("evidence the portal can't keep for want of its own records", () => {
     expect(await db.select().from(signedFormEvidence)).toEqual([]);
     expect(await evidenceHealth()).toMatchObject({ waiting: 1, noLink: 1 });
     const line = (await healthReport()).find((l) => l.key === "forms")!;
-    expect(line).toMatchObject({ state: "attention", says: expect.stringContaining("can't be filed until their families are linked in the roster's QuickBooks company"),
+    expect(line).toMatchObject({ state: "attention", says: expect.stringContaining("can't be filed until the portal can find their families in the roster's QuickBooks company"),
       fix: { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" } });
     expect(line.notes.join(" ")).toContain("1 signed form can't be filed");
+    expect(line.notes.join(" ")).toContain("After the roster is read again it tries again on its own schedule");
     expect(line.notes.join(" ")).not.toContain("Check that Documenso answers");
   });
 
