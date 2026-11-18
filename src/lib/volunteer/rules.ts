@@ -28,8 +28,8 @@ const figure = (n: number) => String(Math.round(n * 100) / 100);
  * for a per-family requirement, a student for a per-student one). All by the app's own ids.
  */
 export function countsFor(requirement: Pick<Requirement, "appliesTo">, filler: Filler, familyId: AppFamilyId, subject: SubjectId): boolean {
-  if (requirement.appliesTo === "family") return String(subject) === String(familyId);
-  return filler.kind === "student" && String(filler.studentId) === String(subject);
+  if (requirement.appliesTo === "family") return subject === familyId;
+  return filler.kind === "student" && filler.studentId === subject;
 }
 
 /**

@@ -16,9 +16,9 @@ import type { ParentCtx } from "@/lib/guards";
 import type { MyFamily } from "@/lib/parents/my-family";
 import { isUuid } from "@/lib/seasons/ids";
 // The season and volunteering keep the app's own ids, and buy-outs are still kept by customer: a boundary of stage 2 of
-// the app-owned families spec (AGENTS.md, Seasons). The family's customers are turned into its app records once, through
-// their own links, and the requirements' lists, standings and credit are read by those records.
-import { linksOfCustomers } from "@/lib/families/links";
+// the app-owned families spec (AGENTS.md, Seasons). The family's customers are turned into its app records once
+// (sessionFamily(), as the volunteer pages do), and the requirements' lists, standings and credit are read by those records.
+import { sessionFamily } from "@/lib/families/session-family";
 import { pairKey } from "@/lib/seasons/kinds";
 import { isCovered, type Requirement, type SubjectId, type SubjectsAsked } from "@/lib/seasons/progress";
 import { loadFacts, toRequirement } from "@/lib/seasons/recorded";
@@ -94,11 +94,13 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
   if (rows.length === 0) return [];
   const students = await myStudents(ctx, family);
   const subjectIds = [ctx.familyQboId, ...students.map((s) => s.qboId)];
-  // The family and its students as the app's records, each through its own link of its kind.
-  const links = await linksOfCustomers({ families: [ctx.familyQboId], students: students.map((s) => s.qboId) });
-  const familyRecord = links.familyOfCustomer.get(ctx.familyQboId);
-  const asked: SubjectsAsked = { families: familyRecord === undefined ? [] : [familyRecord], students: students.flatMap((s) => links.studentOfCustomer.get(s.qboId) ?? []) };
-  const recordOf = (r: Requirement, qboId: string): SubjectId | undefined => (r.appliesTo === "family" ? (qboId === ctx.familyQboId ? familyRecord : undefined) : links.studentOfCustomer.get(qboId));
+  // The family and its students as the app's records, by the one definition of the session's family the volunteer
+  // pages use (sessionFamily(): its active record, and its own students' records); nothing of a family whose record is
+  // inactive is asked about.
+  const records = await sessionFamily(ctx.familyQboId, students);
+  const studentRecords = new Map((records?.students ?? []).map((s) => [s.qboId, s.id]));
+  const asked: SubjectsAsked = { families: records ? [records.familyId] : [], students: [...studentRecords.values()] };
+  const recordOf = (r: Requirement, qboId: string): SubjectId | undefined => (r.appliesTo === "family" ? (records && qboId === ctx.familyQboId ? records.familyId : undefined) : studentRecords.get(qboId));
   const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), asked);
   const requirements = rows.map((x) => ({ row: x.r, r: toRequirement(x.r, covers.get(x.r.id) ?? []) }));
   const ids = requirements.map((x) => x.r.id);

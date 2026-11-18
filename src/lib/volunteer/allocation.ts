@@ -72,7 +72,7 @@ export function compareSlots(a: Slot, b: Slot): number {
 /** Whether a credit can count toward this requirement for this family or student. */
 export function canCountToward(credit: Credit, slot: Slot, familyId: AppFamilyId): boolean {
   const s = credit.source;
-  if (s.kind === "outside") return s.requirementId === slot.requirement.id && String(s.subjectId) === String(slot.subjectId);
+  if (s.kind === "outside") return s.requirementId === slot.requirement.id && s.subjectId === slot.subjectId;
   return s.requirementIds.includes(slot.requirement.id) && countsFor(slot.requirement, s.filler, familyId, slot.subjectId);
 }
 

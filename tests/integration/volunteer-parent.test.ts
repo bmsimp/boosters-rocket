@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { asParent, renderPage, revalidatedPaths } from "../helpers/signed-in";
+import { asParent, pageOutcome, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
 type Msg = { to: string; subject: string; text: string; html: string; attachments?: { filename: string; contentType: string; content: string }[] };
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, qboCustomer, requirement, setting, volunteerShift, volunteerSignup } from "@/lib/db/schema";
+import { auditLog, family as familyTable, qboCustomer, requirement, setting, volunteerCredit, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -15,6 +15,8 @@ import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source"
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import { cancelMySignup, loadMyVolunteering, loadShiftForMe, signUpForShift } from "@/lib/volunteer/my-volunteer";
+import { checkIn, loadCheckInForMe } from "@/lib/volunteer/check-in";
+import { loadMyCredit } from "@/lib/volunteer/credit";
 import { VOLUNTEER_SETTINGS_KEY } from "@/lib/volunteer/settings";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
 import ShiftPage from "@/app/(parent)/volunteer/shifts/[id]/page";
@@ -24,7 +26,7 @@ import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies, type SeededPar
 import { addToCache, moveInCache, stu } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
-import { TWO_FAMILY_EVENT, seedEvent, seedShift, seedSignup, shiftAround } from "../helpers/volunteer";
+import { TWO_FAMILY_EVENT, seedEvent, seedOutsideCredit, seedShift, seedSignup, shiftAround } from "../helpers/volunteer";
 
 /**
  * Volunteering as a parent does it (v1 spec §11.2, §12 invariant 7): the Volunteer page and a shift's page, signing up
@@ -413,6 +415,40 @@ describe("cancelling", () => {
     const v = await loadMyVolunteering(ctxOf(a.identity));
     expect(v.signups.find((x) => x.id === s.id)?.cancel).toBe("cancelled");
     expect(v.events.flatMap((e) => e.shifts.map((x) => x.id))).not.toContain(later.shifts[0]!.id);
+  });
+});
+
+describe("a session whose family record is inactive", () => {
+  it("refuses on every parent path, shows none of the family's places or credit, and writes nothing", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const seeded = await seedSeason({ name: "Fall", steps: [{ name: "Volunteer" }] });
+    const [hours] = await db.insert(requirement).values({ stepId: Object.values(seeded.stepIds)[0]!, kind: "volunteer", title: "Family hours", appliesTo: "family", amount: 6, amountUnit: "hours", position: 0 }).returning();
+    const t = shiftAround(new Date(), 10, 120);
+    const { shifts: [now] } = await seedEvent({ name: "Under way", onDate: t.onDate, shifts: [{ startsAt: t.startsAt, endsAt: t.endsAt }] });
+    const { shifts: [later] } = await seedEvent({ name: "Later on", inDays: 10, shifts: [{}] });
+    const here = await seedSignup({ shiftId: now!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
+    const mine = await seedSignup({ shiftId: later!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: AURELIO! });
+    await seedOutsideCredit({ familyQboId: FAMILY_A.family.qboId, requirementId: hours!.id, minutes: 60 });
+    const ctx = ctxOf(a.identity), family = await famOf(a);
+    // As keepAppRecordsInStep() leaves a family the roster no longer holds as one, while the session still names it.
+    await db.update(familyTable).set({ active: false }).where(eq(familyTable.id, await familyId(FAMILY_A.family.qboId)));
+    const snapshot = async () => JSON.stringify([await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id)), await db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.id))]);
+    const before = await snapshot();
+
+    const v = await loadMyVolunteering(ctx);
+    expect(v.events.map((e) => e.name)).toEqual(expect.arrayContaining(["Under way", "Later on"]));
+    expect(v.signups).toEqual([]);
+    expect(await loadShiftForMe(ctx, family, later!.id)).toBeNull();
+    asParent(a.identity);
+    expect(await pageOutcome(ShiftPage, { params: { id: later!.id } })).toEqual({ notFound: true });
+    expect(await signUpForShift(ctx, family, later!.id, "me")).toEqual({ ok: false, errors: ["Your family isn't set up in the portal yet, so you can't sign up here. Please ask the club."] });
+    expect(await cancelMySignup(ctx, family, mine.id)).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
+    expect((await loadCheckInForMe(ctx, now!.checkinCode))!.people).toEqual([]);
+    expect(await checkIn(ctx, now!.checkinCode, here.id)).toEqual(NOT_FROM_PAGE);
+    expect(await checkIn(ctx, now!.checkinCode, "all")).toEqual({ ok: false, errors: ["Nobody in your family is signed up for this shift, so there's no one to check in."] });
+    expect(await loadMyCredit(ctx, family.students ?? [])).toEqual([]);
+    expect(await snapshot()).toBe(before);
+    expect(mail.outbox).toEqual([]);
   });
 });
 

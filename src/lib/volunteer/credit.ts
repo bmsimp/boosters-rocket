@@ -86,10 +86,10 @@ export async function allocateFamilies(familyIds: readonly AppFamilyId[] | null,
   const paidFor = (key: string) => { const f = bought.get(key); return Boolean(f && (f.state === "paid" || f.invoicePaid)); };
   const askedOf = (r: CreditRequirementRow, subject: SubjectId) => isCovered(r, subject) && !waived.has(slotKey(r.id, subject)) && !paidFor(slotKey(r.id, subject));
   for (const family of families) {
-    const theirs = students.filter((s) => String(s.familyId) === String(family)).map((s) => s.id);
+    const theirs = students.filter((s) => s.familyId === family).map((s) => s.id);
     const slots: Slot[] = requirements.flatMap((r): Slot[] => (r.appliesTo === "family" ? (askedOf(r, family) ? [{ requirement: r, subjectId: family }] : [])
       : theirs.filter((s) => askedOf(r, s)).map((s) => ({ requirement: r, subjectId: s }))));
-    const own = credits.filter((c) => String(c.familyId) === String(family));
+    const own = credits.filter((c) => c.familyId === family);
     const rule: Credit[] = own.map((c) => ({ id: c.id, minutes: c.minutes, shifts: c.shifts,
       source: c.kind === "outside" ? { kind: "outside", requirementId: c.requirementId!, subjectId: c.studentId ?? c.familyId }
         : { kind: "shift", requirementIds: links.filter((l) => l.shiftId === c.shiftId).map((l) => l.requirementId), filler: c.filler ?? { kind: "guardian" } } }));
@@ -161,7 +161,7 @@ export async function loadMyCredit(ctx: { familyQboId: string; parentId: string 
     .leftJoin(requirement, eq(requirement.id, volunteerCredit.requirementId))
     .where(and(eq(volunteerCredit.familyId, mine.familyId), isNull(volunteerCredit.removedAt)))
     .orderBy(asc(volunteerCredit.createdAt), asc(volunteerCredit.id));
-  const nameOf = (id: AppStudentId) => mine.students.find((s) => String(s.id) === String(id))?.name ?? null;
+  const nameOf = (id: AppStudentId) => mine.students.find((s) => s.id === id)?.name ?? null;
   return rows.flatMap(({ c, s, shift, event, title, unit }): MyCredit[] => {
     if (c.kind !== "outside") {
       if (!s || !shift || !event) return [];

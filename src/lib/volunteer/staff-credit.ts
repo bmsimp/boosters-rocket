@@ -77,7 +77,7 @@ export async function addMissedCheckIn(signupId: string, rosterTag: string, o: V
     const when = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (when.start.getTime() > now.getTime()) return refuse("This shift hasn't started yet. A missed check-in can be added once it has.");
     const families = await loadSeasonFamilies();
-    if (!families?.some((f) => String(f.id) === String(s.familyId))) return refuse("This sign-up's family isn't on the roster now, so it can't be credited.");
+    if (!families?.some((f) => f.id === s.familyId)) return refuse("This sign-up's family isn't on the roster now, so it can't be credited.");
     const [live] = await tx.select({ id: volunteerCredit.id }).from(volunteerCredit).where(and(eq(volunteerCredit.signupId, s.id), isNull(volunteerCredit.removedAt)));
     if (live) return refuse("This person is checked in already.");
     const minutes = shiftMinutes(when);
@@ -228,14 +228,17 @@ export async function familyCreditDetail(familyQboId: string, rosterTag: string,
   if (!family) return null;
   await writeAudit({ actor: o.actor, action: "volunteer.credit.family.read", permission: o.permission, targetType: "family", targetId: String(family.id), ip: o.ip });
   const asked: SubjectsAsked = { families: [family.id], students: family.students.map((s) => s.id) };
-  const nameOf = (id: SubjectId | null) => (String(id) === String(family.id) ? family.name : family.students.find((s) => String(s.id) === String(id))?.name ?? "A student no longer in this family");
+  const nameOf = (id: SubjectId | null) => (id === family.id ? family.name : family.students.find((s) => s.id === id)?.name ?? "A student no longer in this family");
 
   // The current season's volunteer requirements asked of the family or one of its students.
   const rows = await db.select({ r: requirement }).from(requirement).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId))
     .where(and(eq(season.isCurrent, true), eq(requirement.kind, "volunteer"))).orderBy(asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
   const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), asked);
   const askedOf = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []))
-    .map((r) => ({ r, who: (r.appliesTo === "family" ? [family.id as SubjectId] : family.students.map((s) => s.id as SubjectId)).filter((s) => isCovered(r, s)) }))
+    .map((r) => {
+      const who: SubjectId[] = r.appliesTo === "family" ? [family.id] : family.students.map((s) => s.id);
+      return { r, who: who.filter((s) => isCovered(r, s)) };
+    })
     .filter((x) => x.who.length > 0);
   const { facts } = await loadFacts(askedOf.map((x) => x.r), asked, { amounts: "none", parentId: null });
   const requirements: StaffRequirementLine[] = askedOf.map(({ r, who }) => ({

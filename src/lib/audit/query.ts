@@ -92,10 +92,13 @@ const likeText = (s: string) => `%${s.replace(/[\\%_]/g, "\\$&")}%`;
 const endsWithKey = (s: string) => `%:${s.replace(/[\\%_]/g, "\\$&")}`;
 
 /**
- * The target types an audit row names a QuickBooks customer under, by the kind of record the customer was: a family
- * ("family", as the season's and volunteering's family pages wrote it before they moved, and "qbo_customer", the
- * roster's own) or a student ("student", as a moved student's volunteer places were written, and "qbo_customer"). A row
- * of any other type whose id happens to be the same number (a job run, a product, a check's run) is never a customer's.
+ * The target types an audit row may name a QuickBooks customer under, by the kind of record the customer was. A family:
+ * "qbo_customer" (the roster's own rows), and "family", which holds two kinds of id: a customer's in the rows the
+ * season's and volunteering's family pages wrote before those areas moved, and in money.balance_mismatch, which still
+ * writes the family's customer until the money cache moves (src/lib/money/family-money.ts); and the app family's own id
+ * in the rows written since the areas moved, which the filter's exact match finds. A student: "qbo_customer", and
+ * "student" (a moved student's volunteer places, by customer before volunteering moved, by the record since). A row of
+ * any other type whose id happens to be the same number (a job run, a product, a check's run) is never a customer's.
  */
 export const CUSTOMER_TARGET_TYPES = { family: ["qbo_customer", "family"], student: ["qbo_customer", "student"] } as const;
 
