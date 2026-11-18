@@ -14,7 +14,7 @@ import { getFormsStatus } from "@/lib/forms/settings";
 import { hearWebhook } from "@/lib/forms/webhook";
 import { resetDb } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../helpers/documenso-stub";
-import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement } from "../helpers/forms";
+import { connectForms, formSetting, groupOf, requestCustomers, requestNow, seedConsent, seedFormRequirement } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { subjectColumns } from "../helpers/app-records";
@@ -50,7 +50,7 @@ async function scene(o: { appliesTo?: "family" | "student"; signers?: "any" | "e
 async function requestIdFor(ctx: ParentCtx, subjectQboId: string): Promise<string> {
   const family = (await loadMyFamily(ctx))!;
   const forms = (await loadMyForms(ctx, family))!;
-  return forms.groups.find((g) => g.subjectQboId === subjectQboId)!.forms[0]!.requestId!;
+  return (await groupOf(forms.groups, subjectQboId))!.forms[0]!.requestId!;
 }
 const open = async (ctx: ParentCtx, id: string) => openMyForm(ctx, (await findMyForm(ctx, id))!);
 /** Agrees, then opens: what the page does once the guardian presses the button. */
@@ -197,7 +197,8 @@ describe("signing a form", () => {
     const document = stub.documentFor(id)!;
     expect(document.fields.find((f) => f.fieldMeta?.label === "Family name")?.customText).toBe(FAMILY_A.family.name);
     expect(stub.apiCalls("/envelope/use")[0]!.body).toMatchObject({ distributeDocument: true }); // one signer, one guardian: every role is filled
-    expect((await requestNow(id)).subjectQboId).toBe(FAMILY_A.family.qboId);
+    expect((await requestCustomers(id)).subjectQboId).toBe(FAMILY_A.family.qboId);
+    expect((await requestNow(id)).studentId).toBeNull();
   });
 
   it("any one guardian: when the other guardian opens it while nobody has signed, it is withdrawn and made again for them", async () => {
@@ -568,7 +569,7 @@ describe("what each guardian reads", () => {
     tokenIn(await agreeAndOpen(ctx, id));
     stub.sign(stub.documentFor(id)!.id, FAMILY_A.parent.email);
     expect(await checkMyForm(ctx, id)).toMatchObject({ message: "Waiting for the other guardian" });
-    const lineFor = async (who: ParentCtx) => (await loadMyForms(who, (await loadMyFamily(who))!))!.groups.find((g) => g.subjectQboId === FAMILY_A.students[0]!.qboId)!.forms[0]!.line;
+    const lineFor = async (who: ParentCtx) => (await groupOf((await loadMyForms(who, (await loadMyFamily(who))!))!.groups, FAMILY_A.students[0]!.qboId))!.forms[0]!.line;
     expect((await lineFor(ctx)).words).toBe("Waiting for the other guardian");
     expect((await lineFor(other)).words).toBe("Not signed yet");
     const family = (await loadMyFamily(other))!;
@@ -688,17 +689,17 @@ describe("a form is looked up within the session's family", () => {
     const [first, second] = FAMILY_A.students;
     const untouched = await requestIdFor(ctx, first!.qboId);
     const family = (await loadMyFamily(ctx))!;
-    const opened = (await loadMyForms(ctx, family))!.groups.find((g) => g.subjectQboId === second!.qboId)!.forms[0]!.requestId!;
+    const opened = (await groupOf((await loadMyForms(ctx, family))!.groups, second!.qboId))!.forms[0]!.requestId!;
     tokenIn(await agreeAndOpen(ctx, opened));
     // Both students move to family B in QuickBooks.
     await moveFamilyInCache(FAMILY_A.family.qboId, FAMILY_B.family.qboId);
     const forB = (await loadMyForms(ctxB, (await loadMyFamily(ctxB))!))!;
-    const of = (qboId: string) => forB.groups.find((g) => g.subjectQboId === qboId)!.forms.find((f) => f.line.requirementId === requirementId)!;
+    const of = async (qboId: string) => (await groupOf(forB.groups, qboId))!.forms.find((f) => f.line.requirementId === requirementId)!;
     // The unopened request passes to the new family; the one with a document made for family A's guardian does not.
-    expect(of(first!.qboId).requestId).toBe(untouched);
-    expect((await requestNow(untouched)).familyQboId).toBe(FAMILY_B.family.qboId);
-    expect(of(second!.qboId).requestId).toBeNull();
-    expect((await requestNow(opened)).familyQboId).toBe(FAMILY_A.family.qboId);
+    expect((await of(first!.qboId)).requestId).toBe(untouched);
+    expect((await requestCustomers(untouched)).familyQboId).toBe(FAMILY_B.family.qboId);
+    expect((await of(second!.qboId)).requestId).toBeNull();
+    expect((await requestCustomers(opened)).familyQboId).toBe(FAMILY_A.family.qboId);
     expect(await findMyForm(ctxB, opened)).toBeNull();
     expect(await findMyForm(ctx, opened)).toBeNull(); // nor is it family A's to open any more: the student is not theirs
   });

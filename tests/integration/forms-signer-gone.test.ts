@@ -4,7 +4,8 @@ import { auditLog, formWithdrawal, parent, type RequestSigner } from "@/lib/db/s
 import { blockPerson } from "@/lib/parents/people";
 import { runReconcile } from "../helpers/reconcile";
 import { resetDb, seedParent, seedGuardian } from "../helpers/db";
-import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu } from "../helpers/roster-cache";
+import { seedCache, seedRosterRead, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu } from "../helpers/roster-cache";
+import { recordOfCustomer } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { formSetting, requestNow, seedFormRequirement, seedRequest } from "../helpers/forms";
 
@@ -14,6 +15,8 @@ import { formSetting, requestNow, seedFormRequirement, seedRequest } from "../he
 
 const staff = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000002", label: "reg@club.org" }, ip: "203.0.113.9", permission: "Parents.ReadWrite" };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
+// A request names the app's own family: each test reads its roster from one company first, so the families have records.
+const REALM = "9130000000000077";
 const signer = (parentId: string, name: string, signedAt: string | null = null, recipientId = 1): RequestSigner => ({ parentId, recipientId, name, email: `${name.toLowerCase()}@example.com`, signedAt });
 
 async function formsIn() {
@@ -31,6 +34,7 @@ describe("a guardian who can no longer sign for the family", () => {
   beforeEach(async () => { await resetDb(); });
 
   it("blocking starts again every unfinished form still waiting for them, withdraws its document, and leaves the rest", async () => {
+    await seedRosterRead({ realmId: REALM });
     const ana = await seedParent({ name: "Ana" }), mei = await seedParent({ name: "Mei" });
     const r = await formsIn();
     const waitingOnAna = await seedRequest({ requirementId: r.any, familyQboId: "F1", subjectQboId: "F1", state: "waiting", envelopeId: "envelope_any", signers: [signer(ana.id, "Ana")] });
@@ -58,6 +62,7 @@ describe("a guardian who can no longer sign for the family", () => {
   });
 
   it("the reconcile closing a link starts again that family's forms waiting for them, and no other family's", async () => {
+    await seedRosterRead({ realmId: REALM });
     await seedShape(); await seedParentSettings(SIGNINS_ON);
     const both = [fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo Rivera", "10"),
       fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")];
@@ -75,7 +80,7 @@ describe("a guardian who can no longer sign for the family", () => {
     expect(await requestNow(inTen)).toMatchObject({ state: "not_opened", envelopeId: null });
     expect(await requestNow(inTwenty)).toMatchObject({ state: "waiting", envelopeId: "envelope_twenty" });
     expect((await db.select().from(formWithdrawal)).map((w) => w.envelopeId)).toEqual(["envelope_ten"]);
-    expect((await audits("forms.request.signer_gone"))[0]!.after).toMatchObject({ parentId: ana.id, familyQboId: "10", reason: "access_ended", withdraw: "delete" });
+    expect((await audits("forms.request.signer_gone"))[0]!.after).toMatchObject({ parentId: ana.id, familyId: String(await recordOfCustomer("10", "family")), reason: "access_ended", withdraw: "delete" });
     expect((await audits("parent.access.ended"))[0]!.after).toMatchObject({ familyQboId: "10", formsReset: 1 });
   });
 });

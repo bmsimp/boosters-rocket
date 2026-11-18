@@ -175,12 +175,18 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         const under = ours ? studentsUnderFamilies(shape, rows) : new Map<string, string>();
         const held = under.size === 0 ? [] : [...(await requestsHeldElsewhere(sp, under)), ...(await placesHeldElsewhere(sp, under))];
         const moves = before.length === 0 ? [] : studentMoves(shape, before, rows, held);
-        const owed: (() => Promise<unknown>)[] = [];
-        try { for (const m of moves) owed.push(await followMovedStudent(sp, m, cause)); } catch { throw new FollowUpFailed(); }
+        // The reconcile first, which brings the app's own records into step with the cache just stored, so a family
+        // QuickBooks made in this same read has its record before a student's move into it is followed: the follow-ups
+        // take the move (found above, from the cache this read replaced) to records through their links, and a
+        // complete form goes with the student to the new family's record at once. Nothing a follow-up changes (form
+        // requests, consents, withdrawals, sign-ups) is read by the records' step, and a failure in either undoes the
+        // whole savepoint.
         try { ({ appRecords } = await reconcileAccess(sp, { cause })); } catch (e) {
           if (e instanceof AppRecordsFailed) { logReconcileFailure(e.cause, "app records"); throw e; }
           logReconcileFailure(e); throw new ReconcileFailed();
         }
+        const owed: (() => Promise<unknown>)[] = [];
+        try { for (const m of moves) owed.push(await followMovedStudent(sp, m, cause)); } catch { throw new FollowUpFailed(); }
         tells = owed;
       });
     } catch (e) {

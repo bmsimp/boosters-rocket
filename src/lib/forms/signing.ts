@@ -10,6 +10,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm"
 import { db } from "@/lib/db/client";
 import { guardian, parent, signatureRequest, type FormSetting, type RequestSigner } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
+import type { AppFamilyId } from "@/lib/families/ids";
 import { writeAudit } from "@/lib/audit/log";
 import { parentActor } from "@/lib/parents/sessions";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
@@ -20,7 +21,7 @@ import {
 } from "@/lib/documenso/client";
 import { hasConsent, recordConsent } from "./consent";
 import { findMyForm, type MyForm } from "./my-forms";
-import { NO_DOCUMENT, asking, claim, holdsSignature, isHeld, readAndStore, release, signedWithin, whenReleased, type RequestRow } from "./requests";
+import { NO_DOCUMENT, asking, claim, holdsSignature, isHeld, readAndStore, release, requestRecords, signedWithin, whenReleased, type RequestRow } from "./requests";
 import { getFormsConfig } from "./settings";
 import { readDocument, signersFor, stillRight, wordsFor, type SignerIdentity } from "./states";
 import { checkTemplate, type TemplatePlan } from "./template";
@@ -61,12 +62,12 @@ const viewOf = (ctx: ParentCtx, row: RequestRow, step: FormStep): FormView => ({
 });
 
 /**
- * The guardians with a sign-in for a family, the primary first: people whose link to the family isn't closed and who
- * aren't blocked. Names and addresses are the portal's own records of them.
+ * The guardians with a sign-in for an app family, the primary first: people whose membership of the family
+ * (guardian.family_id) isn't closed and who aren't blocked. Names and addresses are the portal's own records of them.
  */
-async function familyGuardians(familyQboId: string): Promise<SignerIdentity[]> {
+async function familyGuardians(familyId: AppFamilyId): Promise<SignerIdentity[]> {
   return db.select({ parentId: parent.id, name: parent.name, email: parent.email }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id))
-    .where(and(eq(guardian.familyQboId, familyQboId), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+    .where(and(eq(guardian.familyId, familyId), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
     .orderBy(desc(guardian.isPrimary), asc(guardian.createdAt), asc(guardian.id));
 }
 
@@ -153,7 +154,7 @@ async function makeDocument(ctx: ParentCtx, config: DocumensoConfig, form: MyFor
       .where(and(eq(signatureRequest.id, row.id), isNotNull(signatureRequest.preparingAt))).returning({ id: signatureRequest.id });
     if (!kept) return false;
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.document.create", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
-      after: { envelopeId, templateId: plan.templateId, templateUpdatedAt: plan.updatedAt, signers: setting.signers, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId,
+      after: { envelopeId, templateId: plan.templateId, templateUpdatedAt: plan.updatedAt, signers: setting.signers, ...requestRecords(row),
         subjectName: form.subject.name, madeFor: made.map((s) => ({ parentId: s.parentId, name: s.name, email: s.email })) } }, tx);
     return true;
   });
@@ -178,7 +179,7 @@ async function takeUp(ctx: ParentCtx, form: MyForm, envelope: Envelope): Promise
       .where(and(eq(signatureRequest.id, row.id), isNull(signatureRequest.envelopeId), isNotNull(signatureRequest.preparingAt))).returning({ id: signatureRequest.id });
     if (!kept) return { ok: false, reason: "documenso" } as const;
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.document.recover", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
-      after: { envelopeId: envelope.id, documensoStatus: envelope.status, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId, madeFor: signers.map((s) => ({ parentId: s.parentId || null, name: s.name, email: s.email })) } }, tx);
+      after: { envelopeId: envelope.id, documensoStatus: envelope.status, ...requestRecords(row), madeFor: signers.map((s) => ({ parentId: s.parentId || null, name: s.name, email: s.email })) } }, tx);
     return { ok: true } as const;
   });
 }
@@ -241,7 +242,7 @@ async function shown(ctx: ParentCtx, row: RequestRow, step: FormStep): Promise<F
   if (step.kind === "sign") {
     const mine = row.signers.find((s) => s.parentId === ctx.parentId)!;
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.sign.open", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
-      after: { envelopeId: row.envelopeId, recipientId: mine.recipientId, parentId: ctx.parentId, name: mine.name, email: mine.email, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId } });
+      after: { envelopeId: row.envelopeId, recipientId: mine.recipientId, parentId: ctx.parentId, name: mine.name, email: mine.email, ...requestRecords(row) } });
   }
   return viewOf(ctx, row, step);
 }
@@ -262,7 +263,7 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   // it is that family's (signedWithin()).
   if (row.state === "complete") {
     const view = viewOf(ctx, row, { kind: "complete" });
-    return (await signedWithin(ctx.familyQboId, row.signers)) ? view : { ...view, signers: [] };
+    return (await signedWithin(form.familyId, row.signers)) ? view : { ...view, signers: [] };
   }
   const config = await getFormsConfig();
   if (row.state === "declined") return viewOf(ctx, row, { kind: "declined", canRestart: config !== null && form.setting !== null });
@@ -279,7 +280,7 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   const actor = { actor: parentActor({ id: ctx.parentId, email: ctx.email }), ip: ctx.ip };
   if (!(await mayAsk(ctx, row))) return viewOf(ctx, row, { kind: "unavailable" });
 
-  const guardians = await familyGuardians(ctx.familyQboId);
+  const guardians = await familyGuardians(form.familyId);
   const viewer: SignerIdentity = guardians.find((g) => g.parentId === ctx.parentId) ?? { parentId: ctx.parentId, name: ctx.name, email: ctx.email };
 
   let envelope: Envelope | null = null;
@@ -341,7 +342,7 @@ export async function agreeToSign(ctx: ParentCtx, requestId: unknown, userAgent:
   await db.transaction(async (tx) => {
     const made = await recordConsent(tx, { requestId: form.row.id, parentId: ctx.parentId, name: ctx.name, email: ctx.email, ip: ctx.ip, userAgent });
     if (made) await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.consent.agree", targetType: "signature_request", targetId: form.row.id, ip: ctx.ip,
-      after: { familyQboId: form.row.familyQboId, subjectQboId: form.row.subjectQboId, requirementId: form.row.requirementId } }, tx);
+      after: { ...requestRecords(form.row), requirementId: form.row.requirementId } }, tx);
   });
   return { ok: true, message: "Thank you. The form is next." };
 }
@@ -374,7 +375,7 @@ export async function startMyFormAgain(ctx: ParentCtx, requestId: unknown): Prom
   if (row.state !== "declined") return { ok: false, errors: ["This form can't be started again: it wasn't declined."] };
   const done = await db.transaction(async (tx) => {
     const cleared = await tx.update(signatureRequest).set({ ...NO_DOCUMENT, updatedAt: new Date() })
-      .where(and(eq(signatureRequest.id, row.id), eq(signatureRequest.familyQboId, ctx.familyQboId), eq(signatureRequest.state, "declined"))).returning({ id: signatureRequest.id });
+      .where(and(eq(signatureRequest.id, row.id), eq(signatureRequest.familyId, form.familyId), eq(signatureRequest.state, "declined"))).returning({ id: signatureRequest.id });
     if (cleared.length === 0) return false;
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "form.document.restart", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
       before: { state: "declined", envelopeId: row.envelopeId, declinedAt: row.declinedAt?.toISOString() ?? null }, after: { state: "not_opened" } }, tx);

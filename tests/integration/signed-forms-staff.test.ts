@@ -28,10 +28,11 @@ import { runEvidenceJob } from "@/lib/signed-forms/evidence-job";
 import { runScheduledReminders } from "@/lib/signed-forms/reminders";
 import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
-import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
+import { connectForms, formSetting, requestByCustomer, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { addToCache, fam, moveInCache, par, seedParentSettings, stu } from "../helpers/roster-cache";
 import { subjectColumns } from "../helpers/app-records";
+import { familyRecord, studentRecord } from "../helpers/volunteer";
 
 /**
  * Signed forms for staff (v1 spec §9.3): the matrix, one request and one signed form's evidence (each audited when
@@ -236,7 +237,10 @@ describe("reminders", () => {
   const sentTo = () => mail.outbox.map((m) => m.to).sort();
 
   it("emails only the guardians of the family asked about, about their own forms, with a link to the portal", async () => {
-    const r = await remindFamilyAction(FAMILY_A.family.qboId);
+    // The page sends the app family's own id; a QuickBooks id is not one, and is refused as not from the page.
+    expect(await remindFamilyAction(FAMILY_A.family.qboId)).toEqual({ ok: false, errors: ["That didn't go through. Reload the page and try again."] });
+    expect(mail.outbox).toEqual([]);
+    const r = await remindFamilyAction(String(await familyRecord(FAMILY_A.family.qboId)));
     expect(r.ok).toBe(true);
     expect(sentTo().every((to) => to === FAMILY_A.parent.email)).toBe(true);
     expect(mail.outbox.length).toBeGreaterThan(0);
@@ -291,7 +295,7 @@ describe("reminders", () => {
   it("sends nothing, now or on a schedule, for a form with no template", async () => {
     const medical = await seedNotReadyForm();
     await addToCache([par("COBBLE-P", "Cora Cobblestone", COBBLE, "cora@cobble.example")]);
-    expect(await remindFamilyAction(COBBLE)).toEqual({ ok: true, message: NOBODY_OWED });
+    expect(await remindFamilyAction(String(await familyRecord(COBBLE)))).toEqual({ ok: true, message: NOBODY_OWED });
     await db.update(requirement).set({ dueOn: "2026-12-15", formReminders: { before: [7], weeklyAfter: false } }).where(eq(requirement.id, medical));
     await db.insert(setting).values({ key: "club", value: { timeZone: "America/Chicago" } }).onConflictDoUpdate({ target: setting.key, set: { value: { timeZone: "America/Chicago" } } });
     await seedParentSettings({ signin: true, welcome: true });
@@ -426,10 +430,12 @@ describe("a student moved to another family", () => {
     expect(result.first).toMatchObject({ moved: 0, reset: 2 });
     expect(result.first.toWithdraw.sort()).toEqual(["envelope_alderquistdeclined", "envelope_alderquistsigned"]);
     expect(result.second).toMatchObject({ moved: 1, reset: 1, toWithdraw: ["envelope_alderquistother"] });
-    expect(await requestNow(a.forms!.ids.signed)).toMatchObject({ familyQboId: FAMILY_B.family.qboId, state: "not_opened", envelopeId: null });
+    expect(await requestByCustomer(a.forms!.ids.signed)).toMatchObject({ familyQboId: FAMILY_B.family.qboId, state: "not_opened", envelopeId: null });
     expect(await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, a.forms!.ids.signed))).toEqual([]);
-    expect(await requestNow(a.forms!.ids.complete)).toMatchObject({ familyQboId: FAMILY_B.family.qboId, state: "complete" });
-    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, a.forms!.evidence.id)))[0]!.familyQboId).toBe(FAMILY_B.family.qboId);
+    expect(await requestByCustomer(a.forms!.ids.complete)).toMatchObject({ familyQboId: FAMILY_B.family.qboId, state: "complete" });
+    // Its evidence names the new family's record now; its own copies of the QuickBooks ids stay as they were stored.
+    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, a.forms!.evidence.id)))[0]).toMatchObject({ familyId: await familyRecord(FAMILY_B.family.qboId),
+      studentId: await studentRecord(s2.qboId), familyQboId: FAMILY_A.family.qboId, subjectQboId: s2.qboId });
     expect((await db.select().from(formWithdrawal)).map((w) => [w.envelopeId, w.anySigned]).sort()).toEqual([["envelope_alderquistdeclined", false], ["envelope_alderquistother", true], ["envelope_alderquistsigned", true]]);
     expect(await audits("forms.request.moved")).toHaveLength(4);
     // A's parent no longer reaches the moved form; the worker withdraws the documents (gone already here) and clears the queue.
@@ -498,7 +504,7 @@ describe("a different QuickBooks company connected", () => {
     expect(await clearRosterOfOtherCompany("NEW-COMPANY-REALM", SYSTEM)).toBe(true);
     const kept = await db.select().from(signedFormEvidence);
     expect(kept).toHaveLength(2);
-    for (const e of kept) expect(e).toMatchObject({ requestId: null, earlierCompanyAt: expect.any(Date), realmId: "9130000000000001" });
+    for (const e of kept) expect(e).toMatchObject({ requestId: null, earlierCompanyAt: expect.any(Date), realmId: "9130000000000001", familyId: null, studentId: null });
     const after = await db.select().from(signedFormFile).orderBy(asc(signedFormFile.id));
     expect(after.map((f) => [f.id, f.sha256, f.size, f.bytes.toString("base64")])).toEqual(before.map((f) => [f.id, f.sha256, f.size, f.bytes.toString("base64")]));
     expect((await audits("form.records.cleared"))[0]!.after).toMatchObject({ evidenceKeptAsEarlierCompany: 2 });
@@ -514,16 +520,17 @@ describe("a different QuickBooks company connected", () => {
     for (const m of [a.forms!.evidence.id, a.forms!.evidence.sealedSha256, "/signed", FAMILY_A.parent.name, "Ottoline"]) expect(forms).not.toContain(m);
     expect(await findMySignedPdf({ ...nell.identity, ip: null }, a.forms!.ids.complete)).toBeNull();
     // Her own new request for the same student and form finds nothing of the earlier company's evidence.
-    const mine = await db.select().from(signatureRequest).where(eq(signatureRequest.familyQboId, FAMILY_A.family.qboId));
+    const newA = await familyRecord(FAMILY_A.family.qboId); // the new company's record of that number
+    const mine = await db.select().from(signatureRequest).where(eq(signatureRequest.familyId, newA));
     for (const r of mine) {
       await db.update(signatureRequest).set({ state: "complete", envelopeId: `envelope_new${r.id.slice(0, 8)}` }).where(eq(signatureRequest.id, r.id));
       expect(await findMySignedPdf({ ...nell.identity, ip: null }, r.id)).toBeNull();
     }
-    await db.update(signatureRequest).set({ state: "not_opened", envelopeId: null }).where(eq(signatureRequest.familyQboId, FAMILY_A.family.qboId));
+    await db.update(signatureRequest).set({ state: "not_opened", envelopeId: null }).where(eq(signatureRequest.familyId, newA));
 
     // Reminders reach her about the forms of the new company only, never the earlier evidence.
     asStaff(writer);
-    await remindFamilyAction(FAMILY_A.family.qboId);
+    await remindFamilyAction(String(await familyRecord(FAMILY_A.family.qboId)));
     for (const m of mail.outbox) {
       expect(m.to).toBe("nell.newcomb@new.example");
       for (const marker of [FAMILY_A.parent.name, FAMILY_A.students[1]!.name, a.forms!.evidence.id]) expect(`${m.text} ${m.html}`).not.toContain(marker);

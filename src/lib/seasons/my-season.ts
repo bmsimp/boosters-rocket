@@ -18,8 +18,8 @@ import type { FamilyRoster, SeasonStanding, StepStanding, StudentStanding } from
 
 /**
  * A student's standing as a parent's pages read it, with the student's QuickBooks id beside the app's own: the Home
- * students box matches it to loadMyFamily()'s students, and the forms pages (src/lib/forms/my-forms.ts) find a form's
- * request by it, until those move to the app's ids (stage 3 and the forms slice of stage 2; AGENTS.md, Seasons).
+ * students box matches it to loadMyFamily()'s students, until stage 3 gives those the app's ids (AGENTS.md, Seasons).
+ * The forms pages (src/lib/forms/my-forms.ts) find a form's request by the app's own id alone.
  */
 export type MyStudentStanding = StudentStanding & { qboId: string };
 export type MyStepStanding = Omit<StepStanding, "students"> & { students: MyStudentStanding[] };

@@ -17,13 +17,13 @@ vi.mock("@/lib/parents/reconcile", async (original) => {
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { formWithdrawal, jobRun, qboCustomer, setting, signatureRequest, writeQueue } from "@/lib/db/schema";
+import { formWithdrawal, jobRun, qboCustomer, setting, writeQueue } from "@/lib/db/schema";
 import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
 import { askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { resetDb } from "../helpers/db";
-import { seedFormRequirement, seedRequest } from "../helpers/forms";
+import { requestByCustomer, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { seedSeason } from "../helpers/season";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith } from "../helpers/roster-writes";
@@ -195,7 +195,7 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     await runWriteQueue();
     expect(posts()).toEqual([]);
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
-    expect((await db.select().from(signatureRequest).where(eq(signatureRequest.id, requestId)))[0]).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
+    expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
     expect((await db.select().from(formWithdrawal)).map((w) => w.envelopeId)).toEqual(["envelope_leowaiting"]);
     // The roster read the queue ran first found the move and followed it (src/lib/roster/refresh.ts); the queue's own
     // follow-up then found nothing left to reset.

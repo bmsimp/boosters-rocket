@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { requirement, requirementCover, setting, signatureConsent, signatureRequest, signedFormEvidence, signedFormFile, type FormSetting, type RequestSigner, type SignatureRequestState } from "@/lib/db/schema";
+import { accountingLink, requirement, requirementCover, setting, signatureConsent, signatureRequest, signedFormEvidence, signedFormFile, type FormSetting, type RequestSigner, type SignatureRequestState } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
 import { secretBox } from "@/lib/crypto/secret-box";
 import { CONSENT_VERSION } from "@/lib/forms/consent";
@@ -9,6 +9,8 @@ import { FORMS_AAD, FORMS_KEY } from "@/lib/forms/settings";
 import type { ParentFamilySpec } from "./parent";
 import type { SeededSeason } from "./season";
 import { subjectColumns } from "./app-records";
+import { familyRecord, studentRecord } from "./volunteer";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 
 /**
  * Forms for tests: the connection to Documenso as an Admin would have saved it, form requirements with a template
@@ -41,6 +43,12 @@ export async function seedFormRequirement(o: { stepId: string; title: string; ap
   return row!.id;
 }
 
+/**
+ * A request is given here by its family's and subject's QuickBooks ids, as the tests name families, and stored by the
+ * app's own records they are linked to (stage 2 of the app-owned families spec): the family's record, and for a
+ * per-student requirement the student's (familyRecord(), studentRecord(), which bring the records into step first when
+ * a customer has none yet, so a test that seeds one seeds a roster company first).
+ */
 export type SeedRequest = {
   requirementId: string; familyQboId: string; subjectQboId: string; state?: SignatureRequestState;
   envelopeId?: string | null; signers?: RequestSigner[]; subjectName?: string; form?: FormSetting;
@@ -50,8 +58,9 @@ export type SeedRequest = {
 export async function seedRequest(o: SeedRequest): Promise<string> {
   const state = o.state ?? "not_opened", has = state !== "not_opened";
   const now = new Date();
+  const [r] = await db.select({ appliesTo: requirement.appliesTo }).from(requirement).where(eq(requirement.id, o.requirementId));
   const [row] = await db.insert(signatureRequest).values({
-    requirementId: o.requirementId, familyQboId: o.familyQboId, subjectQboId: o.subjectQboId, state,
+    requirementId: o.requirementId, familyId: await familyRecord(o.familyQboId), studentId: r?.appliesTo === "student" ? await studentRecord(o.subjectQboId) : null, state,
     envelopeId: has ? (o.envelopeId ?? `envelope_seed${Math.random().toString(36).slice(2, 12)}`) : null,
     envelopeStatus: !has ? null : state === "complete" ? "COMPLETED" : state === "declined" ? "REJECTED" : "PENDING",
     templateId: has ? (o.form?.templateId ?? "envelope_seedtemplate") : null, templateUpdatedAt: has ? new Date(o.form?.templateUpdatedAt ?? "2026-11-01T12:00:00.000Z") : null,
@@ -88,9 +97,13 @@ export async function seedEvidence(requestId: string, o: { tag: string; formTitl
     { kind: "audit_log_pdf" as const, itemId: null, bytes: fakePdf(`audit log ${o.tag}`) },
     { kind: "audit_log_json" as const, itemId: null, bytes: Buffer.from(JSON.stringify({ envelopeId: row.envelopeId, count: 1, entries: [{ type: "DOCUMENT_COMPLETED", tag: o.tag }] })) },
   ];
+  // The customers of the request's records, which the evidence keeps as its own copies; the app's records only for the
+  // current company's evidence (an earlier company's names none: signed_form_evidence_app_records).
+  const familyQboId = await customerOf(row.familyId), subjectQboId = row.studentId === null ? familyQboId : await customerOf(row.studentId);
   const [evidence] = await db.insert(signedFormEvidence).values({
     requestId: o.earlierCompanyAt ? null : requestId, realmId: o.realmId === undefined ? await getRosterSource() : o.realmId, earlierCompanyAt: o.earlierCompanyAt ?? null,
-    requirementId: row.requirementId, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId, subjectKind: row.subjectQboId === row.familyQboId ? "family" : "student",
+    requirementId: row.requirementId, familyQboId, subjectQboId, subjectKind: row.studentId === null ? "family" : "student",
+    familyId: o.earlierCompanyAt ? null : row.familyId, studentId: o.earlierCompanyAt ? null : row.studentId,
     formTitle: o.formTitle ?? "Seeded form", familyName: o.familyName ?? null, subjectName: o.subjectName ?? row.subjectName, seasonName: null,
     envelopeId: row.envelopeId ?? `envelope_seed${o.tag.replace(/\W/g, "")}`, templateId: row.templateId, templateUpdatedAt: row.templateUpdatedAt,
     signers: row.signers.map((s) => ({ parentId: s.parentId, name: s.name, email: s.email, signedAt: s.signedAt })),
@@ -125,6 +138,41 @@ export async function signedInStub(stub: { origin: string; token: string; envelo
   }).where(eq(signatureRequest.id, id));
   return { id, envelopeId: made.id };
 }
+
+/** The customer a family or student record is linked to, in the roster's company. */
+async function customerOf(id: AppFamilyId | AppStudentId): Promise<string> {
+  const realmId = await getRosterSource();
+  const links = await db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId, studentId: accountingLink.studentId }).from(accountingLink)
+    .where(and(eq(accountingLink.realmId, realmId ?? ""), eq(accountingLink.system, "quickbooks")));
+  const found = links.find((x) => String(x.familyId) === String(id) || String(x.studentId) === String(id));
+  if (!found) throw new Error("seedEvidence: the request's family or student record has no link in the roster's company");
+  return found.customerId;
+}
+
+/**
+ * The customers a request's family and subject records are linked to, in the roster's company: what a test that names
+ * families by QuickBooks id compares with. The request itself holds only the app's ids.
+ */
+export async function requestCustomers(id: string): Promise<{ familyQboId: string; subjectQboId: string }> {
+  const row = await requestNow(id);
+  const familyQboId = await customerOf(row.familyId);
+  return { familyQboId, subjectQboId: row.studentId === null ? familyQboId : await customerOf(row.studentId) };
+}
+
+/**
+ * The Forms page's group of the family or student with this QuickBooks id: a group's `key` is the app record's own id,
+ * found here through the customer's links (of either kind) in the roster's company.
+ */
+export async function groupOf<G extends { key: string }>(groups: readonly G[], qboId: string): Promise<G | undefined> {
+  const realmId = await getRosterSource();
+  const links = await db.select({ familyId: accountingLink.familyId, studentId: accountingLink.studentId }).from(accountingLink)
+    .where(and(eq(accountingLink.realmId, realmId ?? ""), eq(accountingLink.system, "quickbooks"), eq(accountingLink.customerId, qboId)));
+  const keys = new Set(links.flatMap((l) => [l.familyId, l.studentId].filter((x) => x !== null).map(String)));
+  return groups.find((g) => keys.has(g.key));
+}
+
+/** A request as stored, with the customers its records are linked to beside it (requestCustomers()). */
+export const requestByCustomer = async (id: string) => ({ ...(await requestNow(id)), ...(await requestCustomers(id)) });
 
 export const requestNow = async (id: string) => (await db.select().from(signatureRequest).where(eq(signatureRequest.id, id)))[0]!;
 

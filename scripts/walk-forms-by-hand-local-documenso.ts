@@ -143,7 +143,9 @@ async function main() {
 /** Where Zelda's signature field is on the page, in percent, read from the document the portal had Documenso make. */
 async function signatureField(url: string, token: string): Promise<{ x: number; y: number; w: number; h: number }> {
   const sql = postgres(url);
-  const [request] = await sql`SELECT envelope_id, signers FROM signature_request WHERE subject_qbo_id = 'E2E-S1' AND envelope_id IS NOT NULL`;
+  // A request names the app's own student; E2E-S1 is the customer that student's link names.
+  const [request] = await sql`SELECT s.envelope_id, s.signers FROM signature_request s JOIN accounting_link l ON l.student_id = s.student_id AND l.customer_id = 'E2E-S1'
+    WHERE s.envelope_id IS NOT NULL`;
   await sql.end();
   if (!request) fail("the portal made no document for Xochitl's form.");
   const res = await fetch(`${DOCUMENSO}/api/v2/envelope/${request.envelope_id as string}`, { headers: { Authorization: token } });

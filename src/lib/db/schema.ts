@@ -829,15 +829,18 @@ export type RequestSigner = {
  * Its id is what Documenso holds as the document's `externalId`. `state` is what the portal last read from
  * Documenso's API, never what a webhook said: not opened (no document), waiting for a guardian, signed by everyone and
  * waiting for the sealed copy, complete (Documenso says COMPLETED: the only state that meets the requirement), or
- * declined. `family_qbo_id` is whose it is: every parent lookup starts from it. The ids belong to the connected
- * QuickBooks company; a company change deletes every row. `evidence_owed` is set when a request becomes complete and
- * cleared by whatever stores its sealed PDF and audit record. The row keeps the requirement from being deleted.
+ * declined. `family_id` is the app's own family whose request it is: every parent lookup starts from it. A per-student
+ * form names the app's own student it is signed for (`student_id`); a per-family form names none, its subject being the
+ * family (stage 2 of the app-owned families spec; migrations 0028 and 0029). A complete request moves with its student
+ * to another family; any other is reset under the new family (src/lib/forms/moved.ts). `evidence_owed` is set when a
+ * request becomes complete and cleared by whatever stores its sealed PDF and audit record. The row keeps the
+ * requirement, the family and the student from being deleted.
  */
 export const signatureRequest = pgTable("signature_request", {
   id: uuid("id").primaryKey().defaultRandom(),
   requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "restrict" }),
-  familyQboId: text("family_qbo_id").notNull(),
-  subjectQboId: text("subject_qbo_id").notNull(),          // the family's id for a per-family form, the student's for a per-student one
+  familyId: uuid("family_id").notNull().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student form's student; null for a per-family form
   state: text("state", { enum: ["not_opened", "waiting", "signed", "complete", "declined"] }).notNull().default("not_opened"),
   // The document in Documenso, and what it was made from. All null while there is none.
   envelopeId: text("envelope_id"),
@@ -862,9 +865,12 @@ export const signatureRequest = pgTable("signature_request", {
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
-  uniqueIndex("signature_request_subject_uq").on(t.requirementId, t.subjectQboId),
+  // One request per form and subject: a per-family form's by its family, a per-student form's by its student.
+  uniqueIndex("signature_request_family_uq").on(t.requirementId, t.familyId).where(sql`student_id is null`),
+  uniqueIndex("signature_request_student_uq").on(t.requirementId, t.studentId).where(sql`student_id is not null`),
   uniqueIndex("signature_request_envelope_uq").on(t.envelopeId).where(sql`envelope_id is not null`),
-  index("signature_request_family_ix").on(t.familyQboId),
+  index("signature_request_family_id_ix").on(t.familyId),
+  index("signature_request_student_id_ix").on(t.studentId),
   index("signature_request_state_ix").on(t.state, t.checkedAt),
 ]);
 
@@ -872,7 +878,7 @@ export const signatureRequest = pgTable("signature_request", {
  * A guardian's agreement to sign one form electronically (v1 spec §9.2): who, when, from which address, and which
  * version of the consent text they were shown (src/lib/forms/consent.ts). Without a row for the signed-in guardian no
  * document is made and no signing token is handed out. Kept with the request as part of its evidence (§9.4). The
- * request is the family's (signature_request.family_qbo_id), so a company change deletes these with it.
+ * request is the family's (signature_request.family_id), and a company change, were it to run, deletes these with it.
  */
 export const signatureConsent = pgTable("signature_consent", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -906,6 +912,13 @@ export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
  * (the roster cache's company then); when a different company is connected the row is kept, `request_id` is cut
  * (`earlier_company_at` is set), and from then on it is shown only in the staff archive: its QuickBooks ids may name
  * another family in the new company. `mismatch_at` is set when a later fetch gave a stored file a different hash.
+ *
+ * `family_qbo_id`, `subject_qbo_id` and `subject_kind` are the record's own copies of whose form it was, in QuickBooks'
+ * ids: never changed or removed once stored, and never used to find a family. The current company's evidence also
+ * names the app's own family whose form it is now (`family_id`, which moves with a student, as the request does) and,
+ * for a per-student form, the app's own student (`student_id`): that is how the portal finds a family's evidence
+ * (stage 2 of the app-owned families spec; migration 0028 filled them). An earlier company's evidence names neither,
+ * and never gains them (signed_form_evidence_app_records): it is matched to nobody.
  */
 export const signedFormEvidence = pgTable("signed_form_evidence", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -913,9 +926,11 @@ export const signedFormEvidence = pgTable("signed_form_evidence", {
   realmId: text("realm_id"),                               // the QuickBooks company the request's family belonged to
   earlierCompanyAt: timestamp("earlier_company_at", { withTimezone: true }),
   requirementId: uuid("requirement_id"),                   // requirement.id, with no foreign key
-  familyQboId: text("family_qbo_id").notNull(),
-  subjectQboId: text("subject_qbo_id").notNull(),
+  familyQboId: text("family_qbo_id").notNull(),            // the record's copy: never changed, never matched to a family
+  subjectQboId: text("subject_qbo_id").notNull(),          // the record's copy: never changed, never matched to a family
   subjectKind: text("subject_kind", { enum: ["family", "student"] }).notNull(),
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),   // the current company's only
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student form's, the current company's only
   formTitle: text("form_title").notNull(),                 // the names as they were
   familyName: text("family_name"),
   subjectName: text("subject_name"),
@@ -933,7 +948,11 @@ export const signedFormEvidence = pgTable("signed_form_evidence", {
 }, (t) => [
   uniqueIndex("signed_form_evidence_request_uq").on(t.requestId).where(sql`request_id is not null`),
   index("signed_form_evidence_family_ix").on(t.familyQboId),
+  index("signed_form_evidence_family_id_ix").on(t.familyId),
+  index("signed_form_evidence_student_id_ix").on(t.studentId),
   index("signed_form_evidence_earlier_ix").on(t.earlierCompanyAt),
+  // An earlier company's evidence names no app record; the current company's names its family, and its student exactly when it is a student's.
+  check("signed_form_evidence_app_records", sql`(${t.earlierCompanyAt} is not null and ${t.familyId} is null and ${t.studentId} is null) or (${t.earlierCompanyAt} is null and ${t.familyId} is not null and (${t.studentId} is null) = (${t.subjectKind} = 'family'))`),
 ]);
 
 /**

@@ -19,7 +19,8 @@ import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { setRosterSource } from "@/lib/roster/source";
 import { formWithdrawal, signedFormEvidence, signedFormFile, volunteerSignup } from "@/lib/db/schema";
 import { resetDb, seedParent, untilALockIsAwaited } from "../helpers/db";
-import { formSetting, requestNow, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
+import { formSetting, requestByCustomer, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
+import { recordOfCustomer } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -133,12 +134,13 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: true, message: "Moved in QuickBooks." });
 
     // The open form starts again under the new family, and its document waits for the worker to withdraw it.
-    expect(await requestNow(open)).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
+    expect(await requestByCustomer(open)).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
     expect(await db.select().from(formWithdrawal)).toEqual([expect.objectContaining({ envelopeId: "envelope_movedopen1" })]);
     // The signed form moves with its evidence, every byte kept.
-    expect(await requestNow(signed)).toMatchObject({ familyQboId: "20", state: "complete", envelopeId: "envelope_movedsigned" });
+    expect(await requestByCustomer(signed)).toMatchObject({ familyQboId: "20", state: "complete", envelopeId: "envelope_movedsigned" });
     const [kept] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, evidence.id));
-    expect(kept).toMatchObject({ requestId: signed, familyQboId: "20" });
+    // It names the new family's record now; its own copy of the QuickBooks ids stays as it was stored.
+    expect(kept).toMatchObject({ requestId: signed, familyId: await recordOfCustomer("20", "family"), familyQboId: "10", subjectQboId: "12" });
     expect(await db.select().from(signedFormFile).where(eq(signedFormFile.evidenceId, evidence.id))).toHaveLength(4);
     // The place on a shift still to come is given up; the old family keeps nothing of the student's there.
     const [after] = await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, place.id));

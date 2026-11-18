@@ -6,6 +6,7 @@ import { GET, POST } from "@/app/api/documenso/webhook/route";
 import { getFormsStatus, webhookAddress } from "@/lib/forms/settings";
 import { WEBHOOK_BODY_MAX } from "@/lib/forms/webhook";
 import { resetDb } from "../helpers/db";
+import { seedRosterRead } from "../helpers/roster-cache";
 import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestNow, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { seedSeason } from "../helpers/season";
@@ -51,6 +52,7 @@ describe("the Documenso webhook", () => {
   beforeEach(async () => {
     await resetDb(); stub.reset();
     await connectForms(stub, { webhookSecret: SECRET });
+    await seedRosterRead({ realmId: "9130000000000088" }); // a request names the app's records, made in the roster's company
     logged.length = 0;
     for (const method of ["log", "info", "warn", "error", "debug"] as const) vi.spyOn(console, method).mockImplementation((...args) => { logged.push(args); });
   });

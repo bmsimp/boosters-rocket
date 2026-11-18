@@ -5,22 +5,26 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 
 /**
  * Called inside `clearRosterOfOtherCompanyLocked` (src/lib/roster/source.ts), in its transaction, when a different
- * QuickBooks company is connected. A signature request is kept against a family's and a student's QuickBooks ids,
- * which mean other customers in another company: a signed form would pass to whoever has the same number there. Every
- * request is deleted, and each guardian's consent with it, and every reminder record. The documents themselves stay in
+ * QuickBooks company is connected, before the app's own families and students are removed (clearAppRecords()): a
+ * signature request names one of them (stage 2 of the app-owned families spec), and so does the current company's
+ * evidence, and the database refuses to remove a record one still names. Every request is deleted, and each
+ * guardian's consent with it, and every reminder record. Nothing the portal runs reaches it until stage 4 ships: a
+ * different company is refused wherever one is connected or read (open question 18), and stage 4 replaces it, when a
+ * change of company clears only links and the money cache. The documents themselves stay in
  * Documenso, signed ones included, and every change of a form's state is still in the audit log from when it was read.
  * The requirements keep their templates: those are the club's own.
  *
  * A signed form's kept evidence is the club's record and is never destroyed (signed_form_evidence and its files): each
- * row is kept, with every byte, hash, consent and name as it was, marked as from an earlier company and cut from the
- * request it came from. From then on no parent is shown it, the matrix leaves it out, and it is never matched to a
- * family of the new company by a QuickBooks id; staff find it in the archive on the staff Forms page.
+ * row is kept, with every byte, hash, consent, name and QuickBooks id as it was, marked as from an earlier company, cut
+ * from the request it came from and from the app's family and student it named, in the same statement. From then on no
+ * parent is shown it, the matrix leaves it out, and it is never matched to a family of the new company by a QuickBooks
+ * id; staff find it in the archive on the staff Forms page.
  */
 export async function clearFormRecords(tx: Tx, o: { fromRealmId: string | null; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
   // Every request is locked first: evidence being stored right now (storeEvidence() holds its request's row) commits
   // before the evidence below is marked, so none is left unmarked, pointing at a request deleted here.
   await tx.select({ id: signatureRequest.id }).from(signatureRequest).for("update");
-  const kept = await tx.update(signedFormEvidence).set({ earlierCompanyAt: sql`now()`, requestId: null })
+  const kept = await tx.update(signedFormEvidence).set({ earlierCompanyAt: sql`now()`, requestId: null, familyId: null, studentId: null })
     .where(isNull(signedFormEvidence.earlierCompanyAt)).returning({ id: signedFormEvidence.id });
   const claims = await tx.delete(formReminderClaim).returning({ id: formReminderClaim.id });
   const rounds = await tx.delete(formReminderRound).returning({ id: formReminderRound.id });

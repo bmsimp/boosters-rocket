@@ -5,6 +5,7 @@ import path from "node:path";
 import { createElement } from "react";
 import { resetDb } from "../helpers/db";
 import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { familyRecord, studentRecord } from "../helpers/volunteer";
 
 /**
  * The gate every parent page passes through: one family never sees another's data.
@@ -76,7 +77,10 @@ const MUST_SHOW: Record<string, (family: SeededParent) => string[]> = {
   // The shift, the family's name, and its own person on it, checked in or not.
   "/volunteer/check-in/[code]": (family) => ["Rinse crew", family.spec.family.name, ...family.volunteer!.checkIn],
   // Every form the season asks of the family and of each student, each with its state in words.
-  "/forms": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.forms!.page],
+  // And the way to each of its own requests that can be opened, in every state a document has reached, and the download
+  // of its signed one: found by the family's own app records, so a page that found none fails here.
+  "/forms": (family) => [family.spec.family.name, ...family.spec.students.map((s) => s.name), ...family.forms!.page,
+    ...(["waiting", "signed", "complete", "declined", "waitingOther"] as const).map((s) => `href="/forms/${family.forms!.ids[s]}"`), `href="/forms/${family.forms!.ids.complete}/signed"`],
   // One form: its title, the student it is for, and that it is signed.
   // The question a link puts, with the address it would change to, and the address the parent signs in with now.
   "/family/email/[token]": (family) => [`Use ${family.emailChange!.newEmail} to sign in from now on?`, family.spec.parent.email],
@@ -181,6 +185,28 @@ describe("one family never sees another's data on a parent page", () => {
       const refused = await pageOutcome(page, props);
       expect(refused, `${file} ${describeOutcome(refused)} for a session the portal refuses; it must call requireParentPage() itself, before anything else.`).toEqual({ redirect: "/refused" });
     });
+  });
+
+  // A form's page for each of the family's own requests, in every state, found by the family's own app records: it
+  // renders, shows its form, and nothing of the other family; asked for the other family's request in any state, or its
+  // app family or student ids, it shows nothing of theirs.
+  it("shows each of the family's own forms in every state, and nothing of the other family's in any", async () => {
+    const page = await load(`${PARENT_DIR}/forms/[id]/page.tsx`);
+    for (const [viewer, other] of [[a, b], [b, a]] as const) {
+      asParent(viewer.identity);
+      for (const [state, id] of Object.entries(viewer.forms!.ids)) {
+        const outcome = await pageOutcome(page, { params: { id } });
+        if (!("html" in outcome)) expect.fail(`/forms/${state} ${describeOutcome(outcome)} for ${viewer.spec.family.name}'s own request; it must render.`);
+        expect(markersIn(outcome.html, other.markers), `/forms/[id] (${state}) for ${viewer.spec.family.name}`).toEqual([]);
+        expect(markersIn(outcome.html, [id]).length + markersIn(outcome.html, viewer.markers).length, `/forms/[id] (${state}) shows nothing of its own family`).toBeGreaterThan(0);
+        for (const words of viewer.season!.staffOnly) expect(outcome.html).not.toContain(words);
+      }
+      const theirRecords = [String(await familyRecord(other.spec.family.qboId)), ...(await Promise.all(other.spec.students.map(async (s) => String(await studentRecord(s.qboId)))))];
+      for (const id of [...Object.values(other.forms!.ids), ...theirRecords]) {
+        const outcome = await pageOutcome(page, { params: { id } });
+        if ("html" in outcome) expect(markersIn(outcome.html, other.markers), `/forms/${id} for ${viewer.spec.family.name}`).toEqual([]);
+      }
+    }
   });
 
   // What surrounds every parent page is sent to the same browser, so it passes the same gate.

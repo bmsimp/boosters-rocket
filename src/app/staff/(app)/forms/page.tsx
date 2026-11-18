@@ -105,13 +105,13 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
                 : matrix.families.length === 0 ? <Notice tone="info">{filtered ? "Nobody matches that." : "Nobody on the roster is asked for these forms."}</Notice> : (
                   <div className="matrix-wrap" role="region" aria-labelledby="who-h" tabIndex={0}>
                     <DataTable caption="Students down the side, by family, and the season's forms across" captionHidden className="matrix"
-                      rowKey={(row: MatrixRow) => `${row.kind}-${row.qboId}`}
+                      rowKey={(row: MatrixRow) => `${row.kind}-${row.id}`}
                       columns={[
                         { key: "who", header: "Family and students", rowHeader: true, cell: (row: MatrixRow) => (row.kind === "family" ? "The family" : row.name) },
                         ...matrix.forms.map((f, i) => ({ key: f.id, header: f.title, cell: (row: MatrixRow) => <Cell cell={row.cells[i]!} title={f.title} who={row.name} /> })),
                       ]}
-                      groups={matrix.families.map((fam) => ({ key: fam.qboId, rows: fam.rows, heading: (
-                        <><span>{fam.name}</span>{writes && fam.remindable && <RemindButton label={`Remind ${fam.name}`} run={remindFamilyAction.bind(null, fam.qboId)} />}</>) }))} />
+                      groups={matrix.families.map((fam) => ({ key: fam.id, rows: fam.rows, heading: (
+                        <><span>{fam.name}</span>{writes && fam.remindable && <RemindButton label={`Remind ${fam.name}`} run={remindFamilyAction.bind(null, fam.id)} />}</>) }))} />
                   </div>
                 )}
             </section>

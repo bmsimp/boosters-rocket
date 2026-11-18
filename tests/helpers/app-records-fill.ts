@@ -23,6 +23,13 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
   { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "volunteer_reminder"`, by: "0027_volunteer_app_ids_finish" },
   // The name hint a sign-up's student gave: the sign-up names its student's record now, which keeps the name it has.
   { line: `    UNION ALL SELECT "student_qbo_id", "filler_name", 3, "created_at", "id" FROM "volunteer_signup" WHERE "student_qbo_id" IS NOT NULL AND btrim("filler_name") <> ''`, by: "0027_volunteer_app_ids_finish" },
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "signature_request"`, by: "0029_forms_app_ids_finish" },
+  { line: `    UNION ALL SELECT s."subject_qbo_id", r."applies_to" FROM "signature_request" s JOIN "requirement" r ON r."id" = s."requirement_id"`, by: "0029_forms_app_ids_finish" },
+  // The current company's evidence names its records by id since 0028; its QuickBooks ids are the record's own copies.
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "signed_form_evidence" WHERE "earlier_company_at" IS NULL AND "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0028_forms_app_ids_additive" },
+  { line: `    UNION ALL SELECT "subject_qbo_id", "subject_kind" FROM "signed_form_evidence" WHERE "earlier_company_at" IS NULL AND "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0028_forms_app_ids_additive" },
+  // The name hint a request's subject gave: the request names its record now, which keeps the name it has.
+  { line: `    UNION ALL SELECT "subject_qbo_id", "subject_name", 2, "updated_at", "id" FROM "signature_request" WHERE btrim("subject_name") <> ''`, by: "0029_forms_app_ids_finish" },
 ];
 
 /**

@@ -14,12 +14,18 @@ import { recordOfCustomer } from "../helpers/app-records";
  * since name the app's record. A search for the record finds both: a row naming one of its customers under a target
  * that names a customer of its kind, and a tick's or waiver's row ("<requirement>:<subject>") naming either. The same
  * for volunteering, which moved next: a family's credit page read by its customer and by its record, a moved student's
- * places by the student's customer and by their record. Nothing of another family or student comes with them, and no
+ * places by the student's customer and by their record. And for forms, which moved after: a request's rows name its
+ * family and student in their body, by customer before and by record since (a move names both families), while a kept
+ * form's rows are never matched by a number. Nothing of another family or student comes with them, and no
  * row of another kind whose id happens to be the same number (a job run, a product, a check's run).
  */
 const REQ = "7d1f0b2a-1111-4c3d-8e9f-000000000001";
 const actor = { door: "staff" as const, id: null, label: "admin@club.org" };
 const row = (action: string, targetType: string, targetId: string) => writeAudit({ actor, action, targetType, targetId });
+const bodied = (action: string, targetType: string, targetId: string, body: { before?: Record<string, unknown>; after?: Record<string, unknown> }) =>
+  writeAudit({ actor, action, targetType, targetId, ...body });
+const [FORM_OLD, FORM_NEW, FORM_MOVED] = ["7d1f0b2a-2222-4c3d-8e9f-000000000001", "7d1f0b2a-2222-4c3d-8e9f-000000000002", "7d1f0b2a-2222-4c3d-8e9f-000000000003"];
+const [EVIDENCE_OLD, EVIDENCE_NEW] = ["7d1f0b2a-3333-4c3d-8e9f-000000000001", "7d1f0b2a-3333-4c3d-8e9f-000000000002"];
 const targets = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows.map((r) => `${r.targetType}:${r.targetId}`).sort();
 
 describe("the audit page's filter for one family or student", () => {
@@ -50,6 +56,14 @@ describe("the audit page's filter for one family or student", () => {
     // Since: by the app's own records.
     await row("volunteer.credit.family.read", "family", rivera);
     await row("volunteer.signup.moved", "student", leo);
+    // Forms, which moved next: a request's rows name its family and student in their body, by the customers before
+    // forms moved and by the records since, a move by both families. A kept form's read names an earlier company's
+    // number, which may be Rivera's now: never Rivera's.
+    await bodied("form.state.change", "signature_request", FORM_OLD, { after: { state: "waiting", familyQboId: "10", subjectQboId: "12" } });
+    await bodied("form.state.change", "signature_request", FORM_NEW, { after: { state: "waiting", familyId: rivera, studentId: leo } });
+    await bodied("forms.request.moved", "signature_request", FORM_MOVED, { before: { familyId: rivera, studentId: leo }, after: { familyId: chen, studentId: leo } });
+    await bodied("forms.evidence.read", "signed_form_evidence", EVIDENCE_OLD, { after: { familyQboId: "10", earlierCompany: true } });
+    await bodied("forms.evidence.read", "signed_form_evidence", EVIDENCE_NEW, { after: { familyId: null, studentId: null, earlierCompany: true } });
     // Rows of other kinds whose ids are the same numbers as the customers': never the family's or the student's.
     await row("roster.refresh", "job_run", "10");
     await row("season.requirement.item", "qbo_item", "12");
@@ -57,16 +71,20 @@ describe("the audit page's filter for one family or student", () => {
   });
 
   it("finds a family's old rows and its new ones, the season's and volunteering's, and nothing of another family or another kind", async () => {
-    const rivers = [`family:${rivera}`, `family:${rivera}`, "family:10", "qbo_customer:10"].sort();
+    const rivers = [`family:${rivera}`, `family:${rivera}`, "family:10", "qbo_customer:10",
+      `signature_request:${FORM_OLD}`, `signature_request:${FORM_NEW}`, `signature_request:${FORM_MOVED}`].sort();
     expect(await targets(`family:${rivera}`)).toEqual(rivers);
-    expect(await targets(`family:${chen}`)).toEqual([`family:${chen}`, "family:20", "qbo_customer:20"].sort());
+    expect(await targets(`family:${chen}`)).toEqual([`family:${chen}`, "family:20", "qbo_customer:20", `signature_request:${FORM_MOVED}`].sort());
     // The id alone finds the same.
     expect(await targets(rivera)).toEqual(rivers);
-    expect((await auditExportScope(parseAuditFilters({ record: `family:${rivera}` }))).rows).toBe(4);
+    expect((await auditExportScope(parseAuditFilters({ record: `family:${rivera}` }))).rows).toBe(7);
+    // A kept form's read is never matched by a number: an earlier company's evidence may hold Rivera's.
+    for (const record of [`family:${rivera}`, rivera]) for (const e of [EVIDENCE_OLD, EVIDENCE_NEW]) expect(await targets(record)).not.toContain(`signed_form_evidence:${e}`);
   });
 
   it("finds a student's ticks and moved places under the old key and the new, and never another's whose id ends the same", async () => {
-    expect(await targets(`student:${leo}`)).toEqual([`requirement_progress:${REQ}:12`, `requirement_progress:${REQ}:${leo}`, "student:12", `student:${leo}`].sort());
+    expect(await targets(`student:${leo}`)).toEqual([`requirement_progress:${REQ}:12`, `requirement_progress:${REQ}:${leo}`, "student:12", `student:${leo}`,
+      `signature_request:${FORM_OLD}`, `signature_request:${FORM_NEW}`, `signature_request:${FORM_MOVED}`].sort());
     expect(await targets(`student:${kai}`)).toEqual([`requirement_progress:${REQ}:22`, `requirement_progress:${REQ}:${kai}`].sort());
   });
 
@@ -84,6 +102,8 @@ describe("the audit page's filter for one family or student", () => {
     expect(await targets("qbo_customer:10")).toEqual(["qbo_customer:10"]);
     // A family's id under the wrong kind is no family: only an exact match, and there is none.
     expect(await targets(`student:${rivera}`)).toEqual([]);
-    expect((await db.select().from(auditLog)).length).toBe(17);
+    expect((await db.select().from(auditLog)).length).toBe(22);
+    // A request's id is an exact match too, as before.
+    expect(await targets(`signature_request:${FORM_MOVED}`)).toEqual([`signature_request:${FORM_MOVED}`]);
   });
 });

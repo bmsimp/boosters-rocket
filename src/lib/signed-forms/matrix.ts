@@ -7,11 +7,14 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { requirement, season, seasonStep, signatureRequest, signedFormEvidence, type FormReminders, type FormSetting } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
-// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
-// moves to the app's ids.
-import { everyCustomerCover, everyCustomerRecorded } from "@/lib/seasons/everyone";
-import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
-import { loadSubjects, type FamilySubject } from "@/lib/seasons/subjects";
+// The season and the requests both name the app's own families and students (stage 2 of the app-owned families spec):
+// the roster is turned into those records once, by loadSeasonFamilies().
+import type { AppFamilyId } from "@/lib/families/ids";
+import { everyCover, everyRecorded } from "@/lib/seasons/everyone";
+import { isCovered, type SubjectId } from "@/lib/seasons/progress";
+import { toRequirement } from "@/lib/seasons/recorded";
+import { loadSeasonFamilies, type SeasonFamily } from "@/lib/seasons/subjects";
+import { subjectOfRequest } from "@/lib/forms/requests";
 import { CELL_WORDS, FILTER_STATES, REMINDABLE_STATES, cellState, type CellState } from "./rules";
 
 export type MatrixForm = {
@@ -20,9 +23,10 @@ export type MatrixForm = {
   counts: { signed: number; needed: number; waived: number };
 };
 export type MatrixCell = { state: CellState; words: string; requestId: string | null; evidenceId: string | null };
-export type MatrixRow = { kind: "family" | "student"; qboId: string; name: string; familyQboId: string; familyName: string; cells: MatrixCell[] };
-/** `remindable`: some form of the season, filtered or not, is one a reminder could help someone sign (REMINDABLE_STATES). */
-export type MatrixFamily = { qboId: string; name: string; rows: MatrixRow[]; remindable: boolean };
+/** One row: the family's own, or one of its students'. `id` and `familyId` are the app's own ids, as text. */
+export type MatrixRow = { kind: "family" | "student"; id: string; name: string; familyId: string; familyName: string; cells: MatrixCell[] };
+/** `remindable`: some form of the season, filtered or not, is one a reminder could help someone sign (REMINDABLE_STATES). `id`: the app family's own id, as text. */
+export type MatrixFamily = { id: string; name: string; rows: MatrixRow[]; remindable: boolean };
 export type Matrix = {
   season: { id: string; name: string };
   /** Every form requirement of the season, whatever the filter: the filter's choices and the counts. */
@@ -70,9 +74,9 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
   const formRows = await seasonForms(s.id);
   const ids = formRows.map((f) => f.row.id);
   const [subjects, covers, waivers, requests, realmId] = await Promise.all([
-    loadSubjects(), everyCustomerCover(ids),
-    everyCustomerRecorded(ids).then((rows) => rows.filter((w) => w.waivedAt !== null)),
-    ids.length ? db.select({ id: signatureRequest.id, requirementId: signatureRequest.requirementId, familyQboId: signatureRequest.familyQboId, subjectQboId: signatureRequest.subjectQboId,
+    loadSeasonFamilies(), everyCover(ids),
+    everyRecorded(ids).then((rows) => rows.filter((w) => w.waivedAt !== null)),
+    ids.length ? db.select({ id: signatureRequest.id, requirementId: signatureRequest.requirementId, familyId: signatureRequest.familyId, studentId: signatureRequest.studentId,
       state: signatureRequest.state, signers: signatureRequest.signers }).from(signatureRequest).where(inArray(signatureRequest.requirementId, ids)) : Promise.resolve([]),
     getRosterSource(),
   ]);
@@ -80,21 +84,21 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
   // Evidence is matched by request and by the company the cache holds now: never an earlier company's.
   const evidence = complete.length && realmId !== null ? await db.select({ id: signedFormEvidence.id, requestId: signedFormEvidence.requestId }).from(signedFormEvidence)
     .where(and(inArray(signedFormEvidence.requestId, complete), eq(signedFormEvidence.realmId, realmId), isNull(signedFormEvidence.earlierCompanyAt))) : [];
-  const waived = new Set(waivers.map((w) => `${w.requirementId}|${w.subjectQboId}`));
-  const requirements = formRows.map((f) => toCustomerRequirement(f.row, covers.get(f.row.id) ?? []));
+  const waived = new Set(waivers.map((w) => `${w.requirementId}|${String(w.subjectId)}`));
+  const requirements = formRows.map((f) => toRequirement(f.row, covers.get(f.row.id) ?? []));
 
-  const cellFor = (formIndex: number, subjectQboId: string, familyQboId: string, kind: "family" | "student"): MatrixCell => {
+  const cellFor = (formIndex: number, subject: SubjectId, familyId: AppFamilyId, kind: "family" | "student"): MatrixCell => {
     const r = requirements[formIndex]!;
-    const covered = r.appliesTo === kind && isCustomerCovered(r, subjectQboId);
-    const request = covered ? requests.find((q) => q.requirementId === r.id && q.subjectQboId === subjectQboId && q.familyQboId === familyQboId) ?? null : null;
-    const state = cellState({ covered, waived: waived.has(`${r.id}|${subjectQboId}`), ready: formRows[formIndex]!.row.form !== null, request });
+    const covered = r.appliesTo === kind && isCovered(r, subject);
+    const request = covered ? requests.find((q) => q.requirementId === r.id && String(subjectOfRequest(q)) === String(subject) && String(q.familyId) === String(familyId)) ?? null : null;
+    const state = cellState({ covered, waived: waived.has(`${r.id}|${String(subject)}`), ready: formRows[formIndex]!.row.form !== null, request });
     return { state, words: CELL_WORDS[state], requestId: request?.id ?? null, evidenceId: request ? evidence.find((e) => e.requestId === request.id)?.id ?? null : null };
   };
-  const rowsOf = (f: FamilySubject): MatrixRow[] => [
-    { kind: "family", qboId: f.qboId, name: f.name, familyQboId: f.qboId, familyName: f.name, cells: formRows.map((_, i) => cellFor(i, f.qboId, f.qboId, "family")) },
-    ...f.students.map((st): MatrixRow => ({ kind: "student", qboId: st.qboId, name: st.name, familyQboId: f.qboId, familyName: f.name, cells: formRows.map((_, i) => cellFor(i, st.qboId, f.qboId, "student")) })),
+  const rowsOf = (f: SeasonFamily): MatrixRow[] => [
+    { kind: "family", id: String(f.id), name: f.name, familyId: String(f.id), familyName: f.name, cells: formRows.map((_, i) => cellFor(i, f.id, f.id, "family")) },
+    ...f.students.map((st): MatrixRow => ({ kind: "student", id: String(st.id), name: st.name, familyId: String(f.id), familyName: f.name, cells: formRows.map((_, i) => cellFor(i, st.id, f.id, "student")) })),
   ];
-  const all = subjects?.map((f) => ({ qboId: f.qboId, name: f.name, rows: rowsOf(f) })) ?? null;
+  const all = subjects?.map((f) => ({ id: String(f.id), name: f.name, rows: rowsOf(f) })) ?? null;
 
   const allForms: MatrixForm[] = formRows.map((f, i) => {
     const cells = (all ?? []).flatMap((fam) => fam.rows.map((r) => r.cells[i]!)).filter((c) => c.state !== "not_asked");
@@ -119,7 +123,7 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
     // Reminders go for every form of the family that has a template (src/lib/signed-forms/reminders.ts), so whether one
     // could help is judged from all of those, not from the filter's.
     const remindable = fam.rows.some((r) => r.cells.some((c, i) => formRows[i]!.row.form !== null && REMINDABLE_STATES.includes(c.state)));
-    return { qboId: fam.qboId, name: fam.name, rows: kept, remindable };
+    return { id: fam.id, name: fam.name, rows: kept, remindable };
   }).filter((fam) => fam.rows.length > 0);
   const shownEvidenceIds = (all ?? []).flatMap((fam) => fam.rows.flatMap((r) => r.cells.flatMap((c) => (c.evidenceId ? [c.evidenceId] : []))));
   return { season: s, allForms, forms: shownIndexes.map((i) => allForms[i]!), families, shownEvidenceIds };

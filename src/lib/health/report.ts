@@ -168,6 +168,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const evidenceNotes = [
     ...(evidence.waiting > 0 ? [`Evidence waiting: ${evidence.waiting === 1 ? "1 signed form hasn't" : `${evidence.waiting} signed forms haven't`} had the signed copy and its record kept yet. The worker fetches them from Documenso a few at a time.`] : []),
     ...(evidence.late > 0 ? [`${evidence.late === 1 ? "1 signed form has" : `${evidence.late} signed forms have`} waited more than an hour for the signed copy to be kept. Check that Documenso answers, and the forms line above.`] : []),
+    ...(evidence.noLink > 0 ? [`${evidence.noLink === 1 ? "1 signed form can't" : `${evidence.noLink} signed forms can't`} be filed: the portal can't find the family or student it was signed for in the QuickBooks company the roster was read from, so it can't record whose form it is, and asks Documenso nothing for it. After the roster is read again it tries again on its own schedule (within a few hours), and this count goes by its last try until then. Check the QuickBooks line, then read the roster again.`] : []),
     ...(evidence.mismatches > 0 ? [`${evidence.mismatches === 1 ? "1 signed form" : `${evidence.mismatches} signed forms`} came back from Documenso with a different file than the one kept. The first copy is kept; the audit log has the details (forms.evidence.mismatch).`] : []),
   ];
   if (forms.origin === null && evidence.waiting + evidence.mismatches === 0) {
@@ -183,11 +184,14 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     const verdict: Verdict = forms.origin === null ? { state: "attention", word: "Needs attention", says: "Forms aren't set up any more, but signed forms still wait to have their evidence kept, or a kept file was found changed." }
       : !forms.tokenReadable ? { state: "attention", word: "Needs attention", says: "The saved API token can't be opened with this server's encryption key. Enter it again in Forms settings." }
       : apiFailing ? { state: "attention", word: "Needs attention", says: "The last call to Documenso failed. Parents can't open a form to sign until it answers again." }
+        : evidence.noLink > 0 ? { state: "attention", word: "Needs attention", says: `Connected to Documenso at ${forms.origin}, but signed forms can't be filed until the portal can find their families in the roster's QuickBooks company.` }
         : waiting.sealingLate > 0 ? { state: "attention", word: "Needs attention", says: `Connected to Documenso at ${forms.origin}, but signed forms are waiting too long to be finished.` }
           : evidence.late > 0 || evidence.mismatches > 0 ? { state: "attention", word: "Needs attention", says: `Connected to Documenso at ${forms.origin}, but ${evidence.mismatches > 0 ? "a signed form's file came back different from the one kept" : "signed forms are waiting too long for their evidence to be kept"}.` }
           : !forms.status.lastApiOkAt ? { state: "attention", word: "Not checked", says: `Set up for Documenso at ${forms.origin}, but no call has worked yet. Check the connection in Forms settings.` }
             : { state: "ok", word: "Connected", says: `Connected to Documenso at ${forms.origin}.` };
-    lines.push({ key: "forms", title: "Forms (Documenso)", ...verdict, times: formsTimes, fix: verdict.state === "attention" ? formsFix : null,
+    // Forms that can't be filed for want of a link are the roster's to mend, not Documenso's: the way to it is QuickBooks.
+    const unlinkedOnly = evidence.noLink > 0 && forms.origin !== null && forms.tokenReadable && !apiFailing;
+    lines.push({ key: "forms", title: "Forms (Documenso)", ...verdict, times: formsTimes, fix: verdict.state !== "attention" ? null : unlinkedOnly ? qboFix : formsFix,
       notes: [...(apiFailing && forms.status.lastApiError ? [`The failure: ${forms.status.lastApiError}.`] : []), ...notes] });
   }
 

@@ -7,6 +7,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { guardian, signatureRequest, type RequestSigner } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import type { AppFamilyId } from "@/lib/families/ids";
+import type { SubjectId } from "@/lib/seasons/progress";
 import { documensoCode, getEnvelope, type CallOptions, type DocumensoConfig, type DocumensoErrorCode, type Envelope } from "@/lib/documenso/client";
 import { noteApiFailure, noteApiOk } from "./settings";
 import { readDocument, type DocumentReading } from "./states";
@@ -81,7 +83,7 @@ export async function storeReading(row: RequestRow, reading: DocumentReading, o:
     for (const s of after!.signers) {
       if (s.signedAt === null || current.signers.find((c) => c.recipientId === s.recipientId)?.signedAt) continue;
       await writeAudit({ actor: o.actor, action: "form.signer.signed", targetType: "signature_request", targetId: after!.id, ip: o.ip,
-        after: { envelopeId: after!.envelopeId, recipientId: s.recipientId, parentId: s.parentId || null, name: s.name, email: s.email, signedAt: s.signedAt, familyQboId: after!.familyQboId, subjectQboId: after!.subjectQboId } }, tx);
+        after: { envelopeId: after!.envelopeId, recipientId: s.recipientId, parentId: s.parentId || null, name: s.name, email: s.email, signedAt: s.signedAt, ...requestRecords(after!) } }, tx);
     }
     return after!;
   });
@@ -91,7 +93,7 @@ const parsed = (iso: string | null): Date | null => { const d = iso ? new Date(i
 
 async function auditState(tx: Tx, before: RequestRow, after: RequestRow, documensoStatus: string, o: { actor: Actor; ip: string | null }): Promise<void> {
   await writeAudit({ actor: o.actor, action: "form.state.change", targetType: "signature_request", targetId: after.id, ip: o.ip,
-    before: { state: before.state }, after: { state: after.state, documensoStatus, familyQboId: after.familyQboId, subjectQboId: after.subjectQboId, requirementId: after.requirementId } }, tx);
+    before: { state: before.state }, after: { state: after.state, documensoStatus, ...requestRecords(after), requirementId: after.requirementId } }, tx);
 }
 
 export type Read = { ok: true; row: RequestRow; envelope: Envelope | null; reading: DocumentReading | null } | { ok: false; code: FormsFailure; row: RequestRow };
@@ -144,22 +146,30 @@ export async function release(requestId: string): Promise<void> {
 }
 
 /**
- * True when every guardian the request's document was made for is a guardian of this family (a link of any status:
+ * True when every guardian the request's document was made for is a guardian of this app family (a link of any status:
  * one closed since still counts, since they signed as the family's own). A request whose student moved here from
  * another family keeps the old family's guardians on it (formsForMovedStudent): it counts for the student, but who
  * signed it and the signed PDF (their names, signatures and what they filled in) are that family's, so a parent page
  * shows them only when this is true. A signer the portal couldn't match to a guardian (no parentId) makes it false.
  */
-export async function signedWithin(familyQboId: string, signers: readonly Pick<RequestSigner, "parentId">[]): Promise<boolean> {
+export async function signedWithin(familyId: AppFamilyId, signers: readonly Pick<RequestSigner, "parentId">[]): Promise<boolean> {
   if (signers.length === 0) return true;
   if (signers.some((s) => !s.parentId)) return false;
   const ids = [...new Set(signers.map((s) => s.parentId))];
-  const links = await db.select({ parentId: guardian.parentId }).from(guardian).where(and(eq(guardian.familyQboId, familyQboId), inArray(guardian.parentId, ids)));
+  // A guardian's membership of the app's own family (guardian.family_id).
+  const links = await db.select({ parentId: guardian.parentId }).from(guardian).where(and(eq(guardian.familyId, familyId), inArray(guardian.parentId, ids)));
   return ids.every((id) => links.some((l) => l.parentId === id));
 }
 
 /** The family's own request with this id, or nothing. Every parent lookup of a request comes through here. */
-export async function requestOfFamily(requestId: string, familyQboId: string): Promise<RequestRow | null> {
-  const [row] = await db.select().from(signatureRequest).where(and(eq(signatureRequest.id, requestId), eq(signatureRequest.familyQboId, familyQboId)));
+export async function requestOfFamily(requestId: string, familyId: AppFamilyId): Promise<RequestRow | null> {
+  const [row] = await db.select().from(signatureRequest).where(and(eq(signatureRequest.id, requestId), eq(signatureRequest.familyId, familyId)));
   return row ?? null;
 }
+
+/** Whom a request is signed for: its student for a per-student form, its family for a per-family one. */
+export const subjectOfRequest = (row: Pick<RequestRow, "familyId" | "studentId">): SubjectId => row.studentId ?? row.familyId;
+
+/** The app's records a request names, as its audit rows write them (open question 17: older rows keep the QuickBooks ids). */
+export const requestRecords = (row: Pick<RequestRow, "familyId" | "studentId">): { familyId: string; studentId: string | null } =>
+  ({ familyId: String(row.familyId), studentId: row.studentId === null ? null : String(row.studentId) });

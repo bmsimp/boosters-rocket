@@ -6,6 +6,7 @@ import { ASK_AT_MOST, ASK_EVERY_MS, FORMS_JOB, SEALING_LATE_MS, SEAL_AGAIN_AFTER
 import { getFormsStatus } from "@/lib/forms/settings";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { resetDb } from "../helpers/db";
+import { seedRosterRead } from "../helpers/roster-cache";
 import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestNow, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { seedSeason } from "../helpers/season";
@@ -38,6 +39,7 @@ describe("the worker asks Documenso about forms that are out", () => {
   beforeEach(async () => {
     await resetDb(); stub.reset();
     await connectForms(stub);
+    await seedRosterRead({ realmId: "9130000000000088" }); // a request names the app's records, made in the roster's company
     const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
     const template = stub.addTemplate({ signers: 1 });
     templateId = template.id;

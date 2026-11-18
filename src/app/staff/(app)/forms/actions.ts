@@ -21,10 +21,10 @@ export const remindFormAction = staffAction(WRITE, async (ctx, requirementId: st
   return r.ok ? { ok: true, message: r.message } : r;
 });
 
-/** "Remind now" for one family: its guardians, about each of its forms they still have to sign. */
-export const remindFamilyAction = staffAction(WRITE, async (ctx, familyQboId: string): Promise<Done> => {
-  if (typeof familyQboId !== "string" || familyQboId.length === 0 || familyQboId.length > 64) return NOT_FROM_PAGE;
-  const r = await remindNow({ kind: "family", familyQboId }, op(ctx));
+/** "Remind now" for one family: its guardians, about each of its forms they still have to sign. The page sends the app family's own id (a uuid). */
+export const remindFamilyAction = staffAction(WRITE, async (ctx, familyId: string): Promise<Done> => {
+  if (!isUuid(familyId)) return NOT_FROM_PAGE;
+  const r = await remindNow({ kind: "family", familyId }, op(ctx));
   return r.ok ? { ok: true, message: r.message } : r;
 });
 
