@@ -155,8 +155,10 @@ test("staff open one family's season from a requirement's list, and the visit is
   // One family's page: nothing asked of another family alone, and nobody else's name.
   await expect(page.getByRole("main")).not.toContainText(/Tuba locker|Percussion truck|Cast on his arm|Rivera|Wolfgang/);
   await noSidewaysScroll(page);
-  const reads = await sql`SELECT target_id, actor_label, permission FROM audit_log WHERE id > ${mark!.id} AND action = 'season.progress.family.read'`;
-  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "E2E-FAMILY", actor_label: "e2e-admin@example.org", permission: "Season.Progress.Read" }]); // one visit, one row
+  // The read names the app's own family (stage 2 of the app-owned families spec), the one E2E-FAMILY's link names.
+  const [family] = await sql`SELECT family_id::text AS id FROM accounting_link WHERE customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL`;
+  const reads = await sql`SELECT target_type, target_id, actor_label, permission FROM audit_log WHERE id > ${mark!.id} AND action = 'season.progress.family.read'`;
+  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_type: "family", target_id: family!.id, actor_label: "e2e-admin@example.org", permission: "Season.Progress.Read" }]); // one visit, one row
 });
 
 test("staff see the season's set-up: its steps, what each asks, and every kind offered", async ({ page }) => {
