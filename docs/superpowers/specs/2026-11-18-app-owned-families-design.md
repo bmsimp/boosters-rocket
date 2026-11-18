@@ -1,8 +1,10 @@
 # The app owns families and logins — design
 
-**Status:** proposed on 2026-11-18, awaiting the owner's review. Nothing in it is built. When approved it overrides the
-specs it names below. It goes into AGENTS.md's list of specs only once the owner approves it.
-**Overrides, once approved:** in the v1 spec, §4 (who owns families and students), §5.2, §6 (roster management),
+**Status:** approved by the owner on 2026-11-18 ("plan looks good let's go"). He was shown the eight open questions
+sorted as his to decide (section 11) with their recommendations and raised no change, so all thirty-six stand as
+recommended; "(proposed)" in the text below now means "the lead's detail, as approved". Nothing in it is built yet.
+It is built in the stages of section 9, and until a stage ships, the code and AGENTS.md describe what is built.
+**Overrides, as each stage ships:** in the v1 spec, §4 (who owns families and students), §5.2, §6 (roster management),
 §8.2 (whose invoices a family sees), §11.5 where a buy-out's customer is read from the roster cache, and the parts of
 §12 that name QuickBooks ids; in `2026-11-10-quickbooks-connection-and-roster-design.md`, the cache as the roster (§2)
 and the read-only roster pages (§5); in `2026-11-11-parents-from-quickbooks-design.md`, §1 to §6 (who gets access, the
