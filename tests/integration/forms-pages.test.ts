@@ -2,13 +2,14 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { asParent, asStaff, pageOutcome, renderPage, revalidatedPaths, signedOut } from "../helpers/signed-in";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, signatureConsent, signatureRequest } from "@/lib/db/schema";
+import { auditLog, family, signatureConsent, signatureRequest } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import ParentHome from "@/app/(parent)/page";
 import SeasonPage from "@/app/(parent)/season/page";
 import FormsPage from "@/app/(parent)/forms/page";
 import FormPage, { generateMetadata as generateFormMetadata } from "@/app/(parent)/forms/[id]/page";
 import { agreeToSignAction, checkFormAction, startFormAgainAction } from "@/app/(parent)/forms/actions";
+import { GET as parentDownload } from "@/app/(parent)/forms/[id]/signed/route";
 import { CONSENT_TEXT } from "@/lib/forms/consent";
 import { resetDb, seedStaff } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
@@ -290,5 +291,38 @@ describe("the note that forms can't be signed yet (forms not set up)", () => {
     const text = textOf(await renderPage(FormsPage));
     expect(text).toMatch(/Travel consent \(optional\) Forms Signed/);
     expect(text).not.toContain("aren't ready");
+  });
+});
+
+describe("a session whose family record is inactive", () => {
+  it("refuses on every forms path: the Forms page lists nothing, a form's page and the download answer as for any miss, the actions refuse, nothing is asked of Documenso and nothing is written", async () => {
+    await resetDb(); stub.reset();
+    const { a } = await seedTwoFamilies();
+    await connectForms(stub); // set up, so an open that went through would ask Documenso
+    // As keepAppRecordsInStep() leaves a family the roster no longer holds as one, while the session still names it.
+    await db.update(family).set({ active: false }).where(eq(family.id, await familyRecord(FAMILY_A.family.qboId)));
+    const snapshot = async () => JSON.stringify([await db.select().from(signatureRequest).orderBy(signatureRequest.id), await db.select().from(signatureConsent).orderBy(signatureConsent.id),
+      (await db.select().from(auditLog)).filter((r) => r.action.startsWith("form."))]);
+    const before = await snapshot();
+    stub.calls.length = 0;
+    asParent(a.identity);
+
+    const list = await renderPage(FormsPage);
+    for (const id of Object.values(a.forms!.ids)) expect(list).not.toContain(id);
+    for (const id of Object.values(a.forms!.ids)) expect(await formPage(id)).toEqual({ notFound: true });
+    for (const id of Object.values(a.forms!.ids)) {
+      expect(await agreeToSignAction(id)).toEqual(NOT_YOURS);
+      expect(await checkFormAction(id)).toEqual(NOT_YOURS);
+      expect(await startFormAgainAction(id)).toEqual(NOT_YOURS);
+    }
+    // The signed download: the same 404 as an id that is nobody's.
+    const ask = (id: string) => parentDownload(new Request(`http://localhost/forms/${id}/signed`), { params: Promise.resolve({ id }) });
+    const own = await ask(a.forms!.ids.complete), nobody = await ask(crypto.randomUUID());
+    expect([own.status, await own.text(), own.headers.get("cache-control")]).toEqual([nobody.status, await nobody.text(), nobody.headers.get("cache-control")]);
+    expect(own.status).toBe(404);
+
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await snapshot()).toBe(before);
+    expect(revalidatedPaths()).toEqual([]);
   });
 });
