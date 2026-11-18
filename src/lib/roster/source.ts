@@ -36,21 +36,30 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
  * volunteer sign-up (`clearVolunteerRecords`), and every form made for a family to sign (`clearFormRecords`: the
  * requests and the consents with them), and every staff roster write in the queue, waiting or finished, whose ids are
  * that company's (`write_queue`, counted in the audit row), the records the check of the portal's requests made there
- * (`clearCheckRecords`), and the app's own families, students and links made from its customers (`clearAppRecords`). The same company, or a cache that says no company, keeps it all. The caller
- * owns the transaction and holds ROSTER_LOCK.
+ * (`clearCheckRecords`), and the app's own families, students and links made from its customers (`clearAppRecords`).
+ * The same company, or a cache that says no company, keeps it all. The caller owns the transaction and holds
+ * ROSTER_LOCK.
+ *
+ * From stage 2 of the app-owned families spec until stage 4 ships, a different company is refused wherever one is
+ * connected or read (completeConnect() in src/lib/quickbooks/connection.ts, refreshRoster() in ./refresh.ts; open
+ * question 18), so nothing the portal runs reaches the clear below: the seasons' records point at the app's own
+ * families and students, which a change of company would have to take away. It is kept whole for the areas that have
+ * not moved yet (their part of tests/integration/company-change-step5.test.ts calls it directly), and so the season
+ * records go first: the database refuses to delete a family or student a season record still names.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
   const from = await getRosterSource(tx);
   if (from === null || from === realmId) return false;
   // Parent access first: the snapshot it keeps takes the family names from the cache deleted below.
   await clearParentAccess(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
+  // The season's ticks, waivers, chosen lists and reminder claims name the app's own records, so they go before them.
+  await clearSeasonRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   // The app's own families, students and links, made from that company's customers (src/lib/families/).
   await clearAppRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomer);
   await clearVolunteerRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomerType);
   await tx.delete(familyMoney);
-  await clearSeasonRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await clearMoneyRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await clearFormRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   // The records the check of the portal's requests made in that company (src/lib/quickbooks/sandbox-check/).

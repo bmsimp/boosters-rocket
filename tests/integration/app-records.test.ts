@@ -214,28 +214,20 @@ describe("a staff roster write keeps them in step, in its own transaction, and s
 });
 
 describe("another company", () => {
-  it("a roster read of a different company clears the old records and links and makes the new company's, in the same transaction", async () => {
+  // From stage 2 until stage 4 of the app-owned families spec (open question 18), a different company's roster is
+  // never read over this one's: the seasons keep their records against these families.
+  it("a roster read of a different company is refused, and every record and link stays as it was", async () => {
     await seedParentSettings(SIGNINS_ON);
     await connectRoster(stub);
     const before = await appRecordRows();
-    const ana = await anasLink();
     const OTHER = "9130000000000002";
-    // The same customers in another company, as QuickBooks would send them after an Admin connected it.
+    // A connection to another company stored without a connect's refusal (from before it, or by hand).
     await db.update(qboConnection).set({ realmId: OTHER });
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-
-    const after = await appRecordRows();
-    // Nothing of the old company's is left: no link of it, and no record it made.
-    expect(after.links.every((l) => l.realmId === OTHER)).toBe(true);
-    const oldIds = new Set([...before.families.map((f) => String(f.id)), ...before.students.map((s) => String(s.id))]);
-    for (const r of [...after.families, ...after.students]) expect(oldIds.has(String(r.id))).toBe(false);
-    // The closed sign-in holds the old company's ids: it is in no family. The shape went with the old company, so the
-    // new one has no roster families yet, only what its records name (nothing).
-    expect(after.memberships).toEqual([{ id: ana.id, familyId: null }]);
-    expect(after.families).toEqual([]);
-    const [cleared] = await audits("accounting.links.cleared");
-    expect(cleared!.after).toMatchObject({ reason: "different_company", realmId: OTHER, families: 3, students: 1, links: 5, memberships: 1 });
+    expect(await refreshRoster(WORKER)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(roster_company)") });
+    expect(await appRecordRows()).toEqual(before);
+    expect(await audits("accounting.links.cleared")).toEqual([]);
   });
+
 
   it("connecting a different company leaves the new tables empty and every sign-in in no family", async () => {
     await seedParentSettings(SIGNINS_ON);

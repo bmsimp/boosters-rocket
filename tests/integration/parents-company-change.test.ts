@@ -9,7 +9,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser, qboCustomer, setting, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { loadRosterPage, rosterEntry } from "@/lib/roster/queries";
@@ -140,24 +140,23 @@ describe("connecting a different QuickBooks company", () => {
     expect(JSON.stringify(await listPeople())).not.toContain("Stranger Family");
   });
 
-  it("a refresh that finds the cache came from another company clears it first, as connecting would have", { timeout: 30_000 }, async () => {
+  // From stage 2 of the app-owned families spec until stage 4 ships (open question 18), another company's roster is
+  // never read over this one's: the seasons keep their records against this company's families. So a connection to
+  // another company stored without the clear (from before the refusal, or by hand) clears nothing either.
+  it("a refresh that finds the cache came from another company reads nothing and clears nothing", { timeout: 30_000 }, async () => {
     Object.assign(stub, fznCompany());
+    const guardiansBefore = await db.select().from(guardian);
     await seedConnected(stub, { realmId: "2222" });        // the new company is stored, but the clear never ran
     const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
-    expect(await refreshRoster(worker)).toMatchObject({ ok: true, customers: 9 });
-    expect((await db.select().from(guardian)).every((l) => l.status === "disabled" && l.disabledReason === "company_changed")).toBe(true);
-    expect(await db.select().from(heldAddress)).toEqual([]);
-    expect(await getPreviousCompany()).toMatchObject({ realmId: "1111", newRealmId: "2222" });
-    expect((await getPreviousCompany())!.families.map((f) => f.name)).toEqual(["Rivera Family", "Chen Family"]);
-    expect(await getParentSettings()).toMatchObject({ signin: false, welcome: false });
-    expect(await audits("parent.access.cleared")).toEqual([expect.objectContaining({ door: "system", actorLabel: "worker" })]);
-    expect(await audits("roster.cleared")).toEqual([expect.objectContaining({ after: { reason: "different_company", realmId: "2222", writesDeleted: 0 } })]);
-    const cache = await db.select().from(qboCustomer);
-    expect(cache.map((c) => c.qboId).sort()).toEqual(["10", "11", "12", "20", "21", "30", "40", "50", "60"]);
-    expect(cache.every((c) => c.email === null && c.phone === null)).toBe(true);     // no shape after the clear: no contact details
-    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]!.value).toEqual({ realmId: "2222" });
-    expect(await audits("roster.refresh")).toHaveLength(1);
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(roster_company)") });
+    expect(await db.select().from(guardian)).toEqual(guardiansBefore);
+    expect(await getPreviousCompany()).toBeNull();
+    expect(await audits("parent.access.cleared")).toEqual([]);
+    expect(await audits("roster.cleared")).toEqual([]);
+    expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]!.value).toEqual({ realmId: "1111" });
+    expect(await audits("roster.refresh")).toEqual([]);
   });
+
 
   it("forgets every approval and every welcome, so nothing from the old company applies to the new one by accident", async () => {
     await clearRosterOfOtherCompany("2222", admin);
