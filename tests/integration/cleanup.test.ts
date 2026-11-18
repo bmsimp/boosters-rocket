@@ -153,7 +153,8 @@ describe("the daily clean-up deletes only what is past use", () => {
     const [edge] = await db.insert(schema.formReminderClaim).values({ requirementId, parentId, onDate: "2025-11-02", createdAt: at(-year + SEC) }).returning();
     await db.insert(schema.formReminderRound).values({ requirementId, onDate: "2025-11-01", createdAt: at(-year - SEC) });
     const [round] = await db.insert(schema.formReminderRound).values({ requirementId, onDate: "2025-11-02", createdAt: at(-year + SEC) }).returning();
-    const [evidence] = await db.insert(schema.signedFormEvidence).values({ familyQboId: "F", subjectQboId: "F", subjectKind: "family", formTitle: "Old form", envelopeId: "envelope_oldoldold",
+    // An earlier company's, so it names no app record (signed_form_evidence_app_records): kept whatever its age.
+    const [evidence] = await db.insert(schema.signedFormEvidence).values({ familyQboId: "F", subjectQboId: "F", subjectKind: "family", formTitle: "Old form", envelopeId: "envelope_oldoldold", earlierCompanyAt: at(-9 * year),
       signers: [], consents: [], originals: [], storedAt: at(-10 * year) }).returning();
     await db.insert(schema.signedFormFile).values({ evidenceId: evidence!.id, kind: "sealed_pdf", bytes: Buffer.from("%PDF-1.7 old"), size: 12, sha256: "x", createdAt: at(-10 * year) });
     expect(await clean()).toEqual({ ...NOTHING, reminderClaims: 2 });

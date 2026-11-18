@@ -1,8 +1,8 @@
 // What is recorded against requirements, read once and judged by each kind's rule (./kinds.ts). Shared by the parent
 // query (./my-season.ts) and the staff ones (./staff-progress.ts); it imports no staff-only module, and reads only the
 // requirements and the families or students it is asked about. The season's records name the app's own families and
-// students (stage 2 of the app-owned families spec), and so does volunteering, whose rule is asked by the app's ids.
-// The rules of the kinds still read by customer (forms, payments, and the checklist with them) are asked through the
+// students (stage 2 of the app-owned families spec), and so do volunteering and forms, whose rules are asked by the
+// app's ids. The rules of the kinds still read by customer (payments, and the checklist with them) are asked through the
 // links, and their answers turned back into the app's ids: a boundary AGENTS.md lists (Seasons), to go when those areas
 // move. Every read here takes the families and students it is for; the same reads for everyone, for staff, are in
 // ./everyone.ts (STAFF_ONLY_IMPORTS), built on factsFrom(). The chosen lists and ticks themselves are read in
@@ -45,7 +45,7 @@ async function customerStandings(requirements: readonly CustomerRequirement[], s
   return standings;
 }
 
-/** How the rules of the kinds asked by the app's own ids (volunteering) say these requirements stand: keyed by pairKey(). */
+/** How the rules of the kinds asked by the app's own ids (volunteering, forms) say these requirements stand: keyed by pairKey(). */
 async function appStandings(requirements: readonly Requirement[], asked: SubjectsAsked | null, recorded: readonly Recorded[], viewing: Viewing): Promise<Map<string, Standing>> {
   const standings = new Map<string, Standing>();
   for (const kind of new Set(requirements.map((r) => r.kind))) {
@@ -76,8 +76,8 @@ const askedByCustomer = (r: Requirement) => KIND_RULES[r.kind]?.keyedBy !== "app
  * the kind. `viewing` is who is looking (./kinds.ts): a parent's pages say a payment's amount only from current
  * figures, staff only with Finance.Balance.Read.
  *
- * Volunteering keeps its records by the app's own ids, so its rule is asked with them. The other rules read invoices
- * and signatures, still kept by customer, so they are asked by customer: each family and student given, each chosen
+ * Volunteering and forms keep their records by the app's own ids, so their rules are asked with them. The other rules
+ * read invoices and ticks, still asked by customer, so they are asked by customer: each family and student given, each chosen
  * list and each tick goes as the customer its record is linked to (in the records' company), and each answer comes back
  * to the record of the requirement's kind linked to that customer. A record with no link there is judged as having
  * nothing to show yet by those rules. Waivers are the season's own and read as they are.

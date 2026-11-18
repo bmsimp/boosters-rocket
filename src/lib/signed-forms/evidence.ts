@@ -4,7 +4,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNotNull, isNull, notInArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { qboCustomer, requirement, signatureConsent, signatureRequest, signedFormCopy, signedFormEvidence, signedFormFile } from "@/lib/db/schema";
+import { family, requirement, student, signatureConsent, signatureRequest, signedFormCopy, signedFormEvidence, signedFormFile } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
 import { isUuid } from "@/lib/seasons/ids";
 
@@ -112,13 +112,14 @@ export async function loadRequest(id: unknown): Promise<RequestView | null> {
   const [found] = await db.select({ row: signatureRequest, title: requirement.title, appliesTo: requirement.appliesTo, form: requirement.form }).from(signatureRequest)
     .innerJoin(requirement, eq(requirement.id, signatureRequest.requirementId)).where(eq(signatureRequest.id, id));
   if (!found) return null;
-  const names = await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer).where(eq(qboCustomer.qboId, found.row.familyQboId));
-  const subject = found.row.subjectQboId === found.row.familyQboId ? names : await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer).where(eq(qboCustomer.qboId, found.row.subjectQboId));
+  // The names of the app's own records it names, as the roster gave them.
+  const [mine] = await db.select({ name: family.name }).from(family).where(eq(family.id, found.row.familyId));
+  const [theirs] = found.row.studentId === null ? [] : await db.select({ name: student.name }).from(student).where(eq(student.id, found.row.studentId));
   const consents = await db.select({ parentName: signatureConsent.parentName, textVersion: signatureConsent.textVersion, agreedAt: signatureConsent.agreedAt }).from(signatureConsent)
     .where(eq(signatureConsent.requestId, id)).orderBy(asc(signatureConsent.agreedAt));
   const realmId = await getRosterSource();
   const [evidence] = realmId === null ? [] : await db.select({ id: signedFormEvidence.id }).from(signedFormEvidence)
     .where(and(eq(signedFormEvidence.requestId, id), eq(signedFormEvidence.realmId, realmId)));
   return { row: found.row, title: found.title, appliesTo: found.appliesTo, signersMode: found.form?.signers ?? found.row.signersMode,
-    familyName: names[0]?.name ?? null, subjectName: subject[0]?.name ?? found.row.subjectName, consents, evidenceId: evidence?.id ?? null };
+    familyName: mine?.name ?? null, subjectName: (found.row.studentId === null ? mine?.name : theirs?.name) ?? found.row.subjectName, consents, evidenceId: evidence?.id ?? null };
 }

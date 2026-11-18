@@ -19,8 +19,9 @@ const CHUNK = 500;
  * records' customers, items and invoices (they stay QuickBooks ids), a waiting email change's record, the held
  * addresses and the match review's families (retired, never re-keyed), and the audit log. Also left out: the records
  * stage 2 has re-keyed to the app's own ids (the season's chosen lists, ticks, waivers and reminder claims, migrations
- * 0024 and 0025; volunteering's sign-ups, credit and reminder claims, migrations 0026 and 0027), which name a record by
- * its id and keep it, inactive, for as long as they do. Migration 0023 read the same in SQL, with those as they were;
+ * 0024 and 0025; volunteering's sign-ups, credit and reminder claims, migrations 0026 and 0027; form requests and the
+ * current company's signed-form evidence, migrations 0028 and 0029), which name a record by its id and keep it,
+ * inactive, for as long as they do. Migration 0023 read the same in SQL, with those as they were;
  * tests/helpers/app-records-fill.ts leaves them out when it runs 0023's fill again on today's tables. Change the two
  * together.
  */
@@ -35,16 +36,13 @@ const refsQuery = (realmId: string) => sql`
       WHERE realm_id = ${realmId} AND request->>'op' IN ('rename', 'move', 'deactivate') AND request->>'role' IN ('family', 'member', 'student')
     UNION ALL SELECT family_qbo_id, 'family' FROM buyout WHERE realm_id = ${realmId}
     UNION ALL SELECT b.subject_qbo_id, r.applies_to FROM buyout b JOIN requirement r ON r.id = b.requirement_id WHERE b.realm_id = ${realmId}
-    UNION ALL SELECT family_qbo_id, 'family' FROM signature_request
-    UNION ALL SELECT s.subject_qbo_id, r.applies_to FROM signature_request s JOIN requirement r ON r.id = s.requirement_id
-    UNION ALL SELECT family_qbo_id, 'family' FROM signed_form_evidence WHERE earlier_company_at IS NULL AND realm_id = ${realmId}
-    UNION ALL SELECT subject_qbo_id, subject_kind FROM signed_form_evidence WHERE earlier_company_at IS NULL AND realm_id = ${realmId}
   ) refs WHERE customer_id IS NOT NULL`;
 
 /**
  * What the portal last knew a customer as, for one the cache doesn't hold: the newest current-company kept form's
- * family or subject name, then the newest form request's subject name. Migration 0023 read the newest sign-up's
- * student name too, last; a sign-up now names its student's record, which keeps the name it has. Migration 0023 reads
+ * family or subject name, from the names and customers it keeps as its own copies. Migration 0023 read the newest
+ * form request's subject name and the newest sign-up's student name too, after it; each now names its record, which
+ * keeps the name it has. Migration 0023 reads
  * the rest the same in SQL; change the two together.
  */
 const hintsQuery = (realmId: string) => sql`
@@ -53,7 +51,6 @@ const hintsQuery = (realmId: string) => sql`
       WHERE earlier_company_at IS NULL AND realm_id = ${realmId} AND btrim(family_name) <> ''
     UNION ALL SELECT subject_qbo_id, subject_name, 1, stored_at, id FROM signed_form_evidence
       WHERE earlier_company_at IS NULL AND realm_id = ${realmId} AND btrim(subject_name) <> ''
-    UNION ALL SELECT subject_qbo_id, subject_name, 2, updated_at, id FROM signature_request WHERE btrim(subject_name) <> ''
   ) hints ORDER BY customer_id, rank, at DESC, id DESC`;
 
 async function loadPlanInput(tx: Tx, realmId: string): Promise<Omit<PlanInput, "known">> {

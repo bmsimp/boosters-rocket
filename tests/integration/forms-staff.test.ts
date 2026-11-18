@@ -45,7 +45,11 @@ const BROWSER = { ok: false, errors: ["That didn't go through. Reload the page a
 const SYSTEM = { actor: { door: "system" as const, id: null, label: "test" }, ip: null };
 
 let admin: Staff;
-beforeEach(async () => { await resetDb(); stub.reset(); admin = await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }); });
+// A request names the app's own family and student (stage 2), and records are made only in the roster's company: one is set first.
+beforeEach(async () => {
+  await resetDb(); stub.reset(); admin = await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true });
+  await db.transaction((tx) => setRosterSource(tx, "1111"));
+});
 
 describe("forms settings", () => {
   it("is for Admins only: no custom role can hold its permission by any pattern", async () => {

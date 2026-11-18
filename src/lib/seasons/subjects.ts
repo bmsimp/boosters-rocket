@@ -7,8 +7,8 @@ import { getShape } from "@/lib/roster/shape";
 import { isCovered, type Requirement } from "./progress";
 
 /**
- * A family as the roster lists it, by QuickBooks id: what the areas still keyed by QuickBooks ids read (forms'
- * matrix and reminders, volunteering's staff pages and reminders; boundaries AGENTS.md lists, Seasons).
+ * A family as the roster lists it, by QuickBooks id: what loadSeasonFamilies() turns into the app's own records, the
+ * one place the season's, volunteering's and forms' staff pages and jobs read the roster through.
  */
 export type FamilySubject = { qboId: string; name: string; students: { qboId: string; name: string }[] };
 

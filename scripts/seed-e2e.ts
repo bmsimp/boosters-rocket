@@ -269,35 +269,41 @@ async function main() {
     formIds[f.title] = row!.id as string;
     for (const customer of f.chosen ?? []) seasonRows.push({ table: "cover", requirementId: row!.id as string, kind: f.appliesTo as "family" | "student", customer });
   }
+  // The two requests and the kept evidence are stored once the app's records exist (after the fill below): they name the
+  // app's own families, as migrations 0028 and 0029 store them.
   const zeldaSigned = [{ parentId: p!.id, recipientId: 1, name: "Zelda Quetzalcoatl", email: "zelda@example.com", signedAt: "2026-11-10T15:00:00.000Z" }];
-  await sql`INSERT INTO signature_request (id, requirement_id, family_qbo_id, subject_qbo_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
-              document_created_at, checked_at, all_signed_at, completed_at, evidence_owed)
-            VALUES ('e2e00000-0000-4000-8000-000000000001', ${formIds["Travel consent"]!}, 'E2E-FAMILY', 'E2E-FAMILY', 'complete', 'envelope_e2equetzalcoatl', 'COMPLETED', ${template.templateId}, ${template.templateUpdatedAt},
-              'any', 'Quetzalcoatl Family', ${sql.json(zeldaSigned)}, now(), now(), now(), now(), false)`;
-  // Its evidence, as the worker would have kept it (src/lib/signed-forms/evidence-job.ts), with made-up PDF bytes: the
-  // staff matrix leads to it, and both the staff and the parent downloads send its sealed PDF
-  // (tests/e2e/signed-forms.spec.ts, which reads E2E_SIGNED_PDF). Its copy counts as sent, so nothing is emailed.
-  const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
-  const files = [
-    { kind: "sealed_pdf", itemId: "envelope_item_e2equetzalcoatl1", bytes: Buffer.from(E2E_SIGNED_PDF, "latin1") },
-    { kind: "certificate_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e signing certificate\n%%EOF\n", "latin1") },
-    { kind: "audit_log_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e audit log\n%%EOF\n", "latin1") },
-    { kind: "audit_log_json", itemId: null, bytes: Buffer.from(JSON.stringify({ envelopeId: "envelope_e2equetzalcoatl", count: 1, entries: [{ type: "DOCUMENT_COMPLETED" }] })) },
-  ];
-  const [evidence] = await sql`INSERT INTO signed_form_evidence (request_id, realm_id, requirement_id, family_qbo_id, subject_qbo_id, subject_kind, form_title, family_name, subject_name, season_name,
-              envelope_id, template_id, template_updated_at, signers, consents, originals, completed_at, copies_done_at)
-            VALUES ('e2e00000-0000-4000-8000-000000000001', '9130000000000001', ${formIds["Travel consent"]!}, 'E2E-FAMILY', 'E2E-FAMILY', 'family', 'Travel consent', 'Quetzalcoatl Family',
-              'Quetzalcoatl Family', 'Fall 2026', 'envelope_e2equetzalcoatl', ${template.templateId}, ${template.templateUpdatedAt}, ${sql.json(zeldaSigned.map((s) => ({ parentId: s.parentId, name: s.name, email: s.email, signedAt: s.signedAt })))},
-              ${sql.json([{ parentId: p!.id, name: "Zelda Quetzalcoatl", email: "zelda@example.com", textVersion: "2026-11-16", agreedAt: "2026-11-10T14:58:00.000Z", ip: "203.0.113.50", userAgent: null }])},
-              ${sql.json([{ itemId: "envelope_item_e2equetzalcoatl1", sha256: sha(Buffer.from("%PDF-1.4 original", "latin1")), size: 17 }])}, now(), now()) RETURNING id`;
-  for (const f of files) {
-    await sql`INSERT INTO signed_form_file (evidence_id, kind, position, item_id, bytes, size, sha256) VALUES (${evidence!.id}, ${f.kind}, 1, ${f.itemId}, ${f.bytes}, ${f.bytes.length}, ${sha(f.bytes)})`;
-  }
   const secondWaiting = [{ parentId: crypto.randomUUID(), recipientId: 2, name: "Wilhelmina Secondborn", email: "wilhelmina@second.example", signedAt: null }];
-  await sql`INSERT INTO signature_request (id, requirement_id, family_qbo_id, subject_qbo_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
-              document_created_at, checked_at)
-            VALUES ('e2e00000-0000-4000-8000-000000000002', ${formIds["Travel consent"]!}, 'E2E-FAMILY-2', 'E2E-FAMILY-2', 'waiting', 'envelope_e2esecondfamily', 'PENDING', ${template.templateId}, ${template.templateUpdatedAt},
-              'any', 'Second Family', ${sql.json(secondWaiting)}, now(), now())`;
+  const storeForms = async (tx: postgres.TransactionSql, familyOf: (customer: string) => Promise<string>) => {
+    const quetzalcoatl = await familyOf("E2E-FAMILY"), second = await familyOf("E2E-FAMILY-2");
+    await tx`INSERT INTO signature_request (id, requirement_id, family_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
+                document_created_at, checked_at, all_signed_at, completed_at, evidence_owed)
+              VALUES ('e2e00000-0000-4000-8000-000000000001', ${formIds["Travel consent"]!}, ${quetzalcoatl}, 'complete', 'envelope_e2equetzalcoatl', 'COMPLETED', ${template.templateId}, ${template.templateUpdatedAt},
+                'any', 'Quetzalcoatl Family', ${tx.json(zeldaSigned)}, now(), now(), now(), now(), false)`;
+    // Its evidence, as the worker would have kept it (src/lib/signed-forms/evidence-job.ts), with made-up PDF bytes: the
+    // staff matrix leads to it, and both the staff and the parent downloads send its sealed PDF
+    // (tests/e2e/signed-forms.spec.ts, which reads E2E_SIGNED_PDF). Its copy counts as sent, so nothing is emailed. It
+    // keeps the customers' ids as its own copies, beside the app's family.
+    const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+    const files = [
+      { kind: "sealed_pdf", itemId: "envelope_item_e2equetzalcoatl1", bytes: Buffer.from(E2E_SIGNED_PDF, "latin1") },
+      { kind: "certificate_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e signing certificate\n%%EOF\n", "latin1") },
+      { kind: "audit_log_pdf", itemId: null, bytes: Buffer.from("%PDF-1.4\n% Booster Rocket e2e audit log\n%%EOF\n", "latin1") },
+      { kind: "audit_log_json", itemId: null, bytes: Buffer.from(JSON.stringify({ envelopeId: "envelope_e2equetzalcoatl", count: 1, entries: [{ type: "DOCUMENT_COMPLETED" }] })) },
+    ];
+    const [evidence] = await tx`INSERT INTO signed_form_evidence (request_id, realm_id, requirement_id, family_qbo_id, subject_qbo_id, subject_kind, family_id, form_title, family_name, subject_name, season_name,
+                envelope_id, template_id, template_updated_at, signers, consents, originals, completed_at, copies_done_at)
+              VALUES ('e2e00000-0000-4000-8000-000000000001', '9130000000000001', ${formIds["Travel consent"]!}, 'E2E-FAMILY', 'E2E-FAMILY', 'family', ${quetzalcoatl}, 'Travel consent', 'Quetzalcoatl Family',
+                'Quetzalcoatl Family', 'Fall 2026', 'envelope_e2equetzalcoatl', ${template.templateId}, ${template.templateUpdatedAt}, ${tx.json(zeldaSigned.map((s) => ({ parentId: s.parentId, name: s.name, email: s.email, signedAt: s.signedAt })))},
+                ${tx.json([{ parentId: p!.id, name: "Zelda Quetzalcoatl", email: "zelda@example.com", textVersion: "2026-11-16", agreedAt: "2026-11-10T14:58:00.000Z", ip: "203.0.113.50", userAgent: null }])},
+                ${tx.json([{ itemId: "envelope_item_e2equetzalcoatl1", sha256: sha(Buffer.from("%PDF-1.4 original", "latin1")), size: 17 }])}, now(), now()) RETURNING id`;
+    for (const f of files) {
+      await tx`INSERT INTO signed_form_file (evidence_id, kind, position, item_id, bytes, size, sha256) VALUES (${evidence!.id}, ${f.kind}, 1, ${f.itemId}, ${f.bytes}, ${f.bytes.length}, ${sha(f.bytes)})`;
+    }
+    await tx`INSERT INTO signature_request (id, requirement_id, family_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
+                document_created_at, checked_at)
+              VALUES ('e2e00000-0000-4000-8000-000000000002', ${formIds["Travel consent"]!}, ${second}, 'waiting', 'envelope_e2esecondfamily', 'PENDING', ${template.templateId}, ${template.templateUpdatedAt},
+                'any', 'Second Family', ${tx.json(secondWaiting)}, now(), now())`;
+  };
   // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
   // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
   // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).
@@ -321,8 +327,9 @@ async function main() {
   // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
-  // The season's chosen lists, ticks and waivers, and the volunteer sign-ups, by the app's own record of each customer,
-  // of the kind each names it as, in the roster's company: as migrations 0024 and 0026 store them. A customer with no
+  // The season's chosen lists, ticks and waivers, the volunteer sign-ups and the form requests and evidence, by the app's
+  // own record of each customer, of the kind each names it as, in the roster's company: as migrations 0024, 0026 and
+  // 0028 store them. A customer with no
   // such record stops the seed.
   await sql.begin(async (tx) => {
     const recordOf = async (kind: "family" | "student", customer: string, what: string): Promise<string> => {
@@ -345,6 +352,7 @@ async function main() {
       await tx`INSERT INTO volunteer_signup (shift_id, family_id, signed_up_by, filler_kind, filler_parent_id, student_id, filler_name)
               VALUES (${r.shiftId}, ${family}, ${r.signedUpBy}, ${student === null ? "guardian" : "student"}, ${r.fillerParentId}, ${student}, ${r.fillerName})`;
     }
+    await storeForms(tx, (customer) => recordOf("family", customer, "a form request"));
   });
   await sql.end();
 }

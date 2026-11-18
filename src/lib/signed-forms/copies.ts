@@ -54,10 +54,12 @@ export async function sendOwedCopies(): Promise<CopyCounts> {
       // Their open link to the family the form is kept under, or, when its student moved to another family before the
       // evidence was kept (formsForMovedStudent), to the family they signed it in: the one every signer is a guardian
       // of. The download link is the new family's, so a moved form whose PDF can't go with the email is skipped.
-      const links = await db.select({ email: parent.email, familyQboId: guardian.familyQboId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-        .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
-      let to = links.find((l) => l.familyQboId === evidence.familyQboId);
-      if (!to && pdf) for (const l of links) if (await signedWithin(l.familyQboId, evidence.signers.map((x) => ({ parentId: x.parentId ?? "" })))) { to = l; break; }
+      // Memberships are of the app's own families (guardian.family_id), and the evidence names the family it is kept under now.
+      const links = (await db.select({ email: parent.email, familyId: guardian.familyId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+        .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(parent.blocked, false))))
+        .flatMap((l) => (l.familyId === null ? [] : [{ email: l.email, familyId: l.familyId }]));
+      let to = evidence.familyId === null ? undefined : links.find((l) => String(l.familyId) === String(evidence.familyId));
+      if (!to && pdf) for (const l of links) if (await signedWithin(l.familyId, evidence.signers.map((x) => ({ parentId: x.parentId ?? "" })))) { to = l; break; }
       if (!to) {
         await done("skipped", null);
         await writeAudit({ actor: FORMS_WORKER, action: "forms.copy.skipped", ...audit, after: { parentId, requestId: evidence.requestId, reason: "no_open_link" } });

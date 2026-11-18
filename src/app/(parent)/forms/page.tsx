@@ -66,7 +66,7 @@ export default async function FormsPage() {
             <p className="lede">{forms.seasonName}: the forms for {family.name}, and where each one stands.</p>
             {!forms.ready && stillToSign(forms.groups) && <p className="help" role="status">The forms still to sign aren&apos;t ready yet. There&apos;s nothing you need to do right now: you can sign them here once they are.</p>}
             {forms.groups.map((group, i) => (
-              <section className="box" key={group.subjectQboId} aria-labelledby={`forms-${i}`}>
+              <section className="box" key={group.key} aria-labelledby={`forms-${i}`}>
                 <h2 id={`forms-${i}`}>{group.who === "family" ? "Your family" : group.name}</h2>
                 {group.who === "family" && <p>Signed once for {group.name}</p>}
                 <ul className="reqs">{group.forms.map((form) => <FormLine key={form.line.requirementId} group={group} form={form} today={forms.today} download={form.requestId !== null && (downloads.get(form.requestId) ?? 0) > 0} />)}</ul>

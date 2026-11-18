@@ -11,6 +11,8 @@ import { DataTable } from "../../../../../components/data-table";
 import { Notice } from "../../../../../components/notice";
 import { remindRequestAction, startAgainAction } from "../../actions";
 import { RemindButton, StartAgainForm } from "../../forms";
+import { requestRecords } from "@/lib/forms/requests";
+import { recordNameWords } from "@/lib/families/words";
 
 export const metadata = { title: "Form" };
 export const dynamic = "force-dynamic";
@@ -26,7 +28,7 @@ export default async function FormRequestPage({ params }: { params: Promise<{ id
   const view = await loadRequest(id);
   if (!view) notFound();
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "forms.request.read", permission: "Forms.Signature.Read",
-    targetType: "signature_request", targetId: view.row.id, ip: ctx.ip, after: { familyQboId: view.row.familyQboId, subjectQboId: view.row.subjectQboId } });
+    targetType: "signature_request", targetId: view.row.id, ip: ctx.ip, after: requestRecords(view.row) });
   const { row } = view;
   const state = cellState({ covered: true, waived: false, request: row });
   const writes = can(ctx.effective, "Forms.Signature.ReadWrite");
@@ -35,7 +37,7 @@ export default async function FormRequestPage({ params }: { params: Promise<{ id
   return (
     <main className="wrap single">
       <h1 className="page-title">{view.title}</h1>
-      <p className="lede">For {view.appliesTo === "family" ? `the family, ${view.familyName ?? row.familyQboId}` : `${view.subjectName ?? row.subjectQboId}, of ${view.familyName ?? row.familyQboId}`}. <Link href="/staff/forms">Back to signed forms</Link></p>
+      <p className="lede">For {view.appliesTo === "family" ? `the family, ${recordNameWords(view.familyName, "family")}` : `${recordNameWords(view.subjectName, "student")}, of ${recordNameWords(view.familyName, "family")}`}. <Link href="/staff/forms">Back to signed forms</Link></p>
 
       <section className="box" aria-labelledby="state-h">
         <h2 id="state-h">Where it stands</h2>

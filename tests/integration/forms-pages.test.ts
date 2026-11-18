@@ -15,6 +15,7 @@ import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stu
 import { connectForms, formSetting, requestNow, seedFormRequirement } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
+import { familyRecord, studentRecord } from "../helpers/volunteer";
 
 /**
  * The parent's Forms pages and their actions (src/app/(parent)/forms/), run as signed-in parents without a browser.
@@ -100,7 +101,9 @@ describe("the Forms page, from what the portal has stored (forms not set up)", (
   it("refuses every action called as family A with family B's request, in the same words as for no request at all", async () => {
     const before = await db.select().from(signatureRequest).orderBy(signatureRequest.id);
     asParent(a.identity);
-    for (const theirs of [...Object.values(b.forms!.ids), crypto.randomUUID()]) {
+    // B's request ids, and B's own app family and student ids (uuids too, never a request of A's).
+    const bRecords = [String(await familyRecord(FAMILY_B.family.qboId)), ...(await Promise.all(FAMILY_B.students.map(async (s) => String(await studentRecord(s.qboId)))))];
+    for (const theirs of [...Object.values(b.forms!.ids), ...bRecords, crypto.randomUUID()]) {
       expect(await agreeToSignAction(theirs)).toEqual(NOT_YOURS);
       expect(await checkFormAction(theirs)).toEqual(NOT_YOURS);
       expect(await startFormAgainAction(theirs)).toEqual(NOT_YOURS);
@@ -148,7 +151,7 @@ describe("signing a form on its page", () => {
   const myFormId = async (studentIndex = 0) => {
     asParent(a.identity);
     await renderPage(FormsPage); // the list makes the family's requests
-    const [row] = await db.select().from(signatureRequest).where(eq(signatureRequest.subjectQboId, FAMILY_A.students[studentIndex]!.qboId));
+    const [row] = await db.select().from(signatureRequest).where(eq(signatureRequest.studentId, await studentRecord(FAMILY_A.students[studentIndex]!.qboId)));
     return row!.id;
   };
 

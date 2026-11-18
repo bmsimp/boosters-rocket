@@ -15,17 +15,21 @@ import { currentBrand, sendMail } from "@/lib/mail/send";
 import { getStoredMailConfig } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
-// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
-// moves to the app's ids.
-import { everyCustomerCover, everyCustomerRecorded } from "@/lib/seasons/everyone";
-import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
+// The season and the requests both name the app's own families and students (stage 2 of the app-owned families spec):
+// the roster is turned into those records once, by loadSeasonFamilies(), and guardians are a family's by their
+// membership of its record (guardian.family_id).
+import { subjectOfRequest } from "@/lib/forms/requests";
+import { everyCover, everyRecorded } from "@/lib/seasons/everyone";
 import { isUuid } from "@/lib/seasons/ids";
-import { loadSubjects } from "@/lib/seasons/subjects";
+import { isCovered } from "@/lib/seasons/progress";
+import { toRequirement } from "@/lib/seasons/recorded";
+import { loadSeasonFamilies } from "@/lib/seasons/subjects";
 import { dateWords } from "@/lib/volunteer/clock";
 import { currentSeason, seasonForms } from "./matrix";
 import { REMINDER_HOUR, clubHour, isReminderDay, parseSchedule, whoStillHasToSign } from "./rules";
 
-export type ReminderScope = { kind: "form"; requirementId: string } | { kind: "family"; familyQboId: string } | { kind: "request"; requestId: string };
+/** A family is named by the app's own id, as text (a uuid, checked by remindNow()). */
+export type ReminderScope = { kind: "form"; requirementId: string } | { kind: "family"; familyId: string } | { kind: "request"; requestId: string };
 export type ReminderCounts = { emailed: number; failed: number; alreadyToday: number };
 type Totals = ReminderCounts & { guardians: Set<string> };
 type Op = { actor: Actor; ip: string | null; permission?: string };
@@ -54,31 +58,31 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
     forms = forms.filter((f) => f.row.id === r.requirementId);
   }
   if (scope?.kind === "form") forms = forms.filter((f) => f.row.id === scope.requirementId);
-  const families = await loadSubjects();
+  const families = await loadSeasonFamilies();
   if (!families || forms.length === 0) return { owed: [], forms: [] };
   const ids = forms.map((f) => f.row.id);
   const [covers, waivers, requests] = await Promise.all([
-    everyCustomerCover(ids),
-    everyCustomerRecorded(ids).then((rows) => rows.filter((w) => w.waivedAt !== null)),
+    everyCover(ids),
+    everyRecorded(ids).then((rows) => rows.filter((w) => w.waivedAt !== null)),
     db.select().from(signatureRequest).where(inArray(signatureRequest.requirementId, ids)),
   ]);
-  const inScope = families.filter((f) => (scope?.kind === "family" ? f.qboId === scope.familyQboId : requestFilter ? f.qboId === requestFilter.familyQboId : true));
-  const familyIds = inScope.map((f) => f.qboId);
-  const links = familyIds.length === 0 ? [] : await db.select({ familyQboId: guardian.familyQboId, parentId: guardian.parentId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyQboId, familyIds), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
-  const waived = new Set(waivers.map((w) => `${w.requirementId}|${w.subjectQboId}`));
+  const inScope = families.filter((f) => (scope?.kind === "family" ? String(f.id) === scope.familyId : requestFilter ? String(f.id) === String(requestFilter.familyId) : true));
+  const familyIds = inScope.map((f) => f.id);
+  const links = familyIds.length === 0 ? [] : await db.select({ familyId: guardian.familyId, parentId: guardian.parentId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+    .where(and(inArray(guardian.familyId, familyIds), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
+  const waived = new Set(waivers.map((w) => `${w.requirementId}|${String(w.subjectId)}`));
   const owed = new Map<string, Owed>();
   for (const f of forms) {
-    const r = toCustomerRequirement(f.row, covers.get(f.row.id) ?? []);
+    const r = toRequirement(f.row, covers.get(f.row.id) ?? []);
     for (const fam of inScope) {
-      const subjects = r.appliesTo === "family" ? [{ qboId: fam.qboId, name: fam.name }] : fam.students;
+      const subjects = r.appliesTo === "family" ? [{ id: fam.id, name: fam.name }] : fam.students;
       for (const subject of subjects) {
-        if (!isCustomerCovered(r, subject.qboId) || waived.has(`${r.id}|${subject.qboId}`)) continue;
-        if (requestFilter && requestFilter.subjectQboId !== subject.qboId) continue;
+        if (!isCovered(r, subject.id) || waived.has(`${r.id}|${String(subject.id)}`)) continue;
+        if (requestFilter && String(subjectOfRequest(requestFilter)) !== String(subject.id)) continue;
         // Only the family's own request counts: a request another family left for a student who moved is not this family's.
-        const request = requests.find((q) => q.requirementId === r.id && q.subjectQboId === subject.qboId && q.familyQboId === fam.qboId) ?? null;
+        const request = requests.find((q) => q.requirementId === r.id && String(subjectOfRequest(q)) === String(subject.id) && String(q.familyId) === String(fam.id)) ?? null;
         const mode = f.row.form?.signers ?? "any";
-        for (const parentId of whoStillHasToSign(mode, request, links.filter((l) => l.familyQboId === fam.qboId))) {
+        for (const parentId of whoStillHasToSign(mode, request, links.filter((l) => String(l.familyId) === String(fam.id)))) {
           const key = `${r.id}|${parentId}`;
           const o = owed.get(key) ?? { requirementId: r.id, parentId, names: [], requestIds: [] };
           o.names.push(subject.name); o.requestIds.push(request?.id ?? null);
@@ -125,9 +129,9 @@ async function sendOwed(o: { owed: Owed[]; forms: { id: string; title: string; d
  * forms), forms set up and outgoing mail. Says how many guardians were emailed.
  */
 export async function remindNow(scope: ReminderScope, op: Op): Promise<Done<{ message: string; counts: ReminderCounts & { guardians: number } }>> {
-  const id = scope.kind === "form" ? scope.requirementId : scope.kind === "request" ? scope.requestId : scope.familyQboId;
+  const id = scope.kind === "form" ? scope.requirementId : scope.kind === "request" ? scope.requestId : scope.familyId;
   if (scope.kind !== "family" && !isUuid(id)) return { ok: false, errors: ["That form isn't there any more. Reload the page."] };
-  if (scope.kind === "family" && (typeof id !== "string" || id.length === 0 || id.length > 64)) return { ok: false, errors: ["That family isn't there any more. Reload the page."] };
+  if (scope.kind === "family" && !isUuid(id)) return { ok: false, errors: ["That family isn't there any more. Reload the page."] };
   if (!(await getParentSettings()).signin) return { ok: false, errors: ["Parent sign-ins are switched off, so families couldn't open the forms. An Admin can switch them on under Parent sign-ins."] };
   if (!(await getFormsConfig())) return { ok: false, errors: ["Forms aren't set up yet, so there is nothing families can sign. An Admin can connect Documenso under Forms settings."] };
   if (!(await getStoredMailConfig())) return { ok: false, errors: ["Outgoing mail isn't set up, so no reminder can be sent. An Admin can set it up under Mail."] };

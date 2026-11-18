@@ -10,8 +10,8 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  accountingLink, auditLog, family, formReminderClaim, formReminderRound, guardian, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureRequest,
-  signedFormEvidence, signedFormFile, student, volunteerCredit, requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
+  accountingLink, auditLog, family, formReminderClaim, formReminderRound, guardian, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
+  signedFormCopy, signedFormEvidence, signedFormFile, student, volunteerCredit, requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
 import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -19,6 +19,7 @@ import { clearRosterOfOtherCompany, getRosterSource, setRosterSource } from "@/l
 import { resetDb, seedStaff, untilALockIsAwaited } from "../helpers/db";
 import { seedTwoFamilies } from "../helpers/parent";
 import { recordOfCustomer } from "../helpers/app-records";
+import { seedConsent } from "../helpers/forms";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 
 /**
@@ -30,12 +31,13 @@ import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
  * marked as the earlier company's and cut from its request (tests/integration/signed-forms-staff.test.ts shows the
  * archive and that no parent of the new company reaches it).
  *
- * From stage 2 the seasons and volunteering are the exception too: their ticks, waivers, chosen lists and reminder
- * claims, and every sign-up, credit and volunteer reminder claim, name the app's own families and students, so
+ * From stage 2 the seasons, volunteering and forms are the exception too: their ticks, waivers, chosen lists and
+ * reminder claims, every sign-up, credit and volunteer reminder claim, and every form request and the current
+ * company's evidence, name the app's own families and students, so
  * connecting a different company is refused until stage 4 ships (open question 18), and nothing the portal runs
  * reaches the clear. The last describe proves that part; the clear itself is kept for the areas that have not moved
- * yet, whose part stays below until their own slice. Called directly, it still empties volunteering first, before the
- * app's own records it names (the first test).
+ * yet, whose part stays below until their own slice. Called directly, it still empties volunteering and the form
+ * requests first, and cuts the evidence from the app's records, before the app's own records they name (the first test).
  */
 const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null };
 
@@ -66,6 +68,8 @@ describe("connecting a different company after step 5", () => {
     expect(before.credit).toBeGreaterThan(0);
     expect(before.emails).toBeGreaterThanOrEqual(2);
     expect(before.evidence.map((e) => e.id).sort()).toEqual([a.forms!.evidence.id, b.forms!.evidence.id].sort());
+    // The current company's evidence names the app's own family and student (stage 2), beside its own copies of the ids.
+    expect(before.evidence.every((e) => e.familyId !== null && e.studentId !== null && e.earlierCompanyAt === null)).toBe(true);
     expect(reqId).toBeTruthy();
     // seedTwoFamilies() made the app's own records of both families, linked in this company.
     expect((await db.select().from(family)).length).toBeGreaterThanOrEqual(2);
@@ -92,7 +96,11 @@ describe("connecting a different company after step 5", () => {
 
     const kept = await db.select().from(signedFormEvidence);
     expect(kept.map((e) => e.id).sort()).toEqual(before.evidence.map((e) => e.id).sort());
-    for (const e of kept) expect(e).toMatchObject({ requestId: null, realmId: "1111", earlierCompanyAt: expect.any(Date) });
+    // Kept, marked as the earlier company's and cut from its request and from the app's records, which are gone: every
+    // QuickBooks id, name, signer and consent it holds as it was.
+    for (const e of kept) expect(e).toMatchObject({ requestId: null, realmId: "1111", earlierCompanyAt: expect.any(Date), familyId: null, studentId: null });
+    const asSigned = (e: typeof kept[number]) => ({ ...e, requestId: null, earlierCompanyAt: null, familyId: null, studentId: null });
+    for (const e of kept) expect(asSigned(e)).toEqual(asSigned(before.evidence.find((x) => x.id === e.id)!));
     const files = await db.select().from(signedFormFile);
     expect(files.map((f) => [f.id, f.sha256, f.size, Buffer.from(f.bytes).toString("hex")]).sort())
       .toEqual(before.files.map((f) => [f.id, f.sha256, f.size, Buffer.from(f.bytes).toString("hex")]).sort());
@@ -101,13 +109,14 @@ describe("connecting a different company after step 5", () => {
   it("marks evidence the worker was storing at that moment as the earlier company's too, once its store commits", async () => {
     const { a } = await seedTwoFamilies();
     const requestId = a.forms!.ids.signed;
+    const familyId = await recordOfCustomer(a.identity.familyQboId, "family");
     let commit!: () => void;
     const held = new Promise<void>((resolve) => { commit = resolve; });
     // As storeEvidence() does: the request locked, the evidence inserted, the commit still to come.
     const storing = db.transaction(async (tx) => {
       await tx.select().from(signatureRequest).where(eq(signatureRequest.id, requestId)).for("update");
       await tx.insert(signedFormEvidence).values({ requestId, realmId: "1111", requirementId: null, familyQboId: a.identity.familyQboId, subjectQboId: a.identity.familyQboId,
-        subjectKind: "family", formTitle: "In flight", envelopeId: "envelope_inflight", signers: [], consents: [], originals: [] });
+        subjectKind: "family", familyId, formTitle: "In flight", envelopeId: "envelope_inflight", signers: [], consents: [], originals: [] });
       await held;
     });
     const clearing = clearRosterOfOtherCompany("2222", admin);
@@ -116,11 +125,11 @@ describe("connecting a different company after step 5", () => {
     await storing;
     expect(await clearing).toBe(true);
     const [inFlight] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.formTitle, "In flight"));
-    expect(inFlight).toMatchObject({ requestId: null, earlierCompanyAt: expect.any(Date) });
+    expect(inFlight).toMatchObject({ requestId: null, earlierCompanyAt: expect.any(Date), familyId: null, studentId: null });
   });
 });
 
-describe("the seasons and volunteering, from stage 2 until stage 4: a different company is refused, and every record stays", () => {
+describe("the seasons, volunteering and forms, from stage 2 until stage 4: a different company is refused, and every record stays", () => {
   const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
   const audits = async (...actions: string[]) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => actions.includes(r.action));
   /** Every season and volunteering record, ids and times and all, and the app's own records they name. */
@@ -134,6 +143,14 @@ describe("the seasons and volunteering, from stage 2 until stage 4: a different 
     families: await db.select().from(family).orderBy(asc(family.id)),
     students: await db.select().from(student).orderBy(asc(student.id)),
     links: await db.select().from(accountingLink).orderBy(asc(accountingLink.id)),
+    // Forms (stage 2): every request, consent, reminder claim and round, and every piece of kept evidence with its files and copies.
+    requests: await db.select().from(signatureRequest).orderBy(asc(signatureRequest.id)),
+    consents: await db.select().from(signatureConsent).orderBy(asc(signatureConsent.id)),
+    formClaims: await db.select().from(formReminderClaim).orderBy(asc(formReminderClaim.id)),
+    formRounds: await db.select().from(formReminderRound).orderBy(asc(formReminderRound.id)),
+    evidence: await db.select().from(signedFormEvidence).orderBy(asc(signedFormEvidence.id)),
+    files: await db.select().from(signedFormFile).orderBy(asc(signedFormFile.id)),
+    copies: await db.select().from(signedFormCopy).orderBy(asc(signedFormCopy.id)),
   });
   let staff: Awaited<ReturnType<typeof seedStaff>>;
   const connect = async (realmId: string) => {
@@ -156,8 +173,20 @@ describe("the seasons and volunteering, from stage 2 until stage 4: a different 
     const famA = await recordOfCustomer(a.spec.family.qboId, "family");
     await db.insert(requirementReminder).values({ kind: "due_14", familyId: famA, parentId: a.identity.parentId, dueOn: "2026-11-30", triedAt: new Date(), outcome: "sent" });
     await db.insert(volunteerReminder).values({ kind: "due_14", key: `${String(famA)}|2026-11-30|${a.identity.parentId}`, familyId: famA, triedAt: new Date(), outcome: "sent" });
+    // A guardian's consent to sign, and a form reminder's claim and round.
+    await seedConsent(a.forms!.ids.waiting, { parentId: a.identity.parentId, name: a.spec.parent.name, email: a.spec.parent.email });
+    const [req] = await db.select().from(signatureRequest).limit(1);
+    await db.insert(formReminderClaim).values({ requirementId: req!.requirementId, parentId: a.identity.parentId, onDate: "2026-11-16" });
+    await db.insert(formReminderRound).values({ requirementId: req!.requirementId, onDate: "2026-11-16" });
     await seedConnected(stub, { realmId: "1111" });
     const before = await seasonRecords();
+    // Both families' requests in every state, a consent, the kept evidence of each with its four files, the claim and round.
+    expect(new Set(before.requests.map((r) => r.state))).toEqual(new Set(["not_opened", "waiting", "signed", "complete", "declined"]));
+    expect(before.requests.length).toBeGreaterThanOrEqual(12);
+    expect(before.consents).toHaveLength(1);
+    expect(before.evidence).toHaveLength(2);
+    expect(before.files).toHaveLength(8);
+    expect([before.formClaims.length, before.formRounds.length]).toEqual([1, 1]);
     // Something of each is there to keep: both families' ticks and waivers, their chosen lists, the claim.
     expect(before.progress.filter((p) => p.metAt !== null).length).toBeGreaterThanOrEqual(4);
     expect(before.progress.filter((p) => p.waivedAt !== null).length).toBeGreaterThanOrEqual(2);
@@ -177,13 +206,13 @@ describe("the seasons and volunteering, from stage 2 until stage 4: a different 
     expect(await getRosterSource()).toBe("1111");
     expect(await seasonRecords()).toEqual(before);
     expect((await audits("quickbooks.connect_refused")).map((r) => r.after)).toEqual([{ reason: "roster_company" }]);
-    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "parent.access.cleared")).toEqual([]);
+    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "parent.access.cleared", "form.records.cleared")).toEqual([]);
 
     // The same company again: connected, and every record is as it was.
     expect(await connect("1111")).toEqual({ ok: true });
     expect((await db.select().from(qboConnection))[0]!.realmId).toBe("1111");
     expect(await seasonRecords()).toEqual(before);
-    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared")).toEqual([]);
+    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "form.records.cleared")).toEqual([]);
   });
 
   it("refuses to read another company's roster over this one's, asking QuickBooks nothing, and keeps every season record", { timeout: 30_000 }, async () => {
@@ -198,6 +227,6 @@ describe("the seasons and volunteering, from stage 2 until stage 4: a different 
     expect(await seasonRecords()).toEqual(before);
     expect((await audits("roster.refresh.failed")).map((r) => r.after)).toEqual([{ code: "roster_company" }]);
     expect(before.signups.length).toBeGreaterThanOrEqual(2);
-    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared")).toEqual([]);
+    expect(await audits("roster.cleared", "season.records.cleared", "volunteer.signups.cleared", "accounting.links.cleared", "form.records.cleared")).toEqual([]);
   });
 });

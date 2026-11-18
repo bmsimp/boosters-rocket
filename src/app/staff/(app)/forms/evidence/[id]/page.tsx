@@ -26,7 +26,7 @@ export default async function EvidencePage({ params }: { params: Promise<{ id: s
   if (!view) notFound();
   const e = view.evidence;
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "forms.evidence.read", permission: "Forms.Signature.Read",
-    targetType: "signed_form_evidence", targetId: e.id, ip: ctx.ip, after: { requestId: e.requestId, familyQboId: e.familyQboId, earlierCompany: view.earlier } });
+    targetType: "signed_form_evidence", targetId: e.id, ip: ctx.ip, after: { requestId: e.requestId, familyId: e.familyId === null ? null : String(e.familyId), studentId: e.studentId === null ? null : String(e.studentId), earlierCompany: view.earlier } });
   const download = (key: string) => `/staff/forms/evidence/${e.id}/${key}`;
   return (
     <main className="wrap single">

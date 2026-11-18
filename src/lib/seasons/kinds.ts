@@ -41,8 +41,8 @@ type RuleBase = {
 };
 
 /**
- * A kind's rule asked by customer: one whose own records are still keyed by QuickBooks ids (forms, payments; stage 2
- * of the app-owned families spec), and the checklist with them. The families and students are the customers their
+ * A kind's rule asked by customer: one whose own records are still keyed by QuickBooks ids (payments; stage 2 of the
+ * app-owned families spec), and the checklist with them. The families and students are the customers their
  * links name, and it answers by customerPairKey(). The season's reads translate on the way in and out (factsFrom() in
  * ./recorded.ts): a boundary AGENTS.md lists (Seasons), each going when its area moves.
  */
@@ -57,7 +57,7 @@ export type CustomerKindRule = RuleBase & {
   standings(ask: { requirements: readonly CustomerRequirement[]; subjectQboIds: readonly string[] | null; recorded: readonly CustomerRecorded[]; viewing: Viewing }): Promise<Map<string, Standing>>;
 };
 
-/** A kind's rule asked by the app's own ids: one whose own records name the app's families and students (volunteering). */
+/** A kind's rule asked by the app's own ids: one whose own records name the app's families and students (volunteering, forms). */
 export type AppKindRule = RuleBase & {
   keyedBy: "app";
   /**
@@ -111,8 +111,8 @@ const volunteer: AppKindRule = {
   ticked: false,
 };
 
-/** Each kind's rule; volunteering's is asked by the app's own ids, the others by customer (a boundary AGENTS.md lists, Seasons). */
-export const KIND_RULES: { [K in RequirementKind]: (K extends "volunteer" ? AppKindRule : CustomerKindRule) | null } = {
+/** Each kind's rule; volunteering's and the form's are asked by the app's own ids, the others by customer (a boundary AGENTS.md lists, Seasons). */
+export const KIND_RULES: { [K in RequirementKind]: (K extends "volunteer" | "form" ? AppKindRule : CustomerKindRule) | null } = {
   checklist,
   form: formRule,  // met when Documenso says the document is completed by the required guardians (§9; src/lib/forms/kind.ts)
   payment,

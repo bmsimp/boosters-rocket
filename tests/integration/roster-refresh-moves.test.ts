@@ -29,7 +29,7 @@ import FormsPage from "@/app/(parent)/forms/page";
 import FormPage from "@/app/(parent)/forms/[id]/page";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
 import { resetDb, seedWorkingMail } from "../helpers/db";
-import { formSetting, requestNow, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
+import { formSetting, requestByCustomer, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { identityNow, seedParentIn } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup } from "../helpers/volunteer";
@@ -106,12 +106,13 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     expect(await cached(LEO)).toMatchObject({ parentQboId: CHEN });
 
     // The open form starts again under the new family, the old family's consent goes, and its document waits for the worker to withdraw it.
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened", envelopeId: null, signers: [] });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened", envelopeId: null, signers: [] });
     expect(await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, leo.open))).toEqual([]);
     expect(await db.select().from(formWithdrawal)).toEqual([expect.objectContaining({ envelopeId: "envelope_qbmovedopen", anySigned: false })]);
     // The signed form moves with its evidence: it still counts for Leo.
-    expect(await requestNow(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete", envelopeId: "envelope_qbmovedsigned" });
-    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, leo.evidence.id)))[0]).toMatchObject({ requestId: leo.signed, familyQboId: CHEN });
+    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete", envelopeId: "envelope_qbmovedsigned" });
+    // The kept evidence now names the new family's record; its own copy of the QuickBooks ids stays as it was stored.
+    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, leo.evidence.id)))[0]).toMatchObject({ requestId: leo.signed, familyId: await recordOfCustomer(CHEN, "family"), familyQboId: RIVERA, subjectQboId: LEO });
     // The place still to come is given up; the one done keeps its credit with the family it was earned for.
     expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
     expect((await signup(leo.done.id)).cancelledAt).toBeNull();
@@ -146,7 +147,7 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await cached(LEO)).toMatchObject({ parentQboId: CHEN, active: false });
     expect(await followed()).toEqual([]);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
     expect((await signup(leo.coming.id)).cancelledAt).toBeNull();
     expect(mail.outbox).toEqual([]);
   });
@@ -161,8 +162,8 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     moveInQuickBooks(LEO, CHEN, { active: true });
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    expect(await requestNow(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete" });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete" });
     expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
     // The place done stays with the family it was earned for, and is never taken for a move again.
     expect((await signup(leo.done.id)).cancelledAt).toBeNull();
@@ -179,7 +180,7 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     moveInQuickBooks(LEO, CHEN);
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, formsReset: 1, placesGivenUp: 1 }) })]);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN });
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toHaveLength(1);
   });
@@ -192,7 +193,7 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
       expect((await cached(LEO))!.parentQboId).toBe(to);
     }
     expect(await followed()).toEqual([]);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
     expect((await signup(leo.coming.id)).cancelledAt).toBeNull();
   });
 
@@ -210,7 +211,7 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     expect(await auditsOf("forms.request.moved")).toHaveLength(2);
     expect(await auditsOf("volunteer.signup.moved")).toHaveLength(1);
     expect(mail.outbox).toHaveLength(told);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
   });
 
   // The gap the review of step 5 left: a move whose answer named another record asks for a refresh and runs nothing.
@@ -221,11 +222,11 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
       { Id: "13", DisplayName: "Someone Else", SyncToken: "1", ParentRef: { value: CHEN } }, { realmId: REALM, actor: WORKER.actor, ip: null });
     expect(await followed()).toEqual([]);
     expect((await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY)))).toHaveLength(1);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: RIVERA });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA });
 
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.refresh#${(await lastRun()).id}`, formsReset: 1, formsMoved: 1, placesGivenUp: 1 }) })]);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
   });
 
   it("a queued move QuickBooks made already: the refresh that finds it follows it, and marking it done takes nothing more from the families", async () => {
@@ -236,7 +237,7 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
 
     expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
     // The refresh followed the move; the queue's own look at it found nothing left to move, cancel or tell.
     const rows = await followed();
     expect(rows.map((r) => (r.after as { cause: string }).cause).sort()).toEqual([`roster.refresh#${(await lastRun()).id}`, `roster.write.found#${LEO}`].sort());
@@ -257,8 +258,8 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     expect(await refreshRoster(WORKER)).toEqual({ ok: false, reason: "failed",
       error: "The forms and volunteer places of a student who moved to another family couldn't be brought up to date, so the roster was left as it was. (follow_up_failed)" });
     expect(await db.select().from(qboCustomer)).toEqual(before.customers);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting", envelopeId: "envelope_qbmovedopen" });
-    expect(await requestNow(leo.signed)).toMatchObject({ familyQboId: RIVERA });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting", envelopeId: "envelope_qbmovedopen" });
+    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: RIVERA });
     expect(await db.select().from(formWithdrawal)).toEqual([]);
     expect(await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, leo.open))).toHaveLength(1);
     expect(await db.select().from(volunteerSignup)).toEqual(before.signups);
@@ -270,7 +271,7 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
 
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toHaveLength(1);
-    expect(await requestNow(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
     expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
     expect(mail.outbox).toHaveLength(1);
   });
@@ -315,7 +316,7 @@ describe("not followed when the cache a refresh replaces isn't this company's", 
     Object.assign(company.customers.find((c) => c.Id === LEO)!, { ParentRef: { value: CHEN } });
     await connectRoster(stub, { company });
     expect(await followed()).toEqual([]);
-    expect(await requestNow(open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
+    expect(await requestByCustomer(open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
   });
 
   // Until stage 4 of the app-owned families spec, a refresh over another company's cache is refused before it reads

@@ -11,6 +11,7 @@ import FormPage from "@/app/(parent)/forms/[id]/page";
 import { findMySignedPdf, mySignedDownloads } from "@/lib/forms/my-evidence";
 import { resetDb, seedStaff } from "../helpers/db";
 import { seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { familyRecord, studentRecord } from "../helpers/volunteer";
 
 /**
  * The downloads of a signed form. A parent's (src/app/(parent)/forms/[id]/signed/route.ts): the session first, then
@@ -54,9 +55,11 @@ describe("a parent downloads their own family's signed form", () => {
   it("answers another family's id, an unknown id, a non-uuid, an unsigned form and one with no kept evidence with the same 404 and no bytes", async () => {
     asParent(a.identity);
     const [extra] = await db.insert(signatureRequest).values({ requirementId: (await db.select().from(signatureRequest).where(eq(signatureRequest.id, a.forms!.ids.complete)))[0]!.requirementId,
-      familyQboId: a.spec.family.qboId, subjectQboId: "QBO-ALDERQUIST-EXTRA", state: "complete", envelopeId: "envelope_alderquistextra", evidenceOwed: true }).returning();
+      familyId: await familyRecord(a.spec.family.qboId), studentId: await studentRecord("QBO-ALDERQUIST-EXTRA"), state: "complete", envelopeId: "envelope_alderquistextra", evidenceOwed: true }).returning();
     const answers = [];
-    for (const id of [b.forms!.ids.complete, NOBODY, "not-a-uuid", "..%2F..%2Fstaff", a.forms!.ids.waiting, a.forms!.ids.signed, extra!.id]) {
+    // B's app family and student ids are uuids too: never a request of A's.
+    const bRecords = [String(await familyRecord(b.spec.family.qboId)), ...(await Promise.all(b.spec.students.map(async (s) => String(await studentRecord(s.qboId)))))];
+    for (const id of [b.forms!.ids.complete, ...bRecords, NOBODY, "not-a-uuid", "..%2F..%2Fstaff", a.forms!.ids.waiting, a.forms!.ids.signed, extra!.id]) {
       const res = await askParent(id);
       answers.push({ status: res.status, body: await res.text(), cache: res.headers.get("cache-control"), type: res.headers.get("content-type") });
     }

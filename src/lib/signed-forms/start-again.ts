@@ -8,7 +8,7 @@ import { db } from "@/lib/db/client";
 import { signatureRequest } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { cancelEnvelope, deleteEnvelope } from "@/lib/documenso/client";
-import { NO_DOCUMENT, asking, claim, readAndStore, release } from "@/lib/forms/requests";
+import { NO_DOCUMENT, asking, claim, readAndStore, release, requestRecords } from "@/lib/forms/requests";
 import { getFormsConfig } from "@/lib/forms/settings";
 import { isUuid } from "@/lib/seasons/ids";
 import { RESTART_REASONS, restartPlan, type RestartReason } from "./rules";
@@ -50,7 +50,7 @@ export async function startRequestAgain(requestId: unknown, reason: unknown, raw
       if (cleared.length === 0) return false;
       await writeAudit({ actor: op.actor, action: "forms.request.restart", permission: op.permission, targetType: "signature_request", targetId: row.id, ip: op.ip,
         before: { state: row.state, envelopeId, documensoStatus: row.envelopeStatus, signers: row.signers.map((s) => ({ parentId: s.parentId || null, name: s.name, signedAt: s.signedAt })),
-          allSignedAt: row.allSignedAt?.toISOString() ?? null, familyQboId: row.familyQboId, subjectQboId: row.subjectQboId },
+          allSignedAt: row.allSignedAt?.toISOString() ?? null, ...requestRecords(row) },
         after: { state: "not_opened", reason, note: note || null, withdrawn: withdrawn.ok ? plan.withdraw : "already_gone" } }, tx);
       return true;
     });

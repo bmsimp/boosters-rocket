@@ -20,6 +20,7 @@ import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stu
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
+import { familyRecord, studentRecord } from "../helpers/volunteer";
 
 /**
  * Signed forms kept (src/lib/signed-forms/evidence-job.ts and copies.ts), against the Documenso stub: the worker
@@ -65,6 +66,8 @@ describe("the worker keeps a completed form's evidence", () => {
     const [evidence] = await db.select().from(signedFormEvidence);
     expect(evidence).toMatchObject({ requestId: id, realmId: REALM, earlierCompanyAt: null, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.students[0]!.qboId,
       subjectKind: "student", formTitle: "Medical release", familyName: FAMILY_A.family.name, subjectName: FAMILY_A.students[0]!.name, seasonName: "Fall", envelopeId, templateId: "envelope_seedtemplate" });
+    // Beside its own copies of the QuickBooks ids, the app's records whose form it is: the family's and the student's.
+    expect(evidence).toMatchObject({ familyId: await familyRecord(FAMILY_A.family.qboId), studentId: await studentRecord(FAMILY_A.students[0]!.qboId) });
     expect(evidence!.signers).toEqual([{ parentId: a.identity.parentId, name: FAMILY_A.parent.name, email: FAMILY_A.parent.email, signedAt: expect.any(String) }]);
     expect(evidence!.consents).toEqual([expect.objectContaining({ parentId: a.identity.parentId, name: FAMILY_A.parent.name, textVersion: expect.any(String), ip: "203.0.113.50" })]);
     expect(evidence!.originals).toEqual([{ itemId: expect.stringMatching(/^envelope_item_/), sha256: hash(stub.originalBytes(envelopeId)), size: 1585 }]);
@@ -262,7 +265,8 @@ describe("the guardians' copies", () => {
     const { id, envelopeId } = await signedForA();
     await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: FAMILY_A.students[0]!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
     await runEvidenceJob();
-    expect((await db.select().from(signedFormEvidence))[0]!.familyQboId).toBe(FAMILY_B.family.qboId);
+    // Kept after the move: it names the family the request is under now, by its record and, as its own copy, its customer.
+    expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ familyId: await familyRecord(FAMILY_B.family.qboId), familyQboId: FAMILY_B.family.qboId });
     expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
     expect(Buffer.compare(mail.outbox[0]!.attachments![0]!.content as Buffer, stub.sealedBytes(envelopeId))).toBe(0);
     expect((await audits("forms.copy.sent"))[0]!.after).toEqual({ parentId: a.identity.parentId, requestId: id, how: "attached" });
