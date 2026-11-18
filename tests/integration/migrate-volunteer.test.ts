@@ -25,8 +25,13 @@ const DATABASE_WORK = 300_000;
 const { name: NAME, url: DB_URL } = scratchDatabase("migrate_shifts");
 const folders: string[] = [];
 const REALM = "4620000000000001";
+const OTHER_REALM = "4620000000000999";
+/** Customers that also have a family and a student record linked in OTHER_REALM. */
+const CUSTOMERS_ELSEWHERE = ["F1", "F2", "S1", "S2", "S3", "S-GONE"];
 const ASH_PARENT = "7c0a9a1e-0000-4000-8000-000000000001", BIRCH_PARENT = "7c0a9a1e-0000-4000-8000-000000000002", STAFF = "7c0a9a1e-0000-4000-8000-0000000000aa";
 const NOBODY = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e5f";
+/** A guardian with no place on the set-up's shift, so a row a test adds meets the constraint it is about, not the one-place-each index. */
+const NEW_GUARDIAN = "7c0a9a1e-0000-4000-8000-0000000000ee";
 
 /** The migrations folder as it was up to `last` (by index), for the database as it was before this slice. */
 function migrationsUpTo(last: number): string {
@@ -112,6 +117,16 @@ describe("migrations 0026 and 0027: volunteering names the app's own families an
     });
     // Migration 0023 makes the app's records and links from that, as on the proof-of-concept host.
     await migrateWith(migrationsUpTo(23));
+    // Links of the same customer ids in another company (left from before a change of company, say): the fill must
+    // take this company's record of each, never another company's, so every check below reads through this company.
+    await q(async (pg) => {
+      for (const customer of CUSTOMERS_ELSEWHERE) {
+        const [f] = await pg`INSERT INTO family (name, active) VALUES (${`Elsewhere ${customer}`}, false) RETURNING id`;
+        await pg`INSERT INTO accounting_link (system, realm_id, customer_id, family_id, origin) VALUES ('quickbooks', ${OTHER_REALM}, ${customer}, ${f!.id}, 'carried_over')`;
+        const [s] = await pg`INSERT INTO student (name, active) VALUES (${`Elsewhere ${customer}`}, false) RETURNING id`;
+        await pg`INSERT INTO accounting_link (system, realm_id, customer_id, student_id, origin) VALUES ('quickbooks', ${OTHER_REALM}, ${customer}, ${s!.id}, 'carried_over')`;
+      }
+    });
   }, DATABASE_WORK);
 
   afterAll(async () => {
@@ -122,7 +137,7 @@ describe("migrations 0026 and 0027: volunteering names the app's own families an
   it("stops, and changes nothing, when a row names a customer with no record of the kind its column holds, or a claim's key doesn't start with its family", async () => {
     // Made after 0023, so nothing made a record of them: never guessed at.
     const [bad] = await q((pg) => pg`INSERT INTO volunteer_signup (shift_id, family_qbo_id, signed_up_by, filler_kind, filler_parent_id, filler_name)
-      VALUES (${ids.shift!}, 'F-NOBODY', ${ASH_PARENT}, 'guardian', ${ASH_PARENT}, 'Nobody') RETURNING id`);
+      VALUES (${ids.shift!}, 'F-NOBODY', ${NEW_GUARDIAN}, 'guardian', ${NEW_GUARDIAN}, 'Nobody') RETURNING id`);
     const [badCredit] = await q((pg) => pg`INSERT INTO volunteer_credit (kind, family_qbo_id, student_qbo_id, requirement_id, minutes, shifts, created_by_door, created_by)
       VALUES ('outside', 'F1', 'S-NOBODY', ${ids.requirement!}, 30, 0, 'staff', ${STAFF}) RETURNING id`);
     const message = await failureOf(migrateWith(path.resolve("drizzle")));
@@ -198,15 +213,15 @@ describe("migrations 0026 and 0027: volunteering names the app's own families an
     });
 
     it("refuses a row that names no record, or a student filler without a student, and a family's removal while one names it", async () => {
-      const [ash] = await q((pg) => pg`SELECT family_id FROM accounting_link WHERE customer_id = 'F1' AND family_id IS NOT NULL`);
-      const [kid] = await q((pg) => pg`SELECT student_id FROM accounting_link WHERE customer_id = 'S1' AND student_id IS NOT NULL`);
+      const [ash] = await q((pg) => pg`SELECT family_id FROM accounting_link WHERE customer_id = 'F1' AND family_id IS NOT NULL AND realm_id = ${REALM}`);
+      const [kid] = await q((pg) => pg`SELECT student_id FROM accounting_link WHERE customer_id = 'S1' AND student_id IS NOT NULL AND realm_id = ${REALM}`);
       const shift = ids.shift!;
       await expect(q((pg) => pg`INSERT INTO volunteer_signup (shift_id, family_id, signed_up_by, filler_kind, filler_parent_id, filler_name)
-        VALUES (${shift}, ${NOBODY}, ${ASH_PARENT}, 'guardian', ${ASH_PARENT}, 'x')`)).rejects.toThrow(/volunteer_signup_family_id_family_id_fk/);
+        VALUES (${shift}, ${NOBODY}, ${NEW_GUARDIAN}, 'guardian', ${NEW_GUARDIAN}, 'x')`)).rejects.toThrow(/volunteer_signup_family_id_family_id_fk/);
       await expect(q((pg) => pg`INSERT INTO volunteer_signup (shift_id, family_id, signed_up_by, filler_kind, student_id, filler_name)
         VALUES (${shift}, ${ash!.family_id}, ${ASH_PARENT}, 'student', ${NOBODY}, 'x')`)).rejects.toThrow(/volunteer_signup_student_id_student_id_fk/);
       await expect(q((pg) => pg`INSERT INTO volunteer_signup (shift_id, signed_up_by, filler_kind, filler_parent_id, filler_name)
-        VALUES (${shift}, ${ASH_PARENT}, 'guardian', ${ASH_PARENT}, 'x')`)).rejects.toThrow(/family_id/);
+        VALUES (${shift}, ${NEW_GUARDIAN}, 'guardian', ${NEW_GUARDIAN}, 'x')`)).rejects.toThrow(/family_id/);
       await expect(q((pg) => pg`INSERT INTO volunteer_signup (shift_id, family_id, signed_up_by, filler_kind, filler_name)
         VALUES (${shift}, ${ash!.family_id}, ${ASH_PARENT}, 'student', 'x')`)).rejects.toThrow(/volunteer_signup_filler_record/);
       await expect(q((pg) => pg`INSERT INTO volunteer_credit (kind, signup_id, family_id, student_id, minutes, shifts, created_by_door, created_by)
@@ -218,7 +233,7 @@ describe("migrations 0026 and 0027: volunteering names the app's own families an
       await expect(q((pg) => pg`INSERT INTO volunteer_signup (shift_id, family_id, signed_up_by, filler_kind, student_id, filler_name)
         VALUES (${shift}, ${ash!.family_id}, ${ASH_PARENT}, 'student', ${kid!.student_id}, 'x')`)).rejects.toThrow(/volunteer_signup_student_id_uq/);
       // A record a sign-up names can't be deleted from under it: the departed student's, named by nothing else.
-      const [gone] = await q((pg) => pg`SELECT student_id FROM accounting_link WHERE customer_id = 'S-GONE' AND student_id IS NOT NULL`);
+      const [gone] = await q((pg) => pg`SELECT student_id FROM accounting_link WHERE customer_id = 'S-GONE' AND student_id IS NOT NULL AND realm_id = ${REALM}`);
       await expect(q((pg) => pg`DELETE FROM student WHERE id = ${gone!.student_id}`)).rejects.toThrow(/volunteer_signup_student_id_student_id_fk/);
       await expect(q((pg) => pg`DELETE FROM family WHERE id = ${ash!.family_id}`)).rejects.toThrow(/foreign key/);
     });
