@@ -108,7 +108,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     // change-of-company clear would take them away. Nothing is asked of QuickBooks.
     const from = await getRosterSource(tx);
     if (from !== null && from !== realmId) {
-      return fail("The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Connect that company again. (roster_company)", "roster_company");
+      return fail("The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)", "roster_company");
     }
     let types: Raw[], customers: Raw[];
     try {

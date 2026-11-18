@@ -104,7 +104,7 @@ describe("the roster belongs to the connected company", () => {
     stub.customers = [];
     const calls = stub.apiCalls().length;
     expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "failed",
-      error: "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Connect that company again. (roster_company)" });
+      error: "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)" });
     expect(stub.apiCalls()).toHaveLength(calls); // nothing was asked of QuickBooks
     expect(await db.select().from(qboCustomer)).toHaveLength(9);
     expect(await source()).toEqual({ realmId: A });

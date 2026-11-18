@@ -180,7 +180,7 @@ describe("the seasons, from stage 2 until stage 4: a different company is refuse
     await seedConnected(stub, { realmId: "2222" });
     const before = await seasonRecords();
     expect(await refreshRoster(worker)).toEqual({ ok: false, reason: "failed",
-      error: "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Connect that company again. (roster_company)" });
+      error: "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)" });
     expect(stub.apiCalls()).toEqual([]);
     expect(await getRosterSource()).toBe("1111");
     expect(await seasonRecords()).toEqual(before);
