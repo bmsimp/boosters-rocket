@@ -4,7 +4,7 @@ import { familyMatch, heldAddress, parent } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
-import { appRecordsAudit } from "@/lib/families/in-step";
+import { appRecordsAudit } from "@/lib/families/changes";
 import { getRosterSource } from "@/lib/roster/source";
 import type { StaffOp } from "./people";
 import { loadDecision, reconcileAccess } from "./reconcile";

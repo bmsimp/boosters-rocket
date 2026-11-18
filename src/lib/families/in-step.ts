@@ -8,6 +8,7 @@ import { getShape } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
 import { EMPTY_PLAN, planAppRecords, type PlanInput, type PlanRef } from "./plan";
+import { noAppRecordChanges, type AppRecordChanges } from "./changes";
 
 const CHUNK = 500;
 
@@ -70,22 +71,6 @@ async function loadPlanInput(tx: Tx, realmId: string): Promise<Omit<PlanInput, "
   const hints = new Map(Array.from(await tx.execute<{ customer_id: string; name: string }>(hintsQuery(realmId))).map((h) => [h.customer_id, h.name]));
   return { shape, customers, refs, hints, guardians };
 }
-
-/** What one run made or changed. Nothing is ever removed: a record nothing needs is made inactive, which is a change. */
-export type AppRecordChanges = {
-  families: { made: number; changed: number };
-  students: { made: number; changed: number };
-  memberships: { linked: number; relinked: number; pointed: number };
-};
-
-export const noAppRecordChanges = (): AppRecordChanges => ({ families: { made: 0, changed: 0 }, students: { made: 0, changed: 0 }, memberships: { linked: 0, relinked: 0, pointed: 0 } });
-
-/** Whether a run made or changed anything: then the audit row of the change that ran it says what (appRecordsAudit()). */
-export const changedAppRecords = (c: AppRecordChanges): boolean =>
-  [c.families.made, c.families.changed, c.students.made, c.students.changed, c.memberships.linked, c.memberships.relinked, c.memberships.pointed].some((n) => n > 0);
-
-/** The part of an audit row's `after` that says what a run made or changed: nothing when it changed nothing. */
-export const appRecordsAudit = (c: AppRecordChanges): { appRecords?: AppRecordChanges } => (changedAppRecords(c) ? { appRecords: c } : {});
 
 /** Thrown when bringing the records into step fails, so the roster read can say which part failed (app_records_failed). */
 export class AppRecordsFailed extends Error {}
@@ -157,7 +142,8 @@ async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
   }
   const familyFor = (customerId: string | null | undefined) => (customerId ? familyIdOf.get(customerId) ?? null : null);
 
-  // 2. Students the same way, each in the family the roster holds them under, and in none when it doesn't.
+  // 2. Students the same way, each in the family the roster holds them under; one it doesn't keeps the family they were
+  //    last in (none, for one never held under a family).
   const newStudents = [...plan.students].filter(([customerId]) => !studentIdOf.has(customerId))
     .map(([customerId, s]) => { const id = asAppStudentId(randomUUID()); studentIdOf.set(customerId, id); return { id, customerId, ...s }; });
   await inChunks(newStudents, (rows) => tx.insert(student).values(rows.map((s) => ({ id: s.id, name: s.name, active: s.active, familyId: familyFor(s.familyCustomerId) }))));
@@ -167,7 +153,8 @@ async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
   for (const s of students) {
     const customerId = customerOfStudent.get(s.id);
     const want = customerId === undefined ? undefined : plan.students.get(customerId);
-    const next = want ? { name: want.name, active: want.active, familyId: familyFor(want.familyCustomerId) } : { name: s.name, active: false, familyId: null };
+    const familyId = want && want.familyCustomerId !== null ? familyFor(want.familyCustomerId) : s.familyId;
+    const next = want ? { name: want.name, active: want.active, familyId } : { name: s.name, active: false, familyId };
     if (s.name === next.name && s.active === next.active && s.familyId === next.familyId) continue;
     await tx.update(student).set({ ...next, updatedAt: new Date() }).where(eq(student.id, s.id));
     changes.students.changed++;

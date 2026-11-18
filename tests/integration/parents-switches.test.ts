@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { db } from "@/lib/db/client";
 import { sql } from "drizzle-orm";
 import { auditLog, guardian, heldAddress, jobRun, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
-import { noAppRecordChanges } from "@/lib/families/in-step";
+import { noAppRecordChanges } from "@/lib/families/changes";
 import * as reconcileModule from "@/lib/parents/reconcile";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { ROSTER_JOB } from "@/lib/roster/source";

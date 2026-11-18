@@ -3,7 +3,8 @@
 import { asc } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, student } from "@/lib/db/schema";
-import { keepAppRecordsInStep, noAppRecordChanges, type AppRecordChanges } from "@/lib/families/in-step";
+import { keepAppRecordsInStep } from "@/lib/families/in-step";
+import { noAppRecordChanges, type AppRecordChanges } from "@/lib/families/changes";
 
 /** Runs keepAppRecordsInStep() in its own transaction, as the roster read does inside its own. */
 export const syncAppRecords = (): Promise<AppRecordChanges> => db.transaction((tx) => keepAppRecordsInStep(tx));

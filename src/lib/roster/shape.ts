@@ -4,7 +4,8 @@ import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, setting, qboCustomerType, qboCustomer } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { QboOp } from "@/lib/quickbooks/connection";
-import { appRecordsAudit, keepAppRecordsInStep } from "@/lib/families/in-step";
+import { keepAppRecordsInStep } from "@/lib/families/in-step";
+import { appRecordsAudit } from "@/lib/families/changes";
 
 export const SHAPE_KEY = "membership.shape";
 /** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */

@@ -105,8 +105,9 @@ export const family = pgTable("family", {
 /**
  * A student, with the portal's own id: a student customer directly under a family of the roster cache, active as its
  * customer is; or a customer a record of the current company names as a student that the roster doesn't hold as one,
- * or one nothing names any more, which is inactive. `family_id` is the family the cache holds them under; null for
- * one the roster doesn't hold as a student, who is always inactive.
+ * or one nothing names any more, which is inactive. `family_id` is the family the cache holds them under; for one
+ * the roster no longer holds as a student, who is always inactive, the family they were last in, or null for one it
+ * never held under a family.
  */
 export const student = pgTable("student", {
   id: uuid("id").primaryKey().defaultRandom().$type<AppStudentId>(),

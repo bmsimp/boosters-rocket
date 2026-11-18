@@ -138,7 +138,8 @@ INSERT INTO "family" ("id", "name", "active") SELECT id, name, active FROM app_f
 INSERT INTO "accounting_link" ("system", "realm_id", "customer_id", "family_id", "origin")
   SELECT 'quickbooks', s.realm_id, f.customer_id, f.id, 'carried_over' FROM app_fill_family f CROSS JOIN app_fill_source s;
 --> statement-breakpoint
--- The students the same way: a roster student is in the family the cache holds them under; any other is inactive and in none.
+-- The students the same way: a roster student is in the family the cache holds them under; any other is inactive, and in
+-- none here (the function keeps the family a student was last in, which a first fill never knew).
 CREATE TEMP TABLE app_fill_student AS
   SELECT k.customer_id, gen_random_uuid() AS id, coalesce(c."display_name", h.name) AS name, coalesce(k.on_roster AND c."active", false) AS active,
     f.id AS family_id

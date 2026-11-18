@@ -5,7 +5,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { mailWorking } from "@/lib/mail/settings";
 import { getShape, ROSTER_LOCK } from "@/lib/roster/shape";
-import { appRecordsAudit } from "@/lib/families/in-step";
+import { appRecordsAudit } from "@/lib/families/changes";
 import { ROSTER_JOB } from "@/lib/roster/source";
 import type { HeldAddress } from "./access-rules";
 import type { StaffOp } from "./people";

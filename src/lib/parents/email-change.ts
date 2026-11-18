@@ -25,7 +25,7 @@ import { parseEmailField } from "./emails";
 import { loadMyRecord, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { reconcileAccess } from "./reconcile";
-import { appRecordsAudit } from "@/lib/families/in-step";
+import { appRecordsAudit } from "@/lib/families/changes";
 import { askForRosterRefresh } from "./refresh-ask";
 import { deleteUnusedSigninCodes, endParentSessions, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";

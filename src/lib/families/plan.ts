@@ -13,7 +13,8 @@ import type { MembershipShape } from "@/lib/roster/shape";
  * - Every customer a record of the current company names as a family (`refs`: a guardian row's family, a tick, a
  *   sign-up, a buy-out...) has a family record too, and every one named as a student a student record, whatever the
  *   roster holds it as: a record names a customer as the kind its column holds. One the roster doesn't hold as that
- *   kind is inactive, and a student of that sort is in no family.
+ *   kind is inactive. A student the roster doesn't hold is planned in no family; keepAppRecordsInStep() keeps the
+ *   family such a student was last in, which a first fill (migration 0023) never knew.
  * - A record is named from the cache, else by the name it has already (`known`, by kind: the cache held it once), else
  *   from `hints` (a kept form, a request, a sign-up). Otherwise it has no name: the portal never knew one.
  * - Each guardian row is in the family of its `family_qbo_id`, except one a change of company closed, whose ids are

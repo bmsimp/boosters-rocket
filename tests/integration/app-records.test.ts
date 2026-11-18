@@ -126,7 +126,8 @@ describe("after a roster read", () => {
       { customer: "20", name: "Chen Family", active: true },
       { customer: "40", name: "Old Family", active: false },
     ]);
-    expect(got.students).toEqual([{ customer: "12", name: "Leo Rivera", active: false, family: null }]);
+    // Leo is inactive and stays under the family he was last in.
+    expect(got.students).toEqual([{ customer: "12", name: "Leo Rivera", active: false, family: "10" }]);
     keptEvery(ids, await recordIds());
     expect(got.memberships).toEqual([{ guardianId: ana.id, family: "10" }]);
     expect((await audits("roster.refresh")).at(-1)!.after).toMatchObject({ appRecords: { families: { made: 0, changed: 1 }, students: { made: 0, changed: 1 } } });

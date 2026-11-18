@@ -3,7 +3,7 @@ import { db } from "@/lib/db/client";
 import { heldAddress } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
-import { appRecordsAudit } from "@/lib/families/in-step";
+import { appRecordsAudit } from "@/lib/families/changes";
 import type { StaffOp } from "./people";
 import { loadDecision, reconcileAccess } from "./reconcile";
 

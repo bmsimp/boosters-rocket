@@ -9,7 +9,8 @@ import { decideAccess, type AccessDecision, type HoldSets } from "./access-rules
 import { getParentSettings, type ParentSettings } from "./settings";
 import { deleteUnusedSigninCodes, endFamilySessions, endParentSessions } from "./sessions";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
-import { keepAppRecordsInStep, type AppRecordChanges } from "@/lib/families/in-step";
+import { keepAppRecordsInStep } from "@/lib/families/in-step";
+import type { AppRecordChanges } from "@/lib/families/changes";
 
 export const RECONCILE_ACTOR: Actor = { door: "system", id: null, label: "reconcile" };
 /** Thrown by the roster refresh when the reconcile inside it fails, so the refresh can say which part failed. */

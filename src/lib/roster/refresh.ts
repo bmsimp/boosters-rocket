@@ -9,7 +9,8 @@ import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { clearRosterOfOtherCompanyLocked, getRosterSource, ROSTER_JOB, setRosterSource } from "./source";
 import { studentMoves, studentsUnderFamilies, type StudentMove } from "./moves";
 import { logReconcileFailure, reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
-import { AppRecordsFailed, appRecordsAudit, noAppRecordChanges } from "@/lib/families/in-step";
+import { AppRecordsFailed } from "@/lib/families/in-step";
+import { appRecordsAudit, noAppRecordChanges } from "@/lib/families/changes";
 import { formsForMovedStudent, requestsHeldElsewhere } from "@/lib/forms/moved";
 import { placesHeldElsewhere, volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 
