@@ -176,6 +176,10 @@ async function main() {
     stepIds[name] = step!.id as string;
   }
   type SeedRequirement = { step: string; title: string; appliesTo: "family" | "student"; required?: boolean; due?: number; chosen?: string[]; ticked?: string[]; waived?: Record<string, string>; item?: string };
+  // The chosen lists, ticks and waivers name the app's own families and students (stage 2 of the app-owned families
+  // spec), which the fill at the end makes: they are kept here, by QuickBooks id, and stored once the fill has run.
+  type SeasonRow = { table: "cover" | "progress"; requirementId: string; kind: "family" | "student"; customer: string; ticked?: boolean; reason?: string };
+  const seasonRows: SeasonRow[] = [];
   const requirements: SeedRequirement[] = [
     { step: "Join", title: "Handbook read", appliesTo: "family", ticked: ["E2E-FAMILY", "E2E-10"] },
     { step: "Join", title: "Tuba locker key returned", appliesTo: "family", chosen: ["E2E-10"] },
@@ -189,11 +193,9 @@ async function main() {
   for (const [position, r] of requirements.entries()) {
     const [row] = await sql`INSERT INTO requirement (step_id, kind, item_qbo_id, title, required, applies_to, due_on, covers, position)
             VALUES (${stepIds[r.step]!}, ${r.item ? "payment" : "checklist"}, ${r.item ?? null}, ${r.title}, ${r.required ?? true}, ${r.appliesTo}, ${r.due === undefined ? null : day(r.due)}, ${r.chosen ? "chosen" : "everyone"}, ${position}) RETURNING id`;
-    for (const subject of r.chosen ?? []) await sql`INSERT INTO requirement_cover (requirement_id, subject_qbo_id) VALUES (${row!.id}, ${subject})`;
-    for (const subject of r.ticked ?? []) await sql`INSERT INTO requirement_progress (requirement_id, subject_qbo_id, met_at) VALUES (${row!.id}, ${subject}, now())`;
-    for (const [subject, reason] of Object.entries(r.waived ?? {})) {
-      await sql`INSERT INTO requirement_progress (requirement_id, subject_qbo_id, waived_at, waived_reason) VALUES (${row!.id}, ${subject}, now(), ${reason})`;
-    }
+    for (const customer of r.chosen ?? []) seasonRows.push({ table: "cover", requirementId: row!.id as string, kind: r.appliesTo, customer });
+    for (const customer of r.ticked ?? []) seasonRows.push({ table: "progress", requirementId: row!.id as string, kind: r.appliesTo, customer, ticked: true });
+    for (const [customer, reason] of Object.entries(r.waived ?? {})) seasonRows.push({ table: "progress", requirementId: row!.id as string, kind: r.appliesTo, customer, reason });
   }
   // Volunteer buy-outs (v1 spec §11.5): three optional volunteer requirements in Wrap-up that offer paying instead,
   // with fixed ids (tests/e2e/buyout-seed.ts). The Quetzalcoatl family has chosen a buy-out of "Concession help" and
@@ -208,7 +210,7 @@ async function main() {
   for (const [i, r] of buyoutRequirements.entries()) {
     await sql`INSERT INTO requirement (id, step_id, kind, title, required, applies_to, amount, amount_unit, covers, position, item_qbo_id, buyout_unit_cents)
             VALUES (${r.id}, ${stepIds["Wrap-up"]!}, 'volunteer', ${r.title}, false, 'family', ${r.amount}, ${r.unit}, ${r.chosen ? "chosen" : "everyone"}, ${requirements.length + i}, ${HELP_ITEM}, ${r.unitCents})`;
-    if (r.chosen) await sql`INSERT INTO requirement_cover (requirement_id, subject_qbo_id) VALUES (${r.id}, ${r.chosen})`;
+    if (r.chosen) seasonRows.push({ table: "cover", requirementId: r.id, kind: "family", customer: r.chosen });
   }
   await sql`INSERT INTO buyout (id, requirement_id, family_qbo_id, subject_qbo_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, invoice_qbo_id, invoice_sync_token, realm_id, chosen_by, chosen_by_label)
           VALUES (${E2E_BUYOUT.buyout}, ${E2E_BUYOUT.invoiced}, 'E2E-FAMILY', 'E2E-FAMILY', 'E2E-FAMILY', ${HELP_ITEM}, 5000, 2, 10000, 'invoiced', '902', '0', '9130000000000001', ${p!.id}, 'zelda@example.com')`;
@@ -261,7 +263,7 @@ async function main() {
     const [row] = await sql`INSERT INTO requirement (step_id, kind, title, required, applies_to, covers, position, form)
             VALUES (${stepIds.Join!}, 'form', ${f.title}, false, ${f.appliesTo}, ${f.chosen ? "chosen" : "everyone"}, ${100 + at}, ${f.form ? sql.json(f.form) : null}) RETURNING id`;
     formIds[f.title] = row!.id as string;
-    for (const subject of f.chosen ?? []) await sql`INSERT INTO requirement_cover (requirement_id, subject_qbo_id) VALUES (${row!.id}, ${subject})`;
+    for (const customer of f.chosen ?? []) seasonRows.push({ table: "cover", requirementId: row!.id as string, kind: f.appliesTo as "family" | "student", customer });
   }
   const zeldaSigned = [{ parentId: p!.id, recipientId: 1, name: "Zelda Quetzalcoatl", email: "zelda@example.com", signedAt: "2026-11-10T15:00:00.000Z" }];
   await sql`INSERT INTO signature_request (id, requirement_id, family_qbo_id, subject_qbo_id, state, envelope_id, envelope_status, template_id, template_updated_at, signers_mode, subject_name, signers,
@@ -315,6 +317,20 @@ async function main() {
   // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
+  // The season's chosen lists, ticks and waivers, by the app's own record of each customer, of the kind its requirement
+  // asks for, in the roster's company: as migration 0024 stores them. A customer with no such record stops the seed.
+  await sql.begin(async (tx) => {
+    for (const r of seasonRows) {
+      const [link] = r.kind === "family"
+        ? await tx`SELECT family_id AS id FROM accounting_link WHERE system = 'quickbooks' AND realm_id = '9130000000000001' AND customer_id = ${r.customer} AND family_id IS NOT NULL`
+        : await tx`SELECT student_id AS id FROM accounting_link WHERE system = 'quickbooks' AND realm_id = '9130000000000001' AND customer_id = ${r.customer} AND student_id IS NOT NULL`;
+      if (!link) throw new Error(`seed-e2e: no ${r.kind} record of ${r.customer} for the season's ${r.table === "cover" ? "chosen list" : "tick or waiver"}`);
+      const family = r.kind === "family" ? link.id : null, student = r.kind === "student" ? link.id : null;
+      if (r.table === "cover") await tx`INSERT INTO requirement_cover (requirement_id, family_id, student_id) VALUES (${r.requirementId}, ${family}, ${student})`;
+      else await tx`INSERT INTO requirement_progress (requirement_id, family_id, student_id, met_at, waived_at, waived_reason)
+              VALUES (${r.requirementId}, ${family}, ${student}, ${r.ticked ? new Date() : null}, ${r.reason ? new Date() : null}, ${r.reason ?? null})`;
+    }
+  });
   await sql.end();
 }
 

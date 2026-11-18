@@ -15,8 +15,11 @@ import type { MyFamily } from "@/lib/parents/my-family";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { isUuid } from "@/lib/seasons/ids";
-import { isCovered, type Requirement } from "@/lib/seasons/progress";
-import { loadCovers, loadFacts, toRequirement } from "@/lib/seasons/recorded";
+// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
+// moves to the app's ids.
+import { loadCustomerCovers } from "@/lib/seasons/by-customer";
+import { isCustomerCovered, toCustomerRequirement, type CustomerRequirement } from "@/lib/seasons/customer-keys";
+import { loadCustomerFacts } from "@/lib/seasons/recorded";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
 import { beforeCutoff, clockOf, dateWords, instantWords, shiftInstants, shiftMinutes, shiftTimeWords } from "./clock";
 import { correctedSignups, creditedSignups } from "./credit";
@@ -179,16 +182,16 @@ async function countsTowardFor(familyQboId: string, students: { qboId: string; n
     .orderBy(asc(seasonStep.position), asc(requirement.position));
   if (rows.length === 0) return () => [];
   const subjects = [familyQboId, ...students.map((s) => s.qboId)];
-  const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), subjects);
-  const requirements: Requirement[] = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []));
-  const { facts } = await loadFacts(requirements, subjects, { amounts: "fresh", parentId: null }); // volunteer requirements only
-  const line = (r: Requirement, subject: string, studentName: string | null): CountsToward => ({
+  const covers = await loadCustomerCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), subjects);
+  const requirements: CustomerRequirement[] = rows.map((x) => toCustomerRequirement(x.r, covers.get(x.r.id) ?? []));
+  const { facts } = await loadCustomerFacts(requirements, subjects, { amounts: "fresh", parentId: null }); // volunteer requirements only
+  const line = (r: CustomerRequirement, subject: string, studentName: string | null): CountsToward => ({
     title: r.title, whoMust: whoMustWords(r, studentName), counts: amountWords(r.amountUnit, shiftCredit(r, minutes)), standing: facts.standing(r, subject).words,
   });
   return (who) => {
-    const own = requirements.filter((r) => r.appliesTo === "family" && isCovered(r, familyQboId)).map((r) => line(r, familyQboId, null));
+    const own = requirements.filter((r) => r.appliesTo === "family" && isCustomerCovered(r, familyQboId)).map((r) => line(r, familyQboId, null));
     const student = students.find((s) => s.qboId === who);
-    const theirs = student ? requirements.filter((r) => r.appliesTo === "student" && isCovered(r, student.qboId)).map((r) => line(r, student.qboId, student.name)) : [];
+    const theirs = student ? requirements.filter((r) => r.appliesTo === "student" && isCustomerCovered(r, student.qboId)).map((r) => line(r, student.qboId, student.name)) : [];
     return [...own, ...theirs];
   };
 }

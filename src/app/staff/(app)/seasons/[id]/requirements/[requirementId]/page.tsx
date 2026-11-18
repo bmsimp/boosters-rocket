@@ -4,7 +4,7 @@ import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { isUuid } from "@/lib/seasons/ids";
 import { describeRequirement, getRequirementSetup } from "@/lib/seasons/setup";
-import { candidatesFor, loadSubjects } from "@/lib/seasons/subjects";
+import { candidatesFor, loadSeasonFamilies } from "@/lib/seasons/subjects";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { listItems, itemsReadAt, requirementItem } from "@/lib/money/items";
 import { CalendarDate } from "@/app/components/calendar-date";
@@ -32,9 +32,11 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
   const canChange = can(ctx.effective, "Season.Steps.ReadWrite");
   // The tag first: a change of company before the roster is read leaves it the older one, and the save is refused.
   const rosterTag = await currentRosterTag();
-  const families = await loadSubjects();
+  const families = await loadSeasonFamilies();
   const candidates = families ? candidatesFor(r.appliesTo, families) : [];
-  const onRoster = new Set(candidates.map((c) => c.qboId));
+  // The chosen list names the app's own families or students; the page and the form carry their ids as text.
+  const chosen = new Set(r.coveredIds.map(String));
+  const onRoster = new Set(candidates.map((c) => String(c.id)));
   const noun = r.appliesTo === "family" ? "families" : "students";
   const [item, items, itemsAt] = r.kind === "payment" ? await Promise.all([requirementItem(r.id), listItems(), itemsReadAt()]) : [null, [], null];
   const seesVolunteer = can(ctx.effective, "Volunteer.Event.Read");
@@ -79,16 +81,16 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
 
       <section className="box" aria-labelledby="cover-h"><h2 id="cover-h">Who it is asked of</h2>
         <p>{r.covers === "everyone" ? `Everyone: every ${r.appliesTo === "family" ? "family" : "student"} on the roster.`
-          : `A chosen list: ${r.coveredQboIds.filter((q) => onRoster.has(q)).length} of the ${noun} on the roster.`}</p>
+          : `A chosen list: ${[...chosen].filter((id) => onRoster.has(id)).length} of the ${noun} on the roster.`}</p>
         {r.covers === "chosen" && (
-          <ul className="lines">{candidates.filter((c) => r.coveredQboIds.includes(c.qboId)).map((c) => (
-            <li key={c.qboId}><div><span className="what">{c.name}</span>{r.appliesTo === "student" && <span className="when">{c.familyName}</span>}</div></li>))}</ul>
+          <ul className="lines">{candidates.filter((c) => chosen.has(String(c.id))).map((c) => (
+            <li key={String(c.id)}><div><span className="what">{c.name}</span>{r.appliesTo === "student" && <span className="when">{c.familyName}</span>}</div></li>))}</ul>
         )}
         {canChange && (families === null
           ? <Notice tone="warning">The roster can&apos;t be shown right now, so a list can&apos;t be chosen. Check QuickBooks under Roster.</Notice>
           : <details className="more"><summary>Change who it is asked of</summary>
-              <CoverageForm covers={r.covers} chosen={r.coveredQboIds.filter((q) => onRoster.has(q))} noun={noun}
-                candidates={candidates.map((c) => ({ qboId: c.qboId, label: r.appliesTo === "student" ? `${c.name} (${c.familyName})` : c.name }))}
+              <CoverageForm covers={r.covers} chosen={[...chosen].filter((id) => onRoster.has(id))} noun={noun}
+                candidates={candidates.map((c) => ({ id: String(c.id), label: r.appliesTo === "student" ? `${c.name} (${c.familyName})` : c.name }))}
                 save={setCoverageAction.bind(null, r.id, rosterTag)} />
             </details>)}
       </section>

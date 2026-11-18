@@ -4,10 +4,11 @@
 // about and reads nothing else, and nothing a staff member wrote (a note, a reason) is read here: the staff pages read
 // those through ./staff-credit.ts. It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
-import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { qboCustomer, requirement, requirementCover, requirementProgress, season, seasonStep, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
-import type { Requirement } from "@/lib/seasons/progress";
+import { qboCustomer, requirement, season, seasonStep, volunteerCredit, volunteerEvent, volunteerShift, volunteerShiftRequirement, volunteerSignup } from "@/lib/db/schema";
+import type { Requirement, RequirementFields } from "@/lib/seasons/progress";
+import { loadCustomerCovers, loadCustomerRecorded } from "@/lib/seasons/by-customer";
 import { buyoutFacts } from "@/lib/buyouts/standing";
 import { allocateCredit, type Allocation, type Credit, type CreditRequirement, type Slot } from "./allocation";
 import { clockOf, dateWords, shiftTimeWords } from "./clock";
@@ -65,17 +66,17 @@ export async function allocateFamilies(familyQboIds: readonly string[] | null, a
     .where(and(inArray(qboCustomer.parentQboId, families), eq(qboCustomer.active, true)));
   const subjects = [...families, ...students.map((s) => s.qboId)];
   const chosen = rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id);
-  const covers = chosen.length === 0 ? [] : await q.select({ requirementId: requirementCover.requirementId, subjectQboId: requirementCover.subjectQboId }).from(requirementCover)
-    .where(and(inArray(requirementCover.requirementId, chosen), inArray(requirementCover.subjectQboId, subjects)));
+  // The season keeps its chosen lists and waivers by the app's own ids: read here by customer, through the links
+  // (src/lib/seasons/by-customer.ts), until volunteering moves to the app's ids too.
+  const covers = await loadCustomerCovers(chosen, subjects, tx);
   const requirements: CreditRequirementRow[] = rows.map((x, i) => ({
     id: x.r.id, title: x.r.title, required: x.r.required, appliesTo: x.r.appliesTo, amount: x.r.amount, amountUnit: x.r.amountUnit, dueOn: x.r.dueOn, order: i,
-    covers: x.r.covers, coveredQboIds: covers.filter((c) => c.requirementId === x.r.id).map((c) => c.subjectQboId), seasonId: x.seasonId,
+    covers: x.r.covers, coveredQboIds: covers.get(x.r.id) ?? [], seasonId: x.seasonId,
   }));
   // A requirement staff waived for the family or a student needs nothing, so it takes no credit and what it would have
   // taken flows on to the others. Only when it was waived is read, never why. So does one whose buy-out is paid
   // (v1 spec §11.4: never beyond the amount needed; allocation.ts).
-  const waived = requirements.length === 0 ? [] : await q.select({ requirementId: requirementProgress.requirementId, subjectQboId: requirementProgress.subjectQboId })
-    .from(requirementProgress).where(and(inArray(requirementProgress.requirementId, requirements.map((r) => r.id)), inArray(requirementProgress.subjectQboId, subjects), isNotNull(requirementProgress.waivedAt)));
+  const waived = (await loadCustomerRecorded(requirements.map((r) => r.id), subjects, tx)).filter((w) => w.waivedAt !== null);
   const bought = await buyoutFacts(requirements.map((r) => r.id), subjects, tx);
   const paidFor = (requirementId: string, subject: string) => { const f = bought.get(`${requirementId}|${subject}`); return Boolean(f && (f.state === "paid" || f.invoicePaid)); };
   const asked = (r: CreditRequirementRow, subject: string) => (r.covers === "everyone" || r.coveredQboIds.includes(subject))
@@ -98,7 +99,7 @@ export async function allocateFamilies(familyQboIds: readonly string[] | null, a
  * requirement's unit, keyed by `pairKey` (src/lib/seasons/kinds.ts passes its own in). With `subjectQboIds` (a
  * parent's own family and students) only that family's credit is read; null is everyone, for staff.
  */
-export async function confirmedAmounts(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string): Promise<Map<string, number>> {
+export async function confirmedAmounts(requirements: readonly RequirementFields[], subjectQboIds: readonly string[] | null, pairKey: (requirementId: string, subjectQboId: string) => string): Promise<Map<string, number>> {
   const amounts = new Map<string, number>();
   if (requirements.length === 0 || subjectQboIds?.length === 0) return amounts;
   const wanted = new Set(requirements.map((r) => r.id)), asked = subjectQboIds ? new Set(subjectQboIds) : null;

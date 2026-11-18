@@ -569,26 +569,35 @@ export const requirement = pgTable("requirement", {
 }, (t) => [index("requirement_step_ix").on(t.stepId, t.position)]);
 
 /**
- * The families or students a requirement with `covers = 'chosen'` is asked of: QuickBooks customer ids, families for a
- * per-family requirement and students for a per-student one. No foreign key to the roster cache: one that has left the
- * roster stays listed and is simply not shown.
+ * The families or students a requirement with `covers = 'chosen'` is asked of: the app's own records, a family for a
+ * per-family requirement and a student for a per-student one (exactly one of `family_id` and `student_id`; which one
+ * follows the requirement's `applies_to`, as src/lib/seasons/ writes them). A record is never deleted while anything
+ * names it, so one that has left the roster stays listed and is simply not shown.
  */
 export const requirementCover = pgTable("requirement_cover", {
   requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "cascade" }),
-  subjectQboId: text("subject_qbo_id").notNull(),
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(),
   createdAt: created(),
-}, (t) => [uniqueIndex("requirement_cover_uq").on(t.requirementId, t.subjectQboId), index("requirement_cover_subject_ix").on(t.subjectQboId)]);
+}, (t) => [
+  uniqueIndex("requirement_cover_family_uq").on(t.requirementId, t.familyId),
+  uniqueIndex("requirement_cover_student_uq").on(t.requirementId, t.studentId),
+  index("requirement_cover_family_ix").on(t.familyId),
+  index("requirement_cover_student_ix").on(t.studentId),
+  check("requirement_cover_one_subject", sql`num_nonnulls(${t.familyId}, ${t.studentId}) = 1`),
+]);
 
 /**
  * What is recorded for one family or one student against one requirement: that it is met, a waiver, or both. A row
- * exists only while it records something. `subject_qbo_id` is the family's QuickBooks id for a per-family requirement
- * and the student's for a per-student one. `met_at` is a checklist item's tick; the other kinds are judged from their
- * own records and leave it null. A waiver always has a reason. The row keeps the requirement from being deleted.
+ * exists only while it records something. It names the app's own family (`family_id`) for a per-family requirement
+ * and the app's own student (`student_id`) for a per-student one, exactly one of the two. `met_at` is a checklist
+ * item's tick; the other kinds are judged from their own records and leave it null. A waiver always has a reason. The row keeps the requirement from being deleted.
  */
 export const requirementProgress = pgTable("requirement_progress", {
   id: uuid("id").primaryKey().defaultRandom(),
   requirementId: uuid("requirement_id").notNull().references(() => requirement.id, { onDelete: "restrict" }),
-  subjectQboId: text("subject_qbo_id").notNull(),
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(),
   metAt: timestamp("met_at", { withTimezone: true }),
   metBy: uuid("met_by"),                                 // staff_user.id
   waivedAt: timestamp("waived_at", { withTimezone: true }),
@@ -597,8 +606,11 @@ export const requirementProgress = pgTable("requirement_progress", {
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
-  uniqueIndex("requirement_progress_subject_uq").on(t.requirementId, t.subjectQboId),
-  index("requirement_progress_subject_ix").on(t.subjectQboId),
+  uniqueIndex("requirement_progress_family_uq").on(t.requirementId, t.familyId),
+  uniqueIndex("requirement_progress_student_uq").on(t.requirementId, t.studentId),
+  index("requirement_progress_family_ix").on(t.familyId),
+  index("requirement_progress_student_ix").on(t.studentId),
+  check("requirement_progress_one_subject", sql`num_nonnulls(${t.familyId}, ${t.studentId}) = 1`),
   check("requirement_progress_records_something", sql`${t.metAt} is not null or ${t.waivedAt} is not null`),
   check("requirement_progress_waiver_reason", sql`(${t.waivedAt} is null) = (${t.waivedReason} is null)`),
 ]);
@@ -607,20 +619,21 @@ export const requirementProgress = pgTable("requirement_progress", {
  * The reminders before a required payment's or checklist item's due date (src/lib/seasons/due-reminders.ts), one row
  * per email: to one guardian of one family, about that family's requirements due on `due_on`, sent 14 or 3 days before
  * it (`kind`). Claimed before it is sent, so two wakes never send it twice; `outcome` is null while the send is under
- * way, and a failed one may be claimed again after a while. The family is a QuickBooks id of the connected company: a
- * company change deletes every row (clearSeasonRecords()). Deleted after a year by the daily clean-up.
+ * way, and a failed one may be claimed again after a while. The family is the app's own record. Deleted after a year by
+ * the daily clean-up.
  */
 export const requirementReminder = pgTable("requirement_reminder", {
   id: uuid("id").primaryKey().defaultRandom(),
   kind: text("kind", { enum: ["due_14", "due_3"] }).notNull(),
-  familyQboId: text("family_qbo_id").notNull(),
+  familyId: uuid("family_id").notNull().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   parentId: uuid("parent_id").notNull(),
   dueOn: date("due_on", { mode: "string" }).notNull(),     // the club's date
   triedAt: timestamp("tried_at", { withTimezone: true }).notNull(),
   outcome: text("outcome", { enum: ["sent", "failed"] }),
   createdAt: created(),
 }, (t) => [
-  uniqueIndex("requirement_reminder_uq").on(t.kind, t.familyQboId, t.dueOn, t.parentId),
+  uniqueIndex("requirement_reminder_family_uq").on(t.kind, t.familyId, t.dueOn, t.parentId),
+  index("requirement_reminder_family_ix").on(t.familyId),
   index("requirement_reminder_created_ix").on(t.createdAt),
 ]);
 

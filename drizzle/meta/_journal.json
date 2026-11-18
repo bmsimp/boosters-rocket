@@ -169,6 +169,20 @@
       "when": 1795023727324,
       "tag": "0023_app_records",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795028137032,
+      "tag": "0024_seasons_app_ids_additive",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795028202758,
+      "tag": "0025_seasons_app_ids_finish",
+      "breakpoints": true
     }
   ]
 }

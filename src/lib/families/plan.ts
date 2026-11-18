@@ -10,7 +10,7 @@ import type { MembershipShape } from "@/lib/roster/shape";
  * - Each family of the roster (the family customers in layered books, the members in flat books) has a family record,
  *   and each student of the roster (a customer of the student type directly under one of those families) a student
  *   record in that family. Each is active when its own customer is.
- * - Every customer a record of the current company names as a family (`refs`: a guardian row's family, a tick, a
+ * - Every customer a record of the current company names as a family (`refs`: a guardian row's family, a form request, a
  *   sign-up, a buy-out...) has a family record too, and every one named as a student a student record, whatever the
  *   roster holds it as: a record names a customer as the kind its column holds. One the roster doesn't hold as that
  *   kind is inactive. A student the roster doesn't hold is planned in no family; keepAppRecordsInStep() keeps the

@@ -3,61 +3,65 @@ import {
   currentStepIndex, isCalendarDate, isCovered, lineFor, linesDone, linesLeft, seasonStanding, stepStanding, stepsOutOfOrder, subjectsOf,
   type Facts, type FamilyRoster, type Requirement, type Step,
 } from "@/lib/seasons/progress";
+import { asAppFamilyId, asAppStudentId } from "@/lib/families/ids";
 
 /** The progress rules of v1 spec §10.3, with nothing but values: no database and no clock. */
 let n = 0;
 const req = (o: Partial<Requirement> = {}): Requirement => ({
   id: `r${++n}`, kind: "checklist", title: `Item ${n}`, required: true, appliesTo: "student", amount: null, amountUnit: null, dueOn: null,
-  covers: "everyone", coveredQboIds: [], ...o,
+  covers: "everyone", coveredIds: [], ...o,
 });
 const step = (name: string, requirements: Requirement[] = [], dates: { startsOn?: string; endsOn?: string } = {}): Step =>
   ({ id: `s-${name}`, name, startsOn: dates.startsOn ?? null, endsOn: dates.endsOn ?? null, requirements });
-const FAMILY: FamilyRoster = { familyQboId: "FAM", students: [{ qboId: "LEO", name: "Leo" }, { qboId: "MAYA", name: "Maya" }] };
+// The app's own ids of a family and its students (src/lib/families/ids.ts): short words here, uuids in the portal.
+const FAM = asAppFamilyId("FAM"), OTHER_FAM = asAppFamilyId("OTHER-FAM");
+const LEO = asAppStudentId("LEO"), MAYA = asAppStudentId("MAYA"), NICO = asAppStudentId("NICO"), SOMEONE_ELSE = asAppStudentId("SOMEONE-ELSE"), ANYONE = asAppStudentId("ANYONE");
+const FAMILY: FamilyRoster = { familyId: FAM, students: [{ id: LEO, name: "Leo" }, { id: MAYA, name: "Maya" }] };
 /** Facts from two plain lists of "requirement id|subject id". */
 const facts = (met: string[] = [], waived: string[] = []): Facts => ({
-  standing: (r, subject) => (met.includes(`${r.id}|${subject}`) ? { met: true, words: "Done" } : { met: false, words: "Not done yet" }),
-  waived: (id, subject) => waived.includes(`${id}|${subject}`),
+  standing: (r, subject) => (met.includes(`${r.id}|${String(subject)}`) ? { met: true, words: "Done" } : { met: false, words: "Not done yet" }),
+  waived: (id, subject) => waived.includes(`${id}|${String(subject)}`),
 });
 const TODAY = "2026-09-10";
 
 describe("who a requirement is asked of", () => {
   it("covers everyone, or only the chosen list", () => {
-    expect(isCovered(req(), "ANYONE")).toBe(true);
-    const chosen = req({ covers: "chosen", coveredQboIds: ["LEO"] });
-    expect(isCovered(chosen, "LEO")).toBe(true);
-    expect(isCovered(chosen, "MAYA")).toBe(false);
+    expect(isCovered(req(), ANYONE)).toBe(true);
+    const chosen = req({ covers: "chosen", coveredIds: [LEO] });
+    expect(isCovered(chosen, LEO)).toBe(true);
+    expect(isCovered(chosen, MAYA)).toBe(false);
     // A list left over from "chosen" means nothing once the requirement covers everyone.
-    expect(isCovered(req({ covers: "everyone", coveredQboIds: ["LEO"] }), "MAYA")).toBe(true);
-    expect(isCovered(req({ covers: "chosen", coveredQboIds: [] }), "LEO")).toBe(false);
+    expect(isCovered(req({ covers: "everyone", coveredIds: [LEO] }), MAYA)).toBe(true);
+    expect(isCovered(req({ covers: "chosen", coveredIds: [] }), LEO)).toBe(false);
   });
 
   it("tracks a per-family requirement once for the family and a per-student one for each active student", () => {
-    expect(subjectsOf(req({ appliesTo: "family" }), FAMILY)).toEqual(["FAM"]);
-    expect(subjectsOf(req({ appliesTo: "student" }), FAMILY)).toEqual(["LEO", "MAYA"]);
-    expect(subjectsOf(req({ appliesTo: "student", covers: "chosen", coveredQboIds: ["MAYA", "SOMEONE-ELSE"] }), FAMILY)).toEqual(["MAYA"]);
-    expect(subjectsOf(req({ appliesTo: "family", covers: "chosen", coveredQboIds: ["OTHER-FAM"] }), FAMILY)).toEqual([]);
+    expect(subjectsOf(req({ appliesTo: "family" }), FAMILY)).toEqual([FAM]);
+    expect(subjectsOf(req({ appliesTo: "student" }), FAMILY)).toEqual([LEO, MAYA]);
+    expect(subjectsOf(req({ appliesTo: "student", covers: "chosen", coveredIds: [MAYA, SOMEONE_ELSE] }), FAMILY)).toEqual([MAYA]);
+    expect(subjectsOf(req({ appliesTo: "family", covers: "chosen", coveredIds: [OTHER_FAM] }), FAMILY)).toEqual([]);
     // A student's id on a per-family list, or a family's on a per-student one, covers nobody.
-    expect(subjectsOf(req({ appliesTo: "family", covers: "chosen", coveredQboIds: ["LEO"] }), FAMILY)).toEqual([]);
-    expect(subjectsOf(req({ appliesTo: "student", covers: "chosen", coveredQboIds: ["FAM"] }), FAMILY)).toEqual([]);
-    expect(subjectsOf(req({ appliesTo: "student" }), { familyQboId: "FAM", students: [] })).toEqual([]);
+    expect(subjectsOf(req({ appliesTo: "family", covers: "chosen", coveredIds: [LEO] }), FAMILY)).toEqual([]);
+    expect(subjectsOf(req({ appliesTo: "student", covers: "chosen", coveredIds: [FAM] }), FAMILY)).toEqual([]);
+    expect(subjectsOf(req({ appliesTo: "student" }), { familyId: FAM, students: [] })).toEqual([]);
   });
 });
 
 describe("how one requirement stands", () => {
   it("says Done, Waived or Not done yet, and shows the due date only while something is left", () => {
     const r = req({ dueOn: "2026-11-15" });
-    expect(lineFor(r, "LEO", facts())).toMatchObject({ state: "todo", words: "Not done yet", dueOn: "2026-11-15", title: r.title, required: true });
-    expect(lineFor(r, "LEO", facts([`${r.id}|LEO`]))).toMatchObject({ state: "done", words: "Done", dueOn: null });
-    expect(lineFor(r, "LEO", facts([], [`${r.id}|LEO`]))).toMatchObject({ state: "waived", words: "Waived", dueOn: null });
+    expect(lineFor(r, LEO, facts())).toMatchObject({ state: "todo", words: "Not done yet", dueOn: "2026-11-15", title: r.title, required: true });
+    expect(lineFor(r, LEO, facts([`${r.id}|LEO`]))).toMatchObject({ state: "done", words: "Done", dueOn: null });
+    expect(lineFor(r, LEO, facts([], [`${r.id}|LEO`]))).toMatchObject({ state: "waived", words: "Waived", dueOn: null });
     // Done anyway and waived as well: it is done.
-    expect(lineFor(r, "LEO", facts([`${r.id}|LEO`], [`${r.id}|LEO`]))).toMatchObject({ state: "done", words: "Done" });
+    expect(lineFor(r, LEO, facts([`${r.id}|LEO`], [`${r.id}|LEO`]))).toMatchObject({ state: "done", words: "Done" });
     // One student's tick or waiver says nothing about the other.
-    expect(lineFor(r, "MAYA", facts([`${r.id}|LEO`], [`${r.id}|LEO`]))).toMatchObject({ state: "todo" });
+    expect(lineFor(r, MAYA, facts([`${r.id}|LEO`], [`${r.id}|LEO`]))).toMatchObject({ state: "todo" });
   });
 
   it("uses the kind's own words for what is left", () => {
     const shifts: Facts = { standing: () => ({ met: false, words: "1 of 2 shifts" }), waived: () => false };
-    expect(lineFor(req({ kind: "volunteer", amount: 2, amountUnit: "shifts" }), "FAM", shifts)).toMatchObject({ state: "todo", words: "1 of 2 shifts" });
+    expect(lineFor(req({ kind: "volunteer", amount: 2, amountUnit: "shifts" }), FAM, shifts)).toMatchObject({ state: "todo", words: "1 of 2 shifts" });
   });
 });
 
@@ -90,7 +94,7 @@ describe("when a step is done (spec 10.3)", () => {
 
   it("is done from the start when it asks nothing, of anyone or of this family", () => {
     expect(stepStanding(step("Wrap-up"), FAMILY, facts()).done).toBe(true);
-    const others = req({ covers: "chosen", coveredQboIds: ["SOMEONE-ELSE"] });
+    const others = req({ covers: "chosen", coveredIds: [SOMEONE_ELSE] });
     const view = stepStanding(step("Trip", [others]), FAMILY, facts());
     expect(view.done).toBe(true);
     // Not a line of it, not even its title, for a family it doesn't cover.
@@ -115,7 +119,7 @@ describe("when a step is done (spec 10.3)", () => {
   });
 
   it("covers only the chosen students: the others have nothing to do in it", () => {
-    const guard = req({ title: "Color guard gloves", covers: "chosen", coveredQboIds: ["MAYA"] });
+    const guard = req({ title: "Color guard gloves", covers: "chosen", coveredIds: [MAYA] });
     const view = stepStanding(step("Uniforms", [guard]), FAMILY, facts());
     expect(view.students.map((x) => [x.name, x.lines.length, x.done])).toEqual([["Leo", 0, true], ["Maya", 1, false]]);
     expect(view.done).toBe(false);
@@ -126,7 +130,7 @@ describe("when a step is done (spec 10.3)", () => {
     const s = step("Join", [a]);
     const done = facts([`${a.id}|LEO`, `${a.id}|MAYA`]);
     expect(stepStanding(s, FAMILY, done).done).toBe(true);
-    const grown: FamilyRoster = { ...FAMILY, students: [...FAMILY.students, { qboId: "NICO", name: "Nico" }] };
+    const grown: FamilyRoster = { ...FAMILY, students: [...FAMILY.students, { id: NICO, name: "Nico" }] };
     const view = stepStanding(s, grown, done);
     expect(view.students.map((x) => [x.name, x.done])).toEqual([["Leo", true], ["Maya", true], ["Nico", false]]);
     expect(view.done).toBe(false);
@@ -137,7 +141,7 @@ describe("when a step is done (spec 10.3)", () => {
   });
 
   it("counts what is done and what is left", () => {
-    const lines = [lineFor(req(), "LEO", facts()), lineFor(req({ required: false }), "LEO", facts())];
+    const lines = [lineFor(req(), LEO, facts()), lineFor(req({ required: false }), LEO, facts())];
     expect(linesDone(lines)).toBe(false);
     expect(linesLeft(lines)).toBe(1);
     expect(linesDone([])).toBe(true);

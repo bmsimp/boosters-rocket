@@ -13,15 +13,15 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import { currentBrand, sendMail } from "@/lib/mail/send";
 import { requirementDueMessage } from "@/lib/mail/messages";
 import { mailWorking } from "@/lib/mail/settings";
-import { paymentStandings } from "@/lib/money/payment-standings";
+import type { AppFamilyId } from "@/lib/families/ids";
 import { moneyRows } from "@/lib/money/stored";
 import { getParentSettings } from "@/lib/parents/settings";
 import { getClubSettings } from "@/lib/settings/club";
 import { dateWords } from "@/lib/volunteer/clock";
 import { checklistVerdict, dueToday, owedReminders, paymentVerdict, type DueKind, type Verdict } from "./due-reminder-rules";
-import { pairKey } from "./kinds";
-import { loadCovers, loadFacts, loadRecorded, toRequirement } from "./recorded";
-import { loadSubjects } from "./subjects";
+import type { SubjectId } from "./progress";
+import { loadCovers, loadFacts, toRequirement } from "./recorded";
+import { loadSeasonFamilies } from "./subjects";
 
 export const DUE_REMINDERS_JOB = "season.due_reminders";
 /** Where the last day's look is kept, for the Health page: the club's date, when, and what was sent and failed. */
@@ -68,13 +68,16 @@ export async function noteLook(tx: Tx, today: string, counts: { sent: number; fa
   await tx.insert(setting).values({ key: DUE_REMINDERS_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
 }
 
+/** One email's claim: a kind of reminder, to one guardian of one family (the app's own record), about one due date. */
+type Claim = { kind: DueKind; familyId: AppFamilyId; dueOn: string; parentId: string };
+
 /**
  * Takes one email for sending, in one statement: it succeeds for one wake only, and again only after a failure that is
  * at least DUE_REMINDER_RETRY_MS old. A row with no outcome is a send under way.
  */
-async function claim(e: { kind: DueKind; familyQboId: string; dueOn: string; parentId: string }, now: Date): Promise<string | null> {
+async function claim(e: Claim, now: Date): Promise<string | null> {
   const [row] = await db.insert(requirementReminder).values({ ...e, triedAt: now })
-    .onConflictDoUpdate({ target: [requirementReminder.kind, requirementReminder.familyQboId, requirementReminder.dueOn, requirementReminder.parentId], set: { triedAt: now, outcome: null },
+    .onConflictDoUpdate({ target: [requirementReminder.kind, requirementReminder.familyId, requirementReminder.dueOn, requirementReminder.parentId], set: { triedAt: now, outcome: null },
       setWhere: sql`${requirementReminder.outcome} = 'failed' and ${requirementReminder.triedAt} < ${new Date(now.getTime() - DUE_REMINDER_RETRY_MS).toISOString()}::timestamptz` })
     .returning({ id: requirementReminder.id });
   return row?.id ?? null;
@@ -86,7 +89,7 @@ async function taken(dueOns: string[], now: Date): Promise<Set<string>> {
   const rows = await db.select().from(requirementReminder).where(inArray(requirementReminder.dueOn, dueOns));
   return new Set(rows.filter((r) => r.outcome !== "failed" || r.triedAt.getTime() >= now.getTime() - DUE_REMINDER_RETRY_MS).map(emailKey));
 }
-const emailKey = (e: { kind: DueKind; familyQboId: string; dueOn: string; parentId: string }) => `${e.kind}|${e.familyQboId}|${e.dueOn}|${e.parentId}`;
+const emailKey = (e: Claim) => `${e.kind}|${String(e.familyId)}|${e.dueOn}|${e.parentId}`;
 
 /**
  * What each family still has to do for the current season's required payments and checklist items due on these days,
@@ -99,26 +102,25 @@ async function owedToday(due: { kind: DueKind; days: number; dueOn: string }[]) 
     .where(and(eq(season.isCurrent, true), inArray(requirement.kind, ["payment", "checklist"]), eq(requirement.required, true), inArray(requirement.dueOn, due.map((d) => d.dueOn))))
     .orderBy(asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
   if (rows.length === 0) return [];
-  const families = await loadSubjects();
+  const families = await loadSeasonFamilies();
   if (!families || families.length === 0) return [];
   const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), null);
   const requirements = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []));
-  const checklist = requirements.filter((r) => r.kind === "checklist"), payments = requirements.filter((r) => r.kind === "payment");
-  // As a parent's page sees it: a payment's amount only from figures read within freshSeconds.
-  const [{ facts }, paid, recorded, figures] = await Promise.all([
-    loadFacts(checklist, null, { amounts: "fresh", parentId: null }),
-    paymentStandings(payments, null, "fresh"),
-    loadRecorded(payments.map((r) => r.id), null),
-    moneyRows(payments.length ? families.map((f) => f.qboId) : []),
+  const payments = requirements.some((r) => r.kind === "payment");
+  // As a parent's page sees it: a payment's amount only from figures read within freshSeconds. A payment with no figures
+  // that may be shown has no standing of its own, and reads as "No invoice yet", which sends nothing (paymentVerdict).
+  // The figures are kept by the family's QuickBooks id (the money cache, still keyed by customer: a boundary AGENTS.md
+  // lists, Seasons), so each family and student is taken to its family's customer here.
+  const [{ facts }, figures] = await Promise.all([
+    loadFacts(requirements, null, { amounts: "fresh", parentId: null }),
+    moneyRows(payments ? families.map((f) => f.qboId) : []),
   ]);
-  const payStanding = new Map(paid.map((p) => [pairKey(p.requirementId, p.subjectQboId), p.standing]));
-  const payWaived = new Set(recorded.filter((r) => r.waivedAt !== null).map((r) => pairKey(r.requirementId, r.subjectQboId)));
-  const familyOf = new Map(families.flatMap((f) => [[f.qboId, f.qboId] as const, ...f.students.map((s) => [s.qboId, f.qboId] as const)]));
+  const familyCustomerOf = new Map(families.flatMap((f) => [[String(f.id), f.qboId] as const, ...f.students.map((s) => [String(s.id), f.qboId] as const)]));
   // The figures' age is judged by the real time, whatever day the wake is deciding for.
   const nowMs = Date.now();
-  const verdict = (r: (typeof requirements)[number], subject: string): Verdict => r.kind === "checklist"
+  const verdict = (r: (typeof requirements)[number], subject: SubjectId): Verdict => r.kind === "checklist"
     ? checklistVerdict(facts.standing(r, subject), facts.waived(r.id, subject))
-    : paymentVerdict({ standing: payStanding.get(pairKey(r.id, subject)), readAt: figures.get(familyOf.get(subject) ?? "")?.readAt ?? null, waived: payWaived.has(pairKey(r.id, subject)), nowMs });
+    : paymentVerdict({ standing: facts.standing(r, subject), readAt: figures.get(familyCustomerOf.get(String(subject)) ?? "")?.readAt ?? null, waived: facts.waived(r.id, subject), nowMs });
   return owedReminders({ due, requirements, families, verdict });
 }
 
@@ -135,16 +137,17 @@ export async function sendDueReminders(now: Date = new Date()): Promise<{ sent: 
   const day = dueToday((await getClubSettings()).timeZone, now);
   if (!day) return none;
   const owed = await owedToday(day.due);
-  const people = owed.length === 0 ? [] : await db.select({ familyQboId: guardian.familyQboId, parentId: parent.id, email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyQboId, [...new Set(owed.map((o) => o.familyQboId))]), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
-    .orderBy(asc(guardian.familyQboId), asc(parent.createdAt), asc(parent.id));
-  const emails = owed.flatMap((o) => people.filter((p) => p.familyQboId === o.familyQboId).map((p) => ({ ...o, parentId: p.parentId, email: p.email })));
+  // Each family's guardians by its membership rows (guardian.family_id, the app's own family).
+  const people = owed.length === 0 ? [] : await db.select({ familyId: guardian.familyId, parentId: parent.id, email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
+    .where(and(inArray(guardian.familyId, [...new Set(owed.map((o) => o.familyId))]), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+    .orderBy(asc(guardian.familyId), asc(parent.createdAt), asc(parent.id));
+  const emails = owed.flatMap((o) => people.filter((p) => p.familyId === o.familyId).map((p) => ({ ...o, parentId: p.parentId, email: p.email })));
   const done = emails.length === 0 ? new Set<string>() : await taken(day.due.map((d) => d.dueOn), now);
   let sent = 0, failed = 0, tried = 0;
   const brand = emails.length === 0 ? null : await currentBrand();
   for (const e of emails.filter((x) => !done.has(emailKey(x)))) {
     if (tried >= DUE_REMINDER_BATCH) break;
-    const id = await claim({ kind: e.kind, familyQboId: e.familyQboId, dueOn: e.dueOn, parentId: e.parentId }, now);
+    const id = await claim({ kind: e.kind, familyId: e.familyId, dueOn: e.dueOn, parentId: e.parentId }, now);
     if (!id) continue;
     tried++;
     const message = requirementDueMessage(brand!, e.email, {

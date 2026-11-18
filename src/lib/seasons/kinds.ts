@@ -13,17 +13,18 @@ import { confirmedAmounts } from "@/lib/volunteer/credit";
 import { formRule } from "@/lib/forms/kind";
 import { withBuyout } from "@/lib/buyouts/rules";
 import { buyoutFacts } from "@/lib/buyouts/standing";
-import type { Requirement, Standing } from "./progress";
+import { customerPairKey, type CustomerRecorded, type CustomerRequirement } from "./customer-keys";
+import type { RequirementFields, Standing, SubjectId } from "./progress";
 
-/** What `requirement_progress` holds for one requirement and one family or student. */
+/** What `requirement_progress` holds for one requirement and one family or student, by the app's own id. */
 export type Recorded = {
-  requirementId: string; subjectQboId: string;
+  requirementId: string; subjectId: SubjectId;
   metAt: Date | null; metBy: string | null;
   waivedAt: Date | null; waivedBy: string | null; waivedReason: string | null;
 };
 
-/** The key of one requirement for one family or student. */
-export const pairKey = (requirementId: string, subjectQboId: string) => `${requirementId}|${subjectQboId}`;
+/** The key of one requirement for one family or student, by the app's own id. */
+export const pairKey = (requirementId: string, subject: SubjectId) => `${requirementId}|${String(subject)}`;
 
 /**
  * Who is looking, as far as the words depend on it. `amounts`: whether a payment's words say how much is left to pay
@@ -32,23 +33,29 @@ export const pairKey = (requirementId: string, subjectQboId: string) => `${requi
  */
 export type Viewing = { amounts: AmountsShown; parentId: string | null };
 
+/**
+ * A kind's rule. Until the areas it reads have moved to the app's ids (stage 2 of the app-owned families spec), it is
+ * asked by customer: the families and students are the customers their links name, and it answers by
+ * customerPairKey(). The season's own reads translate on the way in and out (loadFacts() in ./recorded.ts), and the
+ * areas still keyed by QuickBooks ids ask it directly (loadCustomerFacts() in ./by-customer.ts).
+ */
 export type KindRule = {
   /**
-   * How things stand for these requirements (all of this kind) and these families or students, keyed by pairKey().
-   * `subjectQboIds` is null when staff ask about everyone. `recorded` is what requirement_progress holds for them; a
-   * kind judged from its own records (invoices, signatures, volunteer credit) reads those here instead. A pair left
-   * out stands as `nothingYet`. `viewing` is who is looking.
+   * How things stand for these requirements (all of this kind) and these families or students, keyed by
+   * customerPairKey(). `subjectQboIds` is null when staff ask about everyone. `recorded` is what requirement_progress
+   * holds for them; a kind judged from its own records (invoices, signatures, volunteer credit) reads those here
+   * instead. A pair left out stands as `nothingYet`. `viewing` is who is looking.
    */
-  standings(ask: { requirements: readonly Requirement[]; subjectQboIds: readonly string[] | null; recorded: readonly Recorded[]; viewing: Viewing }): Promise<Map<string, Standing>>;
+  standings(ask: { requirements: readonly CustomerRequirement[]; subjectQboIds: readonly string[] | null; recorded: readonly CustomerRecorded[]; viewing: Viewing }): Promise<Map<string, Standing>>;
   /** How a requirement stands for a family or student with nothing to show for it yet. */
-  nothingYet(requirement: Requirement): Standing;
+  nothingYet(requirement: RequirementFields): Standing;
   /** True when staff meet it by hand, with a tick (requirement_progress.met_at). */
   ticked: boolean;
 };
 
 const checklist: KindRule = {
   // Met when staff have ticked it off for the family or student.
-  standings: async ({ recorded }) => new Map(recorded.filter((r) => r.metAt !== null).map((r) => [pairKey(r.requirementId, r.subjectQboId), { met: true, words: "Done" }])),
+  standings: async ({ recorded }) => new Map(recorded.filter((r) => r.metAt !== null).map((r) => [customerPairKey(r.requirementId, r.subjectQboId), { met: true, words: "Done" }])),
   nothingYet: () => ({ met: false, words: "Not done yet" }),
   ticked: true,
 };
@@ -57,7 +64,7 @@ const payment: KindRule = {
   // Met when invoices carrying its QuickBooks product or service exist for the family or student and none of them is
   // still open (src/lib/money/payment-rule.ts), judged from the figures QuickBooks last gave the family.
   standings: async ({ requirements, subjectQboIds, viewing }) =>
-    new Map((await paymentStandings(requirements, subjectQboIds, viewing.amounts)).map((s) => [pairKey(s.requirementId, s.subjectQboId), s.standing])),
+    new Map((await paymentStandings(requirements, subjectQboIds, viewing.amounts)).map((s) => [customerPairKey(s.requirementId, s.subjectQboId), s.standing])),
   nothingYet: () => NO_INVOICE_YET,
   ticked: false,
 };
@@ -73,7 +80,7 @@ const payment: KindRule = {
  */
 const volunteer: KindRule = {
   standings: async ({ requirements, subjectQboIds }) => {
-    const [signedUp, confirmed, bought] = await Promise.all([signedUpAmounts(requirements, subjectQboIds, pairKey), confirmedAmounts(requirements, subjectQboIds, pairKey),
+    const [signedUp, confirmed, bought] = await Promise.all([signedUpAmounts(requirements, subjectQboIds, customerPairKey), confirmedAmounts(requirements, subjectQboIds, customerPairKey),
       buyoutFacts(requirements.map((r) => r.id), subjectQboIds)]);
     const standings = new Map<string, Standing>();
     for (const key of new Set([...signedUp.keys(), ...confirmed.keys(), ...bought.keys()])) {

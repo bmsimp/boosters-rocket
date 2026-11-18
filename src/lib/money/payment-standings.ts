@@ -7,7 +7,7 @@ import { inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { qboCustomer, requirement, type StoredInvoice } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
-import type { Requirement, Standing } from "@/lib/seasons/progress";
+import type { RequirementFields, Standing } from "@/lib/seasons/progress";
 import { invoicesFor, paymentStanding } from "./payment-rule";
 import { getMoneySettings } from "./settings";
 import { familiesCustomers, knowsItems, mayShow, moneyRows } from "./stored";
@@ -46,7 +46,7 @@ async function figuresBySubject(subjectQboIds: readonly string[] | null): Promis
  * How each of these payment requirements stands for each of these families or students (null: everyone), as
  * paymentStanding() judges it. A pair left out has no figures that may be shown, and stands as "No invoice yet".
  */
-export async function paymentStandings(requirements: readonly Requirement[], subjectQboIds: readonly string[] | null, amounts: AmountsShown):
+export async function paymentStandings(requirements: readonly RequirementFields[], subjectQboIds: readonly string[] | null, amounts: AmountsShown):
   Promise<{ requirementId: string; subjectQboId: string; standing: Standing }[]> {
   if (requirements.length === 0) return [];
   const [items, figures, { freshSeconds }] = await Promise.all([

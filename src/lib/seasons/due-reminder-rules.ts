@@ -6,7 +6,8 @@
  */
 import { daysAfter, reminderDay } from "@/lib/volunteer/clock";
 import { NO_INVOICE_YET } from "@/lib/money/payment-rule";
-import { isCovered, type Requirement, type Standing } from "./progress";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { isCovered, type Requirement, type Standing, type SubjectId } from "./progress";
 
 export type DueKind = "due_14" | "due_3";
 /** How many days before a due date each reminder goes, and what each is called. */
@@ -59,8 +60,9 @@ export function paymentVerdict(o: { standing: Standing | undefined; readAt: Date
 /** One requirement in a reminder, as the email says it: its title, who in the family it is for (null: the family), and how it stands. */
 export type DueItem = { requirementId: string; kind: "payment" | "checklist"; title: string; forName: string | null; words: string };
 /** One family's reminder for one due date: every requirement of theirs due that day that they still have to do. */
-export type OwedReminder = { kind: DueKind; days: number; dueOn: string; familyQboId: string; items: DueItem[] };
-export type ReminderFamily = { qboId: string; students: readonly { qboId: string; name: string }[] };
+export type OwedReminder = { kind: DueKind; days: number; dueOn: string; familyId: AppFamilyId; items: DueItem[] };
+/** A family as the reminders read it: the app's own records of the family and its active students. */
+export type ReminderFamily = { id: AppFamilyId; students: readonly { id: AppStudentId; name: string }[] };
 
 /**
  * Who is owed a reminder today: for each due date, each family with a requirement due that day that is asked of it (or
@@ -68,20 +70,20 @@ export type ReminderFamily = { qboId: string; students: readonly { qboId: string
  * all of them, in the order the requirements are given (the season's). A family with none is owed nothing.
  */
 export function owedReminders(o: { due: readonly { kind: DueKind; days: number; dueOn: string }[]; requirements: readonly Requirement[]; families: readonly ReminderFamily[];
-  verdict: (r: Requirement, subjectQboId: string) => Verdict }): OwedReminder[] {
+  verdict: (r: Requirement, subject: SubjectId) => Verdict }): OwedReminder[] {
   const out: OwedReminder[] = [];
   for (const d of o.due) {
     const theirs = o.requirements.filter((r) => isReminded(r) && r.dueOn === d.dueOn);
     if (theirs.length === 0) continue;
     for (const f of o.families) {
       const items = theirs.flatMap((r) => {
-        const subjects = r.appliesTo === "family" ? [{ qboId: f.qboId, name: null as string | null }] : f.students.map((s) => ({ qboId: s.qboId, name: s.name as string | null }));
-        return subjects.filter((s) => isCovered(r, s.qboId)).flatMap((s) => {
-          const v = o.verdict(r, s.qboId);
+        const subjects: { id: SubjectId; name: string | null }[] = r.appliesTo === "family" ? [{ id: f.id, name: null }] : f.students.map((s) => ({ id: s.id, name: s.name }));
+        return subjects.filter((s) => isCovered(r, s.id)).flatMap((s) => {
+          const v = o.verdict(r, s.id);
           return v.remind ? [{ requirementId: r.id, kind: r.kind as "payment" | "checklist", title: r.title, forName: s.name, words: v.words }] : [];
         });
       });
-      if (items.length > 0) out.push({ kind: d.kind, days: d.days, dueOn: d.dueOn, familyQboId: f.qboId, items });
+      if (items.length > 0) out.push({ kind: d.kind, days: d.days, dueOn: d.dueOn, familyId: f.id, items });
     }
   }
   return out;

@@ -4,10 +4,10 @@
 // batch with counts, never an address. It reads every family's forms, so it is never imported by parent code
 // (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import "server-only";
-import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { env } from "@/env";
 import { db } from "@/lib/db/client";
-import { formReminderClaim, formReminderRound, guardian, parent, requirement, requirementProgress, signatureRequest, type FormReminders } from "@/lib/db/schema";
+import { formReminderClaim, formReminderRound, guardian, parent, requirement, signatureRequest, type FormReminders } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getFormsConfig } from "@/lib/forms/settings";
 import { formReminderMessage } from "@/lib/mail/messages";
@@ -15,8 +15,10 @@ import { currentBrand, sendMail } from "@/lib/mail/send";
 import { getStoredMailConfig } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
-import { loadCovers, toRequirement } from "@/lib/seasons/recorded";
-import { isCovered } from "@/lib/seasons/progress";
+// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
+// moves to the app's ids.
+import { loadCustomerCovers, loadCustomerRecorded } from "@/lib/seasons/by-customer";
+import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
 import { isUuid } from "@/lib/seasons/ids";
 import { loadSubjects } from "@/lib/seasons/subjects";
 import { dateWords } from "@/lib/volunteer/clock";
@@ -56,9 +58,8 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
   if (!families || forms.length === 0) return { owed: [], forms: [] };
   const ids = forms.map((f) => f.row.id);
   const [covers, waivers, requests] = await Promise.all([
-    loadCovers(ids, null),
-    db.select({ requirementId: requirementProgress.requirementId, subjectQboId: requirementProgress.subjectQboId }).from(requirementProgress)
-      .where(and(inArray(requirementProgress.requirementId, ids), isNotNull(requirementProgress.waivedAt))),
+    loadCustomerCovers(ids, null),
+    loadCustomerRecorded(ids, null).then((rows) => rows.filter((w) => w.waivedAt !== null)),
     db.select().from(signatureRequest).where(inArray(signatureRequest.requirementId, ids)),
   ]);
   const inScope = families.filter((f) => (scope?.kind === "family" ? f.qboId === scope.familyQboId : requestFilter ? f.qboId === requestFilter.familyQboId : true));
@@ -68,11 +69,11 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
   const waived = new Set(waivers.map((w) => `${w.requirementId}|${w.subjectQboId}`));
   const owed = new Map<string, Owed>();
   for (const f of forms) {
-    const r = toRequirement(f.row, covers.get(f.row.id) ?? []);
+    const r = toCustomerRequirement(f.row, covers.get(f.row.id) ?? []);
     for (const fam of inScope) {
       const subjects = r.appliesTo === "family" ? [{ qboId: fam.qboId, name: fam.name }] : fam.students;
       for (const subject of subjects) {
-        if (!isCovered(r, subject.qboId) || waived.has(`${r.id}|${subject.qboId}`)) continue;
+        if (!isCustomerCovered(r, subject.qboId) || waived.has(`${r.id}|${subject.qboId}`)) continue;
         if (requestFilter && requestFilter.subjectQboId !== subject.qboId) continue;
         // Only the family's own request counts: a request another family left for a student who moved is not this family's.
         const request = requests.find((q) => q.requirementId === r.id && q.subjectQboId === subject.qboId && q.familyQboId === fam.qboId) ?? null;

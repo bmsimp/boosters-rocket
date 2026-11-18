@@ -13,6 +13,7 @@ import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { FAMILY_A, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup, shiftAround } from "../helpers/volunteer";
+import { subjectColumns } from "../helpers/app-records";
 
 /**
  * Three rules of how volunteering counts (v1 spec §11.4) that the review of step 5 found broken: a requirement staff
@@ -41,7 +42,7 @@ describe("a waived requirement", () => {
   it("takes no credit, so what it would have taken counts toward a requirement linked to the same shifts", async () => {
     const leos = await volunteerRequirement("Leo: 2 shifts", { appliesTo: "student", amount: 2, position: 0 });
     const family = await volunteerRequirement("2 shifts", { appliesTo: "family", amount: 2, position: 1 });
-    await db.insert(requirementProgress).values({ requirementId: leos.id, subjectQboId: LEO!.qboId, waivedAt: new Date(), waivedReason: "Injured; staff only" });
+    await db.insert(requirementProgress).values({ requirementId: leos.id, ...(await subjectColumns(LEO!.qboId, "student")), waivedAt: new Date(), waivedReason: "Injured; staff only" });
     const { shifts } = await seedEvent({ inDays: -3, shifts: [{ requirementIds: [leos.id, family.id] }, { startsAt: "10:00", endsAt: "12:00", requirementIds: [leos.id, family.id] }] });
     for (const shift of shifts) {
       const s = await seedSignup({ shiftId: shift.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: LEO! });

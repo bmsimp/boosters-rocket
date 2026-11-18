@@ -77,7 +77,8 @@ export default async function SeasonPage({ params }: { params: Promise<{ id: str
             <ul className="lines">{step.requirements.map((r) => (
               <li key={r.id}><div>
                 <Link className="what" href={`/staff/seasons/${season.id}/requirements/${r.id}`}>{r.title}</Link>
-                <span className="when">{describeRequirement(r)} · {r.covers === "everyone" ? "Everyone" : `A chosen list of ${r.coveredQboIds.length}`}</span>
+                <span className="when">{describeRequirement(r)} · {r.covers === "everyone" ? "Everyone" : `A chosen list of ${r.coveredIds.length}`
+}</span>
                 {r.dueOn && <span className="when">Due <CalendarDate iso={r.dueOn} /></span>}
                 {/* A payment is met by invoices carrying its item: until one is chosen on its page, nothing can meet it. */}
                 {r.kind === "payment" && r.itemQboId === null && <span className="when"><StateWords state="todo" words="No QuickBooks product or service chosen yet" /></span>}

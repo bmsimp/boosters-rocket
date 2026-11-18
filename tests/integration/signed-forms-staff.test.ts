@@ -31,6 +31,7 @@ import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stu
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { addToCache, fam, par, seedParentSettings, stu } from "../helpers/roster-cache";
+import { subjectColumns } from "../helpers/app-records";
 
 /**
  * Signed forms for staff (v1 spec §9.3): the matrix, one request and one signed form's evidence (each audited when
@@ -49,7 +50,7 @@ const COBBLE = "COBBLE-1";
 async function seedNotReadyForm(): Promise<string> {
   await addToCache([fam(COBBLE, "Cobblestone Family")]);
   const travel = await requirementIdOf("Travel consent");
-  await db.insert(requirementProgress).values({ requirementId: travel, subjectQboId: COBBLE, waivedAt: new Date(), waivedReason: "Staff-only reason QC31" });
+  await db.insert(requirementProgress).values({ requirementId: travel, ...(await subjectColumns(COBBLE, "family")), waivedAt: new Date(), waivedReason: "Staff-only reason QC31" });
   const [{ stepId }] = await db.select({ stepId: requirement.stepId }).from(requirement).where(eq(requirement.id, travel)) as [{ stepId: string }];
   return seedFormRequirement({ stepId, title: "Medical release QC31", appliesTo: "family", form: null, chosen: [FAMILY_A.family.qboId, COBBLE] });
 }
@@ -133,7 +134,7 @@ describe("the matrix", () => {
   it("filters by one form, one state, and a family or student name, and shows a waiver as Waived", async () => {
     asStaff(reader);
     const travel = await requirementIdOf("Travel consent");
-    await db.insert(requirementProgress).values({ requirementId: travel, subjectQboId: FAMILY_B.family.qboId, waivedAt: new Date(), waivedReason: "Staff-only reason QZ19" });
+    await db.insert(requirementProgress).values({ requirementId: travel, ...(await subjectColumns(FAMILY_B.family.qboId, "family")), waivedAt: new Date(), waivedReason: "Staff-only reason QZ19" });
     const oneHtml = await renderPage(SignedFormsPage, { searchParams: { form: travel } });
     const one = textOf(oneHtml);
     expect(textOf(/<table[^>]*class="table matrix"[^>]*>[\s\S]*?(<thead[\s\S]*?<\/thead>)/.exec(oneHtml)![1]!).trim()).toBe("Family and students Travel consent");

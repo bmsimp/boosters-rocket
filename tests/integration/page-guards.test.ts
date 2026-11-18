@@ -356,6 +356,12 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/seasons/recorded.ts",
   "src/lib/seasons/kinds.ts",
   "src/lib/seasons/progress.ts",
+  // The season read by customer, for the areas still keyed by QuickBooks ids (stage 2 of the app-owned families spec).
+  "src/lib/seasons/by-customer.ts",
+  "src/lib/seasons/customer-keys.ts",
+  // The lookups through a link, which a parent's season finds the session's app family by.
+  "src/lib/families/links.ts",
+  "src/lib/families/ids.ts",
   "src/lib/volunteer/my-volunteer.ts",
   "src/lib/volunteer/signed-up.ts",
   "src/lib/volunteer/rules.ts",

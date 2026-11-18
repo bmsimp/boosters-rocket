@@ -25,6 +25,7 @@ import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { dayFromNow, seedEvent } from "../helpers/volunteer";
+import { recordOfCustomer } from "../helpers/app-records";
 
 /**
  * The staff side of volunteering (v1 spec §11.1): events and shifts, the sign-up lists, and the emails a change or a
@@ -341,6 +342,6 @@ describe("the cut-off and the volunteer kind of requirement", () => {
     expect(progress).toContain("1 of 2 shifts done");
     expect(progress).toContain("0 of 2 shifts done, signed up for 1");
     // Credit meets it now, not a tick: staff correct credit instead.
-    expect(await setTicksAction(r!.id, await currentRosterTag(), [FAMILY_A.family.qboId], true)).toEqual({ ok: false, errors: ["This kind of requirement isn't ticked off by hand."] });
+    expect(await setTicksAction(r!.id, await currentRosterTag(), [String(await recordOfCustomer(FAMILY_A.family.qboId, "family"))], true)).toEqual({ ok: false, errors: ["This kind of requirement isn't ticked off by hand."] });
   });
 });

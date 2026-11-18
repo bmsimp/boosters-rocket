@@ -17,6 +17,7 @@ import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../he
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
+import { subjectColumns } from "../helpers/app-records";
 
 /**
  * A guardian signs a form: the engine under the Forms pages (src/lib/forms/signing.ts), against a Documenso stub that
@@ -647,7 +648,7 @@ describe("a form is looked up within the session's family", () => {
     // A's own row, but the requirement is now asked only of family B: it is no longer A's form to open.
     const { requirement, requirementCover } = await import("@/lib/db/schema");
     await db.update(requirement).set({ covers: "chosen" }).where(eq(requirement.id, requirementId));
-    await db.insert(requirementCover).values({ requirementId, subjectQboId: FAMILY_B.students[0]!.qboId });
+    await db.insert(requirementCover).values({ requirementId, ...(await subjectColumns(FAMILY_B.students[0]!.qboId, "student")) });
     expect(await findMyForm(ctx, mine)).toBeNull();
     expect((await findMyForm(ctxB, theirs))?.row.id).toBe(theirs);
   });

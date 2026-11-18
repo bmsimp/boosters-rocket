@@ -4,7 +4,7 @@ import { amountWords, countsFor, placesWords, shiftCredit, volunteerStanding, wh
 import { calendarFile, foldLine, icsText } from "@/lib/volunteer/calendar";
 
 const req = (o: Partial<Requirement>): Requirement => ({ id: "r1", kind: "volunteer", title: "Concessions", required: true, appliesTo: "family", amount: 2, amountUnit: "shifts",
-  dueOn: null, covers: "everyone", coveredQboIds: [], ...o });
+  dueOn: null, covers: "everyone", coveredIds: [], ...o });
 
 describe("how volunteering counts", () => {
   it("counts a shift as one shift, or its length in hours, as the requirement counts", () => {

@@ -8,8 +8,11 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { parent, requirement, season, seasonStep, staffUser, volunteerCredit, volunteerEvent, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { isCovered } from "@/lib/seasons/progress";
-import { loadCovers, loadFacts, toRequirement } from "@/lib/seasons/recorded";
+// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
+// moves to the app's ids.
+import { loadCustomerCovers } from "@/lib/seasons/by-customer";
+import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
+import { loadCustomerFacts } from "@/lib/seasons/recorded";
 import { lockRosterAs, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { loadSubjects, type FamilySubject } from "@/lib/seasons/subjects";
 import { getClubSettings } from "@/lib/settings/club";
@@ -125,8 +128,8 @@ export async function addOutsideCredit(input: OutsideInput, rosterTag: string, o
     const student = row.appliesTo === "student" ? family.students.find((s) => s.qboId === input.who) ?? null : null;
     if (row.appliesTo === "student" ? !student : input.who !== "family") return refuse(row.appliesTo === "student" ? "Choose which of the family's students did it." : "Choose who did it.");
     const subject = student?.qboId ?? family.qboId;
-    const covers = row.covers === "chosen" ? await loadCovers([row.id], [subject], tx) : new Map<string, string[]>();
-    if (!isCovered(toRequirement(row, covers.get(row.id) ?? []), subject)) return refuse(`${row.title} isn't asked of ${student?.name ?? family.name}, so credit can't count toward it.`);
+    const covers = row.covers === "chosen" ? await loadCustomerCovers([row.id], [subject], tx) : new Map<string, string[]>();
+    if (!isCustomerCovered(toCustomerRequirement(row, covers.get(row.id) ?? []), subject)) return refuse(`${row.title} isn't asked of ${student?.name ?? family.name}, so credit can't count toward it.`);
     const n = amountOf(input.amount);
     const unit = row.amountUnit ?? "shifts";
     if (unit === "shifts" ? n === null || !Number.isInteger(n) || n < 1 || n > SHIFTS_MAX : n === null || n <= 0 || n > HOURS_MAX) {
@@ -222,11 +225,11 @@ export async function familyCreditDetail(familyQboId: string, rosterTag: string,
   // The current season's volunteer requirements asked of the family or one of its students.
   const rows = await db.select({ r: requirement }).from(requirement).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId))
     .where(and(eq(season.isCurrent, true), eq(requirement.kind, "volunteer"))).orderBy(asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
-  const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), subjects);
-  const asked = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []))
-    .map((r) => ({ r, who: (r.appliesTo === "family" ? [family.qboId] : family.students.map((s) => s.qboId)).filter((s) => isCovered(r, s)) }))
+  const covers = await loadCustomerCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), subjects);
+  const asked = rows.map((x) => toCustomerRequirement(x.r, covers.get(x.r.id) ?? []))
+    .map((r) => ({ r, who: (r.appliesTo === "family" ? [family.qboId] : family.students.map((s) => s.qboId)).filter((s) => isCustomerCovered(r, s)) }))
     .filter((x) => x.who.length > 0);
-  const { facts } = await loadFacts(asked.map((x) => x.r), subjects, { amounts: "none", parentId: null });
+  const { facts } = await loadCustomerFacts(asked.map((x) => x.r), subjects, { amounts: "none", parentId: null });
   const requirements: StaffRequirementLine[] = asked.map(({ r, who }) => ({
     id: r.id, title: r.title, required: r.required, appliesTo: r.appliesTo, unit: r.amountUnit ?? "shifts", amount: r.amount, dueOn: r.dueOn,
     subjects: who.map((s) => ({ qboId: s, who: nameOf(s), words: facts.standing(r, s).words, waived: facts.waived(r.id, s) })),

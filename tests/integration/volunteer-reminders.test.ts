@@ -16,6 +16,7 @@ import { REMINDER_BATCH, REMINDERS_JOB, sendVolunteerReminders } from "@/lib/vol
 import { resetDb, seedWorkingMail } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { seedEvent, seedOutsideCredit, seedSignup } from "../helpers/volunteer";
+import { subjectColumns } from "../helpers/app-records";
 
 /**
  * The volunteer reminders the worker sends (v1 spec §11.3): the day before a shift, from 9:00 on the club's clock, to
@@ -137,7 +138,7 @@ describe("the nudges before a due date", () => {
     const [own] = await db.insert(requirement).values({ ...values, title: "One shift each QR02", appliesTo: "student", amount: 1, dueOn: "2027-03-13", position: 51 }).returning();
     await db.insert(requirement).values({ ...values, title: "Optional shifts QR03", required: false, appliesTo: "family", amount: 1, dueOn: "2027-03-24", position: 52 });
     await seedOutsideCredit({ familyQboId: FAMILY_A.family.qboId, requirementId: family!.id, shifts: 2, note: "Ran the bake sale QR04" });
-    await db.insert(requirementProgress).values({ requirementId: own!.id, subjectQboId: AURELIO!.qboId, waivedAt: new Date(), waivedBy: null, waivedReason: "Has a broken wrist QR05" });
+    await db.insert(requirementProgress).values({ requirementId: own!.id, ...(await subjectColumns(AURELIO!.qboId, "student")), waivedAt: new Date(), waivedBy: null, waivedReason: "Has a broken wrist QR05" });
     await switches({ welcome: true });
     return { a, b };
   }

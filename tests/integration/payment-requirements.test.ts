@@ -31,6 +31,7 @@ import { MONEY_REALM, seedSignedInParent, type SeededParent } from "../helpers/p
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, stu } from "../helpers/roster-cache";
 import { seedSeason } from "../helpers/season";
+import { recordOfCustomer } from "../helpers/app-records";
 
 /**
  * The payment kind of requirement (v1 spec §10.2) end to end: what a parent reads, judged from the figures QuickBooks
@@ -126,7 +127,8 @@ describe("what a parent reads for a payment requirement", () => {
     expect(uniform.counts).toEqual({ asked: 2, done: 0, waived: 0, todo: 2 });
     const staff = await withRole("ticker@club.org", ["Season.*"]);
     asStaff(staff);
-    expect(await setTicksAction(fall.requirementIds["Band fee"]!, await currentRosterTag(), [FAMILY], true))
+    // The page names the family by its own record (stage 2 of the app-owned families spec).
+    expect(await setTicksAction(fall.requirementIds["Band fee"]!, await currentRosterTag(), [String(await recordOfCustomer(FAMILY, "family"))], true))
       .toEqual({ ok: false, errors: ["This kind of requirement isn't ticked off by hand."] });
     // The parent's own query agrees with the staff page.
     const mine = await loadMySeason(rivera.identity, (await loadMyFamily({ ...rivera.identity, ip: null }))!.students);

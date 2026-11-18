@@ -11,7 +11,7 @@ import { seedTwoFamilyVolunteering, type FamilyVolunteer } from "./volunteer";
 import { seedTwoFamilyForms, type FamilyForms } from "./forms";
 import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
 import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
-import { syncAppRecords } from "./app-records";
+import { recordOfCustomer, syncAppRecords } from "./app-records";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -84,6 +84,8 @@ const unique = (values: string[]) => [...new Set(values)];
 
 /** The QuickBooks company the seeded money was "read" from: the one seedConnected() connects (tests/helpers/qbo-stub.ts). */
 export const MONEY_REALM = "9130000000000001";
+/** Marks the roster cache as read from MONEY_REALM, unless it already names a company. */
+const markRosterCompany = () => db.insert(setting).values({ key: SOURCE_KEY, value: { realmId: MONEY_REALM } }).onConflictDoNothing();
 const owed = (spec: ParentFamilySpec) => (spec.invoices ?? []).filter((i) => !i.paid).reduce((sum, i) => sum + i.cents, 0);
 
 /**
@@ -102,7 +104,7 @@ export function moneyMarkers(spec: ParentFamilySpec, which: "all" | "open" = "al
  * company.
  */
 export async function seedFamilyMoney(spec: ParentFamilySpec, o: { readAt?: Date; balanceWithJobsCents?: number | null } = {}): Promise<void> {
-  await db.insert(setting).values({ key: SOURCE_KEY, value: { realmId: MONEY_REALM } }).onConflictDoNothing();
+  await markRosterCompany();
   const invoices: StoredInvoice[] = (spec.invoices ?? []).map((i, n) => ({
     qboId: String(9001 + n), number: i.number, customerQboId: spec.family.qboId, forName: null, date: "2026-10-01", dueDate: i.paid ? null : "2026-12-01",
     totalCents: i.cents, balanceCents: i.paid ? 0 : i.cents, currency: "USD", payLink: i.payLink ?? null, itemQboIds: i.items ?? [],
@@ -130,10 +132,14 @@ function markersOf(spec: ParentFamilySpec, identity: ParentIdentity, session: { 
 /**
  * Seeds one family with a signed-in parent, adding to what is already in the database: a layered membership shape,
  * sign-ins switched on, the family, its parent and its students in the roster cache, the portal person, an active link
- * that names the QuickBooks record it came from, and a session with the family chosen. The identity returned is the one
- * the portal itself resolves from that session, so a fixture the portal would refuse fails here, not in the test.
+ * that names the QuickBooks record it came from, and a session with the family chosen. The cache is marked as read from
+ * MONEY_REALM unless it already names a company, as a roster read leaves it (and as seedFamilyMoney() does), so the
+ * app's own records are made for the family in that company: the season finds the session's family through its link
+ * (src/lib/seasons/my-season.ts). The identity returned is the one the portal itself resolves from that session, so a
+ * fixture the portal would refuse fails here, not in the test.
  */
 export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Promise<SeededParent> {
+  await markRosterCompany();
   await seedShape();
   await seedParentSettings(SIGNINS_ON);
   await addToCache([
@@ -151,8 +157,14 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
   return { identity: state.identity, spec, session, markers: markersOf(spec, state.identity, session) };
 }
 
+/** The app's own ids of a family and its students, as text. */
+async function appIdsOf(spec: ParentFamilySpec): Promise<string[]> {
+  return [String(await recordOfCustomer(spec.family.qboId, "family")), ...(await Promise.all(spec.students.map(async (s) => String(await recordOfCustomer(s.qboId, "student")))))];
+}
+
 /**
- * Family A and family B, each with its own signed-in parent and two students, and nothing in common. The fixture for
+ * Family A and family B, each with its own signed-in parent and two students, and nothing in common.
+ The fixture for
  * every test that asks "can one family see another's data": tests/integration/parent-isolation.test.ts renders every
  * parent page as each parent and searches for the other's markers. Each family has its own invoices (numbers, amounts
  * and a total found nowhere else). When a step gives families new data (forms, sign-ups), seed it here for both
@@ -191,19 +203,23 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   a.buyout = buyouts.a; a.markers.push(...buyouts.a.markers);
   b.buyout = buyouts.b; b.markers.push(...buyouts.b.markers);
   // The app's own families, students and links for both, made by the function the roster read runs
-  // (src/lib/families/in-step.ts), so a test that reads them finds them.
+  // (src/lib/families/in-step.ts), so a test that reads them finds them. Their ids are markers too: the season keeps
+  // its records by them (stage 2 of the app-owned families spec), and no page of one family may carry the other's.
   await syncAppRecords();
+  a.markers.push(...(await appIdsOf(FAMILY_A)));
+  b.markers.push(...(await appIdsOf(FAMILY_B)));
   return { a, b };
 }
 
 /**
  * A signed-in parent for a family the test has put in the roster cache itself, in whatever membership shape: the
  * portal person, an active link to `familyQboId` (naming the QuickBooks record it came from, or made by hand when
- * `sourceQboId` is left out) and a session with that family chosen, with the app's own records brought into step.
- * Switches sign-ins on. For the two standard
+ * `sourceQboId` is left out) and a session with that family chosen, with the app's own records brought into step (in
+ * MONEY_REALM, unless the cache names a company already). Switches sign-ins on. For the two standard
  * families use seedSignedInParent() and seedTwoFamilies(), which also give the markers.
  */
 export async function seedParentIn(o: { familyQboId: string; name: string; email: string; phone?: string | null; sourceQboId?: string | null }): Promise<{ identity: ParentIdentity; session: { id: string; token: string } }> {
+  await markRosterCompany();
   await seedParentSettings(SIGNINS_ON);
   const person = await seedParent({ name: o.name, email: o.email, phone: o.phone ?? null, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId ?? null });

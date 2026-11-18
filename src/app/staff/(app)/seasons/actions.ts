@@ -24,11 +24,12 @@ const TEXT_MAX = 2000, ID_MAX = 64, DATE_MAX = 10;
 const str = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
 // The portal's own ids are UUIDs; anything else would reach Postgres as a bad cast and throw.
 const uuid = isUuid;
-// A QuickBooks id from the roster: short text, never trusted to name anyone until the library finds it on the roster.
-const qboId = (v: unknown): v is string => str(v, ID_MAX) && v.length > 0;
-// The company tag a page carries beside QuickBooks ids (src/lib/seasons/roster-lock.ts).
+// A family or student is the app's own record, by its id (a UUID): never trusted to name anyone until the library
+// finds it on the roster, or among what is recorded against the requirement.
+const subjectId = uuid;
+// The company tag a page carries beside the roster's families and students (src/lib/seasons/roster-lock.ts).
 const tag = (v: unknown): v is string => str(v, ID_MAX) && v.length > 0;
-const qboIds = (v: unknown): v is string[] => Array.isArray(v) && v.length <= BULK_MAX && v.every(qboId);
+const subjectIds = (v: unknown): v is string[] => Array.isArray(v) && v.length <= BULK_MAX && v.every(subjectId);
 const date = (v: unknown): v is string | null => v === null || str(v, DATE_MAX);
 
 type RequirementFields = { title: string; required: boolean; amount: number | null; amountUnit: "shifts" | "hours" | null; dueOn: string | null };
@@ -140,9 +141,9 @@ export const moveRequirementAction = staffAction(SETUP, async (ctx, requirementI
   return { ok: true, message: "Moved." };
 });
 
-export const setCoverageAction = staffAction(SETUP, async (ctx, requirementId: string, rosterTag: string, covers: "everyone" | "chosen", subjectQboIds: string[]): Promise<Done> => {
-  if (!uuid(requirementId) || !tag(rosterTag) || (covers !== "everyone" && covers !== "chosen") || !qboIds(subjectQboIds)) return NOT_FROM_PAGE;
-  const r = await setCoverage(requirementId, rosterTag, covers, covers === "chosen" ? [...subjectQboIds] : [], op(ctx, SETUP));
+export const setCoverageAction = staffAction(SETUP, async (ctx, requirementId: string, rosterTag: string, covers: "everyone" | "chosen", chosen: string[]): Promise<Done> => {
+  if (!uuid(requirementId) || !tag(rosterTag) || (covers !== "everyone" && covers !== "chosen") || !subjectIds(chosen)) return NOT_FROM_PAGE;
+  const r = await setCoverage(requirementId, rosterTag, covers, covers === "chosen" ? [...chosen] : [], op(ctx, SETUP));
   if (!r.ok) return r;
   refresh();
   return { ok: true, message: covers === "everyone" ? "Saved. It is asked of everyone." : "Saved. It is asked only of those you chose." };
@@ -158,26 +159,26 @@ export const removeRequirementAction = staffAction(SETUP, async (ctx, requiremen
 
 /* ---- Ticks and waivers ---- */
 
-export const setTicksAction = staffAction(PROGRESS, async (ctx, requirementId: string, rosterTag: string, subjectQboIds: string[], ticked: boolean): Promise<Done> => {
-  if (!uuid(requirementId) || !tag(rosterTag) || !qboIds(subjectQboIds) || typeof ticked !== "boolean") return NOT_FROM_PAGE;
-  const r = await setTicks(requirementId, rosterTag, [...subjectQboIds], ticked, op(ctx, PROGRESS));
+export const setTicksAction = staffAction(PROGRESS, async (ctx, requirementId: string, rosterTag: string, who: string[], ticked: boolean): Promise<Done> => {
+  if (!uuid(requirementId) || !tag(rosterTag) || !subjectIds(who) || typeof ticked !== "boolean") return NOT_FROM_PAGE;
+  const r = await setTicks(requirementId, rosterTag, [...who], ticked, op(ctx, PROGRESS));
   if (!r.ok) return r;
   if (r.changed === 0) return { ok: true, message: ticked ? "Already ticked." : "Nothing was ticked." }; // nothing changed: nothing to show again
   refresh();
   return { ok: true, message: ticked ? (r.changed === 1 ? "Ticked." : `Ticked ${r.changed}.`) : (r.changed === 1 ? "Unticked." : `Unticked ${r.changed}.`) };
 });
 
-export const waiveAction = staffAction(PROGRESS, async (ctx, requirementId: string, rosterTag: string, subjectQboId: string, reason: string): Promise<Done> => {
-  if (!uuid(requirementId) || !tag(rosterTag) || !qboId(subjectQboId) || !str(reason, TEXT_MAX)) return NOT_FROM_PAGE;
-  const r = await waiveRequirement(requirementId, rosterTag, subjectQboId, reason, op(ctx, PROGRESS));
+export const waiveAction = staffAction(PROGRESS, async (ctx, requirementId: string, rosterTag: string, who: string, reason: string): Promise<Done> => {
+  if (!uuid(requirementId) || !tag(rosterTag) || !subjectId(who) || !str(reason, TEXT_MAX)) return NOT_FROM_PAGE;
+  const r = await waiveRequirement(requirementId, rosterTag, who, reason, op(ctx, PROGRESS));
   if (!r.ok) return r;
   refresh();
   return { ok: true, message: "Waived." };
 });
 
-export const removeWaiverAction = staffAction(PROGRESS, async (ctx, requirementId: string, rosterTag: string, subjectQboId: string): Promise<Done> => {
-  if (!uuid(requirementId) || !tag(rosterTag) || !qboId(subjectQboId)) return NOT_FROM_PAGE;
-  const r = await removeWaiver(requirementId, rosterTag, subjectQboId, op(ctx, PROGRESS));
+export const removeWaiverAction = staffAction(PROGRESS, async (ctx, requirementId: string, rosterTag: string, who: string): Promise<Done> => {
+  if (!uuid(requirementId) || !tag(rosterTag) || !subjectId(who)) return NOT_FROM_PAGE;
+  const r = await removeWaiver(requirementId, rosterTag, who, op(ctx, PROGRESS));
   if (!r.ok) return r;
   if (!r.changed) return { ok: true, message: "There was no waiver to remove." };
   refresh();

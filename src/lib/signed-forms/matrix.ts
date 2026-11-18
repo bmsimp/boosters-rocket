@@ -3,12 +3,14 @@
 // own row. It reads every family, so it is a list (not audited, as the roster list is not) and never imported by
 // parent code (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import "server-only";
-import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { requirement, requirementProgress, season, seasonStep, signatureRequest, signedFormEvidence, type FormReminders, type FormSetting } from "@/lib/db/schema";
+import { requirement, season, seasonStep, signatureRequest, signedFormEvidence, type FormReminders, type FormSetting } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
-import { loadCovers, toRequirement } from "@/lib/seasons/recorded";
-import { isCovered } from "@/lib/seasons/progress";
+// The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
+// moves to the app's ids.
+import { loadCustomerCovers, loadCustomerRecorded } from "@/lib/seasons/by-customer";
+import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
 import { loadSubjects, type FamilySubject } from "@/lib/seasons/subjects";
 import { CELL_WORDS, FILTER_STATES, REMINDABLE_STATES, cellState, type CellState } from "./rules";
 
@@ -68,9 +70,8 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
   const formRows = await seasonForms(s.id);
   const ids = formRows.map((f) => f.row.id);
   const [subjects, covers, waivers, requests, realmId] = await Promise.all([
-    loadSubjects(), loadCovers(ids, null),
-    ids.length ? db.select({ requirementId: requirementProgress.requirementId, subjectQboId: requirementProgress.subjectQboId }).from(requirementProgress)
-      .where(and(inArray(requirementProgress.requirementId, ids), isNotNull(requirementProgress.waivedAt))) : Promise.resolve([]),
+    loadSubjects(), loadCustomerCovers(ids, null),
+    loadCustomerRecorded(ids, null).then((rows) => rows.filter((w) => w.waivedAt !== null)),
     ids.length ? db.select({ id: signatureRequest.id, requirementId: signatureRequest.requirementId, familyQboId: signatureRequest.familyQboId, subjectQboId: signatureRequest.subjectQboId,
       state: signatureRequest.state, signers: signatureRequest.signers }).from(signatureRequest).where(inArray(signatureRequest.requirementId, ids)) : Promise.resolve([]),
     getRosterSource(),
@@ -80,11 +81,11 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
   const evidence = complete.length && realmId !== null ? await db.select({ id: signedFormEvidence.id, requestId: signedFormEvidence.requestId }).from(signedFormEvidence)
     .where(and(inArray(signedFormEvidence.requestId, complete), eq(signedFormEvidence.realmId, realmId), isNull(signedFormEvidence.earlierCompanyAt))) : [];
   const waived = new Set(waivers.map((w) => `${w.requirementId}|${w.subjectQboId}`));
-  const requirements = formRows.map((f) => toRequirement(f.row, covers.get(f.row.id) ?? []));
+  const requirements = formRows.map((f) => toCustomerRequirement(f.row, covers.get(f.row.id) ?? []));
 
   const cellFor = (formIndex: number, subjectQboId: string, familyQboId: string, kind: "family" | "student"): MatrixCell => {
     const r = requirements[formIndex]!;
-    const covered = r.appliesTo === kind && isCovered(r, subjectQboId);
+    const covered = r.appliesTo === kind && isCustomerCovered(r, subjectQboId);
     const request = covered ? requests.find((q) => q.requirementId === r.id && q.subjectQboId === subjectQboId && q.familyQboId === familyQboId) ?? null : null;
     const state = cellState({ covered, waived: waived.has(`${r.id}|${subjectQboId}`), ready: formRows[formIndex]!.row.form !== null, request });
     return { state, words: CELL_WORDS[state], requestId: request?.id ?? null, evidenceId: request ? evidence.find((e) => e.requestId === request.id)?.id ?? null : null };

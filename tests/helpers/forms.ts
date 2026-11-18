@@ -8,6 +8,7 @@ import { CONSENT_VERSION } from "@/lib/forms/consent";
 import { FORMS_AAD, FORMS_KEY } from "@/lib/forms/settings";
 import type { ParentFamilySpec } from "./parent";
 import type { SeededSeason } from "./season";
+import { subjectColumns } from "./app-records";
 
 /**
  * Forms for tests: the connection to Documenso as an Admin would have saved it, form requirements with a template
@@ -35,7 +36,8 @@ export const formSetting = (template: { id: string; title?: string; updatedAt?: 
 export async function seedFormRequirement(o: { stepId: string; title: string; appliesTo: "family" | "student"; form: FormSetting | null; required?: boolean; chosen?: string[]; position?: number }): Promise<string> {
   const [row] = await db.insert(requirement).values({ stepId: o.stepId, kind: "form", title: o.title, required: o.required ?? false, appliesTo: o.appliesTo,
     covers: o.chosen ? "chosen" : "everyone", position: o.position ?? 50, form: o.form }).returning({ id: requirement.id });
-  if (o.chosen?.length) await db.insert(requirementCover).values(o.chosen.map((subjectQboId) => ({ requirementId: row!.id, subjectQboId })));
+  // A chosen list names the app's own records (stage 2 of the app-owned families spec), given here by QuickBooks id.
+  for (const subjectQboId of o.chosen ?? []) await db.insert(requirementCover).values({ requirementId: row!.id, ...(await subjectColumns(subjectQboId, o.appliesTo)) });
   return row!.id;
 }
 
