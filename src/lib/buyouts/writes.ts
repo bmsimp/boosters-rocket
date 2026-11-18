@@ -256,7 +256,8 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
     if (!item.sent) await db.update(writeQueue).set({ sent: true, updatedAt: new Date() }).where(eq(writeQueue.id, item.id));
     let answer: Record<string, unknown>;
     try {
-      answer = await qboCreateInvoice({ customerQboId: w.customerQboId, itemQboId: w.itemQboId, units: w.units, unitCents: w.unitCents, buyoutId: b.id }, sendOptions(item.realmId, o.mayWait));
+      // The bill-to address is the one the queued create carries: the chooser's own, as it was when they chose.
+      answer = await qboCreateInvoice({ customerQboId: w.customerQboId, itemQboId: w.itemQboId, units: w.units, unitCents: w.unitCents, buyoutId: b.id, billEmail: w.billEmail }, sendOptions(item.realmId, o.mayWait));
     } catch (e) {
       if (!(e instanceof QboError)) throw e;
       const f = classify(e.code);
@@ -376,7 +377,11 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
         eq(buyout.familyQboId, ctx.familyQboId), inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));
       return { r: no(ours ? BUYOUT_COPY.already : BUYOUT_COPY.cantNow) };
     }
-    const item = await queueItem(tx, { op: "invoice_create", buyoutId: row.id, customerQboId: row.customerQboId, itemQboId: row.itemQboId, units: row.units, unitCents: row.unitCents, familyQboId: row.familyQboId },
+    // The invoice's bill-to address is the confirming guardian's own sign-in address, from their session (never from the
+    // browser), kept with the queued create so every try sends the same one. It gives the invoice its Pay link; its
+    // email status stays not set, so nothing is emailed. It goes into no audit row.
+    const item = await queueItem(tx, { op: "invoice_create", buyoutId: row.id, customerQboId: row.customerQboId, itemQboId: row.itemQboId, units: row.units, unitCents: row.unitCents, familyQboId: row.familyQboId,
+      billEmail: ctx.email },
       { realmId: row.realmId, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS) });
     await writeAudit({ actor, action: "volunteer.buyout.chosen", targetType: "buyout", targetId: row.id, ip: ctx.ip,
       after: { state: "being_invoiced", requirementId: r.id, title: r.title, subjectQboId: row.subjectQboId, customerQboId: row.customerQboId, itemQboId: row.itemQboId,

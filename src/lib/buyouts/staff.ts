@@ -38,6 +38,16 @@ const STATE_WORDS: Record<string, string> = {
   refused: "QuickBooks refused the invoice, so nothing was billed. The family was told to ask the club.",
   stuck: "A change to this buy-out's invoice is stuck: it won't be tried again until someone asks, above.",
 };
+/**
+ * A refused buy-out whose code says why: the invoice carries the sign-in address of the guardian who chose it, as its
+ * bill-to address, and QuickBooks (2210, as the check saw for a field that isn't an address) or the portal itself
+ * (`bad_email`: longer than QuickBooks takes, or not an address) wouldn't take it.
+ */
+const ADDRESS_REFUSED = "QuickBooks wouldn't take the sign-in email address of the guardian who chose this as the invoice's bill-to address, so nothing was billed. "
+  + "The family was told to ask the club: check that guardian's email address (on their own customer in QuickBooks, and on their Parents page here), then they can choose to pay instead again.";
+const REFUSED_CODE_WORDS: Record<string, string> = { fault_2210: ADDRESS_REFUSED, bad_email: ADDRESS_REFUSED };
+const wordsOf = (b: Row): string =>
+  (b.flag ? FLAG_WORDS[b.flag] : null) ?? (b.state === "refused" && b.lastCode ? REFUSED_CODE_WORDS[b.lastCode] : null) ?? STATE_WORDS[b.state] ?? "Worth a look.";
 
 /**
  * The buy-out as a page shows it, for the close to compare with: its state, its flag and when it last changed. Anything
@@ -82,7 +92,7 @@ export async function loadBuyoutsToLook(now: Date = new Date()): Promise<BuyoutT
   return rows.map(({ b, title }) => ({
     id: b.id, familyQboId: b.familyQboId, familyName: names.get(b.familyQboId) ?? null, subjectName: b.subjectQboId === b.familyQboId ? null : names.get(b.subjectQboId) ?? null,
     requirement: title, amountCents: b.amountCents, state: b.state, flag: b.flag, code: b.lastCode, at: (b.flaggedAt ?? b.updatedAt).toISOString(),
-    words: (b.flag ? FLAG_WORDS[b.flag] : null) ?? STATE_WORDS[b.state] ?? "Worth a look.",
+    words: wordsOf(b),
     close: verdictOf(b, items.get(b.id) ?? []), tag: closeTag(b),
   }));
 }

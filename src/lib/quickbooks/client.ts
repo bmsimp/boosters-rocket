@@ -717,9 +717,9 @@ export type InvoiceCreate = {
   /** The portal's own buy-out id (a uuid): written into the invoice's private note so the portal can find it again. */
   buyoutId: string;
   /**
-   * A bill-to email address (`BillEmail`), sent only when given. Only the check of the portal's requests gives one (its
-   * Pay link probe, at example.com, with `EmailStatus` still NotSet so nothing is emailed): a buy-out sends none until
-   * the owner has seen what the probe found (point 2 below).
+   * A bill-to email address (`BillEmail`), sent only when given, with `EmailStatus` still NotSet so nothing is emailed.
+   * A buy-out gives the sign-in address of the guardian who chose it, kept with its queued create (the owner's decision
+   * of 2026-11-17, point 2 below); the check of the portal's requests gives its own at example.com (its Pay link probe).
    */
   billEmail?: string;
 };
@@ -728,9 +728,10 @@ export type InvoiceCreate = {
 const qboAmount = (cents: number): number => cents / 100;
 
 /**
- * The buy-out invoice writes, exactly as they are sent. NOT YET TRIED AGAINST A REAL QUICKBOOKS COMPANY: nobody could
- * reach the sandbox when they were built, so they follow Intuit's documentation as remembered, like CUSTOMER_UPDATE
- * above. Unlike every write before them they go to the invoice endpoint. The owner's sandbox check must confirm, with
+ * The buy-out invoice writes, exactly as they are sent. Built from Intuit's documentation as remembered, like
+ * CUSTOMER_UPDATE above, and since tried against an Intuit sandbox company by the check of the portal's requests (run
+ * twice on 2026-11-17; the second time every request answered as expected), not yet against a club's own books.
+ * Unlike every write before them they go to the invoice endpoint. The owner's sandbox check confirms, with
  * `minorversion` 75:
  *   1. `create`: `POST /v3/company/<realm>/invoice` with `{ CustomerRef: { value }, Line: [{ DetailType:
  *      "SalesItemLineDetail", Amount, SalesItemLineDetail: { ItemRef: { value }, Qty, UnitPrice } }], PrivateNote,
@@ -743,10 +744,13 @@ const qboAmount = (cents: number): number => cents / 100;
  *      SEEN IN THE SANDBOX ON 2026-11-17: the invoice made exactly as this create makes it came back with no
  *      `InvoiceLink`, while 8 other invoices of the same company carried one. Not confirmed from Intuit's reference
  *      (which could not be read): a link is said elsewhere to be made only for an invoice with online payment on and a
- *      customer email (`BillEmail`). The check's Pay link probe makes a second invoice with `billEmail` to find out;
- *      a buy-out sends no `BillEmail` until the owner decides;
- *   3. that QuickBooks sends no email for it (`EmailStatus: "NotSet"`, no `BillEmail`, and the portal never calls
- *      `/invoice/<id>/send`);
+ *      customer email (`BillEmail`). The check's Pay link probe makes a second invoice with `billEmail` to find out.
+ *      SEEN IN THE SANDBOX ON 2026-11-17, on the check's second run: the invoice made without `BillEmail` came back
+ *      with no `InvoiceLink`, and the one made with it came back with one, its `EmailStatus` still NotSet. The owner
+ *      then decided that a buy-out invoice carries, as `BillEmail`, the sign-in address of the guardian who chose it
+ *      (src/lib/buyouts/writes.ts). Which online-payment flags are needed beyond ACH is still not tried;
+ *   3. that QuickBooks sends no email for it (`EmailStatus: "NotSet"`, even with a `BillEmail`, as the sandbox kept it
+ *      on 2026-11-17; and the portal never calls `/invoice/<id>/send`);
  *   4. how the due date is set when none is sent: the customer's terms, the company's default, or the day it is made;
  *   5. that `PrivateNote` (`notePrefix` and the buy-out's uuid) is kept as sent and comes back in the invoice queries:
  *      that is how a create whose answer was lost is found again (src/lib/buyouts/writes.ts);
