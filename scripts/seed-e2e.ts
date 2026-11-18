@@ -8,6 +8,7 @@ import { E2E_VOLUNTEER } from "../tests/e2e/volunteer-seed";
 import { E2E_BUYOUT } from "../tests/e2e/buyout-seed";
 import { E2E_SIGNED_PDF } from "../tests/e2e/signed-forms-seed";
 import { E2E_EMAIL, emailTokenHash } from "../tests/e2e/email-seed";
+import { appRecordsFillStatements } from "../tests/helpers/app-records-fill";
 
 /**
  * This script empties the database and seeds it again: test databases only, and in a git worktree never the database
@@ -309,6 +310,11 @@ async function main() {
             'stuck', false, 8, 'http_429', now() - interval '1 hour', null, 'e2e-admin@example.org', now() - interval '20 hours')`;
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
+  // The app's own families, students and links for every family above (stage 1 of the app-owned families spec), as a
+  // roster read leaves them: made by migration 0023's fill, which tests/integration/app-records-fill.test.ts proves makes
+  // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
+  const fill = appRecordsFillStatements();
+  await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
   await sql.end();
 }
 

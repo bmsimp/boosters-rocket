@@ -5,6 +5,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { mailWorking } from "@/lib/mail/settings";
 import { getShape, ROSTER_LOCK } from "@/lib/roster/shape";
+import { appRecordsAudit } from "@/lib/families/changes";
 import { ROSTER_JOB } from "@/lib/roster/source";
 import type { HeldAddress } from "./access-rules";
 import type { StaffOp } from "./people";
@@ -143,7 +144,7 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
       const r = await reconcileAccess(tx, { cause: "settings.signin" });
       // The roster stopped being usable after the check above: save nothing.
       if (!r.ran) throw new RolledBack();
-      return { granted: r.granted, ended: r.ended };
+      return { granted: r.granted, ended: r.ended, ...appRecordsAudit(r.appRecords) };
     });
     return r;
   } catch (e) {
@@ -159,7 +160,7 @@ export async function setRequireStudents(on: boolean, o: StaffOp): Promise<Switc
   }
   return change({ requireActiveStudents: on }, o, async (tx) => {
     const r = await reconcileAccess(tx, { cause: "settings.students" });
-    return { granted: r.granted, ended: r.ended };
+    return { granted: r.granted, ended: r.ended, ...appRecordsAudit(r.appRecords) };
   });
 }
 

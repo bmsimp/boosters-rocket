@@ -14,6 +14,7 @@ import { currencyOf, formatMoney, toCents } from "@/lib/money/cents";
 import { normalizeEmail } from "@/lib/email";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { reconcileAccess } from "@/lib/parents/reconcile";
+import { appRecordsAudit, changedAppRecords, noAppRecordChanges } from "@/lib/families/changes";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
@@ -264,16 +265,17 @@ const isRow = (v: unknown): v is Record<string, unknown> => typeof v === "object
 /**
  * Puts a customer QuickBooks sent into the cache, only when it is newer than what the cache holds (a higher SyncToken)
  * or not there at all: a refresh that ran meanwhile may already have stored a later version. Contact details are kept
- * only for a customer the shape names, as the refresh keeps them. Returns the row as the cache now has it.
+ * only for a customer the shape names, as the refresh keeps them. Returns the row as the cache now has it, and whether
+ * the cache took the answer (`took`).
  */
 async function upsertFromAnswer(tx: Tx, answer: Record<string, unknown>, shape: MembershipShape | null) {
   const row = customerRow(answer, new Set(shapeTypeIds(shape)), new Date());
-  if (!row) return null;
+  if (!row) return { stored: null, took: false };
   const [cached] = await tx.select().from(qboCustomer).where(eq(qboCustomer.qboId, row.qboId)).for("update");
-  if (cached && tokenNumber(cached.syncToken) >= tokenNumber(row.syncToken)) return cached;
+  if (cached && tokenNumber(cached.syncToken) >= tokenNumber(row.syncToken)) return { stored: cached, took: false };
   if (cached) await tx.update(qboCustomer).set(row).where(eq(qboCustomer.qboId, row.qboId));
   else await tx.insert(qboCustomer).values(row);
-  return row;
+  return { stored: row, took: true };
 }
 
 /** Whether QuickBooks' answer is the customer the write was about: the same id for an update, the new name for a create. */
@@ -335,18 +337,19 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       const cause = `${AUDIT_ACTION[w.op]}#${w.op === "create" ? nameKey(w.name).slice(0, 40) : w.qboId}`;
       const fits = answerIsFor(w, answer);
       let refreshAsked = false;
+      let appRecords = noAppRecordChanges();
       if (ours && fits) {
         await upsertFromAnswer(tx, answer, await getShape(tx));
         if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
         if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
-        await reconcileAccess(tx, { cause });
+        ({ appRecords } = await reconcileAccess(tx, { cause }));
       } else if (ours) {
         await askForRosterRefresh(tx); refreshAsked = true; // the answer wasn't the record asked about: read the roster again rather than guess
       }
       await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer",
         targetId: w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId,
         before: auditBefore(w, cached), after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), ...(refreshAsked ? { refreshAsked } : {}),
-          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}) } }, tx);
+          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}), ...appRecordsAudit(appRecords) } }, tx);
       if (o.inside) await o.inside(tx);
     });
   } catch {
@@ -385,16 +388,24 @@ async function enqueue(p: { write: RosterWrite; realmId: string; familyQboId: st
   });
 }
 
-/** The record read again after it changed in QuickBooks, stored in the cache when newer, as the page shows it. */
-async function readAgain(qboId: string, realmId: string): Promise<CurrentRecord | null> {
+/**
+ * The record read again after it changed in QuickBooks, stored in the cache when newer, as the page shows it. When the
+ * cache took it, or the app's own records changed with it, that is audited (`roster.customer.read_again`) in the same
+ * transaction, as the staff change that led to it.
+ */
+async function readAgain(qboId: string, realmId: string, o: { actor: Actor; ip: string | null; permission?: string }): Promise<CurrentRecord | null> {
   let answer: Record<string, unknown> | null;
   try { answer = await qboCustomerById(qboId, { failFast: true, realmId, timeoutMs: 5_000 }); } catch (e) { if (e instanceof QboError) return null; throw e; }
   if (!answer || answer.Id !== qboId) return null;
   return db.transaction(async (tx) => {
     if (!(await lockRosterAs(tx, rosterTagOf(realmId)))) return null;
     const shape = await getShape(tx);
-    const stored = await upsertFromAnswer(tx, answer, shape);
-    await reconcileAccess(tx, { cause: `roster.read_again#${qboId}` });
+    const { stored, took } = await upsertFromAnswer(tx, answer, shape);
+    const { appRecords } = await reconcileAccess(tx, { cause: `roster.read_again#${qboId}` });
+    if (took || changedAppRecords(appRecords)) {
+      await writeAudit({ actor: o.actor, action: "roster.customer.read_again", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: qboId,
+        after: { cached: took, syncToken: stored?.syncToken ?? null, ...appRecordsAudit(appRecords) } }, tx);
+    }
     // Shown as QuickBooks has it now, from this read: the cache keeps a row of the same version it already holds (an
     // answer is stored only when newer), so its values can lag behind what QuickBooks just showed.
     const row = stored ? customerRow(answer, new Set(shapeTypeIds(shape)), new Date()) ?? stored : null;
@@ -436,7 +447,7 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
     // record read again is stored and shown (spec §6.3), and the pages are made again.
     if (!owed.active || movedOn(owed, p.write.syncToken)) {
       await audited(owed.active ? "moved_on" : "already_inactive", p.write, target);
-      const current = await readAgain(p.write.qboId, p.realmId);
+      const current = await readAgain(p.write.qboId, p.realmId, o);
       // Inactive there at the version the cache holds: the cache is behind QuickBooks, so the roster is read again.
       if (!owed.active) await db.transaction((tx) => askForRosterRefresh(tx));
       const said = owed.active ? WRITE_COPY.changed : "That is inactive in QuickBooks already, so there was nothing to change.";
@@ -459,7 +470,7 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
         return { ok: true, queued: true, message: WRITE_COPY.queued };
       case "stale": {
         await audited(e.code, p.write, target);
-        const current = p.write.op === "create" ? null : await readAgain(p.write.qboId, p.realmId);
+        const current = p.write.op === "create" ? null : await readAgain(p.write.qboId, p.realmId, o);
         return current ? { ok: false, errors: [WRITE_COPY.changed], current } : refuse(WRITE_COPY.changedUnseen);
       }
       case "duplicate": {
@@ -590,7 +601,7 @@ const listed = (names: string[]) => (names.length <= 1 ? names.join("") : `${nam
  * cache doesn't show is under it (800), ask the worker for a roster refresh. `maybe`: the step may have been made.
  * `changed`: the cache or the refresh ask changed, so the pages are made again.
  */
-async function stepStopped(e: QboError, step: FamilyStep, realmId: string): Promise<{ words: string; maybe: boolean; changed: boolean }> {
+async function stepStopped(e: QboError, step: FamilyStep, realmId: string, o: WriteOp): Promise<{ words: string; maybe: boolean; changed: boolean }> {
   const name = step.name, isFamily = step.write.role === "family";
   if (isFamily && e.code === `fault_${CUSTOMER_WRITES.faults.activeUnder}`) {
     await db.transaction((tx) => askForRosterRefresh(tx));
@@ -601,7 +612,7 @@ async function stepStopped(e: QboError, step: FamilyStep, realmId: string): Prom
   const failure = classify(e.code);
   switch (failure.kind) {
     case "stale":
-      await readAgain(step.write.qboId, realmId);
+      await readAgain(step.write.qboId, realmId, o);
       // The family's last step carries the version read just before it, so a refusal now is a change made while this ran.
       return { words: isFamily ? `${name} changed in QuickBooks while this was running, so it wasn't made inactive. Press “Make ${name} inactive” again.`
         : `${name} changed in QuickBooks since the page was shown, so it wasn't changed. Reload the page to see it as QuickBooks has it now.`, maybe: false, changed: true };
@@ -656,7 +667,7 @@ export async function askFamilyInactive(familyQboId: string, shown: ReadonlyArra
       return { result: refuse(unreadWords(owed.code)), changed: false };
     }
     if (movedOn(owed, step.write.syncToken)) {
-      await readAgain(step.write.qboId, p.realmId);
+      await readAgain(step.write.qboId, p.realmId, o);
       await summary("refused", "moved_on", [], ids);
       return { result: refuse(`${step.name} changed in QuickBooks since the page was shown, so nothing was changed. Look at the list again, and confirm it.`), changed: true };
     }
@@ -708,7 +719,7 @@ export async function askFamilyInactive(familyQboId: string, shown: ReadonlyArra
       answer = await sendWrite(step.write, p.realmId, { mayWait: false });
     } catch (e) {
       if (!(e instanceof QboError)) throw e;
-      return stop(i, e.code, await stepStopped(e, step, p.realmId));
+      return stop(i, e.code, await stepStopped(e, step, p.realmId, o));
     }
     const { cached } = await applyWritten(step.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission });
     if (!cached) allShown = false;

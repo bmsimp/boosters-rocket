@@ -11,6 +11,7 @@ import { seedTwoFamilyVolunteering, type FamilyVolunteer } from "./volunteer";
 import { seedTwoFamilyForms, type FamilyForms } from "./forms";
 import { seedTwoFamilyEmailChanges, type FamilyEmailChange } from "./email-change";
 import { seedTwoFamilyBuyouts, type FamilyBuyout } from "./buyouts";
+import { syncAppRecords } from "./app-records";
 
 /**
  * Signed-in parents for tests: the family as QuickBooks lists it (in the roster cache), the portal person, their link
@@ -145,6 +146,8 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
   const session = await seedParentSession(person.authUserId, { familyQboId: spec.family.qboId });
   const state = await resolveParentSession({ id: session.id, userId: person.authUserId, familyQboId: spec.family.qboId });
   if (state.status !== "ok") throw new Error(`seedSignedInParent: the portal would not sign ${spec.parent.name} in to ${spec.family.name} (session state "${state.status}")`);
+  // The link and the session name the family: the app's own records follow, as the reconcile that made the link would.
+  await syncAppRecords();
   return { identity: state.identity, spec, session, markers: markersOf(spec, state.identity, session) };
 }
 
@@ -157,7 +160,8 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
  * told about them. The club has a current season (seedTwoFamilySeason): each family has its own ticks and a waiver, and
  * a requirement asked of it alone, whose title, id and waiver reason are among its markers. Each also has forms to sign
  * (seedTwoFamilyForms): a request in every state, and one form asked of it alone. And one volunteer shift that both
- * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers.
+ * families have signed up for (seedTwoFamilyVolunteering), whose sign-up ids are among their markers. Last, the app's
+ * own records and links for both families (stage 1 of the app-owned families spec), as a roster read makes them.
  */
 export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededParent }> {
   const a = await seedSignedInParent(FAMILY_A);
@@ -186,13 +190,17 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const buyouts = await seedTwoFamilyBuyouts({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
   a.buyout = buyouts.a; a.markers.push(...buyouts.a.markers);
   b.buyout = buyouts.b; b.markers.push(...buyouts.b.markers);
+  // The app's own families, students and links for both, made by the function the roster read runs
+  // (src/lib/families/in-step.ts), so a test that reads them finds them.
+  await syncAppRecords();
   return { a, b };
 }
 
 /**
  * A signed-in parent for a family the test has put in the roster cache itself, in whatever membership shape: the
  * portal person, an active link to `familyQboId` (naming the QuickBooks record it came from, or made by hand when
- * `sourceQboId` is left out) and a session with that family chosen. Switches sign-ins on. For the two standard
+ * `sourceQboId` is left out) and a session with that family chosen, with the app's own records brought into step.
+ * Switches sign-ins on. For the two standard
  * families use seedSignedInParent() and seedTwoFamilies(), which also give the markers.
  */
 export async function seedParentIn(o: { familyQboId: string; name: string; email: string; phone?: string | null; sourceQboId?: string | null }): Promise<{ identity: ParentIdentity; session: { id: string; token: string } }> {
@@ -200,6 +208,7 @@ export async function seedParentIn(o: { familyQboId: string; name: string; email
   const person = await seedParent({ name: o.name, email: o.email, phone: o.phone ?? null, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId ?? null });
   const session = await seedParentSession(person.authUserId, { familyQboId: o.familyQboId });
+  await syncAppRecords();
   return { identity: await identityNow(session.id), session };
 }
 

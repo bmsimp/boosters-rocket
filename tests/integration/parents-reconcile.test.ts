@@ -21,7 +21,7 @@ describe("the reconcile", () => {
     await seedCache(RIVERA);
     const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
     await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
-    expect(await run()).toEqual({ ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 });
+    expect(await run()).toEqual({ ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0, appRecords: expect.any(Object) });
     expect(await links()).toEqual([{ email: "seeded@example.com", family: "POC-FAMILY-1", source: null, status: "active", reason: null }]);
     expect(await db.select().from(auditLog)).toEqual([]);
   });
@@ -43,7 +43,7 @@ describe("the reconcile", () => {
 
   it("makes a person, their sign-in account and an invited link, audited with the cause", async () => {
     await seedParentSettings(SIGNINS_ON); await seedCache(RIVERA);
-    expect(await run()).toEqual({ ran: true, granted: 1, ended: 0, emailChanged: 0, welcomeOwed: 0 });
+    expect(await run()).toEqual({ ran: true, granted: 1, ended: 0, emailChanged: 0, welcomeOwed: 0, appRecords: expect.any(Object) });
     expect(await links()).toEqual([{ email: "ana@example.com", family: "10", source: "11", status: "invited", reason: null }]);
     const [p] = await db.select().from(parent);
     expect(p).toMatchObject({ name: "Ana Rivera", email: "ana@example.com", welcomeOwed: false });
@@ -67,7 +67,7 @@ describe("the reconcile", () => {
     const first = new Set((await db.select().from(auditLog)).map((r) => r.action));
     expect(first).toEqual(new Set(["parent.create", "parent.access.granted", "parent.access.moved", "parent.hold.opened"]));
     const before = (await db.select().from(auditLog)).length;
-    expect(await run()).toEqual({ ran: true, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0 });
+    expect(await run()).toEqual({ ran: true, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0, appRecords: expect.any(Object) });
     expect((await db.select().from(auditLog)).length).toBe(before);
   });
 
@@ -151,7 +151,7 @@ describe("the reconcile", () => {
     await db.update(parent).set({ welcomedAt: new Date(), welcomeOwed: false });
     await db.insert(signinCode).values({ parentId: before!.id, codeHash: "x", expiresAt: new Date(Date.now() + 60_000) });
     await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com")]);
-    expect(await run()).toEqual({ ran: true, granted: 0, ended: 0, emailChanged: 1, welcomeOwed: 0 });
+    expect(await run()).toEqual({ ran: true, granted: 0, ended: 0, emailChanged: 1, welcomeOwed: 0, appRecords: expect.any(Object) });
     const people = await db.select().from(parent);
     expect(people).toHaveLength(1);
     expect(people[0]).toMatchObject({ id: before!.id, email: "ana.new@example.com", welcomeOwed: false });

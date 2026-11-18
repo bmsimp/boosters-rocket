@@ -25,6 +25,7 @@ import { parseEmailField } from "./emails";
 import { loadMyRecord, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { reconcileAccess } from "./reconcile";
+import { appRecordsAudit } from "@/lib/families/changes";
 import { askForRosterRefresh } from "./refresh-ask";
 import { deleteUnusedSigninCodes, endParentSessions, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
@@ -354,7 +355,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
         }
         const r = await reconcileAccess(tx, { cause: `parent.email.save#${row.id}` });
         const sessionsEnded = await endOldSignIns(tx, ctx.parentId, oldEmail);
-        await audit(tx, { field, portal: "reconciled", emailChanged: r.emailChanged, ended: r.ended, granted: r.granted, sessionsEnded });
+        await audit(tx, { field, portal: "reconciled", emailChanged: r.emailChanged, ended: r.ended, granted: r.granted, sessionsEnded, ...appRecordsAudit(r.appRecords) });
       });
     } catch (e) {
       await leaveToTheRefresh(lockNotAvailable(e) ? "busy" : e instanceof NotThisCompany ? "other_company" : "cache_failed");
