@@ -108,17 +108,36 @@ export const CUSTOMER_TARGET_TYPES = { family: ["qbo_customer", "family"], stude
  * alone. Open question 17 of the app-owned families spec: audit rows are never rewritten, and rows written before an
  * area moved to the app's ids name the customer, so a search for the record also finds those.
  */
-async function customersOfRecord(record: AuditFilters["record"]): Promise<{ id: string; families: string[]; students: string[] } | null> {
+async function customersOfRecord(record: AuditFilters["record"]): Promise<RecordNames | null> {
   if (!record) return null;
   const [type, id] = "either" in record ? [null, record.either] : [record.type, record.id];
   if (!isUuid(id) || (type !== null && type !== "family" && type !== "student")) return null;
   const realmId = await getRosterSource();
-  if (realmId === null) return { id, families: [], students: [] };
+  if (realmId === null) return { id, kind: type, families: [], students: [] };
   const kind = type === "family" ? sql`${accountingLink.familyId}::text = ${id}` : type === "student" ? sql`${accountingLink.studentId}::text = ${id}`
     : sql`(${accountingLink.familyId}::text = ${id} or ${accountingLink.studentId}::text = ${id})`;
   const links = await db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId }).from(accountingLink)
     .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), kind));
-  return { id, families: [...new Set(links.filter((l) => l.familyId !== null).map((l) => l.customerId))], students: [...new Set(links.filter((l) => l.familyId === null).map((l) => l.customerId))] };
+  return { id, kind: type, families: [...new Set(links.filter((l) => l.familyId !== null).map((l) => l.customerId))], students: [...new Set(links.filter((l) => l.familyId === null).map((l) => l.customerId))] };
+}
+/** A family or student record the filter names (`kind` null when the filter gave the id alone), and the customers it is linked to. */
+type RecordNames = { id: string; kind: "family" | "student" | null; families: string[]; students: string[] };
+
+/**
+ * A form request's rows (target "signature_request") name its family and student in their body, not their target: the
+ * customers' ids before forms moved to the app's ids (`familyQboId`, `subjectQboId`), the records' since (`familyId`,
+ * `studentId`), in `after` and, for a move, `before`. A kept form's rows (target "signed_form_evidence") are never
+ * matched this way: an earlier company's evidence holds that company's numbers, which may be a current family's.
+ */
+function formRowsOf(r: RecordNames): SQL {
+  // The key is one of the four written here, never a value from the address: written into the query as a text literal.
+  const said = (side: "before" | "after", key: "familyId" | "studentId" | "familyQboId" | "subjectQboId") =>
+    sql`(${side === "before" ? auditLog.before : auditLog.after}) ->> ${sql.raw(`'${key}'`)}`;
+  const family = r.kind === "student" ? [] : [eq(said("after", "familyId"), r.id), eq(said("before", "familyId"), r.id),
+    ...(r.families.length ? [inArray(said("after", "familyQboId"), r.families), inArray(said("before", "familyQboId"), r.families)] : [])];
+  const student = r.kind === "family" ? [] : [eq(said("after", "studentId"), r.id), eq(said("before", "studentId"), r.id),
+    ...(r.students.length ? [inArray(said("after", "subjectQboId"), r.students)] : [])];
+  return and(eq(auditLog.targetType, "signature_request"), or(...family, ...student))!;
 }
 
 /**
@@ -126,9 +145,10 @@ async function customersOfRecord(record: AuditFilters["record"]): Promise<{ id: 
  * names a customer of that kind (CUSTOMER_TARGET_TYPES), and a tick's or waiver's row, whose target is
  * "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
  */
-function recordsOlderNames(r: { id: string; families: string[]; students: string[] }): SQL | undefined {
+function recordsOlderNames(r: RecordNames): SQL | undefined {
   const keys = [r.id, ...r.families, ...r.students];
   return or(
+    formRowsOf(r),
     ...(r.families.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.family]), inArray(auditLog.targetId, r.families))] : []),
     ...(r.students.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.student]), inArray(auditLog.targetId, r.students))] : []),
     and(eq(auditLog.targetType, "requirement_progress"), or(...keys.map((k) => sql`${auditLog.targetId} like ${endsWithKey(k)} escape '\\'`))),
