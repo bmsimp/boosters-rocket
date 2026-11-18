@@ -11,7 +11,8 @@ import { writeAudit } from "@/lib/audit/log";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { KIND_RULES, pairKey } from "./kinds";
 import { lineFor, type LineState, type Requirement, type SeasonStanding, type SubjectId } from "./progress";
-import { loadCovers, loadFacts, loadFamilyStanding, toRequirement } from "./recorded";
+import { loadFamilyStanding, toRequirement } from "./recorded";
+import { everyCover, everyonesFacts } from "./everyone";
 import { getRequirementSetup, type Refused, type RequirementSetup, type SeasonOp } from "./setup";
 import { coveredBy, loadSeasonFamilies, seasonFamilyAt, type SeasonFamily, type SeasonSubject } from "./subjects";
 import { currentRosterTag, lockRosterAs, ROSTER_MOVED } from "./roster-lock";
@@ -76,7 +77,7 @@ export async function loadRequirementProgress(requirementId: string, amounts: "a
   if (!setup) return null;
   // Read before the roster: a roster read from another company in between makes the tag the older one, and a write is refused.
   const rosterTag = await currentRosterTag();
-  const [families, { facts, recorded }] = await Promise.all([loadSeasonFamilies(), loadFacts([setup.requirement], null, { amounts, parentId: null })]);
+  const [families, { facts, recorded }] = await Promise.all([loadSeasonFamilies(), everyonesFacts([setup.requirement], { amounts, parentId: null })]);
   const who = await staffNames(recorded.flatMap((r) => [r.metBy, r.waivedBy]));
   const by = new Map(recorded.map((r) => [String(r.subjectId), r]));
   const covered = families ? coveredBy(setup.requirement, families) : null;
@@ -108,9 +109,9 @@ export async function loadProgressOverview(seasonId: string): Promise<ProgressOv
   if (!s) return null;
   const steps = await db.select().from(seasonStep).where(eq(seasonStep.seasonId, s.id)).orderBy(asc(seasonStep.position), asc(seasonStep.createdAt));
   const rows = steps.length ? await db.select().from(requirement).where(inArray(requirement.stepId, steps.map((x) => x.id))).orderBy(asc(requirement.position), asc(requirement.createdAt)) : [];
-  const covers = await loadCovers(rows.map((r) => r.id), null);
+  const covers = await everyCover(rows.map((r) => r.id));
   const requirements = rows.map((r) => ({ stepId: r.stepId, requirement: toRequirement(r, covers.get(r.id) ?? []) }));
-  const [families, { facts }] = await Promise.all([loadSeasonFamilies(), loadFacts(requirements.map((r) => r.requirement), null, { amounts: "none", parentId: null })]);
+  const [families, { facts }] = await Promise.all([loadSeasonFamilies(), everyonesFacts(requirements.map((r) => r.requirement), { amounts: "none", parentId: null })]);
   return {
     season: { id: s.id, name: s.name, isCurrent: s.isCurrent }, roster: families !== null,
     steps: steps.map((x) => ({ id: x.id, name: x.name, requirements: requirements.filter((r) => r.stepId === x.id).map(({ requirement: r }) => ({

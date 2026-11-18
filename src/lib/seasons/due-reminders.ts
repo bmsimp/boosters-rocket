@@ -20,7 +20,8 @@ import { getClubSettings } from "@/lib/settings/club";
 import { dateWords } from "@/lib/volunteer/clock";
 import { checklistVerdict, dueToday, owedReminders, paymentVerdict, type DueKind, type Verdict } from "./due-reminder-rules";
 import type { SubjectId } from "./progress";
-import { loadCovers, loadFacts, toRequirement } from "./recorded";
+import { toRequirement } from "./recorded";
+import { everyCover, everyonesFacts } from "./everyone";
 import { loadSeasonFamilies } from "./subjects";
 
 export const DUE_REMINDERS_JOB = "season.due_reminders";
@@ -104,7 +105,7 @@ async function owedToday(due: { kind: DueKind; days: number; dueOn: string }[]) 
   if (rows.length === 0) return [];
   const families = await loadSeasonFamilies();
   if (!families || families.length === 0) return [];
-  const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), null);
+  const covers = await everyCover(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id));
   const requirements = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []));
   const payments = requirements.some((r) => r.kind === "payment");
   // As a parent's page sees it: a payment's amount only from figures read within freshSeconds. A payment with no figures
@@ -112,7 +113,7 @@ async function owedToday(due: { kind: DueKind; days: number; dueOn: string }[]) 
   // The figures are kept by the family's QuickBooks id (the money cache, still keyed by customer: a boundary AGENTS.md
   // lists, Seasons), so each family and student is taken to its family's customer here.
   const [{ facts }, figures] = await Promise.all([
-    loadFacts(requirements, null, { amounts: "fresh", parentId: null }),
+    everyonesFacts(requirements, { amounts: "fresh", parentId: null }),
     moneyRows(payments ? families.map((f) => f.qboId) : []),
   ]);
   const familyCustomerOf = new Map(families.flatMap((f) => [[String(f.id), f.qboId] as const, ...f.students.map((s) => [String(s.id), f.qboId] as const)]));

@@ -9,7 +9,7 @@ import { requirement, season, seasonStep, signatureRequest, signedFormEvidence, 
 import { getRosterSource } from "@/lib/roster/source";
 // The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
 // moves to the app's ids.
-import { loadCustomerCovers, loadCustomerRecorded } from "@/lib/seasons/by-customer";
+import { everyCustomerCover, everyCustomerRecorded } from "@/lib/seasons/everyone";
 import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
 import { loadSubjects, type FamilySubject } from "@/lib/seasons/subjects";
 import { CELL_WORDS, FILTER_STATES, REMINDABLE_STATES, cellState, type CellState } from "./rules";
@@ -70,8 +70,8 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
   const formRows = await seasonForms(s.id);
   const ids = formRows.map((f) => f.row.id);
   const [subjects, covers, waivers, requests, realmId] = await Promise.all([
-    loadSubjects(), loadCustomerCovers(ids, null),
-    loadCustomerRecorded(ids, null).then((rows) => rows.filter((w) => w.waivedAt !== null)),
+    loadSubjects(), everyCustomerCover(ids),
+    everyCustomerRecorded(ids).then((rows) => rows.filter((w) => w.waivedAt !== null)),
     ids.length ? db.select({ id: signatureRequest.id, requirementId: signatureRequest.requirementId, familyQboId: signatureRequest.familyQboId, subjectQboId: signatureRequest.subjectQboId,
       state: signatureRequest.state, signers: signatureRequest.signers }).from(signatureRequest).where(inArray(signatureRequest.requirementId, ids)) : Promise.resolve([]),
     getRosterSource(),

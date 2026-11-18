@@ -10,7 +10,8 @@ import { dropUnopenedForms, formsHolding, formsHoldingWords } from "@/lib/forms/
 import { linkedShifts, placesHolding, placesHoldingWords } from "@/lib/volunteer/removal";
 import { KIND_LABELS, isAvailableKind } from "./kinds";
 import { isCalendarDate, type AmountUnit, type AppliesTo, type Requirement } from "./progress";
-import { loadCovers, toRequirement, type RequirementRow } from "./recorded";
+import { toRequirement, type RequirementRow } from "./recorded";
+import { everyCover } from "./everyone";
 import { candidatesFor, loadSeasonFamilies, type SeasonSubject } from "./subjects";
 import { lockRosterAs, ROSTER_MOVED } from "./roster-lock";
 
@@ -52,7 +53,7 @@ export async function getSeasonSetup(seasonId: string, tx?: Tx): Promise<SeasonS
   if (!s) return null;
   const steps = await stepsOf(s.id, tx);
   const rows = await requirementsOf(steps.map((x) => x.id), tx);
-  const covers = await loadCovers(rows.map((r) => r.id), null, tx);
+  const covers = await everyCover(rows.map((r) => r.id), tx);
   return { id: s.id, name: s.name, isCurrent: s.isCurrent, steps: steps.map((x) => ({
     id: x.id, name: x.name, position: x.position, startsOn: x.startsOn, endsOn: x.endsOn,
     requirements: rows.filter((r) => r.stepId === x.id).map((r) => ({ ...toRequirement(r, covers.get(r.id) ?? []), position: r.position, itemQboId: r.itemQboId })),
@@ -69,7 +70,7 @@ export async function getRequirementSetup(requirementId: string, tx?: Tx): Promi
     .from(requirement).innerJoin(seasonStep, eq(requirement.stepId, seasonStep.id)).innerJoin(season, eq(seasonStep.seasonId, season.id)).where(eq(requirement.id, requirementId));
   if (!row) return null;
   const [covers, [recorded], inStep] = await Promise.all([
-    loadCovers([row.r.id], null, tx),
+    everyCover([row.r.id], tx),
     q.select({ n: count() }).from(requirementProgress).where(eq(requirementProgress.requirementId, row.r.id)),
     requirementsOf([row.step.id], tx),
   ]);

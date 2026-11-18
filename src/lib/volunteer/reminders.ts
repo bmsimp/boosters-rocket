@@ -13,9 +13,8 @@ import { mailWorking } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 // The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
 // moves to the app's ids.
-import { loadCustomerCovers } from "@/lib/seasons/by-customer";
+import { everyCustomerCover, everyonesCustomerFacts } from "@/lib/seasons/everyone";
 import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
-import { loadCustomerFacts } from "@/lib/seasons/recorded";
 import { loadSubjects } from "@/lib/seasons/subjects";
 import { getClubSettings } from "@/lib/settings/club";
 import { dateWords, daysAfter, reminderDay } from "./clock";
@@ -105,9 +104,9 @@ async function nudges(today: string, now: Date): Promise<{ sent: number; failed:
   if (rows.length === 0) return { sent: 0, failed: 0 };
   const families = await loadSubjects();
   if (!families || families.length === 0) return { sent: 0, failed: 0 };
-  const covers = await loadCustomerCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), null);
+  const covers = await everyCustomerCover(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id));
   const requirements = rows.map((x) => toCustomerRequirement(x.r, covers.get(x.r.id) ?? []));
-  const { facts } = await loadCustomerFacts(requirements, null, { amounts: "none", parentId: null });
+  const { facts } = await everyonesCustomerFacts(requirements, { amounts: "none", parentId: null });
   // What each family still has to do, by nudge: never another family's, and never a waiver's reason.
   const owed: { kind: "due_14" | "due_3"; dueOn: string; days: number; familyQboId: string; items: VolunteerDueWords[] }[] = [];
   for (const d of due) {

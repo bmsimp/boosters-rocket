@@ -37,7 +37,7 @@ export type Viewing = { amounts: AmountsShown; parentId: string | null };
  * A kind's rule. Until the areas it reads have moved to the app's ids (stage 2 of the app-owned families spec), it is
  * asked by customer: the families and students are the customers their links name, and it answers by
  * customerPairKey(). The season's own reads translate on the way in and out (loadFacts() in ./recorded.ts), and the
- * areas still keyed by QuickBooks ids ask it directly (loadCustomerFacts() in ./by-customer.ts).
+ * areas still keyed by QuickBooks ids ask it directly (loadCustomerFacts() in ./recorded.ts, and for everyone ./everyone.ts).
  */
 export type KindRule = {
   /**

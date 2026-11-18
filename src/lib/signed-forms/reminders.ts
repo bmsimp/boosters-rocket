@@ -17,7 +17,7 @@ import { getParentSettings } from "@/lib/parents/settings";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
 // The season by customer: a boundary of stage 2 of the app-owned families spec (AGENTS.md, Seasons), until this area
 // moves to the app's ids.
-import { loadCustomerCovers, loadCustomerRecorded } from "@/lib/seasons/by-customer";
+import { everyCustomerCover, everyCustomerRecorded } from "@/lib/seasons/everyone";
 import { isCustomerCovered, toCustomerRequirement } from "@/lib/seasons/customer-keys";
 import { isUuid } from "@/lib/seasons/ids";
 import { loadSubjects } from "@/lib/seasons/subjects";
@@ -58,8 +58,8 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
   if (!families || forms.length === 0) return { owed: [], forms: [] };
   const ids = forms.map((f) => f.row.id);
   const [covers, waivers, requests] = await Promise.all([
-    loadCustomerCovers(ids, null),
-    loadCustomerRecorded(ids, null).then((rows) => rows.filter((w) => w.waivedAt !== null)),
+    everyCustomerCover(ids),
+    everyCustomerRecorded(ids).then((rows) => rows.filter((w) => w.waivedAt !== null)),
     db.select().from(signatureRequest).where(inArray(signatureRequest.requirementId, ids)),
   ]);
   const inScope = families.filter((f) => (scope?.kind === "family" ? f.qboId === scope.familyQboId : requestFilter ? f.qboId === requestFilter.familyQboId : true));

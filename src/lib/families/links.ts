@@ -14,8 +14,8 @@ import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
  * Stage 2's areas read them: a parent's season finds the session's app family through familyLinkedTo(), and the season's
  * reads that cross into an area still keyed by QuickBooks ids translate through linksOf() and linksOfCustomers() (the
  * boundaries are listed in AGENTS.md, Seasons). Each reads only the links it is asked for, so parent code may import
- * this module (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts); only linksOf("all") reads every
- * family's link, and only staff code asks for it.
+ * this module (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts). Every family's links are read only by
+ * everyLink() in src/lib/seasons/everyone.ts, which is staff only.
  */
 export async function recordsCompany(tx?: Tx): Promise<string | null> {
   const [source, connection] = await Promise.all([getRosterSource(tx), getConnection(tx)]);
@@ -70,30 +70,36 @@ export type LinkMaps = {
 };
 const noLinks = (): LinkMaps => ({ customerOfFamily: new Map(), familyOfCustomer: new Map(), customerOfStudent: new Map(), studentOfCustomer: new Map() });
 
-async function linksWhere(which: SQL | undefined | "none", tx?: Tx): Promise<LinkMaps> {
+async function linksWhere(which: SQL | "none", tx?: Tx): Promise<LinkMaps> {
   const out = noLinks();
   if (which === "none") return out;
   const realmId = await recordsCompany(tx);
   if (realmId === null) return out;
-  const rows = await (tx ?? db).select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId, studentId: accountingLink.studentId }).from(accountingLink)
-    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), or(isNotNull(accountingLink.familyId), isNotNull(accountingLink.studentId)), which));
+  return linkMapsFrom(await (tx ?? db).select(LINK_COLUMNS).from(accountingLink)
+    .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), or(isNotNull(accountingLink.familyId), isNotNull(accountingLink.studentId)), which)));
+}
+/** The columns linkMapsFrom() reads. */
+export const LINK_COLUMNS = { customerId: accountingLink.customerId, familyId: accountingLink.familyId, studentId: accountingLink.studentId };
+/** Link rows as maps by kind, both ways. */
+export function linkMapsFrom(rows: readonly { customerId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null }[]): LinkMaps {
+  const out = noLinks();
   for (const r of rows) {
     if (r.familyId !== null) { out.customerOfFamily.set(r.familyId, r.customerId); out.familyOfCustomer.set(r.customerId, r.familyId); }
     else if (r.studentId !== null) { out.customerOfStudent.set(r.studentId, r.customerId); out.studentOfCustomer.set(r.customerId, r.studentId); }
   }
   return out;
 }
-const anyOf = (...parts: (SQL | null)[]): SQL | undefined | "none" => {
+const anyOf = (...parts: (SQL | null)[]): SQL | "none" => {
   const given = parts.filter((p): p is SQL => p !== null);
-  return given.length === 0 ? "none" : or(...given);
+  return given.length === 0 ? "none" : or(...given)!;
 };
 
 /**
  * The customers of these family and student records, in the records' company (as every lookup here reads it), with
- * the way back. "all" is every family and student record's link: for staff code that asks about everyone.
+ * the way back. Every record's links, for staff code that asks about everyone, are everyLink() in
+ * src/lib/seasons/everyone.ts, a staff-only module.
  */
-export function linksOf(records: { families: readonly AppFamilyId[]; students: readonly AppStudentId[] } | "all", tx?: Tx): Promise<LinkMaps> {
-  if (records === "all") return linksWhere(undefined, tx);
+export function linksOf(records: { families: readonly AppFamilyId[]; students: readonly AppStudentId[] }, tx?: Tx): Promise<LinkMaps> {
   return linksWhere(anyOf(records.families.length ? inArray(accountingLink.familyId, [...records.families]) : null,
     records.students.length ? inArray(accountingLink.studentId, [...records.students]) : null), tx);
 }
