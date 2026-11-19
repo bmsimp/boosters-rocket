@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gt, gte, inArray, lt, lte, max, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog } from "@/lib/db/schema";
+import { accountingLink, auditLog, requirement } from "@/lib/db/schema";
 import { QUICKBOOKS } from "@/lib/families/ids";
 import { getRosterSource } from "@/lib/roster/source";
 import { isUuid } from "@/lib/seasons/ids";
@@ -145,17 +145,23 @@ function formRowsOf(r: RecordNames): SQL {
  * to the app's ids: the choice named its subject's customer (`subjectQboId`: the family's for a per-family buy-out, the
  * student's for a per-student one), the daily check's flag and the close the family's (`familyQboId`), and a move's flag
  * the families it went from and to (`fromFamilyQboId`, `toFamilyQboId`). Since: the records (`familyId`, `studentId`,
- * and a move's `toFamilyId`), in `after` or, for the close, `before`.
+ * and a move's `toFamilyId`), in `after` or, for the close, `before`. An old choice's `subjectQboId` is a family's only
+ * when its requirement (`requirementId`, kept while the buy-out is) asks of each family, and a student's only when it
+ * asks of each student: a customer may have a record of each kind, and a per-student choice naming it as a student is
+ * never its family's (nor a per-family one its student's).
  */
 function buyoutRowsOf(r: RecordNames): SQL {
   // The key is one of those written here, never a value from the address: written into the query as a text literal.
-  type Key = "familyId" | "studentId" | "toFamilyId" | "familyQboId" | "subjectQboId" | "fromFamilyQboId" | "toFamilyQboId";
+  type Key = "familyId" | "studentId" | "toFamilyId" | "familyQboId" | "subjectQboId" | "fromFamilyQboId" | "toFamilyQboId" | "requirementId";
   const said = (side: "before" | "after", key: Key) => sql`(${side === "before" ? auditLog.before : auditLog.after}) ->> ${sql.raw(`'${key}'`)}`;
+  // An old choice's subject, of the kind its requirement asks of ("family" or "student", written here, never from the address).
+  const subjectAs = (kind: "family" | "student", customers: string[]) => and(inArray(said("after", "subjectQboId"), customers),
+    sql`exists (select 1 from ${requirement} where ${requirement.id}::text = ${said("after", "requirementId")} and ${requirement.appliesTo} = ${kind})`)!;
   const family = r.kind === "student" ? [] : [eq(said("after", "familyId"), r.id), eq(said("before", "familyId"), r.id), eq(said("after", "toFamilyId"), r.id),
-    ...(r.families.length ? (["familyQboId", "subjectQboId", "fromFamilyQboId", "toFamilyQboId"] as const).map((k) => inArray(said("after", k), r.families))
-      .concat([inArray(said("before", "familyQboId"), r.families)]) : [])];
+    ...(r.families.length ? (["familyQboId", "fromFamilyQboId", "toFamilyQboId"] as const).map((k) => inArray(said("after", k), r.families))
+      .concat([inArray(said("before", "familyQboId"), r.families), subjectAs("family", r.families)]) : [])];
   const student = r.kind === "family" ? [] : [eq(said("after", "studentId"), r.id), eq(said("before", "studentId"), r.id),
-    ...(r.students.length ? [inArray(said("after", "subjectQboId"), r.students)] : [])];
+    ...(r.students.length ? [subjectAs("student", r.students)] : [])];
   return and(eq(auditLog.targetType, "buyout"), or(...family, ...student))!;
 }
 
