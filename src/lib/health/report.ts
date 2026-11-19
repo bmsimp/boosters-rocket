@@ -10,6 +10,8 @@ import { loadRosterPage } from "@/lib/roster/queries";
 import { queueCounts } from "@/lib/roster/queue";
 import { mailFailing, mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { readBreachMark, type BreachMark } from "@/lib/parents/breach-mark";
+import { BREACH_TIMEOUT_MS, type BreachNotChecked } from "@/lib/parents/breach-check";
 import { apiFailing as formsApiFailing, formsSummary } from "@/lib/forms/settings";
 import { formsWaiting } from "@/lib/forms/job";
 import { evidenceHealth } from "@/lib/signed-forms/evidence-job";
@@ -32,7 +34,7 @@ import { env } from "@/env";
 export type HealthState = "ok" | "attention" | "off";
 export type HealthLine = {
   key: "database" | "worker" | "cleanup" | "quickbooks" | "money" | "mail" | "forms" | "parents" | "due_reminders" | "backup" | "version"
-    | "buyout_check" | "volunteer_reminders";
+    | "buyout_check" | "volunteer_reminders" | "breach_check";
   title: string;
   /** "ok": working. "attention": something a person should look at. "off": not set up or switched off, which may be by choice. */
   state: HealthState;
@@ -55,6 +57,32 @@ export const MONEY_OLD_MS = 48 * 3_600_000;
 
 /** Backups are meant to be nightly. Two days without one means a night was missed and nobody noticed. */
 export const BACKUP_OLD_MS = 48 * 3_600_000;
+
+/** Why the breach check last couldn't answer, in words. */
+const BREACH_FAILURE_WORDS: Record<BreachNotChecked, string> = {
+  timeout: `The last time it didn't answer within ${BREACH_TIMEOUT_MS / 1000} seconds.`,
+  unreachable: "The last time it couldn't be reached.",
+  bad_answer: "The last time its answer couldn't be read.",
+};
+
+/**
+ * The breach check's line: never asked yet, working (the service's last answer is the latest word), or a failure the
+ * latest word. A password chosen while the service can't answer is taken, and its audit row says it wasn't checked.
+ */
+export function breachCheckLine(mark: BreachMark | null): HealthLine {
+  const base = { key: "breach_check" as const, title: "Password breach check", fix: null,
+    times: [{ label: "Last answered", at: mark?.answeredAt ?? null }, { label: "Last failed", at: mark?.failedAt ?? null }] };
+  if (!mark || (!mark.answeredAt && !mark.failedAt)) {
+    return { ...base, state: "off", word: "Not used yet", notes: [],
+      says: "Not used yet. When a parent chooses a password from a set-up or reset link, the portal asks the Pwned Passwords service whether it has appeared in a known data breach, sending only the first five characters of a hash of it." };
+  }
+  if (mark.failedLast) {
+    return { ...base, state: "attention", word: "Needs attention", notes: mark.failure ? [BREACH_FAILURE_WORDS[mark.failure]] : [],
+      says: "The Pwned Passwords service didn't answer the last time a parent chose a password, so passwords chosen since then were accepted without the check. The portal's server must be able to reach the service on the internet; the line says Working again once it answers." };
+  }
+  return { ...base, state: "ok", word: "Working", notes: [],
+    says: "Answering. Each password a parent chooses is checked against passwords known from data breaches, sending only the first five characters of a hash of it." };
+}
 
 const bytesWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`);
 
@@ -208,6 +236,10 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
     : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
       says: "Off. No parent can sign in until an Admin switches them on." });
+
+  // The check of a chosen password against those known from data breaches (src/lib/parents/breach-check.ts), from what
+  // the portal marked each time it asked (src/lib/parents/breach-mark.ts). This page asks the service nothing.
+  lines.push(breachCheckLine(await readBreachMark()));
 
   // The reminders before a payment's or a checklist item's due date (src/lib/seasons/due-reminders.ts): when the worker
   // last looked, and what it sent or couldn't send that day.

@@ -38,6 +38,7 @@ const SITES: Record<string, string> = {
   "docs.documenso.com": "Documenso's own documentation",
   "caddyserver.com": "the proxy's own documentation (deploy/Caddyfile)",
   "smtp.office365.com": "Microsoft 365's SMTP server, for Documenso's account mail (mail.md)",
+  "pwnedpasswords.com": "the password breach service the server must reach (health-warnings.md, Password breach check)",
 };
 const TLDS = "com|org|net|io|dev|app|co|us|uk|ca|au|de|eu|fr|nl|edu|gov|info|biz|me|xyz|site|online|tech|ai|cloud|club|school|team|tv|cc|ly|gg|in|link|page|run|host|systems|network";
 const HOST = new RegExp(`\\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(?:${TLDS})\\b`, "gi");

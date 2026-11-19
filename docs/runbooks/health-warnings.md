@@ -172,6 +172,26 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.
   With this installation's own proxy it is `x-forwarded-for`.
 
+## Password breach check
+
+When a parent chooses a password from a set-up or reset link, the portal asks Have I Been Pwned's Pwned Passwords
+service whether it has appeared in a known data breach. Only the first five characters of a hash of the password leave
+the server; the password itself never does.
+
+- **"Not used yet."** No parent has chosen a password yet. Normal until the club starts sending set-up links.
+- **"Needs attention"**, with "The Pwned Passwords service didn't answer the last time a parent chose a password". The
+  passwords chosen since then were taken without the check: the portal never stops a parent for it, and each one's
+  audit row says it wasn't checked. The note says why: no answer within 3 seconds, the service couldn't be reached, or
+  its answer couldn't be read. The server must be able to reach `https://api.pwnedpasswords.com` over HTTPS. To try
+  it from the portal's own container:
+
+  ```sh
+  docker compose exec app node -e "fetch('https://api.pwnedpasswords.com/range/00000').then(r => console.log(r.status), e => console.log(e.cause?.code ?? e.message))"
+  ```
+
+  `200` means it can. Anything else names what stopped it: look at the server's firewall and its outgoing connections.
+  The line says **"Working"** again once a parent chooses a password and the service answers.
+
 ## Payment and checklist reminders
 
 - **"Off."** Families are emailed 14 days and 3 days before a required payment or checklist item is due only while
