@@ -10,8 +10,8 @@
 // set up. Nothing of it is shown. What a buy-out bills stays QuickBooks', and this is the one place a parent's buy-out
 // reads it: the family's own linked customer (customerOfFamily()), or the student's own (customerOfStudent()), in the
 // records' company, and a student only while the roster cache holds their customer active and directly under the
-// family's (billing follows QuickBooks' tree until QuickBooks takes a move: open question 14). With no link there is
-// no offer. It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
+// family's (billing follows QuickBooks' tree until QuickBooks takes a move: open question 14). With no link, or while
+// the membership shape doesn't hold (shapeHolds()), there is no offer. It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
 import { createHmac } from "node:crypto";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
@@ -29,6 +29,7 @@ import { loadFacts, toRequirement } from "@/lib/seasons/recorded";
 import { loadCovers } from "@/lib/seasons/season-rows";
 import { confirmedAmounts } from "@/lib/volunteer/credit";
 import { getRosterSource } from "@/lib/roster/source";
+import { shapeHolds } from "@/lib/roster/shape";
 import { guardianMay, LIVE_STATES, quoteBuyout, buyoutOffered, type Quote } from "./rules";
 import { buyoutFacts } from "./standing";
 
@@ -43,7 +44,7 @@ export type MyBuyout = {
   standing: string; met: boolean;
   /** What a buy-out would cost now, worked out on the server; and its stamp, which the confirm sends back. */
   quote: Quote; stamp: string | null;
-  /** Which family, requirement and subject the page shows (subjectStamp()), which the switch-back sends back. */
+  /** Which family, requirement and subject the page shows (subjectStamp()), which the confirm and the switch-back send back. */
   subjectStamp: string;
   /** The buy-out that stands, if one does: its price as it was fixed. */
   buyout: { state: BuyoutState; units: number; unitCents: number; amountCents: number; invoicePaid: boolean;
@@ -66,20 +67,21 @@ export const isChoiceKey = (v: unknown): v is string => typeof v === "string" &&
  * The quote's stamp: which family, requirement, subject, customer billed, item and price the guardian was shown, sealed
  * with the server's key so nothing in it can be read or made in the browser. The confirm works the quote out again and
  * refuses when it differs. It seals the app's own ids of the session's family and of the subject (the family itself,
- * or the student), so a key that has come to name another student since the page was shown fails it, and so does a
- * stamp made before the session carried the app's family (it sealed QuickBooks ids): either is answered with the
- * price-changed words, never with an invoice for the wrong student. The switch-back has a stamp of its own
- * (subjectStamp()), since it has no quote.
+ * or the student), so it never bills the wrong student; a quote stamp made the old way (it sealed QuickBooks ids)
+ * fails it and is answered with the price-changed words, though a page drawn before the subject's stamp sends one
+ * argument fewer and is answered with the reload words before any stamp is compared. Which subject the page showed is the
+ * subject stamp's to say (subjectStamp()), and the confirm checks that first: a key that has come to name another
+ * student is answered with the reload words, so the quote's stamp speaks only for the price.
  */
 export const quoteStamp = (familyId: AppFamilyId, requirementId: string, subject: SubjectId, customerQboId: string, itemQboId: string, q: Quote): string | null =>
   q.ok ? createHmac("sha256", env.BETTER_AUTH_SECRET)
     .update(`buyout-quote-app:${String(familyId)}|${requirementId}|${String(subject)}|${customerQboId}|${itemQboId}|${q.unitCents}|${q.units}|${q.amountCents}`).digest("base64url").slice(0, 22) : null;
 
 /**
- * The switch-back's stamp: which family, requirement and subject (the family itself, or the student, by the app's ids)
- * the page showed the buy-out of, sealed with the server's key. A key that has come to name another student since the
- * page was drawn (one joined, left or was renamed, and the order moved) fails it, and nothing is switched back, so a
- * stale page never voids a sibling's invoice. It holds no price: a buy-out's price is fixed once it is chosen.
+ * The subject's stamp, which the confirm and the switch-back both send back: which family, requirement and subject
+ * (the family itself, or the student, by the app's ids) the page showed, sealed with the server's key. A key that has
+ * come to name another student since the page was drawn (one joined, left or was renamed, and the order moved) fails
+ * it, and nothing is set up or switched back, so a stale page never bills or voids for a sibling. It holds no price.
  */
 export const subjectStamp = (familyId: AppFamilyId, requirementId: string, subject: SubjectId): string =>
   createHmac("sha256", env.BETTER_AUTH_SECRET).update(`buyout-subject-app:${String(familyId)}|${requirementId}|${String(subject)}`).digest("base64url").slice(0, 22);
@@ -90,11 +92,13 @@ type Subject = { key: string; qboId: string; record: SubjectId; studentId: AppSt
 /**
  * Who would be billed for each of the family's subjects, from QuickBooks' side and nowhere else: the family's own
  * linked customer, and each student's own linked customer that the roster cache holds active and directly under it.
- * Null with no family link (no offer at all); a student missing from `students` is not billable.
+ * Null with no family link, and while the membership shape can't say whose customers are the family's (none, or one
+ * naming a customer type QuickBooks no longer has: shapeHolds(), money's rule too): no offer at all. A student missing
+ * from `students` is not billable.
  */
 async function billedCustomers(records: SessionFamily): Promise<{ family: string; students: Map<string, string> } | null> {
-  const family = await customerOfFamily(records.familyId);
-  if (family === null) return null;
+  const [family, holds] = await Promise.all([customerOfFamily(records.familyId), shapeHolds()]);
+  if (family === null || !holds) return null;
   const students = new Map<string, string>();
   if (records.students.length === 0) return { family, students };
   const links = await linksOf({ families: [], students: records.students.map((s) => s.id) });
@@ -113,8 +117,8 @@ async function billedCustomers(records: SessionFamily): Promise<{ family: string
  * Who in the family a requirement asks, each with its key: the family once, or each of its students it covers. A
  * student's key is its place among the family's active students as sessionFamily() lists them (by name, then the app's
  * id); one with no customer to bill is asked nothing, and keeps its place. A key that comes to name another student
- * (one joined or left the family, or a rename moved the order) fails the quote's stamp and the switch-back's
- * (subjectStamp()), which both seal the student's own record.
+ * (one joined or left the family, or a rename moved the order) fails the subject's stamp (subjectStamp()), which the
+ * confirm and the switch-back check first, and the quote's, which both seal the student's own record.
  */
 function subjectsOf(r: Requirement, records: SessionFamily, billed: { family: string; students: Map<string, string> }): Subject[] {
   if (r.appliesTo === "family") {

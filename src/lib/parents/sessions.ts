@@ -68,11 +68,6 @@ export async function endFamilySessions(parentId: string, familyQboId: string, t
   return Array.from(rows as ArrayLike<{ id: string }>).length;
 }
 
-export async function enabledGuardianRows(parentId: string, tx?: Tx): Promise<GuardianRow[]> {
-  return (tx ?? db).select().from(guardian)
-    .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"))).orderBy(guardian.familyQboId);
-}
-
 /** An open guardian row whose family the person may enter: it names an app family record, and that record is active. */
 export type EnterableRow = GuardianRow & { familyId: AppFamilyId };
 
@@ -83,8 +78,9 @@ export type EnterableRow = GuardianRow & { familyId: AppFamilyId };
  * not a family the person can enter: the chooser doesn't offer it, a session that chose it is sent back to choose, and
  * a person with no row that counts is refused as one with no open row (src/lib/auth/resolve.ts): sent no code and
  * refused at the code check (signin-codes.ts, `no_enabled_guardian`) and at the sign-in's end (completeParentSignin()).
- * In the chooser's order, the order enabledGuardianRows() gives. The welcome email and endFamilySessions() keep going
- * by every open row.
+ * In the chooser's order, by `family_qbo_id`. Nothing else asks this: the welcome email counts every open row with a
+ * query of its own (welcome.ts), and closing a membership ends the sessions that chose its family by the session's
+ * stored family (endFamilySessions()), and every session once no open row is left (membership.ts).
  */
 export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<EnterableRow[]> {
   const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))

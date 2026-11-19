@@ -230,7 +230,7 @@ describe("after a close, the family can choose again", () => {
     expect(staffPage).toContain("0 of 2 shifts done");
 
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", after.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.done("$100.00") });
+    expect(await confirmBuyoutAction(req, "family", after.subjectStamp, after.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.done("$100.00") });
     const rows = await buyoutsOf(FAMILY);
     expect(rows.map((r) => r.state)).toEqual(["voided", "invoiced"]);
     expect(stub.invoices).toHaveLength(1);

@@ -5,6 +5,7 @@ import { findMyBuyout } from "@/lib/buyouts/my-buyouts";
 import { BUYOUT_WORDS, perUnitWords, unitsWords } from "@/lib/buyouts/rules";
 import { formatMoney } from "@/lib/money/cents";
 import { loadMyFamily } from "@/lib/parents/my-family";
+import { shapeHolds } from "@/lib/roster/shape";
 import { getClubSettings } from "@/lib/settings/club";
 import { NotSetUpBox } from "../../../../family-boxes";
 import { confirmBuyoutAction, switchBackAction } from "../../actions";
@@ -23,8 +24,10 @@ export const dynamic = "force-dynamic";
 export default async function PayInsteadPage({ params }: { params: Promise<{ requirementId: string; choice: string }> }) {
   const { requirementId, choice } = await params;
   const ctx = await requireParentPage(`/volunteer/pay-instead/${encodeURIComponent(requirementId)}/${encodeURIComponent(choice)}`);
-  const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
-  if (!family) {
+  // While the membership shape can't say whose customers are the family's, nothing can be billed: the page says the
+  // family isn't set up, as it did when loadMyFamily() went by the shape (shapeHolds(), the buy-out's and money's rule).
+  const [family, club, holds] = await Promise.all([loadMyFamily(ctx), getClubSettings(), shapeHolds()]);
+  if (!family || !holds) {
     return <main className="wrap single"><h1 className="page-title">Pay instead of volunteering</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
   const found = await findMyBuyout(ctx, requirementId, choice);
@@ -72,7 +75,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
             <li>The amount is fixed now: volunteering later doesn&apos;t lower it.</li>
             <li>You can switch back to volunteering until it&apos;s paid, and the invoice is then cancelled.</li>
           </ul>
-          <ConfirmBuyout label={`Confirm: invoice me ${formatMoney(v.quote.amountCents)}`} act={confirmBuyoutAction.bind(null, v.requirementId, v.key, v.stamp)} />
+          <ConfirmBuyout label={`Confirm: invoice me ${formatMoney(v.quote.amountCents)}`} act={confirmBuyoutAction.bind(null, v.requirementId, v.key, v.subjectStamp, v.stamp)} />
         </section>
       ) : (
         <section className="box" aria-labelledby="cost-h"><h2 id="cost-h">Nothing to pay</h2>

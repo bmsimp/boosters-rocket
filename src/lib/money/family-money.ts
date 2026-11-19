@@ -8,14 +8,14 @@
 // (tests/integration/page-guards.test.ts).
 import { eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, qboConnection, qboCustomer, qboCustomerType, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
+import { familyMoney, qboConnection, qboCustomer, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { customerOfFamily, familyLinkState } from "@/lib/families/links";
 import { activeFamilyOf } from "@/lib/families/session-family";
 import { isQboId, qboCustomerById, qboInvoices, type QboGetOptions } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
-import { getShape, missingTypes } from "@/lib/roster/shape";
+import { shapeHolds } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { clubToday } from "@/lib/settings/club";
 import { currencyOf, toCents } from "./cents";
@@ -312,17 +312,6 @@ export async function loadFamilyMoney(familyId: AppFamilyId, o: { timeoutMs?: nu
   const shown = await figuresToShow(familyId, o);
   // The club's day as the page is drawn, after any wait for QuickBooks.
   return { ...shown, today: await clubToday() };
-}
-
-/**
- * Whether the membership shape can be trusted to say whose invoices are a family's: not when there is none, nor when
- * it names a customer type QuickBooks no longer has (the staff roster shows nothing then either). Before stage 3's
- * fourth slice a page asked loadMyFamily() first, which went by the same rule; the family is the app's own record now,
- * so money keeps it here, and with no shape nothing is read and no failed try is stamped.
- */
-async function shapeHolds(): Promise<boolean> {
-  const [shape, types] = await Promise.all([getShape(), db.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType)]);
-  return shape !== null && missingTypes(shape, types).length === 0;
 }
 
 async function figuresToShow(familyId: AppFamilyId, o: { timeoutMs?: number }): Promise<Omit<FamilyMoney, "today">> {
