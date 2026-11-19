@@ -1,23 +1,20 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
-import { setSessionCookie } from "better-auth/cookies";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { parentAuthUser } from "@/lib/db/schema";
 import { clientIpFrom } from "@/lib/request";
-import { requestSigninCode, signinStands, verifySigninCode } from "@/lib/parents/signin-codes";
-import { completeParentSignin } from "@/lib/parents/family-choice";
-import { PARENT_SESSION_COOKIE_SECONDS } from "@/lib/parents/sessions";
-import { MAX_RETURN_PATH, landingPath, withReturnPath } from "./return-path";
+import { requestSigninCode, verifySigninCode } from "@/lib/parents/signin-codes";
+import { MAX_RETURN_PATH } from "./return-path";
+import { finishParentSignin } from "./parent-signin-finish";
 
 type Ctx = { headers?: Headers; request?: Request };
 const ipOf = (ctx: Ctx) => { const h = ctx.headers ?? ctx.request?.headers; return h ? clientIpFrom(h) : null; };
 
 /**
  * The portal's email-code door (spec §1). Codes, tries and limits are portal code (src/lib/parents/signin-codes.ts);
- * Better Auth only makes the session and its cookie. Better Auth's own sign-up is never reachable: the only way in is
- * a code for an existing person, whose auth user the portal made with them.
+ * Better Auth only makes the session and its cookie, in the one finish every sign-in goes through (finishParentSignin(),
+ * parent-signin-finish.ts), which only this plugin's endpoints call. Better Auth's own sign-up is never reachable: the
+ * only ways in are a code, or a set-up link's new password, for an existing person, whose auth user the portal made
+ * with them.
  */
 export const parentCodePlugin = () => ({
   id: "booster-parent-code",
@@ -36,22 +33,9 @@ export const parentCodePlugin = () => ({
       const ip = ipOf(ctx);
       const r = await verifySigninCode(ctx.body.email, ctx.body.code, ip);
       if (!r.ok) return ctx.json({ ok: false, error: r.reason });
-      const [u] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, r.parentId));
-      const user = u ? await ctx.context.internalAdapter.findUserById(u.id) : null;
-      if (!user) return ctx.json({ ok: false, error: "rejected" });
-      // The session is stored before the last check and before anything is audited as a sign-in, so an address change,
-      // a block or a password reset that lands at this moment cannot leave a session behind (signinStands, which reads
-      // the code this sign-in spent again: a reset deletes it).
-      const session = await ctx.context.internalAdapter.createSession(user.id, false, { familyId: null });
-      if (!(await signinStands(r.parentId, ctx.body.email, ip, r.codeId))) {
-        await ctx.context.internalAdapter.deleteSession(session.token);
-        return ctx.json({ ok: false, error: "rejected" });
-      }
-      const { familyId, sessionEnded } = await completeParentSignin(r.parentId, ip, session.id);
-      if (sessionEnded) return ctx.json({ ok: false, error: "rejected" });   // ended while it was being made: no cookie for it
-      // The cookie is sent this once and has to outlive the session row, which use renews (sessions.ts).
-      await setSessionCookie(ctx, { session, user }, false, { maxAge: PARENT_SESSION_COOKIE_SECONDS });
-      return ctx.json({ ok: true, next: familyId ? landingPath(ctx.body.next) : withReturnPath("/choose-family", ctx.body.next) });
+      // Everything after the code is checked is the one finish every sign-in goes through (parent-signin-finish.ts).
+      const done = await finishParentSignin(ctx, { parentId: r.parentId, email: ctx.body.email, proof: { codeId: r.codeId }, ip, next: ctx.body.next });
+      return ctx.json(done.ok ? { ok: true, next: done.next } : { ok: false, error: "rejected" });
     }),
   },
 }) satisfies BetterAuthPlugin;
