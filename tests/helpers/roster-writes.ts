@@ -70,7 +70,7 @@ export const asOp = (staff: { id: string; email: string }) => ({ actor: { door: 
  * that kind (familyRecord(), studentRecord()), as the writer stores it. An item of a company other than the roster's
  * names no record, as migration 0034 leaves one.
  */
-export async function seedQueued(w: RosterWrite, o: { sent?: boolean; state?: "waiting" | "stuck" | "done" | "given_up"; tries?: number; createdAt?: Date; lastTriedAt?: Date;
+export async function seedQueued(w: RosterWrite, o: { sent?: boolean; state?: "waiting" | "stuck" | "done" | "given_up" | "refused"; tries?: number; createdAt?: Date; lastTriedAt?: Date;
   nextTryAt?: Date | null; familyQboId?: string | null; code?: string; finishedAt?: Date | null; realmId?: string; familyId?: AppFamilyId } = {}) {
   const now = new Date();
   const realmId = o.realmId ?? REALM;

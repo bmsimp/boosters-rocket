@@ -17,8 +17,8 @@ import { NOT_HERE } from "@/lib/roster/operations";
 import { MAKING_LOCK } from "@/lib/roster/writes";
 import { TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
 import { addGuardianAction, reinstateGuardianAction, removeGuardianAction } from "@/app/staff/(app)/parents/actions";
-import { addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction, renameAction,
-  renameHereAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
+import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction,
+  renameHereAction, renameLinkedAction, renameParentAction, sendPortalValueAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
@@ -39,13 +39,16 @@ const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const idOf = async (customer: string) => String(await recordOfCustomer(customer, "family"));
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" };
+const SOME_UUID = "00000000-0000-4000-8000-000000000000";
 /** The Rivera family's list as its page binds it: the family, Ana and Leo, each at the version the stub's company starts at. */
 const RIVERA_SHOWN: [string, string][] = [["10", "0"], ["11", "0"], ["12", "0"]];
 const everyAction = (tag: string, itemId: string) => [
   () => createAction(tag, "family", "Patel Family"),
-  () => addToFamilyAction(tag, "student", "10", "Rosa Rivera"),
+  () => addStudentAction(tag, SOME_UUID, "Rosa Rivera"),
   () => addToFamilyAction(tag, "parent", "10", "Luis Rivera", "luis@example.com"),
-  () => renameAction(tag, "12", "0", "Leon Rivera"),
+  () => renameLinkedAction(tag, "student", SOME_UUID, "Leon Rivera"),
+  () => renameParentAction(tag, "21", "0", "Mei L. Chen"),
+  () => sendPortalValueAction(itemId, "", "stamp"),
   () => moveAction(tag, "12", "0", "20"),
   () => deactivateAction(tag, "12", "0"),
   () => familyInactiveAction(tag, "10", RIVERA_SHOWN),
@@ -87,11 +90,18 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
       () => createAction("", "family", "Rosa"),
       () => createAction(tag, "family", { toString: () => "Rosa" } as unknown as string),
       () => createAction(tag, "family", "x".repeat(5000)),
-      () => addToFamilyAction(tag, "student", "10", "Rosa", "rosa@example.com"),
-      () => addToFamilyAction(tag, "parent", "10", "Luis", null),
-      () => addToFamilyAction(tag, "family" as "student", "10", "Rosa"),
-      () => renameAction(tag, "12", "zero", "Leon"),
-      () => renameAction(tag, "x".repeat(65), "0", "Leon"),
+      // A student is no longer added by customer, and the parent's form takes an address.
+      () => addToFamilyAction(tag, "student" as "parent", "10", "Rosa", "rosa@example.com"),
+      () => addToFamilyAction(tag, "parent", "10", "Luis", null as unknown as string),
+      () => addStudentAction(tag, "10", "Rosa"),
+      () => addStudentAction(tag, SOME_UUID, 7 as unknown as string),
+      // A linked record's rename names it by its kind and app id, and sends no version.
+      () => renameLinkedAction(tag, "student", "12", "Leon"),
+      () => renameLinkedAction(tag, "parent" as "student", SOME_UUID, "Leon"),
+      () => renameParentAction(tag, "21", "zero", "Mei"),
+      () => renameParentAction(tag, "x".repeat(65), "0", "Mei"),
+      () => sendPortalValueAction("not-a-uuid", "", "stamp"),
+      () => sendPortalValueAction(SOME_UUID, 7 as unknown as string, "stamp"),
       () => moveAction(tag, "12", "0", 20 as unknown as string),
       () => deactivateAction(tag, ["12"] as unknown as string, "0"),
       () => familyInactiveAction(tag, "10", []),
@@ -109,13 +119,14 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
 
   it("send a change and show it everywhere: the pages are made again", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    expect(await renameAction(tag, "12", "0", "Leon Rivera")).toEqual({ ok: true, message: "Renamed in QuickBooks." });
+    const leo = String(await recordOfCustomer("12", "student"));
+    expect(await renameLinkedAction(tag, "student", leo, "Leon Rivera")).toEqual({ ok: true, message: "Renamed Leon Rivera in the portal and in QuickBooks." });
     expect(revalidatedPaths()).toContain("/");
     const [row] = await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, "12"));
     expect(row!.displayName).toBe("Leon Rivera");
-    // A refusal changes nothing, and nothing is made again.
+    // A refusal before anything is saved changes nothing, and nothing is made again.
     const before = revalidatedPaths().length;
-    expect(await renameAction(tag, "12", "1", "Ana Rivera")).toMatchObject({ ok: false, offer: "Ana Rivera (2)" });
+    expect(await renameLinkedAction(tag, "student", leo, "Ana Rivera")).toMatchObject({ ok: false, offer: "Ana Rivera (2)" });
     expect(revalidatedPaths().length).toBe(before);
   });
 });

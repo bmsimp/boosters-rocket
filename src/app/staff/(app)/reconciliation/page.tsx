@@ -10,7 +10,8 @@ import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
-import { giveUpAction, linkMadeStudentAction, tryAgainAction } from "../roster/write-actions";
+import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
+import { keptRefusalWords, portalValueStamp } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
@@ -66,6 +67,33 @@ function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; ca
 }
 
 /**
+ * The changes saved in the portal first that QuickBooks refused (stage 3's slice 9e), a row each: what, why in words
+ * (never a code), what QuickBooks has now for a rename (the roster cache's name), who asked and when, the family's page,
+ * and, for staff who may change families, "Send the portal's value" (bound to what the row showed, sealed so a value the
+ * form sends back that isn't it is refused) and "Give up". A refused change is never tried again by itself.
+ */
+function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean }) {
+  const columns: Column<QueueView>[] = [
+    { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span></> },
+    { key: "why", header: "Why QuickBooks refused it", cell: (i) => keptRefusalWords(i.lastCode, i.holds) },
+    { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
+    { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
+    ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
+      const shown = i.holds ?? "";
+      return (
+        <div className="row-actions">
+          <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, shown, portalValueStamp(i.id, shown))} />
+          <details className="more"><summary>Give up</summary>
+            <p className="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>
+            <TextAction field="Why? (kept in the audit log)" label="Give up" pendingLabel="Giving up…" maxLength={500} multiline act={giveUpAction.bind(null, i.id)} />
+          </details>
+        </div>);
+    } }] : []),
+  ];
+  return <DataTable caption="Changes QuickBooks refused, kept in the portal" captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
+}
+
+/**
  * The creates staff gave up here that QuickBooks made all the same (stage 3's slice 9d, the lead's decision): a given-up
  * change stays given up, so nothing in the portal is linked to the customer QuickBooks made, and no second one is made
  * for the record. A family's or member's is brought in from Customers with no family; a student's sits under its
@@ -112,7 +140,7 @@ export default async function ReconciliationPage() {
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
-  const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting");
+  const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting"), refused = writes.filter((w) => w.state === "refused");
   // The customers with a family page (the roster's families, or members in flat books), each by its family record, found
   // through the family kind of link in one lookup for the list: a customer with none links nowhere.
   const withPage = !roster.roster ? [] : roster.roster.kind === "flat" ? roster.roster.members.map((m) => m.qboId) : roster.roster.families.map((f) => f.customer.qboId);
@@ -128,7 +156,9 @@ export default async function ReconciliationPage() {
             <p>QuickBooks couldn&apos;t take these when they were asked for. The worker tries a waiting change again, at longer and longer gaps;
               one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
               One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
-              A stuck change waits for you: try it again, or give it up and make it in QuickBooks.</p>
+              A stuck change waits for you: try it again, or give it up and make it in QuickBooks.
+              A change saved in the portal first that QuickBooks refused is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.</p>
+            {refused.length > 0 && <><h3 className="table-head">Refused by QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
           </>

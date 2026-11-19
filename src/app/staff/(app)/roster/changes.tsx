@@ -3,18 +3,21 @@ import type { MembershipShape } from "@/lib/roster/shape";
 import type { Cust, Family } from "@/lib/roster/model";
 import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/operations";
 import { waitingWords, type QueueView } from "@/lib/roster/queue";
+import { keptRefusalWords } from "@/lib/roster/writes";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { DataTable } from "@/app/components/data-table";
 import type { Covered } from "@/lib/roster/writes";
 import { CreateAndLinkForm, DeactivateForm, FamilyInactiveForm, MemberForm, MoveForm, NameForm, ParentForm } from "./write-forms";
-import { addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, moveAction, renameAction,
-  renameHereAction } from "./write-actions";
+import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, moveAction,
+  renameHereAction, renameLinkedAction, renameParentAction } from "./write-actions";
 
 /**
  * The roster's changes in QuickBooks, for staff who hold Roster.Family.ReadWrite with Roster.Read. Every form's action
- * has the page's roster tag, the record's id and the version the page was shown bound in; names are QuickBooks text,
- * shown as text only.
+ * has the page's roster tag and the record's id bound in: a rename of a linked family, member or student, and a new
+ * student, the app's id (saved in the portal first, stage 3's slice 9e, and sent with the link's own version); a move,
+ * a make-inactive and a parent's changes, the customer's id and the version the page was shown. Names are QuickBooks
+ * text, or the portal's own, shown as text only.
  */
 
 /** What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts). */
@@ -28,8 +31,8 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
   const list = can.length > 1 ? `${can.slice(0, -1).join(", ")} and ${can.at(-1)}` : can[0] ?? "";
   return (
     <section className="box" aria-labelledby="changes-h"><h2 id="changes-h">Changing the roster</h2>
-      <p>{canChange ? <>From the portal you can {list}. A change to a family linked to QuickBooks is sent to QuickBooks first, and the roster shows it once QuickBooks has it.</>
-        : <>Staff who may change the roster can {list} from the portal. A change to a family linked to QuickBooks is sent to QuickBooks first.</>}</p>
+      <p>{canChange ? <>From the portal you can {list}. For a family linked to QuickBooks, a rename or a new student is saved in the portal first and then sent to QuickBooks; if QuickBooks refuses it, the portal keeps it and the Reconciliation page lists it. A move, or making someone inactive, is sent to QuickBooks first, and the roster shows it once QuickBooks has it.</>
+        : <>Staff who may change the roster can {list} from the portal. For a family linked to QuickBooks, a rename or a new student is saved in the portal first; a move, or making someone inactive, is sent to QuickBooks first.</>}</p>
       <p>{unlinked ? "This family has no customer in QuickBooks: a change to it is saved in the portal only."
         : "A new family is saved in the portal first, and made in QuickBooks too when the staff member who adds it may link families to accounting. A family with no customer in QuickBooks is changed in the portal only."}</p>
       {notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
@@ -38,18 +41,36 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
   );
 }
 
-/** The writes waiting or stuck for this family or member: shown to everyone who can see the page. */
+/**
+ * The writes waiting or stuck for this family or member, and the changes saved in the portal first that QuickBooks
+ * refused (stage 3's slice 9e), each under its own heading: shown to everyone who can see the page, with no buttons (the
+ * Reconciliation page has them). A refused change blocks nothing here.
+ */
 export function Waiting({ items }: { items: QueueView[] }) {
-  if (!items.length) return null;
+  const open = items.filter((i) => i.state !== "refused"), refused = items.filter((i) => i.state === "refused");
   return (
-    <section className="box" aria-labelledby="waiting-h"><h2 id="waiting-h">Waiting to reach QuickBooks</h2>
-      <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>.</p>
-      <DataTable caption="Each change, and where it stands" captionHidden rows={items} rowKey={(i) => i.id} columns={[
-        { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
-        { key: "state", header: "Where it stands", cell: (i) => waitingWords(i) },
-        { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
-      ]} />
-    </section>
+    <>
+      {open.length > 0 && (
+        <section className="box" aria-labelledby="waiting-h"><h2 id="waiting-h">Waiting to reach QuickBooks</h2>
+          <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>.</p>
+          <DataTable caption="Each change, and where it stands" captionHidden rows={open} rowKey={(i) => i.id} columns={[
+            { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
+            { key: "state", header: "Where it stands", cell: (i) => waitingWords(i) },
+            { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
+          ]} />
+        </section>
+      )}
+      {refused.length > 0 && (
+        <section className="box" aria-labelledby="refused-h"><h2 id="refused-h">Kept in the portal, refused by QuickBooks</h2>
+          <p>These changes are saved in the portal, but QuickBooks refused them, so QuickBooks still has something else. They don&apos;t stop other changes. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
+          <DataTable caption="Each change QuickBooks refused, and why" captionHidden rows={refused} rowKey={(i) => i.id} columns={[
+            { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
+            { key: "why", header: "Why", cell: (i) => keptRefusalWords(i.lastCode, i.holds) },
+            { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
+          ]} />
+        </section>
+      )}
+    </>
   );
 }
 
@@ -150,7 +171,14 @@ export function CreateInQuickBooks({ familyId, name, noun, unlinked, students, t
   );
 }
 
-type Edit = { rosterTag: string; versions: Map<string, string>; blocked: Set<string> };
+/**
+ * What the forms of a family's page are given: the roster tag, each customer's version (for a move, a make-inactive and
+ * a parent's rename), the customers a change waits for, the family record's app id (for a new student), and each linked
+ * record by its customer (`records`: the family's or member's own, and each student's), whose rename is saved in the
+ * portal first and starts from the portal's own name.
+ */
+export type Edit = { rosterTag: string; versions: Map<string, string>; blocked: Set<string>; familyId: string;
+  records: Map<string, { kind: "family" | "student"; id: string; name: string }> };
 
 /**
  * Rename and make inactive, for one record: offered only when the shape allows it and nothing is waiting for it. Making
@@ -162,10 +190,14 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra, follo
 }) {
   const version = edit.versions.get(c.qboId);
   if (version === undefined) return null;
+  // A linked family, member or student: its rename is saved in the portal first (stage 3's slice 9e); a parent's goes to QuickBooks first.
+  const record = edit.records.get(c.qboId);
   if (edit.blocked.has(c.qboId)) return <Notice tone="info" live="none">A change to {c.displayName} is waiting to reach QuickBooks, so nothing else can be changed for now.</Notice>;
   return (
     <details className="more"><summary>Change {who} {c.displayName}</summary>
-      {rename && <NameForm field="New name" label="Rename" pendingLabel="Renaming in QuickBooks…" initial={c.displayName} act={renameAction.bind(null, edit.rosterTag, c.qboId, version)} />}
+      {rename && (record ? <NameForm field="New name" label="Rename" pendingLabel="Saving in the portal, then sending to QuickBooks…" initial={record.name}
+        act={renameLinkedAction.bind(null, edit.rosterTag, record.kind, record.id)} />
+        : <NameForm field="New name" label="Rename" pendingLabel="Renaming in QuickBooks…" initial={c.displayName} act={renameParentAction.bind(null, edit.rosterTag, c.qboId, version)} />)}
       {extra}
       {deactivate && c.active && <DeactivateForm label={`Make ${c.displayName} inactive`} warning={warning} act={deactivateAction.bind(null, edit.rosterTag, c.qboId, version)} />}
       {deactivate && !c.active && follow && <DeactivateForm label={`Make ${c.displayName} inactive in the portal`}
@@ -217,7 +249,8 @@ export function FamilyChanges({ shape, family, families, edit, cover, inactiveRe
         extra={offered.has("deactivate_family") && cover ? <FamilyInactive family={f} cover={cover} edit={edit} /> : null} />
       {f.active && offered.has("add_student") && (
         <details className="more"><summary>Add a student</summary>
-          <NameForm field="The student's name, as QuickBooks will show it" label="Add the student" pendingLabel="Adding in QuickBooks…" act={addToFamilyAction.bind(null, edit.rosterTag, "student", f.qboId)} />
+          <p className="hint">The student is saved in the portal first, then made in QuickBooks under the family. If QuickBooks refuses, they stay in the portal and the Reconciliation page says why.</p>
+          <NameForm field="The student's name, as QuickBooks will show it" label="Add the student" pendingLabel="Saving in the portal, then making them in QuickBooks…" act={addStudentAction.bind(null, edit.rosterTag, edit.familyId)} />
         </details>
       )}
       {f.active && offered.has("add_parent") && (

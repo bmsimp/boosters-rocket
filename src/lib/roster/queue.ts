@@ -12,7 +12,8 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { afterStudentMoved, applyWritten, changeOwnRecord, madeAfterGivingUp, owedBy, REFRESH_ASK_KEY, sendWrite, type MadeAfterGivingUp, type OwnRecordChange } from "./writes";
+import { afterStudentMoved, alignAfterWrite, applyWritten, changeOwnRecord, madeAfterGivingUp, owedBy, REFRESH_ASK_KEY, sendWrite, tryRename, type MadeAfterGivingUp,
+  type OwnRecordChange } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
@@ -59,10 +60,12 @@ const short = (code: string) => code.slice(0, 40);
  * `triedAt` is when this try sent the write (or looked for it): a refresh that started before it may not show it.
  * `resultQboId`: the customer a create was found made as, kept so that it is never sent again (tryItem()).
  */
-async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string; sent: boolean; nextTryAt?: Date; resultQboId?: string }, triedAt: Date): Promise<Step> {
+async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string; sent: boolean; nextTryAt?: Date; resultQboId?: string; request?: RosterWrite }, triedAt: Date): Promise<Step> {
   await db.transaction(async (tx) => {
+    // `request`: what this try sent, when it may have been made with another version than the item's (a rename resent
+    // after a live read, stage 3's slice 9e), so a later look finds it as sent.
     const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), sent: to.sent, tries: item.tries + 1, lastTriedAt: triedAt,
-      nextTryAt: to.state === "waiting" ? to.nextTryAt! : null, ...(to.resultQboId ? { resultQboId: to.resultQboId } : {}), updatedAt: new Date() })
+      nextTryAt: to.state === "waiting" ? to.nextTryAt! : null, ...(to.resultQboId ? { resultQboId: to.resultQboId } : {}), ...(to.request ? { request: to.request } : {}), updatedAt: new Date() })
       .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: WORKER_ACTOR, action: to.state === "stuck" ? "roster.write.stuck" : "roster.write.retry", targetType: "write_queue", targetId: item.id,
@@ -70,6 +73,29 @@ async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string
   });
   return to.state;
 }
+
+/**
+ * A change saved in the portal first that QuickBooks refused on a later try (stage 3's slice 9e: a rename of a linked
+ * record, or a student's create filed under the student record): kept as `refused`, never tried again, audited, only
+ * while it is still waiting. The portal's own value stays.
+ */
+async function refuseItem(item: Item, code: string, sent: boolean, triedAt: Date): Promise<Step> {
+  await db.transaction(async (tx) => {
+    const [still] = await tx.update(writeQueue).set({ state: "refused", lastCode: short(code), sent, tries: item.tries + 1, lastTriedAt: triedAt, nextTryAt: null, updatedAt: new Date() })
+      .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
+    if (!still) return;
+    await writeAudit({ actor: WORKER_ACTOR, action: "roster.write.kept_refused", targetType: "write_queue", targetId: item.id,
+      before: { state: item.state, tries: item.tries, code: item.lastCode }, after: { state: "refused", tries: item.tries + 1, code: short(code), sent } }, tx);
+  });
+  return "stuck";
+}
+
+/**
+ * Whether an item is a change saved in the portal first (stage 3's slice 9e), whose refusals are kept as `refused`: a
+ * rename of a family, member or student (a parent's keeps its page's version and today's rules), or a student's
+ * create filed under the student record.
+ */
+const savedFirst = (item: Item, w: RosterWrite) => (w.op === "rename" && w.role !== "parent") || (w.op === "create" && w.role === "student" && item.studentId !== null);
 
 /** Marks an item done, audited, in the transaction given (or one of its own), with the app record a found change made or changed: only while it is still waiting (settle()). */
 async function markDone(item: Item, how: "sent" | "found", resultQboId: string | null, tries: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -107,6 +133,9 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     const cache = await db.select().from(qboCustomer);
     const seen = beforeResend(w, cache);
     if (seen.is === "done") return finishFound(item, w, seen.qboId, now);
+    // A rename saved first whose record moved on is settled by the field, not the version (the lead's decision 3): read
+    // live and compared with the item's before-value, it is kept refused when the name changed, sent once otherwise.
+    if (seen.is === "stuck" && seen.code === "moved_on" && w.op === "rename" && savedFirst(item, w)) return tryRenameItem(item, w, now, "moved_on", cache);
     if (seen.is === "stuck") return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
     // A create QuickBooks answered with a customer, or one a read found made (`result_qbo_id`, kept when it was held or
     // its finish failed), that isn't there as sent now: QuickBooks made something, so it is never sent again, whatever
@@ -125,6 +154,7 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     if (owed.cents > 0) return settle(item, { state: "stuck", code: "open_balance", sent: item.sent }, now);
     if (!owed.active) return finishFound(item, w, w.qboId, now);
   }
+  if (w.op === "rename" && savedFirst(item, w)) return tryRenameItem(item, w, now, null, null);
   let answer: Record<string, unknown>;
   // The time of the send itself, not the wake's: the check before a later resend needs a refresh that began after it.
   const triedAt = new Date();
@@ -142,6 +172,8 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
   } catch (e) {
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
+    // A student's create saved first that QuickBooks refuses is kept as refused: the student stays, unlinked.
+    if ((failure.kind === "refused" || failure.kind === "duplicate") && savedFirst(item, w)) return refuseItem(item, e.code, item.sent, triedAt);
     // Once a try may have reached QuickBooks, the item stays `sent`: a later try that sent nothing (a 429, a token that
     // couldn't be had) or was refused says nothing about the earlier one, which may still have been made.
     if (failure.kind !== "retry") return settle(item, { state: "stuck", code: e.code, sent: item.sent }, triedAt);
@@ -152,6 +184,38 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     filed: { familyId: item.familyId, studentId: item.studentId },
     inside: (tx) => markDone(item, "sent", typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
   return cached ? "done" : "waiting";
+}
+
+/**
+ * One try of a queued rename saved in the portal first (tryRename(), ./writes.ts, the same rule as at once): sent with
+ * the version it was queued with; on a stale answer, or with no version, or (`readFirst`) when the cache shows the name
+ * other than the item's before-value or the record moved on, read live and compared with that before-value: kept
+ * refused when QuickBooks' name changed, sent once more with the version just read otherwise. A second stale answer
+ * waits as never sent; QuickBooks holding the name already is found done. Never more than one resend in a try.
+ */
+async function tryRenameItem(item: Item, w: Extract<RosterWrite, { op: "rename" }>, now: Date, readFirst: "moved_on" | null, cache: { qboId: string; displayName: string }[] | null): Promise<Step> {
+  const rows = cache ?? await db.select({ qboId: qboCustomer.qboId, displayName: qboCustomer.displayName }).from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
+  const cachedName = rows.find((c) => c.qboId === w.qboId)?.displayName;
+  const first = readFirst ?? (cachedName !== undefined && cachedName !== w.was ? "differs" : null);
+  const triedAt = new Date();
+  const t = await tryRename(w, item.realmId, { mayWait: true, readFirst: first, actor: WORKER_ACTOR, ip: null });
+  switch (t.is) {
+    case "answer": {
+      const { cached } = await applyWritten(t.write, t.answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id, linkedBy: item.askedBy,
+        filed: { familyId: item.familyId, studentId: item.studentId }, ...(t.resent ? { auditExtra: { resent: t.resent, fieldAsHeld: true } } : {}),
+        inside: (tx) => markDone(item, "sent", typeof t.answer.Id === "string" ? t.answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
+      return cached ? "done" : "waiting";
+    }
+    case "in_place": return finishFound(item, w, w.qboId, now);
+    case "changed": return refuseItem(item, t.code, item.sent, triedAt);
+    case "stale_again": return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "fault_5010", sent: false }, triedAt);
+    case "failed": {
+      const failure = classify(t.code);
+      if (failure.kind === "retry") return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: t.code, sent: item.sent || t.sent, ...(t.sent ? { request: t.write } : {}) }, triedAt);
+      if (failure.kind === "refused" || failure.kind === "duplicate" || failure.kind === "stale") return refuseItem(item, t.code, item.sent, triedAt);
+      return settle(item, { state: "stuck", code: t.code, sent: item.sent }, triedAt);
+    }
+  }
 }
 
 /**
@@ -198,7 +262,10 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Fou
         ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
           { actor: WORKER_ACTOR, ip: null }));
       }
-      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId, familyId: item.familyId });
+      // The link takes the version of the cache row it was found as, by the rule an answer's takes (its answer was lost).
+      const [row] = await tx.select({ syncToken: qboCustomer.syncToken }).from(qboCustomer).where(eq(qboCustomer.qboId, qboId));
+      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId, familyId: item.familyId, syncedToken: row?.syncToken ?? null });
+      await alignAfterWrite(tx, w, item.realmId, row?.syncToken ?? null);
     }
     await markDone(item, "found", qboId, item.tries, tx, appRecord);
     return "done";
@@ -274,7 +341,7 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
  * create queued before slice 9d) or that page can't stand (an inactive record with no link).
  */
 export type QueueView = {
-  id: string; state: "waiting" | "stuck"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
+  id: string; state: "waiting" | "stuck" | "refused"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null;
   /** The family record it is filed under, for the link to that family's page: null when it has none, or that record has no page (inactive, with no link). */
   familyId: AppFamilyId | null;
@@ -285,6 +352,8 @@ export type QueueView = {
    * (waitingWords()).
    */
   finishing: boolean;
+  /** For a refused rename: the name the roster cache holds for its customer, what QuickBooks has now (null: none, or not a rename). */
+  holds: string | null;
 };
 
 /** The codes of an item QuickBooks took that the portal still has to finish on its side (QueueView.finishing). */
@@ -292,6 +361,7 @@ const FINISHING_CODES = new Set(["cache_failed", "answer_other", "finish_failed"
 
 /** Where a waiting or stuck item stands, in words, for the Reconciliation page and a family's page. */
 export function waitingWords(i: Pick<QueueView, "state" | "finishing">): string {
+  if (i.state === "refused") return "Refused by QuickBooks: the portal keeps its own value";
   if (i.state === "stuck") return "Stuck: it needs someone to look at it";
   return i.finishing ? "Done in QuickBooks: the portal finishes it on its side after its next read of QuickBooks" : "Waiting to reach QuickBooks";
 }
@@ -315,7 +385,7 @@ export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { s
 }
 
 /**
- * Every waiting and stuck item, newest first; for one family (`familyId`, the app's family its staff page's address
+ * Every waiting, stuck and refused item (a change saved first that QuickBooks refused, stage 3's slice 9e), newest first; for one family (`familyId`, the app's family its staff page's address
  * names), only the items under or about it: an item filed under that record, one whose target is the family's
  * customer, or a move into it (what is sent names the family moved to by customer). The record's customer is found once
  * here, through its own link in the roster's company; with none, only the items filed under the record are found. Each
@@ -324,7 +394,7 @@ export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { s
  */
 export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: boolean } = {}): Promise<QueueView[]> {
   const customer = o.familyId === undefined ? null : await customerOfFamily(o.familyId);
-  const where = and(inArray(writeQueue.state, ["waiting", "stuck"]), o.familyId === undefined ? undefined
+  const where = and(inArray(writeQueue.state, ["waiting", "stuck", "refused"]), o.familyId === undefined ? undefined
     : or(eq(writeQueue.familyId, o.familyId), customer === null ? undefined : eq(writeQueue.targetQboId, customer),
       customer === null ? undefined : sql`${writeQueue.request}->>'toFamilyQboId' = ${customer}`));
   const rows = await db.select().from(writeQueue).where(where).orderBy(desc(writeQueue.createdAt));
@@ -337,10 +407,11 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
     families.length ? db.select({ id: family.id }).from(family).where(and(inArray(family.id, families), eq(family.active, true))) : Promise.resolve([])]);
   const withPage = new Set([...active.map((f) => String(f.id)), ...[...links.customerOfFamily.keys()].map(String)]);
   return rows.map((r) => ({
-    id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
+    id: r.id, state: r.state as QueueView["state"], write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
     lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
     familyId: r.familyId !== null && withPage.has(String(r.familyId)) ? r.familyId : null,
-    finishing: r.sent && r.lastCode !== null && FINISHING_CODES.has(r.lastCode),
+    finishing: r.state !== "refused" && r.sent && r.lastCode !== null && FINISHING_CODES.has(r.lastCode),
+    holds: r.state === "refused" && r.request.op === "rename" ? names.get(r.request.qboId) ?? null : null,
   }));
 }
 
@@ -359,10 +430,11 @@ export async function loadMadeAfterGivingUp(): Promise<GivenUpMadeView[]> {
   });
 }
 
-/** How many items are waiting, and how many are stuck, for the Health page. */
-export async function queueCounts(): Promise<{ waiting: number; stuck: number }> {
-  const rows = await db.select({ state: writeQueue.state, n: sql<number>`count(*)::int` }).from(writeQueue).where(inArray(writeQueue.state, ["waiting", "stuck"])).groupBy(writeQueue.state);
-  return { waiting: rows.find((r) => r.state === "waiting")?.n ?? 0, stuck: rows.find((r) => r.state === "stuck")?.n ?? 0 };
+/** How many items are waiting, how many are stuck, and how many changes the portal keeps that QuickBooks refused, for the Health page. */
+export async function queueCounts(): Promise<{ waiting: number; stuck: number; refused: number }> {
+  const rows = await db.select({ state: writeQueue.state, n: sql<number>`count(*)::int` }).from(writeQueue).where(inArray(writeQueue.state, ["waiting", "stuck", "refused"])).groupBy(writeQueue.state);
+  const n = (state: string) => rows.find((r) => r.state === state)?.n ?? 0;
+  return { waiting: n("waiting"), stuck: n("stuck"), refused: n("refused") };
 }
 
 export type QueueOp = { actor: Actor; ip: string | null; permission: string };
@@ -382,8 +454,10 @@ export const isFamilyCreateItem = (w: QueuedWrite) => w.op === "create" && (w.ro
  */
 export async function tryAgainNow(id: string, o: QueueOp & { mayLink?: boolean }): Promise<Done> {
   return db.transaction(async (tx) => {
-    const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
+    const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).for("update");
     if (!item) return GONE;
+    // A change QuickBooks refused is never tried again by the worker: it is sent again only on purpose, or given up.
+    if (item.state === "refused") return { ok: false as const, errors: [REFUSED_NOT_AGAIN] };
     if (isFamilyCreateItem(item.request) && !o.mayLink) return { ok: false as const, errors: [TRY_AGAIN_NEEDS_LINKING] };
     const now = new Date();
     // A buy-out write whose first try, made at once for the guardian, may still be under way: trying it again now could
@@ -412,13 +486,15 @@ export async function giveUp(id: string, rawNote: string, o: QueueOp): Promise<D
  * close (src/lib/buyouts/close.ts), which gives up its stuck item in the same transaction as it ends the buy-out.
  */
 export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Promise<Done> {
-  const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
+  const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck", "refused"]))).for("update");
   if (!item) return GONE;
   await tx.update(writeQueue).set({ state: "given_up", note, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() }).where(eq(writeQueue.id, id));
   // A buy-out whose invoice write is given up waits for the treasurer: its outcome in QuickBooks isn't known.
   if (isBuyoutWrite(item.request)) await tx.update(buyout).set({ state: "stuck", flag: "given_up", flaggedAt: new Date(), updatedAt: new Date() }).where(and(eq(buyout.id, item.request.buyoutId), inArray(buyout.state, ["being_invoiced", "being_voided", "stuck"])));
   await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,
     before: { state: item.state, tries: item.tries, code: item.lastCode, op: item.request.op }, after: { state: "given_up", note } }, tx);
+  // A change QuickBooks refused (stage 3's slice 9e) was never made there: the portal keeps its own value.
+  if (item.state === "refused") return { ok: true as const, message: refusedGivenUpWords(item) };
   // Since stage 3's slice 9c no roster read changes the app's own records: a roster change QuickBooks did make is in its
   // copy of the roster after the next read, but the portal's own family or student keeps what it had, until staff bring
   // it into line from the family's page (a move or a make-inactive QuickBooks has already sends nothing there).
@@ -445,6 +521,18 @@ function givenUpNext(item: Item): string {
   }
   return "If QuickBooks made the new customer, it has no record in the portal: look for it in QuickBooks.";
 }
+
+/**
+ * What a refused change given up leaves (stage 3's slice 9e): the portal keeps its own value and QuickBooks its own,
+ * and the difference waits for the mapping screen; a student saved first stays in the portal, unlinked.
+ */
+function refusedGivenUpWords(item: Item): string {
+  const w = item.request;
+  if (w.op === "create") return "Given up. Nothing more will be sent for it. The student the portal saved first stays in the portal, unlinked: to make them in QuickBooks later, press “Create in QuickBooks and link” on their family's page.";
+  return "Given up. Nothing more will be sent for it. The portal keeps its own name, and QuickBooks keeps the one it has: renaming the record again on its family's page sends that name, or rename it in QuickBooks.";
+}
+/** Why "Try again now" isn't taken for a change QuickBooks refused. */
+export const REFUSED_NOT_AGAIN = "QuickBooks refused this change, so it isn't tried again by itself: use “Send the portal's value” to send it again on purpose, or “Give up”.";
 
 /** What staff can do once a roster change QuickBooks may have made is given up, by what it was (a create: givenUpNext()). */
 const GIVEN_UP_NEXT: Partial<Record<QueuedWrite["op"], string>> = {
