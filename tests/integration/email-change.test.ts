@@ -14,7 +14,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthUser, parentEmailChange, qboConnection, qboCustomer, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, parent, parentAuthSession, parentAuthUser, parentEmailChange, qboConnection, qboCustomer, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
@@ -235,7 +235,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect(mine).toEqual({ ...was, PrimaryEmailAddr: { Address: NEW }, SyncToken: "1", MetaData: mine.MetaData });
     for (const other of before.filter((x) => x.Id !== R_PARENT)) expect(inQuickBooks(stub, other.Id as string)).toEqual(other);
 
-    // Then the portal: the cache from QuickBooks' answer, and the reconcile changed the person's address in place.
+    // Then the portal: the cache from QuickBooks' answer, and the person's own address, changed by the confirmation itself.
     expect(await cached(R_PARENT)).toMatchObject({ email: NEW, syncToken: "1" });
     expect(await person(r.identity.parentId)).toMatchObject({ email: NEW, name: RIVERA.parent.name });
     expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId)))[0]!.email).toBe(NEW);
@@ -251,10 +251,13 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect(await confirmEmailChangeAction(token)).toEqual({ ok: false, errors: [EMAIL_COPY.linkNoGood] });
 
     const saved = (await audits()).filter((a) => a.action === "parent.email.save");
-    // The reconcile changed the address in place, and that signed the person out itself (parent.email.changed).
+    // One row says it all: the cache took QuickBooks' answer, and the person's address changed, signing them out.
     expect(saved).toEqual([{ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
-      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "reconciled", emailChanged: 1, ended: 0, granted: 0, sessionsEnded: 0 } }]);
-    expect((await audits()).map((a) => a.action)).toContain("parent.email.changed");
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "cached", app: "changed", sessionsEnded: 1 } }]);
+    // Nothing decided access from QuickBooks: no sign-in was opened, moved or closed, and no address was changed by a rule.
+    for (const action of ["parent.email.changed", "parent.access.granted", "parent.access.moved", "parent.access.ended", "parent.hold.opened"]) {
+      expect((await audits()).map((a) => a.action)).not.toContain(action);
+    }
     // The app's own records followed the change in its transaction (src/lib/families/in-step.ts): the sign-in is in its
     // family and linked to its own record, and a fresh run finds nothing to change.
     const records = await appRecordsByCustomer();
@@ -313,33 +316,34 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect((await person(m.identity.parentId)).email).toBe("marisol.new@flat.example");
   });
 
-  it("an address already under another family ends held, and the parent is told the same as for any change not finished", async () => {
+  // One address is one person (app-owned families spec section 6): an address another person signs in with, whether
+  // they are in another family or in none, is refused before anything is sent, in words that never say why.
+  it.each([
+    ["a guardian of another family", "other family"],
+    ["a person in the portal with no family", "no family"],
+  ] as const)("an address %s signs in with is refused before anything is sent, and nothing changes", async (_, who) => {
     const { r, c } = await seedContactFamilies(stub);
+    const taken = who === "other family" ? CHENOWETH.parent.email : NEW;
+    if (who === "no family") await seedParent({ name: "Somebody Else", email: NEW });
+    await aCode(r.identity.parentId);
     asParent(r.identity);
-    await asking(CHENOWETH.parent.email);
-    expect(await confirmEmailChangeAction(linkTo(CHENOWETH.parent.email))).toEqual({ ok: true, message: EMAIL_COPY.finishing, signedOut: true });
-    expect(inQuickBooks(stub, R_PARENT).PrimaryEmailAddr).toEqual({ Address: CHENOWETH.parent.email });
-    // The rules hold the address for both families until staff decide: nobody at it signs in to either.
-    expect((await db.select().from(heldAddress)).map((h) => h.email)).toEqual([CHENOWETH.parent.email]);
-    expect(await db.select({ status: guardian.status }).from(guardian).where(eq(guardian.familyQboId, R_FAMILY))).toEqual([{ status: "disabled" }]);
-    expect(await db.select({ status: guardian.status, reason: guardian.disabledReason }).from(guardian).where(eq(guardian.familyQboId, C_FAMILY))).toEqual([{ status: "disabled", reason: "held" }]);
-    expect(await sessionsOf(r.identity.parentId)).toEqual([]);
-    // The words say nothing of the other family or why: the same as when the roster was busy (below).
-    expect(EMAIL_COPY.finishing).not.toMatch(/family|held|another|already/i);
-    expect(c.identity.parentId).not.toBe(r.identity.parentId);
-  });
-
-  it("an address a person in the portal has, and nobody else claims: the link moves to that person", async () => {
-    const { r } = await seedContactFamilies(stub);
-    const known = await seedParent({ name: "Rosalind Riverquill", email: NEW });
-    asParent(r.identity);
-    await asking(NEW);
-    expect(await confirmEmailChangeAction(linkTo(NEW))).toEqual({ ok: true, message: EMAIL_COPY.done(NEW), signedOut: true });
-    const links = await db.select({ parentId: guardian.parentId, status: guardian.status, sourceQboId: guardian.sourceQboId }).from(guardian).where(eq(guardian.familyQboId, R_FAMILY));
-    expect(links).toEqual(expect.arrayContaining([{ parentId: known.id, status: "invited", sourceQboId: R_PARENT }, { parentId: r.identity.parentId, status: "disabled", sourceQboId: null }]));
-    // The old person keeps the old address, and signs in nowhere with it.
+    await asking(taken);
+    const token = linkTo(taken);
+    stub.calls.length = 0;
+    expect(await confirmEmailChangeAction(token)).toEqual({ ok: false, errors: [EMAIL_COPY.cantHere] });
+    expect(stub.apiCalls()).toEqual([]);
+    expect(inQuickBooks(stub, R_PARENT).PrimaryEmailAddr).toEqual({ Address: RIVERA.parent.email });
     expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
-    expect(await sessionsOf(r.identity.parentId)).toEqual([]);
+    expect(await sessionsOf(r.identity.parentId)).toHaveLength(1);
+    expect(await codesOf(r.identity.parentId)).toHaveLength(1);
+    expect((await person(c.identity.parentId)).email).toBe(CHENOWETH.parent.email);
+    expect(await sessionsOf(c.identity.parentId)).toHaveLength(1);
+    // The link can never work: it is spent, and the refusal is recorded with its code, for staff.
+    expect((await requests()).find((q) => q.newEmail === taken)!.usedAt).not.toBeNull();
+    expect((await audits()).at(-1)).toMatchObject({ action: "parent.email.save.failed", targetId: R_PARENT, after: { code: "address_taken" } });
+    // The words say nothing of another person, a family or why.
+    expect(EMAIL_COPY.cantHere).not.toMatch(/family|another|already|taken|someone/i);
+    expect(await db.select({ status: guardian.status }).from(guardian).where(eq(guardian.parentId, r.identity.parentId))).toEqual([{ status: "active" }]);
   });
 });
 
@@ -394,8 +398,12 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     expect(await confirmEmailChangeAction(token)).toEqual({ ok: true, message: EMAIL_COPY.done(NEW), signedOut: true });
     expect(posts()).toHaveLength(before); // read, found made, and not sent again
     expect(await cached(R_PARENT)).toMatchObject({ email: NEW, syncToken: "1" });
+    // The second try finished the portal's side: the app and QuickBooks agree, and the old address signs in nowhere.
     expect((await person(r.identity.parentId)).email).toBe(NEW);
+    expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId)))[0]!.email).toBe(NEW);
     expect(await sessionsOf(r.identity.parentId)).toEqual([]);
+    expect(await codesOf(r.identity.parentId)).toEqual([]);
+    expect((await audits()).filter((a) => a.action === "parent.email.save").at(-1)).toMatchObject({ after: { portal: "cached", app: "changed" } });
   });
 
   it("a server error after the write: the same words, and nothing in the portal", async () => {
@@ -450,23 +458,23 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     await portalAsItWas(r);
   });
 
-  it("the roster is busy: QuickBooks has the change, the cache is left alone and a refresh asked for, and the old address still signs in nowhere", async () => {
+  it("the roster is busy: QuickBooks has the change, the person's address changes all the same, the cache is left alone and a refresh asked for", async () => {
     const { r, token } = await asked();
     const lock = await holdTheRosterLock();
     const result = await confirmMyEmailChange(ctxOf(r.identity), token, { lockWaitMs: 150 });
     await lock.release();
-    expect(result).toEqual({ ok: true, message: EMAIL_COPY.finishing, signedOut: true });
-    // The worker's next roster read finishes it, not the club: the parent is told it works in a few minutes.
-    expect(EMAIL_COPY.finishing).toContain("within a few minutes");
+    // The sign-in address is the app's own: it changes without the roster, and the new address signs in at once.
+    expect(result).toEqual({ ok: true, message: EMAIL_COPY.done(NEW), signedOut: true });
     expect(inQuickBooks(stub, R_PARENT).PrimaryEmailAddr).toEqual({ Address: NEW });
     expect(await cached(R_PARENT)).toMatchObject({ email: RIVERA.parent.email, syncToken: "0" });
-    expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
+    expect((await person(r.identity.parentId)).email).toBe(NEW);
+    expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId)))[0]!.email).toBe(NEW);
     expect(await sessionsOf(r.identity.parentId)).toEqual([]);
     expect(await codesOf(r.identity.parentId)).toEqual([]);
     expect((await requests())[0]!.usedAt).not.toBeNull();
     expect(await rosterRefreshAsked()).toBe(true);
     expect((await audits()).at(-1)).toEqual({ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
-      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "refresh_asked", code: "busy", sessionsEnded: 1 } });
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "refresh_asked", code: "busy", app: "changed", sessionsEnded: 1 } });
   }, 30_000);
 
   it("a refresh that stored a later version while the confirmation waited keeps it: the answer's older one is not written over it", async () => {
@@ -481,14 +489,15 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     expect(await cached(R_PARENT)).toMatchObject({ email: "later.change@family-r.example", syncToken: "6" });
   }, 30_000);
 
-  it("the company changed between the write and the cache: the cache is left alone", async () => {
-    const { token } = await asked();
+  it("the company changed between the write and the cache: the cache is left alone, and the person's own address still changes", async () => {
+    const { r, token } = await asked();
     stub.onApiRequest = async (call) => {
       if (call.method === "POST") await db.execute(sql`update setting set value = ${JSON.stringify({ realmId: "9130000000000999" })}::jsonb where key = ${SOURCE_KEY}`);
     };
-    expect(await confirmEmailChangeAction(token)).toEqual({ ok: true, message: EMAIL_COPY.finishing, signedOut: true });
+    expect(await confirmEmailChangeAction(token)).toEqual({ ok: true, message: EMAIL_COPY.done(NEW), signedOut: true });
     expect(await cached(R_PARENT)).toMatchObject({ email: RIVERA.parent.email });
-    expect((await audits()).at(-1)).toMatchObject({ action: "parent.email.save", after: { portal: "refresh_asked", code: "other_company" } });
+    expect((await person(r.identity.parentId)).email).toBe(NEW);
+    expect((await audits()).at(-1)).toMatchObject({ action: "parent.email.save", after: { portal: "refresh_asked", code: "other_company", app: "changed" } });
   });
 });
 
