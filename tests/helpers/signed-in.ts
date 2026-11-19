@@ -130,6 +130,10 @@ export async function renderPage(page: Page, props: PageProps = {}): Promise<str
   throw new Error("redirect" in outcome ? `The page redirected to ${outcome.redirect} instead of rendering` : "The page answered 404 instead of rendering");
 }
 
+/** Rendered HTML with every uuid blanked, so a check that a bare number is absent can't match inside a random id. */
+export const withoutIds = (html: string): string =>
+  html.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>");
+
 /** Where a server action (or anything else) redirected, or null if it returned. Other errors are thrown on. */
 export async function redirectOf(running: Promise<unknown>): Promise<string | null> {
   try { await running; return null; } catch (e) {
