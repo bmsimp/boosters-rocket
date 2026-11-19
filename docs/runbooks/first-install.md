@@ -148,7 +148,11 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
 2. Forms: [Documenso, parts 2 to 4](documenso.md#2-the-first-documenso-account).
 3. Parent sign-ins: under **Settings**, **Parent sign-ins**, once QuickBooks has read the roster. A guardian is
    added on their family's page, and a fresh installation has no families yet: a read of QuickBooks brings no
-   customer into the portal's own families until the import that will is built (the roadmap's S10 and stage 4).
+   customer into the portal's own families by itself. Bring each family in from **Reconciliation** in the staff menu:
+   under **Customers with no family**, **Create a family from this** makes the family and its students, linked to
+   their customers in QuickBooks (an Admin can do it, and so can anyone given "Link families to accounting"). Then add
+   its guardians on its page, under **Families**. The reviewed import of every family at once comes with stage 4 of
+   the roadmap.
 4. Before any family signs in: [before the first family](before-the-first-family.md), the checks only a person can
    make, from real phones to a pilot with a few families.
 

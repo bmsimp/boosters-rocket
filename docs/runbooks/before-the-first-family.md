@@ -415,7 +415,11 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    proof-of-concept host stays on the sandbox; the club's installation is a fresh one ([first install](first-install.md)).
    **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
    line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
-   customer into the portal's own families, and the import that will (the roadmap's S10 and stage 4) isn't built yet.
+   customer into the portal's own families by itself. On **Reconciliation**, **Customers with no family** lists the
+   family customers of the real books; **Create a family from this** brings each in, with its students, linked to
+   their customers. Bring in the pilot families this way, then add their guardians on each family's page, and check
+   each family's page shows its students and the Balances page its money. The reviewed import of every family at once
+   comes with stage 4 of the roadmap.
    **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
 2. **Check the portal's requests against the real books.** Settings, QuickBooks, **Check the portal's requests**,
    **Run the check**. Against the real books it only reads.
