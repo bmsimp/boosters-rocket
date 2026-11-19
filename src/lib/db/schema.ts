@@ -82,17 +82,21 @@ export const parent = pgTable("parent", {
 
 /*
  * ---- The app's own records (stage 1 of docs/superpowers/specs/2026-11-18-app-owned-families-design.md) ----
- * A family and a student with the portal's own ids, and the links that tie each to its QuickBooks customer. Until
- * stage 3 QuickBooks is still the source: they mirror the roster cache, kept in step by keepAppRecordsInStep()
- * (src/lib/families/in-step.ts), and nothing a user sees reads them yet. Every row belongs to the company the cache
- * came from. Nothing deletes a record or a link but a change of company, which empties all three tables
- * (src/lib/families/company-change.ts): a record nothing needs any more is made inactive and keeps its id.
+ * A family and a student with the portal's own ids, and the links that tie each to its QuickBooks customer. Migration
+ * 0023 made them from the roster cache, and until stage 3's slice 9c every change of the cache brought them into step
+ * with it; since then they stand alone: a staff roster write changes its own record (changeOwnRecord(),
+ * src/lib/roster/writes.ts), and nothing QuickBooks holds changes one (the import that made them,
+ * src/lib/families/roster-import.ts, has no caller in the portal). Every link belongs to the company the cache came
+ * from. Nothing deletes a record or a link but a change of company, which empties all three tables
+ * (src/lib/families/company-change.ts).
  */
 
 /**
- * A family, with the portal's own id: a family customer of the roster cache (a member, in flat books), active as its
- * customer is; or a customer a record of the current company names as a family that the roster doesn't hold as one,
- * or one nothing names any more, which is inactive. Its QuickBooks customer is in its link (`accounting_link`).
+ * A family, with the portal's own id: made by migration 0023 (or the import) from a family customer of the roster
+ * cache (a member, in flat books), or by a staff member's new family or member once QuickBooks made its customer.
+ * Named and made active or inactive by the app alone since stage 3's slice 9c (a staff rename or make-inactive sent to
+ * QuickBooks changes it too); what QuickBooks holds changes nothing here. Its QuickBooks customer is in its link
+ * (`accounting_link`).
  */
 export const family = pgTable("family", {
   id: uuid("id").primaryKey().defaultRandom().$type<AppFamilyId>(),
@@ -103,11 +107,10 @@ export const family = pgTable("family", {
 });
 
 /**
- * A student, with the portal's own id: a student customer directly under a family of the roster cache, active as its
- * customer is; or a customer a record of the current company names as a student that the roster doesn't hold as one,
- * or one nothing names any more, which is inactive. `family_id` is the family the cache holds them under; for one
- * the roster no longer holds as a student, who is always inactive, the family they were last in, or null for one it
- * never held under a family.
+ * A student, with the portal's own id: made by migration 0023 (or the import) from a student customer directly under a
+ * family of the roster cache, or by a staff member's new student once QuickBooks made its customer. `family_id` is the
+ * family the app holds them in: changed only by a move staff make (since stage 3's slice 9c a move made in QuickBooks
+ * changes nothing here); null only for an inactive student never held under a family.
  */
 export const student = pgTable("student", {
   id: uuid("id").primaryKey().defaultRandom().$type<AppStudentId>(),
@@ -125,9 +128,9 @@ export const student = pgTable("student", {
 export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
   familyQboId: text("family_qbo_id").notNull(),
-  // The same family as the app's own record (src/lib/families/in-step.ts). Null for a row a change of company closed
-  // (its QuickBooks ids are another company's), for every row while the roster cache names no company, and for a row
-  // made since the last time the records were brought into step (one a test inserts straight into the table).
+  // The same family as the app's own record: written by whoever makes or reinstates the row (src/lib/parents/guardians.ts),
+  // never by a roster read (stage 3's slice 9c). Null for a row a change of company closed (its QuickBooks ids are
+  // another company's), and for a row made before its family had a record that nothing has given one since.
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "restrict" }),
   isPrimary: boolean("is_primary").notNull().default(false),
@@ -152,8 +155,9 @@ export const guardian = pgTable("guardian", {
  * link and one student link (it can be both, when records name it as both), and each record one link. Several guardian
  * rows may have come from one record (a closed one and the one open now), so a membership link is unique by its row
  * only. `origin` says how the link came to be: every link stage 1 makes is `carried_over` from the roster cache on
- * `linked_at`, with nobody named; a later stage's admin confirms links (`confirmed`, `linked_by`). Kept in step with
- * the cache by keepAppRecordsInStep() (src/lib/families/in-step.ts), which never deletes one; a change of company
+ * `linked_at`, with nobody named; one the portal makes for a customer it has just created in QuickBooks (a staff
+ * member's new family, member or student, stage 3's slice 9c) is `created`, with `linked_by` the staff member who asked;
+ * a later stage's admin confirms links (`confirmed`, `linked_by`). Nothing deletes one but a change of company, which
  * deletes every row. A lookup always asks for one kind (src/lib/families/links.ts).
  */
 export const accountingLink = pgTable("accounting_link", {
@@ -164,9 +168,9 @@ export const accountingLink = pgTable("accounting_link", {
   familyId: uuid("family_id").references(() => family.id, { onDelete: "cascade" }).$type<AppFamilyId>(),
   studentId: uuid("student_id").references(() => student.id, { onDelete: "cascade" }).$type<AppStudentId>(),
   guardianId: uuid("guardian_id").references(() => guardian.id, { onDelete: "cascade" }),
-  origin: text("origin", { enum: ["carried_over", "confirmed"] }).notNull(),
+  origin: text("origin", { enum: ["carried_over", "created", "confirmed"] }).notNull(),
   linkedAt: timestamp("linked_at", { withTimezone: true }).notNull().defaultNow(),
-  linkedBy: uuid("linked_by"),                         // staff_user.id of who confirmed it; null for a link carried over
+  linkedBy: uuid("linked_by"),                         // staff_user.id of who asked for it or confirmed it; null for a link carried over
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [

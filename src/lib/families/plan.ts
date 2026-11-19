@@ -2,7 +2,7 @@ import type { MembershipShape } from "@/lib/roster/shape";
 
 /**
  * What the app's own records should be, worked out from what the database holds (stage 1 of
- * docs/superpowers/specs/2026-11-18-app-owned-families-design.md). Pure: keepAppRecordsInStep() (./in-step.ts) loads
+ * docs/superpowers/specs/2026-11-18-app-owned-families-design.md). Pure: importRecordsFromRoster() (./roster-import.ts) loads
  * the inputs and makes the tables agree with the answer, and migration 0023 fills them by the same rules in SQL
  * (tests/integration/app-records-fill.test.ts proves the two agree). Every id here is a QuickBooks customer id of the
  * company the roster cache came from. A record is of one kind, family or student, and a customer may have one of each.
@@ -15,7 +15,7 @@ import type { MembershipShape } from "@/lib/roster/shape";
  *   but the rule stands for any that may), whatever the roster holds it as: a record names a customer as the kind its
  *   column holds. One the roster doesn't hold as that kind is inactive. The records re-keyed since (the season's,
  *   volunteering's, form requests, buy-outs, the money cache, the write queue, and parents' sessions and pending email
- *   changes) are not among them: they name a record by its id and keep it (./in-step.ts). A student the roster doesn't hold is planned in no family; keepAppRecordsInStep() keeps the
+ *   changes) are not among them: they name a record by its id and keep it (./roster-import.ts). A student the roster doesn't hold is planned in no family; importRecordsFromRoster() keeps the
  *   family such a student was last in, which a first fill (migration 0023) never knew.
  * - A record is named from the cache, else by the name it has already (`known`, by kind: the cache held it once), else
  *   from `hints` (a current-company kept form's). Otherwise it has no name: the portal never knew one.
@@ -24,7 +24,7 @@ import type { MembershipShape } from "@/lib/roster/shape";
  * - Each such guardian row whose sign-in came from a record of its own (a `source_qbo_id` that isn't the family's own
  *   customer), open or closed, is linked to that record.
  *
- * The answer lists what must exist. Records that exist and are not in it are kept, inactive (./in-step.ts): nothing
+ * The answer lists what must exist. Records that exist and are not in it are kept, inactive (./roster-import.ts): nothing
  * but a change of company deletes one.
  */
 export type PlanCustomer = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null };

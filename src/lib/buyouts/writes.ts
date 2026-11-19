@@ -121,8 +121,8 @@ async function markMoneyStale(tx: Tx, familyId: AppFamilyId): Promise<void> {
 /**
  * Every family whose figures may show this buy-out's invoice: the one that chose it (its own record), and for a
  * per-student one the family its student is under now in the roster cache, through that customer's family link (a
- * student who moved takes their invoices with them, and a move QuickBooks made is followed here before the records' step
- * has caught up with it).
+ * student who moved takes their invoices with them: whose invoices a family sees follows QuickBooks' tree, a move made
+ * there included, though the app's records no longer follow one).
  */
 export async function markBuyoutMoneyStale(tx: Tx, b: Pick<Row, "familyId" | "studentId" | "customerQboId">): Promise<void> {
   await markMoneyStale(tx, b.familyId);

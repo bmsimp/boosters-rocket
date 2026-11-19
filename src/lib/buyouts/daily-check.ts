@@ -15,15 +15,15 @@ import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
 import { judgeInvoice } from "./rules";
 import { buyoutRecords } from "./standing";
-import { markBuyoutMoneyStale, queueVoid } from "./writes";
+import { markBuyoutMoneyStale } from "./writes";
 
 export const BUYOUT_CHECK_JOB = "buyouts.check";
 /** The money run the check last followed: `{ runId }`, so each run is followed once. */
 export const CHECKED_KEY = "buyouts.checked";
 
-/** What one check did: buy-outs marked paid, flagged, ended as voided in QuickBooks, set to be voided, and unflagged. */
-export type BuyoutCheck = { ran: boolean; paid: number; flagged: number; voided: number; voiding: number; unflagged: number };
-const NOT_RUN: BuyoutCheck = { ran: false, paid: 0, flagged: 0, voided: 0, voiding: 0, unflagged: 0 };
+/** What one check did: buy-outs marked paid, flagged, ended as voided in QuickBooks, and unflagged. */
+export type BuyoutCheck = { ran: boolean; paid: number; flagged: number; voided: number; unflagged: number };
+const NOT_RUN: BuyoutCheck = { ran: false, paid: 0, flagged: 0, voided: 0, unflagged: 0 };
 
 /**
  * Follows the latest money run that read every family, once: each invoiced buy-out of the connected company whose
@@ -31,10 +31,10 @@ const NOT_RUN: BuyoutCheck = { ran: false, paid: 0, flagged: 0, voided: 0, voidi
  * ends as voided (nothing is owed for it); one QuickBooks no longer shows, or shows on another customer, is flagged for
  * the Reconciliation page with the family, the requirement and the amount, and audited once (a flag already set is not
  * audited again), and that flag is taken off, audited, once a later run finds the invoice where it belongs. Figures
- * marked behind since they were read (an invoice made or voided after the run read the family) are not judged. A
- * per-student one whose student QuickBooks moved to another family has its void put on the write queue, as a move made
- * in the portal does: the worker reads the invoice live and voids it only when nothing is paid on it, so the new family
- * is never left an invoice for the old family's choice. A paid buy-out is not judged: stored figures keep paid
+ * marked behind since they were read (an invoice made or voided after the run read the family) are not judged. Nor is
+ * a per-student one whose student QuickBooks holds under another family or inactive: the check voids nothing for a
+ * move made in QuickBooks (stage 3's slice 9c), and the family's figures hold no invoice of that customer to judge it
+ * by. What a buy-out bills still follows QuickBooks' tree (open question 14). A paid buy-out is not judged: stored figures keep paid
  * invoices for 12 months only, so its invoice dropping out says nothing. `ran` is true when it followed a run.
  */
 export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
@@ -44,14 +44,14 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
   if ((seen?.value as { runId?: unknown } | undefined)?.runId === run.id) return NOT_RUN;
   const source = await getRosterSource();
   const rows = source === null ? [] : await db.select().from(buyout).where(and(eq(buyout.state, "invoiced"), eq(buyout.realmId, source)));
-  // The family that chose each buy-out is the app's record, and its stored figures are kept by that record; but the
-  // roster still says where a student is by QuickBooks ids (until stage 3), so a move is read as the cache has it, through
-  // the record's link: the invoice's customer no longer under the family's own.
+  // The family that chose each buy-out is the app's record, and its stored figures are kept by that record; whose
+  // invoices they hold is still QuickBooks' tree (open question 14), read through the record's link: an invoice's
+  // customer no longer active and directly under the family's own isn't among them.
   const families = [...new Set(rows.map((b) => b.familyId))];
   const [links, money] = await Promise.all([linksOf({ families, students: [] }), moneyRows(families)]);
   const customers = rows.length === 0 ? [] : await db.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer)
     .where(inArray(qboCustomer.qboId, [...new Set(rows.map((b) => b.customerQboId))]));
-  let paid = 0, flagged = 0, voided = 0, voiding = 0, unflagged = 0;
+  let paid = 0, flagged = 0, voided = 0, unflagged = 0;
   for (const b of rows) {
     if (!b.invoiceQboId) continue;
     // A family with no link in the roster's company can't be compared with anything: it is left for a later run.
@@ -60,14 +60,11 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
     const perStudent = b.studentId !== null;
     const c = customers.find((x) => x.qboId === b.customerQboId);
     const stillTheFamilys = Boolean(c?.active && c.parentQboId === familyQboId);
-    if (perStudent && !stillTheFamilys) {
-      // Moved in QuickBooks: the roster cache says so, whatever the figures hold. Its void goes on the queue once; a
-      // void that found something paid has flagged it, and it is left for the treasurer. No item comes back only for a
-      // buy-out no longer invoiced by the time it is queued (a guardian or a move got there first): nothing to count.
-      if (b.flag === "student_moved") continue;
-      if (await db.transaction((tx) => queueVoid(tx, b, "student_moved", { actor: WORKER_ACTOR, label: "student moved", nextTryAt: new Date() }))) voiding++;
-      continue;
-    }
+    // Billed to a customer QuickBooks no longer holds active and directly under the family's (moved, or made inactive,
+    // in QuickBooks): the family's figures don't hold that customer's invoices, so they say nothing about it, and it is
+    // left as it is. A move made in QuickBooks is no longer followed (stage 3's slice 9c): nothing is voided for it;
+    // stage 4 shows it as a difference. A move staff make voids it then (buyoutsForMovedStudent(), ./moved.ts).
+    if (perStudent && !stillTheFamilys) continue;
     const row = money.get(b.familyId);
     // Only a family this run read, from this company: older figures may be from before the invoice was made, and so
     // may figures marked behind since they were read.
@@ -121,5 +118,5 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
   }
   const value = { runId: run.id };
   await db.insert(setting).values({ key: CHECKED_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
-  return { ran: true, paid, flagged, voided, voiding, unflagged };
+  return { ran: true, paid, flagged, voided, unflagged };
 }

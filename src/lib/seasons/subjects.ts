@@ -74,9 +74,9 @@ async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
  * no QuickBooks connection is needed, so a family with no QuickBooks customer is here like any other, and the list
  * stands while the shape is broken or QuickBooks is disconnected. The one exception: while QuickBooks is connected to a
  * company other than the roster cache's (connectedToAnotherCompany()), nobody is listed, as before, until stage 4.
- * While the records mirror the roster cache (every roster read and staff write keeps them in step) these are the
- * roster's active families and the active students directly under each; in flat books a member is a family and nobody
- * is a student. By name, as the roster lists them.
+ * The records stand alone (stage 3's slice 9c): a family or student made, renamed, moved or made inactive in QuickBooks
+ * changes nobody here; a staff write sent to QuickBooks changes its own record, and a family with no link stays as it
+ * is. In flat books a member is a family and nobody is a student. By name, as the roster lists them.
  */
 export async function loadSeasonFamilies(): Promise<SeasonFamily[]> {
   return activeFamilies();

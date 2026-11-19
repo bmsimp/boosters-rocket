@@ -8,17 +8,18 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
-// A switch to make the cache's side of a write fail after QuickBooks took it: bringing the app's own records into step
-// (which a write's cache transaction ends with) throws while it is on.
-const reconcileFails = vi.hoisted(() => ({ on: false }));
-vi.mock("@/lib/families/in-step", async (original) => {
-  const m = await original<typeof import("@/lib/families/in-step")>();
-  return { ...m, keepAppRecordsInStep: async (...args: Parameters<typeof m.keepAppRecordsInStep>) => { if (reconcileFails.on) throw new Error("deadlock detected"); return m.keepAppRecordsInStep(...args); } };
+// A switch to make the portal's side of a write fail after QuickBooks took it: reading QuickBooks' answer into a cache
+// row (customerRow(), which applyWritten() calls first in its transaction) throws while it is on. The roster refresh
+// reads its rows through its own reference, so a refresh still works.
+const cacheFails = vi.hoisted(() => ({ on: false }));
+vi.mock("@/lib/roster/refresh", async (original) => {
+  const m = await original<typeof import("@/lib/roster/refresh")>();
+  return { ...m, customerRow: (...args: Parameters<typeof m.customerRow>) => { if (cacheFails.on) throw new Error("deadlock detected"); return m.customerRow(...args); } };
 });
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, formWithdrawal, jobRun, qboCustomer, setting, writeQueue } from "@/lib/db/schema";
+import { accountingLink, family, formWithdrawal, jobRun, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
 import { askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
@@ -44,7 +45,7 @@ const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", s
 
 let op: ReturnType<typeof asOp>;
 beforeEach(async () => {
-  await resetDb(); stub.reset(); reconcileFails.on = false;
+  await resetDb(); stub.reset(); cacheFails.on = false;
   await connectRoster(stub);
   stub.calls.length = 0;
   op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
@@ -188,7 +189,7 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect((await auditsOf("roster.write.done"))[0]!.after).toMatchObject({ how: "found" });
   });
 
-  it("a move found made already still runs its follow-ups: the student's open form is reset under the new family", async () => {
+  it("a move found made already runs its follow-ups once, and moves the student's record: the open form is reset under the new family", async () => {
     const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
     const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
     const requestId = await seedRequest({ requirementId, familyQboId: "10", subjectQboId: "12", state: "waiting", envelopeId: "envelope_leowaiting" });
@@ -199,18 +200,22 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
     expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
     expect((await db.select().from(formWithdrawal)).map((w) => w.envelopeId)).toEqual(["envelope_leowaiting"]);
-    // The roster read the queue ran first found the move and followed it (src/lib/roster/refresh.ts); the queue's own
-    // follow-up then found nothing left to reset.
+    // The roster read the queue ran first followed nothing (stage 3's slice 9c): the queue's own follow-up did it all,
+    // once, and the student's record is in the new family's, said on the item's done row.
     const followed = (await auditsOf("roster.student.move.followed")).map((r) => r.after as { cause: string; formsReset: number });
-    expect(followed.map((f) => [f.cause.split("#")[0], f.formsReset])).toEqual([["roster.write.found", 0], ["roster.refresh", 1]]);
-    expect(followed[1]).toMatchObject({ fromFamilyQboId: "10", toFamilyQboId: "20" });
+    expect(followed.map((f) => [f.cause.split("#")[0], f.formsReset])).toEqual([["roster.write.found", 1]]);
+    expect(followed[0]).toMatchObject({ fromFamilyQboId: "10", toFamilyQboId: "20" });
+    const [leo] = await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student")));
+    expect(leo).toMatchObject({ familyId: await recordOfCustomer("20", "family"), active: true });
+    expect((await auditsOf("roster.write.done"))[0]!.after).toMatchObject({ how: "found",
+      appRecord: { kind: "student", studentId: String(leo!.id), set: { familyId: String(await recordOfCustomer("20", "family")) } } });
   });
 
   it("a change QuickBooks took whose cache update fails is audited, asks for a roster read, and is looked for after it, never simply sent again", async () => {
     const item = await seedQueued(RENAME, { sent: false });
-    reconcileFails.on = true;
+    cacheFails.on = true;
     expect(await runWriteQueue()).toEqual({ ran: true, ok: true });
-    reconcileFails.on = false;
+    cacheFails.on = false;
     expect(posts()).toHaveLength(1);
     expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: true, lastCode: "cache_failed", tries: 2 });
     expect((await auditsOf("roster.customer.rename"))[0]).toMatchObject({ targetId: "12", after: { name: "Leon Rivera", queueId: item.id, refreshAsked: true, code: "cache_failed" } });
@@ -220,12 +225,63 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(posts()).toHaveLength(1);
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
     expect(await cached("12")).toMatchObject({ displayName: "Leon Rivera" });
+    // Found made, its record follows as a sent one's does: nothing else would bring it (stage 3's slice 9c).
+    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ name: "Leon Rivera" });
 
-    // The staff action says the change is made, and that the roster here will show it after its next read.
-    reconcileFails.on = true;
+    // The staff action says the change is made, and that the roster here will show it after its next read; the change
+    // goes on the queue as one QuickBooks may have made, so the worker finishes it.
+    cacheFails.on = true;
     const tag = await (await import("@/lib/seasons/roster-lock")).currentRosterTag();
     expect(await askRosterWrite({ op: "rename", qboId: "21", syncToken: "0", name: "Mei L. Chen" }, tag, op)).toEqual({ ok: true, message: expect.stringContaining("Done in QuickBooks. The roster here will show it") });
     expect((await auditsOf("roster.customer.rename"))[0]).toMatchObject({ targetId: "21", after: { code: "cache_failed" } });
+    expect((await db.select().from(writeQueue).where(eq(writeQueue.targetQboId, "21")))[0]).toMatchObject({ state: "waiting", sent: true, lastCode: "cache_failed",
+      familyId: await recordOfCustomer("20", "family"), studentId: null, askedBy: op.staffUserId });
+  });
+
+  it("a family staff made that the portal couldn't take in is queued as made, and the worker makes its record and link once a read shows it", async () => {
+    cacheFails.on = true;
+    const tag = await (await import("@/lib/seasons/roster-lock")).currentRosterTag();
+    expect(await askRosterWrite({ op: "create", role: "family", name: "Okafor Family", familyQboId: null, email: null, typeQboId: null }, tag, op))
+      .toEqual({ ok: true, message: expect.stringContaining("Done in QuickBooks") });
+    cacheFails.on = false;
+    const made = stub.customers.find((c) => c.DisplayName === "Okafor Family")!;
+    const [item] = await db.select().from(writeQueue);
+    expect(item).toMatchObject({ state: "waiting", sent: true, lastCode: "cache_failed", familyId: null, askedBy: op.staffUserId });
+    expect((await auditsOf("roster.write.queued"))[0]).toMatchObject({ targetId: item!.id, after: { op: "create", role: "family", code: "cache_failed", sent: true } });
+    // Nothing in the portal yet: the cache missed it, and no read makes a record.
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.customerId, made.Id as string))).toEqual([]);
+    await db.update(writeQueue).set({ nextTryAt: ago(MIN) });
+    await runWriteQueue();
+    expect(posts()).toHaveLength(1); // the create itself, never sent again
+    expect(await queueItem(item!.id)).toMatchObject({ state: "done", resultQboId: made.Id });
+    const [link] = await db.select().from(accountingLink).where(eq(accountingLink.customerId, made.Id as string));
+    expect(link).toMatchObject({ origin: "created", linkedBy: op.staffUserId, realmId: REALM, studentId: null, guardianId: null });
+    expect((await db.select().from(family).where(eq(family.id, link!.familyId!)))[0]).toMatchObject({ name: "Okafor Family", active: true });
+    expect((await auditsOf("roster.write.done"))[0]!.after).toMatchObject({ how: "found", appRecord: { kind: "family", familyId: String(link!.familyId), made: true, linkId: link!.id } });
+  });
+
+  it("a move staff made that the portal couldn't take in is queued as made, and the worker runs its follow-ups and moves the record once a read shows it", async () => {
+    const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
+    const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
+    const requestId = await seedRequest({ requirementId, familyQboId: "10", subjectQboId: "12", state: "waiting", envelopeId: "envelope_leoheld" });
+    cacheFails.on = true;
+    const tag = await (await import("@/lib/seasons/roster-lock")).currentRosterTag();
+    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toMatchObject({ ok: true });
+    cacheFails.on = false;
+    // Nothing of the move's transaction was kept: no follow-up, and the record still in the Rivera family.
+    expect(await auditsOf("roster.student.move.followed")).toEqual([]);
+    expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "10", state: "waiting" });
+    const leo = await recordOfCustomer("12", "student");
+    expect((await db.select().from(student).where(eq(student.id, leo)))[0]).toMatchObject({ familyId: await recordOfCustomer("10", "family") });
+    const [item] = await db.select().from(writeQueue);
+    expect(item).toMatchObject({ state: "waiting", sent: true, lastCode: "cache_failed", familyId: await recordOfCustomer("10", "family"), studentId: leo });
+    await db.update(writeQueue).set({ nextTryAt: ago(MIN) });
+    await runWriteQueue();
+    expect(posts()).toHaveLength(1);
+    expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
+    expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "20", state: "not_opened" });
+    expect((await auditsOf("roster.student.move.followed")).map((r) => (r.after as { cause: string }).cause.split("#")[0])).toEqual(["roster.write.found"]);
+    expect((await db.select().from(student).where(eq(student.id, leo)))[0]).toMatchObject({ familyId: await recordOfCustomer("20", "family") });
   });
 
   it("from the staff action to done: a lost answer is queued, then found by the worker", async () => {

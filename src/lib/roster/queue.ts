@@ -12,7 +12,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { afterStudentMoved, applyWritten, owedBy, REFRESH_ASK_KEY, sendWrite } from "./writes";
+import { afterStudentMoved, applyWritten, changeOwnRecord, owedBy, REFRESH_ASK_KEY, sendWrite, type OwnRecordChange } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
@@ -68,14 +68,15 @@ async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string
   return to.state;
 }
 
-/** Marks an item done, audited, in the transaction given (or one of its own). */
-async function markDone(item: Item, how: "sent" | "found", resultQboId: string | null, tries: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0]): Promise<void> {
+/** Marks an item done, audited, in the transaction given (or one of its own), with the app record a found change made or changed. */
+async function markDone(item: Item, how: "sent" | "found", resultQboId: string | null, tries: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  appRecord: OwnRecordChange | null = null): Promise<void> {
   const run = async (t: NonNullable<typeof tx>) => {
     const [still] = await t.update(writeQueue).set({ state: "done", resultQboId, tries, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
       .where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: WORKER_ACTOR, action: "roster.write.done", targetType: "write_queue", targetId: item.id,
-      before: { state: item.state, tries: item.tries }, after: { state: "done", how, tries, ...(resultQboId ? { resultQboId } : {}) } }, t);
+      before: { state: item.state, tries: item.tries }, after: { state: "done", how, tries, ...(resultQboId ? { resultQboId } : {}), ...(appRecord ? { appRecord } : {}) } }, t);
   };
   if (tx) await run(tx); else await db.transaction(run);
 }
@@ -131,25 +132,31 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     const next = afterFailedTry(item.tries + 1, item.createdAt, now);
     return settle(item, { ...next, code: e.code, sent: item.sent || failure.sent }, triedAt);
   }
-  const { cached } = await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id,
+  const { cached } = await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id, linkedBy: item.askedBy,
     inside: (tx) => markDone(item, "sent", typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
   return cached ? "done" : "waiting";
 }
 
 /**
- * An item a refresh shows QuickBooks made already, marked done. A move made that way still has its follow-ups (the
- * student's forms and volunteer places, afterStudentMoved()), run in the same transaction under the roster lock while
- * the cache is still the item's company; the guardians whose places were given up are told after the commit.
+ * An item a refresh shows QuickBooks made already (or, for a make-inactive, QuickBooks shows done), marked done. Its app
+ * record follows as one sent now does (changeOwnRecord(), ./writes.ts: a new customer's record and link, `created` by
+ * the staff member who asked, a name, a student's family, an inactive flag), and a move still has its follow-ups (the
+ * student's forms, volunteer places and buy-outs, afterStudentMoved()), first: all in the same transaction under the
+ * roster lock while the cache is still the item's company; the guardians whose places were given up are told after
+ * the commit. `qboId` is the customer it was found as: the one a create made.
  */
 async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<void> {
-  if (w.op !== "move") { await markDone(item, "found", qboId, item.tries); return; }
   let tell: (() => Promise<unknown>) | null = null;
   await db.transaction(async (tx) => {
+    let appRecord: OwnRecordChange | null = null;
     if (await lockRosterAs(tx, rosterTagOf(item.realmId))) {
-      ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
-        { actor: WORKER_ACTOR, ip: null }));
+      if (w.op === "move") {
+        ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
+          { actor: WORKER_ACTOR, ip: null }));
+      }
+      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy });
     }
-    await markDone(item, "found", qboId, item.tries, tx);
+    await markDone(item, "found", qboId, item.tries, tx, appRecord);
   });
   if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
 }

@@ -5,7 +5,7 @@
 import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { qboCustomer, qboCustomerType, writeQueue, type RosterRole, type RosterWrite } from "@/lib/db/schema";
+import { accountingLink, family, qboCustomer, qboCustomerType, student, writeQueue, type RosterRole, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { CUSTOMER_WRITES, NO_TOKEN, qboCreateCustomer, qboCustomerById, qboMoveCustomer, qboRenameCustomer, qboSetCustomerActive } from "@/lib/quickbooks/client";
@@ -13,10 +13,8 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { currencyOf, formatMoney, toCents } from "@/lib/money/cents";
 import { normalizeEmail } from "@/lib/email";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { keepAppRecordsInStep } from "@/lib/families/in-step";
-import { appRecordsAudit, changedAppRecords, noAppRecordChanges } from "@/lib/families/changes";
 import { familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
-import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
@@ -341,18 +339,128 @@ export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fr
 }
 
 /**
- * What follows a write QuickBooks said yes to (spec 6.1: QuickBooks first, then the cache from its answer). In one
- * transaction that holds the roster lock: when the cache is still the company the write was sent to, the customer is
- * stored from the answer (only if newer), a moved student's follow-ups run, a family made inactive asks the worker for
- * a roster refresh (QuickBooks may have changed the customers under it), and the app's own records are brought into
- * step with the cache (keepAppRecordsInStep()). Who may sign in is the app's own guardian rows: a write to QuickBooks
- * opens or closes none of them. The write is audited
- * with before and after, whether or not the cache could take it. `inside` runs last, in the same transaction. When
- * that transaction fails, the change is still audited (code cache_failed) and a refresh asked for; `cached` says so.
+ * What a staff roster write changed in the app's own records, for its audit row (`appRecord`): the record, of its kind,
+ * and whether it was made or what was set on it. Since stage 3's slice 9c the records stand alone: nothing makes or
+ * changes them from the roster cache, so a write QuickBooks took changes its own record here, from what was sent.
+ */
+export type OwnRecordChange =
+  | { kind: "family"; familyId: string; made: true; linkId: string }
+  | { kind: "student"; studentId: string; familyId: string; made: true; linkId: string }
+  | { kind: "family"; familyId: string; set: { name?: string; active?: boolean } }
+  | { kind: "student"; studentId: string; set: { name?: string; active?: boolean; familyId?: string } };
+
+/**
+ * The app's own record a write QuickBooks took is about, changed to match, in the caller's transaction (under the
+ * roster lock, with the cache already holding QuickBooks' answer): `customerId` is the customer the write was about,
+ * the new one QuickBooks made for a create. Each record is found through its own link of its kind
+ * (src/lib/families/links.ts):
+ * - a new family (layered) or member (flat): a `family` record, active, named as sent, and its family link to the new
+ *   customer, `created` by `linkedBy` (the staff member who asked);
+ * - a new student: a `student` record, active, named as sent, in the app family the new customer's family is linked
+ *   to, and its student link, the same way (none when that family has no record: the Families pages offer such a
+ *   family no write forms);
+ * - a rename: the family's, member's or student's record's name;
+ * - a move: the student record's family, the one the family moved to is linked to (the follow-ups run before this);
+ * - a make-inactive: a member's or family's record, or a student's (a customer the family action covers, too, when it
+ *   has a student record), inactive. A family's own record goes inactive with its own last step, after everyone under it.
+ * A Parent customer changes nothing here: memberships are made and ended on a family's Portal sign-ins box (slice 7b).
+ * A customer that already has a record of the kind (a change found made twice) makes nothing new. Null when nothing
+ * changed. It writes no audit row: its caller's row says what it returns.
+ */
+export async function changeOwnRecord(tx: Tx, w: RosterWrite, customerId: string, o: { realmId: string; linkedBy: string | null }): Promise<OwnRecordChange | null> {
+  if (w.role === "parent") return null;
+  const now = new Date();
+  if (w.op === "create") {
+    if (w.role === "family" || w.role === "member") {
+      if ((await familyLinkedTo(customerId, tx)) !== null) return null;
+      const [made] = await tx.insert(family).values({ name: w.name, active: true }).returning({ id: family.id });
+      const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, familyId: made!.id, origin: "created", linkedBy: o.linkedBy })
+        .returning({ id: accountingLink.id });
+      return { kind: "family", familyId: String(made!.id), made: true, linkId: link!.id };
+    }
+    if (w.role !== "student" || w.familyQboId === null) return null;
+    if ((await studentLinkedTo(customerId, tx)) !== null) return null;
+    const familyId = await familyLinkedTo(w.familyQboId, tx);
+    if (familyId === null) return null;
+    const [made] = await tx.insert(student).values({ familyId, name: w.name, active: true }).returning({ id: student.id });
+    const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, studentId: made!.id, origin: "created", linkedBy: o.linkedBy })
+      .returning({ id: accountingLink.id });
+    return { kind: "student", studentId: String(made!.id), familyId: String(familyId), made: true, linkId: link!.id };
+  }
+  if (w.role === "family" || w.role === "member") {
+    const familyId = await familyLinkedTo(w.qboId, tx);
+    if (familyId === null) return null;
+    const [f] = await tx.select({ name: family.name, active: family.active }).from(family).where(eq(family.id, familyId)).for("update");
+    if (!f) return null;
+    const set = w.op === "rename" ? (f.name === w.name ? null : { name: w.name }) : f.active ? { active: false } : null;
+    if (set === null) return null;
+    await tx.update(family).set({ ...set, updatedAt: now }).where(eq(family.id, familyId));
+    return { kind: "family", familyId: String(familyId), set };
+  }
+  const studentId = await studentLinkedTo(w.qboId, tx);
+  if (studentId === null) return null;
+  const [s] = await tx.select({ name: student.name, active: student.active, familyId: student.familyId }).from(student).where(eq(student.id, studentId)).for("update");
+  if (!s) return null;
+  if (w.op === "rename") {
+    if (s.name === w.name) return null;
+    await tx.update(student).set({ name: w.name, updatedAt: now }).where(eq(student.id, studentId));
+    return { kind: "student", studentId: String(studentId), set: { name: w.name } };
+  }
+  if (w.op === "move") {
+    const to = await familyLinkedTo(w.toFamilyQboId, tx);
+    if (to === null || (s.familyId !== null && String(s.familyId) === String(to))) return null;
+    await tx.update(student).set({ familyId: to, updatedAt: now }).where(eq(student.id, studentId));
+    return { kind: "student", studentId: String(studentId), set: { familyId: String(to) } };
+  }
+  if (!s.active) return null;
+  await tx.update(student).set({ active: false, updatedAt: now }).where(eq(student.id, studentId));
+  return { kind: "student", studentId: String(studentId), set: { active: false } };
+}
+
+/** The records a write sent at once is filed under, should it go on the queue (Prepared). */
+type Filed = { familyId: AppFamilyId | null; studentId: AppStudentId | null };
+
+/**
+ * A write QuickBooks took that the portal couldn't take in after it (its transaction failed, or QuickBooks' answer
+ * wasn't the record asked about), held so its app record still follows: since slice 9c no roster read brings the
+ * records into step. A queued one is marked as possibly made (`sent`); one sent while staff waited goes on the queue
+ * marked so, filed under its records. Either way the queue looks for it in the cache after the next roster refresh,
+ * never simply sending it again, and, finding it made, marks it done and changes its record (foundDone(), ./queue.ts).
+ * A new item is audited (roster.write.queued) in the caller's transaction.
+ */
+async function holdForTheQueue(tx: Tx, w: RosterWrite, code: string, o: { realmId: string; actor: Actor; ip: string | null; permission?: string; queueId?: string;
+  linkedBy: string | null; filed?: Filed }): Promise<void> {
+  if (o.queueId) {
+    await tx.update(writeQueue).set({ sent: true, lastCode: code, tries: sql`${writeQueue.tries} + 1`, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000), updatedAt: new Date() })
+      .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting")));
+    return;
+  }
+  const [item] = await tx.insert(writeQueue).values({
+    realmId: o.realmId, request: w, targetQboId: w.op === "create" ? null : w.qboId, familyId: o.filed?.familyId ?? null, studentId: o.filed?.studentId ?? null,
+    sent: true, tries: 1, lastCode: code, nextTryAt: new Date(Date.now() + 60_000), askedBy: o.linkedBy, askedByLabel: o.actor.label,
+  }).returning({ id: writeQueue.id });
+  await writeAudit({ actor: o.actor, action: "roster.write.queued", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item!.id,
+    after: { op: w.op, role: w.role, code, sent: true } }, tx);
+}
+
+/**
+ * What follows a write QuickBooks said yes to (spec 6.1: QuickBooks first, then the cache and the app's record from its
+ * answer). In one transaction that holds the roster lock: when the cache is still the company the write was sent to,
+ * the customer is stored from the answer (only if newer), a moved student's follow-ups run, the app's own record the
+ * write was about is made or changed (changeOwnRecord()), and a family made inactive asks the worker for a roster
+ * refresh (QuickBooks may have changed the customers under it). Who may sign in is the app's own guardian rows: a
+ * write to QuickBooks opens or closes none of them. The write is audited with before and after and the record it
+ * changed (`appRecord`), whether or not the portal could take it in. `inside` runs last, in the same transaction.
+ * When that transaction fails (code cache_failed), or QuickBooks' answer isn't the record asked about (answer_other),
+ * the change is still audited, a refresh asked for, and the write held for the queue to finish (holdForTheQueue());
+ * `cached` is then false. `linkedBy` is the staff member who asked, for a link made to a new customer; `filed`, the
+ * records a write sent at once is filed under should it go on the queue.
  */
 export async function applyWritten(w: RosterWrite, answer: Record<string, unknown>, o: { realmId: string; actor: Actor; ip: string | null; permission?: string;
-  queueId?: string; inside?: (tx: Tx) => Promise<void> }): Promise<{ cached: boolean }> {
+  queueId?: string; linkedBy: string | null; filed?: Filed; inside?: (tx: Tx) => Promise<void> }): Promise<{ cached: boolean }> {
   let tell: (() => Promise<unknown>) | null = null;
+  const targetId = w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId;
+  let held = false;
   try {
     await db.transaction(async (tx) => {
       const ours = await lockRosterAs(tx, rosterTagOf(o.realmId));
@@ -360,43 +468,43 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       const cause = `${AUDIT_ACTION[w.op]}#${w.op === "create" ? nameKey(w.name).slice(0, 40) : w.qboId}`;
       const fits = answerIsFor(w, answer);
       let refreshAsked = false;
-      let appRecords = noAppRecordChanges();
+      let appRecord: OwnRecordChange | null = null;
       if (ours && fits) {
         await upsertFromAnswer(tx, answer, await getShape(tx));
         if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
+        appRecord = await changeOwnRecord(tx, w, targetId, { realmId: o.realmId, linkedBy: o.linkedBy });
         if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
-        appRecords = await keepAppRecordsInStep(tx);
       } else if (ours) {
-        await askForRosterRefresh(tx); refreshAsked = true; // the answer wasn't the record asked about: read the roster again rather than guess
+        // The answer wasn't the record asked about: the roster is read again rather than guessed at, and the queue finds
+        // the change in it and finishes it, its record with it.
+        await askForRosterRefresh(tx); refreshAsked = true;
+        await holdForTheQueue(tx, w, "answer_other", o);
+        held = true;
       }
-      await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer",
-        targetId: w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId,
+      await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId,
         before: auditBefore(w, cached), after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), ...(refreshAsked ? { refreshAsked } : {}),
-          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}), ...appRecordsAudit(appRecords) } }, tx);
-      if (o.inside) await o.inside(tx);
+          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}), ...(appRecord ? { appRecord } : {}) } }, tx);
+      if (o.inside && !held) await o.inside(tx);
     });
   } catch {
-    // QuickBooks made the change but the cache couldn't take it (a deadlock, a follow-up that failed): nothing of that
-    // transaction is kept, so the change is audited here with its code, the worker is asked for a roster refresh, and
-    // a queued item is marked as possibly made, so it is looked for after that refresh and never simply sent again.
+    // QuickBooks made the change but the portal couldn't take it in (a deadlock, a follow-up that failed): nothing of
+    // that transaction is kept, so the change is audited here with its code, the worker is asked for a roster refresh,
+    // and the write is held for the queue, marked as possibly made, so it is looked for after that refresh (never simply
+    // sent again) and its app record changed once it is found there.
     tell = null;
     await db.transaction(async (tx) => {
       await askForRosterRefresh(tx);
-      await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer",
-        targetId: w.op === "create" ? (typeof answer.Id === "string" ? answer.Id.slice(0, 64) : "unknown") : w.qboId,
+      await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId,
         before: w.op === "create" ? null : { syncToken: w.syncToken },
         after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), refreshAsked: true, code: "cache_failed" } }, tx);
-      if (o.queueId) {
-        await tx.update(writeQueue).set({ sent: true, lastCode: "cache_failed", tries: sql`${writeQueue.tries} + 1`, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000), updatedAt: new Date() })
-          .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting")));
-      }
+      await holdForTheQueue(tx, w, "cache_failed", o);
     });
     return { cached: false };
   }
   // The guardians whose places a moved student gave up are told once the move is committed. A mail failure is the
   // notices' own to record; it never undoes the move.
   if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
-  return { cached: true };
+  return { cached: !held };
 }
 
 /** Puts a write that may go through later on the queue, audited, in one transaction. */
@@ -413,8 +521,9 @@ async function enqueue(p: { write: RosterWrite; realmId: string; familyId: AppFa
 
 /**
  * The record read again after it changed in QuickBooks, stored in the cache when newer, as the page shows it. When the
- * cache took it, or the app's own records changed with it, that is audited (`roster.customer.read_again`) in the same
- * transaction, as the staff change that led to it.
+ * cache took it, that is audited (`roster.customer.read_again`) in the same transaction, as the staff change that led
+ * to it. The app's own records are left as they are: what QuickBooks holds is shown, never taken into them (stage 4's
+ * differences will offer that).
  */
 async function readAgain(qboId: string, realmId: string, o: { actor: Actor; ip: string | null; permission?: string }): Promise<CurrentRecord | null> {
   let answer: Record<string, unknown> | null;
@@ -424,10 +533,9 @@ async function readAgain(qboId: string, realmId: string, o: { actor: Actor; ip: 
     if (!(await lockRosterAs(tx, rosterTagOf(realmId)))) return null;
     const shape = await getShape(tx);
     const { stored, took } = await upsertFromAnswer(tx, answer, shape);
-    const appRecords = await keepAppRecordsInStep(tx);
-    if (took || changedAppRecords(appRecords)) {
+    if (took) {
       await writeAudit({ actor: o.actor, action: "roster.customer.read_again", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: qboId,
-        after: { cached: took, syncToken: stored?.syncToken ?? null, ...appRecordsAudit(appRecords) } }, tx);
+        after: { cached: took, syncToken: stored?.syncToken ?? null } }, tx);
     }
     // Shown as QuickBooks has it now, from this read: the cache keeps a row of the same version it already holds (an
     // answer is stored only when newer), so its values can lag behind what QuickBooks just showed.
@@ -513,7 +621,8 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
       }
     }
   }
-  const { cached } = await applyWritten(p.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission });
+  const { cached } = await applyWritten(p.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId,
+    filed: { familyId: p.familyId, studentId: p.studentId } });
   return { ok: true, message: cached ? DONE_WORDS[p.write.op] : WRITE_COPY.doneNotShown };
 }
 
@@ -573,7 +682,8 @@ export async function familyCover(familyQboId: string): Promise<{ family: Covere
   return { family: { qboId: f.qboId, name: f.displayName, syncToken: f.syncToken, depth: 0 }, under: activeUnder(cache, familyQboId) };
 }
 
-type FamilyStep = { write: Extract<RosterWrite, { op: "deactivate" }>; name: string };
+/** One step of the family action, with the records a queue item for it would be filed under (holdForTheQueue()). */
+type FamilyStep = { write: Extract<RosterWrite, { op: "deactivate" }>; name: string; filed: Filed };
 type PreparedFamily = { ok: true; realmId: string; familyName: string; steps: FamilyStep[] } | { ok: false; result: WriteResult };
 
 /**
@@ -607,10 +717,14 @@ async function prepareFamily(familyQboId: string, shown: ReadonlyMap<string, str
       const r = roleIn(roster, qboId);
       return r && r.familyQboId === familyQboId && (r.role === "student" || r.role === "parent") ? r.role : "other";
     };
-    const steps: FamilyStep[] = [
-      ...under.map((u) => ({ write: { op: "deactivate" as const, role: roleOf(u.qboId), qboId: u.qboId, syncToken: u.syncToken }, name: u.name })),
-      { write: { op: "deactivate", role: "family", qboId: familyQboId, syncToken: family.syncToken }, name: family.displayName },
+    const writes: FamilyStep["write"][] = [
+      ...under.map((u) => ({ op: "deactivate" as const, role: roleOf(u.qboId), qboId: u.qboId, syncToken: u.syncToken })),
+      { op: "deactivate", role: "family", qboId: familyQboId, syncToken: family.syncToken },
     ];
+    const steps: FamilyStep[] = [];
+    for (const [i, write] of writes.entries()) {
+      steps.push({ write, name: i < under.length ? under[i]!.name : family.displayName, filed: await recordsOf(tx, write, familyQboId) });
+    }
     return { ok: true, realmId: source, familyName: family.displayName, steps };
   });
 }
@@ -665,7 +779,7 @@ export type FamilyInactiveAnswer = { result: WriteResult; changed: boolean };
  *      read stops it before anything is sent when a version there is newer than the one the page showed, and passes
  *      over anyone it shows already inactive;
  *   3. each made inactive, deepest first and the family last, each through sendWrite() and applyWritten(): QuickBooks
- *      first, then the cache from its answer under the roster lock, with the records' step, its follow-ups and its audit row.
+ *      first, then the cache and the app's own record from its answer under the roster lock, with its audit row.
  *      The family's own last step is the one exception to carrying the version the page showed: the family is read
  *      once more after its members' writes, and sent with the version just read, since QuickBooks may raise it when a
  *      customer under it changes. Its version was the page's when the action began (step 2), the write sets only the
@@ -744,7 +858,7 @@ export async function askFamilyInactive(familyQboId: string, shown: ReadonlyArra
       if (!(e instanceof QboError)) throw e;
       return stop(i, e.code, await stepStopped(e, step, p.realmId, o));
     }
-    const { cached } = await applyWritten(step.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission });
+    const { cached } = await applyWritten(step.write, answer, { realmId: p.realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed: step.filed });
     if (!cached) allShown = false;
     made.push(step);
   }

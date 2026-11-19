@@ -173,8 +173,8 @@ describe("the parent switches", () => {
     expect(await studentsRuleInForce()).toBe(true);
     // A shape save never touches the parents' settings: one with students keeps the rule in force; one without leaves
     // the stored value as it is, not in force; one with students again puts it back in force, with nothing switched.
-    // (Who it then lets in is tests/integration/parent-door.test.ts: a shape save here, with no roster company, also
-    // takes Ana's row out of its family record, as keepAppRecordsInStep() does with no company.)
+    // (Who it then lets in is tests/integration/parent-door.test.ts. A shape save changes no record or guardian row
+    // since stage 3's slice 9c.)
     const saved = (await audits("settings.parents.save")).length;
     await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S2", parentTypeId: "P" }, { actor: admin.actor, ip: null });
     expect(await studentsRuleInForce()).toBe(true);

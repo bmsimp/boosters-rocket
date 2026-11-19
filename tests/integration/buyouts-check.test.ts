@@ -27,7 +27,7 @@ import { MONEY_REALM, seedSignedInParent, seedTwoFamilies } from "../helpers/par
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { buyoutFamily, queueOf, seedBuyout, seedBuyoutRequirement, BUYOUT_ITEM } from "../helpers/buyouts";
 import { recordOfCustomer } from "../helpers/app-records";
-import { moveInCache } from "../helpers/roster-cache";
+import { moveInCache, moveInQuickBooksOnly } from "../helpers/roster-cache";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -49,7 +49,7 @@ async function moneyRun(invoices: StoredInvoice[], o: { readAt?: Date } = {}) {
 }
 
 describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
-  it("marks a paid one paid, flags one QuickBooks no longer shows and one on another customer, has one whose student moved voided, and audits each once", async () => {
+  it("marks a paid one paid, flags one QuickBooks no longer shows and one on another customer, voids nothing for a student QuickBooks moved, and audits each once", async () => {
     const p = await buyoutFamily(stub);
     await seedSignedInParent(CHENOWETH);
     const by = p.identity.parentId;
@@ -62,41 +62,40 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     const elsewhere = await seedBuyout({ requirementId: reqs[3]!, familyQboId: FAMILY, chosenBy: by, invoiceQboId: "9904" });
     const moved = await seedBuyout({ requirementId: perStudent, familyQboId: FAMILY, subjectQboId: S1, chosenBy: by, invoiceQboId: "9905" });
     stub.invoices.push(stubInvoice("9905", S1, { TotalAmt: 100, Balance: 100, SyncToken: "2" }));
-    // The student was moved to another family in QuickBooks, and a refresh read it: the family's read no longer has their invoices.
-    await moveInCache([S1], CHENOWETH.family.qboId);
+    // The student was moved to another family in QuickBooks, and a refresh read it: the family's read no longer has their
+    // invoices, and the app still holds the student in the family (stage 3's slice 9c).
+    await moveInQuickBooksOnly([S1], CHENOWETH.family.qboId);
     await moneyRun([stored("9901", FAMILY), stored("9902", FAMILY, { balanceCents: 0 }), stored("9904", S2)]);
     // The new family's figures hold the moved student's invoice, open, as a money read would.
     const theirFigures = { realmId: MONEY_REALM, readAt: new Date(), invoices: [stored("9905", S1)], totalCents: 10000, currency: "USD", staleAt: null };
     await db.insert(familyMoney).values({ familyId: await recordOfCustomer(CHENOWETH.family.qboId, "family"), ...theirFigures }).onConflictDoUpdate({ target: familyMoney.familyId, set: theirFigures });
 
-    expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 1, flagged: 2, voided: 0, voiding: 1, unflagged: 0 });
+    expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 1, flagged: 2, voided: 0, unflagged: 0 });
     expect(await row(fine.id)).toMatchObject({ state: "invoiced", flag: null });
     expect(await row(paid.id)).toMatchObject({ state: "paid", flag: null });
     expect(await row(gone.id)).toMatchObject({ state: "invoiced", flag: "missing" });
     expect(await row(elsewhere.id)).toMatchObject({ state: "invoiced", flag: "other_customer" });
-    // The new family is never left an invoice for the old family's choice: its void goes on the queue, as a move made in the portal does.
-    expect(await row(moved.id)).toMatchObject({ state: "being_voided" });
-    expect((await queueOf(moved.id)).map((i) => [i.state, (i.request as { why?: string }).why])).toEqual([["waiting", "student_moved"]]);
+    // A move made in QuickBooks is no longer followed: the buy-out stays as it is, unflagged, and nothing is queued.
+    expect(await row(moved.id)).toMatchObject({ state: "invoiced", flag: null });
+    expect(await queueOf(moved.id)).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
     expect(await audits("volunteer.buyout.flagged")).toHaveLength(2);
     expect(await audits("volunteer.buyout.paid")).toHaveLength(1);
-    expect(await audits("volunteer.buyout.moved")).toHaveLength(1);
+    expect(await audits("volunteer.buyout.moved")).toEqual([]);
     // Shown on Reconciliation, with the family, the requirement and the amount.
     const look = await loadBuyoutsToLook();
     expect(look.map((l) => [l.requirement, l.flag, l.amountCents, l.familyName])).toEqual(expect.arrayContaining([
       ["Gone", "missing", 10000, RIVERA.family.name], ["Elsewhere", "other_customer", 10000, RIVERA.family.name]]));
 
-    // The worker reads it live and voids it, and the family the student is under now reads its figures again.
+    // The worker has nothing of it to send.
     await runWriteQueue(later(1));
-    expect(await row(moved.id)).toMatchObject({ state: "voided", endReason: "student_moved" });
-    expect(stub.apiCalls().filter((c) => c.method === "POST").map((c) => [c.query.get("operation"), JSON.parse(c.body)])).toEqual([["void", { Id: "9905", SyncToken: "2" }]]);
-    const [theirs] = await db.select().from(familyMoney).where(eq(familyMoney.familyId, await recordOfCustomer(CHENOWETH.family.qboId, "family")));
-    expect(theirs!.staleAt).not.toBeNull();
+    expect(await row(moved.id)).toMatchObject({ state: "invoiced" });
+    expect(stub.apiCalls().filter((c) => c.method === "POST")).toEqual([]);
 
     // Each run is followed once; a later run with nothing new audits nothing again.
     expect((await checkBuyoutInvoices()).ran).toBe(false);
     await moneyRun([stored("9901", FAMILY), stored("9904", S2)]);
-    expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 0, flagged: 0, voided: 0, voiding: 0, unflagged: 0 });
+    expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 0, flagged: 0, voided: 0, unflagged: 0 });
     expect(await audits("volunteer.buyout.flagged")).toHaveLength(2);
   });
 

@@ -1,5 +1,5 @@
 import { sql, eq, desc } from "drizzle-orm";
-import { db, type Tx } from "@/lib/db/client";
+import { db } from "@/lib/db/client";
 import { jobRun, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
@@ -7,11 +7,6 @@ import { qboQueryAll, qboCustomerTypes } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { clearRosterOfOtherCompanyLocked, getRosterSource, ROSTER_JOB, setRosterSource } from "./source";
-import { studentMoves, studentsUnderFamilies, type StudentMove } from "./moves";
-import { AppRecordsFailed, keepAppRecordsInStep, logAppRecordsFailure } from "@/lib/families/in-step";
-import { appRecordsAudit, noAppRecordChanges } from "@/lib/families/changes";
-import { formsForMovedStudent, requestsHeldElsewhere } from "@/lib/forms/moved";
-import { placesHeldElsewhere, volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 
 export { ROSTER_LOCK, ROSTER_JOB };
 
@@ -32,31 +27,6 @@ type TypeRowIn = { qboId: string; name: string; active: boolean; refreshedAt: Da
 type CustomerRowIn = NonNullable<ReturnType<typeof customerRow>>;
 /** The answer held no customers while the cache, read from the same company, holds some. Thrown inside the save, so nothing of it is kept. */
 class NoCustomersInAnswer extends Error {}
-/** What follows a student QuickBooks moved couldn't be done. Thrown inside the save, so nothing of it is kept. */
-class FollowUpFailed extends Error {}
-
-/** The actor of what a refresh does for a student QuickBooks moved, as for one moved in the portal (afterStudentMoved()). */
-const MOVE_ACTOR: Actor = { door: "system", id: null, label: "roster" };
-
-/**
- * What follows a student QuickBooks moved to another family, in the refresh's savepoint once the cache holds the new
- * family, as afterStudentMoved() (./writes.ts) does for a move made in the portal: the student's signature requests
- * (formsForMovedStudent: a complete one moves with its evidence, any other starts again under the new family and its
- * document is queued for the worker to withdraw), then their volunteer places (volunteerForMovedStudent: places on
- * shifts still to come given up, credit left with the family it was earned for), then the same audit row. A buy-out
- * is left to the daily check after the money run (checkBuyoutInvoices(), src/lib/buyouts/daily-check.ts), which puts
- * the void of an unpaid per-student invoice on the queue from the cache this refresh stores. The answer emails the
- * guardians whose places were given up: call it after the transaction commits.
- */
-async function followMovedStudent(sp: Tx, move: StudentMove, cause: string): Promise<() => Promise<unknown>> {
-  const forms = await formsForMovedStudent(sp, { ...move, actor: MOVE_ACTOR, ip: null });
-  const volunteer = await volunteerForMovedStudent(sp, move, { actor: MOVE_ACTOR, ip: null });
-  await writeAudit({ actor: MOVE_ACTOR, action: "roster.student.move.followed", targetType: "qbo_customer", targetId: move.studentQboId,
-    after: { fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId, cause,
-      formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled, buyouts: "daily_check" } }, sp);
-  return volunteer.tell;
-}
-
 /** One customer of a QuickBooks answer as the cache holds it (spec §2): contact details only for a customer the shape names. Null without an Id. */
 export function customerRow(c: Raw, named: Set<string>, now: Date) {
   const qboId = text(c.Id, 64);
@@ -76,7 +46,13 @@ export function customerRow(c: Raw, named: Set<string>, now: Date) {
  * Replaces the cache from QuickBooks: every customer type and every customer, active and inactive. QuickBooks is read
  * first; the tables change only if all of it arrived, in the same transaction, so a failure leaves the old cache whole.
  *
- * An empty roster would make every family record inactive (the records' step below), so it is believed from one answer only: a
+ * It stores the customer list and nothing else (stage 3's slice 9c of the app-owned families spec): the app's own
+ * families, students and guardian rows stand alone, so a customer renamed, moved, made inactive, added or removed in
+ * QuickBooks changes no record, and a student QuickBooks moved keeps their forms, places and buy-outs where the app has
+ * them (stage 4 shows such a change as a difference). What the list still decides: whose invoices a family sees, and
+ * what the roster pages show of each record's customer.
+ *
+ * An empty roster would leave every family with no invoices to show, so it is believed from one answer only: a
  * well-formed one (the client reads strictly, and anything else is a failed read), and never over a cache of the same
  * company that holds customers. QuickBooks makes a customer inactive and never deletes one, so a company that had
  * customers still has them; an answer with none is recorded as a failed run (`no_customers`) and the cache stays.
@@ -90,9 +66,7 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     // Any run counts, a failed one too: the limit protects QuickBooks from repeated reads.
     if (last && Date.now() - last.startedAt.getTime() < MANUAL_GAP_MS) return { ok: false, reason: "too_soon" };
   }
-  // The guardians to tell once the run is committed, of the students QuickBooks moved (followMovedStudent).
-  let tells: (() => Promise<unknown>)[] = [];
-  const result = await db.transaction(async (tx): Promise<RefreshResult> => {
+  return db.transaction(async (tx): Promise<RefreshResult> => {
     const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${ROSTER_LOCK}) as locked`)) as unknown as { locked: boolean }[];
     if (!lock?.locked) return { ok: false, reason: "running" };
     const [run] = await tx.insert(jobRun).values({ job: ROSTER_JOB, startedBy: o.startedBy }).returning();
@@ -139,16 +113,9 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     }
     if (prepared === "company_changed") return fail("The QuickBooks company changed during the read. (company_changed)", "company_changed");
     const { typeRows, customerRows } = prepared;
-    const cause = `roster.refresh#${run!.id}`;
-    // What the read changed in the app's own records (src/lib/families/in-step.ts), for the run's audit row.
-    let appRecords = noAppRecordChanges();
     try {
-      // A savepoint: a failure here undoes the cache changes and the app's own records' changes together, so the roster
-      // and the records never disagree, and the failed run can still be recorded.
+      // A savepoint: a failure here undoes the cache changes, and the failed run can still be recorded.
       await tx.transaction(async (sp) => {
-        // Whether the cache about to be replaced is this company's: a first read of a company, and another company's
-        // cache cleared below, have no move to follow.
-        const ours = (await getRosterSource(sp)) === realmId;
         // The cache came from another company and connecting didn't clear it: clear it now, with that company's parent
         // access, in the same savepoint as the swap. Its shape goes with it, so the rows are stored with no contact
         // details, as with no shape. Until stage 4 another company's cache is
@@ -157,54 +124,21 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         // Another company's cache was just cleared, and a new company may truly have no customers yet. Otherwise the
         // customers in the cache are this company's, and an answer without one of them is not believed.
         if (!cleared && customerRows.length === 0 && (await sp.select({ qboId: qboCustomer.qboId }).from(qboCustomer).limit(1)).length > 0) throw new NoCustomersInAnswer();
-        // Where each customer sat in that cache, read before it is replaced, under the roster lock this run holds.
-        const before = ours ? await sp.select({ qboId: qboCustomer.qboId, typeQboId: qboCustomer.typeQboId, parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer) : [];
         const rows = cleared ? customerRows.map((r) => ({ ...r, email: null, phone: null })) : customerRows;
         await sp.delete(qboCustomerType);
         await sp.delete(qboCustomer);
         for (let i = 0; i < typeRows.length; i += CHUNK) await sp.insert(qboCustomerType).values(typeRows.slice(i, i + CHUNK)).onConflictDoNothing();
         for (let i = 0; i < rows.length; i += CHUNK) await sp.insert(qboCustomer).values(rows.slice(i, i + CHUNK)).onConflictDoNothing();
         await setRosterSource(sp, realmId);
-        // A student QuickBooks moved to another family since the last read is followed up as a move made in the portal
-        // is. One the portal moved is in the old cache under the new family already, so it is no move here, and a move
-        // is found once: the next read sees the student where this one stored them. A move that reached the new family
-        // over more than one read (moved while inactive, or through a stray) is found by where the student's forms and
-        // places still to come are held; a followed move leaves none held elsewhere.
-        const shape = await getShape(sp);
-        const under = ours ? studentsUnderFamilies(shape, rows) : new Map<string, string>();
-        const held = under.size === 0 ? [] : [...(await requestsHeldElsewhere(sp, under)), ...(await placesHeldElsewhere(sp, under))];
-        const moves = before.length === 0 ? [] : studentMoves(shape, before, rows, held);
-        // The app's own records first, brought into step with the cache just stored, so a family
-        // QuickBooks made in this same read has its record before a student's move into it is followed: the follow-ups
-        // take the move (found above, from the cache this read replaced) to records through their links, and a
-        // complete form goes with the student to the new family's record at once. Nothing a follow-up changes (form
-        // requests, consents, withdrawals, sign-ups) is read by the records' step, and a failure in either undoes the
-        // whole savepoint. Who may sign in is the app's own guardian rows, which a read of QuickBooks no longer changes.
-        try { appRecords = await keepAppRecordsInStep(sp); } catch (e) {
-          logAppRecordsFailure(e instanceof AppRecordsFailed ? e.cause : e);
-          throw e;
-        }
-        const owed: (() => Promise<unknown>)[] = [];
-        try { for (const m of moves) owed.push(await followMovedStudent(sp, m, cause)); } catch { throw new FollowUpFailed(); }
-        tells = owed;
       });
     } catch (e) {
-      tells = [];
-      return e instanceof AppRecordsFailed
-        ? fail("The portal's own family and student records couldn't be brought up to date, so the roster was left as it was. (app_records_failed)", "app_records_failed")
-        : e instanceof NoCustomersInAnswer
-          ? fail("QuickBooks sent a roster with no customers in it, so the roster was left as it was. (no_customers)", "no_customers")
-          : e instanceof FollowUpFailed
-            ? fail("The forms and volunteer places of a student who moved to another family couldn't be brought up to date, so the roster was left as it was. (follow_up_failed)", "follow_up_failed")
-            : fail("The roster couldn't be saved. (save_failed)", "save_failed");
+      return e instanceof NoCustomersInAnswer
+        ? fail("QuickBooks sent a roster with no customers in it, so the roster was left as it was. (no_customers)", "no_customers")
+        : fail("The roster couldn't be saved. (save_failed)", "save_failed");
     }
     await tx.update(jobRun).set({ finishedAt: new Date(), outcome: "ok", detail: `${customerRows.length} customers, ${typeRows.length} customer types` }).where(eq(jobRun.id, run!.id));
     await writeAudit({ actor: o.actor, action: "roster.refresh", targetType: "job_run", targetId: String(run!.id),
-      after: { customers: customerRows.length, types: typeRows.length, ...appRecordsAudit(appRecords) }, ip: o.ip }, tx);
+      after: { customers: customerRows.length, types: typeRows.length }, ip: o.ip }, tx);
     return { ok: true, customers: customerRows.length, types: typeRows.length };
   });
-  // Mail only after the commit, one guardian at a time. A notice that fails is the notices' own to record; it never
-  // undoes the refresh.
-  if (result.ok) for (const tell of tells) await tell().catch(() => undefined);
-  return result;
 }

@@ -12,7 +12,8 @@ import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldCha
 /**
  * Migration 0023 fills the app's own records in SQL from what the database holds, so that stage 2's migrations find
  * them however soon they run after it (AGENTS.md, The app's own records). The fill must make exactly what the
- * TypeScript function makes from nothing (keepAppRecordsInStep(), src/lib/families/in-step.ts): here each is run on the
+ * TypeScript import makes from nothing (importRecordsFromRoster(), src/lib/families/roster-import.ts, which nothing in the
+ * portal runs since stage 3's slice 9c but a later slice's and stage 4's import will): here each is run on the
  * same data from empty tables, in turn, and what they made is compared customer by customer. And after the fill, the
  * function finds nothing to change.
  */
@@ -64,7 +65,7 @@ async function seedRecordsNamingOthers() {
   ]);
 }
 
-describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => {
+describe("migration 0023's fill makes what the import makes", () => {
   beforeEach(async () => { await resetDb(); });
 
   it("in layered books with a parent type, with records naming customers the cache doesn't hold, or names as the other kind", async () => {

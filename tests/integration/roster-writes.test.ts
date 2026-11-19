@@ -10,7 +10,8 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, qboConnection, qboCustomer, setting, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, parent, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { askFamilyInactive, askRosterWrite, familyCover, familyHereWords, REFRESH_ASK_KEY, WRITE_COPY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -20,7 +21,7 @@ import { setRosterSource } from "@/lib/roster/source";
 import { formWithdrawal, signedFormEvidence, signedFormFile, volunteerSignup } from "@/lib/db/schema";
 import { resetDb, seedParent, untilALockIsAwaited } from "../helpers/db";
 import { formSetting, requestByCustomer, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
-import { recordOfCustomer } from "../helpers/app-records";
+import { appRecordRows, NO_CHANGES, recordOfCustomer, whatAFreshRunWouldChange } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -222,6 +223,122 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
     expect((await db.select().from(auditLog)).filter((a) => a.action === "parent.access.ended")).toEqual([]);
     expect(await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY))).toEqual([]); // only a family's asks for a refresh
+  });
+});
+
+describe("each write QuickBooks took changes the app's own record too, in its transaction, and its audit row says which (stage 3's slice 9c)", () => {
+  const linkOf = async (customerId: string) => db.select().from(accountingLink).where(eq(accountingLink.customerId, customerId));
+  const familyRow = async (id: AppFamilyId | null) => (id === null ? undefined : (await db.select().from(family).where(eq(family.id, id)))[0]);
+  const studentRow = async (id: AppStudentId | null) => (id === null ? undefined : (await db.select().from(student).where(eq(student.id, id)))[0]);
+
+  describe("layered books", () => {
+    beforeEach(async () => { tag = await connectRoster(stub); });
+
+    it("a new family: an active record named as sent, linked to the customer QuickBooks made, as created by the staff member who asked", async () => {
+      await askRosterWrite({ op: "create", role: "family", name: " Okafor  Family ", familyQboId: null, email: null, typeQboId: null }, tag, op);
+      const made = stub.customers.find((c) => c.DisplayName === "Okafor Family")!;
+      const [link] = await linkOf(made.Id as string);
+      expect(link).toMatchObject({ system: "quickbooks", realmId: REALM, origin: "created", linkedBy: op.staffUserId, studentId: null, guardianId: null });
+      expect(await familyRow(link!.familyId)).toMatchObject({ name: "Okafor Family", active: true });
+      expect((await auditsOf("roster.customer.create"))[0]!.after).toMatchObject({ appRecord: { kind: "family", familyId: String(link!.familyId), made: true, linkId: link!.id } });
+      // What an import of the roster would make of it is what the write made.
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
+
+    it("a new student: an active record in the family the new customer's family is linked to, with its own student link", async () => {
+      await askRosterWrite({ op: "create", role: "student", name: "Rosa Rivera", familyQboId: "10", email: null, typeQboId: null }, tag, op);
+      const made = stub.customers.find((c) => c.DisplayName === "Rosa Rivera")!;
+      const [link] = await linkOf(made.Id as string);
+      expect(link).toMatchObject({ origin: "created", linkedBy: op.staffUserId, familyId: null, guardianId: null });
+      expect(await studentRow(link!.studentId)).toMatchObject({ name: "Rosa Rivera", active: true, familyId: await recordOfCustomer("10", "family") });
+      expect((await auditsOf("roster.customer.create"))[0]!.after).toMatchObject({ appRecord: { kind: "student", studentId: String(link!.studentId),
+        familyId: String(await recordOfCustomer("10", "family")), made: true } });
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
+
+    it("a new parent: no record and no sign-in, and the audit row names none", async () => {
+      const before = await appRecordRows();
+      await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email: "luis@example.com", typeQboId: null }, tag, op);
+      expect(await appRecordRows()).toEqual(before);
+      expect((await auditsOf("roster.customer.create"))[0]!.after).not.toHaveProperty("appRecord");
+    });
+
+    it("a rename: the family's or the student's record takes the new name; a parent's changes no record", async () => {
+      const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
+      await askRosterWrite({ op: "rename", qboId: "10", syncToken: "0", name: "Rivera-Diaz Family" }, tag, op);
+      await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op);
+      expect(await familyRow(rivera)).toMatchObject({ name: "Rivera-Diaz Family", active: true });
+      expect(await studentRow(leo)).toMatchObject({ name: "Leon Rivera", active: true, familyId: rivera });
+      const renames = await auditsOf("roster.customer.rename");
+      expect(renames.find((a) => a.targetId === "10")!.after).toMatchObject({ appRecord: { kind: "family", familyId: String(rivera), set: { name: "Rivera-Diaz Family" } } });
+      expect(renames.find((a) => a.targetId === "12")!.after).toMatchObject({ appRecord: { kind: "student", studentId: String(leo), set: { name: "Leon Rivera" } } });
+      const before = await appRecordRows();
+      await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana M. Rivera" }, tag, op);
+      expect(await appRecordRows()).toEqual(before);
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
+
+    it("a move: the student's record goes to the family moved to, after its follow-ups, once", async () => {
+      const leo = await recordOfCustomer("12", "student"), chen = await recordOfCustomer("20", "family");
+      await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op);
+      expect(await studentRow(leo)).toMatchObject({ familyId: chen, active: true });
+      expect((await auditsOf("roster.student.move"))[0]!.after).toMatchObject({ appRecord: { kind: "student", studentId: String(leo), set: { familyId: String(chen) } } });
+      expect(await auditsOf("roster.student.move.followed")).toHaveLength(1);
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
+
+    it("a student made inactive: their record is inactive; a parent made inactive changes no record", async () => {
+      const leo = await recordOfCustomer("12", "student");
+      await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op);
+      expect(await studentRow(leo)).toMatchObject({ active: false, familyId: await recordOfCustomer("10", "family") });
+      expect((await auditsOf("roster.customer.deactivate"))[0]!.after).toMatchObject({ appRecord: { kind: "student", studentId: String(leo), set: { active: false } } });
+      const before = await appRecordRows();
+      await askRosterWrite({ op: "deactivate", qboId: "21", syncToken: "0" }, tag, op);
+      expect(await appRecordRows()).toEqual(before);
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
+
+    it("a family made inactive with everyone under it: each student's record as its step goes through, the family's at the end", async () => {
+      const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
+      expect(await askFamilyInactive("10", await shownFor("10"), tag, op)).toMatchObject({ result: { ok: true } });
+      expect(await studentRow(leo)).toMatchObject({ active: false });
+      expect(await familyRow(rivera)).toMatchObject({ active: false });
+      const rows = (await auditsOf("roster.customer.deactivate")).reverse();
+      expect(rows.map((a) => [a.targetId, (a.after as { appRecord?: { kind: string } }).appRecord?.kind ?? null])).toEqual([["11", null], ["12", "student"], ["10", "family"]]);
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
+
+    it("a family whose make-inactive stops part way keeps its record active, and the student made inactive is inactive", async () => {
+      const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
+      // The family's own write is the one QuickBooks turns away.
+      stub.onApiRequest = (c) => { stub.updateFault = c.method === "POST" && /"Id":"10"/.test(c.body) ? "6000" : null; };
+      expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result.ok).toBe(false);
+      expect(await studentRow(leo)).toMatchObject({ active: false });
+      expect(await familyRow(rivera)).toMatchObject({ active: true });
+    });
+  });
+
+  describe("flat books", () => {
+    beforeEach(async () => { tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2", "3"] } }); });
+
+    it("a new member: an active family record and its link, as created by the staff member", async () => {
+      await askRosterWrite({ op: "create", role: "member", name: "Okafor Household", familyQboId: null, email: null, typeQboId: "3" }, tag, op);
+      const made = stub.customers.find((c) => c.DisplayName === "Okafor Household")!;
+      const [link] = await linkOf(made.Id as string);
+      expect(link).toMatchObject({ origin: "created", linkedBy: op.staffUserId, studentId: null });
+      expect(await familyRow(link!.familyId)).toMatchObject({ name: "Okafor Household", active: true });
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
+
+    it("a member renamed, then made inactive: their family record follows each", async () => {
+      const ana = await recordOfCustomer("11", "family");
+      await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana R. Rivera" }, tag, op);
+      expect(await familyRow(ana)).toMatchObject({ name: "Ana R. Rivera", active: true });
+      expect((await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "1" }, tag, op)).ok).toBe(true);
+      expect(await familyRow(ana)).toMatchObject({ name: "Ana R. Rivera", active: false });
+      expect((await auditsOf("roster.customer.deactivate"))[0]!.after).toMatchObject({ appRecord: { kind: "family", familyId: String(ana), set: { active: false } } });
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    });
   });
 });
 

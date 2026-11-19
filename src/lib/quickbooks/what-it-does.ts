@@ -5,7 +5,9 @@
  * tests/unit/quickbooks-writes.test.ts.
  */
 export const QUICKBOOKS_USE = {
-  reads: "The portal reads the club's families and members, what each family owes, and the products and services its invoices are for, from QuickBooks.",
+  reads: "The portal reads the club's families and members, what each family owes, and the products and services its invoices are for, from QuickBooks. "
+    + "What it reads there decides whose invoices each family sees; it changes none of the portal's own families, students or sign-ins, "
+    + "so a name, a student's family or an inactive customer changed in QuickBooks stays as the portal has it.",
   writes: "It changes only what someone asks it to there: a parent's own phone and mailing address, and the email address they sign in with, in their own record's email field, "
     + "each only when that parent changes it in the portal; "
     + "and, for staff allowed to change the roster, new families, students, parents and members, their names, a student's family, and making a customer inactive "

@@ -54,9 +54,9 @@ export async function loadRosterPage(): Promise<RosterPage> {
   }
   const brokenTypes = shape && lastOk ? missingTypes(shape, typeRows) : [];
   const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
-  // A cache that names no company has no family records yet (keepAppRecordsInStep() makes none until a read records
-  // it), so no sign-in can be held to one: the two sign-in rules wait for that read, which the Families list says is
-  // coming, rather than flag every open sign-in as attached to no family. QuickBooks' own tidy rules still run.
+  // A cache that names no company has no records' company to hold a sign-in's family to (every link names one), so the
+  // sign-in rule waits for a read that records it, rather than flag every open sign-in as attached to no family.
+  // QuickBooks' own tidy rules still run.
   const judged = from === null ? [] : people;
   return {
     connected: conn.connected, shape, shapeWords: shape ? describeShape(shape, typeRows) : null, brokenTypes, roster,

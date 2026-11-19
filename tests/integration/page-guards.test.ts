@@ -153,7 +153,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/staff-home/today", names: "all", why: "the staff home's counts read every family's forms and every shift's sign-ups" },
   { module: "@/lib/quickbooks/sandbox-check/run", names: "all", why: "the Admin's check of the portal's requests reads every customer and some families' invoices" },
   { module: "@/lib/quickbooks/sandbox-check/writes", names: "all", why: "the check's writes to QuickBooks, for an Intuit sandbox company only" },
-  { module: "@/lib/families/in-step", names: "all", why: "it reads every family's customers, sign-ins and records to keep the app's own records and links in step" },
+  { module: "@/lib/families/roster-import", names: "all", why: "the import of the app's own records from the roster: it reads every family's customers, sign-ins and records" },
   { module: "@/lib/parents/guardians", names: "all", why: "staff add, remove and reinstate guardians: it gives any address a sign-in for any family" },
 ];
 
@@ -354,6 +354,8 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/contact-fields.ts",
   "src/lib/parents/email-change.ts",
   "src/lib/parents/email-field.ts",
+  // The confirmed address taken into the roster cache, and nothing else (stage 3's slice 9c: no record keeping).
+  "src/lib/roster/cache-email.ts",
   // The names of the person's own families, from the app's records, for the chooser and the frame.
   "src/lib/parents/my-family-names.ts",
   "src/lib/seasons/my-season.ts",

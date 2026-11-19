@@ -23,8 +23,9 @@ export async function seedCache(customers: CacheCustomer[], types = P_TYPES): Pr
 
 /**
  * Adds rows to the roster cache and keeps what is there (tests/helpers/parent.ts seeds one family at a time with it).
- * The app's own records are brought into step with the cache afterward, as a roster read would (tests/helpers/app-records.ts):
- * while the cache names no company that leaves none.
+ * The app's own records are imported from the cache afterward (syncAppRecords(), tests/helpers/app-records.ts), as
+ * migration 0023 made them for a club's roster: while the cache names no company that makes none. Since stage 3's slice
+ * 9c no roster read does this in the portal: a test of what a read changes reads the stub (refreshRoster()).
  */
 export async function addToCache(customers: CacheCustomer[], types = P_TYPES): Promise<void> {
   await db.insert(qboCustomerType).values(types.map((t) => ({ ...t, active: true }))).onConflictDoNothing();
@@ -35,13 +36,23 @@ export async function addToCache(customers: CacheCustomer[], types = P_TYPES): P
 }
 
 /**
- * Moves students to another family in the cache, as a roster read that found the move in QuickBooks leaves it: the
- * app's own records follow (the student's record is in the new family), as the reconcile at the end of the read does.
- * It follows nothing of the student's forms or places: a test that wants those calls the follow-ups itself.
+ * Moves students to another family both in the cache and in the app's own records, as a move staff made from the
+ * portal leaves them once QuickBooks took it (the student's record is in the new family, by the import's rules): a test
+ * that means "the student is now in the other family". It follows nothing of the student's forms or places: a test
+ * that wants those calls the follow-ups itself (afterStudentMoved()). For a move made in QuickBooks alone, which since
+ * stage 3's slice 9c changes no record, use moveInQuickBooksOnly().
  */
 export async function moveInCache(studentQboIds: string[], toFamilyQboId: string): Promise<void> {
   await db.update(qboCustomer).set({ parentQboId: toFamilyQboId }).where(inArray(qboCustomer.qboId, studentQboIds));
   await syncAppRecords();
+}
+
+/**
+ * Moves students to another family in the roster cache alone, as a roster read leaves a move someone made in
+ * QuickBooks: the app's own records, and so the student's forms, places and buy-outs, stay where they were.
+ */
+export async function moveInQuickBooksOnly(studentQboIds: string[], toFamilyQboId: string): Promise<void> {
+  await db.update(qboCustomer).set({ parentQboId: toFamilyQboId }).where(inArray(qboCustomer.qboId, studentQboIds));
 }
 /** Every student the cache holds under one family, moved to another (moveInCache()). */
 export async function moveFamilyInCache(fromFamilyQboId: string, toFamilyQboId: string): Promise<void> {
@@ -49,7 +60,11 @@ export async function moveFamilyInCache(fromFamilyQboId: string, toFamilyQboId: 
   await moveInCache(under.map((c) => c.qboId), toFamilyQboId);
 }
 
-/** Saves the membership shape as an Admin would have, and brings the app's own records into step with it, as saveShape() does. */
+/**
+ * Stores the membership shape as an Admin would have saved it, and imports the app's own records from the cache by it
+ * (syncAppRecords()), as migration 0023 made them for a club with that shape. saveShape() itself changes no record since
+ * stage 3's slice 9c; storeShape() stores the shape alone.
+ */
 export async function seedShape(shape: MembershipShape = P_SHAPE): Promise<void> {
   await db.insert(setting).values({ key: SHAPE_KEY, value: shape }).onConflictDoUpdate({ target: setting.key, set: { value: shape } });
   await syncAppRecords();

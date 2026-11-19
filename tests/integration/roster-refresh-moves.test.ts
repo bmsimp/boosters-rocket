@@ -14,37 +14,36 @@ const mail = vi.hoisted(() => ({ outbox: [] as Msg[], atSend: null as null | (()
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password",
   buildSender: async () => async (m: Msg) => { if (mail.atSend) mail.seen.push(await mail.atSend()); mail.outbox.push(m); } }));
 
-import { asc, desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, formWithdrawal, guardian, jobRun, parent, qboCustomer, setting, signatureConsent, signedFormEvidence, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
-import * as volunteerMoved from "@/lib/volunteer/moved-student";
-import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
+import { buyout, formWithdrawal, jobRun, parent, qboCustomer, setting, signatureConsent, signedFormEvidence, student, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
+import { refreshRoster } from "@/lib/roster/refresh";
 import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
-import { setRosterSource } from "@/lib/roster/source";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import FormsPage from "@/app/(parent)/forms/page";
 import FormPage from "@/app/(parent)/forms/[id]/page";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
-import { findMySignedPdf } from "@/lib/forms/my-evidence";
-import { remindNow } from "@/lib/signed-forms/reminders";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
-import { connectForms, formSetting, requestByCustomer, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
+import { formSetting, requestByCustomer, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { identityNow } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup } from "../helpers/volunteer";
-import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
-import { seedBuyout, seedBuyoutRequirement, queueOf } from "../helpers/buyouts";
+import { recordOfCustomer } from "../helpers/app-records";
+import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 
 /**
- * A student moved to another family in QuickBooks, and read by a roster refresh, is followed up as a move staff make in
- * the portal is (afterStudentMoved(), src/lib/roster/writes.ts): their forms and volunteer places, in the refresh's own
- * savepoint, once; the guardians told after the commit. Buy-outs are the daily check's (src/lib/buyouts/daily-check.ts).
+ * A move is followed only when staff make it in the portal (afterStudentMoved(), src/lib/roster/writes.ts): the
+ * student's forms, volunteer places and buy-outs, once, in the move's own transaction (or the queue's, when QuickBooks
+ * took it and the portal found it made later), the guardians told after the commit. Since stage 3's slice 9c a roster
+ * refresh follows nothing: a student moved, renamed or made inactive in QuickBooks keeps their record, forms, places
+ * and buy-outs where the app has them, and the daily buy-out check voids nothing for it (stage 4 shows such a change
+ * as a difference).
  */
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -55,16 +54,17 @@ vi.setConfig({ testTimeout: 60_000 });
 const LEO = "12", RIVERA = "10", CHEN = "20";
 const inStub = (id: string) => stub.customers.find((c) => c.Id === id)!;
 /** Moves a customer to another parent in QuickBooks, as a change made there: a new version of the record. */
-const moveInQuickBooks = (id: string, toQboId: string | null, o: { active?: boolean } = {}) => {
+const moveInQuickBooks = (id: string, toQboId: string | null, o: { active?: boolean; name?: string } = {}) => {
   const c = inStub(id);
   if (toQboId === null) { delete c.ParentRef; delete c.Job; } else Object.assign(c, { ParentRef: { value: toQboId }, Job: true });
   if (o.active !== undefined) c.Active = o.active;
+  if (o.name !== undefined) c.DisplayName = o.name;
   c.SyncToken = String(Number(c.SyncToken) + 1);
 };
 /**
  * A guardian in a family, seeded before the roster is read. Their session is made only after the read (signedInNow()):
- * a session names the app's own family record, which the read's records' step makes and gives their row, and the gate
- * lets them in only once that record is active.
+ * a session names the app's own family record, which the import after the read (connectRoster()) makes and gives their
+ * row, and the gate lets them in only once that record is active.
  */
 async function guardianBeforeTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
   const person = await seedParent({ name: o.name, email: o.email, welcomedAt: new Date() });
@@ -76,12 +76,13 @@ const signedInNow = async (g: { authUserId: string; familyQboId: string }) =>
   ({ session: await seedParentSession(g.authUserId, { familyQboId: g.familyQboId }) });
 const cached = async (qboId: string) => (await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, qboId)))[0];
 const followed = () => auditsOf("roster.student.move.followed");
-const lastRun = async () => (await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1))[0]!;
 const signup = async (id: string) => (await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, id)))[0]!;
 const anaId = async () => (await db.select().from(parent).where(eq(parent.email, "ana@example.com")))[0]!.id;
+/** Leo's own record as the app holds it. */
+const leoRecord = async () => (await db.select().from(student).where(eq(student.id, await recordOfCustomer(LEO, "student"))))[0]!;
 /**
  * Ana, the Rivera family's guardian, as the portal holds her: a roster read makes no sign-in from QuickBooks (stage 3's
- * slice 7a), so she is seeded before the read, whose records' step puts her row in the Rivera family's record.
+ * slice 7a), so she is seeded before the read, and the import after it puts her row in the Rivera family's record.
  */
 const anaBeforeTheRead = () => guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
 
@@ -105,6 +106,12 @@ async function seedLeo() {
   const credit = await seedCheckIn({ signupId: done.id, familyQboId: RIVERA, by: ana });
   return { ana, open, signed, evidence, coming, done, credit, openReq, signedReq };
 }
+/** Everything of Leo's a move would change, as it is now. */
+const leosThings = async (leo: Awaited<ReturnType<typeof seedLeo>>) => ({
+  record: await leoRecord(), open: await requestByCustomer(leo.open), signed: await requestByCustomer(leo.signed),
+  consents: await db.select().from(signatureConsent), withdrawals: await db.select().from(formWithdrawal), signups: await db.select().from(volunteerSignup),
+  credit: await db.select().from(volunteerCredit), buyouts: await db.select().from(buyout), queue: await db.select().from(writeQueue),
+});
 
 beforeEach(async () => {
   await resetDb(); stub.reset(); mail.outbox = []; mail.seen = [];
@@ -112,144 +119,81 @@ beforeEach(async () => {
   await seedWorkingMail();
 });
 
-describe("a student QuickBooks moved to another family, read by a refresh", () => {
+describe("a student moved, renamed or made inactive in QuickBooks, read by a refresh", () => {
   beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
 
-  it("is followed as a move made in the portal: the forms and the place still to come follow, the place done stays, once", async () => {
+  const CHANGES: [string, { to: string; active?: boolean; name?: string }][] = [
+    ["moved to another family", { to: CHEN }],
+    ["moved and made inactive", { to: CHEN, active: false }],
+    ["renamed", { to: RIVERA, name: "Leonardo Rivera" }],
+    ["made inactive where they are", { to: RIVERA, active: false }],
+    ["moved to a school", { to: "30" }],
+  ];
+  it.each(CHANGES)("%s: the cache takes it, and nothing of the student's changes in the app", async (_what, change) => {
     const leo = await seedLeo();
-    moveInQuickBooks(LEO, CHEN);
-    // Each guardian is told only once the refresh is committed: at that moment its run is recorded as done.
-    mail.atSend = async () => (await lastRun()).outcome;
-
+    const before = await leosThings(leo);
+    moveInQuickBooks(LEO, change.to, change);
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    const run = await lastRun();
-    expect(await cached(LEO)).toMatchObject({ parentQboId: CHEN });
+    expect(await cached(LEO)).toMatchObject({ parentQboId: change.to, ...(change.active === false ? { active: false } : {}), ...(change.name ? { displayName: change.name } : {}) });
+    expect(await leosThings(leo)).toEqual(before);
+    expect(before.record).toMatchObject({ name: "Leo Rivera", active: true, familyId: await recordOfCustomer(RIVERA, "family") });
+    expect(await followed()).toEqual([]);
+    expect(await auditsOf("forms.request.moved")).toEqual([]);
+    expect(await auditsOf("volunteer.signup.moved")).toEqual([]);
+    expect(mail.outbox).toEqual([]);
+    expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
+  });
 
-    // The open form starts again under the new family, the old family's consent goes, and its document waits for the worker to withdraw it.
+  it("a move staff made in the portal is followed once, by the move: the refresh after it changes nothing", async () => {
+    const leo = await seedLeo();
+    const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    // Each guardian is told only once the move is committed.
+    mail.atSend = async () => (await leoRecord()).familyId === (await recordOfCustomer(CHEN, "family"));
+    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
+    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.student.move#${LEO}`, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
+    // The open form starts again under the new family, its document queued for withdrawal; the signed one moves with its evidence.
     expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened", envelopeId: null, signers: [] });
-    expect(await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, leo.open))).toEqual([]);
-    expect(await db.select().from(formWithdrawal)).toEqual([expect.objectContaining({ envelopeId: "envelope_qbmovedopen", anySigned: false })]);
-    // The signed form moves with its evidence: it still counts for Leo.
-    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete", envelopeId: "envelope_qbmovedsigned" });
-    // The kept evidence now names the new family's record; its own copy of the QuickBooks ids stays as it was stored.
-    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, leo.evidence.id)))[0]).toMatchObject({ requestId: leo.signed, familyId: await recordOfCustomer(CHEN, "family"), familyQboId: RIVERA, subjectQboId: LEO });
+    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete" });
+    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, leo.evidence.id)))[0]).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family"), familyQboId: RIVERA, subjectQboId: LEO });
     // The place still to come is given up; the one done keeps its credit with the family it was earned for.
     expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
     expect((await signup(leo.done.id)).cancelledAt).toBeNull();
     expect((await db.select().from(volunteerCredit).where(eq(volunteerCredit.id, leo.credit.id)))[0]).toMatchObject({ familyId: await recordOfCustomer(RIVERA, "family"), removedAt: null });
-
-    const [row] = await followed();
-    expect(await followed()).toHaveLength(1);
-    expect(row).toMatchObject({ door: "system", actorLabel: "roster", targetType: "qbo_customer", targetId: LEO,
-      after: { fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, cause: `roster.refresh#${run.id}`, formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1, buyouts: "daily_check" } });
-    expect(await auditsOf("forms.request.moved")).toHaveLength(2);
-    // The places name the app's own student, and so does their new audit row.
-    expect(await auditsOf("volunteer.signup.moved")).toEqual([expect.objectContaining({ targetType: "student", targetId: String(await recordOfCustomer(LEO, "student")),
-      after: expect.objectContaining({ familyId: String(await recordOfCustomer(CHEN, "family")), cancelled: 1, guardiansTold: 1 }) })]);
-    // Ana, who took the place, is told once, after the commit, about her own sign-up, and never where Leo went.
+    expect(await leoRecord()).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family"), active: true });
     expect(mail.outbox.map((m) => [m.to, m.subject])).toEqual([["ana@example.com", "Your place has been freed: Fall fair"]]);
-    expect(mail.seen).toEqual(["ok"]);
-    expect(mail.outbox[0]!.text).not.toContain("Chen");
-    // The follow-ups send QuickBooks nothing.
-    expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
+    expect(mail.seen).toEqual([true]);
 
-    // A later refresh that still sees Leo under the Chen family runs nothing.
+    const after = await leosThings(leo);
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toHaveLength(1);
-    expect(await db.select().from(formWithdrawal)).toHaveLength(1);
-    expect(await auditsOf("forms.request.moved")).toHaveLength(2);
-    expect(mail.outbox).toHaveLength(1);
-  });
-
-  it("a student made inactive in QuickBooks is followed by nothing, moved or not", async () => {
-    const leo = await seedLeo();
-    moveInQuickBooks(LEO, CHEN, { active: false });
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await cached(LEO)).toMatchObject({ parentQboId: CHEN, active: false });
-    expect(await followed()).toEqual([]);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
-    expect((await signup(leo.coming.id)).cancelledAt).toBeNull();
-    expect(mail.outbox).toEqual([]);
-  });
-
-  it("a move made over two refreshes is followed when the student is active under the new family: moved while inactive, made active later", async () => {
-    const leo = await seedLeo();
-    // Moved to the Chen family while inactive: nothing to follow yet.
-    moveInQuickBooks(LEO, CHEN, { active: false });
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([]);
-    // Taken back into use under the Chen family: the forms and the place still to come follow from where they are held.
-    moveInQuickBooks(LEO, CHEN, { active: true });
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete" });
-    expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
-    // The place done stays with the family it was earned for, and is never taken for a move again.
-    expect((await signup(leo.done.id)).cancelledAt).toBeNull();
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
+    expect(await leosThings(leo)).toEqual(after);
     expect(await followed()).toHaveLength(1);
     expect(mail.outbox).toHaveLength(1);
   });
 
-  it("a move through a stray (off the family first, under the new one at the next read) is followed once", async () => {
-    const leo = await seedLeo();
-    moveInQuickBooks(LEO, null);
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([]);
-    moveInQuickBooks(LEO, CHEN);
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: CHEN, formsReset: 1, placesGivenUp: 1 }) })]);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN });
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toHaveLength(1);
-  });
-
-  it("a student moved to something that isn't a family is followed by nothing: a school, a parent, no one", async () => {
-    const leo = await seedLeo();
-    for (const to of ["30", "21", null]) {
-      moveInQuickBooks(LEO, to);
-      expect(await refreshRoster(WORKER), String(to)).toMatchObject({ ok: true });
-      expect((await cached(LEO))!.parentQboId).toBe(to);
-    }
-    expect(await followed()).toEqual([]);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
-    expect((await signup(leo.coming.id)).cancelledAt).toBeNull();
-  });
-
-  it("a move staff made in the portal is followed once, by the move: the refresh after it finds the student where the move put them", async () => {
-    const leo = await seedLeo();
-    const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([expect.objectContaining({ after: expect.objectContaining({ cause: `roster.student.move#${LEO}`, formsReset: 1, placesGivenUp: 1 }) })]);
-    const told = mail.outbox.length;
-    expect(told).toBe(1);
-
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toHaveLength(1);
-    expect(await db.select().from(formWithdrawal)).toHaveLength(1);
-    expect(await auditsOf("forms.request.moved")).toHaveLength(2);
-    expect(await auditsOf("volunteer.signup.moved")).toHaveLength(1);
-    expect(mail.outbox).toHaveLength(told);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-  });
-
-  // The gap the review of step 5 left: a move whose answer named another record asks for a refresh and runs nothing.
-  it("a move whose answer named another record is followed by the refresh it asks for", async () => {
+  it("a move whose answer named another record changes nothing at once; the queue finishes it once a read shows it, follow-ups and record together", async () => {
     const leo = await seedLeo();
     moveInQuickBooks(LEO, CHEN);
     await applyWritten({ op: "move", role: "student", qboId: LEO, syncToken: "0", fromFamilyQboId: RIVERA, toFamilyQboId: CHEN },
-      { Id: "13", DisplayName: "Someone Else", SyncToken: "1", ParentRef: { value: CHEN } }, { realmId: REALM, actor: WORKER.actor, ip: null });
+      { Id: "13", DisplayName: "Someone Else", SyncToken: "1", ParentRef: { value: CHEN } }, { realmId: REALM, actor: WORKER.actor, ip: null, linkedBy: null });
     expect(await followed()).toEqual([]);
     expect((await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY)))).toHaveLength(1);
     expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA });
+    const [item] = await db.select().from(writeQueue);
+    expect(item).toMatchObject({ state: "waiting", sent: true, lastCode: "answer_other", targetQboId: LEO });
 
+    // A refresh alone follows nothing; the queue, after one, finds the move made and finishes it.
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.refresh#${(await lastRun()).id}`, formsReset: 1, formsMoved: 1, placesGivenUp: 1 }) })]);
+    expect(await followed()).toEqual([]);
+    await db.update(writeQueue).set({ nextTryAt: new Date(Date.now() - 60_000) });
+    expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
+    expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
+    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.write.found#${LEO}`, formsReset: 1, formsMoved: 1, placesGivenUp: 1 }) })]);
     expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
+    expect(await leoRecord()).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family") });
+    expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
 
-  it("a queued move QuickBooks made already: the refresh that finds it follows it, and marking it done takes nothing more from the families", async () => {
+  it("a queued move QuickBooks made already: the queue follows it once it finds it, and the refresh before that follows nothing", async () => {
     const leo = await seedLeo();
     moveInQuickBooks(LEO, CHEN);
     // Sent after the last read, its answer lost: the queue reads the roster again before it looks for it.
@@ -258,117 +202,16 @@ describe("a student QuickBooks moved to another family, read by a refresh", () =
     expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
     expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    // The refresh followed the move; the queue's own look at it found nothing left to move, cancel or tell.
-    const rows = await followed();
-    expect(rows.map((r) => (r.after as { cause: string }).cause).sort()).toEqual([`roster.refresh#${(await lastRun()).id}`, `roster.write.found#${LEO}`].sort());
-    expect(rows.find((r) => (r.after as { cause: string }).cause.startsWith("roster.write.found"))!.after).toMatchObject({ formsMoved: 0, formsReset: 0, placesGivenUp: 0 });
+    expect((await followed()).map((r) => (r.after as { cause: string }).cause)).toEqual([`roster.write.found#${LEO}`]);
+    expect((await followed())[0]!.after).toMatchObject({ formsMoved: 1, formsReset: 1, placesGivenUp: 1 });
+    expect(await leoRecord()).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family") });
     expect(await db.select().from(formWithdrawal)).toHaveLength(1);
-    expect(await auditsOf("forms.request.moved")).toHaveLength(2);
     expect(mail.outbox).toHaveLength(1);
     expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
-
-  it("a follow-up that fails leaves the old roster and everything of the student as it was, and records the run as failed; the next refresh follows the move", async () => {
-    const leo = await seedLeo();
-    const before = { customers: await db.select().from(qboCustomer), signups: await db.select().from(volunteerSignup), audits: (await db.select().from(auditLog)).length };
-    moveInQuickBooks(LEO, CHEN);
-    // The forms are moved first; the volunteer places then fail, so the forms' changes must be undone with the rest.
-    vi.spyOn(volunteerMoved, "volunteerForMovedStudent").mockRejectedValueOnce(new Error("boom: ana@example.com"));
-
-    expect(await refreshRoster(WORKER)).toEqual({ ok: false, reason: "failed",
-      error: "The forms and volunteer places of a student who moved to another family couldn't be brought up to date, so the roster was left as it was. (follow_up_failed)" });
-    expect(await db.select().from(qboCustomer)).toEqual(before.customers);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting", envelopeId: "envelope_qbmovedopen" });
-    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: RIVERA });
-    expect(await db.select().from(formWithdrawal)).toEqual([]);
-    expect(await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, leo.open))).toHaveLength(1);
-    expect(await db.select().from(volunteerSignup)).toEqual(before.signups);
-    expect(await lastRun()).toMatchObject({ outcome: "failed" });
-    const after = await db.select().from(auditLog).orderBy(asc(auditLog.id));
-    expect(after.slice(before.audits).map((r) => [r.action, r.after])).toEqual([["roster.refresh.failed", { code: "follow_up_failed" }]]);
-    expect(JSON.stringify(after)).not.toContain("boom");
-    expect(mail.outbox).toEqual([]);
-
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toHaveLength(1);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
-    expect(mail.outbox).toHaveLength(1);
-  });
-
-  it("a club that moves dozens of students at once in QuickBooks: the refresh finishes, each move followed once", async () => {
-    const ana = await anaId();
-    const season = await seedSeason({ name: "Reorganized", steps: [{ name: "Join" }] });
-    const req = await seedFormRequirement({ stepId: season.stepIds["Join"]!, title: "Medical release", appliesTo: "student", form: formSetting({ id: "envelope_tmplmedical" }) });
-    const { shifts: [shift] } = await seedEvent({ name: "Big fair", inDays: 10, shifts: [{ places: 100 }] });
-    const ids = Array.from({ length: 48 }, (_, i) => String(1000 + i));
-    for (const id of ids) {
-      stub.customers.push({ Id: id, DisplayName: `Student ${id}`, Active: true, SyncToken: "0", CustomerTypeRef: { value: "3" }, ParentRef: { value: RIVERA }, Job: true });
-    }
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    for (const id of ids) {
-      await seedRequest({ requirementId: req, familyQboId: RIVERA, subjectQboId: id, state: "waiting", envelopeId: `envelope_many${id}` });
-      await seedSignup({ shiftId: shift!.id, familyQboId: RIVERA, signedUpBy: ana, student: { qboId: id, name: `Student ${id}` } });
-    }
-    for (const id of ids) moveInQuickBooks(id, CHEN);
-
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    const rows = await followed();
-    expect(rows).toHaveLength(48);
-    expect(new Set(rows.map((r) => r.targetId))).toEqual(new Set(ids));
-    expect(rows.every((r) => (r.after as { formsReset: number; placesGivenUp: number }).formsReset === 1 && (r.after as { placesGivenUp: number }).placesGivenUp === 1)).toBe(true);
-    expect(await db.select().from(formWithdrawal)).toHaveLength(48);
-    expect((await db.select().from(volunteerSignup)).every((s) => s.cancelledAt !== null)).toBe(true);
-    expect(mail.outbox).toHaveLength(48);
-
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toHaveLength(48);
-  });
 });
 
-describe("not followed when the cache a refresh replaces isn't this company's", () => {
-  it("the first read of a company follows nothing, wherever its students are", async () => {
-    // Before a company's first read there are no app records, so no form or place can be held anywhere (a request
-    // names its family's and student's records, made only from a roster read): there is no earlier state of the
-    // company to compare with, and nothing held elsewhere. The first read, with Leo under the Chen family, follows nothing.
-    // The refresh's own guard for this (the cache it replaces isn't this company's, so nothing counts as held elsewhere)
-    // has no state left to meet until stage 4: records and a request exist only once a company's roster is read, and a
-    // read over another company's cache is refused before it reads anything (the next test). It stays in the refresh
-    // for when stage 4 lets a company change again, and its test comes back with it.
-    const season = await seedSeason({ name: "Before", steps: [{ name: "Join" }] });
-    const req = await seedFormRequirement({ stepId: season.stepIds["Join"]!, title: "Medical release", appliesTo: "student", form: formSetting({ id: "envelope_tmplmedical" }) });
-    const company = fznCompany();
-    Object.assign(company.customers.find((c) => c.Id === LEO)!, { ParentRef: { value: CHEN } });
-    await connectRoster(stub, { company });
-    expect(await followed()).toEqual([]);
-    expect(await auditsOf("forms.request.moved")).toEqual([]);
-    expect(await db.select().from(formWithdrawal)).toEqual([]);
-    // Leo's record is in the Chen family; a form opened for him there, and read again with nothing changed, stays put.
-    const open = await seedRequest({ requirementId: req, familyQboId: CHEN, subjectQboId: LEO, state: "waiting", envelopeId: "envelope_firstread" });
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([]);
-    expect(await requestByCustomer(open)).toMatchObject({ familyQboId: CHEN, state: "waiting", envelopeId: "envelope_firstread" });
-  });
-
-  // Until stage 4 of the app-owned families spec, a refresh over another company's cache is refused before it reads
-  // anything (open question 18), so it clears nothing and follows nothing. (The rule that a cleared cache has no move to
-  // follow stays in the refresh for when stage 4 lets a company change again.)
-  it("a refresh over another company's cache is refused, and follows nothing", async () => {
-    await anaBeforeTheRead();
-    await connectRoster(stub);
-    await seedLeo();
-    await db.transaction((tx) => setRosterSource(tx, "9130000000000999"));
-    moveInQuickBooks(LEO, CHEN);
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(roster_company)") });
-    expect(await auditsOf("roster.cleared")).toEqual([]);
-    expect(await followed()).toEqual([]);
-    expect(await auditsOf("forms.request.moved")).toEqual([]);
-    expect(await auditsOf("volunteer.signup.moved")).toEqual([]);
-    expect(mail.outbox).toEqual([]);
-  });
-});
-
-describe("buy-outs of a student QuickBooks moved are the daily check's, and never voided twice", () => {
+describe("buy-outs of a student QuickBooks moved are voided by nothing; a move in the portal voids once", () => {
   beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
 
   /** A money run that read every family, as the daily check follows it. */
@@ -387,56 +230,32 @@ describe("buy-outs of a student QuickBooks moved are the daily check's, and neve
     };
   }
 
-  it("a QuickBooks move, then the daily check, then a move in the portal: one void for the unpaid one, none for the paid one or the family's", async () => {
+  it("a QuickBooks move, the refresh and the daily check void nothing; a move in the portal then voids the unpaid one, once", async () => {
     const b = await leoBuyouts();
     moveInQuickBooks(LEO, CHEN);
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    // The refresh voids nothing itself.
+    await moneyRun();
+    expect(await checkBuyoutInvoices()).toMatchObject({ ran: true });
     expect(await state(b.invoiced.id)).toMatchObject({ state: "invoiced", flag: null });
     expect(await voids()).toEqual([]);
 
-    await moneyRun();
-    expect(await checkBuyoutInvoices()).toMatchObject({ ran: true, voiding: 1 });
-    expect(await state(b.invoiced.id)).toMatchObject({ state: "being_voided" });
-    expect((await queueOf(b.invoiced.id)).map((i) => i.request)).toEqual([expect.objectContaining({ op: "invoice_void", invoiceQboId: "9905", why: "student_moved" })]);
-
-    // Staff then move Leo back in the portal: the buy-out was the Rivera family's, already being voided, and nothing more is queued.
+    // Staff then move Leo in the portal: the move's one void, for the unpaid per-student one, and none for the paid one or the family's.
     const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const tag = await currentRosterTag();
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: inStub(LEO).SyncToken as string, toFamilyQboId: RIVERA }, tag, op)).toMatchObject({ ok: true });
-    await moneyRun();
-    await checkBuyoutInvoices();
-    expect(await voids()).toHaveLength(1);
-    expect(await state(b.paid.id)).toMatchObject({ state: "paid" });
-    expect(await state(b.family.id)).toMatchObject({ state: "invoiced", flag: null });
-    expect(stub.apiCalls().filter((c) => c.method === "POST" && c.path.includes("/invoice"))).toEqual([]);
-  });
-
-  it("a move in the portal, then a refresh, then the daily check: the move's one void, and no other", async () => {
-    const b = await leoBuyouts();
-    const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const tag = await currentRosterTag();
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, tag, op)).toMatchObject({ ok: true });
-    expect(await voids()).toHaveLength(1);
+    moveInQuickBooks(LEO, RIVERA); // back where the app holds him, so the portal's move is offered
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    await moneyRun();
-    await checkBuyoutInvoices();
+    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: inStub(LEO).SyncToken as string, toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
     expect(await voids()).toHaveLength(1);
-    expect(await state(b.invoiced.id)).toMatchObject({ state: "being_voided" });
-    expect(await state(b.paid.id)).toMatchObject({ state: "paid" });
-  });
-
-  it("a paid one is never voided, however many refreshes and checks follow", async () => {
-    const b = await leoBuyouts();
-    moveInQuickBooks(LEO, CHEN);
+    expect((await voids())[0]!.request).toMatchObject({ buyoutId: b.invoiced.id, why: "student_moved" });
     for (let i = 0; i < 2; i++) {
       expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
       await moneyRun();
       await checkBuyoutInvoices();
     }
     expect(await voids()).toHaveLength(1);
-    expect((await voids())[0]!.request).toMatchObject({ buyoutId: b.invoiced.id });
+    expect(await state(b.invoiced.id)).toMatchObject({ state: "being_voided" });
     expect(await state(b.paid.id)).toMatchObject({ state: "paid" });
+    expect(await state(b.family.id)).toMatchObject({ state: "invoiced", flag: null });
+    expect(stub.apiCalls().filter((c) => c.method === "POST" && c.path.includes("/invoice"))).toEqual([]);
   });
 });
 
@@ -444,8 +263,7 @@ describe("buy-outs of a student QuickBooks moved are the daily check's, and neve
 const mine = (html: string) => html.slice(html.indexOf('id="mine-h"'), html.indexOf("</section>", html.indexOf('id="mine-h"')));
 
 describe("what each family reads after a student QuickBooks moved", () => {
-  it("the new family sees the signed form as signed, never the old family's guardian; the old family no longer sees the student's forms or places", async () => {
-    // Both families' guardians sign in, matched to their own records in QuickBooks.
+  it("the family the app holds the student in keeps their forms and places; the family QuickBooks moved them to sees none of them", async () => {
     const company = fznCompany();
     Object.assign(company.customers.find((c) => c.Id === "21")!, { PrimaryEmailAddr: { Address: "mei@example.com" } });
     const anaRow = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
@@ -455,94 +273,17 @@ describe("what each family reads after a student QuickBooks moved", () => {
     const mei = await signedInNow(meiRow);
     const leo = await seedLeo();
 
-    asParent(await identityNow(ana.session.id));
-    const beforeMove = await renderPage(FormsPage);
-    expect(beforeMove).toContain("Photo consent");
-    const mineBefore = mine(await renderPage(VolunteerPage));
-    expect(mineBefore).toContain("Fall fair");
-    expect(mineBefore).toContain("Leo Rivera");
-
     moveInQuickBooks(LEO, CHEN);
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
 
-    asParent(await identityNow(mei.session.id));
-    const theirs = await renderPage(FormPage, { params: { id: leo.signed } });
-    expect(theirs).toContain("Photo consent");
-    expect(theirs).toContain("Signed");
-    expect(theirs).not.toContain("Ana Rivera");
-    expect(await renderPage(FormsPage)).not.toContain("Ana Rivera");
-
     asParent(await identityNow(ana.session.id));
     const forms = await renderPage(FormsPage);
-    for (const s of ["Photo consent", "Medical release", "Leo Rivera"]) expect(forms).not.toContain(s);
-    // Leo's place still to come is gone from the family's sign-ups and from the shift's count; the check-in he earned
-    // for them stays in what they have done, as credit stays with the family it was earned for.
-    const volunteer = await renderPage(VolunteerPage);
-    expect(mine(volunteer)).not.toContain("Fall fair");
-    expect(mine(volunteer)).not.toContain("Leo Rivera");
-    expect(volunteer).toContain("0 of 4 places filled");
-  });
+    for (const s of ["Photo consent", "Medical release"]) expect(forms).toContain(s);
+    expect(mine(await renderPage(VolunteerPage))).toContain("Fall fair");
 
-  it("a family QuickBooks made in the same read as a student's move into it gets the student's forms at once, and a second read changes nothing", async () => {
-    const anaRow = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
-    await connectRoster(stub);
-    const ana = await signedInNow(anaRow);
-    const leo = await seedLeo();
-    // Forms are set up (nothing here calls Documenso), so reminders could go.
-    await connectForms({ origin: "http://127.0.0.1:9", token: "api_never_called" });
-    // In QuickBooks, between two reads: the Okafor family is made, with its parent, and Leo moved into it.
-    const OKAFOR = "70";
-    stub.customers.push({ Id: OKAFOR, DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } },
-      { Id: "71", DisplayName: "Obi Okafor", Active: true, SyncToken: "0", CustomerTypeRef: { value: "2" }, ParentRef: { value: OKAFOR }, Job: true,
-        PrimaryEmailAddr: { Address: "obi@example.com" } });
-    moveInQuickBooks(LEO, OKAFOR);
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    const okafor = await recordOfCustomer(OKAFOR, "family");
-
-    // The complete form and its evidence are the new family's at once; the unfinished one starts again there, its document queued for withdrawal.
-    expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: OKAFOR, state: "complete" });
-    expect((await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, leo.evidence.id)))[0]).toMatchObject({ familyId: okafor, familyQboId: RIVERA });
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: OKAFOR, state: "not_opened", envelopeId: null });
-    expect((await db.select().from(formWithdrawal)).map((w) => w.envelopeId)).toContain("envelope_qbmovedopen");
-    expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: OKAFOR, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
-
-    // The new family's guardian reads it as signed, without the old family's guardian or the PDF they signed. The read
-    // made no sign-in from QuickBooks' parent record: the club gives Obi his, as the portal holds guardians (written
-    // here directly), and his row is in the new family's record.
-    expect(await db.select().from(parent).where(eq(parent.email, "obi@example.com"))).toEqual([]);
-    const obiPerson = await seedParent({ name: "Obi Okafor", email: "obi@example.com", welcomedAt: new Date() });
-    await seedGuardian({ parentId: obiPerson.id, familyQboId: OKAFOR, status: "active", isPrimary: true, sourceQboId: "71" });
-    await syncAppRecords();
-    expect((await db.select().from(guardian).where(eq(guardian.parentId, obiPerson.id)))).toEqual([expect.objectContaining({ familyQboId: OKAFOR, familyId: okafor, sourceQboId: "71" })]);
-    const obi = { session: await seedParentSession(obiPerson.authUserId, { familyQboId: OKAFOR }) };
-    asParent(await identityNow(obi.session.id));
-    const theirs = await renderPage(FormPage, { params: { id: leo.signed } });
-    expect(theirs).toContain("Photo consent");
-    expect(theirs).toContain("Signed");
-    expect(theirs).not.toContain("Ana Rivera");
-    expect(await findMySignedPdf({ ...(await identityNow(obi.session.id)), ip: null }, leo.signed)).toBeNull();
-
-    // The old family sees and downloads neither, and has no place for Leo.
-    const anaNow = await identityNow(ana.session.id);
-    asParent(anaNow);
-    for (const id of [leo.signed, leo.open]) expect(await pageOutcome(FormPage, { params: { id } })).toEqual({ notFound: true });
-    for (const id of [leo.signed, leo.open]) expect(await findMySignedPdf({ ...anaNow, ip: null }, id)).toBeNull();
+    asParent(await identityNow(mei.session.id));
+    expect(await pageOutcome(FormPage, { params: { id: leo.signed } })).toEqual({ notFound: true });
     expect(await renderPage(FormsPage)).not.toContain("Photo consent");
     expect(mine(await renderPage(VolunteerPage))).not.toContain("Leo Rivera");
-
-    // No reminder is owed to the new family for the form already signed.
-    mail.outbox = [];
-    const reminded = await remindNow({ kind: "family", familyId: String(okafor) }, { actor: WORKER.actor, ip: null });
-    expect(reminded).toMatchObject({ ok: true });
-    // What the family does owe goes: the unfinished form, started again for them. The signed one owes nothing.
-    expect(mail.outbox.map((m) => [m.to, m.subject])).toEqual([["obi@example.com", "Please sign: Medical release"]]);
-    expect(mail.outbox.filter((m) => m.subject.includes("Photo consent"))).toEqual([]);
-
-    // A second read finds nothing more to follow and changes no request.
-    const requestsNow = [await requestByCustomer(leo.signed), await requestByCustomer(leo.open)];
-    expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await followed()).toHaveLength(1);
-    expect([await requestByCustomer(leo.signed), await requestByCustomer(leo.open)]).toEqual(requestsNow);
   });
 });

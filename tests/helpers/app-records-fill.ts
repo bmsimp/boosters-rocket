@@ -9,8 +9,8 @@ export const FILL_MIGRATION = "drizzle/0023_app_records.sql";
 /**
  * The lines of 0023's fill that read a column a later migration removed: stage 2 re-keyed those tables to the app's own
  * ids, so their rows name a record by its id and no longer name a customer for the fill to make one of. Each is taken
- * out of the fill when it is run on today's tables, as keepAppRecordsInStep()'s refsQuery left it out
- * (src/lib/families/in-step.ts). A later slice that re-keys a table adds its line here.
+ * out of the fill when it is run on today's tables, as the import's refsQuery left it out
+ * (importRecordsFromRoster(), src/lib/families/roster-import.ts). A later slice that re-keys a table adds its line here.
  */
 export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
   { line: `    UNION ALL SELECT c."subject_qbo_id", r."applies_to" FROM "requirement_cover" c JOIN "requirement" r ON r."id" = c."requirement_id"`, by: "0025_seasons_app_ids_finish" },

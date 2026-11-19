@@ -424,7 +424,7 @@ describe("a session whose family record is inactive", () => {
     const mine = await seedSignup({ shiftId: later!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: AURELIO! });
     await seedOutsideCredit({ familyQboId: FAMILY_A.family.qboId, requirementId: hours!.id, minutes: 60 });
     const ctx = ctxOf(a.identity);
-    // As keepAppRecordsInStep() leaves a family the roster no longer holds as one, while the session still names it.
+    // A family's record made inactive (as a staff write makes one), while the session still names it.
     await db.update(familyTable).set({ active: false }).where(eq(familyTable.id, await familyId(FAMILY_A.family.qboId)));
     const snapshot = async () => JSON.stringify([await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id)), await db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.id))]);
     const before = await snapshot();

@@ -48,6 +48,7 @@ export async function volunteerRemindersLine(o: { signin: boolean; welcome: bool
 
 const DID_WORDS: [key: string, one: string, many: string][] = [
   ["paid", "1 marked paid", "{n} marked paid"], ["voided", "1 ended as voided in QuickBooks", "{n} ended as voided in QuickBooks"],
+  // Read only from a mark written before stage 3's slice 9c, when the check still voided for a move made in QuickBooks.
   ["voiding", "1 set to be voided (its student moved)", "{n} set to be voided (their students moved)"],
   ["flagged", "1 flagged for the club", "{n} flagged for the club"], ["unflagged", "1 flag taken off", "{n} flags taken off"],
 ];
