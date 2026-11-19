@@ -261,6 +261,15 @@ describe("evidence of a family or student with no QuickBooks link, and the one s
       subjectKind: "student", familyId: await familyRecord(FAMILY_A.family.qboId), studentId });
   });
 
+  it("keeps a per-student form of a family with no link whose student is linked with no copy at all: no QuickBooks number without its company", async () => {
+    const familyId = await familyRecord(FAMILY_A.family.qboId), studentId = await studentRecord(FAMILY_A.students[0]!.qboId);
+    const { id } = await signedForA();
+    await unlinkFamily(familyId);
+    expect(await runEvidenceJob()).toMatchObject({ stored: 1, failed: 0 });
+    expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ requestId: id, realmId: null, familyQboId: null, subjectQboId: null,
+      subjectKind: "student", familyId, studentId });
+  });
+
   it("keeps a form when the roster names no company at all, with no copy and no company", async () => {
     const familyId = await familyRecord(FAMILY_A.family.qboId), studentId = await studentRecord(FAMILY_A.students[0]!.qboId);
     const { id } = await signedForA();
