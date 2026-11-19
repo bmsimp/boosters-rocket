@@ -166,8 +166,12 @@ describe("the parent door", () => {
     const stranger = await seedGuardian({ parentId: (await seedParent({ name: "Bo", email: "bo@example.com" })).id, familyQboId: "F2" });
     for (const guardianId of [crypto.randomUUID(), stranger.id]) {
       expect(await chooseFamily({ sessionId, parentId: a.id, guardianId, ip: IP })).toBe(false);
-      expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.refused").at(-1)!.after).toEqual({ reason: "family_not_enabled", guardianId });
+      // Found by what it records, never by its place among the rows.
+      const refused = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused"
+        && (x.after as { guardianId?: string } | null)?.guardianId === guardianId);
+      expect(refused.map((x) => x.after)).toEqual([{ reason: "family_not_enabled", guardianId }]);
     }
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.refused")).toHaveLength(2);
     expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { familyQboId: "F1" } });
   });
 
