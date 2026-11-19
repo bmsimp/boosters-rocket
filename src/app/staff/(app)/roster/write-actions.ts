@@ -133,9 +133,10 @@ export const familyInactiveAction = staffAction(P, async (ctx, rosterTag: string
 
 /* ---- The write queue, from the Reconciliation page ---- */
 
+/** "Try again now": a family's or member's create, which makes its customer and links it, also takes the linking permission (tryAgainNow()). */
 export const tryAgainAction = staffAction(P, async (ctx, itemId: string): Promise<Done> => {
   if (!canRead(ctx) || !uuid(itemId)) return NOT_FROM_PAGE;
-  const r = await tryAgainNow(itemId, op(ctx));
+  const r = await tryAgainNow(itemId, { ...op(ctx), mayLink: mayLink(ctx) });
   if (r.ok) revalidatePath("/staff", "layout");
   return r;
 });

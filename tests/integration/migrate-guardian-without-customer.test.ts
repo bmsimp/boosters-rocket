@@ -86,6 +86,9 @@ describe("migration 0040: a guardian row may name no customer, and a person is i
     const appliedBefore = await applied();
     const failure = await failureOf(migrateWith(path.resolve("drizzle")));
     expect(saidBy(failure)).toMatch(/Migration 0040 stopped: 1 family membership\(s\) are held by more than one guardian row \(one person, two or more rows naming the same family record\)/);
+    // It says that a closed row counts too, so closing the extra row from the staff pages is never offered as the way out.
+    expect(saidBy(failure)).toMatch(/a closed row counts as much as an open one\. Nothing was changed\. Report it to the portal's maintainers/);
+    expect(saidBy(failure)).not.toMatch(/close and merge/);
     expect(await rows()).toEqual(held);
     expect(await nullable()).toBe("NO");
     expect(await indexes()).not.toContain("guardian_family_id_parent_uq");

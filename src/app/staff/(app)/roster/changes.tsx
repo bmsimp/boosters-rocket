@@ -107,7 +107,7 @@ export function PortalChanges({ familyId, name, noun, unlinked, addStudents, stu
         <details className="more"><summary>Change the {noun} {name}</summary>
           <NameForm field="New name" label="Rename" pendingLabel="Renaming…" initial={name} act={renameHereAction.bind(null, rosterTag, "family", familyId)} />
           <DeactivateForm label={`Make ${name} inactive`}
-            warning={`This makes ${name} inactive in the portal${noun === "family" ? ", with its students" : ""}: its guardians can no longer sign in to it. Nothing is sent to QuickBooks, and there is no balance to check: it has no customer there.`}
+            warning={`This makes ${name} inactive in the portal${noun === "family" ? ", with its students" : ""}: its guardians can no longer sign in to it. It can't be made active again in the portal, and with no customer in QuickBooks its page here goes away; what it holds (its season, forms and volunteering) is kept. Nothing is sent to QuickBooks, and there is no balance to check: it has no customer there.`}
             act={deactivateHereAction.bind(null, rosterTag, "family", familyId)} />
         </details>
       )}

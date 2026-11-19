@@ -9,11 +9,14 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, familyMoney, guardian, qboCustomer, student, writeQueue } from "@/lib/db/schema";
+import { auditLog, family, familyMoney, guardian, qboConnection, qboCustomer, student, writeQueue } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { NOT_HERE } from "@/lib/roster/operations";
+import { MAKING_LOCK } from "@/lib/roster/writes";
+import { TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
+import { addGuardianAction, reinstateGuardianAction, removeGuardianAction } from "@/app/staff/(app)/parents/actions";
 import { addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction, renameAction,
   renameHereAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
@@ -457,5 +460,112 @@ describe("the Reconciliation page (Roster.Read)", () => {
     expect(rowNamed(html, "Leo Rivera")).toEqual([expect.any(String), "Leo Rivera", "$50.00", "$0.00", expect.stringMatching(/UTC$/)]);
     expect(html).toContain(`href="/staff/balances/${await idOf("10")}"`);
     expect(html).not.toContain('href="/staff/balances/10"');
+  });
+});
+
+/* ---- Families by hand on the pages (stage 3's slice 9d) ---- */
+
+/** A family's own create, as addFamily() files it under the record saved first. */
+const HAND_CREATE = { op: "create" as const, role: "family" as const, name: "Handmade Family", typeQboId: "1", familyQboId: null, email: null };
+/** One section of a page, from its heading to the end of its section. */
+const sectionOf = (html: string, id: string) => { const at = html.indexOf(`id="${id}"`); return at < 0 ? "" : html.slice(at, html.indexOf("</section>", at)); };
+const escaped = (words: string) => words.replaceAll("'", "&#x27;");
+
+describe("a family with no link on the pages", () => {
+  it("is offered no link to what it owes or to its buy-outs, whose pages stand for no such family; a linked family is", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Finance.Balance.Read", "Season.Progress.Read", "Volunteer.Credit.ReadWrite"]));
+    const elsewhere = sectionOf(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } }), "entry-elsewhere-h");
+    expect(elsewhere).toContain("Where it stands this season");
+    for (const words of ["What it owes", "Its volunteer buy-outs"]) expect(elsewhere, words).not.toContain(words);
+    const rivera = sectionOf(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } }), "entry-elsewhere-h");
+    for (const words of ["What it owes", "Its volunteer buy-outs"]) expect(rivera, words).toContain(words);
+  });
+
+  it("whose own create waits: listed and described as being made, on Reconciliation in words with its page linked, and tried again only by someone who may link", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    await seedQueued(HAND_CREATE, { familyId: hand!.id, state: "stuck", code: "customer_has_family", sent: true, nextTryAt: null });
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "0", "0", "Not linked yet: being made in QuickBooks"]);
+    expect(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } })).toContain("A family the portal keeps, not linked to QuickBooks yet: its customer is being made there.");
+    const writes = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(writes).toContain("another family in the portal is linked to it already, so this family was left unlinked and nothing will be sent again");
+    expect(writes).toContain("(customer_has_family)");
+    expect(writes).toContain(`href="/staff/roster/${hand!.id}"`);
+    expect(writes).toContain(escaped(TRY_AGAIN_NEEDS_LINKING));
+    expect(writes).not.toContain("Try again now");
+    expect(writes).toContain("Give up");
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
+    const linking = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(linking).toContain("Try again now");
+    expect(linking).not.toContain(escaped(TRY_AGAIN_NEEDS_LINKING));
+  });
+
+  it("a student whose own create waits on the queue is offered no change on the family's page", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    const [hal, ivy] = await db.insert(student).values([{ name: "Hal Handmade", active: true, familyId: hand!.id }, { name: "Ivy Handmade", active: true, familyId: hand!.id }]).returning();
+    await db.insert(writeQueue).values({ realmId: REALM, request: { op: "create", role: "student", name: "Hal Handmade", typeQboId: "3", familyQboId: "10", email: null },
+      familyId: hand!.id, studentId: hal!.id, sent: true, tries: 1, lastCode: "timeout", nextTryAt: new Date(), askedByLabel: "registrar@club.org" });
+    expect(ivy).toBeDefined();
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const portal = sectionOf(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } }), "portal-changes-h");
+    expect(portal).toContain("Change the student Ivy Handmade");
+    expect(portal).not.toContain("Change the student Hal Handmade");
+  });
+
+  it("a create given up that QuickBooks made anyway is said on Reconciliation, pointing at Customers with no family and the family saved first", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    stub.customers.push({ Id: "77", SyncToken: "0", DisplayName: "Handmade Family", Active: true, CustomerTypeRef: { value: "1" } });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    await seedQueued(HAND_CREATE, { familyId: hand!.id, state: "given_up", sent: true, nextTryAt: null, lastTriedAt: new Date(Date.now() - 3_600_000) });
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
+    const html = await renderPage(ReconciliationPage);
+    const made = sectionOf(html, "made-anyway-h");
+    expect(made).toContain("Made in QuickBooks after it was given up (1)");
+    expect(made).toContain("Handmade Family");
+    expect(made).toContain("Customers with no family");
+    expect(made).toContain(`href="/staff/roster/${hand!.id}"`);
+    // The customer is offered there, to bring in.
+    expect(sectionOf(html, "no-family-h")).toContain("Handmade Family");
+    // With nothing of the kind, the section isn't drawn.
+    await db.delete(writeQueue);
+    expect(await renderPage(ReconciliationPage)).not.toContain('id="made-anyway-h"');
+  });
+});
+
+describe("a guardian added or reinstated while the family's create waits, is being sent, or its link can't be told", () => {
+  it("is refused in the words of each, changing nothing", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    expect(await addGuardianAction(String(hand!.id), "Hal Hand", "hal@example.com")).toMatchObject({ ok: true });
+    const [row] = await db.select().from(guardian).where(eq(guardian.familyId, hand!.id));
+    expect(await removeGuardianAction(row!.id, "Moved away.")).toMatchObject({ ok: true });
+    const errorsOf = async (p: Promise<unknown>) => ((await p) as { errors?: string[] }).errors;
+    const both = async () => [await errorsOf(addGuardianAction(String(hand!.id), "Ivy Hand", "ivy@example.com")), await errorsOf(reinstateGuardianAction(row!.id))];
+    // Its own create waiting on the queue.
+    const item = await seedQueued(HAND_CREATE, { familyId: hand!.id });
+    expect(await both()).toEqual([[expect.stringContaining("still waiting on the queue, so nobody can be added to it for now")],
+      [expect.stringContaining("still waiting on the queue, so this sign-in can't be brought back for now")]]);
+    await db.delete(writeQueue).where(eq(writeQueue.id, item.id));
+    // Being sent at this moment: its "being made" lock held, as a send holds it.
+    await db.transaction(async (hold) => {
+      await hold.execute(sql`select pg_advisory_xact_lock(${sql.raw(String(MAKING_LOCK))}, hashtext(${String(hand!.id)}::text))`);
+      expect(await both()).toEqual([[expect.stringContaining("being made in QuickBooks at this moment, so nobody can be added to it")],
+        [expect.stringContaining("being made in QuickBooks at this moment, so this sign-in can't be brought back just now")]]);
+    });
+    // QuickBooks connected to another company: the portal can't tell the family's link.
+    await db.update(qboConnection).set({ realmId: "9999" });
+    expect(await both()).toEqual([[expect.stringContaining("and nobody was added")], [expect.stringContaining("and this sign-in wasn't brought back")]]);
+    expect(await db.select().from(guardian).where(eq(guardian.familyId, hand!.id))).toEqual([expect.objectContaining({ id: row!.id, status: "disabled" })]);
+    expect(posts()).toEqual([]);
+  });
+});
+
+describe("the Families list while QuickBooks is connected to another company", () => {
+  it("offers no add form, as addFamily() refuses one then", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(await renderPage(RosterPage)).toContain("Make a family</h2>");
+    await db.update(qboConnection).set({ realmId: "9999" });
+    expect(await renderPage(RosterPage)).not.toContain("Make a family</h2>");
   });
 });

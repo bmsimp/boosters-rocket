@@ -129,16 +129,18 @@ async function openFamiliesOf(tx: Tx, parentId: string): Promise<string[]> {
 
 /**
  * Opens a closed row again as it was before it closed (`status_before_disable`, else invited), in the family it names,
- * and records it (`parent.access.granted`, `reinstated`, with `more`: what an add adds). The caller holds the person's
+ * and records it (`parent.access.granted`, `reinstated`, with `more`: what an add adds), naming the customer the row
+ * itself names (`family_qbo_id`; none for a row made while its family had no link, even once the family is linked).
+ * The caller holds the person's
  * row and this row FOR UPDATE.
  */
-async function reopen(tx: Tx, row: Row, p: Person, familyId: AppFamilyId, customer: string | null, o: StaffOp, more: Record<string, unknown> = {}): Promise<void> {
+async function reopen(tx: Tx, row: Row, p: Person, familyId: AppFamilyId, o: StaffOp, more: Record<string, unknown> = {}): Promise<void> {
   const status = row.statusBeforeDisable ?? "invited";
   const before = { status: row.status, disabledReason: row.disabledReason };
   await tx.update(guardian).set({ status, disabledReason: null, statusBeforeDisable: null, updatedAt: new Date() }).where(eq(guardian.id, row.id));
   const owed = await oweWelcome(tx, p);
   await writeAudit({ actor: o.actor, action: "parent.access.granted", permission: o.permission, targetType: "guardian", targetId: row.id, ip: o.ip,
-    before, after: { parentId: p.id, familyId: String(familyId), familyQboId: customer, status, reinstated: true, ...more, ...owed } }, tx);
+    before, after: { parentId: p.id, familyId: String(familyId), familyQboId: row.familyQboId, status, reinstated: true, ...more, ...owed } }, tx);
 }
 
 export type AddGuardianResult =
@@ -199,7 +201,7 @@ export async function addGuardian(familyId: AppFamilyId, input: { name: string; 
     const who = p!;
     const row = held;
     if (row && row.disabledReason !== "company_changed") {
-      await reopen(tx, row, who, familyId, fam.customer, o, { addedBy: "staff", ...said });
+      await reopen(tx, row, who, familyId, o, { addedBy: "staff", ...said });
       return { ok: true, outcome: "reinstated", person, name: who.name, guardianId: row.id, parentId: who.id };
     }
     let guardianId: string;
@@ -285,7 +287,7 @@ export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits
     // The row names no customer (made while the family had no link), or the family's own; one that names another is not
     // this family's to reopen.
     if (row.familyQboId !== null && row.familyQboId !== fam.customer) return { ok: false, reason: "other_customer" };
-    await reopen(tx, row, p, row.familyId!, fam.customer, o);
+    await reopen(tx, row, p, row.familyId!, o);
     return { ok: true };
   });
 }

@@ -36,8 +36,10 @@ export type NoFamilyList = { state: "listed"; customers: NoFamilyCustomer[] } | 
  * customer, of the roster's own company (the cache holds no other), that have no family link in that company; by name,
  * as the roster lists them. The students under each are those the roster lists under it, active or not, which are the
  * ones the import makes records of (src/lib/families/plan.ts). A customer a waiting or stuck family's create would be
- * found as (beforeResend(): the same name, under nobody, of the same type) is left out too (stage 3's slice 9d): the
- * queue is about to link it to the family the portal saved first, so nobody makes a second family of it. Reads every
+ * found as (beforeResend(): the same name, under nobody, of the same type) is left out too (stage 3's slice 9d): a
+ * waiting one is about to be linked to the family the portal saved first, so nobody makes a second family of it; a
+ * stuck one is tried only when staff ask, so its customer stays off the list until they try it again or give it up.
+ * A given-up one is never linked: its customer is listed (Reconciliation says why: madeAfterGivingUp()). Reads every
  * customer: staff only.
  */
 export async function customersWithNoFamily(tx?: Tx): Promise<NoFamilyList> {

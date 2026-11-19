@@ -4,7 +4,7 @@
 // actions and the write queue's job reach QuickBooks through it.
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { accountingLink, family, jobRun, qboCustomer, qboCustomerType, student, writeQueue, type RosterRole, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -14,7 +14,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { currencyOf, formatMoney, toCents } from "@/lib/money/cents";
 import { normalizeEmail } from "@/lib/email";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { connectedToAnotherCompany, customerOfFamily, customerOfStudent, familyLinkState, familyLinkedTo, linksOf, studentLinkedTo } from "@/lib/families/links";
+import { connectedToAnotherCompany, customerOfFamily, customerOfStudent, familyLinkState, familyLinkedTo, linksOf, linksOfCustomers, studentLinkedTo } from "@/lib/families/links";
 import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import { isUuid } from "@/lib/seasons/ids";
@@ -28,7 +28,7 @@ import { getRosterSource, ROSTER_JOB } from "./source";
 import { customerRow } from "./refresh";
 import { checkName, freeName, nameKey } from "./names";
 import { deactivateOf, offers, renameOf, typeForNew, type RosterOperation } from "./operations";
-import { classify, type CachedCustomer } from "./write-rules";
+import { beforeResend, classify, type CachedCustomer } from "./write-rules";
 
 /**
  * The setting that asks the worker for a roster refresh at its next wake: `{ at }`. One ask for the whole portal,
@@ -560,9 +560,10 @@ async function holdForTheQueue(tx: Tx, w: RosterWrite, code: string, o: { realmI
   linkedBy: string | null; filed?: Filed; resultQboId?: string | null }): Promise<void> {
   const resultQboId = o.resultQboId ?? null;
   if (o.queueId) {
-    await tx.update(writeQueue).set({ sent: true, lastCode: code, tries: sql`${writeQueue.tries} + 1`, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000),
+    const [still] = await tx.update(writeQueue).set({ sent: true, lastCode: code, tries: sql`${writeQueue.tries} + 1`, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000),
       ...(resultQboId ? { resultQboId } : {}), updatedAt: new Date() })
-      .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting")));
+      .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
+    if (!still) await keepMadeOnGivenUp(tx, o.queueId, resultQboId);
     return;
   }
   const [item] = await tx.insert(writeQueue).values({
@@ -571,6 +572,23 @@ async function holdForTheQueue(tx: Tx, w: RosterWrite, code: string, o: { realmI
   }).returning({ id: writeQueue.id });
   await writeAudit({ actor: o.actor, action: "roster.write.queued", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item!.id,
     after: { op: w.op, role: w.role, code: code.slice(0, 40), sent: true } }, tx);
+}
+
+/**
+ * A queue item staff gave up while a try of it was on its way to QuickBooks (the lead's decision in stage 3's slice 9d):
+ * it stays given up, whatever QuickBooks answered, and a create keeps the customer QuickBooks made for it
+ * (`result_qbo_id`), which the Reconciliation page names (madeAfterGivingUp()). Nothing is linked to that customer.
+ */
+async function keepMadeOnGivenUp(tx: Tx, queueId: string, resultQboId: string | null): Promise<void> {
+  if (!resultQboId) return;
+  await tx.update(writeQueue).set({ resultQboId, updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, queueId), eq(writeQueue.state, "given_up"), isNull(writeQueue.resultQboId)));
+}
+
+/** Whether a queue item a try is for is no longer waiting (given up meanwhile), read FOR UPDATE so a give-up waits for this try's answer. */
+async function queuedNoLonger(tx: Tx, queueId: string): Promise<boolean> {
+  const [q] = await tx.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, queueId)).for("update");
+  return q !== undefined && q.state !== "waiting";
 }
 
 /**
@@ -601,7 +619,13 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       const fits = answerIsFor(w, answer);
       let refreshAsked = false;
       let appRecord: OwnRecordChange | null = null;
-      if (ours && fits) {
+      // A queued try whose item staff gave up while it was on its way stays given up: the cache takes QuickBooks' answer,
+      // but no record is made, linked or changed for it, and a create keeps the customer it made (keepMadeOnGivenUp()).
+      const givenUp = ours && o.queueId !== undefined && (await queuedNoLonger(tx, o.queueId));
+      if (ours && fits && givenUp) {
+        await upsertFromAnswer(tx, answer, await getShape(tx));
+        await keepMadeOnGivenUp(tx, o.queueId!, resultQboId);
+      } else if (ours && fits) {
         await upsertFromAnswer(tx, answer, await getShape(tx));
         if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
         appRecord = await changeOwnRecord(tx, w, targetId, { realmId: o.realmId, linkedBy: o.linkedBy, studentId: o.filed?.studentId, familyId: o.filed?.familyId });
@@ -615,8 +639,8 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       }
       await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId,
         before: auditBefore(w, cached), after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), ...(refreshAsked ? { refreshAsked } : {}),
-          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}), ...(appRecord ? { appRecord } : {}) } }, tx);
-      if (o.inside && !held) await o.inside(tx);
+          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}), ...(givenUp ? { queue: "given_up" } : {}), ...(appRecord ? { appRecord } : {}) } }, tx);
+      if (o.inside && !held && !givenUp) await o.inside(tx);
     });
   } catch {
     // QuickBooks made the change but the portal couldn't take it in (a deadlock, a follow-up that failed): nothing of
@@ -1122,13 +1146,16 @@ export const FAMILY_WAITING = "Making this family in QuickBooks is still waiting
 export const FAMILY_SENDING = "This family is being made in QuickBooks at this moment, so nothing else can be changed on it. Try again in a minute.";
 const STUDENT_WAITING = "Making this student in QuickBooks is still waiting on the queue, so nothing else can be changed for them for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
 const LINKED_HERE = "That is linked to QuickBooks, so it is changed there first: use the QuickBooks changes on this page.";
-const GIVEN_UP_MAYBE_MADE = "Making this in QuickBooks was given up on the Reconciliation page after a try QuickBooks may have taken. Once the roster has been read again (within a few minutes), press “Create in QuickBooks and link” again: if QuickBooks made it, its name is taken there, and you'll be offered another.";
+const GIVEN_UP_MAYBE_MADE = "Making this in QuickBooks was given up on the Reconciliation page after a try QuickBooks may have taken. Once the roster has been read again (within a few minutes), the Reconciliation page says whether QuickBooks made it; if it didn't, press “Create in QuickBooks and link” again.";
+/** A family's create given up after QuickBooks made its customer (madeAfterGivingUp()): no second customer is made for it. */
+const madeAfterGivingUpWords = (name: string, noun: string) =>
+  `QuickBooks made the customer “${name}” for this ${noun} before making it was given up on the Reconciliation page, and no ${noun} in the portal is linked to it, so a second one wasn't made. If it is this ${noun}, bring it in with “Create a family from this” under Customers with no family on the Reconciliation page (that makes a ${noun} linked to it: add its guardians and students there, then make this one inactive here). If it isn't, make it inactive in QuickBooks, then press “Create in QuickBooks and link” again.`;
 const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
 const isFamilyCreate = sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' in ('family', 'member')`;
 const isStudentCreate = sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' = 'student'`;
 
 /** First key of the lock held while a family's create is being sent; the second is a hash of the family record's id. */
-const MAKING_LOCK = 7461011;
+export const MAKING_LOCK = 7461011;
 const makingLock = (familyId: AppFamilyId) => sql`${sql.raw(String(MAKING_LOCK))}, hashtext(${String(familyId)}::text)`;
 
 /**
@@ -1183,6 +1210,45 @@ async function givenUpMaybeMade(tx: Tx, filed: { familyId: AppFamilyId } | { stu
   if (!given) return false;
   const [read] = await tx.select({ at: jobRun.startedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
   return !read || read.at <= given.lastTriedAt;
+}
+
+/** A create given up on the Reconciliation page that QuickBooks made all the same, with no record linked to its customer. */
+export type MadeAfterGivingUp = { queueId: string; role: "family" | "member" | "student"; name: string; customerQboId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null };
+
+/**
+ * The creates of a family, member or student given up after a try QuickBooks may have taken (`sent`) whose customer the
+ * roster cache holds, active, with no record of its kind linked to it: the customer QuickBooks answered with or a read
+ * found it made as (`result_qbo_id`), else the one beforeResend() would find it as. Given up, such an item is never
+ * linked (the lead's decision in stage 3's slice 9d): the Reconciliation page says so, and "Create in QuickBooks and
+ * link" makes no second customer while it stands (prepareLink()). `filed`: only those filed under that record. None
+ * while the cache names no company or QuickBooks is connected to another (every link lookup answers nothing then).
+ * One per customer, the latest try first.
+ */
+export async function madeAfterGivingUp(tx: Tx, filed?: { familyId: AppFamilyId } | { studentId: AppStudentId }): Promise<MadeAfterGivingUp[]> {
+  const source = await getRosterSource(tx);
+  if (source === null || (await connectedToAnotherCompany(tx))) return [];
+  const which = filed === undefined ? sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' in ('family', 'member', 'student')`
+    : "familyId" in filed ? and(eq(writeQueue.familyId, filed.familyId), isFamilyCreate) : and(eq(writeQueue.studentId, filed.studentId), isStudentCreate);
+  const rows = await tx.select().from(writeQueue).where(and(eq(writeQueue.state, "given_up"), eq(writeQueue.sent, true), eq(writeQueue.realmId, source), which))
+    .orderBy(desc(writeQueue.lastTriedAt), asc(writeQueue.id));
+  if (!rows.length) return [];
+  const cache = await cacheRows(tx);
+  const found: MadeAfterGivingUp[] = rows.flatMap((r) => {
+    const w = r.request as CreateWrite;
+    if (w.role !== "family" && w.role !== "member" && w.role !== "student") return [];
+    const seen = beforeResend(w, cache);
+    const c = (r.resultQboId !== null ? cache.find((x) => x.qboId === r.resultQboId) : undefined)
+      ?? (seen.is === "done" ? cache.find((x) => x.qboId === seen.qboId) : undefined);
+    return c?.active ? [{ queueId: r.id, role: w.role, name: c.displayName, customerQboId: c.qboId, familyId: r.familyId, studentId: r.studentId }] : [];
+  });
+  const isStudent = (m: MadeAfterGivingUp) => m.role === "student";
+  const links = await linksOfCustomers({ families: found.filter((m) => !isStudent(m)).map((m) => m.customerQboId), students: found.filter(isStudent).map((m) => m.customerQboId) }, tx);
+  const named = new Set<string>();
+  return found.filter((m) => {
+    if ((isStudent(m) ? links.studentOfCustomer : links.familyOfCustomer).has(m.customerQboId) || named.has(m.customerQboId)) return false;
+    named.add(m.customerQboId);
+    return true;
+  });
 }
 
 /** The names of the portal's own active families (members, in flat books), but `except`: a family's name must be none of them. */
@@ -1295,7 +1361,8 @@ type LinkPlan = {
 
 /**
  * Everything checked before anything is sent, under the roster lock with the page's tag: QuickBooks connected to the
- * roster's company, the shape holding, the family record active, nothing of its own waiting on the queue, and a create
+ * roster's company, the shape holding, the family record active, nothing of its own waiting on the queue, no create of
+ * its own given up that QuickBooks made a customer for (madeAfterGivingUp(): a second would be made), and a create
  * given up after a try QuickBooks may have taken only once a roster read has run since. With no family link: a name
  * QuickBooks can take (checkName()) and doesn't hold already (namesTaken(), "Name (2)" offered for the family's page),
  * and the type (the shape's family type, or the member type chosen, by typeForNew()). With one: its customer an active
@@ -1322,6 +1389,9 @@ async function prepareLink(rawFamilyId: string, chosenType: string | null, roste
     const taken = await namesTaken(tx, cache, null);
     let familyWrite: CreateWrite | null = null;
     if (familyCustomer === null) {
+      // A given-up create QuickBooks made a customer for: no second one is made, and the words say where the first is.
+      const [made] = await madeAfterGivingUp(tx, { familyId: f.id });
+      if (made) return no(madeAfterGivingUpWords(made.name, role));
       if (await givenUpMaybeMade(tx, { familyId: f.id })) return no(GIVEN_UP_MAYBE_MADE);
       if (f.name === null) return no(`This ${role} has no name in the portal, so it can't be made in QuickBooks. Give it a name on this page first.`);
       const name = checkName(f.name);
@@ -1347,12 +1417,14 @@ async function prepareLink(rawFamilyId: string, chosenType: string | null, roste
       const rows = await tx.select({ id: student.id, name: student.name }).from(student).where(and(eq(student.familyId, f.id), eq(student.active, true)));
       const links = await linksOf({ families: [], students: rows.map((r) => r.id) }, tx);
       for (const r of rows) {
-        if (links.customerOfStudent.has(r.id) || (await studentCreateWaiting(tx, r.id)) || (await givenUpMaybeMade(tx, { studentId: r.id }))) continue;
+        // A student whose given-up create QuickBooks made, or may have made, is not made again (the Reconciliation page lists those it made).
+        if (links.customerOfStudent.has(r.id) || (await studentCreateWaiting(tx, r.id)) || (await givenUpMaybeMade(tx, { studentId: r.id }))
+          || (await madeAfterGivingUp(tx, { studentId: r.id })).length > 0) continue;
         students.push(r);
       }
       students = students.sort((a, b) => COLLATOR.compare(a.name ?? "", b.name ?? "") || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
     }
-    if (familyWrite === null && students.length === 0) return no("Everything in this family that can be made in QuickBooks is linked already, or waiting to be, so nothing was made.");
+    if (familyWrite === null && students.length === 0) return no("Everything in this family that can be made in QuickBooks is linked already, waiting to be, or was made there after making it was given up (the Reconciliation page lists those), so nothing was made.");
     return { ok: true, realmId: source, familyId: f.id, familyName: recordNameWords(f.name, "family"), familyWrite, familyCustomer, students,
       studentTypeId: shape.kind === "layered" ? shape.studentTypeId : null, taken };
   });

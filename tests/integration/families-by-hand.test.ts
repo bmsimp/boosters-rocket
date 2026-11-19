@@ -10,10 +10,10 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, qboConnection, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, qboConnection, qboCustomerType, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { addFamily, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, FAMILY_WAITING, studentsBeingMade, WRITE_COPY } from "@/lib/roster/writes";
-import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, runWriteQueue } from "@/lib/roster/queue";
+import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, loadMadeAfterGivingUp, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
 import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { customersWithNoFamily } from "@/lib/roster/no-family";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -43,6 +43,9 @@ const familyLinks = () => db.select().from(accountingLink).where(isNotNull(accou
 const studentsOf = async (id: AppFamilyId) => db.select().from(student).where(eq(student.familyId, id)).orderBy(asc(student.name));
 const stubNamed = (name: string) => stub.customers.filter((c) => c.DisplayName === name);
 const ago = (ms: number) => new Date(Date.now() - ms);
+const OAK_CREATE = { op: "create" as const, role: "family" as const, name: "Oak Family", typeQboId: "1", familyQboId: null, email: null };
+/** What "Create in QuickBooks and link" answers when QuickBooks made the family's customer for a create given up. */
+const MADE_ANYWAY = "QuickBooks made the customer “Oak Family” for this family before making it was given up on the Reconciliation page";
 
 let tag: string;
 let op: ReturnType<typeof asOp>;
@@ -106,6 +109,23 @@ describe("adding a family: the portal's own record first, sent to QuickBooks onl
     expect(await addFamily({ role: "family", name: "Lincoln High", typeQboId: null }, tag, linker())).toMatchObject({ ok: false, offer: "Lincoln High (2)" });
     expect(await db.select().from(family)).toHaveLength(before);
     expect(posts()).toEqual([]);
+  });
+
+  it("a name the cache holds is saved when nothing will be sent (no linking permission), and met at Create in QuickBooks and link", async () => {
+    expect(await addFamily({ role: "family", name: "Lincoln High", typeQboId: null }, tag, nonLinker())).toMatchObject({ ok: true, unlinked: true });
+    const lincoln = (await familyNamed("Lincoln High"))!;
+    expect(lincoln).toMatchObject({ active: true });
+    expect(await linkOfFamily(lincoln.id)).toBeUndefined();
+    expect((await createInQuickBooksAndLink(String(lincoln.id), null, tag, op)).result).toEqual({ ok: false, errors: [expect.stringContaining("for instance to “Lincoln High (2)”")] });
+    expect(posts()).toEqual([]);
+  });
+
+  it("refuses, saving nothing, while QuickBooks is connected to another company than the roster's", async () => {
+    await db.update(qboConnection).set({ realmId: "9999" });
+    const before = (await db.select().from(family)).length;
+    for (const o of [linker(), nonLinker()]) expect(await addFamily({ role: "family", name: "Oak Family", typeQboId: null }, tag, o)).toEqual({ ok: false, errors: [WRITE_COPY.noRoster] });
+    expect(await db.select().from(family)).toHaveLength(before);
+    expect(stub.apiCalls()).toEqual([]);
   });
 
   it("refused by QuickBooks with a fault: the family stays, unlinked, and the staff member is told at once", async () => {
@@ -370,14 +390,69 @@ describe("Create in QuickBooks and link", () => {
     expect(await linkOfFamily(oak)).toBeUndefined();
   });
 
-  it("a given-up create that may have been made waits for a roster read, then meets the name QuickBooks has with Name (2)", async () => {
+  it("a given-up create that may have been made waits for a roster read; one QuickBooks made is named, never linked, and no second customer is made", async () => {
     const oak = await unlinkedFamily("Oak Family");
     // QuickBooks made it at a try whose answer was lost; staff gave the item up before any read since.
     stub.customers.push({ Id: "77", SyncToken: "0", DisplayName: "Oak Family", Active: true, CustomerTypeRef: { value: "1" } });
-    await seedQueued({ op: "create", role: "family", name: "Oak Family", typeQboId: "1", familyQboId: null, email: null }, { familyId: oak, sent: true, state: "given_up", lastTriedAt: new Date() });
+    const item = await seedQueued(OAK_CREATE, { familyId: oak, sent: true, state: "given_up", lastTriedAt: new Date() });
     expect((await createInQuickBooksAndLink(String(oak), null, tag, op)).result).toEqual({ ok: false, errors: [expect.stringContaining("Once the roster has been read again")] });
     expect((await refreshRoster(WORKER)).ok).toBe(true);
+    // The read shows it made: the answer points at it, offered under Customers with no family, rather than advising a
+    // rename that would make a second customer.
+    const r = (await createInQuickBooksAndLink(String(oak), null, tag, op)).result;
+    expect(r).toEqual({ ok: false, errors: [expect.stringContaining(MADE_ANYWAY)] });
+    expect(JSON.stringify(r)).not.toContain("Oak Family (2)");
+    expect(await loadMadeAfterGivingUp()).toEqual([expect.objectContaining({ queueId: item.id, role: "family", name: "Oak Family", customerQboId: "77", familyPage: oak })]);
+    const list = await customersWithNoFamily();
+    expect(list.state === "listed" && list.customers.map((c) => c.qboId)).toContain("77");
+    expect(await linkOfFamily(oak)).toBeUndefined();
+    // Made inactive in QuickBooks (not this family's after all): it is no longer named, and the name is met with another.
+    stub.customers.find((c) => c.Id === "77")!.Active = false;
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    expect(await loadMadeAfterGivingUp()).toEqual([]);
     expect((await createInQuickBooksAndLink(String(oak), null, tag, op)).result).toEqual({ ok: false, errors: [expect.stringContaining("for instance to “Oak Family (2)”")] });
+    expect(posts()).toEqual([]);
+  });
+
+  it("a create given up while the worker's send is on its way stays given up: nothing linked, its customer kept and named, and no second one made", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    const item = await seedQueued(OAK_CREATE, { familyId: oak, sent: false, code: "http_429", nextTryAt: ago(1000) });
+    // At the moment QuickBooks receives the worker's create, before it answers, staff give the item up.
+    let gaveUp: unknown = null;
+    let markedSent: unknown = null;
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      stub.onApiRequest = null;
+      markedSent = (await queueItem(item.id))!.sent;
+      gaveUp = await giveUp(item.id, "Making it in QuickBooks by hand.", op);
+    };
+    expect(await runWriteQueue()).toMatchObject({ ok: true });
+    expect(markedSent).toBe(true); // marked as maybe sent before it went
+    expect(gaveUp).toMatchObject({ ok: true });
+    const made = stubNamed("Oak Family")[0]!.Id as string;
+    expect(await queueItem(item.id)).toMatchObject({ state: "given_up", sent: true, resultQboId: made });
+    expect(await linkOfFamily(oak)).toBeUndefined();
+    expect(await auditsOf("roster.write.done")).toEqual([]);
+    const [create] = await auditsOf("roster.customer.create");
+    expect(create!.after).toMatchObject({ queue: "given_up" });
+    expect(create!.after).not.toHaveProperty("appRecord");
+    // Named on Reconciliation, offered under Customers with no family, and "Create in QuickBooks and link" makes no second.
+    expect(await loadMadeAfterGivingUp()).toEqual([expect.objectContaining({ queueId: item.id, name: "Oak Family", customerQboId: made, familyPage: oak })]);
+    const list = await customersWithNoFamily();
+    expect(list.state === "listed" && list.customers.map((c) => c.qboId)).toContain(made);
+    expect((await createInQuickBooksAndLink(String(oak), null, tag, op)).result).toEqual({ ok: false, errors: [expect.stringContaining(MADE_ANYWAY)] });
+    expect(posts()).toHaveLength(1);
+    expect(stubNamed("Oak Family")).toHaveLength(1);
+  });
+
+  it("Try again now on a family's create takes the linking permission: refused without it, the item left as it was", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    const item = await seedQueued(OAK_CREATE, { familyId: oak, state: "stuck", nextTryAt: null, tries: 8 });
+    for (const o of [op, nonLinker()]) expect(await tryAgainNow(item.id, o)).toEqual({ ok: false, errors: [TRY_AGAIN_NEEDS_LINKING] });
+    expect(await queueItem(item.id)).toMatchObject({ state: "stuck" });
+    expect(await auditsOf("roster.write.again")).toEqual([]);
+    expect(await tryAgainNow(item.id, linker())).toMatchObject({ ok: true });
+    expect(await queueItem(item.id)).toMatchObject({ state: "waiting" });
     expect(posts()).toEqual([]);
   });
 
@@ -404,9 +479,19 @@ describe("Create in QuickBooks and link", () => {
     expect(sent()).toEqual([{ DisplayName: "Oak Family", CustomerTypeRef: { value: "1" } }]);
   });
 
-  it("refuses an inactive family, a family that isn't there, and anything while QuickBooks isn't connected", async () => {
+  it("refuses an inactive family, a family that isn't there, a broken shape, another company, and anything while QuickBooks isn't connected", async () => {
     const oak = await unlinkedFamily("Oak Family");
-    expect((await createInQuickBooksAndLink("00000000-0000-4000-8000-000000000000", null, tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.gone] });
+    const ash = await unlinkedFamily("Ash Family");
+    const result = async (id: string) => (await createInQuickBooksAndLink(id, null, tag, op)).result;
+    expect(await result("00000000-0000-4000-8000-000000000000")).toEqual({ ok: false, errors: [WRITE_COPY.gone] });
+    expect(await changeInPortal({ op: "deactivate_family", familyId: String(ash) }, tag, op)).toMatchObject({ ok: true });
+    expect(await result(String(ash))).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+    await db.update(qboConnection).set({ realmId: "9999" });
+    expect(await result(String(oak))).toEqual({ ok: false, errors: [WRITE_COPY.otherCompany] });
+    await db.update(qboConnection).set({ realmId: REALM });
+    await db.delete(qboCustomerType).where(eq(qboCustomerType.qboId, "2")); // the shape's parent type, gone from QuickBooks
+    expect(await result(String(oak))).toEqual({ ok: false, errors: [WRITE_COPY.noRoster] });
+    expect(stub.apiCalls()).toEqual([]);
     await db.delete(qboConnection);
     expect((await createInQuickBooksAndLink(String(oak), null, tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.notConnected] });
     expect(stub.apiCalls()).toEqual([]);

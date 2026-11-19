@@ -208,6 +208,22 @@ describe("staff manage a family's guardians", () => {
       expect(await removeGuardian(row!.id, "Moved away.", staffOp)).toMatchObject({ ok: true });
       expect(await reinstateGuardian(row!.id, staffOp)).toEqual({ ok: true });
       expect((await rowsOf(hal.id))[0]).toMatchObject({ id: row!.id, familyQboId: null, status: "invited", disabledReason: null });
+      // Its audit row names the customer the row names (none), not the family's link made since.
+      const reinstated = (await audits("parent.access.granted")).filter((a) => a.targetId === row!.id && (a.after as { reinstated?: boolean }).reinstated === true);
+      expect(reinstated).toEqual([expect.objectContaining({ after: expect.objectContaining({ familyId: String(hand!.id), familyQboId: null }) })]);
+    });
+
+    it("a person's page links a family with no link while its record is active, and not once it is made inactive in the portal: its page is gone", async () => {
+      const [hand] = await db.insert(family).values({ name: "Hand Family", active: true }).returning({ id: family.id });
+      expect(await addGuardianAction(String(hand!.id), "Hal Hand", "hal@example.com")).toMatchObject({ ok: true });
+      const hal = (await personOf("hal@example.com"))!;
+      const href = `href="/staff/roster/${hand!.id}"`;
+      expect(familiesBox(await personPage(hal.id))).toContain(href);
+      await db.update(family).set({ active: false }).where(eq(family.id, hand!.id));
+      const html = familiesBox(await personPage(hal.id));
+      expect(html).toContain("Hand Family");
+      expect(html).not.toContain(href);
+      await expect(RosterEntryPage({ params: Promise.resolve({ id: String(hand!.id) }) })).rejects.toMatchObject({ notFound: true });
     });
 
     it("reinstates the person's closed row in that family instead of making another, once staff say it is them, and says so", async () => {

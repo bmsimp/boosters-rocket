@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage } from "@/lib/roster/queries";
-import { loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
+import { isFamilyCreateItem, loadMadeAfterGivingUp, loadOpenWrites, TRY_AGAIN_NEEDS_LINKING, waitingWords, type GivenUpMadeView, type QueueView } from "@/lib/roster/queue";
 import { loadBalances } from "@/lib/money/balances";
 import { linksOfCustomers } from "@/lib/families/links";
 import { LocalTime } from "@/app/components/local-time";
@@ -42,7 +42,7 @@ const codeWords = (code: string | null) => (code === null ? null
   : CODE_WORDS[code] ?? (/^http_5\d\d/.test(code) ? "QuickBooks had a problem of its own" : /^token_/.test(code) ? "the portal couldn't get a key to QuickBooks" : "QuickBooks refused it"));
 
 /** The changes in one state, a row each: what, who asked and when, the tries, the last answer, and what can be done. */
-function Writes({ items, caption, canChange }: { items: QueueView[]; caption: string; canChange: boolean }) {
+function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; caption: string; canChange: boolean; mayLink: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => (
       <>{i.words}<span className="when">{i.state === "stuck" ? "Stuck: it won't be tried again until someone asks" : waitingWords(i)}</span></>) },
@@ -53,13 +53,38 @@ function Writes({ items, caption, canChange }: { items: QueueView[]; caption: st
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => (
       <div className="row-actions">
-        <OneButton label="Try again now" pendingLabel="Asking…" act={tryAgainAction.bind(null, i.id)} />
+        {/* A family's create makes its customer and links it: only for staff who may link families to accounting (tryAgainNow()). */}
+        {isFamilyCreateItem(i.write) && !mayLink ? <Notice tone="info" live="none">{TRY_AGAIN_NEEDS_LINKING}</Notice>
+          : <OneButton label="Try again now" pendingLabel="Asking…" act={tryAgainAction.bind(null, i.id)} />}
         <details className="more"><summary>Give up</summary>
           <TextAction field="Why? (kept in the audit log)" label="Give up" pendingLabel="Giving up…" maxLength={500} multiline act={giveUpAction.bind(null, i.id)} />
         </details>
       </div>) }] : []),
   ];
   return <DataTable caption={caption} captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
+}
+
+/**
+ * The creates staff gave up here that QuickBooks made all the same (stage 3's slice 9d, the lead's decision): a given-up
+ * change stays given up, so nothing in the portal is linked to the customer QuickBooks made, and no second one is made
+ * for the record. A family's or member's is brought in from Customers with no family; a student's is checked in
+ * QuickBooks. Names are QuickBooks text, shown as text only.
+ */
+function MadeAfterGivingUp({ items, linking }: { items: GivenUpMadeView[]; linking: boolean }) {
+  const bringIn = linking ? "Bring it in with “Create a family from this” under Customers with no family below"
+    : "Someone who may link families to accounting can bring it in from Customers with no family on this page";
+  return (
+    <section className="box" aria-labelledby="made-anyway-h"><h2 id="made-anyway-h">Made in QuickBooks after it was given up ({items.length})</h2>
+      <p>These were given up here while QuickBooks may still have been making them, and QuickBooks did make them. Nothing in the portal is linked to them, and no second customer is made for them.</p>
+      <DataTable caption="Each customer QuickBooks made for a change given up" captionHidden rows={items} rowKey={(m) => m.queueId} columns={[
+        { key: "name", header: "In QuickBooks", rowHeader: true, cell: (m) => m.name },
+        { key: "what", header: "What to do", cell: (m) => (m.role === "student"
+          ? "A student customer that no student in the portal is linked to: check it in QuickBooks, and make it inactive there if it isn't wanted."
+          : `A ${m.role} customer that no ${m.role} in the portal is linked to. ${bringIn}, then make the ${m.role} the portal saved first inactive on its page; if it isn't wanted, make it inactive in QuickBooks.`) },
+        { key: "family", header: "Saved first", cell: (m) => (m.familyPage ? <Link href={familyPage(m.familyPage)}>Open the family</Link> : "None") },
+      ]} />
+    </section>
+  );
 }
 
 /**
@@ -72,7 +97,8 @@ function Writes({ items, caption, canChange }: { items: QueueView[]; caption: st
 export default async function ReconciliationPage() {
   const ctx = await requireStaffPage("Roster.Read");
   const money = can(ctx.effective, "Finance.Balance.Read");
-  const [writes, roster, balances] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null)]);
+  const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
+    loadMadeAfterGivingUp()]);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
   const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
@@ -93,11 +119,13 @@ export default async function ReconciliationPage() {
               one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
               One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.</p>
-            {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} /></>}
-            {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} /></>}
+            {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
+            {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
           </>
         )}
       </section>
+
+      {madeAnyway.length > 0 && <MadeAfterGivingUp items={madeAnyway} linking={linking} />}
 
       <BuyoutsToLook showAmounts={money} canChange={canChange} />
 

@@ -38,7 +38,7 @@ vi.mock("@/lib/families/links", async (original) => {
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, formWithdrawal, jobRun, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
-import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, waitingWords, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
+import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, TRY_AGAIN_NEEDS_LINKING, waitingWords, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
 import { addFamily, applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
 import { runDueJobs } from "@/lib/jobs/runner";
@@ -396,8 +396,10 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(posts()).toEqual([]);
     expect(await queueItem(item!.id)).toMatchObject({ state: "stuck", lastCode: "made_unmatched", sent: true });
     expect(await db.select().from(accountingLink).where(eq(accountingLink.customerId, "88"))).toEqual([]);
-    // "Try again now" looks again, and still sends nothing.
-    await tryAgainNow(item!.id, op);
+    // "Try again now" on a family's create takes the linking permission too, and with it looks again, and still sends nothing.
+    expect(await tryAgainNow(item!.id, op)).toEqual({ ok: false, errors: [TRY_AGAIN_NEEDS_LINKING] });
+    expect(await queueItem(item!.id)).toMatchObject({ state: "stuck" });
+    expect(await tryAgainNow(item!.id, { ...op, mayLink: true })).toMatchObject({ ok: true });
     await runWriteQueue();
     expect(posts()).toEqual([]);
     expect(await queueItem(item!.id)).toMatchObject({ state: "stuck", lastCode: "made_unmatched" });
@@ -453,7 +455,8 @@ describe("staff try a change again, or give it up", () => {
     const rivera = await recordOfCustomer("10", "family"), chen = await recordOfCustomer("20", "family"), leo = await recordOfCustomer("12", "student");
     expect((await loadOpenWrites({ familyId: chen })).map((i) => i.write.op)).toEqual(["move"]);   // the family it moves to
     expect((await loadOpenWrites({ familyId: rivera })).map((i) => i.write.op).sort()).toEqual(["move", "rename"]);
-    // Each is filed under the app's family record, which its link addresses; a new family is filed under none.
+    // Each is filed under the app's family record, which its link addresses; a new family's create queued before slice 9d (as
+    // this one is seeded) is filed under none: since 9d it is filed under the record saved first.
     expect(all.map((i) => [i.write.op, i.familyId]).sort()).toEqual([["create", null], ["move", rivera], ["rename", rivera]]);
     const filed = await db.select({ op: sql<string>`${writeQueue.request}->>'op'`, familyId: writeQueue.familyId, studentId: writeQueue.studentId }).from(writeQueue);
     expect(filed.sort((a, b) => (a.op < b.op ? -1 : 1))).toEqual([{ op: "create", familyId: null, studentId: null }, { op: "move", familyId: rivera, studentId: leo }, { op: "rename", familyId: rivera, studentId: leo }]);

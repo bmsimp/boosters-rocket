@@ -181,9 +181,11 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       ) : (
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />
       )}
-      {/* Buy-outs for any family or member, active or not: one made inactive may still have one to close. What it owes
-          only for a family linked to an active family customer: its page stands for no other (loadFamilyBalance()). */}
-      <Elsewhere familyId={familyId} buyouts
+      {/* Buy-outs for any linked family or member, active or not: one made inactive may still have one to close. A family
+          with no link has none (a buy-out bills its linked customer) and its buy-outs page answers 404, so it gets no link
+          (stage 3's slice 9d). What it owes only for a family linked to an active family customer: its page stands for no
+          other (loadFamilyBalance()). */}
+      <Elsewhere familyId={familyId} buyouts={fam.linked}
         money={entry.kind === "family" && fam.active && customer !== null && customer.active && can(ctx.effective, "Finance.Balance.Read")}
         season={entry.kind === "family" && fam.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />

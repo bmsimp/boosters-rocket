@@ -29,7 +29,7 @@ export function NoFamilyRows({ rows }: { rows: NoFamilyRow[] }) {
   return (
     <>
       {outcomes.map((o) => <ActionOutcome key={o.n} state={o.state} />)}
-      {rows.length === 0 ? <Notice tone="done" live="none">Nothing: every customer QuickBooks lists as a family has a family in the portal.</Notice> : (
+      {rows.length === 0 ? <Notice tone="done" live="none">Nothing: every active family customer QuickBooks has at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on this page.</Notice> : (
         <DataTable caption="Customers with no family" captionHidden rowKey={(r) => r.key} rows={rows}
           columns={[
             { key: "name", header: "Customer", rowHeader: true, cell: (r) => r.name },

@@ -390,7 +390,7 @@ describe("the action and the Reconciliation section", () => {
     await connectRoster(stub);
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
     let html = section(await renderPage(ReconciliationPage))!;
-    expect(html).toContain("Nothing: every customer QuickBooks lists as a family has a family in the portal.");
+    expect(html).toContain("Nothing: every active family customer QuickBooks has at the top level, under no other customer, is linked to a family in the portal, or is about to be by a change on this page.");
     expect(tableRows(html)).toEqual([]);
     await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
     html = section(await renderPage(ReconciliationPage))!;

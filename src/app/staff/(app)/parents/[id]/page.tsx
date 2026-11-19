@@ -40,8 +40,9 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         {p.families.length === 0 ? <p>This person isn&apos;t linked to any family.</p> : (
           <DataTable caption="Each family this person is linked to, and whether they can sign in to it" captionHidden
             rows={p.families} rowKey={(f) => f.guardianId} columns={[
-              // A previous company's row carries that company's ID, which names some other family (or none) now.
-              { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null ? f.familyName
+              // A previous company's row carries that company's ID, which names some other family (or none) now; a family
+              // made inactive in the portal with no link has no page to open (stage 3's slice 9d).
+              { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null || !f.pageStands ? f.familyName
                 : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
               { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind)} words={f.words} /> },
               ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),

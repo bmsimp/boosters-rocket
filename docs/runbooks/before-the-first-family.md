@@ -424,7 +424,9 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
    line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
    customer into the portal's own families by itself. On **Reconciliation**, **Customers with no family** lists the
-   family customers of the real books; **Create a family from this** brings each in, with its students, linked to
+   active family customers of the real books at the top level (under no other customer); a family that is inactive in
+   QuickBooks, or sits under another customer there, isn't offered, so make it active, or move it to the top level, in
+   QuickBooks first; **Create a family from this** brings each in, with its students, linked to
    their customers. Bring in the pilot families this way, then add their guardians on each family's page, and check
    each family's page shows its students. Making a family reads none of its money: on **Balances** press **Read every
    family now** (or wait for the next daily read), then check the Balances page shows each pilot family's money. The

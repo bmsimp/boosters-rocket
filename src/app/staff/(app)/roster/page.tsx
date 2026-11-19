@@ -1,7 +1,7 @@
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage, rosterFamilies } from "@/lib/roster/queries";
-import { linksOfCustomers } from "@/lib/families/links";
+import { connectedToAnotherCompany, linksOfCustomers } from "@/lib/families/links";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
 import { DataTable, type Column } from "@/app/components/data-table";
@@ -35,7 +35,8 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected;
   // Adding a family is the portal's own (stage 3's slice 9d): offered wherever the list is, connected or not, and made
   // in QuickBooks too only by staff who may link families to accounting while QuickBooks is connected.
-  const mayAdd = can(ctx.effective, "Roster.Family.ReadWrite");
+  // Not while QuickBooks is connected to another company than the roster's: addFamily() refuses then (WRITE_COPY.noRoster).
+  const mayAdd = can(ctx.effective, "Roster.Family.ReadWrite") && !(await connectedToAnotherCompany());
   const goes = !can(ctx.effective, "Accounting.Link.ReadWrite") ? "no_permission" as const : page.connected ? "sends" as const : "not_connected" as const;
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
   const settings = admin ? <> <a href="/staff/settings/quickbooks">Open QuickBooks settings</a></> : " An Admin can do that under QuickBooks.";
