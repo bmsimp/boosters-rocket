@@ -12,7 +12,7 @@ vi.mock("@/lib/mail/senders", async () => {
   };
 });
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import * as sendModule from "@/lib/mail/send";
 import { db } from "@/lib/db/client";
 import { auditLog, family, parent, parentSigninToken, setting, student } from "@/lib/db/schema";
@@ -20,7 +20,7 @@ import { runDueJobs } from "@/lib/jobs/runner";
 import { blockPerson } from "@/lib/parents/people";
 import { removeGuardian } from "@/lib/parents/guardians";
 import { hashLinkToken, linkVerdict } from "@/lib/parents/signin-links";
-import { setSignins, setWelcome } from "@/lib/parents/switches";
+import { oweSetupMails, setSignins, setWelcome, SETUP_MAILS_NEED_SWITCHES } from "@/lib/parents/switches";
 import { sendOwedWelcomes, resendWelcome, WELCOME_RETRY_MS } from "@/lib/parents/welcome";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { seedParentSettings, storeShape } from "../helpers/roster-cache";
@@ -409,5 +409,71 @@ describe("welcome emails", () => {
     expect(await resendWelcome(p.id, STAFF)).toEqual({ ok: true, link: "none" });
     expect(setupTokensIn(sink.messages[0]!.raw)).toEqual([]);
     expect(await linkRows(p.id)).toEqual([]);
+  });
+
+  // The Admin's press (oweSetupMails(), src/lib/parents/switches.ts): people welcomed before this release have no
+  // password, and nothing else emails them a link.
+  it("the press marks exactly those who can sign in with no password, refuses while a switch is off, and is audited once", async () => {
+    await seedParentSettings({ welcome: true });
+    const before = new Date("2026-01-01T00:00:00Z");
+    const welcomedBefore = await person("Welcomed Before", { welcomedAt: before });
+    const neverWelcomed = await person("Never Welcomed");
+    await person("Blocked One", { welcomedAt: before, blocked: true });
+    await person("No Access", { welcomedAt: before, status: "disabled" });
+    const has = await person("Has One", { welcomedAt: before });
+    await seedPassword(has.authUserId, "a phrase they chose some time ago");
+    await person("Owed Already", { welcomeOwed: true });
+    const justSent = await person("Just Sent", { welcomedAt: before });
+    await mintLink(justSent.id, "setup");
+    await seedParentSettings({ welcome: false });
+    expect(await oweSetupMails(admin)).toEqual({ ok: false, errors: [SETUP_MAILS_NEED_SWITCHES] });
+    await seedParentSettings({ welcome: true, signin: false });
+    expect(await oweSetupMails(admin)).toEqual({ ok: false, errors: [SETUP_MAILS_NEED_SWITCHES] });
+    expect(await audits("parent.setup_mail.owed")).toEqual([]);
+    await seedParentSettings({ welcome: true, signin: true });
+    expect(await oweSetupMails(admin)).toEqual({ ok: true, owed: 2 });
+    expect(await owedNames()).toEqual(["Never Welcomed", "Owed Already", "Welcomed Before"]);
+    // A second press while they are still owed marks nobody twice.
+    expect(await oweSetupMails(admin)).toEqual({ ok: true, owed: 0 });
+    expect((await audits("parent.setup_mail.owed")).map((r) => r.after)).toEqual([{ owed: 2 }, { owed: 0 }]);
+    expect((await audits("parent.setup_mail.owed"))[0]).toMatchObject({ actorId: admin.actor.id, permission: "Settings.Parents.ReadWrite", targetType: "setting", targetId: "parents.settings" });
+    expect(sink.messages).toEqual([]); // the press itself sends nothing
+
+    // The worker sends the mail for those welcomed before, and the welcome to those never welcomed, each with a link.
+    expect(await sendOwedWelcomes()).toEqual({ sent: 3, failed: 0 });
+    const textTo = (email: string) => mailText(sink.messages.find((m) => m.to[0] === email)!.raw);
+    expect(textTo(welcomedBefore.email)).toContain("now signs you in with a password, instead of a code alone");
+    expect(textTo(welcomedBefore.email)).toMatch(/Subject: How you sign in to .* has changed/);
+    expect(textTo(neverWelcomed.email)).toMatch(/Subject: You can now sign in to /);
+    for (const p of [welcomedBefore, neverWelcomed]) {
+      const token = setupTokensIn(sink.messages.find((m) => m.to[0] === p.email)!.raw)[0];
+      expect(await linkVerdict("setup", token)).toMatchObject({ ok: true, link: { parentId: p.id } });
+    }
+    expect((await audits("parent.welcome.sent")).find((r) => r.targetId === welcomedBefore.id)!.after).toMatchObject({ mail: "signin_changed", link: "setup" });
+    expect(await owedNames()).toEqual([]);
+  });
+
+  it("a press mail to someone who chose a password meanwhile is not sent, and says why", async () => {
+    await seedParentSettings({ welcome: true });
+    const p = await person("Welcomed Before", { welcomedAt: new Date("2026-01-01T00:00:00Z") });
+    expect(await oweSetupMails(admin)).toEqual({ ok: true, owed: 1 });
+    await seedPassword(p.authUserId, "a phrase chosen after the press");
+    expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
+    expect(sink.messages).toEqual([]);
+    expect((await audits("parent.welcome.skipped")).map((r) => [r.targetId, r.after])).toEqual([[p.id, { to: p.email, mail: "signin_changed", reason: "has_password" }]]);
+    expect(await owedNames()).toEqual([]);
+    expect(await db.select().from(parentSigninToken)).toEqual([]);
+  });
+
+  it("a press mail waits, owed, while a set-up link sent a moment ago may still be unread", async () => {
+    await seedParentSettings({ welcome: true });
+    const p = await person("Welcomed Before", { welcomedAt: new Date("2026-01-01T00:00:00Z") });
+    expect(await oweSetupMails(admin)).toEqual({ ok: true, owed: 1 });
+    const asked = await mintLink(p.id, "setup"); // asked for on "Set up or reset my password" just after the press
+    expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
+    expect(sink.messages).toEqual([]);
+    expect(await owedNames()).toEqual(["Welcomed Before"]);
+    expect(await linkVerdict("setup", asked)).toMatchObject({ ok: true });
+    expect(await db.select().from(parentSigninToken).where(and(eq(parentSigninToken.parentId, p.id), isNull(parentSigninToken.usedAt)))).toHaveLength(1);
   });
 });

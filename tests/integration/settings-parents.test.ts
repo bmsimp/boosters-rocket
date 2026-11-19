@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 import { renderToStaticMarkup } from "react-dom/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, jobRun, parentSigninToken, qboConnection, role, roleAssignment, roleRule, setting, student } from "@/lib/db/schema";
+import { auditLog, guardian, jobRun, parent, parentSigninToken, qboConnection, role, roleAssignment, roleRule, setting, student } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { getParentSettings } from "@/lib/parents/settings";
 import { ROSTER_JOB, setRosterSource } from "@/lib/roster/source";
@@ -33,11 +33,12 @@ import ParentSetupPage from "@/app/staff/(app)/settings/parents/setup/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import StaffLayout from "@/app/staff/(app)/layout";
 import { SETTINGS_SECTIONS } from "@/app/staff/(app)/settings/sections";
-import { setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
+import { oweSetupMailsAction, setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
 import { resetDb, seedGuardian, seedParent, seedStaff, seedWorkingMail } from "../helpers/db";
 import { seedCache, seedShape, storeShape, fam, par, stu } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
 import { syncAppRecords } from "../helpers/app-records";
+import { seedPassword } from "../helpers/signin-links";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -81,7 +82,7 @@ describe("the Parent sign-ins settings", () => {
     who.staff = { door: "staff", staffUserId: other.id, name: other.name, email: other.email };
     expect((await thrown(ParentSettingsPage())).url).toBe("/refused");
     expect((await thrown(ParentSetupPage({ searchParams: Promise.resolve({}) }))).url).toBe("/refused");
-    for (const call of [() => setSigninsAction(true), () => setWelcomeAction(true), () => setRequireStudentsAction(true)]) {
+    for (const call of [() => setSigninsAction(true), () => setWelcomeAction(true), () => setRequireStudentsAction(true), () => oweSetupMailsAction()]) {
       await expect(call()).rejects.toBeInstanceOf(AccessDenied);
     }
     expect(renderToStaticMarkup(await StaffLayout({ children: null }))).not.toContain('href="/staff/settings/parents"');
@@ -266,5 +267,36 @@ describe("the Parent sign-ins settings", () => {
     expect(html.indexOf(warning)).toBeLessThan(html.indexOf("Disconnect QuickBooks</button>"));
     await db.delete(qboConnection);
     expect(renderToStaticMarkup(await QuickBooksSettingsPage())).not.toContain("can sign in to the portal now");   // nothing to disconnect
+  });
+
+  // The press for people welcomed before parents signed in with a password (the sign-in release, slice SI-4).
+  it("offers to email a set-up link only while sign-ins and welcome emails are on and someone has no password, and answers how many", async () => {
+    const ana = await ready();
+    const section = 'id="ps-setup-h"';
+    expect(await view()).not.toContain(section); // sign-ins off
+    await setSigninsAction(true);
+    expect(await view()).not.toContain(section); // welcome emails off
+    await setWelcomeAction(true);
+    // Ana was never welcomed, so switching welcomes on owed her the welcome already: nobody is left to ask for.
+    expect(await view()).not.toContain(section);
+    expect(await oweSetupMailsAction()).toEqual({ ok: true, message: "Nobody needs one now: everyone who can sign in has a password, or was sent a link a moment ago." });
+    // Welcomed before this release, with no password: one to email.
+    await db.update(parent).set({ welcomedAt: new Date("2026-01-01T00:00:00Z"), welcomeOwed: false }).where(eq(parent.id, ana.id));
+    const html = (await view()).replaceAll("&#x27;", "'");
+    expect(html).toContain(section);
+    expect(html).toContain("1 person can sign in and hasn't chosen a password.");
+    expect(html).toContain("Email a set-up link to everyone who can sign in and hasn't chosen a password (1)");
+    revalidated.count = 0;
+    expect(await oweSetupMailsAction()).toEqual({ ok: true, message: "1 person is queued for a link to choose a password. They go out a few each minute." });
+    expect(revalidated.count).toBe(1);
+    expect((await audits("parent.setup_mail.owed")).at(-1)).toMatchObject({ actorId: admin.id, permission: "Settings.Parents.ReadWrite", ip: "203.0.113.40", after: { owed: 1 } });
+    expect(await view()).not.toContain(section); // owed now
+    // With a password, nobody is left to email.
+    await db.update(parent).set({ welcomeOwed: false }).where(eq(parent.id, ana.id));
+    await seedPassword(ana.authUserId, "a phrase Ana chose some time ago");
+    expect(await view()).not.toContain(section);
+    // Refused in words while a switch is off.
+    await setWelcomeAction(false);
+    expect(await oweSetupMailsAction()).toEqual({ ok: false, errors: ["Switch parent sign-ins and welcome emails on first."] });
   });
 });

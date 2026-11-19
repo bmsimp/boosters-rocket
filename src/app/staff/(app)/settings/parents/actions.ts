@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
-import { setSignins, setWelcome, setRequireStudents } from "@/lib/parents/switches";
+import { oweSetupMails, setSignins, setWelcome, setRequireStudents } from "@/lib/parents/switches";
 import { getParentSettings } from "@/lib/parents/settings";
 
 const P = "Settings.Parents.ReadWrite" as const;
@@ -31,4 +31,12 @@ export const setWelcomeAction = staffAction(P, async (ctx, on: boolean): Promise
 export const setRequireStudentsAction = staffAction(P, async (ctx, on: boolean): Promise<Done> => {
   if (typeof on !== "boolean") return NOT_FROM_PAGE;
   return done(await setRequireStudents(on, op(ctx)), on ? "Saved. Families with no active student can't sign in." : "Saved. Students no longer affect who can sign in.");
+});
+// The press for everyone who can sign in and hasn't chosen a password (the sign-in release, slice SI-4). It takes no
+// argument: who is emailed is worked out under the lock, never sent by the page.
+export const oweSetupMailsAction = staffAction(P, async (ctx): Promise<Done> => {
+  const r = await oweSetupMails(op(ctx));
+  if (!r.ok) return r;
+  return done(r, r.owed === 0 ? "Nobody needs one now: everyone who can sign in has a password, or was sent a link a moment ago."
+    : `${r.owed === 1 ? "1 person is" : `${r.owed} people are`} queued for a link to choose a password. They go out a few each minute.`);
 });

@@ -1,12 +1,13 @@
-import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, exists, gt, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { mailWorking } from "@/lib/mail/settings";
 import { getShape, shapeNamesStudents } from "@/lib/roster/shape";
 import type { StaffOp } from "./people";
-import { unspentLink } from "./link-state";
+import { heldLink, unspentLink } from "./link-state";
 import { hasRowThatCounts, studentsRuleInForce } from "./sessions";
+import { RESEND_AFTER_MS } from "./signin-codes";
 import { getParentSettings, putParentSettings, PARENTS_KEY, type ParentSettings } from "./settings";
 
 export type SwitchResult = { ok: true } | { ok: false; errors: string[] };
@@ -72,8 +73,8 @@ async function oweWelcomes(tx: Tx): Promise<number> {
 
 /**
  * The sentences for what is missing before sign-ins can be switched on; empty when ready. The settings page uses them
- * too. Only working mail: a sign-in is a code sent by email. QuickBooks plays no part (open question 15 of the
- * app-owned families spec).
+ * too. Only working mail: a parent chooses their password from a link sent by email, and on a new device a code sent
+ * by email is the second step. QuickBooks plays no part (open question 15 of the app-owned families spec).
  */
 export async function missingForSignins(): Promise<string[]> {
   return (await mailWorking()) ? [] : ["Set up outgoing mail and send a test email first."];
@@ -194,4 +195,56 @@ export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult>
     }
     return { owed: await oweWelcomes(tx) };
   }, (before) => (on && !before.signin ? ["Switch parent sign-ins on first."] : null));
+}
+
+/**
+ * Who the Admin's press would email a set-up link (the sign-in release, slice SI-4): everyone who can sign in by the
+ * gate's rule (a row that counts, with the students rule as it is in force), not blocked, with a sign-in account and no
+ * password (no `credential` row of `parent_auth_account`), not owed a mail already, and not sent a set-up link less
+ * than RESEND_AFTER_MS ago that is live and unused or still on its way (linkSentWithin()'s rule, signin-links.ts), so
+ * the press never replaces a link that may be in a mailbox unread. A condition on a query of `parent`.
+ */
+function setupMailOwedTo(studentsRule: boolean, now: Date): SQL {
+  return and(eq(parent.blocked, false), eq(parent.welcomeOwed, false), hasRowThatCounts(studentsRule),
+    exists(db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, parent.id))),
+    notExists(db.select({ id: parentAuthAccount.id }).from(parentAuthAccount).innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthAccount.userId))
+      .where(and(eq(parentAuthUser.parentId, parent.id), eq(parentAuthAccount.providerId, "credential")))),
+    notExists(db.select({ id: parentSigninToken.id }).from(parentSigninToken).where(and(eq(parentSigninToken.parentId, parent.id), eq(parentSigninToken.purpose, "setup"),
+      gt(parentSigninToken.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)),
+      or(and(isNull(parentSigninToken.usedAt), gt(parentSigninToken.expiresAt, now)), heldLink)))))!;
+}
+
+/** How many people the press would email a set-up link now (setupMailOwedTo()), for the settings page. */
+export async function setupMailsToOwe(now: Date = new Date()): Promise<number> {
+  const rows = await db.select({ id: parent.id }).from(parent).where(setupMailOwedTo(await studentsRuleInForce(), now));
+  return rows.length;
+}
+
+/** Why the press can't be used now. */
+export const SETUP_MAILS_NEED_SWITCHES = "Switch parent sign-ins and welcome emails on first.";
+
+/**
+ * The Admin's press: "Email a set-up link to everyone who can sign in and hasn't chosen a password" (the sign-in
+ * release, slice SI-4). People welcomed before this release were told there was no password, have none, and are
+ * welcomed again by nothing else. It marks owed (`parent.welcome_owed`) everyone setupMailOwedTo() names, and the
+ * worker sends them in the welcome's batches under the same switches (sendOwedWelcomes(), ./welcome.ts): a person
+ * welcomed before is sent the mail that says sign-in has changed, one never welcomed the welcome, each with a set-up
+ * link. Nothing else owes a welcome to someone welcomed already, so "owed and welcomed before" is this press's mail;
+ * and everything that clears an owed welcome clears it too (welcome emails or sign-ins switched off, a block, a change
+ * of company). Under the parents' settings lock, as change() takes it, then the rows of the people it marks, in id order
+ * (lockPeople()); refused in words while either switch is off. A second press while they are still owed marks nobody
+ * twice. One audit row, `parent.setup_mail.owed`, with the count, in the same transaction.
+ */
+export async function oweSetupMails(o: StaffOp, now: Date = new Date()): Promise<{ ok: true; owed: number } | { ok: false; errors: string[] }> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
+    const settings = await getParentSettings(tx);
+    if (!settings.signin || !settings.welcome) return { ok: false as const, errors: [SETUP_MAILS_NEED_SWITCHES] };
+    const owe = setupMailOwedTo(await studentsRuleInForce(tx), now);
+    await lockPeople(tx, owe);
+    const rows = await tx.update(parent).set({ welcomeOwed: true, updatedAt: new Date() }).where(owe).returning({ id: parent.id });
+    await writeAudit({ actor: o.actor, action: "parent.setup_mail.owed", permission: o.permission, targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
+      after: { owed: rows.length } }, tx);
+    return { ok: true as const, owed: rows.length };
+  });
 }
