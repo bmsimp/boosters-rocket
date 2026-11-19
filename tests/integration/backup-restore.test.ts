@@ -271,9 +271,11 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     expect(JSON.stringify(after.rows["public.setting"])).toContain("made.after.restore");
   });
 
-  it("refuses to replace a database that is in use, counting the sessions really in it and not its own look", async () => {
-    // Two sessions held open on purpose: the refusal names exactly them. The script's own connection to the database,
-    // which counts its tables, is never among them, and Postgres's own workers (autovacuum) are not counted either.
+  it("refuses to replace a database that is in use, naming how many sessions are in it", async () => {
+    // Two sessions held open on purpose: the refusal says exactly 2, in its own words, and nothing is changed. This
+    // pins the message and the true count only. That the script never counts its own look or an autovacuum worker
+    // can't be shown on demand (neither can be made to linger at the moment it counts), so it is held by the other
+    // restores in this file, which ran into either now and then, no longer being refused.
     const held = postgres(SCRATCH_URL, { max: 1 });
     const alsoHeld = postgres(SCRATCH_URL, { max: 1 });
     try {

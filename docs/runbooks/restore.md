@@ -28,8 +28,8 @@ The commands run in `~/booster-rocket/deploy`; add the `-f` files and `--profile
    docker compose run --rm --entrypoint bash backup /opt/booster-rocket/scripts/restore.sh /backups/<booster-rocket file> booster --replace --owner booster
    ```
    It says `Restored ... into the database booster (<number> tables, owned by booster), replacing what was there.`
-   If it says the database is in use, a program is still connected to it (Postgres's own background work doesn't
-   count, and one that has just stopped is given a moment to go): step 3 again.
+   If it says the database is in use, a program is still connected to it (Postgres's own autovacuum doesn't count,
+   and one that has just stopped is given a moment to go): step 3 again.
 5. Restore Documenso's the same way:
    ```bash
    docker compose run --rm --entrypoint bash backup /opt/booster-rocket/scripts/restore.sh /backups/<documenso file> documenso --replace --owner documenso

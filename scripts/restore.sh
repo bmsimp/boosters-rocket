@@ -95,10 +95,13 @@ fi
 
 exists="$(ask "select count(*) from pg_database where datname = '$DB'")"
 tables=0
-# Who is using the database: client sessions only, never the one asking. Postgres lists its own workers under the
-# database's name too (an autovacuum worker analysing a database that was just loaded, say), and ends them itself when
-# the database is dropped or renamed, so they are no reason to refuse.
-IN_USE="select count(*) from pg_stat_activity where datname = '$DB' and backend_type = 'client backend' and pid <> pg_backend_pid()"
+# Who is using the database: everything listed under its name that would stop the drop below, never the one asking.
+# Postgres ends only its autovacuum workers itself when a database is dropped or renamed (one analysing a database that
+# was just loaded, say), so they alone are no reason to refuse; anything else (a client session, a replication or
+# background worker connected to it) would make the drop fail, and is counted. An autovacuum worker runs as no role
+# (usesysid is null), which is how it is known to a role that isn't allowed to see another session's backend_type:
+# Postgres shows that as null to it, and every session a person or program opens has a role.
+IN_USE="select count(*) from pg_stat_activity where datname = '$DB' and pid <> pg_backend_pid() and backend_type is distinct from 'autovacuum worker' and usesysid is not null"
 if [ "$exists" != "0" ]; then
   # One connection to the database says both what it holds and who else is in it. A second connection asked just after
   # the first could count the first: a psql that has finished has closed its end, but its server process can still be
