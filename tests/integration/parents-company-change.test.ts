@@ -63,7 +63,7 @@ describe("connecting a different QuickBooks company", () => {
     expect(links).toHaveLength(3);
     expect(links.every((l) => l.status === "disabled" && l.disabledReason === "company_changed" && l.statusBeforeDisable === "active")).toBe(true);
     expect(await db.select().from(parentAuthSession)).toEqual([]);
-    expect(await getParentSettings()).toMatchObject({ signin: false, welcome: false, everEnabled: true });
+    expect(await getParentSettings()).toMatchObject({ signin: false, welcome: false });
     expect((await db.select().from(parent)).map((p) => p.name).sort()).toEqual(["Ana Rivera", "Mei Chen"]);
     const [row] = await audits("parent.access.cleared");
     expect(row).toMatchObject({ door: "staff", actorLabel: "admin@club.org", ip: "203.0.113.9" });

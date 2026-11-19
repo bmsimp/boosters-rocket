@@ -172,7 +172,10 @@ function buyoutRowsOf(r: RecordNames): SQL {
  * `familyQboId`, and a switch's `from` and `to`), its record since (`familyId`, and a switch's `from` and `to`). A change
  * of sign-in address (`parent.email.request`, `parent.email.save`, whose target is the QuickBooks record it changes)
  * names the family it was asked in only since then (`familyId`): an older one is found by its record, when that is the
- * family's own customer (CUSTOMER_TARGET_TYPES). Nothing of a student's.
+ * family's own customer (CUSTOMER_TARGET_TYPES). A membership given or ended (`parent.access.granted`,
+ * `parent.access.ended`, whose target is the guardian row) and a person made by staff for a family (`parent.create`,
+ * whose target is the person) name the family in their body: its record (`familyId`, stage 3's slice 7b), and in rows
+ * the retired reconcile wrote its customer (`familyQboId`). Nothing of a student's.
  */
 function parentRowsOf(r: RecordNames): SQL | undefined {
   if (r.kind === "student") return undefined;
@@ -184,6 +187,9 @@ function parentRowsOf(r: RecordNames): SQL | undefined {
       or(eq(said("familyId"), r.id), ...(r.families.length ? [inArray(said("familyQboId"), r.families)] : []))),
     and(eq(auditLog.targetType, "parent"), eq(auditLog.action, "signin.family_switch"), or(inArray(said("from"), names), inArray(said("to"), names))),
     and(inArray(auditLog.action, ["parent.email.request", "parent.email.save"]), eq(said("familyId"), r.id)),
+    and(eq(auditLog.targetType, "guardian"), inArray(auditLog.action, ["parent.access.granted", "parent.access.ended"]),
+      or(eq(said("familyId"), r.id), ...(r.families.length ? [inArray(said("familyQboId"), r.families)] : []))),
+    and(eq(auditLog.targetType, "parent"), eq(auditLog.action, "parent.create"), eq(said("familyId"), r.id)),
   );
 }
 

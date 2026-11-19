@@ -1,7 +1,7 @@
 "use client";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
-import { ActionOutcome } from "@/app/components/notice";
+import { ActionOutcome, Notice } from "@/app/components/notice";
 
 // No form `action` on the forms with a text field: React resets a form after one, and the note would vanish on a
 // refusal. State is the source of truth; a type="button" calls the action inside startTransition (see
@@ -34,6 +34,89 @@ export function OneButton({ label, pendingLabel, act }: { label: string; pending
     <form action={run} className="stack">
       <Outcome state={state} />
       <button className="btn btn-line" disabled={pending}>{pending ? pendingLabel : label}</button>
+    </form>
+  );
+}
+
+/**
+ * Remove or reinstate one guardian row (./guardian-change.tsx). One component for both, kept mounted across the change
+ * (the row's key is its guardian row's id), so the answer stays on the page when the action's refresh swaps Remove for
+ * Reinstate or back, and the focus, whose button is gone, moves to that answer.
+ */
+export function GuardianChangeControls({ name, open, reinstatable, remove, reinstate }: {
+  name: string; open: boolean; reinstatable: boolean; remove: (note: string) => Promise<Done>; reinstate: () => Promise<Done>;
+}) {
+  const [note, setNote] = useState("");
+  const [state, run, pending] = useActionState(async (_: Done | null, what: "remove" | "reinstate") => {
+    const r = await safely(() => (what === "remove" ? remove(note) : reinstate()), failed);
+    if (r.ok) setNote("");
+    return r;
+  }, null);
+  const said = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (state?.ok) said.current?.focus(); }, [state]);
+  if (!state && !open && !reinstatable) return null;
+  return (
+    <div className="stack">
+      {state ? <div ref={said} tabIndex={-1}><ActionOutcome state={state} /></div> : null}
+      {open ? (
+        <details className="more"><summary>Remove<span className="visually-hidden"> {name}</span></summary>
+          <p>They can&apos;t sign in to this family any more, and are signed out of it at once, whatever the family owes. Forms still waiting for their signature start again.</p>
+          <form onSubmit={noSubmit} className="stack">
+            <label className="field"><span>Why? (staff only)</span><textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+            <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run("remove"))}>{pending ? "Removing…" : "Remove"}</button>
+          </form>
+        </details>
+      ) : reinstatable ? (
+        <form action={() => run("reinstate")} className="stack">
+          <button className="btn btn-line" disabled={pending}>{pending ? "Reinstating…" : `Reinstate ${name}`}</button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+/** An add's answer: done, refused, or a question (the address belongs to a person already: `samePerson` is who). */
+type AddDone = Done | { ok: false; errors: string[]; samePerson: string };
+
+/**
+ * Add a guardian to a family: a name and an email address, sent to the action as typed (the server checks both). After
+ * an add the fields are emptied, so a second guardian can be typed in; after a refusal they stay as they were. An
+ * address that belongs to a person already is answered with who that is and nothing changed; "Yes, add them" sends
+ * that person's id back with the same address, and is offered only while the address is the one asked about.
+ */
+export function AddGuardianForm({ act }: { act: (name: string, email: string, samePerson: string | null) => Promise<AddDone> }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [asked, setAsked] = useState<{ email: string; parentId: string } | null>(null);
+  const [state, run, pending] = useActionState(async (_: AddDone | null, confirm: boolean) => {
+    const same = confirm && asked && asked.email === email ? asked.parentId : null;
+    const r = await safely(() => act(name, email, same), failed as AddDone);
+    if (r.ok) { setName(""); setEmail(""); }
+    setAsked(!r.ok && "samePerson" in r ? { email, parentId: r.samePerson } : null);
+    return r;
+  }, null);
+  const question = state && !state.ok && "samePerson" in state ? state : null;
+  const asking = question !== null && asked !== null && asked.email === email;
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      <label className="field"><span>Name</span><input type="text" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <label className="field"><span>Email address they sign in with</span><input type="email" maxLength={320} autoComplete="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      {question ? (asking ? <Notice tone="warning">{question.errors[0]}</Notice> : null) : <Outcome state={state} />}
+      {asking ? <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run(true))}>{pending ? "Adding…" : "Yes, add them"}</button> : null}
+      <button type="button" className={asking ? "btn btn-line" : "btn"} disabled={pending} onClick={() => startTransition(() => run(false))}>{pending ? "Adding…" : "Add guardian"}</button>
+    </form>
+  );
+}
+
+/** A person's name, changed in the portal: the field starts from the name they have. */
+export function NameForm({ name: current, act }: { name: string; act: (name: string) => Promise<Done> }) {
+  const [name, setName] = useState(current);
+  const [state, run, pending] = useActionState(async () => safely(() => act(name), failed), null);
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      <label className="field"><span>Name</span><input type="text" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <Outcome state={state} />
+      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save name"}</button>
     </form>
   );
 }

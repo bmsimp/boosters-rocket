@@ -52,7 +52,22 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   only then, in a savepoint, the roster lock and the app's records;
  * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
- *   sessions;
+ *   sessions; renamePerson() (people.ts) takes the row FOR UPDATE and touches nothing that hangs on it;
+ * - the staff writes of guardians.ts take the parents' settings lock shared first (setSignins() and setWelcome() take
+ *   it before the people they touch), then the person's locks, and only then the roster lock shared, as the email
+ *   confirm takes the roster after the person's locks: a write that held the roster lock while it waited for a person
+ *   the confirm holds, as the confirm asked for the roster, would be a deadlock, which Postgres ends by aborting one of
+ *   them (its check runs after a second, before the confirm's three-second wait is up). No roster read waits for a
+ *   person's row, so waiting for the roster while holding one is safe against it; the change-of-company clear, which
+ *   holds the roster as it takes everyone's rows, could meet these writes and the confirm alike, though nothing the
+ *   portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
+ *   roster lock, then makes the person if there is none, then takes their guardian row in the family FOR UPDATE;
+ *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE (no address lock: the address isn't changed or
+ *   claimed), then the roster lock, then the guardian row FOR UPDATE, and removeGuardian() then deletes the person's
+ *   unused requests, then codes, then ends sessions through closeMembership() (membership.ts). Each waits for the
+ *   roster lock at most three seconds, as the confirm does, and gives up changing nothing: a roster read holds it
+ *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
+ *   it (FOR KEY SHARE, below);
  * - setSignins(false) (switches.ts) takes FOR UPDATE, in id order, the row of every person it will touch (an owed
  *   welcome, an unused code, a session), then clears the owed welcomes, then deletes the unused codes, then the
  *   sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;

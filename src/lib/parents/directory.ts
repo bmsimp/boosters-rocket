@@ -8,15 +8,19 @@ import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
 
 export type AccessKind = "can" | "cannot" | "blocked";
-/** One guardian row of a family, open or closed, and its person, with whether they can sign in to it, in words. */
-export type FamilySignin = { guardianId: string; parentId: string; name: string; email: string; kind: AccessKind; words: string };
+/**
+ * One guardian row of a family, open or closed, and its person, with whether they can sign in to it, in words. `open`:
+ * the row is open, so staff may remove it; `reinstatable`: it is closed, and staff may open it again (stage 3's slice
+ * 7b: any closed row but one a change of company closed, which is in no family's list).
+ */
+export type FamilySignin = { guardianId: string; parentId: string; name: string; email: string; kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
 /**
  * `previousCompany`: the link was closed when a different QuickBooks company was connected. Its `familyQboId` is the
  * old company's, so a page shows the family name as text and never links it to, or looks it up in, the roster.
  * `familyId`: the membership's own app family (`guardian.family_id`), which the family's page is addressed by; null for
  * a previous company's link, which has none.
  */
-export type PersonFamily = { familyQboId: string; familyId: AppFamilyId | null; familyName: string; previousCompany: boolean; kind: AccessKind; words: string };
+export type PersonFamily = { guardianId: string; familyQboId: string; familyId: AppFamilyId | null; familyName: string; previousCompany: boolean; kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
 export type PersonRow = { parentId: string; name: string; email: string; blocked: boolean; families: PersonFamily[]; lastSigninAt: string | null; welcomedAt: string | null };
 export type PersonDetail = PersonRow & { blockedReason: string | null; blockedAt: string | null; welcomeOwed: boolean };
 /**
@@ -83,6 +87,9 @@ const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: tr
 /** The label for a link closed by a company change, in place of a family name. */
 export const PREVIOUS_COMPANY_FAMILY = "A family in the previous QuickBooks company";
 const oldCompany = (l: { disabledReason: DisabledReason | null }) => l.disabledReason === "company_changed";
+/** What staff may do with a row (src/lib/parents/guardians.ts): remove an open one, reinstate a closed one but a previous company's. */
+const rowActions = (l: { status: GuardianStatus; disabledReason: DisabledReason | null }) =>
+  ({ open: l.status !== "disabled", reinstatable: l.status === "disabled" && !oldCompany(l) });
 
 async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   const persons = await db.select().from(parent).where(where).orderBy(parent.name, parent.email);
@@ -100,8 +107,8 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   return persons.map((p) => ({
     parentId: p.id, name: p.name, email: p.email, blocked: p.blocked,
     families: links.filter((l) => l.parentId === p.id).sort((a, b) => Number(oldCompany(a)) - Number(oldCompany(b)) || numeric(a.familyQboId, b.familyQboId)).map((l) => ({
-      familyQboId: l.familyQboId, familyId: oldCompany(l) ? null : l.familyId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!, previousCompany: oldCompany(l),
-      ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked, family: standing(l.familyId) }) })),
+      guardianId: l.id, familyQboId: l.familyQboId, familyId: oldCompany(l) ? null : l.familyId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!, previousCompany: oldCompany(l),
+      ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked, family: standing(l.familyId) }), ...rowActions(l) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,
     blockedReason: p.blockedReason, blockedAt: p.blockedAt?.toISOString() ?? null, welcomeOwed: p.welcomeOwed,
   }));
@@ -131,6 +138,6 @@ export async function familySignins(familyId: AppFamilyId): Promise<FamilySignin
     .where(and(eq(guardian.familyId, familyId), sql`${guardian.disabledReason} is distinct from 'company_changed'`));
   const standing = await familyStandings([familyId]);
   return links.map(({ g, p }): FamilySignin => ({ guardianId: g.id, parentId: p.id, name: p.name, email: p.email,
-    ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, family: standing(g.familyId) }) }))
+    ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, family: standing(g.familyId) }), ...rowActions(g) }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }) || a.email.localeCompare(b.email) || (a.guardianId < b.guardianId ? -1 : 1));
 }

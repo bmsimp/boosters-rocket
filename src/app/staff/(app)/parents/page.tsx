@@ -35,7 +35,7 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
     <main className="wrap single">
       <h1 className="page-title">Parents</h1>
       <p className="lede">Everyone who can sign in to the portal, or once could, and each family they belong to. Who can sign in is kept by the portal itself: a change made in QuickBooks no longer gives anyone a sign-in or ends one.</p>
-      {!settings.signin && <Notice tone="warning">{settings.everEnabled ? "Parent sign-ins are switched off, so nobody can sign in right now." : "Parent sign-ins haven't been switched on yet. An Admin does that under Parent sign-ins."}</Notice>}
+      {!settings.signin && <Notice tone="warning">Parent sign-ins are off, so nobody can sign in, not even a guardian added here. An Admin switches them on under Parent sign-ins.</Notice>}
 
       <section className="box" aria-labelledby="people-h"><h2 id="people-h">People</h2>
         <form method="get" role="search" className="stack">

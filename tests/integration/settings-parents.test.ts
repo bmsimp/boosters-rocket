@@ -98,7 +98,7 @@ describe("the Parent sign-ins settings", () => {
   it("the view shows what is set, plainly, with no inputs, and what switching on needs", async () => {
     await ready();
     const html = await view();
-    expect(html).toContain("Not switched on yet");
+    expect(html).toContain("Off. Nobody can sign in, not even a guardian staff have added.");
     expect(html).toContain("Welcome emails");
     expect(html).toContain("Everything sign-ins need is ready: outgoing mail works.");
     expect(html).not.toMatch(/<textarea|<select|<input(?![^>]*type="hidden")/);   // React may add hidden fields to a form; nothing to type into
@@ -142,7 +142,7 @@ describe("the Parent sign-ins settings", () => {
     expect(welcome).toContain("You can now sign in to");
     expect(await setWelcomeAction(true)).toEqual({ ok: true, message: "Welcome emails are on. They go out a few each minute." });
     expect(await setSigninsAction(false)).toEqual({ ok: true, message: "Parent sign-ins are off. Every parent has been signed out, and welcome emails are off." });
-    expect(await view()).toContain("Switched off");
+    expect(await view()).toContain("Off: nobody can sign in");
   });
 
   it("each step says the state it is in after its button was pressed, since the button and its message are gone", async () => {

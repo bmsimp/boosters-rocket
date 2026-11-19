@@ -40,7 +40,7 @@ describe("the people directory", () => {
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") }).where(eq(parent.id, ana.id));
     await db.insert(auditLog).values({ door: "parent", actorId: ana.id, actorLabel: ana.email, action: "signin", targetType: "parent", targetId: ana.id, at: new Date("2026-11-05T12:00:00Z") });
     expect((await listPeople("ana"))).toEqual([{ parentId: ana.id, name: "Ana Rivera", email: "ana@example.com", blocked: false,
-      families: [{ familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS }],
+      families: [{ guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS, open: true, reinstatable: false }],
       lastSigninAt: "2026-11-05T12:00:00.000Z", welcomedAt: "2026-11-01T12:00:00.000Z" }]);
     expect((await listPeople("RIVERA")).length).toBe(1);
     expect((await listPeople("ana@ex")).length).toBe(1);
@@ -54,8 +54,8 @@ describe("the people directory", () => {
     await seedPeople();
     const [sam] = await listPeople("sam");
     expect(sam!.families).toEqual([
-      { familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: HELD_WORDS },
-      { familyQboId: "20", familyId: null, familyName: "Chen Family", previousCompany: false, kind: "cannot", words: HELD_WORDS },
+      { guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: HELD_WORDS, open: false, reinstatable: true },
+      { guardianId: expect.any(String), familyQboId: "20", familyId: null, familyName: "Chen Family", previousCompany: false, kind: "cannot", words: HELD_WORDS, open: false, reinstatable: true },
     ]);
   });
 
@@ -94,12 +94,12 @@ describe("the people directory", () => {
   });
 
   it("shows a blocked person as blocked, and a link made by hand as it stands", async () => {
-    await seedParentSettings({ signin: false, everEnabled: false });
+    await seedParentSettings({ signin: false });
     await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     const g = await seedGuardian({ parentId: p.id, familyQboId: "10" });
     await syncAppRecords(); // the membership's family record, as the next roster read would set it
-    expect(await signinsOf("10")).toEqual([{ guardianId: g.id, parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked" }]);
+    expect(await signinsOf("10")).toEqual([{ guardianId: g.id, parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked", open: true, reinstatable: false }]);
   });
 
   it("keeps two same-named people in one family apart, one row each", async () => {
@@ -115,13 +115,13 @@ describe("the people directory", () => {
     const { ana } = await seedPeople();
     await seedGuardian({ parentId: ana.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     expect((await getPerson(ana.id))!.families).toEqual([
-      { familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS },
-      { familyQboId: "20", familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected" },
+      { guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS, open: true, reinstatable: false },
+      { guardianId: expect.any(String), familyQboId: "20", familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected", open: false, reinstatable: false },
     ]);
   });
 
   it("reads a family's sign-ins by the membership's own family record, not by the QuickBooks ID the row was made with", async () => {
-    await seedParentSettings({ signin: false, everEnabled: false });
+    await seedParentSettings({ signin: false });
     await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
     const [g] = await db.insert(guardian).values({ parentId: p.id, familyQboId: "10", status: "invited" }).returning();

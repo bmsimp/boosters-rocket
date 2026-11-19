@@ -37,7 +37,7 @@ describe("the parent switches", () => {
     await seedWorkingMail();
     expect(await missingForSignins()).toEqual([]);
     expect(await setSignins(true, admin)).toEqual({ ok: true });
-    expect(await getParentSettings()).toMatchObject({ signin: true, everEnabled: true });
+    expect(await getParentSettings()).toMatchObject({ signin: true });
   });
 
   it("switching on saves the switch and is audited, and opens, closes and makes no sign-in", async () => {
@@ -56,7 +56,7 @@ describe("the parent switches", () => {
     const [row] = await audits("settings.parents.save");
     expect(row).toMatchObject({ door: "staff", actorLabel: "admin@club.org", permission: "Settings.Parents.ReadWrite", targetType: "setting", targetId: PARENTS_KEY, ip: "203.0.113.9" });
     expect(row!.before).toMatchObject({ signin: false });
-    expect(row!.after).toEqual({ signin: true, everEnabled: true, welcome: false, requireActiveStudents: false });
+    expect(row!.after).toEqual({ signin: true, welcome: false, requireActiveStudents: false });
     for (const action of ["parent.create", "parent.access.granted", "parent.access.ended"]) expect(await audits(action)).toEqual([]);
   });
 
@@ -84,7 +84,7 @@ describe("the parent switches", () => {
     const before = await rows();
     expect(await setSignins(false, admin)).toEqual({ ok: true });
     expect(await db.select().from(parentAuthSession)).toEqual([]);
-    expect(await getParentSettings()).toMatchObject({ signin: false, everEnabled: true });
+    expect(await getParentSettings()).toMatchObject({ signin: false });
     expect(await rows()).toEqual(before);
     expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: false, sessionsEnded: 1 });
   });
@@ -147,7 +147,7 @@ describe("the parent switches", () => {
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
     expect(await rows()).toEqual(before);
     expect(await audits("parent.access.ended")).toEqual([]);
-    expect((await audits("settings.parents.save")).at(-1)!.after).toEqual({ signin: true, everEnabled: true, welcome: false, requireActiveStudents: true });
+    expect((await audits("settings.parents.save")).at(-1)!.after).toEqual({ signin: true, welcome: false, requireActiveStudents: true });
     expect(await signinCounts()).toEqual({ people: 0, families: 0, welcomeNow: 0 });
     // A student comes back: she counts again, with no row reopened, since none was closed.
     await db.update(student).set({ active: true });

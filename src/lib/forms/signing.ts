@@ -7,8 +7,8 @@
 // staff-only module: tests/integration/page-guards.test.ts scans this folder.
 import "server-only";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { guardian, parent, signatureRequest, type FormSetting, type RequestSigner } from "@/lib/db/schema";
+import { db, type Tx } from "@/lib/db/client";
+import { formWithdrawal, guardian, parent, signatureRequest, type FormSetting, type RequestSigner } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { writeAudit } from "@/lib/audit/log";
@@ -69,6 +69,22 @@ async function familyGuardians(familyId: AppFamilyId): Promise<SignerIdentity[]>
   return db.select({ parentId: parent.id, name: parent.name, email: parent.email }).from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id))
     .where(and(eq(guardian.familyId, familyId), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
     .orderBy(desc(guardian.isPrimary), asc(guardian.createdAt), asc(guardian.id));
+}
+
+/**
+ * Which of these people can no longer sign for the family at this moment: not an open guardian of it, or blocked. Read
+ * FOR SHARE, each person's row first and then their guardian row in the family, the order in which a remove
+ * (removeGuardian(), closeMembership()) takes them FOR UPDATE and a block (blockPerson()) takes the person's: so either
+ * the close or block waits for this transaction and then finds the document it stored (formsForGoneSigner() starts it
+ * again), or this read waits for the close or block and sees it. Empty when every one can still sign.
+ */
+async function goneSigners(tx: Tx, familyId: AppFamilyId, parentIds: readonly string[]): Promise<string[]> {
+  const ids = [...new Set(parentIds)].sort();
+  if (ids.length === 0) return [];
+  const people = await tx.select({ id: parent.id, blocked: parent.blocked }).from(parent).where(inArray(parent.id, ids)).orderBy(asc(parent.id)).for("share");
+  const open = await tx.select({ parentId: guardian.parentId }).from(guardian)
+    .where(and(eq(guardian.familyId, familyId), inArray(guardian.parentId, ids), ne(guardian.status, "disabled"))).orderBy(asc(guardian.id)).for("share");
+  return ids.filter((id) => !people.some((p) => p.id === id && !p.blocked) || !open.some((g) => g.parentId === id));
 }
 
 type Made = { ok: true } | { ok: false; reason: "template" | "documenso" };
@@ -148,6 +164,9 @@ async function makeDocument(ctx: ParentCtx, config: DocumensoConfig, form: MyFor
   const made: RequestSigner[] = chosen.map((s, i) => ({ parentId: s.parentId, recipientId: ours[i]!.id, name: s.name, email: s.email, signedAt: null }));
   const now = new Date();
   const stored = await db.transaction(async (tx) => {
+    // A signer removed or blocked while the document was being made never gets it: nothing is stored, and it is undone
+    // (deleted in Documenso, nobody having signed it) as any failed open is.
+    if ((await goneSigners(tx, form.familyId, made.map((s) => s.parentId))).length > 0) return false;
     // The document's id is written again, and only while this open still holds the request: a request is never left waiting with no document.
     const [kept] = await tx.update(signatureRequest).set({ state: "waiting", envelopeId, envelopeStatus: "PENDING", templateId: plan.templateId, templateUpdatedAt: new Date(plan.updatedAt), signersMode: setting.signers,
       subjectName: form.subject.name, signers: made, documentCreatedAt: now, checkedAt: now, allSignedAt: null, sealAskedAt: null, completedAt: null, declinedAt: null, updatedAt: now })
@@ -173,7 +192,18 @@ async function takeUp(ctx: ParentCtx, form: MyForm, envelope: Envelope): Promise
   const people = emails.length === 0 ? [] : await db.select({ id: parent.id, email: parent.email }).from(parent).where(inArray(parent.email, emails));
   const signers: RequestSigner[] = recipients.map((r) => ({ parentId: people.find((p) => p.email === r.email.toLowerCase())?.id ?? "", recipientId: r.id, name: r.name, email: r.email, signedAt: null }));
   const now = new Date();
+  // The guardians it still waits for (a complete one waits for nobody): each must still be able to sign for the family.
+  const waitingOn = envelope.status === "COMPLETED" ? [] : signers.filter((s, i) => s.parentId !== "" && recipients[i]!.signingStatus !== "SIGNED").map((s) => s.parentId);
   return db.transaction(async (tx) => {
+    const gone = await goneSigners(tx, form.familyId, waitingOn);
+    if (gone.length > 0) {
+      // Never taken up: it is withdrawn by the worker (cancelled, as it holds a signature), as formsForGoneSigner() does
+      // for a document the request still points at, and the request stays not opened, to be made again.
+      await tx.insert(formWithdrawal).values({ envelopeId: envelope.id, anySigned: true }).onConflictDoNothing();
+      await writeAudit({ actor: parentActor({ id: ctx.parentId, email: ctx.email }), action: "forms.request.signer_gone", targetType: "signature_request", targetId: row.id, ip: ctx.ip,
+        before: { state: row.state, envelopeId: envelope.id }, after: { state: "not_opened", parentIds: gone, ...requestRecords(row), reason: "gone_before_taken_up", withdraw: "cancel" } }, tx);
+      return { ok: false, reason: "documenso" } as const;
+    }
     const [kept] = await tx.update(signatureRequest).set({ ...NO_DOCUMENT, state: "waiting", envelopeId: envelope.id, envelopeStatus: envelope.status, subjectName: form.subject.name, signers,
       documentCreatedAt: now, checkedAt: null, updatedAt: now })
       .where(and(eq(signatureRequest.id, row.id), isNull(signatureRequest.envelopeId), isNotNull(signatureRequest.preparingAt))).returning({ id: signatureRequest.id });
@@ -281,7 +311,10 @@ async function open(ctx: ParentCtx, form: MyForm, mayWait: boolean): Promise<For
   if (!(await mayAsk(ctx, row))) return viewOf(ctx, row, { kind: "unavailable" });
 
   const guardians = await familyGuardians(form.familyId);
-  const viewer: SignerIdentity = guardians.find((g) => g.parentId === ctx.parentId) ?? { parentId: ctx.parentId, name: ctx.name, email: ctx.email };
+  // Only a guardian of the family at this moment signs: one removed or blocked since their session began gets the same
+  // words as any refusal, and no token. The store checks it again, under locks a remove and a block wait for.
+  const viewer = guardians.find((g) => g.parentId === ctx.parentId);
+  if (!viewer) return viewOf(ctx, row, { kind: "unavailable" });
 
   let envelope: Envelope | null = null;
   if (row.envelopeId !== null) {

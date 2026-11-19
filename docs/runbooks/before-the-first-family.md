@@ -32,8 +32,7 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    **Pass:** `main` on GitHub shows the merge. **If not:** resolve what GitHub says blocks it, then merge.
 3. **Get the host's env file ready before the deploy.** On the host, `~/booster-rocket/.env.poc` needs an `APP_URL`
    line with the portal's address (the new deploy script refuses without one), and the user who deploys must be able to write
-   to `~/booster-rocket-backups` (or set `BR_BACKUP_DIR` to a folder they can). If the proof of concept's seed script
-   is still wanted there, add the line `BR_PROOF_OF_CONCEPT=yes`.
+   to `~/booster-rocket-backups` (or set `BR_BACKUP_DIR` to a folder they can).
    **Pass:** `grep APP_URL ~/booster-rocket/.env.poc` prints the line, and `ls -ld ~/booster-rocket-backups` shows the
    deploying user as owner (or the folder doesn't exist yet). **If not:** add the line; `mkdir ~/booster-rocket-backups`.
 4. **Deploy** as section 8 of [the proof of concept's runbook](poc-linuxdev.md#8-deploy) says, but first bring the
@@ -72,8 +71,8 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
 8. **Run checks 18 to 24** of [the proof of concept's checklist](poc-linuxdev.md#9-the-test-checklist): who can sign
    in, an edit in QuickBooks that changes no sign-in, blocking and welcome emails. They need edits in the Intuit sandbox
    and a mailbox you can read. Since the portal keeps its own list of each family's guardians, a parent in QuickBooks
-   is given no sign-in by it; until staff can add a guardian in the portal (the next part of the work), the host's
-   guardians are the ones it already holds.
+   is given no sign-in by it: the host's guardians are the ones it already holds and those staff add on a family's
+   page (under **Families**, the **Portal sign-ins** box, **Add guardian**, as in part 6, step 3).
    **Pass:** each step does what its line says; add a row for each to that runbook's Results table.
    **If not:** note the step and what you saw; that runbook's Troubleshooting table covers the usual causes.
    **Check 25, a second sandbox company, waits for the mapping screen:** until
@@ -421,7 +420,10 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    guardians, not QuickBooks' parents.
    **Pass:** the number of people and families looks right for the guardians the portal holds, and **Parents** lists
    each one with their families. **If not:** a guardian you expected and don't see is the portal's to add, not a
-   QuickBooks record to fix.
+   QuickBooks record to fix: on the family's page under **Families**, the **Portal sign-ins** box, **Add guardian**,
+   with their name and the email address they will sign in with. Nobody can sign in, whoever you add, until parent
+   sign-ins are switched on (part 7). A guardian who shouldn't sign in for a family any more is removed from the same
+   box (**Remove**, with a note only staff see): they are signed out of that family at once.
 4. **The daily read of every family's invoices, at the club's size.** The day after connecting, open Health.
    **Pass:** **Every family's invoices** is "Working" and finished within the day. A run longer than a few minutes
    carries on at the next wake by itself. QuickBooks turning the portal away for asking too often shows as a stop with
@@ -436,7 +438,7 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 ## 7. A pilot with a few families
 
 1. **Choose three to five families** who will tell you what confused them. Check each has its guardians in the portal,
-   with the email address each signs in with.
+   with the email address each signs in with, and add any that are missing on the family's page (part 6, step 3).
    **Pass:** **Parents** lists each of their guardians, and Settings, Parent sign-ins counts them among those who could
    sign in.
 2. **Switch parent sign-ins on, and leave welcome emails off:** Settings, Parent sign-ins, **Set up** (or
@@ -517,6 +519,16 @@ work another. Any time before the pilot.
     active, so nothing anyone changed is overwritten. The check's "Making a family inactive once everyone under it is
     inactive" row says whether QuickBooks raises it: on its second run (2026-11-17) it left the family's version as it
     was.
+19. The lead's choices, not the owner's (2026-11-19, stage 3's slice 7b): nobody can sign in until parent sign-ins
+    are switched on, not even before they were first switched on (earlier, a sign-in seeded by hand worked until
+    then); adding, removing and reinstating a guardian take the permission that changes a family
+    (`Roster.Family.ReadWrite`), since each gives or ends an address's view of a family (its invoices, its forms to
+    sign, a buy-out to confirm): anyone who can change families can give an address a parent's view of one, and every
+    such grant is audited with who made it; changing a person's name takes the same permission as blocking
+    (`Parents.ReadWrite`); an address that belongs to someone already is added only after staff are shown who that is
+    and say it is the same person; removing a guardian needs a note, kept for staff in the audit log; and a guardian
+    can't be added to a family with no customer in QuickBooks linked to it until the portal's changes are sent on to
+    QuickBooks.
 
 ## Results
 

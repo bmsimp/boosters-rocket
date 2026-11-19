@@ -119,9 +119,11 @@ async function main() {
           ('E2E-50', 'Lee Family', true, null, 'E2E-T1', null, null, '0'),
           ('E2E-51', 'Sam Okafor', true, 'E2E-50', 'E2E-T2', 'sam@example.com', null, '0')`;
   // Zelda is in two families on purpose (the family chooser test): one guardian simply belongs to both.
-  // The parents setting is cleared here and nowhere else: tests/e2e/parents.spec.ts switches sign-ins on, and that
-  // state must survive the second (desktop) pass of the run.
-  await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
+  // Parent sign-ins are switched on here and nowhere else (welcome emails off): the parent door is closed until they
+  // are (parentDoorClosed()), and every spec that signs Zelda in needs it open. tests/e2e/parents.spec.ts finds them on;
+  // the specs that change the setting put it back as they found it.
+  await sql`INSERT INTO setting (key, value) VALUES ('parents.settings', ${sql.json({ signin: true, welcome: false, requireActiveStudents: false })})
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await sql`INSERT INTO setting (key, value) VALUES ('membership.shape', ${sql.json({ kind: "layered", familyTypeId: "E2E-T1", studentTypeId: "E2E-T3", parentTypeId: "E2E-T2" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   // The cache says which company it came from, as a real refresh records it; without this the pages treat it as unread.

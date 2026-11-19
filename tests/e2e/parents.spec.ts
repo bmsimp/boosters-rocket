@@ -9,9 +9,9 @@ test.beforeEach(async ({ context }) => { await context.addCookies([staffSessionC
 test.describe.configure({ mode: "serial" });
 
 // The run does everything twice (phone, then desktop) against one seeded database, and may be run again without
-// re-seeding. Each test leaves things as it found them, or passes from either state. The one change meant to last is
-// "parent sign-ins on": tests/e2e/parent-sign-in.spec.ts passes with them on or never switched on, never switched off,
-// so nothing here switches them off. Welcome emails stay off: the worker isn't running here, and a welcome to a
+// re-seeding. Each test leaves things as it found them, or passes from either state. The seed switches parent sign-ins
+// on (the door is closed until they are), and every spec that signs a parent in needs them on, so nothing here
+// switches them off. Welcome emails stay off: the worker isn't running here, and a welcome to a
 // seeded address would land in the sink that spec reads.
 
 const mark = async () => Number((await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`)[0]!.id);
@@ -31,7 +31,7 @@ test("an Admin switches parent sign-ins on (and finds them on the second time)",
     await expect(page.getByText("Parent sign-ins are on. 2 people can sign in, to 3 families.")).toBeVisible();
     const saves = await sql`SELECT after FROM audit_log WHERE id > ${since} AND action = 'settings.parents.save'`;
     expect(saves).toHaveLength(1);
-    expect(saves[0]!.after).toMatchObject({ signin: true, everEnabled: true });
+    expect(saves[0]!.after).toMatchObject({ signin: true });
   } else {
     await expect(page.getByText("Parent sign-ins are on. 2 people can sign in, to 3 families.")).toBeVisible();
   }
@@ -49,7 +49,7 @@ test("an Admin switches parent sign-ins on (and finds them on the second time)",
   await expect(page.getByRole("link", { name: "Change", exact: true })).toBeVisible();
   await expect(page.locator("main input:not([type=hidden]), main textarea, main select")).toHaveCount(0);
   const [row] = await sql`SELECT value FROM setting WHERE key = 'parents.settings'`;
-  expect(row!.value).toMatchObject({ signin: true, everEnabled: true, welcome: false });
+  expect(row!.value).toMatchObject({ signin: true, welcome: false });
 });
 
 test("the staff home and the Parents page have nothing to review", async ({ page }) => {

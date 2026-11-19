@@ -68,7 +68,8 @@ export async function seedParentSettings(patch: Partial<ParentSettings>): Promis
   const value = { ...DEFAULT_PARENT_SETTINGS, ...(await getParentSettings()), ...patch };
   await db.insert(setting).values({ key: PARENTS_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value } });
 }
-export const SIGNINS_ON = { signin: true, everEnabled: true } as const;
+/** Parent sign-ins switched on: the parent door is closed until they are (parentDoorClosed()). */
+export const SIGNINS_ON = { signin: true } as const;
 
 /**
  * What a successful refresh leaves beside the cache: the company it was read from (leave `realmId` out for a cache

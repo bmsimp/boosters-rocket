@@ -37,14 +37,14 @@ describe("the parents-from-QuickBooks schema", () => {
 
   it("stores and reads the parents setting, defaulting when no row is stored", async () => {
     expect(await getParentSettings()).toEqual(DEFAULT_PARENT_SETTINGS);
-    await db.transaction((tx) => putParentSettings(tx, { ...DEFAULT_PARENT_SETTINGS, signin: true, everEnabled: true }));
-    expect(await getParentSettings()).toMatchObject({ signin: true, everEnabled: true });
+    await db.transaction((tx) => putParentSettings(tx, { ...DEFAULT_PARENT_SETTINGS, signin: true }));
+    expect(await getParentSettings()).toMatchObject({ signin: true });
     expect(await db.select().from(setting)).toEqual([expect.objectContaining({ key: PARENTS_KEY })]);
   });
 
   it("reads a stored parents setting it can't parse as closed, not as the defaults", async () => {
     await db.insert(setting).values({ key: PARENTS_KEY, value: { signin: "yes" } });
-    expect(await getParentSettings()).toEqual({ signin: false, everEnabled: true, welcome: false, requireActiveStudents: false });
+    expect(await getParentSettings()).toEqual({ signin: false, welcome: false, requireActiveStudents: false });
   });
 
   it("adds an Admin-only settings permission and a grantable parents permission", () => {

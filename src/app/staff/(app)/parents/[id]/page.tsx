@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
-import { getPerson } from "@/lib/parents/directory";
+import { getPerson, type PersonFamily } from "@/lib/parents/directory";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
-import { NoteAction, OneButton } from "../forms";
-import { blockAction, unblockAction, resendWelcomeAction } from "../actions";
+import { NameForm, NoteAction, OneButton } from "../forms";
+import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction } from "../actions";
+import { GuardianChange } from "../guardian-change";
 import { accessState } from "../access-state";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 
@@ -25,6 +27,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "parent.read", permission: "Parents.ReadWrite",
     targetType: "parent", targetId: p.parentId, ip: ctx.ip });
   const canSignIn = !p.blocked && p.families.some((f) => f.kind === "can");
+  // Removing and reinstating give or end the person's sign-in for a family: Roster.Family.ReadWrite's, beside this page's own.
+  const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   return (
     <main className="wrap single">
       <h1 className="page-title">{p.name}</h1>
@@ -35,18 +39,24 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           words={p.blocked ? "Blocked: can't sign in to any family" : canSignIn ? "Can sign in" : "Can't sign in to any family right now"} />
         {p.families.length === 0 ? <p>This person isn&apos;t linked to any family.</p> : (
           <DataTable caption="Each family this person is linked to, and whether they can sign in to it" captionHidden
-            rows={p.families} rowKey={(f) => `${f.previousCompany ? "old" : "now"}|${f.familyQboId}`} columns={[
+            rows={p.families} rowKey={(f) => f.guardianId} columns={[
               // A previous company's row carries that company's ID, which names some other family (or none) now.
               { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null ? f.familyName
                 : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
               { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind)} words={f.words} /> },
+              ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
             ]} />
         )}
         <dl className="details">
           <dt>Last signed in</dt><dd>{p.lastSigninAt ? <LocalTime iso={p.lastSigninAt} /> : "Never"}</dd>
           <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
         </dl>
-        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them.</p>
+        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. A guardian is added to a family from that family&apos;s page.</p>
+      </section>
+
+      <section className="box" aria-labelledby="pn-h"><h2 id="pn-h">Name</h2>
+        <p>Changes their name in the portal: what staff see, and what the portal calls them. QuickBooks isn&apos;t changed.</p>
+        <NameForm name={p.name} act={renamePersonAction.bind(null, p.parentId)} />
       </section>
 
       <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Welcome email</h2>

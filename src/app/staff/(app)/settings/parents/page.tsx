@@ -22,16 +22,16 @@ export default async function ParentSettingsPage() {
       <p className="lede">Parents sign in to the portal with their email address and a code. Who can sign in is the portal&apos;s own list of each family&apos;s guardians: a change made in QuickBooks no longer gives anyone a sign-in or ends one. Only Admins can change this.</p>
 
       <section className="box" aria-labelledby="ps-status-h"><h2 id="ps-status-h">What is set</h2>
-        <StateWords state={s.signin ? "done" : "todo"} words={s.signin ? "On: parents can sign in" : s.everEnabled ? "Switched off: nobody can sign in" : "Not switched on yet"} />
+        <StateWords state={s.signin ? "done" : "todo"} words={s.signin ? "On: parents can sign in" : "Off: nobody can sign in"} />
         <dl className="details">
-          <dt>Parent sign-ins</dt><dd>{s.signin ? "On" : s.everEnabled ? "Switched off. Nobody can sign in." : "Not switched on yet"}</dd>
+          <dt>Parent sign-ins</dt><dd>{s.signin ? "On" : "Off. Nobody can sign in, not even a guardian staff have added."}</dd>
           <dt>Who can sign in</dt><dd>{s.signin ? `${n(counts.people, "person", "people")}, to ${n(counts.families, "family", "families")}` : "Nobody yet"}</dd>
-          <dt>Welcome emails</dt><dd>{s.welcome ? "On: everyone who could sign in when this was switched on is emailed once" : "Off: nobody is emailed"}</dd>
+          <dt>Welcome emails</dt><dd>{s.welcome ? "On: everyone who could sign in when this was switched on is emailed once, and so is each guardian staff add or reinstate since" : "Off: nobody is emailed"}</dd>
         </dl>
         {!s.signin && (missing.length > 0
           ? <Notice tone="warning" live="none">Before sign-ins can be switched on:<ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>
           : <Notice tone="info" live="none">Everything sign-ins need is ready: outgoing mail works.</Notice>)}
-        <p><a className="btn" href="/staff/settings/parents/setup">{s.everEnabled ? "Change" : "Set up"}</a></p>
+        <p><a className="btn" href="/staff/settings/parents/setup">{s.signin ? "Change" : "Set up"}</a></p>
       </section>
 
       <section className="box" aria-labelledby="ps-options-h"><h2 id="ps-options-h">Options</h2>
