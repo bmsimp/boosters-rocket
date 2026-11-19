@@ -148,7 +148,9 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
  * (src/lib/auth/resolve.ts): sent no code and refused at the code check (signin-codes.ts, `no_enabled_guardian`) and
  * at the sign-in's end (completeParentSignin()), and sent no welcome (welcome.ts, through hasRowThatCounts(), the same
  * rule as SQL). A session already open when the rule comes into force, or when a family loses its last active student
- * or goes inactive, is caught on its next request. In the chooser's order, by `family_qbo_id`. Closing a membership
+ * or goes inactive, is caught on its next request. In the chooser's order, by `family_qbo_id`, then the rows that name
+ * no customer (made while their family had no link, stage 3's slice 9d), then by row id, so no linked family's place in
+ * the chooser (and its "(1)", "(2)" in myFamilyNames()) moves. Closing a membership
  * ends the sessions that chose the row's family record (endFamilySessions()), and every session once no open row is
  * left (membership.ts).
  */
@@ -156,7 +158,7 @@ export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<
   const studentsRule = await studentsRuleInForce(tx);
   const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
     .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true),
-      studentsRule ? hasActiveStudent(family.id) : undefined)).orderBy(guardian.familyQboId);
+      studentsRule ? hasActiveStudent(family.id) : undefined)).orderBy(sql`${guardian.familyQboId} asc nulls last`, guardian.id);
   return rows.map((r) => ({ ...r.g, familyId: r.familyId }));
 }
 

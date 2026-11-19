@@ -193,6 +193,8 @@ async function importInto(tx: Tx, one: OneFamily | undefined): Promise<OneFamily
   //    comes from a record of its own keeps the link it had: it says where the sign-in came from. Narrowed to one
   //    family, no guardian row is touched (the narrowed plan holds none).
   for (const m of changeExisting ? memberships : []) {
+    // A row that names no customer (made while its family had no link) is not in the plan: it keeps the family it has.
+    if (!plan.memberships.has(m.id)) continue;
     const now = familyFor(plan.memberships.get(m.id));
     if (m.familyId === now) continue;
     await tx.update(guardian).set({ familyId: now }).where(eq(guardian.id, m.id));

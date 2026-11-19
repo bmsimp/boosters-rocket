@@ -4,6 +4,7 @@ import { db } from "@/lib/db/client";
 import { family, guardian } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 import { myFamilyNames, numberedWhereRepeated } from "@/lib/parents/my-family-names";
+import { enterableGuardianRows } from "@/lib/parents/sessions";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 
 /**
@@ -58,5 +59,26 @@ describe("myFamilyNames()", () => {
     expect([...names.entries()]).toEqual([[first, UNKNOWN], [only, "Birch Family"]]);
     expect(names.has(bens)).toBe(false);
     expect(names.has(nobody)).toBe(false);
+  });
+});
+
+describe("the chooser's order (enterableGuardianRows())", () => {
+  beforeEach(async () => { await resetDb(); });
+
+  it("keeps the rows that name a customer in their place, by customer, and puts those that name none (slice 9d) after them, by row", async () => {
+    const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const second = await rowIn(ana.id, "F2", "Birch Family"), first = await rowIn(ana.id, "F1", "Ash Family");
+    // Two families staff added in the portal while they had no link: rows naming no customer.
+    const byHand: string[] = [];
+    for (const name of ["Ash Family", "Cedar Family"]) {
+      const [f] = await db.insert(family).values({ name, active: true }).returning({ id: family.id });
+      const [g] = await db.insert(guardian).values({ parentId: ana.id, familyQboId: null, familyId: f!.id, status: "invited" }).returning({ id: guardian.id });
+      byHand.push(g!.id);
+    }
+    byHand.sort();
+    expect((await enterableGuardianRows(ana.id)).map((r) => r.id)).toEqual([first, second, ...byHand]);
+    // The two Ash families are told apart by that place: the linked one stays "(1)".
+    const names = await myFamilyNames(ana.id, [first, second, ...byHand]);
+    expect(names.get(first)).toBe("Ash Family (1)");
   });
 });

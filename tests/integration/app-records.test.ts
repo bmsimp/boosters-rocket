@@ -99,6 +99,21 @@ describe("the import, as migration 0023 made the records", () => {
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
   });
 
+  it("a guardian row that names no customer (made while its family had no link, slice 9d) keeps its family, and is linked to nothing", async () => {
+    await connectRoster(stub);
+    // Inactive, as a whole run of the import leaves a family with no link (its own rule, which stage 4 takes up): the
+    // row's family is what is under test.
+    const [byHand] = await db.insert(family).values({ name: "Oak Family", active: false }).returning({ id: family.id });
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    const [row] = await db.insert(guardian).values({ parentId: ana.id, familyQboId: null, familyId: byHand!.id, status: "invited", sourceQboId: null }).returning();
+    const before = await appRecordRows();
+    expect(await withTheRosterLock((tx) => importRecordsFromRoster(tx))).toEqual(NO_CHANGES);
+    expect(await appRecordRows()).toEqual(before);
+    const [now] = await db.select().from(guardian).where(eq(guardian.id, row!.id));
+    expect(now!.familyId).toBe(byHand!.id);
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.guardianId, row!.id))).toEqual([]);
+  });
+
   it("keeps the records, inactive and named from what the portal last knew, of customers the cache no longer returns", async () => {
     await seedParentSettings(SIGNINS_ON);
     await seedAnaRivera();

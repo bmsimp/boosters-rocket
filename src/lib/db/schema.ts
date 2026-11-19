@@ -124,10 +124,16 @@ export const student = pgTable("student", {
   check("student_active_in_family", sql`not ${t.active} or ${t.familyId} is not null`),
 ]);
 
-/** "This person is a guardian in this family." Name, email and phone live on the person (`parent`). */
+/**
+ * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). `family_qbo_id` is
+ * the customer the family's link named when the row was made: null for a membership made while its family had no link
+ * (stage 3's slice 9d, migration 0040), which is never filled in later, even once the family is linked, and by which
+ * nothing finds a family. A person is in a family record at most once (`guardian_family_id_parent_uq`); the old unique
+ * index by customer stays, for the rows that name one.
+ */
 export const guardian = pgTable("guardian", {
   id: uuid("id").primaryKey().defaultRandom(),
-  familyQboId: text("family_qbo_id").notNull(),
+  familyQboId: text("family_qbo_id"),
   // The same family as the app's own record: written by whoever makes or reinstates the row (src/lib/parents/guardians.ts),
   // never by a roster read (stage 3's slice 9c). Null for a row a change of company closed (its QuickBooks ids are
   // another company's), and for a row made before its family had a record that nothing has given one since.
@@ -142,6 +148,7 @@ export const guardian = pgTable("guardian", {
   updatedAt: updated(),
 }, (t) => [
   uniqueIndex("guardian_family_parent_uq").on(t.familyQboId, t.parentId),
+  uniqueIndex("guardian_family_id_parent_uq").on(t.familyId, t.parentId).where(sql`family_id is not null`),
   index("guardian_family_ix").on(t.familyQboId),
   index("guardian_family_id_ix").on(t.familyId),
   index("guardian_parent_ix").on(t.parentId),

@@ -59,6 +59,19 @@ describe("the people directory", () => {
     ]);
   });
 
+  it("names a row that names no customer (slice 9d) from its family record, listing it after the rows that name one", async () => {
+    await withCompany(); await seedCache(ALL);
+    const { ana } = await seedPeople();
+    // Two families staff added in the portal, with no link: one named, one whose name the portal never knew.
+    const [oak] = await db.insert(family).values({ name: "Oak Family", active: true }).returning({ id: family.id });
+    const [nameless] = await db.insert(family).values({ name: null, active: true }).returning({ id: family.id });
+    const rows = await db.insert(guardian).values([oak!, nameless!].map((f) => ({ parentId: ana.id, familyQboId: null, familyId: f.id, status: "invited" as const, sourceQboId: null }))).returning();
+    const [person] = await listPeople("ana");
+    expect(person!.families.map((f) => [f.familyQboId, f.familyName])).toEqual([["10", "Rivera Family"],
+      ...rows.sort((a, b) => (a.id < b.id ? -1 : 1)).map((r) => [null, r.familyId === oak!.id ? "Oak Family" : "A family whose name the portal doesn't know"])]);
+    expect(person!.families.at(-1)).toMatchObject({ previousCompany: false, open: true });
+  });
+
   it("shows a family's guardian rows, open and closed, in words, and no row worked out from QuickBooks", async () => {
     await withCompany(); await seedCache(ALL);
     const { ana, sam } = await seedPeople();
