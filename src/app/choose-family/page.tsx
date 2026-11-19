@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getParentState } from "@/lib/auth/identity";
 import { getClubSettings } from "@/lib/settings/club";
-import { familyNames } from "@/lib/parents/directory";
+import { myFamilyNames } from "@/lib/parents/my-family-names";
 import { RETURN_PARAM, safeReturnPath, withReturnPath } from "@/lib/auth/return-path";
 import { SignOutButton } from "@/app/components/sign-out-button";
 import { chooseFamilyAction } from "./actions";
@@ -18,8 +18,11 @@ export default async function ChooseFamily({ searchParams }: { searchParams?: Pr
   const next = safeReturnPath(query?.[RETURN_PARAM]);
   if (state.status === "none") redirect(withReturnPath("/sign-in", next));
   const families = state.status === "ok" ? state.identity.families : state.families;
-  const current = state.status === "ok" ? state.identity.familyQboId : null;
-  const names = await familyNames(families.map((f) => f.familyQboId));
+  const parentId = state.status === "ok" ? state.identity.parentId : state.parentId;
+  const current = state.status === "ok" ? state.identity.guardianId : null;
+  // Each family is named from the app's own record and chosen by the person's own guardian row: no QuickBooks id is
+  // sent to the browser, neither as a label nor as the form's bound argument.
+  const names = await myFamilyNames(parentId, families.map((f) => f.guardianId));
   return (
     <main className="wrap signin">
       <h1 className="page-title">{club.name}</h1>
@@ -28,8 +31,8 @@ export default async function ChooseFamily({ searchParams }: { searchParams?: Pr
         {families.map((f) => (
           <li key={f.guardianId}>
             {/* Both arguments are bound, always: a form adds its FormData after them, and it must never arrive as `next`. */}
-            <form action={chooseFamilyAction.bind(null, f.familyQboId, next ?? undefined)}>
-              <button className="btn" aria-current={f.familyQboId === current ? "true" : undefined}>{names.get(f.familyQboId)}</button>
+            <form action={chooseFamilyAction.bind(null, f.guardianId, next ?? undefined)}>
+              <button className="btn" aria-current={f.guardianId === current ? "true" : undefined}>{names.get(f.guardianId)}</button>
             </form>
           </li>
         ))}

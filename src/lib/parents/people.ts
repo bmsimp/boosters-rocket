@@ -23,7 +23,7 @@ export async function blockPerson(parentId: string, rawReason: string, o: StaffO
     await deleteUnusedSigninCodes(p.id, tx);
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, p.id), isNull(parentEmailChange.usedAt)));
     const sessionsEnded = await endParentSessions(p.id, tx);
-    const formsReset = await formsForGoneSigner(tx, { parentId: p.id, familyQboId: null, reason: "blocked", actor: o.actor, ip: o.ip });
+    const formsReset = await formsForGoneSigner(tx, { parentId: p.id, family: "every family", reason: "blocked", actor: o.actor, ip: o.ip });
     await writeAudit({ actor: o.actor, action: "parent.block", permission: o.permission, targetType: "parent", targetId: p.id,
       before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: true, reason, sessionsEnded, formsReset }, ip: o.ip }, tx);
     return { ok: true as const, sessionsEnded };

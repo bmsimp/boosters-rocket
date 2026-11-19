@@ -37,7 +37,7 @@ export function accessWords(o: { status: GuardianStatus; reason: DisabledReason 
   return { kind: "can", words: o.status === "invited" ? "Can sign in (hasn't yet)" : "Can sign in" };
 }
 
-/** Family names from the roster cache, for showing a family to staff and to its own parents. */
+/** Family names from the roster cache, for showing a family to staff. A parent's pages use myFamilyNames() (./my-family-names.ts). */
 export async function familyNames(ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids)];
   const rows = unique.length ? await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer).where(inArray(qboCustomer.qboId, unique)) : [];

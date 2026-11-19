@@ -7,8 +7,8 @@ import { getShape, missingTypes, type MembershipShape } from "@/lib/roster/shape
 import { buildRoster, type Cust, type Roster } from "@/lib/roster/model";
 import { decideAccess, type AccessDecision, type HoldSets } from "./access-rules";
 import { getParentSettings, type ParentSettings } from "./settings";
-import { deleteUnusedSigninCodes, endFamilySessions, endParentSessions } from "./sessions";
-import { formsForGoneSigner } from "@/lib/forms/signer-gone";
+import { deleteUnusedSigninCodes, endParentSessions } from "./sessions";
+import { closeMembership } from "./membership";
 import { keepAppRecordsInStep } from "@/lib/families/in-step";
 import type { AppRecordChanges } from "@/lib/families/changes";
 
@@ -110,20 +110,11 @@ async function reconcileSignins(tx: Tx, o: { cause: string; report?: EndedReport
   const foreign = new Set(links.filter((l) => l.status === "disabled" && l.disabledReason === "company_changed").map((l) => l.id));
   const ours = (l: Link) => !foreign.has(l.id);
 
+  // One membership closed by closeMembership() (./membership.ts), on the run's own locked row object, which it changes in
+  // place: so the person's last open row is decided from the rows this run holds, as every other step here decides.
   const close = async (l: Link, reason: DisabledReason, dropSource = false) => {
-    const wasOpen = l.status !== "disabled";
-    const was = l.status === "disabled" ? l.statusBeforeDisable : l.status;
-    const droppedSource = l.sourceQboId;
-    const set = { status: "disabled" as const, disabledReason: reason, statusBeforeDisable: was, ...(dropSource ? { sourceQboId: null } : {}) };
-    await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, l.id));
-    Object.assign(l, set);
-    let sessionsEnded = await endFamilySessions(l.parentId, l.familyQboId, tx);
-    if (!links.some((x) => x.parentId === l.parentId && x.status !== "disabled")) sessionsEnded += await endParentSessions(l.parentId, tx);
-    // A document already made for them keeps a working signing link: their unfinished forms for this family start again.
-    const formsReset = wasOpen ? await formsForGoneSigner(tx, { parentId: l.parentId, familyQboId: l.familyQboId, reason: "access_ended", actor: RECONCILE_ACTOR }) : 0;
-    // A dropped source is gone from the row: the audit row keeps what it was.
-    await audit("parent.access.ended", "guardian", l.id, dropSource ? { status: was, sourceQboId: droppedSource } : { status: was },
-      { parentId: l.parentId, familyQboId: l.familyQboId, reason, sessionsEnded, ...(formsReset ? { formsReset } : {}) });
+    const { wasOpen } = await closeMembership(tx, l, { reason, dropSource, actor: RECONCILE_ACTOR, cause: o.cause,
+      stillOpenElsewhere: () => links.some((x) => x.parentId === l.parentId && x.status !== "disabled") });
     r.ended++;
     if (o.report && wasOpen) o.report.ended.push({ ...startedAs.get(l.parentId)!, familyQboId: l.familyQboId });
   };

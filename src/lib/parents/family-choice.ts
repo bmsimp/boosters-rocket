@@ -49,25 +49,30 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
 }
 
 /**
- * The chooser and **Switch family**. Refuses (and audits) a family that isn't one of the person's enabled rows.
- * `familyQboId: null` is an argument the caller couldn't use as an ID: refused the same way, and not recorded.
+ * The chooser and **Switch family**, given one of the person's own guardian rows by its id: the chooser binds the row,
+ * never a family's QuickBooks id. Refuses (and audits, with the id sent) a row that isn't one of the person's own
+ * enabled rows, the same way whatever the reason. `guardianId: null` is an argument the caller couldn't use as a row's
+ * id: refused the same way, with what was sent recorded as `sent` when the caller passes it (a short string only). The
+ * session is then given that row's family, as the sign-in gives it.
  */
-export async function chooseFamily(o: { sessionId: string; parentId: string; familyQboId: string | null; ip: string | null }): Promise<boolean> {
+export async function chooseFamily(o: { sessionId: string; parentId: string; guardianId: string | null; sent?: string; ip: string | null }): Promise<boolean> {
   const [p] = await db.select().from(parent).where(eq(parent.id, o.parentId));
   if (!p) return false;
   const actor = parentActor(p);
-  const row = o.familyQboId === null ? undefined : (await enabledGuardianRows(o.parentId)).find((r) => r.familyQboId === o.familyQboId);
-  if (!row || p.blocked || o.familyQboId === null) {
-    const after = o.familyQboId === null ? { reason: "family_not_enabled" } : { reason: "family_not_enabled", familyQboId: o.familyQboId };
+  const row = o.guardianId === null ? undefined : (await enabledGuardianRows(o.parentId)).find((r) => r.id === o.guardianId);
+  if (!row || p.blocked) {
+    const after = o.guardianId !== null ? { reason: "family_not_enabled", guardianId: o.guardianId }
+      : o.sent !== undefined ? { reason: "family_not_enabled", sent: o.sent } : { reason: "family_not_enabled" };
     await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after, ip: o.ip });
     return false;
   }
+  const familyQboId = row.familyQboId;
   const [s] = await db.select({ familyQboId: parentAuthSession.familyQboId }).from(parentAuthSession).where(eq(parentAuthSession.id, o.sessionId));
   if (!s) return false;
-  if (s.familyQboId === o.familyQboId) return true;
-  await db.update(parentAuthSession).set({ familyQboId: o.familyQboId, updatedAt: new Date() }).where(eq(parentAuthSession.id, o.sessionId));
+  if (s.familyQboId === familyQboId) return true;
+  await db.update(parentAuthSession).set({ familyQboId, updatedAt: new Date() }).where(eq(parentAuthSession.id, o.sessionId));
   await writeAudit(s.familyQboId === null
-    ? { actor, action: "signin", targetType: "parent", targetId: p.id, after: { familyQboId: o.familyQboId }, ip: o.ip }
-    : { actor, action: "signin.family_switch", targetType: "parent", targetId: p.id, after: { from: s.familyQboId, to: o.familyQboId }, ip: o.ip });
+    ? { actor, action: "signin", targetType: "parent", targetId: p.id, after: { familyQboId }, ip: o.ip }
+    : { actor, action: "signin.family_switch", targetType: "parent", targetId: p.id, after: { from: s.familyQboId, to: familyQboId }, ip: o.ip });
   return true;
 }

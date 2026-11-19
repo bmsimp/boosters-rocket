@@ -18,15 +18,16 @@ import { Announcer } from "../announce";
 export const metadata = { title: "Volunteer" };
 
 /** The volunteering the current season asks of the family and of each student, with where each stands. */
-function volunteerLines(season: MySeason | null): { who: string; lines: Line[] }[] {
+function volunteerLines(season: MySeason | null): { key: string; who: string; lines: Line[] }[] {
   if (!season) return [];
   const family = season.steps.flatMap((s) => s.family).filter((l) => l.kind === "volunteer");
-  const students = new Map<string, { who: string; lines: Line[] }>();
+  const students = new Map<string, { key: string; who: string; lines: Line[] }>();
   for (const step of season.steps) for (const s of step.students) {
     const lines = s.lines.filter((l) => l.kind === "volunteer");
-    if (lines.length) students.set(s.qboId, { who: s.name, lines: [...(students.get(s.qboId)?.lines ?? []), ...lines] });
+    // By the student's own record, never by name: two students may share one.
+    if (lines.length) students.set(String(s.id), { key: String(s.id), who: s.name, lines: [...(students.get(String(s.id))?.lines ?? []), ...lines] });
   }
-  return [...(family.length ? [{ who: "Your family", lines: family }] : []), ...students.values()];
+  return [...(family.length ? [{ key: "family", who: "Your family", lines: family }] : []), ...students.values()];
 }
 
 /**
@@ -51,7 +52,7 @@ export default async function VolunteerPage() {
 
       {asked.length > 0 && (
         <section className="box" aria-labelledby="asked-h"><h2 id="asked-h">What the club asks</h2>
-          {asked.map((a) => <div className="family-reqs" key={a.who}><h3>{a.who}</h3><RequirementLines lines={a.lines} today={season!.today} /></div>)}
+          {asked.map((a) => <div className="family-reqs" key={a.key}><h3>{a.who}</h3><RequirementLines lines={a.lines} today={season!.today} /></div>)}
         </section>
       )}
 

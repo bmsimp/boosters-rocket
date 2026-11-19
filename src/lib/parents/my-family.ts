@@ -8,8 +8,15 @@ import { guardian, jobRun, qboConnection, qboCustomer, qboCustomerType } from "@
 import type { ParentCtx } from "@/lib/guards";
 import { getShape, missingTypes } from "@/lib/roster/shape";
 import { ROSTER_JOB, getRosterSource } from "@/lib/roster/source";
+import type { AppStudentId } from "@/lib/families/ids";
+import { sessionFamily } from "@/lib/families/session-family";
 
-export type MyStudent = { qboId: string; name: string };
+/**
+ * One of the family's students as the roster cache holds them. `id` is the student's own app record, by the rule the
+ * season reads them by (sessionFamily()): null for a student with no active record in the session's active family, who
+ * is listed and has no standing. A page keys and matches a student by `id`, never by `qboId` (server only) or by name.
+ */
+export type MyStudent = { qboId: string; id: AppStudentId | null; name: string };
 /** A contact record as QuickBooks has it. The email field is shown as written there; it can hold more than one address. */
 export type MyContact = {
   name: string; email: string | null; phone: string | null;
@@ -119,8 +126,11 @@ async function read(ctx: ParentCtx): Promise<{ family: MyFamily; mine: Mine | nu
 
   if (family.typeQboId !== shape.familyTypeId) return null;
   const under = rows.filter((r) => r.parentQboId === familyId && r.active && r.typeQboId !== shape.familyTypeId);
-  const students = shape.studentTypeId === null ? null
+  const listed = shape.studentTypeId === null ? null
     : under.filter((r) => r.typeQboId === shape.studentTypeId).sort(byName).map((r) => ({ qboId: r.qboId, name: r.displayName }));
+  // Each student's own record beside them, found as the season finds it, so the two never disagree on who has one.
+  const records = listed?.length ? (await sessionFamily(familyId, listed))?.students ?? [] : [];
+  const students = listed?.map((s) => ({ qboId: s.qboId, id: records.find((r) => r.qboId === s.qboId)?.id ?? null, name: s.name })) ?? null;
   // The record a sign-in comes from (src/lib/parents/access-rules.ts): a parent directly under the family, or, when
   // QuickBooks has no parent type, the family customer itself. A link that names anything else is ignored.
   const mine = sourceId === null ? undefined

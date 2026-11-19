@@ -4,24 +4,27 @@
 // family's unfinished forms that still wait for that guardian's signature are reset to not opened, in the caller's
 // transaction, and their documents withdrawn by the worker (form_withdrawal: cancelled when anyone signed, deleted when
 // nobody did), as formsForMovedStudent() does. A form the guardian signed already, and one everyone has signed, complete
-// or declined, is left as it is. Requests name the app's own family (stage 2 of the app-owned families spec); the caller
-// names the family by its QuickBooks id, as the guardian row and the reconcile still do until stage 3, and it is turned
-// into the app's family here through its family link: a family with no record there has no requests. Imports no
+// or declined, is left as it is. Requests name the app's own family (stage 2 of the app-owned families spec), and the
+// caller names it the same way: the guardian row's own `family_id`. A row with none (one a change of company closed)
+// has no requests to start again, as the family link it was once looked up by answered nothing for it. Imports no
 // staff-only module (tests/integration/page-guards.test.ts).
 import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { formWithdrawal, signatureRequest } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { familyLinkedTo } from "@/lib/families/links";
+import type { AppFamilyId } from "@/lib/families/ids";
 import { NO_DOCUMENT, requestRecords } from "./requests";
 
 export type SignerGoneReason = "blocked" | "access_ended";
 
-/** Resets the forms of `familyQboId` (every family, for a block) still waiting for this person to sign. Returns how many. */
-export async function formsForGoneSigner(tx: Tx, o: { parentId: string; familyQboId: string | null; reason: SignerGoneReason; actor: Actor; ip?: string | null }): Promise<number> {
-  const familyId = o.familyQboId === null ? null : await familyLinkedTo(o.familyQboId, tx);
-  if (o.familyQboId !== null && familyId === null) return 0;
+/**
+ * Resets the forms of `family` (every family, for a block) still waiting for this person to sign. Returns how many.
+ * A null family is a guardian row with no family record: nothing is reset.
+ */
+export async function formsForGoneSigner(tx: Tx, o: { parentId: string; family: AppFamilyId | null | "every family"; reason: SignerGoneReason; actor: Actor; ip?: string | null }): Promise<number> {
+  if (o.family === null) return 0;
+  const familyId = o.family === "every family" ? null : o.family;
   const rows = await tx.select().from(signatureRequest).where(and(
     eq(signatureRequest.state, "waiting"),
     familyId === null ? undefined : eq(signatureRequest.familyId, familyId),

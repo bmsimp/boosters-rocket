@@ -353,6 +353,8 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/contact-fields.ts",
   "src/lib/parents/email-change.ts",
   "src/lib/parents/email-field.ts",
+  // The names of the person's own families, from the app's records, for the chooser and the frame.
+  "src/lib/parents/my-family-names.ts",
   "src/lib/seasons/my-season.ts",
   "src/lib/seasons/recorded.ts",
   "src/lib/seasons/kinds.ts",

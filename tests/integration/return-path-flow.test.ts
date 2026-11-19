@@ -104,54 +104,59 @@ describe("the page a parent asked for", () => {
     });
 
     it("lists only the signed-in parent's own families, whatever the address says", async () => {
-      await seedGuardian({ parentId: a.identity.parentId, familyQboId: "QBO-ALDERQUIST-SECOND-7099" });
-      asParentChoosing({ ...a.identity, families: [...a.identity.families, { guardianId: "g2", familyQboId: "QBO-ALDERQUIST-SECOND-7099" }] });
+      const second = await seedGuardian({ parentId: a.identity.parentId, familyQboId: "QBO-ALDERQUIST-SECOND-7099" });
+      asParentChoosing({ ...a.identity, families: [...a.identity.families, { guardianId: second.id, familyQboId: "QBO-ALDERQUIST-SECOND-7099" }] });
       for (const next of ["/payments", "//evil.example", b.spec.family.qboId]) {
         const html = await renderPage(ChooseFamily, { searchParams: { next } });
         expect(html).toContain(a.spec.family.name);
         for (const marker of b.markers) expect(html.toLowerCase()).not.toContain(marker.toLowerCase());
         expect(html).not.toContain("evil.example");
+        // Neither family's QuickBooks id is on the page: the chooser binds each guardian row, and names it from its record.
+        expect(html).not.toContain(a.spec.family.qboId);
+        expect(html).not.toContain("QBO-ALDERQUIST-SECOND-7099");
       }
     });
 
     it("lands on the page asked for once a family is chosen", async () => {
       asParentChoosing(a.identity);
       await db.update(parentAuthSession).set({ familyQboId: null }).where(eq(parentAuthSession.id, a.session.id));
-      expect(await redirectOf(chooseFamilyAction(a.spec.family.qboId, "/payments"))).toBe("/payments");
+      expect(await redirectOf(chooseFamilyAction(a.identity.guardianId, "/payments"))).toBe("/payments");
       expect(await sessionFamily(a)).toBe(a.spec.family.qboId);
-      expect(await redirectOf(chooseFamilyAction(a.spec.family.qboId))).toBe("/");
+      expect(await redirectOf(chooseFamilyAction(a.identity.guardianId))).toBe("/");
     });
 
     it("lands on the home page when the page asked for is not a parent page of this site", async () => {
       asParent(a.identity);
       for (const next of HOSTILE) {
-        expect(await redirectOf((chooseFamilyAction as (family: string, next: unknown) => Promise<void>)(a.spec.family.qboId, next))).toBe("/");
+        expect(await redirectOf((chooseFamilyAction as (row: string, next: unknown) => Promise<void>)(a.identity.guardianId, next))).toBe("/");
       }
     });
 
-    it("given another family's id, changes nothing, says nothing of that family and keeps the page asked for", async () => {
-      // Family A's parent, with family B's id in the request: both as a parent who has a family chosen and as one who has not.
+    it("given another family's guardian row, changes nothing, says nothing of that family and keeps the page asked for", async () => {
+      // Family A's parent, with family B's guardian row in the request: both as a parent who has a family chosen and as one who has not.
       for (const signIn of [() => asParent(a.identity), () => asParentChoosing(a.identity)]) {
         signIn();
         const before = { mine: await sessionFamily(a), theirs: await sessionFamily(b), refused: (await refusals()).length };
-        const went = await redirectOf(chooseFamilyAction(b.spec.family.qboId, "/payments"));
-        expect(went).toBe("/choose-family?next=%2Fpayments");                 // back to the chooser: the same answer as for a family that does not exist
-        expect(await redirectOf(chooseFamilyAction("QBO-NO-SUCH-FAMILY", "/payments"))).toBe(went);
+        const went = await redirectOf(chooseFamilyAction(b.identity.guardianId, "/payments"));
+        expect(went).toBe("/choose-family?next=%2Fpayments");                 // back to the chooser: the same answer as for a row that does not exist
+        expect(await redirectOf(chooseFamilyAction(crypto.randomUUID(), "/payments"))).toBe(went);
+        expect(await redirectOf(chooseFamilyAction(a.spec.family.qboId, "/payments"))).toBe(went);   // a family's QuickBooks id is not a row's
         expect(await sessionFamily(a)).toBe(before.mine);
         expect(await sessionFamily(b)).toBe(before.theirs);
         const added = (await refusals()).slice(before.refused);
-        expect(added).toHaveLength(2);
-        expect(added[0]).toMatchObject({ door: "parent", actorId: a.identity.parentId, targetId: a.identity.parentId, after: { reason: "family_not_enabled", familyQboId: b.spec.family.qboId } });
+        expect(added).toHaveLength(3);
+        expect(added.find((r) => (r.after as { guardianId?: string }).guardianId === b.identity.guardianId)).toMatchObject({ door: "parent", actorId: a.identity.parentId, targetId: a.identity.parentId,
+          after: { reason: "family_not_enabled", guardianId: b.identity.guardianId } });
       }
       // The return path can't be used to say which family either: another family's id there is only a path that is dropped or kept.
       asParent(a.identity);
-      expect(await redirectOf(chooseFamilyAction(a.spec.family.qboId, `/${b.spec.family.qboId}`))).toBe(`/${b.spec.family.qboId}`);
+      expect(await redirectOf(chooseFamilyAction(a.identity.guardianId, `/${b.spec.family.qboId}`))).toBe(`/${b.spec.family.qboId}`);
       expect(await sessionFamily(a)).toBe(a.spec.family.qboId);
       expect(await sessionFamily(b)).toBe(b.spec.family.qboId);
     });
 
     it("is refused without a parent session, whatever it is given", async () => {
-      await expect(chooseFamilyAction(a.spec.family.qboId, "/payments")).rejects.toThrow("Not allowed");
+      await expect(chooseFamilyAction(a.identity.guardianId, "/payments")).rejects.toThrow("Not allowed");
       expect(await sessionFamily(a)).toBe(a.spec.family.qboId);
     });
   });

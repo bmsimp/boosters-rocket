@@ -38,7 +38,8 @@ const FAMILY = RIVERA.family.qboId, STUDENT = RIVERA.students[0]!.qboId;
 const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const invoicePosts = () => posts().filter((c) => c.path.endsWith("/invoice"));
 const ctxOf = (p: SeededParent) => ({ ...p.identity, ip: "203.0.113.50" });
-const family = { students: RIVERA.students };
+// As loadMyFamily() gives them; the buy-outs read a student by the customer only, so no app id is needed here.
+const family = { students: RIVERA.students.map((s) => ({ ...s, id: null })) };
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 /** The choice as the family's page shows it: its key and the stamp of its quote. */
 async function shown(p: SeededParent, requirementId: string, key = "family") {

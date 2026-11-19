@@ -17,7 +17,7 @@ import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../he
 import { connectForms, formSetting, groupOf, requestCustomers, requestNow, seedConsent, seedFormRequirement } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
-import { subjectColumns } from "../helpers/app-records";
+import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 import { moveFamilyInCache, moveInCache } from "../helpers/roster-cache";
 
 /**
@@ -276,7 +276,9 @@ describe("signing a form", () => {
     const id = await requestIdFor(ctx, student.qboId);
     tokenIn(await agreeAndOpen(ctx, id));
     const document = stub.documentFor(id)!;
-    const line = async () => (await loadMySeason(ctx, (await loadMyFamily(ctx))!.students))!.steps[0]!.students.find((s) => s.qboId === student.qboId)!.lines[0]!;
+    // A standing names the student by their own record, never by a QuickBooks id.
+    const record = String(await recordOfCustomer(student.qboId, "student"));
+    const line = async () => (await loadMySeason(ctx, (await loadMyFamily(ctx))!.students))!.steps[0]!.students.find((s) => String(s.id) === record)!.lines[0]!;
     expect(await line()).toMatchObject({ state: "todo", words: "Not signed yet" });
 
     stub.sealing = "held";
@@ -629,7 +631,8 @@ describe("what each guardian reads", () => {
     // Moved as a roster read that finds it leaves it: the app's own student record follows (the reconcile's).
     await moveInCache([student.qboId], FAMILY_B.family.qboId);
     const season = (await loadMySeason(ctxB, (await loadMyFamily(ctxB))!.students))!;
-    const line = season.steps[0]!.students.find((s) => s.qboId === student.qboId)!.lines[0]!;
+    const record = String(await recordOfCustomer(student.qboId, "student"));
+    const line = season.steps[0]!.students.find((s) => String(s.id) === record)!.lines[0]!;
     expect(line).toMatchObject({ state: "todo", words: "Not signed yet" });
   });
 });

@@ -150,19 +150,29 @@ describe("the parent door", () => {
 
   it("with two families, asks first; choosing audits the sign-in, choosing again audits a switch", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    await seedGuardian({ parentId: a.id, familyQboId: "F1" }); await seedGuardian({ parentId: a.id, familyQboId: "F2" });
+    const f1 = await seedGuardian({ parentId: a.id, familyQboId: "F1" }), f2 = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
     const { body, cookie } = await signIn("ana@example.com");
     expect(body).toEqual({ ok: true, next: "/choose-family" });
     const first = await stateOf(cookie);
     expect(first).toMatchObject({ status: "choose", families: [{ familyQboId: "F1" }, { familyQboId: "F2" }] });
     const sessionId = first.status === "choose" ? first.sessionId : "";
-    expect(await chooseFamily({ sessionId, parentId: a.id, familyQboId: "F2", ip: IP })).toBe(true);
+    // A family is chosen by the person's own guardian row; the session is given that row's family.
+    expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: f2.id, ip: IP })).toBe(true);
     expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { familyQboId: "F2" } });
-    expect(await chooseFamily({ sessionId, parentId: a.id, familyQboId: "F1", ip: IP })).toBe(true);
+    expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: f1.id, ip: IP })).toBe(true);
     const rows = await db.select().from(auditLog);
     expect(rows.filter((x) => x.action === "signin").map((x) => x.after)).toEqual([{ familyQboId: "F2" }]);
     expect(rows.find((x) => x.action === "signin.family_switch")!.after).toEqual({ from: "F2", to: "F1" });
-    expect(await chooseFamily({ sessionId, parentId: a.id, familyQboId: "F9", ip: IP })).toBe(false);
+    const stranger = await seedGuardian({ parentId: (await seedParent({ name: "Bo", email: "bo@example.com" })).id, familyQboId: "F2" });
+    for (const guardianId of [crypto.randomUUID(), stranger.id]) {
+      expect(await chooseFamily({ sessionId, parentId: a.id, guardianId, ip: IP })).toBe(false);
+      // Found by what it records, never by its place among the rows.
+      const refused = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused"
+        && (x.after as { guardianId?: string } | null)?.guardianId === guardianId);
+      expect(refused.map((x) => x.after)).toEqual([{ reason: "family_not_enabled", guardianId }]);
+    }
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.refused")).toHaveLength(2);
+    expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { familyQboId: "F1" } });
   });
 
   it("sends a parent back to choose when the chosen family goes away and another is left", async () => {
@@ -170,7 +180,7 @@ describe("the parent door", () => {
     const g1 = await seedGuardian({ parentId: a.id, familyQboId: "F1" }); await seedGuardian({ parentId: a.id, familyQboId: "F2" });
     const { cookie } = await signIn("ana@example.com");
     const s = await stateOf(cookie);
-    await chooseFamily({ sessionId: s.status === "choose" ? s.sessionId : "", parentId: a.id, familyQboId: "F1", ip: IP });
+    await chooseFamily({ sessionId: s.status === "choose" ? s.sessionId : "", parentId: a.id, guardianId: g1.id, ip: IP });
     await dropRow(g1.id);
     expect(await stateOf(cookie)).toMatchObject({ status: "choose", families: [{ familyQboId: "F2" }] });
     expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBeNull();
