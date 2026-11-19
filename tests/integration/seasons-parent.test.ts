@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { asParent, renderPage } from "../helpers/signed-in";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, qboCustomer, requirement, requirementProgress, season, setting } from "@/lib/db/schema";
+import { accountingLink, auditLog, qboCustomer, requirement, requirementProgress, season, setting } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
-import { loadMyFamily } from "@/lib/parents/my-family";
 import type { MembershipShape } from "@/lib/roster/shape";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import { calendarDayIn } from "@/lib/settings/club";
@@ -13,9 +12,9 @@ import ParentHome from "@/app/(parent)/page";
 import SeasonPage from "@/app/(parent)/season/page";
 import { resetDb } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
-import { addToCache, seedCache, seedShape, stu } from "../helpers/roster-cache";
+import { addToCache, moveInCache, seedCache, seedShape, stu } from "../helpers/roster-cache";
 import { TWO_FAMILY_SEASON, seedSeason } from "../helpers/season";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 /**
  * The season as a parent sees it: the query that reads one family's standing, the ruler and requirement lines on Home,
@@ -23,7 +22,7 @@ import { recordOfCustomer } from "../helpers/app-records";
  * file checks what each family is told, and the ways another family's progress could slip in.
  */
 const ctxOf = (identity: ParentIdentity): ParentCtx => ({ ...identity, ip: null });
-const mySeason = async (who: SeededParent) => loadMySeason(ctxOf(who.identity), (await loadMyFamily(ctxOf(who.identity)))!.students);
+const mySeason = async (who: SeededParent) => loadMySeason(ctxOf(who.identity));
 const day = (offset: number) => calendarDayIn("UTC", new Date(Date.now() + offset * 86_400_000));
 /** The text of a page, tags dropped, as a parent reads it. */
 const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'");
@@ -64,31 +63,26 @@ describe("loadMySeason: the current season for the session's family alone", () =
     }
   });
 
-  it("ignores students handed to it that aren't this family's own: the family comes from the session", async () => {
+  it("reads the session's family's own students alone: a student who moved to another family goes with them", async () => {
     const { a, b } = await seedTwoFamilies();
-    // Family A's session, asked about family B's students.
-    const got = (await loadMySeason(ctxOf(a.identity), FAMILY_B.students))!;
-    expect(got.steps.flatMap((s) => s.students)).toEqual([]);
-    const sent = JSON.stringify(got);
-    for (const marker of b.markers) expect(sent).not.toContain(marker);
-    // With its own students beside them, only its own are read.
-    const mixed = (await loadMySeason(ctxOf(a.identity), [...FAMILY_A.students, ...FAMILY_B.students]))!;
-    expect(mixed.steps[1]!.students.map((s) => s.name)).toEqual([AURELIO!.name, AZALEA!.name]);
-    for (const marker of b.markers) expect(JSON.stringify(mixed)).not.toContain(marker);
+    // Azalea moves to family B, as a roster read that finds it leaves her: her record follows her.
+    await moveInCache([AZALEA!.qboId], FAMILY_B.family.qboId);
+    const forA = (await mySeason(a))!, forB = (await mySeason(b))!;
+    expect(forA.steps[1]!.students.map((s) => s.name)).toEqual([AURELIO!.name]);
+    expect(forB.steps[1]!.students.map((s) => s.name)).toEqual([AZALEA!.name, BARNABY!.name, BRISEIS!.name]);
+    const azalea = String(await recordOfCustomer(AZALEA!.qboId, "student"));
+    expect(JSON.stringify(forA)).not.toContain(azalea);
+    for (const marker of b.markers) expect(JSON.stringify(forA)).not.toContain(marker);
   });
 
-  it("finds the session's family through its own link: family B's app ids in any field bring nothing of B", async () => {
-    const { a, b } = await seedTwoFamilies();
-    const bFamily = String(await recordOfCustomer(FAMILY_B.family.qboId, "family"));
-    const bStudents = await Promise.all(FAMILY_B.students.map(async (s) => ({ qboId: String(await recordOfCustomer(s.qboId, "student")), name: s.name })));
-    // Family A's session, handed family B's own records' ids where QuickBooks ids are asked for: nobody of B is read.
-    const got = (await loadMySeason(ctxOf(a.identity), bStudents))!;
-    expect(got.steps.flatMap((s) => s.students)).toEqual([]);
-    for (const marker of b.markers) expect(JSON.stringify(got)).not.toContain(marker);
-    // A session naming family B's app id as its family has no family of that customer: no season at all.
-    expect(await loadMySeason({ ...ctxOf(a.identity), familyQboId: bFamily }, bStudents)).toBeNull();
-    // And B's own session still reads B's: the ids are B's own, found through B's link.
-    expect((await mySeason(b))!.steps[1]!.students.map((s) => s.name)).toEqual([BARNABY!.name, BRISEIS!.name]);
+  it("needs no link: a family whose link is removed by hand still sees its season", async () => {
+    const { a } = await seedTwoFamilies();
+    const before = (await mySeason(a))!;
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, a.identity.familyId));
+    const after = (await mySeason(a))!;
+    expect(after.steps.map((s) => [s.name, s.done])).toEqual(before.steps.map((s) => [s.name, s.done]));
+    expect(after.steps[1]!.students.map((s) => s.name)).toEqual([AURELIO!.name, AZALEA!.name]);
+    expect(after.steps[0]!.family.map((l) => l.title)).toEqual(before.steps[0]!.family.map((l) => l.title));
   });
 
   it("shows nothing while the session's family record is inactive, whatever the roster cache says", async () => {
@@ -121,6 +115,7 @@ describe("loadMySeason: the current season for the session's family alone", () =
 
     // Azalea leaves: QuickBooks marks her inactive. She is no longer shown; her tick is still in the table.
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, AZALEA!.qboId));
+    await syncAppRecords();
     expect((await mySeason(a))!.steps[0]!.students.map((s) => s.name)).toEqual(["Anselm Alderquist", AURELIO!.name]);
     const kept = await db.select().from(requirementProgress).where(eq(requirementProgress.requirementId, seeded.requirementIds[fitting]!));
     expect(kept.map((r) => String(r.studentId)).sort()).toEqual([String(await recordOfCustomer(AURELIO!.qboId, "student")), String(await recordOfCustomer(AZALEA!.qboId, "student"))].sort());
@@ -305,6 +300,7 @@ describe("the Season page", () => {
   it("shows a family the roster can't show nothing of the season", async () => {
     const { a } = await seedTwoFamilies();
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, FAMILY_A.family.qboId));
+    await syncAppRecords();
     asParent(a.identity);
     for (const page of [ParentHome, SeasonPage]) {
       const html = await renderPage(page);

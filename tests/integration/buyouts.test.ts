@@ -38,12 +38,10 @@ const FAMILY = RIVERA.family.qboId, STUDENT = RIVERA.students[0]!.qboId;
 const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const invoicePosts = () => posts().filter((c) => c.path.endsWith("/invoice"));
 const ctxOf = (p: SeededParent) => ({ ...p.identity, ip: "203.0.113.50" });
-// As loadMyFamily() gives them; the buy-outs read a student by the customer only, so no app id is needed here.
-const family = { students: RIVERA.students.map((s) => ({ ...s, id: null })) };
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 /** The choice as the family's page shows it: its key and the stamp of its quote. */
 async function shown(p: SeededParent, requirementId: string, key = "family") {
-  const all = await loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, family);
+  const all = await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId });
   const one = all.find((b) => b.requirementId === requirementId && b.key === key);
   if (!one) throw new Error(`no buy-out choice ${key} for ${requirementId}`);
   return one;
@@ -87,7 +85,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(money!.staleAt).not.toBeNull();
     // It does: the invoice is then among the family's open invoices, with its Pay link. The sandbox gave a link only to
     // an invoice carrying a bill-to email address (2026-11-17; the stub's quirks.linkNeedsEmail), and this one carries one.
-    const after = await loadFamilyMoney(FAMILY);
+    const after = await loadFamilyMoney(p.identity.familyId);
     expect(after.figures?.current).toBe(true);
     expect(after.figures?.open.map((i) => [i.qboId, i.totalCents, i.payLink ?? null])).toEqual([["5001", 5000, "https://connect.intuit.com/t/scs-v1-stub-5001"]]);
     // The address is in no audit row's before or after (the actor is the guardian, as on every row a parent's action writes).
@@ -104,7 +102,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
   it("bills a per-student requirement to the student's own customer, and says the student's key, never an id", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ appliesTo: "student", amount: 4, unit: "hours", unitCents: 1200 });
-    const all = await loadMyBuyouts({ familyQboId: FAMILY, parentId: p.identity.parentId }, family);
+    const all = await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId });
     expect(all.map((b) => b.key)).toEqual(["s1", "s2"]);
     expect(JSON.stringify(all)).not.toContain(STUDENT);
     const choice = all[0]!;
@@ -155,7 +153,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     // The student was the Chenoweth family's, who chose a buy-out for them; QuickBooks moved them since.
     const stamp = (await shown(p, req, "s1")).stamp;
     await seedBuyout({ requirementId: req, familyQboId: "8010", subjectQboId: STUDENT, chosenBy: p.identity.parentId, invoiceQboId: "9977", unitCents: 4321, units: 1 });
-    const all = await loadMyBuyouts({ familyQboId: FAMILY, parentId: p.identity.parentId }, family);
+    const all = await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId });
     expect(all.map((b) => b.key)).toEqual(["s2"]);
     asParent(p.identity);
     const html = await renderPage(VolunteerPage);
@@ -443,7 +441,7 @@ describe("one buy-out, one invoice, however many confirm at once", () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();
     const choice = await shown(p, req);
-    const results = await Promise.all(Array.from({ length: 5 }, () => confirmMyBuyout(ctxOf(p), family, req, "family", choice.stamp)));
+    const results = await Promise.all(Array.from({ length: 5 }, () => confirmMyBuyout(ctxOf(p), req, "family", choice.stamp)));
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(results.filter((r) => !r.ok).map((r) => !r.ok && r.errors)).toEqual(Array.from({ length: 4 }, () => [BUYOUT_COPY.already]));
     expect(await buyoutsOf(FAMILY)).toHaveLength(1);
@@ -459,7 +457,7 @@ describe("one buy-out, one invoice, however many confirm at once", () => {
     const choice = await shown(p, req);
     const theirs = await shown({ ...p, identity: other.identity }, req);
     expect(theirs.stamp).toBe(choice.stamp);
-    const results = await Promise.all([confirmMyBuyout(ctxOf(p), family, req, "family", choice.stamp), confirmMyBuyout({ ...other.identity, ip: null }, family, req, "family", theirs.stamp)]);
+    const results = await Promise.all([confirmMyBuyout(ctxOf(p), req, "family", choice.stamp), confirmMyBuyout({ ...other.identity, ip: null }, req, "family", theirs.stamp)]);
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(await buyoutsOf(FAMILY)).toHaveLength(1);
     await stub.idle();

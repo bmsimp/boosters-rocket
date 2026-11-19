@@ -10,9 +10,10 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 });
 
 import { createElement } from "react";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parentAuthSession, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { auditLog, family, guardian, parentAuthSession, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { resolveParentSession } from "@/lib/auth/resolve";
 import { recordNameWords } from "@/lib/families/words";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
@@ -23,8 +24,8 @@ import FamilyPage from "@/app/(parent)/family/page";
 import ParentLayout from "@/app/(parent)/layout";
 import NotFound from "@/app/not-found";
 import ChooseFamily from "@/app/choose-family/page";
-import { resetDb, seedGuardian } from "../helpers/db";
-import { FAMILY_A, FAMILY_B, identityNow, moneyMarkers, seedFamilyMoney, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
+import { resetDb, seedGuardian, seedParent, seedParentSession } from "../helpers/db";
+import { FAMILY_A, FAMILY_B, identityNow, moneyMarkers, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -34,6 +35,14 @@ const ctxOf = (identity: ParentIdentity): ParentCtx => ({ ...identity, ip: null 
 const A_STUDENTS = FAMILY_A.students.map((s) => s.name), B_STUDENTS = FAMILY_B.students.map((s) => s.name);
 const setTreasurer = (treasurerEmail: string) => db.insert(setting).values({ key: "club", value: { name: "Test Boosters", shortName: "TB", color: "#5b2a86", treasurerEmail } });
 const NOT_SET_UP = "set up here yet";
+/** A person whose one link names `familyQboId`, with a session that chose it, and the records brought into step: what the gate makes of them. */
+async function gateOf(familyQboId: string, email: string) {
+  const person = await seedParent({ name: "Hand Made", email, welcomedAt: new Date() });
+  await seedGuardian({ parentId: person.id, familyQboId, status: "active" });
+  const session = await seedParentSession(person.authUserId, { familyQboId });
+  await syncAppRecords();
+  return resolveParentSession({ id: session.id, userId: person.authUserId, familyQboId });
+}
 
 // Nothing here reaches Intuit: the stub is what seedConnected() needs to write a connection row, and what a read of a
 // family's invoices would be sent to (the families here have ids QuickBooks never gives, so none is sent).
@@ -42,15 +51,15 @@ beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; }
 afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
 
-describe("loadMyFamily: one family from the roster cache, for its own parent", () => {
+describe("loadMyFamily: one family from the app's own records, for its own parent", () => {
   it("returns the family's name, its students by name, the parent's own record and when the roster was read", async () => {
     const { a, b } = await seedTwoFamilies();
     const readAt = await seedRosterRead();
     expect(await loadMyFamily(ctxOf(a.identity))).toEqual({
       name: "Alderquist Family",
-      // Each student with their own app record beside them, the id Home matches a standing by.
-      students: [{ qboId: FAMILY_A.students[0]!.qboId, id: await recordOfCustomer(FAMILY_A.students[0]!.qboId, "student"), name: "Aurelio Alderquist" },
-        { qboId: FAMILY_A.students[1]!.qboId, id: await recordOfCustomer(FAMILY_A.students[1]!.qboId, "student"), name: "Azalea Alderquist" }],
+      // Each student by their own app record, the id Home matches a standing by, and no QuickBooks id.
+      students: [{ id: await recordOfCustomer(FAMILY_A.students[0]!.qboId, "student"), name: "Aurelio Alderquist" },
+        { id: await recordOfCustomer(FAMILY_A.students[1]!.qboId, "student"), name: "Azalea Alderquist" }],
       me: { name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone, edits: "own" },
       rosterReadAt: readAt.toISOString(),
     });
@@ -96,6 +105,7 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", students: null, me: { name: "Ansgar Alderquist" } });
     await seedShape();
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.typeQboId, "S"));
+    await syncAppRecords();
     expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ students: [] });
   });
 
@@ -104,7 +114,7 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     await addToCache([fam("NP-FAM", "Noparent Family", { email: "home@noparent.example, work@noparent.example", phone: "512-555-0199" }), stu("NP-S1", "Nico Noparent", "NP-FAM"),
       par("NP-P1", "Nora Noparent", "NP-FAM", "nora@noparent.example")]);
     const fromFamily = await seedParentIn({ familyQboId: "NP-FAM", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "NP-FAM" });
-    expect(await loadMyFamily(ctxOf(fromFamily.identity))).toEqual({ name: "Noparent Family", students: [{ qboId: "NP-S1", id: await recordOfCustomer("NP-S1", "student"), name: "Nico Noparent" }],
+    expect(await loadMyFamily(ctxOf(fromFamily.identity))).toEqual({ name: "Noparent Family", students: [{ id: await recordOfCustomer("NP-S1", "student"), name: "Nico Noparent" }],
       me: { name: "Noparent Family", email: "home@noparent.example, work@noparent.example", phone: "512-555-0199", edits: "family" }, rosterReadAt: null });
     // A link that names a record the shape doesn't call a parent is not the person's own record.
     const stale = await seedParentIn({ familyQboId: "NP-FAM", name: "Nora Noparent", email: "nora@noparent.example", sourceQboId: "NP-P1" });
@@ -121,9 +131,8 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     const m = await seedParentIn({ familyQboId: "FLAT-M1", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "FLAT-M1" });
     expect(await loadMyFamily(ctxOf(m.identity))).toEqual({ name: "Marisol Thackeray", students: null,
       me: { name: "Marisol Thackeray", email: "marisol@flat.example", phone: "512-555-0144", edits: "family" }, rosterReadAt: null });
-    // A customer that isn't a member type is not a family in a flat club.
-    const notMember = await seedParentIn({ familyQboId: "FLAT-SUB", name: "Tobias Thackeray", email: "tobias@flat.example" });
-    expect(await loadMyFamily(ctxOf(notMember.identity))).toBeNull();
+    // A customer that isn't a member type is not a family in a flat club: its record is inactive, so nobody is let in to it.
+    expect(await gateOf("FLAT-SUB", "tobias@flat.example")).toEqual({ status: "none" });
   });
 
   it("takes the parent's own record only from their own link, and only when it sits in their family", async () => {
@@ -151,17 +160,19 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     expect(await db.select().from(auditLog)).toEqual([]);
   });
 
-  it("is null for a family that isn't in the cache, is inactive, or isn't a family: a sign-in made by hand can name any ID", async () => {
+  it("is null for a family whose record is inactive; a sign-in made by hand to a customer that isn't a family is not let in at all", async () => {
     const a = await seedSignedInParent();
+    // A link can name any ID: one the cache doesn't hold, a student, a parent. Their records are inactive (or none is a
+    // family's), so the gate finds no family to enter (src/lib/auth/resolve.ts).
     for (const familyQboId of ["NOT-IN-QUICKBOOKS", FAMILY_A.students[0]!.qboId, FAMILY_A.parent.qboId]) {
-      const p = await seedParentIn({ familyQboId, name: "Hand Made", email: `hand.made.${familyQboId.toLowerCase()}@example.com` });
-      expect(await loadMyFamily(ctxOf(p.identity)), familyQboId).toBeNull();
+      expect(await gateOf(familyQboId, `hand.made.${familyQboId.toLowerCase()}@example.com`), familyQboId).toEqual({ status: "none" });
     }
     await db.update(qboCustomer).set({ active: false, displayName: "Alderquist Family (deleted)" }).where(eq(qboCustomer.qboId, FAMILY_A.family.qboId));
+    await syncAppRecords();
     expect(await loadMyFamily(ctxOf(a.identity))).toBeNull();
   });
 
-  it("shows nothing of a cache read from another company while QuickBooks is connected, as the staff roster does", async () => {
+  it("shows nothing of a cache read from another company while QuickBooks is connected, as the staff roster does: the records follow the cache's company", async () => {
     const a = await seedSignedInParent();
     await seedConnected(stub, { realmId: REALM });
     // Connected, and the cache doesn't say which company it came from (seedSignedInParent() says it was read from REALM).
@@ -184,20 +195,24 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     await seedConnected(stub, { realmId: REALM });
     const readAt = await seedRosterRead({ realmId: OTHER_REALM });
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
-    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", rosterReadAt: readAt.toISOString() });
+    // The records were made again from that cache's company, and the gate finds the family through the row's record.
+    const now = await identityNow(a.session.id);
+    expect(await loadMyFamily(ctxOf(now))).toMatchObject({ name: "Alderquist Family", rosterReadAt: readAt.toISOString(), me: { name: "Ansgar Alderquist" } });
     expect((await loadRosterPage()).roster).not.toBeNull();
   });
 
-  it("shows nothing when there is no membership shape, or it names a customer type QuickBooks no longer has", async () => {
+  it("keeps the parent's own QuickBooks record back when there is no membership shape, or it names a customer type QuickBooks no longer has", async () => {
     const a = await seedSignedInParent();
     await seedRosterRead();
+    // The family and its students are the app's own records, shown whatever the shape; what QuickBooks holds of the
+    // parent is read by the shape, and not while it can't be trusted.
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" });
-    expect(await loadMyFamily(ctxOf(a.identity))).toBeNull();
+    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", me: null });
     expect((await loadRosterPage()).roster).toBeNull();
     await seedShape({ kind: "flat", memberTypeIds: ["F", "GONE"] });
-    expect(await loadMyFamily(ctxOf(a.identity))).toBeNull();
+    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", students: null, me: null });
     await db.delete(setting).where(eq(setting.key, "membership.shape"));
-    expect(await loadMyFamily(ctxOf(a.identity))).toBeNull();
+    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", students: null, me: null });
     expect((await loadRosterPage()).roster).toBeNull();
   });
 });
@@ -253,23 +268,22 @@ describe("Home", () => {
     expect(stub.apiCalls()).toEqual([]);
   });
 
-  it("shows no money for a family the roster may not show: not in the cache, or a cache from another company", async () => {
-    await seedShape();
-    const stray = await seedParentIn({ familyQboId: "NOT-IN-QUICKBOOKS", name: "Hester Handmade", email: "hester@handmade.example" });
-    // Figures stored under that id are not shown either: the page says only that the family isn't set up yet.
-    await seedFamilyMoney({ ...FAMILY_B, family: { qboId: "NOT-IN-QUICKBOOKS", name: "Nobody" } });
-    asParent(stray.identity);
+  it("shows no money for a family whose record is inactive, and no figures while QuickBooks is connected to another company", async () => {
+    const { a, b } = await seedTwoFamilies();
+    // Made inactive some way the reconcile doesn't follow: the page says only that the family isn't set up yet.
+    await db.update(family).set({ active: false }).where(eq(family.id, a.identity.familyId));
+    asParent(a.identity);
     let html = await renderPage(ParentHome);
     expect(html).toContain(NOT_SET_UP);
     expect(html).not.toMatch(/class="box money"|owe|INV-|\$\d/);
 
-    await resetDb();
-    const { a } = await seedTwoFamilies();
+    // Another company connected: the family's link answers nothing there, so no figures are shown or asked for.
     await seedConnected(stub, { realmId: OTHER_REALM });
-    asParent(a.identity);
+    asParent(b.identity);
     html = await renderPage(ParentHome);
-    expect(html).toContain(NOT_SET_UP);
-    expect(html).not.toMatch(/class="box money"|owe|INV-|\$\d/);
+    expect(html).toContain("We can&#x27;t show what you owe right now.");
+    expect(html).not.toMatch(/INV-|\$\d/);
+    for (const marker of moneyMarkers(FAMILY_B)) expect(html).not.toContain(marker);
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -356,6 +370,7 @@ describe("Home", () => {
   it("a family with no active student says so, calmly", async () => {
     const a = await seedSignedInParent();
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.typeQboId, "S"));
+    await syncAppRecords();
     asParent(a.identity);
     const html = await renderPage(ParentHome);
     expect(html).toContain("Your students");
@@ -366,6 +381,7 @@ describe("Home", () => {
   it("leaves an inactive student out, and never shows QuickBooks' (deleted) name", async () => {
     const a = await seedSignedInParent();
     await db.update(qboCustomer).set({ active: false, displayName: "Azalea Alderquist (deleted)" }).where(eq(qboCustomer.qboId, FAMILY_A.students[1]!.qboId));
+    await syncAppRecords();
     asParent(a.identity);
     for (const page of [ParentHome, FamilyPage]) {
       const html = await renderPage(page);
@@ -375,21 +391,21 @@ describe("Home", () => {
     }
   });
 
-  it("a family that isn't in the roster doesn't crash: both pages say the club hasn't finished setting it up", async () => {
-    await seedShape();
+  it("a family whose record went inactive under a signed-in parent doesn't crash: both pages say the club hasn't finished setting it up", async () => {
+    const a = await seedSignedInParent();
     await setTreasurer("treasurer@club.example");
-    const p = await seedParentIn({ familyQboId: "NOT-IN-QUICKBOOKS", name: "Hester Handmade", email: "hester@handmade.example" });
-    asParent(p.identity);
+    await db.update(family).set({ active: false }).where(eq(family.id, a.identity.familyId));
+    asParent(a.identity);
     const home = await renderPage(ParentHome);
-    expect(home).toContain("Hi, Hester</h1>");
+    expect(home).toContain("Hi, Ansgar</h1>");
     expect(home).toContain(NOT_SET_UP);
     expect(home).toContain(`<a href="mailto:treasurer@club.example">`);
-    expect(home).not.toMatch(/Your students|Your details|NOT-IN-QUICKBOOKS|Family account/);
-    const family = await renderPage(FamilyPage);
-    expect(family).toContain(NOT_SET_UP);
-    expect(family).toContain("Your account");
-    expect(family).toContain("<dd>hester@handmade.example</dd>");
-    expect(family).not.toMatch(/Your students|Your details|NOT-IN-QUICKBOOKS|Family account/);
+    expect(home).not.toMatch(/Your students|Your details|Alderquist Family|Aurelio|Family account/);
+    const page = await renderPage(FamilyPage);
+    expect(page).toContain(NOT_SET_UP);
+    expect(page).toContain("Your account");
+    expect(page).toContain(`<dd>${FAMILY_A.parent.email}</dd>`);
+    expect(page).not.toMatch(/Your students|Your details|Alderquist Family|Aurelio|Family account/);
   });
 
   it("a cache from another company shows none of it, and the same calm words", async () => {
@@ -454,6 +470,7 @@ describe("Family", () => {
     const a = await seedSignedInParent();
     await addToCache([fam("CEDAR-FAM", "Cedarholm Family"), par("CEDAR-P1", "Ansgar Alderquist", "CEDAR-FAM", FAMILY_A.parent.email), stu("CEDAR-S1", "Cosima Cedarholm", "CEDAR-FAM")]);
     await seedGuardian({ parentId: a.identity.parentId, familyQboId: "CEDAR-FAM", status: "active", sourceQboId: "CEDAR-P1" });
+    await syncAppRecords();
     const both = await identityNow(a.session.id);
     expect(both.families).toHaveLength(2);
     asParent(both);
@@ -470,12 +487,16 @@ describe("Family", () => {
   it("names a family the portal has no name for, among two such, with the same numbered words on the Viewing line as on its chooser button", async () => {
     const a = await seedSignedInParent();
     // Two more families, neither on the roster: their records have no name. They sort after the Alderquist family's
-    // customer, so the chooser lists them second and third.
+    // customer, so the chooser lists them second and third. Their records are made active here, as a family the app
+    // owns can be with no name known (only an active family is one the chooser offers).
     for (const familyQboId of ["ZZ-UNNAMED-1", "ZZ-UNNAMED-2"]) await seedGuardian({ parentId: a.identity.parentId, familyQboId, status: "active" });
     await syncAppRecords();
+    const unnamed = [await recordOfCustomer("ZZ-UNNAMED-1", "family"), await recordOfCustomer("ZZ-UNNAMED-2", "family")];
+    await db.update(family).set({ active: true }).where(inArray(family.id, unnamed));
     await db.update(parentAuthSession).set({ familyQboId: "ZZ-UNNAMED-2" }).where(eq(parentAuthSession.id, a.session.id));
     const who = await identityNow(a.session.id);
-    expect(who.families.map((f) => f.familyQboId)).toEqual([FAMILY_A.family.qboId, "ZZ-UNNAMED-1", "ZZ-UNNAMED-2"]);
+    expect(who.families.map((f) => String(f.familyId))).toEqual([String(a.identity.familyId), ...unnamed.map(String)]);
+    expect(String(who.familyId)).toBe(String(unnamed[1]));
     asParent(who);
     const unknown = recordNameWords(null, "family").replaceAll("'", "&#x27;");
     const chooser = await renderPage(ChooseFamily);

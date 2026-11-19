@@ -252,6 +252,7 @@ describe("the Payments page", () => {
     asParent(r.identity);
     expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>'); // stored, and fresh
     await db.update(qboCustomer).set({ active: false, displayName: "Riverquill Family (deleted)" }).where(eq(qboCustomer.qboId, FAMILY));
+    await syncAppRecords(); // as the roster read that found it inactive leaves the records
     const asked = stub.calls.length;
     const html = await renderPage(PaymentsPage);
     expect(html).toContain('<h1 class="page-title">Payments</h1>');
@@ -540,18 +541,19 @@ describe("a buy-out's invoice on Payments", () => {
 
   it("names a buy-out only on the customer the portal raised it on, and only in the company the roster came from", async () => {
     await withBuyoutInvoices();
-    const mine = await loadMyBuyoutInvoices(FAMILY_A.family.qboId);
+    const familyA = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    const mine = await loadMyBuyoutInvoices(familyA);
     expect([...mine.keys()]).toEqual(["9174"]);
     expect(buyoutTitleOf(mine, { qboId: "9174", customerQboId: FAMILY_A.family.qboId })).toBe("Concession stand shifts QA74");
     expect(buyoutTitleOf(mine, { qboId: "9174", customerQboId: FAMILY_A.students[0]!.qboId })).toBeNull();
     await db.transaction((tx) => setRosterSource(tx, "another-company"));
-    expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
+    expect(await loadMyBuyoutInvoices(familyA)).toEqual(new Map());
   });
 
   it("names it only while the buy-out is live: one staff closed after it was paid (refunded in QuickBooks) is an invoice like any other", async () => {
     const { a } = await withBuyoutInvoices();
     await db.update(buyout).set({ state: "voided", endReason: "closed_by_staff" }).where(eq(buyout.familyId, await recordOfCustomer(FAMILY_A.family.qboId, "family")));
-    expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
+    expect(await loadMyBuyoutInvoices(a.identity.familyId)).toEqual(new Map());
     asParent(a.identity);
     const html = text(await renderPage(PaymentsPage));
     expect(html).toContain("Invoice BUY-9174 Invoice date");

@@ -1,15 +1,17 @@
-// Parent-facing: everything here takes one family's id, which the caller takes from the session (ctx.familyQboId), and
-// returns that family's money alone. Nothing in a request ever chooses the customers: they are read from the roster
-// cache for that family. The stored figures are kept by the app's own family (family_money.family_id, stage 2 of the
-// app-owned families spec): the session's customer becomes that family here, through its own family link and only
-// while the record is active (activeFamilyOf()), on each load, and the customers whose invoices may show are those of
-// the same customer the family was found from. This module is in the staff-only import scan
+// Parent-facing: everything here takes one family's id, which the caller takes from the session (ctx.familyId, the
+// app's own family record), and returns that family's money alone. Nothing in a request ever chooses the customers:
+// the family's customer is the one its own family link names, in the roster's company (customerOfFamily(), which
+// answers nothing while QuickBooks is connected to another company), found again on each load, and the customers whose
+// invoices may show are that customer and its active direct sub-customers of the student or parent type in the roster
+// cache. A family with no active record, or with no link, has no figures: nothing is read from QuickBooks for it and
+// nothing is written. The stored figures are kept by the app's own family (family_money.family_id). This module is in the staff-only import scan
 // (tests/integration/page-guards.test.ts).
 import { eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, qboConnection, qboCustomer, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
+import { customerOfFamily } from "@/lib/families/links";
 import { activeFamilyOf } from "@/lib/families/session-family";
 import { isQboId, qboCustomerById, qboInvoices, type QboGetOptions } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
@@ -242,13 +244,14 @@ const storedRow = async (familyId: AppFamilyId, tx?: Tx): Promise<MoneyRow | und
  * A per-family advisory lock is held from before QuickBooks is asked until the row is saved, so two requests for one
  * family (in two processes) never both go to QuickBooks: the second finds the lock taken and shows what is there.
  */
-async function liveRead(familyQboId: string, timeoutMs: number): Promise<boolean> {
+async function liveRead(familyId: AppFamilyId, timeoutMs: number): Promise<boolean> {
   if (!(await takePlace())) return false;
   try {
     return await db.transaction(async (tx) => {
-      // The session's customer as the app's family, found again here: with no active record nothing is read or written.
-      const familyId = await activeFamilyOf(familyQboId, tx);
-      if (familyId === null) return false;
+      // The family's record and its customer, found again here: with no active record, or no link, nothing is read or written.
+      if ((await activeFamilyOf(familyId, tx)) === null) return false;
+      const familyQboId = await customerOfFamily(familyId, tx);
+      if (familyQboId === null) return false;
       const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${familyLock(familyId)}) as locked`)) as unknown as { locked: boolean }[];
       if (!lock?.locked) return false;
       const before = await storedRow(familyId, tx);
@@ -280,46 +283,51 @@ export async function readFamilyForRun(familyId: AppFamilyId, familyQboId: strin
 
 /** Two page loads for one family in this process share one read: the second waits for the first and shows what it brought. */
 const reading = new Map<string, Promise<boolean>>();
-function readOnce(familyQboId: string, timeoutMs: number): Promise<boolean> {
-  let read = reading.get(familyQboId);
+function readOnce(familyId: AppFamilyId, timeoutMs: number): Promise<boolean> {
+  const key = String(familyId);
+  let read = reading.get(key);
   if (!read) {
-    read = liveRead(familyQboId, timeoutMs).finally(() => reading.delete(familyQboId));
-    reading.set(familyQboId, read);
+    read = liveRead(familyId, timeoutMs).finally(() => reading.delete(key));
+    reading.set(key, read);
   }
   return read;
 }
 
 /**
- * What one family owes, for its own parents (v1 spec §8.2). `familyQboId` is ctx.familyQboId from the session.
+ * What one family owes, for its own parents (v1 spec §8.2). `familyId` is ctx.familyId from the session.
  *
  * Fresh stored figures are shown at once. Older ones (or none) mean one read from QuickBooks first, with a short
  * timeout; if that can't be done, the last figures QuickBooks gave are shown marked as not current, and with none
  * stored there is nothing to show. Figures from another QuickBooks company are never shown, nor figures that hold an
- * invoice of a customer who is no longer this family's (mayShow), and nothing is shown for an id the roster cache does
- * not hold as an active family, nor for one with no active family record (nothing is read or written for it either).
+ * invoice of a customer who is no longer this family's (mayShow), and nothing is shown for a family whose customer the
+ * roster cache does not hold as an active family, nor for one with no active record or no link to a customer (nothing
+ * is read or written for it either).
  */
-export async function loadFamilyMoney(familyQboId: string, o: { timeoutMs?: number } = {}): Promise<FamilyMoney> {
-  const shown = await figuresToShow(familyQboId, o);
+export async function loadFamilyMoney(familyId: AppFamilyId, o: { timeoutMs?: number } = {}): Promise<FamilyMoney> {
+  const shown = await figuresToShow(familyId, o);
   // The club's day as the page is drawn, after any wait for QuickBooks.
   return { ...shown, today: await clubToday() };
 }
 
-async function figuresToShow(familyQboId: string, o: { timeoutMs?: number }): Promise<Omit<FamilyMoney, "today">> {
-  // The session's customer becomes the app's family on each load, never carried from one to the next; the customers
-  // whose invoices may show are those of that same customer (mayShow checks every stored invoice against them).
-  // A family with no active record has no figures to show (its name is still the cache's, as before).
+async function figuresToShow(familyId: AppFamilyId, o: { timeoutMs?: number }): Promise<Omit<FamilyMoney, "today">> {
+  // The family's customer is found through its own link on each load, never carried from one to the next; the
+  // customers whose invoices may show are those of that customer (mayShow checks every stored invoice against them).
+  // A family with no active record has no figures to show (its name is still the cache's, as before); one with no link
+  // has neither.
   const load = async () => {
-    const [familyId, source, family] = await Promise.all([activeFamilyOf(familyQboId), getRosterSource(), familyCustomers(familyQboId)]);
-    const row = familyId === null ? undefined : await storedRow(familyId);
-    return { familyId, row, source, family, familyName: family?.familyName ?? null };
+    const [active, familyQboId] = await Promise.all([activeFamilyOf(familyId), customerOfFamily(familyId)]);
+    if (familyQboId === null) return { shows: false, row: undefined, source: null, family: null, familyName: null };
+    const [source, family] = await Promise.all([getRosterSource(), familyCustomers(familyQboId)]);
+    const row = active === null ? undefined : await storedRow(familyId);
+    return { shows: active !== null, row, source, family, familyName: family?.familyName ?? null };
   };
   const [stored, settings] = await Promise.all([load(), getMoneySettings()]);
-  if (stored.familyId === null) return { familyName: stored.familyName, figures: null };
+  if (!stored.shows) return { familyName: stored.familyName, figures: null };
   if (isFresh(stored.row, stored.source, stored.family, settings.freshSeconds)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, true) };
   if (failedJustNow(stored.row)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, false) };
-  const current = await readOnce(familyQboId, o.timeoutMs ?? CALL_TIMEOUT_MS);
+  const current = await readOnce(familyId, o.timeoutMs ?? CALL_TIMEOUT_MS);
   // Everything is read again: the roster cache may have been replaced while QuickBooks was answering.
   const after = await load();
-  if (after.familyId === null) return { familyName: after.familyName, figures: null };
+  if (!after.shows) return { familyName: after.familyName, figures: null };
   return { familyName: after.familyName, figures: figuresOf(after.row, after.source, after.family, current) };
 }

@@ -278,7 +278,7 @@ describe("signing a form", () => {
     const document = stub.documentFor(id)!;
     // A standing names the student by their own record, never by a QuickBooks id.
     const record = String(await recordOfCustomer(student.qboId, "student"));
-    const line = async () => (await loadMySeason(ctx, (await loadMyFamily(ctx))!.students))!.steps[0]!.students.find((s) => String(s.id) === record)!.lines[0]!;
+    const line = async () => (await loadMySeason(ctx))!.steps[0]!.students.find((s) => String(s.id) === record)!.lines[0]!;
     expect(await line()).toMatchObject({ state: "todo", words: "Not signed yet" });
 
     stub.sealing = "held";
@@ -437,14 +437,14 @@ describe("signing a form", () => {
     expect(await db.select().from(signatureConsent)).toEqual([]);
     const family = (await loadMyFamily(ctx))!;
     expect((await loadMyForms(ctx, family))!.ready).toBe(false);
-    expect((await loadMySeason(ctx, family.students))!.steps[0]!.students[0]!.lines[0]).toMatchObject({ state: "todo", words: "Not ready yet" });
+    expect((await loadMySeason(ctx))!.steps[0]!.students[0]!.lines[0]).toMatchObject({ state: "todo", words: "Not ready yet" });
 
     await connectForms(stub);
     expect((await open(ctx, id)).step).toEqual({ kind: "consent" });
     const { requirement } = await import("@/lib/db/schema");
     await db.update(requirement).set({ form: null }).where(eq(requirement.id, requirementId)); // no template attached
     expect((await open(ctx, id)).step).toEqual({ kind: "not_ready" });
-    expect((await loadMySeason(ctx, family.students))!.steps[0]!.students[0]!.lines[0]).toMatchObject({ words: "Not ready yet" });
+    expect((await loadMySeason(ctx))!.steps[0]!.students[0]!.lines[0]).toMatchObject({ words: "Not ready yet" });
     expect(stub.calls).toEqual([]);
   });
 
@@ -574,8 +574,7 @@ describe("what each guardian reads", () => {
     const lineFor = async (who: ParentCtx) => (await groupOf((await loadMyForms(who, (await loadMyFamily(who))!))!.groups, FAMILY_A.students[0]!.qboId))!.forms[0]!.line;
     expect((await lineFor(ctx)).words).toBe("Waiting for the other guardian");
     expect((await lineFor(other)).words).toBe("Not signed yet");
-    const family = (await loadMyFamily(other))!;
-    expect((await loadMySeason(other, family.students))!.steps[0]!.students[0]!.lines[0]!.words).toBe("Not signed yet");
+    expect((await loadMySeason(other))!.steps[0]!.students[0]!.lines[0]!.words).toBe("Not signed yet");
     const theirs = await agreeAndOpen(other, id);
     expect(theirs.words).toBe("Not signed yet");
     tokenIn(theirs);
@@ -630,7 +629,7 @@ describe("what each guardian reads", () => {
     expect((await checkMyForm(ctx, id)).state).toBe("complete");
     // Moved as a roster read that finds it leaves it: the app's own student record follows (the reconcile's).
     await moveInCache([student.qboId], FAMILY_B.family.qboId);
-    const season = (await loadMySeason(ctxB, (await loadMyFamily(ctxB))!.students))!;
+    const season = (await loadMySeason(ctxB))!;
     const record = String(await recordOfCustomer(student.qboId, "student"));
     const line = season.steps[0]!.students.find((s) => String(s.id) === record)!.lines[0]!;
     expect(line).toMatchObject({ state: "todo", words: "Not signed yet" });

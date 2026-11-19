@@ -3,8 +3,8 @@
 // QuickBooks through confirmMyBuyout() and switchMyBuyoutBack(), called only from the parent's own actions
 // (src/app/(parent)/volunteer/pay-instead/actions.ts); every write goes on the write queue first and is tried once at
 // once, then by the worker's queue job (src/lib/roster/queue.ts), through sendBuyoutWrite(). The family is the
-// session's: the requirement and the subject are found within it (./my-buyouts.ts), the customer billed is that
-// family's own from the roster cache, and nothing the browser sends names a customer, an item or an amount. It imports
+// session's (ctx.familyId): the requirement and the subject are found within it (./my-buyouts.ts), the customer billed
+// is the family's own linked customer or its student's, under it in the roster cache, and nothing the browser sends names a customer, an item or an amount. It imports
 // no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -12,11 +12,10 @@ import { db, type Tx } from "@/lib/db/client";
 import { buyout, familyMoney, qboCustomer, requirement, writeQueue, type BuyoutState, type BuyoutWrite, type QueuedWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { familyLinkedTo } from "@/lib/families/links";
+import { customerOfFamily, customerOfStudent, familyLinkedTo } from "@/lib/families/links";
 import { activeFamilyOf, studentsStillIn } from "@/lib/families/session-family";
 import type { ParentCtx } from "@/lib/guards";
 import { formatMoney, toCents } from "@/lib/money/cents";
-import type { MyFamily } from "@/lib/parents/my-family";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { parentActor } from "@/lib/parents/sessions";
 import { INVOICE_WRITES, isQboId, qboCreateInvoice, qboInvoices, qboVoidInvoice, WORKER_ACTOR } from "@/lib/quickbooks/client";
@@ -356,14 +355,13 @@ async function writable(tx: Tx, realmId: string): Promise<boolean> {
  * the write queue, and the choice is audited. The create is then tried
  * once at once, never waiting for the connection row; the worker's queue job does the rest.
  */
-export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, requirementId: unknown, key: unknown, stamp: unknown): Promise<Result> {
+export async function confirmMyBuyout(ctx: ParentCtx, requirementId: unknown, key: unknown, stamp: unknown): Promise<Result> {
   if (!isUuid(requirementId) || !isChoiceKey(key) || typeof stamp !== "string" || stamp.length === 0 || stamp.length > 64) return no(BUYOUT_COPY.notFromPage);
-  if (!family) return no(BUYOUT_COPY.notSetUp);
   const actor = parentActor({ id: ctx.parentId, email: ctx.email });
   const take = await takeRateLimit("buyout_parent", ctx.parentId);
   if (take === "first_refusal") await writeAudit({ actor, action: "volunteer.buyout.limit", targetType: "parent", targetId: ctx.parentId, after: { code: "rate_limited" }, ip: ctx.ip });
   if (take !== "taken") return no(BUYOUT_COPY.rateLimited);
-  const t = await findMyBuyout(ctx, family, requirementId, key);
+  const t = await findMyBuyout(ctx, requirementId, key);
   if (!t) return no(BUYOUT_COPY.notFromPage);
   if (t.view.buyout) return no(BUYOUT_COPY.already);
   const q = t.view.quote;
@@ -377,14 +375,17 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
     const [r] = await tx.select().from(requirement).where(eq(requirement.id, t.requirement.id)).for("share");
     if (!r || r.kind !== "volunteer" || r.buyoutUnitCents === null || r.itemQboId === null) return { r: no(BUYOUT_COPY.notOffered) };
     if (r.buyoutUnitCents !== q.unitCents || r.itemQboId !== t.itemQboId || r.amount !== t.requirement.amount || r.amountUnit !== t.requirement.amountUnit) return { r: no(BUYOUT_COPY.changed(amount)) };
-    // Who is billed: the family's own customer, or the student's own, active and directly under the session's family now.
-    const [customer] = await tx.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId }).from(qboCustomer)
-      .where(and(eq(qboCustomer.qboId, t.customerQboId), eq(qboCustomer.active, true)));
-    const ours = customer && (r.appliesTo === "family" ? customer.qboId === ctx.familyQboId : customer.parentQboId === ctx.familyQboId);
-    if (!ours) return { r: no(BUYOUT_COPY.notFromPage) };
     // Whose it is: the session's own family record, still active, and for a per-student requirement the student's own
     // record, still active and in that family, as the page found them (sessionFamily()), read again under the lock.
-    if ((r.appliesTo === "family") !== (t.studentId === null) || (await activeFamilyOf(ctx.familyQboId, tx)) !== t.familyId) return { r: no(BUYOUT_COPY.notFromPage) };
+    if ((r.appliesTo === "family") !== (t.studentId === null) || String(ctx.familyId) !== String(t.familyId) || (await activeFamilyOf(ctx.familyId, tx)) === null) return { r: no(BUYOUT_COPY.notFromPage) };
+    // Who is billed, read again under the lock: the family's own linked customer, or the student's own linked customer,
+    // active and directly under the family's now (QuickBooks' tree: open question 14).
+    const familyCustomer = await customerOfFamily(t.familyId, tx);
+    const subjectCustomer = t.studentId === null ? familyCustomer : await customerOfStudent(t.studentId, tx);
+    const [customer] = familyCustomer === null || subjectCustomer !== t.customerQboId ? [] : await tx.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId }).from(qboCustomer)
+      .where(and(eq(qboCustomer.qboId, t.customerQboId), eq(qboCustomer.active, true)));
+    const ours = customer && (r.appliesTo === "family" ? customer.qboId === familyCustomer : customer.parentQboId === familyCustomer);
+    if (!ours) return { r: no(BUYOUT_COPY.notFromPage) };
     if (t.studentId !== null && !(await studentsStillIn(t.familyId, [t.studentId], tx)).has(String(t.studentId))) return { r: no(BUYOUT_COPY.notFromPage) };
     const [row] = await tx.insert(buyout).values({
       requirementId: r.id, familyId: t.familyId, studentId: t.studentId, customerQboId: t.customerQboId, itemQboId: r.itemQboId,
@@ -426,14 +427,13 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
  * reads the invoice again just before it is sent). A buy-out still being invoiced can't be switched back until the
  * create's outcome is known.
  */
-export async function switchMyBuyoutBack(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, requirementId: unknown, key: unknown): Promise<Result> {
+export async function switchMyBuyoutBack(ctx: ParentCtx, requirementId: unknown, key: unknown): Promise<Result> {
   if (!isUuid(requirementId) || !isChoiceKey(key)) return no(BUYOUT_COPY.notFromPage);
-  if (!family) return no(BUYOUT_COPY.notSetUp);
   const actor = parentActor({ id: ctx.parentId, email: ctx.email });
   const take = await takeRateLimit("buyout_parent", ctx.parentId);
   if (take === "first_refusal") await writeAudit({ actor, action: "volunteer.buyout.limit", targetType: "parent", targetId: ctx.parentId, after: { code: "rate_limited" }, ip: ctx.ip });
   if (take !== "taken") return no(BUYOUT_COPY.rateLimited);
-  const t = await findMyBuyout(ctx, family, requirementId, key);
+  const t = await findMyBuyout(ctx, requirementId, key);
   if (!t?.view.buyout) return no(t ? BUYOUT_COPY.nothingToSwitch : BUYOUT_COPY.notFromPage);
   const [b] = await db.select().from(buyout).where(and(eq(buyout.familyId, t.familyId), eq(buyout.requirementId, t.requirement.id), forSubject(t),
     inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));

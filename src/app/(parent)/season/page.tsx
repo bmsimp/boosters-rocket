@@ -27,7 +27,7 @@ export default async function SeasonPage() {
   const ctx = await requireParentPage("/season");
   // The family comes from the session and nothing else: no address, query string or form chooses whose season this is.
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
-  const season = family ? await loadMySeason(ctx, family.students) : null;
+  const season = family ? await loadMySeason(ctx) : null;
   return (
     <main className="wrap single season-page">
       <h1 className="page-title">{season ? season.name : "Season"}</h1>

@@ -1,6 +1,6 @@
 // Privacy: checking in at a volunteer shift (v1 spec §11.4, §12 invariant 8). A check-in code credits only the
-// signed-in family's own sign-up, and only inside its window. The family is the session's (ctx.familyQboId) and
-// nothing else, found as the app's own active family through its link (activeFamilyOf()): the code finds the shift,
+// signed-in family's own sign-up, and only inside its window. The family is the session's (ctx.familyId, the app's own
+// family record) and nothing else, only while that record is active (activeFamilyOf()): the code finds the shift,
 // and on that shift only the family's own live sign-ups are read. The code and
 // the sign-up id come from the browser and are untrusted; the window is checked again at the moment of writing. It
 // imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
@@ -61,7 +61,7 @@ async function ourSignups(familyId: AppFamilyId, shiftId: string, only: string |
  * and the family's own people on the shift with whether each is checked in. Null for a code that opens nothing (never
  * made, or replaced by a new one), which the page answers with a 404. Reading it records nothing.
  */
-export async function loadCheckInForMe(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, code: string, now: Date = new Date()): Promise<CheckInView | null> {
+export async function loadCheckInForMe(ctx: Pick<ParentCtx, "familyId" | "parentId">, code: string, now: Date = new Date()): Promise<CheckInView | null> {
   if (!isCheckInCode(code)) return null;
   const [row] = await db.select({ shift: volunteerShift, event: volunteerEvent }).from(volunteerShift).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
     .where(eq(volunteerShift.checkinCode, code));
@@ -70,7 +70,7 @@ export async function loadCheckInForMe(ctx: Pick<ParentCtx, "familyQboId" | "par
   const zone = (await getClubSettings()).timeZone;
   const window = checkInWindow(shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone), now);
   const state: CheckInState = shift.cancelledAt || event.cancelledAt ? "cancelled" : window.state;
-  const familyId = await activeFamilyOf(ctx.familyQboId);
+  const familyId = await activeFamilyOf(ctx.familyId);
   const mine = familyId === null ? [] : await ourSignups(familyId, shift.id, null);
   const credited = await creditedSignups(mine.map((s) => s.id));
   const corrected = await correctedSignups(mine.map((s) => s.id));
@@ -112,7 +112,7 @@ export async function checkIn(ctx: ParentCtx, code: unknown, which: unknown, now
     if (window.state === "before") return no(`Check-in for this shift opens ${instantWords(window.opensAt, zone)}, half an hour before it starts. Nothing was recorded.`);
     if (window.state === "closed") return no(`Check-in for this shift has closed: it's over. Nothing was recorded. If you helped and weren't checked in, please tell ${contactWords(event)}.`);
     // The session's family as its app record, read under the roster lock: no refresh moves anyone in between.
-    const familyId = await activeFamilyOf(ctx.familyQboId, tx);
+    const familyId = await activeFamilyOf(ctx.familyId, tx);
     if (familyId === null) return which === "all" ? no("Nobody in your family is signed up for this shift, so there's no one to check in.") : no(NOT_FROM_PAGE);
     const found = await ourSignups(familyId, shift.id, which === "all" ? null : which, tx);
     if (found.length === 0) return which === "all" ? no("Nobody in your family is signed up for this shift, so there's no one to check in.") : no(NOT_FROM_PAGE);

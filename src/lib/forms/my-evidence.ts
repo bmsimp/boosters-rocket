@@ -1,6 +1,6 @@
 // Privacy: a family's own signed forms, for the parent download (src/app/(parent)/forms/[id]/signed/route.ts) and the
-// pages that offer it. The family is the session's (ctx.familyQboId, turned once into the app's own active family by
-// activeFamilyOf()) and nothing else. A request id from the address is looked up within that family (requestOfFamily),
+// pages that offer it. The family is the session's (ctx.familyId, the app's own family record, only while it is
+// active: activeFamilyOf()) and nothing else. A request id from the address is looked up within that family (requestOfFamily),
 // and its evidence by that request, by the app family it names now and by the QuickBooks company the roster cache
 // holds: evidence kept from an earlier company names no app family (signed_form_evidence_app_records), and is never
 // matched to a family by its QuickBooks ids, which may name another family there. It never imports the staff-only modules: tests/integration/page-guards.test.ts
@@ -35,7 +35,7 @@ async function evidenceOf(familyId: AppFamilyId, requestIds: readonly string[]):
 
 /** Which of these requests of the signed-in family have a signed form to download, and how many parts each has. */
 export async function mySignedDownloads(ctx: ParentCtx, requestIds: readonly string[]): Promise<Map<string, number>> {
-  const familyId = await activeFamilyOf(ctx.familyQboId);
+  const familyId = await activeFamilyOf(ctx.familyId);
   if (familyId === null) return new Map();
   const found = await evidenceOf(familyId, requestIds.filter(isUuid));
   if (found.length === 0) return new Map();
@@ -56,7 +56,7 @@ export async function findMySignedPdf(ctx: ParentCtx, requestId: unknown, part: 
   if (!isUuid(requestId)) return null;
   const position = typeof part === "number" ? part : typeof part === "string" && /^[1-9][0-9]?$/.test(part) ? Number(part) : NaN;
   if (!Number.isInteger(position) || position < 1 || position > 99) return null;
-  const familyId = await activeFamilyOf(ctx.familyQboId);
+  const familyId = await activeFamilyOf(ctx.familyId);
   if (familyId === null) return null;
   const row = await requestOfFamily(requestId, familyId);
   if (!row || row.state !== "complete") return null;

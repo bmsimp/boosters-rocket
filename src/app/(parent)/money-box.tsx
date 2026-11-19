@@ -16,11 +16,11 @@ import { DueLine } from "./due-line";
  *   ...
  *   <MoneyBox ctx={ctx} />
  *
- * The family is ctx.familyQboId, from the session, and nothing else. It sends the browser only what it shows. A page
+ * The family is ctx.familyId, from the session, and nothing else. It sends the browser only what it shows. A page
  * shows a family's money only when loadMyFamily() returns the family: Home and Payments both ask it first.
  */
-export async function MoneyBox({ ctx }: { ctx: Pick<ParentCtx, "familyQboId"> }) {
-  return <MoneySection money={await loadFamilyMoney(ctx.familyQboId)} more />;
+export async function MoneyBox({ ctx }: { ctx: Pick<ParentCtx, "familyId"> }) {
+  return <MoneySection money={await loadFamilyMoney(ctx.familyId)} more />;
 }
 
 // QuickBooks text (the invoice number, a name) only ever becomes a text node or an attribute value here, through React.
@@ -95,7 +95,7 @@ function Figures({ f, today, buyouts }: { f: MoneyFigures; today: string; buyout
 
 /**
  * What the family owes. `more` adds the way to the Payments page (on Home). `buyouts`, the family's own buy-out invoices
- * (loadMyBuyoutInvoices(ctx.familyQboId)), names each one as the volunteering buy-out it is.
+ * (loadMyBuyoutInvoices(ctx.familyId)), names each one as the volunteering buy-out it is.
  */
 export function MoneySection({ money, more = false, buyouts }: { money: FamilyMoney; more?: boolean; buyouts?: MyBuyoutInvoices }) {
   return (

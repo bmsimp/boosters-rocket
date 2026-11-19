@@ -25,12 +25,12 @@ export default async function ParentHome() {
   const [family, club, ownEmail] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx)]);
   // The family's money first: a read that brings stale figures up to date is made before the season's payment lines
   // are worked out from the same row, so the money box and those lines never disagree on one page.
-  const money = family ? await loadFamilyMoney(ctx.familyQboId) : null;
+  const money = family ? await loadFamilyMoney(ctx.familyId) : null;
   // A buy-out's invoice is named as such, from the family's own buy-outs only, as on Payments.
-  const buyouts = money ? await loadMyBuyoutInvoices(ctx.familyQboId) : undefined;
+  const buyouts = money ? await loadMyBuyoutInvoices(ctx.familyId) : undefined;
   // The club's current season as it stands for this family: only for a family the roster may show, and null when no
   // season is current. With none there is no ruler, and nothing in its place.
-  const season = family ? await loadMySeason(ctx, family.students) : null;
+  const season = family ? await loadMySeason(ctx) : null;
   const first = firstName(ctx.name);
   return (
     <>

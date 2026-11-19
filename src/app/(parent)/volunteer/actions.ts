@@ -1,7 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { parentAction } from "@/lib/guards";
-import { loadMyFamily } from "@/lib/parents/my-family";
 import { checkIn } from "@/lib/volunteer/check-in";
 import { cancelMySignup, signUpForShift } from "@/lib/volunteer/my-volunteer";
 
@@ -12,13 +11,13 @@ import { cancelMySignup, signUpForShift } from "@/lib/volunteer/my-volunteer";
  * is the session's alone. Every page that shows a sign-up or a requirement's progress is shown again afterward.
  */
 export const signUpAction = parentAction(async (ctx, shiftId: unknown, who: unknown) => {
-  const r = await signUpForShift(ctx, await loadMyFamily(ctx), shiftId, who);
+  const r = await signUpForShift(ctx, shiftId, who);
   if (r.ok) revalidatePath("/", "layout");
   return r;
 });
 
 export const cancelSignupAction = parentAction(async (ctx, signupId: unknown) => {
-  const r = await cancelMySignup(ctx, await loadMyFamily(ctx), signupId);
+  const r = await cancelMySignup(ctx, signupId);
   if (r.ok) revalidatePath("/", "layout");
   return r;
 });

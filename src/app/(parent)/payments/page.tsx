@@ -24,8 +24,8 @@ export default async function PaymentsPage() {
   // The family comes from the session and nothing else: no address, query string or form chooses whose invoices these are.
   // The money first: a stale row is read again before anything is drawn. Then which invoices are the family's own
   // volunteer buy-outs, by the family's own buy-outs (never an invoice id the browser names).
-  const money = await loadFamilyMoney(ctx.familyQboId);
-  const buyouts = await loadMyBuyoutInvoices(ctx.familyQboId);
+  const money = await loadFamilyMoney(ctx.familyId);
+  const buyouts = await loadMyBuyoutInvoices(ctx.familyId);
   return (
     <main className="wrap single">
       <h1 className="page-title">Payments</h1>

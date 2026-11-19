@@ -27,7 +27,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
   if (!family) {
     return <main className="wrap single"><h1 className="page-title">Pay instead of volunteering</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
-  const found = await findMyBuyout(ctx, family, requirementId, choice);
+  const found = await findMyBuyout(ctx, requirementId, choice);
   if (!found) notFound();
   const v = found.view;
   const forWhom = v.key === "family" ? "your family" : v.who;

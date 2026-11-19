@@ -122,13 +122,13 @@ describe("connecting a different company after step 5", () => {
   it("marks evidence the worker was storing at that moment as the earlier company's too, once its store commits", async () => {
     const { a } = await seedTwoFamilies();
     const requestId = a.forms!.ids.signed;
-    const familyId = await recordOfCustomer(a.identity.familyQboId, "family");
+    const familyId = a.identity.familyId;
     let commit!: () => void;
     const held = new Promise<void>((resolve) => { commit = resolve; });
     // As storeEvidence() does: the request locked, the evidence inserted, the commit still to come.
     const storing = db.transaction(async (tx) => {
       await tx.select().from(signatureRequest).where(eq(signatureRequest.id, requestId)).for("update");
-      await tx.insert(signedFormEvidence).values({ requestId, realmId: "1111", requirementId: null, familyQboId: a.identity.familyQboId, subjectQboId: a.identity.familyQboId,
+      await tx.insert(signedFormEvidence).values({ requestId, realmId: "1111", requirementId: null, familyQboId: a.spec.family.qboId, subjectQboId: a.spec.family.qboId,
         subjectKind: "family", familyId, formTitle: "In flight", envelopeId: "envelope_inflight", signers: [], consents: [], originals: [] });
       await held;
     });

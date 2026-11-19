@@ -43,13 +43,11 @@ beforeEach(async () => { await resetDb(); stub.reset(); });
 
 const FAMILY = RIVERA.family.qboId;
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
-// As loadMyFamily() gives them; the buy-outs read a student by the customer only, so no app id is needed here.
-const family = { students: RIVERA.students.map((s) => ({ ...s, id: null })) };
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 const rowOf = async (id: string) => (await db.select().from(buyout).where(eq(buyout.id, id)))[0]!;
 const writer = () => staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
 const standing = async (p: SeededParent, req: string) =>
-  (await loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, family)).find((b) => b.requirementId === req)!;
+  (await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId })).find((b) => b.requirementId === req)!;
 
 /** A queue item for a buy-out, as the write queue leaves one: filed under the family that chose it. */
 async function seedItem(b: { id: string; customerQboId: string; familyId: AppFamilyId }, o: { op?: "invoice_create" | "invoice_void"; state?: "waiting" | "stuck" | "done" | "given_up"; sent?: boolean } = {}) {

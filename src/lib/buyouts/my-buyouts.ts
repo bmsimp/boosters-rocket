@@ -1,14 +1,17 @@
 // Privacy: the one module a parent's buy-out pages read through (v1 spec §11.5, §12 invariant 1). The family is the
-// session's (ctx.familyQboId), turned into its own active app family and students once (sessionFamily(), the volunteer
+// session's (ctx.familyId, the app's own family record), with its own active students (sessionFamily(), the volunteer
 // pages' one definition of the session's family), and nothing else: the requirements are the current season's
 // volunteer ones that ask something of that family or its own active students, and the buy-outs read are that family's
-// own, by its records (stage 2 of the app-owned families spec). What the browser sends back is the requirement id and a
-// choice key made here from the family's own list of subjects ("family", or "s1", "s2" for its students in the order of
-// their QuickBooks ids), never an id; both are looked up again within the session's family. Of another family's
-// buy-outs only this is read: whether one still stands for one of this family's own students (a student who moved here
-// in QuickBooks), so no choice is offered that could never be set up. Nothing of it is shown. What a buy-out bills stays
-// QuickBooks': the customer, the family's own or the student's own, read from the roster cache for the session's family.
-// It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
+// own, by its records. What the browser sends back is the requirement id and a choice key made here from the family's
+// own list of subjects ("family", or "s1", "s2" for its students in the order the family's pages list them, by name and
+// then the app's id: never by a QuickBooks id), never an id; both are
+// looked up again within the session's family. Of another family's buy-outs only this is read: whether one still
+// stands for one of this family's own students (a student who moved here), so no choice is offered that could never be
+// set up. Nothing of it is shown. What a buy-out bills stays QuickBooks', and this is the one place a parent's buy-out
+// reads it: the family's own linked customer (customerOfFamily()), or the student's own (customerOfStudent()), in the
+// records' company, and a student only while the roster cache holds their customer active and directly under the
+// family's (billing follows QuickBooks' tree until QuickBooks takes a move: open question 14). With no link there is
+// no offer. It imports no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
 import { createHmac } from "node:crypto";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
@@ -16,9 +19,9 @@ import { env } from "@/env";
 import { db } from "@/lib/db/client";
 import { buyout, qboCustomer, requirement, season, seasonStep, type BuyoutState } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
-import type { MyFamily } from "@/lib/parents/my-family";
 import { isUuid } from "@/lib/seasons/ids";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { customerOfFamily, linksOf } from "@/lib/families/links";
 import { sessionFamily, type SessionFamily } from "@/lib/families/session-family";
 import { pairKey } from "@/lib/seasons/kinds";
 import { isCovered, type Requirement, type SubjectId, type SubjectsAsked } from "@/lib/seasons/progress";
@@ -58,39 +61,55 @@ const KEY = /^(family|s[1-9]\d{0,2})$/;
 export const isChoiceKey = (v: unknown): v is string => typeof v === "string" && KEY.test(v);
 
 /**
- * The quote's stamp: which requirement, customer billed, item and price the guardian was shown, sealed with the
- * server's key so nothing in it can be read or made in the browser. The confirm works the quote out again and refuses
- * when it differs. It seals the QuickBooks ids of what is billed (the session's family customer and the subject's own
- * customer), as it did before buy-outs named the app's records, so a quote shown before then confirms the same.
+ * The quote's stamp: which family, requirement, subject, customer billed, item and price the guardian was shown, sealed
+ * with the server's key so nothing in it can be read or made in the browser. The confirm works the quote out again and
+ * refuses when it differs. It seals the app's own ids of the session's family and of the subject (the family itself,
+ * or the student), so a key that has come to name another student since the page was shown fails it, and so does a
+ * stamp made before the session carried the app's family (it sealed QuickBooks ids): either is answered with the
+ * price-changed words, never with an invoice for the wrong student.
  */
-export const quoteStamp = (familyQboId: string, requirementId: string, customerQboId: string, itemQboId: string, q: Quote): string | null =>
-  q.ok ? createHmac("sha256", env.BETTER_AUTH_SECRET).update(`buyout-quote:${familyQboId}|${requirementId}|${customerQboId}|${itemQboId}|${q.unitCents}|${q.units}|${q.amountCents}`).digest("base64url").slice(0, 22) : null;
+export const quoteStamp = (familyId: AppFamilyId, requirementId: string, subject: SubjectId, customerQboId: string, itemQboId: string, q: Quote): string | null =>
+  q.ok ? createHmac("sha256", env.BETTER_AUTH_SECRET)
+    .update(`buyout-quote-app:${String(familyId)}|${requirementId}|${String(subject)}|${customerQboId}|${itemQboId}|${q.unitCents}|${q.units}|${q.amountCents}`).digest("base64url").slice(0, 22) : null;
 
 /** One of the family's subjects: its key, its own customer (who would be billed), its app record, and who it is in words. */
 type Subject = { key: string; qboId: string; record: SubjectId; studentId: AppStudentId | null; who: string };
 
-/** The family's active students as loadMyFamily() gave them, kept only where the roster cache holds them directly under the session's family, in id order. */
-async function myStudents(ctx: Pick<ParentCtx, "familyQboId">, family: Pick<MyFamily, "students">): Promise<{ qboId: string; name: string }[]> {
-  const asked = (family.students ?? []).map((s) => s.qboId);
-  if (asked.length === 0) return [];
-  const under = await db.select({ qboId: qboCustomer.qboId }).from(qboCustomer)
-    .where(and(eq(qboCustomer.parentQboId, ctx.familyQboId), eq(qboCustomer.active, true), inArray(qboCustomer.qboId, asked)));
+/**
+ * Who would be billed for each of the family's subjects, from QuickBooks' side and nowhere else: the family's own
+ * linked customer, and each student's own linked customer that the roster cache holds active and directly under it.
+ * Null with no family link (no offer at all); a student missing from `students` is not billable.
+ */
+async function billedCustomers(records: SessionFamily): Promise<{ family: string; students: Map<string, string> } | null> {
+  const family = await customerOfFamily(records.familyId);
+  if (family === null) return null;
+  const students = new Map<string, string>();
+  if (records.students.length === 0) return { family, students };
+  const links = await linksOf({ families: [], students: records.students.map((s) => s.id) });
+  const customers = [...links.customerOfStudent.values()];
+  const under = customers.length === 0 ? [] : await db.select({ qboId: qboCustomer.qboId }).from(qboCustomer)
+    .where(and(eq(qboCustomer.parentQboId, family), eq(qboCustomer.active, true), inArray(qboCustomer.qboId, customers)));
   const ok = new Set(under.map((u) => u.qboId));
-  return (family.students ?? []).filter((s) => ok.has(s.qboId)).sort((a, b) => (a.qboId < b.qboId ? -1 : a.qboId > b.qboId ? 1 : 0));
+  for (const s of records.students) {
+    const customer = links.customerOfStudent.get(s.id);
+    if (customer !== undefined && ok.has(customer)) students.set(String(s.id), customer);
+  }
+  return { family, students };
 }
 
 /**
  * Who in the family a requirement asks, each with its key: the family once, or each of its students it covers. A
- * student's key is its place among the students myStudents() gives; one with no record of its own in the family is
- * asked nothing.
+ * student's key is its place among the family's active students as sessionFamily() lists them (by name, then the app's
+ * id); one with no customer to bill is asked nothing, and keeps its place. A key that comes to name another student
+ * (one joined or left the family) fails the quote's stamp, which seals the student's own record.
  */
-function subjectsOf(r: Requirement, familyQboId: string, records: SessionFamily, students: { qboId: string; name: string }[]): Subject[] {
+function subjectsOf(r: Requirement, records: SessionFamily, billed: { family: string; students: Map<string, string> }): Subject[] {
   if (r.appliesTo === "family") {
-    return isCovered(r, records.familyId) ? [{ key: "family", qboId: familyQboId, record: records.familyId, studentId: null, who: "Your family" }] : [];
+    return isCovered(r, records.familyId) ? [{ key: "family", qboId: billed.family, record: records.familyId, studentId: null, who: "Your family" }] : [];
   }
-  return students.flatMap((s, i) => {
-    const record = records.students.find((x) => x.qboId === s.qboId)?.id;
-    return record !== undefined && isCovered(r, record) ? [{ key: `s${i + 1}`, qboId: s.qboId, record, studentId: record, who: s.name }] : [];
+  return records.students.flatMap((s, i) => {
+    const customer = billed.students.get(String(s.id));
+    return customer !== undefined && isCovered(r, s.id) ? [{ key: `s${i + 1}`, qboId: customer, record: s.id, studentId: s.id, who: s.name }] : [];
   });
 }
 
@@ -102,17 +121,18 @@ const isFor = (b: { studentId: AppStudentId | null }, s: Subject) => b.studentId
  * or has one standing for the family, for the family or for each of its students it asks. `only` narrows it to one
  * requirement. In the season's order. None while the family has no active record.
  */
-async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, family: Pick<MyFamily, "students">, only?: string): Promise<BuyoutTarget[]> {
+async function loadTargets(ctx: Pick<ParentCtx, "familyId" | "parentId">, only?: string): Promise<BuyoutTarget[]> {
   const rows = await db.select({ r: requirement }).from(requirement).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId))
     .where(and(eq(season.isCurrent, true), eq(requirement.kind, "volunteer"), only ? eq(requirement.id, only) : undefined))
     .orderBy(asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
   if (rows.length === 0) return [];
-  const students = await myStudents(ctx, family);
   // The family and its students as the app's records, by the one definition of the session's family the volunteer
-  // pages use (sessionFamily(): its active record, and its own students' records); nothing of a family whose record is
-  // inactive is asked about.
-  const records = await sessionFamily(ctx.familyQboId, students);
+  // pages use (sessionFamily(): its active record, and its own active students); nothing of a family whose record is
+  // inactive is asked about, and nothing is offered to a family with no customer to bill.
+  const records = await sessionFamily(ctx.familyId);
   if (records === null) return [];
+  const billed = await billedCustomers(records);
+  if (billed === null) return [];
   const own = records.students.map((s) => s.id);
   const asked: SubjectsAsked = { families: [records.familyId], students: own };
   const covers = await loadCovers(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id), asked);
@@ -132,7 +152,7 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
   const out: BuyoutTarget[] = [];
   for (const { row, r } of requirements) {
     const terms = { kind: r.kind, amount: r.amount, amountUnit: r.amountUnit, buyoutUnitCents: row.buyoutUnitCents, itemQboId: row.itemQboId };
-    for (const s of subjectsOf(r, ctx.familyQboId, records, students)) {
+    for (const s of subjectsOf(r, records, billed)) {
       const fact = facts.get(pairKey(r.id, s.record)) ?? null;
       const live = fact ? mine.find((b) => b.requirementId === r.id && isFor(b, s) && LIVE_STATES.includes(b.state)) ?? null : null;
       if (!buyoutOffered(terms) && !live) continue;
@@ -145,7 +165,7 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
         familyId: records.familyId, studentId: s.studentId, customerQboId: s.qboId, itemQboId: row.itemQboId ?? "", realmId: source ?? "", requirement: r,
         view: {
           requirementId: r.id, title: r.title, unit: r.amountUnit ?? "shifts", key: s.key, who: s.who, standing: shown.words, met: shown.met,
-          quote, stamp: row.itemQboId ? quoteStamp(ctx.familyQboId, r.id, s.qboId, row.itemQboId, quote) : null,
+          quote, stamp: row.itemQboId ? quoteStamp(records.familyId, r.id, s.record, s.qboId, row.itemQboId, quote) : null,
           buyout: live && fact ? { state: live.state, units: live.units, unitCents: live.unitCents, amountCents: live.amountCents, invoicePaid: fact.invoicePaid,
             clubLooking: live.flag !== null } : null,
           may: live?.flag ? "nothing" : guardianMay(fact, quote), refusedBefore: !live && last?.state === "refused",
@@ -157,15 +177,15 @@ async function loadTargets(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, fam
 }
 
 /** The Volunteer page's list: every buy-out choice the season gives the family, in words and amounts. */
-export async function loadMyBuyouts(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, family: Pick<MyFamily, "students">): Promise<MyBuyout[]> {
-  return (await loadTargets(ctx, family)).map((t) => t.view);
+export async function loadMyBuyouts(ctx: Pick<ParentCtx, "familyId" | "parentId">): Promise<MyBuyout[]> {
+  return (await loadTargets(ctx)).map((t) => t.view);
 }
 
 /**
  * One choice, for its page and its actions: the requirement id and the key come from the browser, and are looked up
  * within the session's family's own list. Null for anything that isn't there (the page answers 404).
  */
-export async function findMyBuyout(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, family: Pick<MyFamily, "students"> | null, requirementId: unknown, key: unknown): Promise<BuyoutTarget | null> {
-  if (!family || !isUuid(requirementId) || !isChoiceKey(key)) return null;
-  return (await loadTargets(ctx, family, requirementId)).find((t) => t.view.key === key) ?? null;
+export async function findMyBuyout(ctx: Pick<ParentCtx, "familyId" | "parentId">, requirementId: unknown, key: unknown): Promise<BuyoutTarget | null> {
+  if (!isUuid(requirementId) || !isChoiceKey(key)) return null;
+  return (await loadTargets(ctx, requirementId)).find((t) => t.view.key === key) ?? null;
 }

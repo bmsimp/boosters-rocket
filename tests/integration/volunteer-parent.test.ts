@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { asParent, pageOutcome, renderPage, revalidatedPaths } from "../helpers/signed-in";
+import { asParent, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
 type Msg = { to: string; subject: string; text: string; html: string; attachments?: { filename: string; contentType: string; content: string }[] };
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
@@ -10,7 +10,6 @@ import { db } from "@/lib/db/client";
 import { auditLog, family as familyTable, qboCustomer, requirement, setting, volunteerCredit, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
-import { loadMyFamily } from "@/lib/parents/my-family";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { loadMySeason } from "@/lib/seasons/my-season";
@@ -22,7 +21,7 @@ import VolunteerPage from "@/app/(parent)/volunteer/page";
 import ShiftPage from "@/app/(parent)/volunteer/shifts/[id]/page";
 import { cancelSignupAction, signUpAction } from "@/app/(parent)/volunteer/actions";
 import { resetDb, seedWorkingMail } from "../helpers/db";
-import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, moveInCache, stu } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
@@ -45,7 +44,6 @@ const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the 
 const NOT_OFFERED = { ok: false, errors: ["That shift isn't open for sign-up any more. Reload the page to see what's open."] };
 const NO_SUCH = "5b0e7f0a-3c1d-4a52-9f0e-3a1b2c3d4e5f";
 const [AURELIO, AZALEA] = FAMILY_A.students, [BARNABY] = FAMILY_B.students;
-const famOf = async (who: SeededParent) => (await loadMyFamily(ctxOf(who.identity)))!;
 /** The app's own records of a fixture's family or student: what a sign-up names, and what a page sends for a student. */
 const familyId = (qboId: string) => recordOfCustomer(qboId, "family");
 const studentId = (qboId: string) => recordOfCustomer(qboId, "student");
@@ -72,7 +70,7 @@ describe("invariant 7: each parent sees only a count and their own sign-up", () 
       expect(shift).toContain(`Signed up from your family: ${viewer === a ? `${AURELIO!.name} (checked in)` : "you"}.`);
       expect(leaked(shift, other.markers)).toEqual([]);
       // What the pages are given, rendered or not: client components get some of it as props.
-      const data = JSON.stringify([await loadMyVolunteering(ctxOf(viewer.identity)), await loadShiftForMe(ctxOf(viewer.identity), await famOf(viewer), viewer.volunteer!.shiftId)]);
+      const data = JSON.stringify([await loadMyVolunteering(ctxOf(viewer.identity)), await loadShiftForMe(ctxOf(viewer.identity), viewer.volunteer!.shiftId)]);
       expect(leaked(data, other.markers)).toEqual([]);
       expect(data).not.toContain(other.identity.parentId);
     }
@@ -135,7 +133,7 @@ describe("signing up", () => {
       { stepId: stepId!, kind: "volunteer", title: "Not linked", appliesTo: "family", amount: 1, amountUnit: "shifts", position: 2 },
     ]).returning();
     const { shifts: [shift] } = await seedEvent({ shifts: [{ startsAt: "09:00", endsAt: "12:00", requirementIds: [family!.id, hours!.id] }] });
-    const view = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
+    const view = (await loadShiftForMe(ctxOf(a.identity), shift!.id))!;
     expect(view.choices.map((c) => [c.value, c.label, c.countsToward.map((t) => `${t.counts} toward ${t.title}: ${t.whoMust}; ${t.standing}`)])).toEqual([
       ["me", `Me (${FAMILY_A.parent.name})`, ["1 shift toward Family shifts: Anyone in your family can do it; 0 of 2 shifts done"]],
       [await studentChoice(AURELIO!), AURELIO!.name, ["1 shift toward Family shifts: Anyone in your family can do it; 0 of 2 shifts done", `3 hours toward Student hours: ${AURELIO!.name} must do it; 0 of 6 hours done`]],
@@ -147,11 +145,11 @@ describe("signing up", () => {
     expect(await signUpAction(shift!.id, await studentChoice(AURELIO!))).toMatchObject({ ok: true, message: expect.stringContaining(`${AURELIO!.name} is signed up. Thank you!`) });
     expect((await signups())[0]).toMatchObject({ fillerKind: "student", studentId: await studentId(AURELIO!.qboId), fillerName: AURELIO!.name, fillerParentId: null, signedUpBy: a.identity.parentId });
     // The season now says what the family is signed up for: the family's shift, and Aurelio's hours, not Azalea's.
-    const season = (await loadMySeason(ctxOf(a.identity), (await famOf(a)).students))!;
+    const season = (await loadMySeason(ctxOf(a.identity)))!;
     expect(season.steps[0]!.family.map((l) => [l.title, l.words])).toEqual([["Family shifts", "0 of 2 shifts done, signed up for 1"], ["Not linked", "0 of 1 shift done"]]);
     expect(season.steps[0]!.students.map((s) => [s.name, s.lines.map((l) => l.words)])).toEqual([[AURELIO!.name, ["0 of 6 hours done, signed up for 3"]], [AZALEA!.name, ["0 of 6 hours done"]]]);
     // The shift's page marks Aurelio as on it, and says so.
-    const again = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
+    const again = (await loadShiftForMe(ctxOf(a.identity), shift!.id))!;
     expect(again.choices.map((c) => c.taken)).toEqual([false, true, false]);
     expect(again.mine).toEqual([{ who: AURELIO!.name, checkedIn: false }]);
   });
@@ -163,25 +161,24 @@ describe("signing up", () => {
     const { shifts: [shift] } = await seedEvent({ shifts: [{ startsAt: "09:00", endsAt: "12:00", requirementIds: [hours!.id] }] });
     await seedSignup({ shiftId: shift!.id, familyQboId: FAMILY_B.family.qboId, signedUpBy: b.identity.parentId, student: BARNABY! });
     await moveInCache([BARNABY!.qboId], FAMILY_A.family.qboId); // as a roster read leaves it: the app's records follow
-    const season = (await loadMySeason(ctxOf(a.identity), (await famOf(a)).students))!;
+    const season = (await loadMySeason(ctxOf(a.identity)))!;
     expect(season.steps[0]!.students.find((s) => s.name === BARNABY!.name)!.lines.map((l) => l.words)).toEqual(["0 of 6 hours done"]);
-    const view = (await loadShiftForMe(ctxOf(a.identity), await famOf(a), shift!.id))!;
+    const view = (await loadShiftForMe(ctxOf(a.identity), shift!.id))!;
     expect(view.mine).toEqual([]);
     const barnaby = await studentChoice(BARNABY!);
     expect(view.choices.find((c) => c.value === barnaby)!.taken).toBe(true);
-    expect((await loadShiftForMe(ctxOf(b.identity), await famOf(b), shift!.id))!.mine).toEqual([]);
+    expect((await loadShiftForMe(ctxOf(b.identity), shift!.id))!.mine).toEqual([]);
   });
 
   it("says the club's list is being updated when a roster refresh holds the lock, rather than failing", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     const { shifts: [shift] } = await seedEvent({ shifts: [{}] });
-    const family = await famOf(a);
     let taken!: () => void, letGo!: () => void;
     const holding = new Promise<void>((r) => { taken = r; }), until = new Promise<void>((r) => { letGo = r; });
     const refresh = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`); taken(); await until; });
     await holding;
     try {
-      expect(await signUpForShift(ctxOf(a.identity), family, shift!.id, "me")).toEqual({ ok: false, errors: ["The club's list of families is being brought up to date just now. Please try again in a minute."] });
+      expect(await signUpForShift(ctxOf(a.identity), shift!.id, "me")).toEqual({ ok: false, errors: ["The club's list of families is being brought up to date just now. Please try again in a minute."] });
     } finally { letGo(); await refresh; }
     expect(await live()).toEqual([]);
   });
@@ -209,7 +206,7 @@ describe("signing up", () => {
     const off = await seedEvent({ cancelled: true, shifts: [{ requirementIds: [r!.id] }] });
     for (const shift of [...on.shifts, ...off.shifts]) await seedSignup({ shiftId: shift.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: "x" });
     await seedSignup({ shiftId: on.shifts[0]!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: AURELIO!, cancelled: true });
-    const season = (await loadMySeason(ctxOf(a.identity), (await famOf(a)).students))!;
+    const season = (await loadMySeason(ctxOf(a.identity)))!;
     expect(season.steps[0]!.family.map((l) => l.words)).toEqual(["0 of 3 shifts done, signed up for 1"]);
   });
 
@@ -225,8 +222,8 @@ describe("signing up", () => {
     expect(await signUpAction(open!.id, "me")).toEqual({ ok: false, errors: ["You're signed up for this shift already."] });
     const today = await seedEvent({ onDate: MARCH_10, shifts: [{ startsAt: "10:00", endsAt: "12:00" }] });
     const at = new Date("2027-03-10T10:00:00Z");
-    expect(await signUpForShift(ctxOf(a.identity), await famOf(a), today.shifts[0]!.id, "me", new Date(at.getTime() - 1000))).toMatchObject({ ok: true });
-    expect(await signUpForShift(ctxOf(a.identity), await famOf(a), today.shifts[0]!.id, await studentChoice(AURELIO!), at)).toEqual({ ok: false, errors: ["That shift has started, so it's too late to sign up for it."] });
+    expect(await signUpForShift(ctxOf(a.identity), today.shifts[0]!.id, "me", new Date(at.getTime() - 1000))).toMatchObject({ ok: true });
+    expect(await signUpForShift(ctxOf(a.identity), today.shifts[0]!.id, await studentChoice(AURELIO!), at)).toEqual({ ok: false, errors: ["That shift has started, so it's too late to sign up for it."] });
     expect((await live()).length).toBe(4);
   });
 
@@ -257,7 +254,7 @@ describe("signing up", () => {
     for (const [shiftId, who] of [["not-a-uuid", "me"], [open!.id, ""], [open!.id, { qboId: AURELIO!.qboId }], [open!.id, AURELIO!.qboId], [open!.id, "x".repeat(65)], [open!.id, null], [123, "me"]] as const) {
       expect(await signUpAction(shiftId as never, who as never)).toEqual(NOT_FROM_PAGE);
     }
-    for (const id of [NO_SUCH, cancelledShift!.id, ofCancelledEvent!.id, "nope"]) expect(await loadShiftForMe(ctxOf(a.identity), await famOf(a), id)).toBeNull();
+    for (const id of [NO_SUCH, cancelledShift!.id, ofCancelledEvent!.id, "nope"]) expect(await loadShiftForMe(ctxOf(a.identity), id)).toBeNull();
     expect(await signups()).toEqual([]);
   });
 
@@ -274,26 +271,23 @@ describe("signing up", () => {
       expect(await signUpAction(shift!.id, who), who).toEqual(NOT_FROM_PAGE);
     }
     expect((await signups()).filter((s) => s.shiftId === shift!.id)).toEqual([]);
-    // A student QuickBooks has moved to another family since the page was drawn is refused too, both while only the cache
-    // has heard of it and once the app's records have followed.
-    const family = await famOf(a);
+    // A student of A's who has moved to family B since the page was drawn is refused too: the family's students are the
+    // app's own records, and hers follows her (as the roster read that finds the move leaves it). B's page may now send her.
     const azalea = await studentChoice(AZALEA!);
-    await db.update(qboCustomer).set({ parentQboId: FAMILY_B.family.qboId }).where(eq(qboCustomer.qboId, AZALEA!.qboId));
-    expect(await signUpForShift(ctxOf(a.identity), family, shift!.id, azalea)).toEqual(NOT_FROM_PAGE);
-    await syncAppRecords();
-    expect(await signUpForShift(ctxOf(a.identity), family, shift!.id, azalea)).toEqual(NOT_FROM_PAGE);
+    await moveInCache([AZALEA!.qboId], FAMILY_B.family.qboId);
+    expect(await signUpForShift(ctxOf(a.identity), shift!.id, azalea)).toEqual(NOT_FROM_PAGE);
+    expect(await signUpAction(shift!.id, azalea)).toEqual(NOT_FROM_PAGE);
     expect((await signups()).filter((s) => s.shiftId === shift!.id)).toEqual([]);
   });
 
   it("leaves exactly as many people signed up as there are places when they all take them at the same moment", async () => {
     const a = await seedSignedInParent(FAMILY_A), b = await seedSignedInParent(FAMILY_B);
-    const [famA, famB] = [await famOf(a), await famOf(b)];
     let shiftId = "";
     const [kidsA, kidsB] = [await Promise.all(FAMILY_A.students.map(studentChoice)), await Promise.all(FAMILY_B.students.map(studentChoice))];
     const people = [
-      () => signUpForShift(ctxOf(a.identity), famA, shiftId, "me"), () => signUpForShift(ctxOf(b.identity), famB, shiftId, "me"),
-      ...kidsA.map((s) => () => signUpForShift(ctxOf(a.identity), famA, shiftId, s)),
-      ...kidsB.map((s) => () => signUpForShift(ctxOf(b.identity), famB, shiftId, s)),
+      () => signUpForShift(ctxOf(a.identity), shiftId, "me"), () => signUpForShift(ctxOf(b.identity), shiftId, "me"),
+      ...kidsA.map((s) => () => signUpForShift(ctxOf(a.identity), shiftId, s)),
+      ...kidsB.map((s) => () => signUpForShift(ctxOf(b.identity), shiftId, s)),
     ];
     for (const [round, places] of [1, 1, 1, 2, 3].entries()) {
       // Each round on its own day: one person can't hold two places at the same time.
@@ -311,16 +305,16 @@ describe("the rate limit on signing up", () => {
   it("refuses a guardian's 31st sign-up press in 15 minutes, takes no place, and audits the first refusal once", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     const { shifts: [shift] } = await seedEvent({ name: "Fish fry", shifts: [{ places: 3 }] });
-    const ctx = ctxOf(a.identity), family = await famOf(a);
-    for (let i = 0; i < 30; i++) expect(await signUpForShift(ctx, family, NO_SUCH, "me")).toEqual(NOT_OFFERED);
+    const ctx = ctxOf(a.identity);
+    for (let i = 0; i < 30; i++) expect(await signUpForShift(ctx, NO_SUCH, "me")).toEqual(NOT_OFFERED);
     const limited = { ok: false, errors: ["That's a lot of sign-ups in a few minutes. Please wait a little, then try again."] };
-    expect(await signUpForShift(ctx, family, shift!.id, "me")).toEqual(limited);
-    expect(await signUpForShift(ctx, family, shift!.id, "me")).toEqual(limited);
+    expect(await signUpForShift(ctx, shift!.id, "me")).toEqual(limited);
+    expect(await signUpForShift(ctx, shift!.id, "me")).toEqual(limited);
     expect(await signups()).toEqual([]);
     expect(await audits("volunteer.signup.refused")).toMatchObject([{ targetId: a.identity.parentId, after: { code: "rate_limited" }, ip: "203.0.113.50" }]);
     // Another guardian has a count of their own.
     const b = await seedSignedInParent(FAMILY_B);
-    expect((await signUpForShift(ctxOf(b.identity), await famOf(b), shift!.id, "me")).ok).toBe(true);
+    expect((await signUpForShift(ctxOf(b.identity), shift!.id, "me")).ok).toBe(true);
   });
 });
 
@@ -337,15 +331,15 @@ describe("cancelling", () => {
   it("cancels the family's own sign-up until the cut-off, to the second, and not at it", async () => {
     const { a, mine } = await seedOwn();
     const cutoff = new Date("2027-03-08T18:00:00Z");
-    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, cutoff)).toEqual({ ok: false,
+    expect(await cancelMySignup(ctxOf(a.identity), mine.id, cutoff)).toEqual({ ok: false,
       errors: ["It's too close to the shift to cancel here: the portal takes cancellations until 48 hours before it starts. Please contact Pat Organizer (pat@club.example)."] });
     expect((await live()).map((s) => s.id)).toContain(mine.id);
-    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, new Date(cutoff.getTime() - 1000))).toEqual({ ok: true,
+    expect(await cancelMySignup(ctxOf(a.identity), mine.id, new Date(cutoff.getTime() - 1000))).toEqual({ ok: true,
       message: `Cancelled. ${AURELIO!.name}'s place is free for someone else now. Thanks for letting us know. If you added it to your calendar, you can delete it there.` });
     const [row] = await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, mine.id));
     expect(row).toMatchObject({ cancelledByDoor: "parent", cancelledBy: a.identity.parentId });
     expect((await audits("volunteer.signup.cancel"))[0]).toMatchObject({ door: "parent", actorId: a.identity.parentId, targetId: mine.id, after: { cancelled: true } });
-    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, new Date(cutoff.getTime() - 1000))).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
+    expect(await cancelMySignup(ctxOf(a.identity), mine.id, new Date(cutoff.getTime() - 1000))).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
   });
 
   it("moves the cut-off with the club's setting and its time zone", async () => {
@@ -354,9 +348,9 @@ describe("cancelling", () => {
     await db.insert(setting).values({ key: VOLUNTEER_SETTINGS_KEY, value: { cutoffHours: 2 } });
     const v = await loadMyVolunteering(ctxOf(a.identity), new Date("2027-03-10T21:59:59Z"));
     expect(v.signups.map((s) => [s.cancel, s.cancelUntil])).toEqual([["open", "Wednesday, March 10, 4:00 pm"]]);
-    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, new Date("2027-03-10T22:00:00Z"))).toMatchObject({ ok: false });
+    expect(await cancelMySignup(ctxOf(a.identity), mine.id, new Date("2027-03-10T22:00:00Z"))).toMatchObject({ ok: false });
     expect((await loadMyVolunteering(ctxOf(a.identity), new Date("2027-03-10T22:00:00Z"))).signups.map((s) => s.cancel)).toEqual(["closed"]);
-    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, new Date("2027-03-10T21:59:59Z"))).toMatchObject({ ok: true });
+    expect(await cancelMySignup(ctxOf(a.identity), mine.id, new Date("2027-03-10T21:59:59Z"))).toMatchObject({ ok: true });
   });
 
   it("after the cut-off, the page says whom to contact and offers no button", async () => {
@@ -399,7 +393,7 @@ describe("cancelling", () => {
     const view = await loadMyVolunteering(ctxOf(a.identity), early);
     expect(view.signups).toEqual([]);
     expect(JSON.stringify(view)).not.toContain(AURELIO!.name);
-    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), mine.id, early)).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
+    expect(await cancelMySignup(ctxOf(a.identity), mine.id, early)).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
     expect((await live()).map((s) => s.id)).toContain(mine.id);
     // The same for a student made inactive.
     await db.update(qboCustomer).set({ parentQboId: FAMILY_A.family.qboId, active: false }).where(eq(qboCustomer.qboId, AURELIO!.qboId));
@@ -411,7 +405,7 @@ describe("cancelling", () => {
     const { a } = await seedOwn();
     const later = await seedEvent({ inDays: 10, shifts: [{ cancelled: true }] });
     const s = await seedSignup({ shiftId: later.shifts[0]!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
-    expect(await cancelMySignup(ctxOf(a.identity), await famOf(a), s.id)).toEqual({ ok: false, errors: ["The club has cancelled this shift, so there's nothing to cancel."] });
+    expect(await cancelMySignup(ctxOf(a.identity), s.id)).toEqual({ ok: false, errors: ["The club has cancelled this shift, so there's nothing to cancel."] });
     const v = await loadMyVolunteering(ctxOf(a.identity));
     expect(v.signups.find((x) => x.id === s.id)?.cancel).toBe("cancelled");
     expect(v.events.flatMap((e) => e.shifts.map((x) => x.id))).not.toContain(later.shifts[0]!.id);
@@ -429,7 +423,7 @@ describe("a session whose family record is inactive", () => {
     const here = await seedSignup({ shiftId: now!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
     const mine = await seedSignup({ shiftId: later!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: AURELIO! });
     await seedOutsideCredit({ familyQboId: FAMILY_A.family.qboId, requirementId: hours!.id, minutes: 60 });
-    const ctx = ctxOf(a.identity), family = await famOf(a);
+    const ctx = ctxOf(a.identity);
     // As keepAppRecordsInStep() leaves a family the roster no longer holds as one, while the session still names it.
     await db.update(familyTable).set({ active: false }).where(eq(familyTable.id, await familyId(FAMILY_A.family.qboId)));
     const snapshot = async () => JSON.stringify([await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id)), await db.select().from(volunteerCredit).orderBy(asc(volunteerCredit.id))]);
@@ -438,15 +432,16 @@ describe("a session whose family record is inactive", () => {
     const v = await loadMyVolunteering(ctx);
     expect(v.events.map((e) => e.name)).toEqual(expect.arrayContaining(["Under way", "Later on"]));
     expect(v.signups).toEqual([]);
-    expect(await loadShiftForMe(ctx, family, later!.id)).toBeNull();
+    expect(await loadShiftForMe(ctx, later!.id)).toBeNull();
     asParent(a.identity);
-    expect(await pageOutcome(ShiftPage, { params: { id: later!.id } })).toEqual({ notFound: true });
-    expect(await signUpForShift(ctx, family, later!.id, "me")).toEqual({ ok: false, errors: ["Your family isn't set up in the portal yet, so you can't sign up here. Please ask the club."] });
-    expect(await cancelMySignup(ctx, family, mine.id)).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
+    // The page says only that the family isn't set up yet, as every parent page does for a family it may not show.
+    expect(await renderPage(ShiftPage, { params: { id: later!.id } })).toContain("set up here yet");
+    expect(await signUpForShift(ctx, later!.id, "me")).toEqual({ ok: false, errors: ["Your family isn't set up in the portal yet, so you can't sign up here. Please ask the club."] });
+    expect(await cancelMySignup(ctx, mine.id)).toEqual({ ok: false, errors: ["That sign-up isn't there any more. Reload the page."] });
     expect((await loadCheckInForMe(ctx, now!.checkinCode))!.people).toEqual([]);
     expect(await checkIn(ctx, now!.checkinCode, here.id)).toEqual(NOT_FROM_PAGE);
     expect(await checkIn(ctx, now!.checkinCode, "all")).toEqual({ ok: false, errors: ["Nobody in your family is signed up for this shift, so there's no one to check in."] });
-    expect(await loadMyCredit(ctx, family.students ?? [])).toEqual([]);
+    expect(await loadMyCredit(ctx)).toEqual([]);
     expect(await snapshot()).toBe(before);
     expect(mail.outbox).toEqual([]);
   });
@@ -469,10 +464,10 @@ describe("the club's day and hour", () => {
     const now = new Date("2027-03-09T21:30:00Z");
     await setZone("Pacific/Kiritimati"); // UTC+14: the shift ran 20:00 to 21:00 UTC on March 9
     expect((await loadMyVolunteering(ctxOf(a.identity), now)).events).toEqual([]);
-    expect(await signUpForShift(ctxOf(a.identity), await famOf(a), shift!.id, "me", now)).toEqual({ ok: false, errors: ["That shift has started, so it's too late to sign up for it."] });
+    expect(await signUpForShift(ctxOf(a.identity), shift!.id, "me", now)).toEqual({ ok: false, errors: ["That shift has started, so it's too late to sign up for it."] });
     await setZone("Pacific/Pago_Pago"); // UTC-11: it runs 21:00 to 22:00 UTC on March 10
     expect((await loadMyVolunteering(ctxOf(a.identity), now)).events.flatMap((e) => e.shifts.map((s) => s.state))).toEqual(["open"]);
-    expect(await signUpForShift(ctxOf(a.identity), await famOf(a), shift!.id, "me", now)).toMatchObject({ ok: true });
+    expect(await signUpForShift(ctxOf(a.identity), shift!.id, "me", now)).toMatchObject({ ok: true });
   });
 
   it("keeps an overnight shift listed past midnight, until it ends the next morning", async () => {

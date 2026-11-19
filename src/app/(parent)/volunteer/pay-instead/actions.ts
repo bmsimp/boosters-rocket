@@ -2,7 +2,6 @@
 import { revalidatePath } from "next/cache";
 import { parentAction } from "@/lib/guards";
 import { confirmMyBuyout, switchMyBuyoutBack } from "@/lib/buyouts/writes";
-import { loadMyFamily } from "@/lib/parents/my-family";
 
 /**
  * Paying instead of volunteering, and switching back (v1 spec §11.5). Every argument comes from the browser, whatever
@@ -12,13 +11,13 @@ import { loadMyFamily } from "@/lib/parents/my-family";
  * amount. Every page that shows the requirement or the family's money is shown again afterward.
  */
 export const confirmBuyoutAction = parentAction(async (ctx, requirementId: unknown, key: unknown, stamp: unknown) => {
-  const r = await confirmMyBuyout(ctx, await loadMyFamily(ctx), requirementId, key, stamp);
+  const r = await confirmMyBuyout(ctx, requirementId, key, stamp);
   revalidatePath("/", "layout");
   return r;
 });
 
 export const switchBackAction = parentAction(async (ctx, requirementId: unknown, key: unknown) => {
-  const r = await switchMyBuyoutBack(ctx, await loadMyFamily(ctx), requirementId, key);
+  const r = await switchMyBuyoutBack(ctx, requirementId, key);
   revalidatePath("/", "layout");
   return r;
 });
