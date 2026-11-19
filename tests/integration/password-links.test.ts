@@ -16,6 +16,7 @@ import { hashLinkToken, isLinkToken, LINK_LIFE_MS, linkVerdict, type LinkPurpose
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { RATE_LIMITS, takeRateLimit } from "@/lib/parents/rate-limit";
 import { readBreachMark } from "@/lib/parents/breach-mark";
+import { CODE_TTL_MS, signinStands, verifySigninCode } from "@/lib/parents/signin-codes";
 import { choosePasswordAction } from "@/app/sign-in/password-actions";
 import SetUpPage from "@/app/sign-in/set-up/[token]/page";
 import ResetPage from "@/app/sign-in/reset/[token]/page";
@@ -276,6 +277,26 @@ describe("setting a password from a link", () => {
     expect(await db.select().from(signinCode)).toEqual([]);
     expect((await audits("parent.password.set"))[0]!.after).toEqual({ purpose: "reset", replaced: true, breachChecked: true, codesDeleted: 1, devicesForgotten: 2, sessionsEnded: 2 });
     expect(await choose("reset", token)).toEqual(REFUSED);
+  });
+
+  it("a code sign-in whose code was spent before a reset committed, and whose session is made after it, is refused at its last check", async () => {
+    const { ana } = await seedAna();
+    await seedPassword(ana.authUserId, OTHER);
+    // A code spent before a code's life ago is the clean-up's; the one the door is about to spend is right.
+    const old = await seedCode(ana.id, { usedAt: new Date(Date.now() - CODE_TTL_MS - 60_000) });
+    await seedCode(ana.id, { code: "123456" });
+    const token = await mintLink(ana.id, "reset");
+    // The code door's first step (src/lib/auth/parent-code-plugin.ts): the code is right, and spent.
+    const spent = await verifySigninCode("ana@example.com", "123456", IP);
+    if (!spent.ok) expect.fail(`the code was refused: ${JSON.stringify(spent)}`);
+    // The reset commits before the door makes its session: there is no session to end yet.
+    expect(await choose("reset", token)).toEqual({ ok: true, message: PASSWORD_COPY.set });
+    expect((await audits("parent.password.set"))[0]!.after).toMatchObject({ purpose: "reset", codesDeleted: 1, sessionsEnded: 0 });
+    expect((await db.select().from(signinCode)).map((c) => c.id)).toEqual([old]);
+    // Then the door makes the session, and its last check, which reads the code it spent again, refuses it.
+    await seedParentSession(ana.authUserId);
+    expect(await signinStands(ana.id, "ana@example.com", IP, spent.codeId)).toBe(false);
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ targetId: ana.id, after: { reason: "code_gone" }, ip: IP });
   });
 
   it("two submits at once for one link set the password once", async () => {

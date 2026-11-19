@@ -17,6 +17,7 @@ import { markBreachCheck } from "./breach-mark";
 import { PASSWORD_COPY } from "./password-copy";
 import { checkPasswordRule } from "./password-rule";
 import { takeRateLimit, type RateLimitTake } from "./rate-limit";
+import { CODE_TTL_MS } from "./signin-codes";
 import { deleteUnusedSigninCodes, endParentSessions, forgetDevices, parentActor } from "./sessions";
 import { hashLinkToken, isLinkPurpose, isLinkToken, linkVerdict, type LinkPurpose, type LinkRefusal } from "./signin-links";
 
@@ -111,8 +112,10 @@ export async function choosePasswordFromLink(raw: { purpose: unknown; token: unk
  * life), and a refusal changes nothing. The link's row is so taken right after the person's, ahead of the codes: the one
  * step out of the order above lockedPerson() (./sessions.ts), which says why it is safe; the rest follows that order.
  * Then: for a reset, the person's unused sign-in codes go (until the code stops being a way in by itself, a reset that
- * left one would leave a way in); the link is spent; the person's `credential` row is replaced, or made when there is
- * none, so a person never has two; and for a reset every remembered device is forgotten and every session ended (open
+ * left one would leave a way in), and so do those spent within a code's life (CODE_TTL_MS), so a code sign-in that
+ * spent its code before the reset and makes its session after it is refused at its last check (signinStands(),
+ * signin-codes.ts, which reads the code it spent again under the person's lock); the link is spent; the person's
+ * `credential` row is replaced, or made when there is none, so a person never has two; and for a reset every remembered device is forgotten and every session ended (open
  * question 23). A set-up ends nothing. Audited `parent.password.set`, never with the password, its hash, the token or
  * its hash.
  *
@@ -142,7 +145,9 @@ async function writePassword(o: { purpose: LinkPurpose; token: string; hash: str
     const link = verdict.link;
     const reset = o.purpose === "reset";
 
-    const codesDeleted = reset ? await deleteUnusedSigninCodes(link.parentId, tx) : 0;
+    // A code spent within a code's life goes too: a sign-in that spent it just before this reset, and makes its session
+    // just after, finds it gone at its last check (signinStands()) and is refused.
+    const codesDeleted = reset ? await deleteUnusedSigninCodes(link.parentId, tx, { spentSince: new Date(now.getTime() - CODE_TTL_MS) }) : 0;
     await tx.update(parentSigninToken).set({ usedAt: now }).where(eq(parentSigninToken.id, link.tokenId));
     const [had] = await tx.select({ id: parentAuthAccount.id }).from(parentAuthAccount)
       .where(and(eq(parentAuthAccount.userId, link.authUserId), eq(parentAuthAccount.providerId, "credential"))).for("update");

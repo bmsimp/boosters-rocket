@@ -199,7 +199,8 @@ export const signinCode = pgTable("signin_code", {
  * the person's lock and in the same transaction, as a new sign-in code replaces the old one (signin-codes.ts); an insert
  * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes one past its expiry or
  * used. Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
- * password-set.ts); blocking, sign-ins switched off and the change-of-company clear delete the unused ones.
+ * password-set.ts); blocking, sign-ins switched off, the change-of-company clear, a confirmed change of sign-in email
+ * and closing a person's last open membership delete the unused ones.
  */
 export const parentSigninToken = pgTable("parent_signin_token", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -218,8 +219,8 @@ export const parentSigninToken = pgTable("parent_signin_token", {
  * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
  * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
  * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-3b will); since slice SI-2
- * blocking, sign-ins switched off, the change-of-company clear and a password reset delete them. Closing a person's
- * last membership leaves them until the sign-in release's choice 10 is decided (src/lib/parents/sessions.ts).
+ * blocking, sign-ins switched off, the change-of-company clear, a password reset, a confirmed change of sign-in email
+ * and closing a person's last open membership delete them (src/lib/parents/sessions.ts).
  */
 export const parentDevice = pgTable("parent_device", {
   id: uuid("id").primaryKey().defaultRandom(),

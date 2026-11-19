@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
 import { parentAuthAccount, parentDevice, parentSigninToken, signinCode } from "@/lib/db/schema";
+import { hashSigninCode } from "@/lib/parents/signin-codes";
 import { mintSigninLink, type LinkPurpose } from "@/lib/parents/signin-links";
 
 /** Who makes a link in a test: the system, as the welcome job will (SI-4). */
@@ -29,9 +30,16 @@ export async function seedDevice(parentId: string): Promise<void> {
   await db.insert(parentDevice).values({ parentId, tokenHash: createHash("sha256").update(randomUUID()).digest("hex"), expiresAt: new Date(Date.now() + 90 * 86_400_000) });
 }
 
-/** An unused sign-in code for the person, as a code request stores one. */
-export async function seedCode(parentId: string): Promise<void> {
-  await db.insert(signinCode).values({ parentId, codeHash: createHash("sha256").update(randomUUID()).digest("hex"), expiresAt: new Date(Date.now() + 600_000) });
+/**
+ * A sign-in code for the person, as a code request stores one: unused, or spent at `usedAt`; with `code`, one that
+ * verifySigninCode() takes for those six digits. Its row's id.
+ */
+export async function seedCode(parentId: string, o: { code?: string; usedAt?: Date } = {}): Promise<string> {
+  const codeHash = o.code ? hashSigninCode(parentId, o.code) : createHash("sha256").update(randomUUID()).digest("hex");
+  const at = o.usedAt ?? new Date();
+  const [row] = await db.insert(signinCode).values({ parentId, codeHash, createdAt: new Date(at.getTime() - 1000), expiresAt: new Date(at.getTime() + 600_000), usedAt: o.usedAt ?? null })
+    .returning({ id: signinCode.id });
+  return row!.id;
 }
 
 /** The person's link rows, used or not. */

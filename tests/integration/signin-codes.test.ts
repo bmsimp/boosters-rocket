@@ -28,6 +28,13 @@ const IP = "203.0.113.20";
 const codeOf = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((a) => a.action === action);
 async function send(email: string, now = T0, ip: string | null = IP) { const r = await requestSigninCode(email, ip, now); await r.delivery; }
+/** Ana's code, sent and spent as a sign-in spends it: the id of its row, which the last check reads again. */
+async function spentCode(): Promise<string> {
+  await send("ana@example.com");
+  const r = await verifySigninCode("ana@example.com", codeOf(mail.outbox.at(-1)!), IP, at(1000));
+  if (!r.ok) throw new Error("the code was refused");
+  return r.codeId;
+}
 
 /** Ana with one row, in an active family of the app's own (the only kind of row a code is sent for), unless `family` says otherwise. */
 async function ana(o: { blocked?: boolean; status?: "invited" | "active" | "disabled"; family?: "active" | "inactive" | "none" } = {}) {
@@ -97,7 +104,7 @@ describe("requesting a code", () => {
     const p = await ana();
     await send("  Ana@Example.COM ");
     expect(mail.outbox[0]!.to).toBe("ana@example.com");
-    expect(await verifySigninCode(" ANA@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: true, parentId: p.id });
+    expect(await verifySigninCode(" ANA@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: true, parentId: p.id, codeId: (await db.select().from(signinCode))[0]!.id });
   });
 
   it("answers before the email is sent", async () => {
@@ -299,20 +306,25 @@ describe("checking a code", () => {
     expect(await limited()).toHaveLength(2);
   }, 60_000);
 
-  it("the last check of a sign-in stands only while the address is still the person's and they are not blocked", async () => {
+  it("the last check of a sign-in stands only while the address is still the person's, they are not blocked, and the code it spent is there", async () => {
     const p = await ana();
-    expect(await signinStands(p.id, " Ana@Example.com ", IP)).toBe(true);
+    const codeId = await spentCode();
+    expect(await signinStands(p.id, " Ana@Example.com ", IP, codeId)).toBe(true);
     expect(await audits("signin.refused")).toEqual([]);
-    expect(await signinStands(p.id, "someone.else@example.com", IP)).toBe(false);
+    expect(await signinStands(p.id, "someone.else@example.com", IP, codeId)).toBe(false);
     expect((await audits("signin.refused")).at(-1)).toMatchObject({ door: "parent", actorId: p.id, targetType: "parent", targetId: p.id, after: { reason: "address_changed" }, ip: IP });
+    // The code it spent is gone (a password reset deletes the codes spent within a code's life): refused.
+    expect(await signinStands(p.id, "ana@example.com", IP, "00000000-0000-4000-8000-000000000000")).toBe(false);
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ targetId: p.id, after: { reason: "code_gone" } });
     await db.update(parent).set({ blocked: true }).where(eq(parent.id, p.id));
-    expect(await signinStands(p.id, "ana@example.com", IP)).toBe(false);
+    expect(await signinStands(p.id, "ana@example.com", IP, codeId)).toBe(false);
     expect((await audits("signin.refused")).at(-1)).toMatchObject({ after: { reason: "blocked" } });
-    expect(await signinStands("00000000-0000-4000-8000-000000000000", "ana@example.com", IP)).toBe(false);
+    expect(await signinStands("00000000-0000-4000-8000-000000000000", "ana@example.com", IP, codeId)).toBe(false);
   });
 
   it("the last check waits for a change of address that is under way, and then sees it", async () => {
     const p = await ana();
+    const codeId = await spentCode();
     let commit!: () => void;
     const held = new Promise<void>((resolve) => { commit = resolve; });
     let changed!: () => void;
@@ -324,7 +336,7 @@ describe("checking a code", () => {
     });
     await written;
     let answer: boolean | null = null;
-    const checking = signinStands(p.id, "ana@example.com", IP).then((r) => { answer = r; });
+    const checking = signinStands(p.id, "ana@example.com", IP, codeId).then((r) => { answer = r; });
     await untilALockIsAwaited();
     expect(answer).toBeNull();                       // still waiting: the change has not been committed
     commit();
