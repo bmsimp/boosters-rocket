@@ -49,9 +49,9 @@ export const hashLinkToken = (purpose: LinkPurpose, token: string): string =>
  * newer link always wins (putHeldLinkInPlace() then finds its held link gone and puts nothing in place); and the new one
  * is stored with its life from `now`. Audited `parent.password.link_made` in the same
  * transaction, with the purpose, its expiry and how many it replaced (a held one counted), never the token or its hash; the caller's own row
- * says why the link was made. For a caller whose mail goes out in the same work as the link (the welcome, SI-4, and the
- * staff reset, SI-9, will call it). The page that asks for a link mails after its transaction, and so holds its link
- * until the mail is handed over instead (holdSigninLink(), below). Throws for a person who doesn't exist.
+ * says why the link was made. For a caller whose mail goes out in the same work as the link (the staff reset, SI-9,
+ * will call it). The page that asks for a link and, since SI-4, the welcome mail after their transaction, and so hold
+ * their link until the mail is handed over instead (holdSigninLink(), below). Throws for a person who doesn't exist.
  */
 export async function mintSigninLink(tx: Tx, o: { parentId: string; purpose: LinkPurpose; actor: Actor; ip: string | null; now?: Date }): Promise<string> {
   const now = o.now ?? new Date();
@@ -80,7 +80,8 @@ const isHeld = heldLink;
 
 /**
  * Makes a held link (isHeld, above) for a link whose mail goes out after this transaction: the request page's
- * (askForPasswordLink(), password-request.ts). In the caller's transaction, under the person's lock the caller took; the
+ * (askForPasswordLink(), password-request.ts) and, since SI-4, the welcome's (sendOwedWelcomes() and resendWelcome(),
+ * welcome.ts), each delivered by deliverHeldLink() (link-delivery.ts). In the caller's transaction, under the person's lock the caller took; the
  * caller's own row, in the same transaction, says the link is on its way (`parent.password.reset_asked`). Once the mail has been handed over, putHeldLinkInPlace() makes it
  * the person's one live link of its purpose; if it never is, dropHeldLink() removes it. One the portal never comes back
  * to (the process stopped mid-send) is a spent link to the daily clean-up, gone after a code's life.

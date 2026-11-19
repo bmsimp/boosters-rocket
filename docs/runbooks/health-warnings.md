@@ -119,9 +119,9 @@ holds under the family, is flagged for the club.
 
 ## Outgoing mail
 
-- **"Not set up"** or **"Not tested."** Parents can't get password links or sign-in codes. **Settings**, **Outgoing mail**: save the
+- **"Not set up"** or **"Not tested."** Parents can't sign in: they can't get password links or sign-in codes. **Settings**, **Outgoing mail**: save the
   settings and **Send test email** ([outgoing mail](mail.md)).
-- **"Tested, but the last email failed."** The note has the mail service's reason. The usual ones: a changed or expired
+- **"Tested, but the last email failed."** Until a send works again, parents aren't sent sign-in codes, password links or welcome emails. The note has the mail service's reason. The usual ones: a changed or expired
   password (enter it again under **Outgoing mail**); for Microsoft 365, the mailbox renamed, or the app's permission removed
   (run the mail script again, [outgoing mail](mail.md#the-portal-microsoft-365)). Send a test email after the fix.
 

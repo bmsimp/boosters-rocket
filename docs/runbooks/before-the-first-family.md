@@ -473,10 +473,11 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    sign in, but only those you tell will know to. Scheduled reminders stay off while welcome emails are off;
    don't press **Remind now** on Signed forms during the pilot: it emails every guardian still to sign that form.
    **If not:** the step lists what is missing first (working mail).
-3. **Tell the pilot families** the portal's address and to sign in with their email and a password. Until the welcome
-   email carries a set-up link (the sign-in release's slice SI-4), nobody has a password yet: tell each family to start at **Set up or
+3. **Tell the pilot families** the portal's address and to sign in with their email and a password. With welcome
+   emails off, nobody is sent the link that chooses a password by themselves: tell each family to start at **Set up or
    reset my password** on the sign-in page (`/sign-in/password`), type their email, and choose a password from the
-   link mailed to them, which signs them in. Ask each to, on their own phone:
+   link mailed to them, which signs them in. Or send each pilot guardian their welcome from their page under
+   **Parents**, **Resend welcome email**: it carries the same kind of link, working for 7 days. Ask each to, on their own phone:
    look at Home and Payments, sign a form, sign up for a shift and check in at it, update their details, and try
    Display.
    **Pass:** each finishes without help (the product's first principle). **If not:** write each place they got stuck
@@ -487,11 +488,20 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 
 ## 8. Switch welcome emails on
 
-1. **Settings, Parent sign-ins, step 2, "Welcome emails".** Read the sample email and how many people would be emailed
-   now, then **Switch welcome emails on**.
+1. **Settings, Parent sign-ins, step 2, "Welcome emails".** Read the sample email (each welcome carries a link,
+   made for its person when it is sent, to choose their password; it works once, for 7 days, and a guardian who has a
+   password already is sent the welcome with no link) and how many people would be emailed now, then **Switch welcome
+   emails on**.
    **Pass:** they go out a few each minute; Health's mail line stays "Working". From now on, scheduled form reminders,
    volunteer due-date nudges and the payment and checklist reminders also go, from 9:00 club time. **If not:** **Switch welcome emails off** stops the rest
    at once; Health's mail line says why sending failed ([outgoing mail](mail.md)).
+2. **Anyone welcomed before the portal signed parents in with a password** (an installation that welcomed its families
+   while parents signed in with a code alone, or the pilot guardians of part 7) has no password and is not welcomed
+   again by themselves. Settings, Parent sign-ins shows **Passwords not chosen yet** while there is anyone to email:
+   read the count, then **Email a set-up link to everyone who can sign in and hasn't chosen a password**.
+   **Pass:** the answer says how many are queued, and they go out a few each minute: someone welcomed before gets an
+   email saying the portal now signs parents in with a password, with the link; anyone never welcomed gets the welcome.
+   The section is gone once nobody is left to email. **If not:** Health's mail line says why sending failed.
 
 ## Choices to confirm
 
