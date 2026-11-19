@@ -139,7 +139,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(await buyoutsOf(FAMILY)).toHaveLength(1);
   });
 
-  it("refuses a quote stamped the old way, by the QuickBooks ids it billed, with the price-changed words and nothing queued", async () => {
+  it("refuses a quote stamped the old way, by the QuickBooks ids it billed, with the price-changed words, and a page drawn before the subject's stamp with the reload words, nothing queued", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ amount: 2, unitCents: 5000 });
     const now = await shown(p, req);
@@ -148,6 +148,9 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(old).not.toBe(now.stamp);
     asParent(p.identity);
     expect(await confirmBuyoutAction(req, "family", now.subjectStamp, old)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$100.00")] });
+    // A page drawn before the subject's stamp bound three values: its quote stamp arrives as the subject's, and no
+    // quote stamp comes at all. That is the reload words, said before any stamp is compared.
+    expect(await (confirmBuyoutAction as (...a: unknown[]) => Promise<unknown>)(req, "family", old)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
     expect(await buyoutsOf(FAMILY)).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
     expect(posts()).toEqual([]);

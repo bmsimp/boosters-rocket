@@ -67,8 +67,9 @@ export const isChoiceKey = (v: unknown): v is string => typeof v === "string" &&
  * The quote's stamp: which family, requirement, subject, customer billed, item and price the guardian was shown, sealed
  * with the server's key so nothing in it can be read or made in the browser. The confirm works the quote out again and
  * refuses when it differs. It seals the app's own ids of the session's family and of the subject (the family itself,
- * or the student), so it never bills the wrong student; a stamp made before the session carried the app's family (it
- * sealed QuickBooks ids) fails it and is answered with the price-changed words. Which subject the page showed is the
+ * or the student), so it never bills the wrong student; a quote stamp made the old way (it sealed QuickBooks ids)
+ * fails it and is answered with the price-changed words, though a page drawn before the subject's stamp sends one
+ * argument fewer and is answered with the reload words before any stamp is compared. Which subject the page showed is the
  * subject stamp's to say (subjectStamp()), and the confirm checks that first: a key that has come to name another
  * student is answered with the reload words, so the quote's stamp speaks only for the price.
  */
