@@ -5,9 +5,9 @@
 // the family's own link and the guardian row's source. It never imports the staff-only modules
 // (src/lib/roster/queries.ts, the staff functions of ./directory.ts): tests/integration/page-guards.test.ts scans this file.
 import "server-only";
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { guardian, jobRun, qboConnection, qboCustomer, qboCustomerType } from "@/lib/db/schema";
+import { guardian, jobRun, parentEmailChange, qboConnection, qboCustomer, qboCustomerType } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
 import { getShape, missingTypes } from "@/lib/roster/shape";
 import { ROSTER_JOB, getRosterSource } from "@/lib/roster/source";
@@ -15,7 +15,7 @@ import type { AppStudentId } from "@/lib/families/ids";
 import { customerOfFamily } from "@/lib/families/links";
 import { sessionFamily } from "@/lib/families/session-family";
 import { recordNameWords } from "@/lib/families/words";
-import { fieldSignsIn } from "./email-field";
+import { fieldHasChange, fieldSignsIn } from "./email-field";
 
 /**
  * One of the family's active students: the app's own record, and its name in words. A page keys and matches a student
@@ -118,7 +118,10 @@ type Shape = NonNullable<Awaited<ReturnType<typeof getShape>>>;
  * customer, in the records' company) and the source of the guardian row the session chose, by the rules loadMyFamily()
  * gives, and only while its email field holds the person's sign-in address (fieldSignsIn()). Nothing rewrites a row's
  * source when the club re-addresses or reuses a record, so the field is what says the record is still theirs. Null
- * whenever any of it doesn't hold.
+ * whenever any of it doesn't hold. One case more keeps it theirs: a field that reads as the change the person's own live
+ * email change request asks for (heldByMyChange()), for QuickBooks may have taken that change while the portal's side
+ * did not finish (an answer lost, or the app's transaction failing), and a roster read since then has put the new
+ * address in the cache; the link then still finds the record, sees the change made, and finishes the portal's side.
  */
 async function myOwnRecord(ctx: ParentCtx, shape: Shape | null): Promise<{ contact: MyContact & { edits: "own" | "family" }; mine: Mine } | null> {
   if (!shape) return null;
@@ -151,7 +154,7 @@ async function myOwnRecord(ctx: ParentCtx, shape: Shape | null): Promise<{ conta
     // The member is its own family: its own record and nothing under it.
     if (family.typeQboId === null || !shape.memberTypeIds.includes(family.typeQboId)) return null;
     // Every address on a member's record signs in through it, so its details are shared like a family's.
-    return sourceId === familyId && fieldSignsIn(family.email, ctx.email, "first")
+    return sourceId === familyId && (fieldSignsIn(family.email, ctx.email, "first") || (await heldByMyChange(ctx, family, true)))
       ? { contact: contact(family, "family"), mine: { row: family, signsInBy: "first", typeQboIds: shape.memberTypeIds } } : null;
   }
 
@@ -163,7 +166,21 @@ async function myOwnRecord(ctx: ParentCtx, shape: Shape | null): Promise<{ conta
     : under.find((r) => r.qboId === sourceId && r.typeQboId === shape.parentTypeId);
   if (!mine) return null;
   const signsInBy = shape.parentTypeId === null ? "every" : "first";
-  if (!fieldSignsIn(mine.email, ctx.email, signsInBy)) return null;
+  if (!fieldSignsIn(mine.email, ctx.email, signsInBy) && !(await heldByMyChange(ctx, mine, signsInBy === "first"))) return null;
   return { contact: contact(mine, shape.parentTypeId === null ? "family" : "own"),
     mine: shape.parentTypeId === null ? { row: mine, signsInBy, typeQboIds: [shape.familyTypeId] } : { row: mine, signsInBy, typeQboIds: [shape.parentTypeId] } };
+}
+
+/**
+ * Whether `row`'s email field reads as the change the person's own live email change request for this record asks for
+ * (the request ./email-change.ts finds by its link: unused, unexpired, this person's, asked under the session's own
+ * guardian row and family, for this record), the session's address replaced by the new one by the same rule the confirm
+ * uses (fieldHasChange()). Only the person can have asked for that address on that record, so the record is still theirs
+ * while the link lives; once it is used or expires, the field is read by fieldSignsIn() alone again.
+ */
+async function heldByMyChange(ctx: ParentCtx, row: { qboId: string; email: string | null }, firstOnly: boolean): Promise<boolean> {
+  const asked = await db.select({ newEmail: parentEmailChange.newEmail }).from(parentEmailChange).where(and(
+    eq(parentEmailChange.parentId, ctx.parentId), eq(parentEmailChange.guardianId, ctx.guardianId), eq(parentEmailChange.familyId, ctx.familyId),
+    eq(parentEmailChange.recordQboId, row.qboId), isNull(parentEmailChange.usedAt), gt(parentEmailChange.expiresAt, new Date())));
+  return asked.some((r) => fieldHasChange(row.email, ctx.email, r.newEmail, firstOnly));
 }

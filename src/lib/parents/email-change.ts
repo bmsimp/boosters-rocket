@@ -234,9 +234,10 @@ class NotThisCompany extends Error {}
  * email field is sent, with the version just read, so a change made in QuickBooks meanwhile is refused and nothing is
  * overwritten. A field that already reads as the change made (the answer to an earlier try was lost, and the parent
  * was told the portal can't tell) is taken as made and nothing is sent again: this try finishes the portal's side, so
- * the two are never left apart while the link lives, and a new link for the same address finishes it after that, until
- * a roster read brings the new address into the cache: from then the record's field no longer holds the address the
- * person signs in with, so it is not theirs here (loadMyRecord()) and the parent is told to ask the club. One address is one
+ * the two are never left apart while the link lives, even once a roster read has brought the new address into the
+ * cache (the record is the person's own while their live request names the address its field now holds:
+ * heldByMyChange() in ./my-family.ts). Once the link has expired the field no longer holds the address the person signs
+ * in with, so the record is not theirs here (loadMyRecord()) and the parent is told to ask the club. One address is one
  * person: an address another person signs in with is refused before anything is sent.
  *
  * Then the portal, only after QuickBooks has said yes, in one transaction. First the person, in the order ./sessions.ts
@@ -255,7 +256,8 @@ class NotThisCompany extends Error {}
  * failure is tried once more), a small transaction of its own records it (`parent.email.save` with its short code:
  * QuickBooks holds the new address, the app is unchanged) and asks the worker for a roster refresh, and the parent is
  * told the portal can't tell yet, as after a lost answer: the request is still live, so opening the link again finds
- * the change made in QuickBooks, sends nothing, and finishes the app's side.
+ * the change made in QuickBooks, sends nothing, and finishes the app's side, before or after the refresh asked for has
+ * run (heldByMyChange()), until the link expires.
  *
  * A token is spent when the change is made, or when it can never succeed. After a failure that changed nothing
  * (QuickBooks out of reach or busy, the record changed meanwhile, an answer the portal can't tell about) it works
@@ -414,7 +416,9 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     outcome = await finish().catch((e: unknown) => { if (worthAnotherTry(e)) return finish(); throw e; });
   } catch (e) {
     // QuickBooks holds the new address and the app could not take it: recorded on its own, the refresh asked for, and
-    // the parent told the portal can't tell yet. The request was not spent, so the link finishes the app's side.
+    // the parent told the portal can't tell yet. The request was not spent, so the link finishes the app's side while
+    // it lives, after that refresh too: the record stays the person's while their live request names the address the
+    // cached field then holds (heldByMyChange(), ./my-family.ts).
     const failed = typeof pgCode(e) === "string" ? `app_failed_${String(pgCode(e)).slice(0, 8)}` : "app_failed";
     await db.transaction(async (tx) => {
       await askForRosterRefresh(tx);

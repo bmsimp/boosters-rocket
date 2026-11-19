@@ -5,7 +5,9 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
  * fails once QuickBooks has taken the address. Postgres ending the transaction for a deadlock is tried once more; a
  * second failure is recorded in a small transaction of its own, a roster refresh is asked for, and the parent is told
  * the portal can't tell yet. The request stays live, so opening the link again finishes the app's side, sending
- * QuickBooks nothing. The failure is made where it would happen: one of the transaction's own steps, the deletion of
+ * QuickBooks nothing, and still does after the refresh asked for has put the new address in the roster cache: the
+ * record is the person's own while their live request names the address its field now holds (heldByMyChange(),
+ * src/lib/parents/my-family.ts), and no longer once the link has expired. The failure is made where it would happen: one of the transaction's own steps, the deletion of
  * the person's unused codes, ends it as Postgres would end the loser of a deadlock.
  */
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -33,9 +35,11 @@ vi.mock("@/lib/parents/sessions", async (original) => {
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, parentAuthSession, parentAuthUser, parentEmailChange } from "@/lib/db/schema";
-import { EMAIL_COPY, confirmMyEmailChange } from "@/lib/parents/email-change";
+import { auditLog, parent, parentAuthSession, parentAuthUser, parentEmailChange, qboCustomer } from "@/lib/db/schema";
+import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
+import { loadMyRecord } from "@/lib/parents/my-family";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
+import { syncAppRecords } from "../helpers/app-records";
 import { resetDb, seedWorkingMail } from "../helpers/db";
 import { inQuickBooks, seedContactFamilies } from "../helpers/contact";
 import { seedEmailChange } from "../helpers/email-change";
@@ -57,6 +61,11 @@ const sessionsOf = async (parentId: string) => db.select({ id: parentAuthSession
 let r: SeededParent;
 let token: string;
 const confirm = () => confirmMyEmailChange({ ...r.identity, ip: null }, token);
+/** What the roster refresh the fallback asks for does to the person's record: the cache takes QuickBooks' field. */
+const refreshTakesTheField = async () => {
+  await db.update(qboCustomer).set({ email: NEW }).where(eq(qboCustomer.qboId, RIVERA.parent.qboId));
+  await syncAppRecords();
+};
 
 describe("the app side of a confirmed change of sign-in email, when its transaction fails", () => {
   beforeEach(async () => {
@@ -98,5 +107,29 @@ describe("the app side of a confirmed change of sign-in email, when its transact
     expect(await addressOf(r.identity.parentId)).toBe(NEW);
     expect(await sessionsOf(r.identity.parentId)).toEqual([]);
     expect((await saves()).map((a) => (a.after as { app?: string }).app)).toEqual(["unchanged", "changed"]);
+  });
+
+  it("failing twice, is still finished by the link after the refresh it asked for has put the new address in the cache", async () => {
+    failing.times = 2;
+    expect(await confirm()).toEqual({ ok: false, errors: [EMAIL_COPY.unsure] });
+    await refreshTakesTheField();
+    // The field no longer holds the address the person signs in with, but it reads as the change their live link asks
+    // for: the record is still theirs, the link still asks, and confirming finishes the app's side, sending nothing.
+    expect(await loadMyRecord({ ...r.identity, ip: null })).toMatchObject({ qboId: RIVERA.parent.qboId });
+    expect(await findMyEmailChange({ ...r.identity, ip: null }, token)).toEqual({ state: "ask", newEmail: NEW });
+    expect(await confirm()).toMatchObject({ ok: true, signedOut: true });
+    expect(posts()).toHaveLength(1);
+    expect(await addressOf(r.identity.parentId)).toBe(NEW);
+    expect(await sessionsOf(r.identity.parentId)).toEqual([]);
+    expect((await saves()).map((a) => (a.after as { app?: string }).app)).toEqual(["unchanged", "changed"]);
+  });
+
+  it("holds the record as the person's only while the link lives", async () => {
+    failing.times = 2;
+    expect(await confirm()).toEqual({ ok: false, errors: [EMAIL_COPY.unsure] });
+    await refreshTakesTheField();
+    await db.update(parentEmailChange).set({ expiresAt: new Date(Date.now() - 1000) });
+    expect(await loadMyRecord({ ...r.identity, ip: null })).toBeNull();
+    expect(await findMyEmailChange({ ...r.identity, ip: null }, token)).toEqual({ state: "gone" });
   });
 });
