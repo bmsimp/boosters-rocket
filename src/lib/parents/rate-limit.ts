@@ -4,7 +4,7 @@ import { rateLimitEvent } from "@/lib/db/schema";
 
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
-  | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip";
+  | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip" | "password_try_email" | "password_try_ip";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -31,6 +31,14 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // stop only, for a room of parents on the school's one address; not applied with no address.
   password_ask_email: { max: 3, windowMs: WINDOW_MS },
   password_ask_ip: { max: 60, windowMs: WINDOW_MS },
+  // Signing in with a password (password-signin.ts; the sign-in release, slice SI-3b). 5 tries per typed address in 15
+  // minutes, counted under a keyed hash of the address (never the address), whatever it names, so the answer and the
+  // count are the same for an address on file and one that isn't. Open question 27 says 5 wrong tries; every try is
+  // counted, right or wrong, because a try is counted before its answer is known (takeRateLimit()), and 5 of any kind is
+  // still more than a parent signing in takes. 180 per IP address, as code_check_ip, a flood stop only, for a room of
+  // parents signing in on the school's one address; not applied with no address.
+  password_try_email: { max: 5, windowMs: WINDOW_MS },
+  password_try_ip: { max: 180, windowMs: WINDOW_MS },
   // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
   // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
   // from QuickBooks each time, so that is bounded too, well above what editing takes.

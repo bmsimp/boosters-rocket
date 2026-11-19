@@ -4,6 +4,7 @@ import { hashPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
 import { parentAuthAccount, parentDevice, parentSigninToken, signinCode } from "@/lib/db/schema";
 import { hashSigninCode } from "@/lib/parents/signin-codes";
+import { hashDeviceToken } from "@/lib/parents/devices";
 import { holdSigninLink, mintSigninLink, type LinkPurpose } from "@/lib/parents/signin-links";
 
 /** Who makes a link in a test: the system, as the welcome job will (SI-4). */
@@ -33,10 +34,20 @@ export async function seedPassword(authUserId: string, password: string): Promis
 /** The person's `credential` rows (a person never has more than one). */
 export const credentialRows = (authUserId: string) => db.select().from(parentAuthAccount).where(eq(parentAuthAccount.userId, authUserId));
 
-/** A device remembered for the person, as a later slice (SI-3b) will make one: only a hash of its token is stored. */
-export async function seedDevice(parentId: string): Promise<void> {
-  await db.insert(parentDevice).values({ parentId, tokenHash: createHash("sha256").update(randomUUID()).digest("hex"), expiresAt: new Date(Date.now() + 90 * 86_400_000) });
+/**
+ * A device remembered for the person, as a sign-in remembers one (recordStrongSignin(), src/lib/parents/devices.ts):
+ * only the keyed hash of its token is stored. Its token, for the device cookie a test sends, and its row's id; with
+ * `expiresAt`, one that ends then (in the past for an expired one).
+ */
+export async function seedDevice(parentId: string, o: { expiresAt?: Date } = {}): Promise<{ token: string; id: string }> {
+  const token = randomBytes(32).toString("base64url");
+  const [row] = await db.insert(parentDevice).values({ parentId, tokenHash: hashDeviceToken(token), expiresAt: o.expiresAt ?? new Date(Date.now() + 90 * 86_400_000) })
+    .returning({ id: parentDevice.id });
+  return { token, id: row!.id };
 }
+
+/** The person's remembered device rows. */
+export const deviceRows = (parentId: string) => db.select().from(parentDevice).where(eq(parentDevice.parentId, parentId));
 
 /**
  * A sign-in code for the person, as a code request stores one: unused, or spent at `usedAt`; with `code`, one that
