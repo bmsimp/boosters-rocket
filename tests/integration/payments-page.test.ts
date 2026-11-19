@@ -224,12 +224,22 @@ describe("the Payments page", () => {
   it("another company: figures stored from a different QuickBooks company than the roster cache are not shown", async () => {
     const r = await seedSignedInParent(RIVERA);
     await seedFamilyMoney({ ...RIVERA, invoices: [{ number: "INV-OTHER-COMPANY", cents: 4242, payLink: "https://connect.intuit.com/t/other-company" }] });
-    // QuickBooks is disconnected, and the roster cache says it came from another company than the stored figures.
+    // QuickBooks is disconnected, and the roster cache says it came from another company than the stored figures. The
+    // roster read of that company brings the app's records into step with it, so the family has a record linked there,
+    // and the row is that record's: the page finds the row, and only the company it names keeps it off the page.
     await db.transaction((tx) => setRosterSource(tx, "2222"));
+    await syncAppRecords();
+    const there = await recordOfCustomer(RIVERA.family.qboId, "family");
+    await db.update(familyMoney).set({ familyId: there });
+    expect((await db.select().from(familyMoney)).map((m) => m.realmId)).toEqual([MONEY_REALM]);
     asParent(r.identity);
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(NOTHING);
     expect(html).not.toMatch(/INV-OTHER-COMPANY|\$42\.42|other-company/);
+    expect(stub.calls).toHaveLength(0);
+    // The same row, named as the roster's company, is shown: it was the company that refused it, not a missing link.
+    await db.update(familyMoney).set({ realmId: "2222" });
+    expect(await renderPage(PaymentsPage)).toContain("INV-OTHER-COMPANY");
     expect(stub.calls).toHaveLength(0);
   });
 

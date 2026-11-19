@@ -63,9 +63,13 @@ test.describe("staff", () => {
     await expect(owed).toContainText("Invoice QZ-1041, Xochitl Quetzalcoatl");
     await expect(page.getByRole("region", { name: "Paid in the last 12 months" })).toContainText("Invoice QZ-1017");
     await noSidewaysScroll(page);
-    // Opening one family's money is recorded, as every staff read of a family is.
-    const [read] = await sql`SELECT action, target_id FROM audit_log WHERE action = 'money.family.read' ORDER BY id DESC LIMIT 1`;
-    expect(read).toMatchObject({ action: "money.family.read", target_id: "E2E-FAMILY" });
+    // Opening one family's money is recorded, as every staff read of a family is, naming the app's family record.
+    const [read] = await sql`SELECT action, target_type, target_id FROM audit_log WHERE action = 'money.family.read' ORDER BY id DESC LIMIT 1`;
+    const [record] = await sql`SELECT family_id::text AS id FROM accounting_link
+      WHERE customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL
+        AND realm_id = (SELECT value->>'realmId' FROM setting WHERE key = 'roster.source')`;
+    expect(record?.id).toBeTruthy();
+    expect(read).toMatchObject({ action: "money.family.read", target_type: "family", target_id: record!.id });
   });
 
   test("asks the worker to read every family, and says so", async ({ page }) => {
