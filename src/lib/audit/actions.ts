@@ -77,6 +77,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.read": "A parent's record opened",
   "parent.review.notified": "Staff emailed about addresses to review",
   "parent.seed": "Test parent made by the proof-of-concept script",
+  "parent.session.carried_over": "Parents' sessions and pending email changes moved to the portal's own families, with counts",
   "parent.unblock": "Parent unblocked",
   "parent.welcome.failed": "Welcome email couldn't be sent",
   "parent.welcome.sent": "Welcome email sent",

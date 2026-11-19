@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex, index, inet, bigserial, bigint, integer, check, date, time, customType } from "drizzle-orm/pg-core";
-import type { PgColumnBuilderBase } from "drizzle-orm/pg-core";
+import type { PgColumn, PgColumnBuilderBase, PgTableExtraConfigValue } from "drizzle-orm/pg-core";
 import type { AppFamilyId, AppStudentId } from "../families/ids";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -212,6 +212,7 @@ export const parentEmailChange = pgTable("parent_email_change", {
   parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
   guardianId: uuid("guardian_id").references(() => guardian.id, { onDelete: "cascade" }),
   familyQboId: text("family_qbo_id"),
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   recordQboId: text("record_qbo_id"),
   newEmail: text("new_email").notNull(),
   tokenHash: text("token_hash").notNull(),
@@ -221,6 +222,7 @@ export const parentEmailChange = pgTable("parent_email_change", {
 }, (t) => [
   uniqueIndex("parent_email_change_token_uq").on(t.tokenHash),
   uniqueIndex("parent_email_change_one_live").on(t.parentId).where(sql`used_at IS NULL`),
+  index("parent_email_change_family_ix").on(t.familyId),
 ]);
 
 /**
@@ -1106,7 +1108,8 @@ export const auditLog = pgTable("audit_log", {
 function authTables<
   U extends Record<string, PgColumnBuilderBase> = Record<never, never>,
   S extends Record<string, PgColumnBuilderBase> = Record<never, never>,
->(prefix: "staff_auth" | "parent_auth", extraUser: U = {} as U, extraSession: S = {} as S) {
+>(prefix: "staff_auth" | "parent_auth", extraUser: U = {} as U, extraSession: S = {} as S,
+  sessionIndexes: (t: Record<string, PgColumn>) => PgTableExtraConfigValue[] = () => []) {
   const user = pgTable(`${prefix}_user`, {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
@@ -1127,7 +1130,7 @@ function authTables<
     userAgent: text("user_agent"),
     ...extraSession,
     userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-  });
+  }, (t) => sessionIndexes(t as unknown as Record<string, PgColumn>));
   const account = pgTable(`${prefix}_account`, {
     id: text("id").primaryKey(),
     accountId: text("account_id").notNull(),
@@ -1160,9 +1163,14 @@ export const staffAuthSession = staffAuth.session;
 export const staffAuthAccount = staffAuth.account;
 export const staffAuthVerification = staffAuth.verification;
 
+// A parent session's family (Better Auth's additional field `familyId`, src/lib/auth/parent-auth.ts): the app's own
+// family record the session chose, null until it chooses one. The gate matches it to the person's own open guardian
+// rows by their `family_id` on every request (src/lib/auth/resolve.ts); it is never a QuickBooks id. Migration 0037
+// carried each session's QuickBooks family over to it, and 0038 dropped `family_qbo_id`.
 const parentAuth = authTables("parent_auth",
   { parentId: uuid("parent_id").notNull().unique().references(() => parent.id, { onDelete: "cascade" }) },
-  { familyQboId: text("family_qbo_id") });
+  { familyQboId: text("family_qbo_id"), familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>() },
+  (t) => [index("parent_auth_session_family_ix").on(t.familyId!)]);
 export const parentAuthUser = parentAuth.user;
 export const parentAuthSession = parentAuth.session;
 export const parentAuthAccount = parentAuth.account;

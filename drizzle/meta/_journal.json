@@ -260,6 +260,13 @@
       "when": 1795067469346,
       "tag": "0036_evidence_without_link",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795070581386,
+      "tag": "0037_sessions_app_ids_additive",
+      "breakpoints": true
     }
   ]
 }
