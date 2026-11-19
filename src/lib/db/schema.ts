@@ -396,7 +396,9 @@ export const jobRun = pgTable("job_run", {
 export type RosterRole = "family" | "student" | "parent" | "member";
 /**
  * One staff change to the roster, as it is sent to QuickBooks (src/lib/roster/writes.ts), kept in `write_queue.request`.
- * Every id is a QuickBooks id of the company the queue row names; a create holds the customer type it was given.
+ * Every id is a QuickBooks id of the company the queue row names, because each is what is sent or what the roster
+ * cache is compared with (a move's families feed its follow-ups, a create's family is looked for after a refresh); a
+ * create holds the customer type it was given. The app's records the item is filed under are the row's own columns.
  */
 export type RosterWrite =
   | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null }
@@ -410,30 +412,43 @@ export type RosterWrite =
 /**
  * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
  * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company
- * the queue row names, from the roster cache when the guardian chose; `buyoutId` is the portal's own `buyout.id`, which
+ * the queue row names, from the roster cache when the guardian chose (what is sent); the family that chose it is the
+ * row's `family_id`, the buy-out's own. A row written before migration 0034 also carries the family's customer as
+ * `familyQboId`, which was never sent and which nothing reads. `buyoutId` is the portal's own `buyout.id`, which
  * the invoice carries in its private note so the portal can find it again. `billEmail` is the sign-in address of the
  * guardian who chose the buy-out, taken from their session when they chose (decided by the owner on 2026-11-17:
  * QuickBooks gives a Pay link only to an invoice that carries an email address). Every try sends that address, never
  * one looked up again. A create queued before then has none, and is sent without one, as it was then.
  */
 export type BuyoutWrite =
-  | { op: "invoice_create"; buyoutId: string; customerQboId: string; itemQboId: string; units: number; unitCents: number; familyQboId: string; billEmail?: string }
-  | { op: "invoice_void"; buyoutId: string; invoiceQboId: string; customerQboId: string; familyQboId: string; why: "switched_back" | "student_moved" };
-/** Everything the write queue holds: the staff roster writes and the buy-out invoice writes. */
+  | { op: "invoice_create"; buyoutId: string; customerQboId: string; itemQboId: string; units: number; unitCents: number; billEmail?: string }
+  | { op: "invoice_void"; buyoutId: string; invoiceQboId: string; customerQboId: string; why: "switched_back" | "student_moved" };
+/**
+ * Everything the write queue holds: the staff roster writes and the buy-out invoice writes, as they are sent, in
+ * QuickBooks ids. Who an item is for in the app is `write_queue.family_id` and `student_id`, never read from here.
+ */
 export type QueuedWrite = RosterWrite | BuyoutWrite;
 
 /**
- * Staff roster writes that QuickBooks didn't take at the time and may take later (v1 spec §4, §8.4): it was busy, it
- * throttled, or it couldn't be reached or didn't answer. `sent` says whether QuickBooks may have acted on the last try:
- * such an item is never simply sent again (src/lib/roster/queue.ts looks in a fresh roster first). A done or given-up
- * item is kept 30 days (the daily clean-up); every item goes when a different company is connected.
+ * Staff roster writes and buy-out invoice writes that QuickBooks didn't take at the time and may take later (v1 spec §4,
+ * §8.4): it was busy, it throttled, or it couldn't be reached or didn't answer. `sent` says whether QuickBooks may have
+ * acted on the last try: such an item is never simply sent again (src/lib/roster/queue.ts looks in a fresh roster
+ * first). What is sent, and the customer it changes (`target_qbo_id`, the key of "one change waiting on a record"),
+ * stay QuickBooks'. Since stage 3 of the app-owned families spec (migrations 0034 and 0035) the item names the app's
+ * own records it is filed under, each a `restrict` foreign key: `family_id`, the family it is under or about (a new
+ * student's or parent's family, a changed student's or parent's, the family itself, a member's own in flat books, the
+ * family a student moves from, the family that chose a buy-out), and `student_id`, the student a rename, move or
+ * make-inactive is for. Each is null where there is no such record: a new family or member (made after QuickBooks
+ * answers), a parent's own customer, an invoice's student. A done or given-up item is kept 30 days (the daily
+ * clean-up); every item goes when a different company is connected, before the app's records.
  */
 export const writeQueue = pgTable("write_queue", {
   id: uuid("id").primaryKey().defaultRandom(),
   realmId: text("realm_id").notNull(),               // the company it is for: never sent to another
   request: jsonb("request").$type<QueuedWrite>().notNull(),
   targetQboId: text("target_qbo_id"),                // the customer it changes; null for a create
-  familyQboId: text("family_qbo_id"),                // the family it is under or about, for the family's page
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),     // the family it is filed under
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // the student it is for
   state: text("state", { enum: ["waiting", "stuck", "done", "given_up"] }).notNull().default("waiting"),
   sent: boolean("sent").notNull(),                    // QuickBooks may have acted on the last try
   tries: integer("tries").notNull().default(1),
@@ -450,7 +465,8 @@ export const writeQueue = pgTable("write_queue", {
 }, (t) => [
   index("write_queue_state_ix").on(t.state, t.nextTryAt),
   index("write_queue_target_ix").on(t.targetQboId),
-  index("write_queue_family_ix").on(t.familyQboId),
+  index("write_queue_family_id_ix").on(t.familyId),
+  index("write_queue_student_ix").on(t.studentId),
 ]);
 
 /**

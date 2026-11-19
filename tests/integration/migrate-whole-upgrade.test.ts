@@ -269,10 +269,11 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
         ["F-FAILED", null, false], ["F-REMOVED", REALM, false], ["F1", REALM, true]]);
     });
 
-    it("leaves the write queue by QuickBooks id, with a family record for the family it names (stage 3 re-keys it)", async () => {
-      const [queued] = await q((pg) => pg`SELECT family_qbo_id, request FROM write_queue WHERE id = ${ids.queued!}`);
-      expect(queued).toMatchObject({ family_qbo_id: "F1", request: { op: "invoice_void", familyQboId: "F1" } });
-      expect(await recordOf("F1", "family")).toEqual(expect.any(String));
+    it("files the write queue's item under the family record of the family it named, and keeps what it sends", async () => {
+      const [queued] = await q((pg) => pg`SELECT family_id, student_id, request FROM write_queue WHERE id = ${ids.queued!}`);
+      // The request is as it was written, its family's customer included (never sent, and read by nothing now).
+      expect(queued).toMatchObject({ family_id: await recordOf("F1", "family"), student_id: null, request: { op: "invoice_void", invoiceQboId: "9001", familyQboId: "F1" } });
+      expect(await q((pg) => pg`SELECT column_name FROM information_schema.columns WHERE table_name = 'write_queue' AND column_name = 'family_qbo_id'`)).toHaveLength(0);
     });
   });
 

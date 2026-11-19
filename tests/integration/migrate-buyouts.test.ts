@@ -114,7 +114,7 @@ describe("migrations 0030 and 0031: buy-outs name the app's own families and stu
       await buyout("gone", { requirement: "student-gone", family: "F1", subject: "S-GONE", state: "paid" });
       // A per-student buy-out whose student is a customer the roster holds as a family: 0023 made it a student record too.
       await buyout("both", { requirement: "student-both", family: "F1", subject: "F2", state: "voided" });
-      // The queued create of the one being invoiced: the write queue keeps its own QuickBooks ids, untouched here.
+      // The queued create of the one being invoiced: what the write queue sends stays its own QuickBooks ids, untouched here.
       await pg`INSERT INTO write_queue (realm_id, request, family_qbo_id, sent, tries, next_try_at)
         VALUES (${REALM}, ${pg.json({ op: "invoice_create", buyoutId: ids["ash-being_invoiced"]!, customerQboId: "F1", itemQboId: "4343", units: 2, unitCents: 5000, familyQboId: "F1" })}, 'F1', false, 0, now())`;
     });
@@ -200,7 +200,8 @@ describe("migrations 0030 and 0031: buy-outs name the app's own families and stu
       const after = await q(async (pg) => [...await pg`SELECT * FROM buyout ORDER BY id`]);
       expect(kept(after)).toEqual(kept(buyoutsBefore));
       expect(kept(after).every((b) => typeof b.customer_qbo_id === "string" && b.item_qbo_id === "4343" && b.realm_id === REALM)).toBe(true);
-      expect(await q(async (pg) => [...await pg`SELECT * FROM write_queue ORDER BY id`])).toEqual(queueBefore);
+      // The queue's own columns as they were; its family's columns are 0034's and 0035's to change (migrate-queue.test.ts).
+      expect(kept(await q(async (pg) => [...await pg`SELECT * FROM write_queue ORDER BY id`]))).toEqual(kept(queueBefore));
     });
 
     it("drops the QuickBooks columns of the family and the subject, and keeps those of what is billed", async () => {
