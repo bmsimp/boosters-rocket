@@ -6,8 +6,9 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
  * second failure is recorded in a small transaction of its own, a roster refresh is asked for, and the parent is told
  * the portal can't tell yet. The request stays live, so opening the link again finishes the app's side, sending
  * QuickBooks nothing, and still does after the refresh asked for has put the new address in the roster cache: the
- * record is the person's own while their live request names the address its field now holds (heldByMyChange(),
- * src/lib/parents/my-family.ts), and no longer once the link has expired. The failure is made where it would happen: one of the transaction's own steps, the deletion of
+ * change finds the record while their live request names the address its field now holds
+ * (loadMyRecordForMyEmailChange(), src/lib/parents/my-family.ts), and no longer once the link has expired; what the
+ * pages show and edit goes by the sign-in address alone (loadMyRecord()), so it is no record of theirs there. The failure is made where it would happen: one of the transaction's own steps, the deletion of
  * the person's unused codes, ends it as Postgres would end the loser of a deadlock.
  */
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -37,7 +38,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, parent, parentAuthSession, parentAuthUser, parentEmailChange, qboCustomer } from "@/lib/db/schema";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
-import { loadMyRecord } from "@/lib/parents/my-family";
+import { loadMyRecord, loadMyRecordForMyEmailChange } from "@/lib/parents/my-family";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { syncAppRecords } from "../helpers/app-records";
 import { resetDb, seedWorkingMail } from "../helpers/db";
@@ -114,8 +115,10 @@ describe("the app side of a confirmed change of sign-in email, when its transact
     expect(await confirm()).toEqual({ ok: false, errors: [EMAIL_COPY.unsure] });
     await refreshTakesTheField();
     // The field no longer holds the address the person signs in with, but it reads as the change their live link asks
-    // for: the record is still theirs, the link still asks, and confirming finishes the app's side, sending nothing.
-    expect(await loadMyRecord({ ...r.identity, ip: null })).toMatchObject({ qboId: RIVERA.parent.qboId });
+    // for: the change still finds the record, the link still asks, and confirming finishes the app's side, sending
+    // nothing. The pages, which go by the sign-in address alone, show and edit no record of theirs meanwhile.
+    expect(await loadMyRecord({ ...r.identity, ip: null })).toBeNull();
+    expect(await loadMyRecordForMyEmailChange({ ...r.identity, ip: null })).toMatchObject({ qboId: RIVERA.parent.qboId });
     expect(await findMyEmailChange({ ...r.identity, ip: null }, token)).toEqual({ state: "ask", newEmail: NEW });
     expect(await confirm()).toMatchObject({ ok: true, signedOut: true });
     expect(posts()).toHaveLength(1);
@@ -124,12 +127,12 @@ describe("the app side of a confirmed change of sign-in email, when its transact
     expect((await saves()).map((a) => (a.after as { app?: string }).app)).toEqual(["unchanged", "changed"]);
   });
 
-  it("holds the record as the person's only while the link lives", async () => {
+  it("finds the record by the change only while the link lives", async () => {
     failing.times = 2;
     expect(await confirm()).toEqual({ ok: false, errors: [EMAIL_COPY.unsure] });
     await refreshTakesTheField();
     await db.update(parentEmailChange).set({ expiresAt: new Date(Date.now() - 1000) });
-    expect(await loadMyRecord({ ...r.identity, ip: null })).toBeNull();
+    expect(await loadMyRecordForMyEmailChange({ ...r.identity, ip: null })).toBeNull();
     expect(await findMyEmailChange({ ...r.identity, ip: null }, token)).toEqual({ state: "gone" });
   });
 });
