@@ -434,12 +434,12 @@ describe("requirements", () => {
 
   // The roadmap's known gap from step 3: requirements could not be put in another order within a step.
   it("moves a requirement earlier or later within its step, with its audit row, and families read the new order", async () => {
-    await seedSignedInParent();
+    const parent = await seedSignedInParent();
     const fall = await seedSeason({ name: "Fall 2026", steps: [{ name: "Join", requirements: [
       { title: "Dues paid", appliesTo: "family" }, { title: "Contact sheet", appliesTo: "family" }, { title: "Banquet RSVP", appliesTo: "family" }] }] });
     const rsvp = fall.requirementIds["Banquet RSVP"]!, dues = fall.requirementIds["Dues paid"]!;
     const titles = async () => (await db.select().from(requirement).orderBy(asc(requirement.position))).map((r) => r.title);
-    const parentReads = async () => (await loadMySeason({ familyQboId: FAMILY_A.family.qboId, parentId: crypto.randomUUID() }, FAMILY_A.students))!.steps[0]!.family.map((l) => l.title);
+    const parentReads = async () => (await loadMySeason({ familyId: parent.identity.familyId, parentId: crypto.randomUUID() }))!.steps[0]!.family.map((l) => l.title);
 
     const page = textOf(await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: rsvp } }));
     expect(page).toContain("Order 3 of the 3 requirements in Join. Families read them in this order. Move earlier");
@@ -624,14 +624,14 @@ describe("ticks and waivers", () => {
       { name: "Uniforms", requirements: [{ title: "Uniform fitting attended", appliesTo: "student" }] }, { name: "Wrap-up", requirements: [{ title: "Banquet RSVP", appliesTo: "family" }] }] });
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
     const [aurelio, azalea] = FAMILY_A.students;
-    const mine = async () => (await loadMySeason({ familyQboId: FAMILY_A.family.qboId, parentId: crypto.randomUUID() }, FAMILY_A.students))!;
+    const mine = async () => (await loadMySeason({ familyId: parent.identity.familyId, parentId: crypto.randomUUID() }))!;
     expect((await mine()).currentIndex).toBe(0);
     await setTicksAction(fitting, TAG, [await S(aurelio!.qboId)], true);
     await waiveAction(fitting, TAG, await S(azalea!.qboId), "Borrowed one");
     const now = await mine();
     expect(now.steps[0]!.students.map((s) => s.lines[0]!.words)).toEqual(["Done", "Waived"]);
     expect(now.currentIndex).toBe(1);
-    expect(parent.identity.familyQboId).toBe(FAMILY_A.family.qboId);
+    expect(String(parent.identity.familyId)).toBe(String(await recordOfCustomer(FAMILY_A.family.qboId, "family")));
   });
 });
 

@@ -25,12 +25,12 @@ export default async function ParentHome() {
   const [family, club, ownEmail] = await Promise.all([loadMyFamily(ctx), getClubSettings(), canChangeMyEmail(ctx)]);
   // The family's money first: a read that brings stale figures up to date is made before the season's payment lines
   // are worked out from the same row, so the money box and those lines never disagree on one page.
-  const money = family ? await loadFamilyMoney(ctx.familyQboId) : null;
+  const money = family ? await loadFamilyMoney(ctx.familyId) : null;
   // A buy-out's invoice is named as such, from the family's own buy-outs only, as on Payments.
-  const buyouts = money ? await loadMyBuyoutInvoices(ctx.familyQboId) : undefined;
-  // The club's current season as it stands for this family: only for a family the roster may show, and null when no
+  const buyouts = money ? await loadMyBuyoutInvoices(ctx.familyId) : undefined;
+  // The club's current season as it stands for this family: only for a family the portal may show, and null when no
   // season is current. With none there is no ruler, and nothing in its place.
-  const season = family ? await loadMySeason(ctx, family.students) : null;
+  const season = family ? await loadMySeason(ctx) : null;
   const first = firstName(ctx.name);
   return (
     <>
@@ -41,7 +41,7 @@ export default async function ParentHome() {
         </div>
         {family ? (
           <>
-            {/* Only for a family the roster may show: when it may not, nothing of it is shown, money included. */}
+            {/* Only for a family the portal may show: when it may not, nothing of it is shown, money included. */}
             {money && <MoneySection money={money} buyouts={buyouts} more />}
             {family.students ? <StudentsBox students={family.students} season={season} /> : season && <FamilyStepBox season={season} />}
             <DetailsBox who={family.me ?? { name: ctx.name, email: ctx.email, phone: null }} treasurerEmail={club.treasurerEmail} ownEmail={ownEmail && "family"} />

@@ -7,9 +7,11 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { asAppFamilyId } from "@/lib/families/ids";
 import { loadFamilyMoney, MAX_LIVE_READS, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
 import { saveShape } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
@@ -40,6 +42,13 @@ async function twoFamilies() {
 const balanceWithJobs = (amount: number) => { stub.customers.find((c) => c.Id === "10")!.BalanceWithJobs = amount; };
 const audits = async (action = "money.balance_mismatch") => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const numbers = (invoices: { number: string | null }[]) => invoices.map((i) => i.number);
+/**
+ * What a family's own parents are shown for the family customer `customerId`: loadFamilyMoney() for the app family
+ * linked to it, as the session gives it (ctx.familyId). A customer with no family record is asked about as a family
+ * the portal has no record of (a uuid of no family row), which is what a session could name for it: nothing.
+ */
+const moneyOf = async (customerId: string, o?: { timeoutMs?: number }) =>
+  loadFamilyMoney((await familyRecordOf(customerId)) ?? asAppFamilyId(randomUUID()), o);
 
 describe("the day the due dates are said against", () => {
   it("is the club's own date, whatever is stored and whatever zone the server is in", async () => {
@@ -48,11 +57,11 @@ describe("the day the due dates are said against", () => {
     const now = new Date();
     const eastern = calendarDayIn("Pacific/Kiritimati", now), western = calendarDayIn("Pacific/Pago_Pago", now);
     expect(eastern > western).toBe(true);
-    expect((await loadFamilyMoney("10")).today).toBe(calendarDayIn("UTC", now)); // no zone chosen yet
+    expect((await moneyOf("10")).today).toBe(calendarDayIn("UTC", now)); // no zone chosen yet
     await db.insert(setting).values({ key: "club", value: { timeZone: "Pacific/Pago_Pago" } });
-    expect(await loadFamilyMoney("10")).toMatchObject({ figures: null, today: western });
+    expect(await moneyOf("10")).toMatchObject({ figures: null, today: western });
     await db.update(setting).set({ value: { timeZone: "Pacific/Kiritimati" } }).where(eq(setting.key, "club"));
-    expect((await loadFamilyMoney("10")).today).toBe(eastern);
+    expect((await moneyOf("10")).today).toBe(eastern);
   });
 });
 
@@ -71,7 +80,7 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
       inv("4", "13"), inv("5", "14"), inv("6", "15"), inv("7", "16"), inv("8", "20"), inv("9", "22"),
     ];
     balanceWithJobs(135.5);
-    const money = await loadFamilyMoney("10");
+    const money = await moneyOf("10");
     expect(invoiceQueries(stub)).toEqual(["select * from Invoice where CustomerRef in ('10','11','12') orderby Id startposition 1 maxresults 1000"]);
     expect(money.familyName).toBe("Rivera Family");
     expect(money.figures).toMatchObject({ current: true, totalCents: 13550, currency: "USD", credit: false, paid: [] });
@@ -84,7 +93,7 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     await addToCache([fam("10", "Rivera Family"), stu("12", "Leo Rivera", "10")]);
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("3", "12")];
-    expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1"]);
+    expect(numbers((await moneyOf("10")).figures!.open)).toEqual(["INV-1"]);
     expect(invoiceQueries(stub)).toEqual(["select * from Invoice where CustomerRef = '10' orderby Id startposition 1 maxresults 1000"]);
   });
 
@@ -95,7 +104,7 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     await connectCompany(stub);
     stub.customers = [{ Id: "30", BalanceWithJobs: 170 }];
     stub.invoices = [inv("1", "30"), inv("2", "31"), inv("3", "40")];
-    const money = await loadFamilyMoney("30");
+    const money = await moneyOf("30");
     expect(money.familyName).toBe("Okafor Household");
     expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
     expect(money.figures!.totalCents).toBe(8500);
@@ -114,10 +123,22 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     await addToCache([{ qboId: "15", displayName: "A Sponsor", typeQboId: "M" }]);
     await connectCompany(stub);
     stub.invoices = [inv("1", "12"), inv("2", "15"), inv("3", "999")];
-    expect((await loadFamilyMoney(id)).figures).toBeNull();
+    expect((await moneyOf(id)).figures).toBeNull();
     expect(stub.calls).toHaveLength(0);
     // It has no family record of the app's own (the student has a student record only), so there is no row to stamp.
     expect(await familyRecordOf(id)).toBeNull();
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
+  });
+
+  it("shows nothing, asks QuickBooks nothing and writes nothing, for a family with no link to a customer", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    const familyId = (await familyRecordOf("10"))!;
+    // The family is the app's own, active; only its link to QuickBooks is gone (from stage 3 a family may have none).
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId));
+    expect(await loadFamilyMoney(familyId)).toMatchObject({ familyName: null, figures: null });
+    expect(stub.calls).toHaveLength(0);
     expect(await db.select().from(familyMoney)).toHaveLength(0);
   });
 
@@ -125,8 +146,8 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     await seedShape();
     await addToCache([fam(FAMILY_A.family.qboId, FAMILY_A.family.name), fam("50", "Digits Family"), stu("5O", "Letter O Student", "50")]);
     await connectCompany(stub);
-    expect((await loadFamilyMoney(FAMILY_A.family.qboId)).figures).toBeNull();
-    expect((await loadFamilyMoney("50")).figures).toBeNull(); // one bad id among the family's customers refuses the whole read
+    expect((await moneyOf(FAMILY_A.family.qboId)).figures).toBeNull();
+    expect((await moneyOf("50")).figures).toBeNull(); // one bad id among the family's customers refuses the whole read
     expect(stub.calls).toHaveLength(0);
     expect((await moneyRow("50"))?.failedCode).toBe("bad_id");
   });
@@ -142,7 +163,7 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     ];
     balanceWithJobs(170);
     const before = Date.now();
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     const row = (await moneyRow("10"))!;
     expect(row).toMatchObject({ realmId: MONEY_REALM, totalCents: 17000, balanceWithJobsCents: 17000, currency: "USD", failedAt: null, failedCode: null, mismatchAuditedAt: null });
     expect(row.readAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
@@ -157,11 +178,11 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    const first = await loadFamilyMoney("10");
+    const first = await moneyOf("10");
     const asked = stub.calls.length;
     stub.invoices = [inv("1", "10"), inv("2", "10")];
     await ageMoney("10", 4 * MINUTE); // inside the default five minutes
-    const second = await loadFamilyMoney("10");
+    const second = await moneyOf("10");
     expect(stub.calls).toHaveLength(asked);
     expect(second.figures).toMatchObject({ current: true, totalCents: 8500 });
     expect(Date.parse(second.figures!.asOf)).toBe(Date.parse(first.figures!.asOf) - 4 * MINUTE);
@@ -171,10 +192,10 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     stub.invoices = [inv("1", "10", { Balance: 0 }), inv("2", "10", { Balance: 12.34 })];
     await ageMoney("10", 6 * MINUTE);
-    const money = await loadFamilyMoney("10");
+    const money = await moneyOf("10");
     expect(money.figures).toMatchObject({ current: true, totalCents: 1234 });
     expect(numbers(money.figures!.open)).toEqual(["INV-2"]);
     expect(Date.now() - Date.parse(money.figures!.asOf)).toBeLessThan(10_000);
@@ -185,7 +206,7 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     // As the invoices are asked for, a buy-out's invoice is made and the family's figures are marked behind
     // (src/lib/buyouts/writes.ts); the answer already on its way doesn't hold the new invoice.
@@ -194,13 +215,13 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
       stub.onApiRequest = null;
       await db.update(familyMoney).set({ staleAt: new Date() }).where(eq(familyMoney.familyId, (await familyRecordOf("10"))!));
     };
-    expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1"]);
+    expect(numbers((await moneyOf("10")).figures!.open)).toEqual(["INV-1"]);
     const row = (await moneyRow("10"))!;
     // The figures are as of when QuickBooks was asked, which is before the mark: they are not taken as current.
     expect(row.staleAt!.getTime()).toBeGreaterThanOrEqual(row.readAt!.getTime());
     stub.invoices = [inv("1", "10"), inv("2", "10")];
     const asked = invoiceQueries(stub).length;
-    expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1", "INV-2"]);
+    expect(numbers((await moneyOf("10")).figures!.open)).toEqual(["INV-1", "INV-2"]);
     expect(invoiceQueries(stub)).toHaveLength(asked + 1);
   });
 
@@ -209,14 +230,14 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
     await setFreshSeconds(7 * 86_400);
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * 86_400_000);
     const asked = stub.calls.length;
-    expect((await loadFamilyMoney("10")).figures!.current).toBe(true);
+    expect((await moneyOf("10")).figures!.current).toBe(true);
     expect(stub.calls).toHaveLength(asked);
     await setFreshSeconds(0);
-    expect((await loadFamilyMoney("10")).figures!.current).toBe(true);
-    expect((await loadFamilyMoney("10")).figures!.current).toBe(true);
+    expect((await moneyOf("10")).figures!.current).toBe(true);
+    expect((await moneyOf("10")).figures!.current).toBe(true);
     expect(invoiceQueries(stub)).toHaveLength(3);
   });
 
@@ -224,11 +245,11 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    const first = await loadFamilyMoney("10");
+    const first = await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     stub.invoices = [inv("1", "10", { Balance: 1 })];
     stub.failNext = 2; // the try and its one retry
-    const money = await loadFamilyMoney("10");
+    const money = await moneyOf("10");
     expect(money.figures).toMatchObject({ current: false, totalCents: 8500 });
     expect(Date.parse(money.figures!.asOf)).toBe(Date.parse(first.figures!.asOf) - 6 * MINUTE);
     const row = (await moneyRow("10"))!;
@@ -242,31 +263,31 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     stub.failNext = 2;
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     const asked = stub.calls.length;
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: false, totalCents: 8500 }); // QuickBooks is back, but it is too soon
+    expect((await moneyOf("10")).figures).toMatchObject({ current: false, totalCents: 8500 }); // QuickBooks is back, but it is too soon
     expect(stub.calls).toHaveLength(asked);
     await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
     stub.invoices = [inv("1", "10", { Balance: 60 })];
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 6000 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 6000 });
     // The failed try stays on the row as the last one that failed; it is older than the read, so nothing waits on it.
     expect((await moneyRow("10"))!.failedCode).toBe("http_500");
     stub.invoices = [];
     await ageMoney("10", 6 * MINUTE);
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 0 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 0 });
   });
 
   it("with nothing stored and QuickBooks down, shows nothing and records the failed try", async () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.failNext = 2;
-    expect(await loadFamilyMoney("10")).toEqual({ familyName: "Rivera Family", figures: null, today: calendarDayIn("UTC") });
+    expect(await moneyOf("10")).toEqual({ familyName: "Rivera Family", figures: null, today: calendarDayIn("UTC") });
     expect(await moneyRow("10")).toMatchObject({ readAt: null, invoices: null, totalCents: null, realmId: null, failedCode: "http_500" });
     stub.reset();
-    expect((await loadFamilyMoney("10")).figures).toBeNull(); // too soon to ask again
+    expect((await moneyOf("10")).figures).toBeNull(); // too soon to ask again
     expect(stub.calls).toHaveLength(0);
   });
 
@@ -274,11 +295,11 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     stub.apiDelayMs = 4000;
     const started = Date.now();
-    const money = await loadFamilyMoney("10", { timeoutMs: 200 });
+    const money = await moneyOf("10", { timeoutMs: 200 });
     expect(Date.now() - started).toBeLessThan(3000);
     expect(money.figures).toMatchObject({ current: false, totalCents: 8500 });
     expect((await moneyRow("10"))!.failedCode).toBe("timeout");
@@ -288,11 +309,11 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: "lots" })];
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
     expect(await moneyRow("10")).toMatchObject({ readAt: null, failedCode: "bad_answer" });
     stub.nullQueryBody = true;
     await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
     expect((await moneyRow("10"))!.failedCode).toBe("bad_answer");
   });
 
@@ -314,17 +335,17 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     balanceWithJobs(85);
     stub.oddInvoiceAnswer = { body };
     // Nothing stored: nothing is shown, and the try is recorded as failed.
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
     const failed = (await moneyRow("10"))!;
     expect(failed).toMatchObject({ readAt: null, invoices: null, totalCents: null, failedCode: code });
     expect(JSON.stringify(failed)).not.toContain("a message the portal must never store");
     // Figures stored: they stay, marked as not current, and are not replaced by a zero.
     stub.oddInvoiceAnswer = null;
     await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
     await ageMoney("10", 6 * MINUTE);
     stub.oddInvoiceAnswer = { body };
-    const money = await loadFamilyMoney("10");
+    const money = await moneyOf("10");
     expect(money.figures).toMatchObject({ current: false, totalCents: 8500 });
     expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
     expect(await moneyRow("10")).toMatchObject({ totalCents: 8500, failedCode: code });
@@ -334,10 +355,10 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.oddInvoiceAnswer = { body: { QueryResponse: {}, time: "2026-11-15T10:00:00.000-08:00" } };
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 0, open: [], paid: [] });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 0, open: [], paid: [] });
     stub.oddInvoiceAnswer = { body: { QueryResponse: { Invoice: [], startPosition: 1, maxResults: 0 } } };
     await ageMoney("10", 6 * MINUTE);
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 0 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 0 });
     expect((await moneyRow("10"))!.failedAt).toBeNull();
   });
 
@@ -346,7 +367,7 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await connectCompany(stub);
     stub.customers = []; // the customer read answers 400
     stub.invoices = [inv("1", "10")];
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 8500, credit: false });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 8500, credit: false });
     expect(await moneyRow("10")).toMatchObject({ balanceWithJobsCents: null, failedAt: null });
     expect(await audits()).toHaveLength(0);
   });
@@ -358,7 +379,7 @@ describe("two requests for the same family never both go to QuickBooks", () => {
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
     stub.apiDelayMs = 150;
-    const [one, two, three] = await Promise.all([loadFamilyMoney("10"), loadFamilyMoney("10"), loadFamilyMoney("10")]);
+    const [one, two, three] = await Promise.all([moneyOf("10"), moneyOf("10"), moneyOf("10")]);
     expect(invoiceQueries(stub)).toHaveLength(1);
     for (const money of [one, two, three]) expect(money.figures).toMatchObject({ current: true, totalCents: 8500 });
   });
@@ -367,7 +388,7 @@ describe("two requests for the same family never both go to QuickBooks", () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     stub.invoices = [inv("1", "10", { Balance: 1 })];
     const asked = stub.calls.length;
@@ -381,11 +402,11 @@ describe("two requests for the same family never both go to QuickBooks", () => {
     const holder = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(7461002, hashtext(${familyId}::text))`); locked(); await held; });
     await taken;
     try {
-      expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: false, totalCents: 8500 }); // the old row, marked as not current
-      expect((await loadFamilyMoney("20")).figures).toMatchObject({ current: true, totalCents: 0 });      // another family is not held up
+      expect((await moneyOf("10")).figures).toMatchObject({ current: false, totalCents: 8500 }); // the old row, marked as not current
+      expect((await moneyOf("20")).figures).toMatchObject({ current: true, totalCents: 0 });      // another family is not held up
       expect(stub.calls.length).toBe(asked + 2); // family 20's read and cross-check only
     } finally { release(); await holder; }
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 100 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 100 });
   });
 
   it("many families at once take turns: no more than a few reads run together, and every one is answered", async () => {
@@ -396,7 +417,7 @@ describe("two requests for the same family never both go to QuickBooks", () => {
     stub.customers = ids.map((Id) => ({ Id, BalanceWithJobs: 85 }));
     stub.invoices = ids.map((id, i) => inv(String(i + 1), id));
     stub.apiDelayMs = 80;
-    const all = await Promise.all(ids.map((id) => loadFamilyMoney(id)));
+    const all = await Promise.all(ids.map((id) => moneyOf(id)));
     expect(all.map((m) => m.figures?.totalCents)).toEqual(ids.map(() => 8500));
     expect(all.every((m) => m.figures!.current)).toBe(true);
     expect(stub.peakApi).toBeGreaterThan(1);
@@ -428,7 +449,7 @@ describe("a page load never waits in line for the QuickBooks connection, and lea
     stub.invoices = ids.map((id, i) => inv(String(i + 1), id));
     stub.tokenDelayMs = 3000;
     const started = Date.now();
-    const all = await Promise.all(ids.map((id) => loadFamilyMoney(id, { timeoutMs: 200 })));
+    const all = await Promise.all(ids.map((id) => moneyOf(id, { timeoutMs: 200 })));
     expect(Date.now() - started).toBeLessThan(2500);
     expect(all.map((m) => m.figures)).toEqual(ids.map(() => null));
     expect((await Promise.all(ids.map(moneyRow))).map((r) => r!.failedCode)).toEqual(ids.map(() => "timeout"));
@@ -442,7 +463,7 @@ describe("a page load never waits in line for the QuickBooks connection, and lea
     expect(await inUse()).toEqual([]);
     for (const id of ids) await ageMoney(id, RETRY_AFTER_FAILURE_MS + 1000);
     stub.tokenDelayMs = 0;
-    expect((await Promise.all(ids.map((id) => loadFamilyMoney(id)))).map((m) => m.figures?.totalCents)).toEqual(ids.map(() => 8500));
+    expect((await Promise.all(ids.map((id) => moneyOf(id)))).map((m) => m.figures?.totalCents)).toEqual(ids.map(() => 8500));
     expect(stub.tokenCalls()).toHaveLength(1);
   });
 
@@ -455,7 +476,7 @@ describe("a page load never waits in line for the QuickBooks connection, and lea
     stub.customers = ids.map((Id) => ({ Id, BalanceWithJobs: 85 }));
     stub.invoices = ids.map((id, i) => inv(String(i + 1), id));
     stub.tokenDelayMs = 150;
-    const all = await Promise.all(ids.map((id) => loadFamilyMoney(id)));
+    const all = await Promise.all(ids.map((id) => moneyOf(id)));
     expect(all.map((m) => [m.figures?.current, m.figures?.totalCents])).toEqual(ids.map(() => [true, 8500]));
     expect(stub.tokenCalls()).toHaveLength(1);
   });
@@ -464,21 +485,21 @@ describe("a page load never waits in line for the QuickBooks connection, and lea
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     await expireToken();
     const asked = stub.calls.length;
     const release = await holdConnectionRow();
     try {
       const started = Date.now();
-      expect((await loadFamilyMoney("10", { timeoutMs: 2000 })).figures).toMatchObject({ current: false, totalCents: 8500 });
+      expect((await moneyOf("10", { timeoutMs: 2000 })).figures).toMatchObject({ current: false, totalCents: 8500 });
       expect(Date.now() - started).toBeLessThan(1500); // not the 3 seconds the page would have waited
       expect((await moneyRow("10"))!.failedCode).toBe("busy");
       expect(stub.calls).toHaveLength(asked);
       expect((await inUse()).filter((c) => c.waiting === "Lock")).toEqual([]);
     } finally { await release(); }
     await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
   });
 
   it("with a token that is still good, takes no lock on the connection: a held row holds nobody up", async () => {
@@ -489,7 +510,7 @@ describe("a page load never waits in line for the QuickBooks connection, and lea
     const release = await holdConnectionRow();
     try {
       const started = Date.now();
-      expect((await loadFamilyMoney("10", { timeoutMs: 2000 })).figures).toMatchObject({ current: true, totalCents: 8500 });
+      expect((await moneyOf("10", { timeoutMs: 2000 })).figures).toMatchObject({ current: true, totalCents: 8500 });
       expect(Date.now() - started).toBeLessThan(1500);
       expect((await moneyRow("10"))!.balanceWithJobsCents).toBe(8500); // the cross-check was read too
       expect(stub.tokenCalls()).toHaveLength(0);
@@ -502,7 +523,7 @@ describe("stored figures are shown only while they are still this family's", () 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 40 }), inv("3", "11", { Balance: 0, TxnDate: new Date().toISOString().slice(0, 10) })];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     expect((await moneyRow("10"))!.invoices!.map((i) => [i.number, i.customerQboId])).toEqual([["INV-1", "10"], ["INV-2", "12"], ["INV-3", "11"]]);
   });
 
@@ -510,27 +531,27 @@ describe("stored figures are shown only while they are still this family's", () 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 40 })];
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 12500 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 12500 });
     // The roster refresh finds Leo (12) under the Chen family now, and then QuickBooks stops answering.
     await moveInCache(["12"], "20");
     stub.failNext = 2;
-    expect((await loadFamilyMoney("10")).figures).toBeNull(); // not the row that holds Leo's invoice, read seconds ago
+    expect((await moneyOf("10")).figures).toBeNull(); // not the row that holds Leo's invoice, read seconds ago
     expect((await moneyRow("10"))!.failedCode).toBe("http_500");
-    expect((await loadFamilyMoney("10")).figures).toBeNull(); // nor while the portal waits to ask again
+    expect((await moneyOf("10")).figures).toBeNull(); // nor while the portal waits to ask again
     await ageMoney("10", RETRY_AFTER_FAILURE_MS + 1000);
-    const mine = await loadFamilyMoney("10");
+    const mine = await moneyOf("10");
     expect(mine.figures).toMatchObject({ current: true, totalCents: 8500 });
     expect(numbers(mine.figures!.open)).toEqual(["INV-1"]);
-    expect((await loadFamilyMoney("20")).figures!.open.map((i) => [i.number, i.forName])).toEqual([["INV-2", "Leo Rivera"]]);
+    expect((await moneyOf("20")).figures!.open.map((i) => [i.number, i.forName])).toEqual([["INV-2", "Leo Rivera"]]);
   });
 
   it("a student made inactive: the row that holds their invoice is read again before anything is shown", async () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 40 })];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "12"));
-    const money = await loadFamilyMoney("10"); // still inside the freshness window
+    const money = await moneyOf("10"); // still inside the freshness window
     expect(money.figures).toMatchObject({ current: true, totalCents: 8500 });
     expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
   });
@@ -539,22 +560,22 @@ describe("stored figures are shown only while they are still this family's", () 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     const [row] = await db.select().from(familyMoney);
     const unnamed = row!.invoices!.map((i) => ({ ...i, customerQboId: undefined })) as unknown as NonNullable<typeof row>["invoices"];
     await db.update(familyMoney).set({ invoices: unnamed });
     stub.failNext = 2;
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
   });
 
   it("a family the cache no longer holds as an active family is shown nothing, whatever is stored", async () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await db.update(qboCustomer).set({ active: false, displayName: "Rivera Family (deleted)" }).where(eq(qboCustomer.qboId, "10"));
     const asked = stub.calls.length;
-    expect(await loadFamilyMoney("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
     // The roster read that made it inactive has not brought the records into step yet: the family record is still
     // active, so the failed try is stamped on its row.
@@ -565,7 +586,7 @@ describe("stored figures are shown only while they are still this family's", () 
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
     const [before] = await db.select().from(familyMoney);
     // QuickBooks made the family inactive, and the roster read brought the records into step: its record is inactive.
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "10"));
@@ -574,23 +595,36 @@ describe("stored figures are shown only while they are still this family's", () 
     await ageMoney("10", 6 * MINUTE);
     const [aged] = await db.select().from(familyMoney);
     const asked = stub.calls.length;
-    expect(await loadFamilyMoney("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
     expect(await db.select().from(familyMoney)).toEqual([aged]); // not even a failed try is stamped
     expect(aged!.totalCents).toBe(before!.totalCents);
+  });
+
+  it("with no membership shape at all, shows nothing, asks QuickBooks nothing and stamps no failed try", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    // A database without the setting (restored without it, say), while the family's record and link stand.
+    await db.delete(setting).where(eq(setting.key, "membership.shape"));
+    expect(await familyRecordOf("10")).not.toBeNull();
+    const asked = stub.calls.length;
+    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(stub.calls).toHaveLength(asked);
+    expect(await db.select().from(familyMoney)).toEqual([]);
   });
 
   it("a change of membership shape forgets what every family was last seen to owe", async () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "12"), inv("3", "20")];
-    await loadFamilyMoney("10");
-    await loadFamilyMoney("20");
+    await moneyOf("10");
+    await moneyOf("20");
     expect(await db.select().from(familyMoney)).toHaveLength(2);
     // Students are no longer identified: Leo's invoice is not the Rivera family's to see any more.
     await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }, { actor: SYSTEM.actor, ip: null });
     expect(await db.select().from(familyMoney)).toHaveLength(0);
-    expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1"]);
+    expect(numbers((await moneyOf("10")).figures!.open)).toEqual(["INV-1"]);
   });
 });
 
@@ -599,19 +633,19 @@ describe("never the wrong company", () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
     const asked = stub.calls.length;
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: false, totalCents: 8500 });
-    expect((await loadFamilyMoney("20")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toMatchObject({ current: false, totalCents: 8500 });
+    expect((await moneyOf("20")).figures).toBeNull();
     expect(stub.calls).toHaveLength(asked);
     expect((await moneyRow("10"))!.failedCode).toBe("not_connected");
   });
 
   it("asks nothing when there is no connection at all", async () => {
     await twoFamilies();
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
     expect(stub.calls).toHaveLength(0);
     // The roster names no company, so the family has no record yet, and nothing is written.
     expect(await db.select().from(familyMoney)).toHaveLength(0);
@@ -621,7 +655,7 @@ describe("never the wrong company", () => {
     await twoFamilies();
     await connectCompany(stub);
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
     expect(stub.calls).toHaveLength(0);
     expect((await moneyRow("10"))!.failedCode).toBe("not_connected");
   });
@@ -635,7 +669,7 @@ describe("never the wrong company", () => {
     if (source) await db.transaction((tx) => setRosterSource(tx, source));
     else await db.delete(setting).where(eq(setting.key, "roster.source"));
     stub.invoices = [inv("1", "10")];
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
     expect(stub.calls).toHaveLength(0);
     // No link answers in either case (links.ts goes by the records' company), so the session's customer has no family
     // record here and there is no row to stamp.
@@ -646,14 +680,14 @@ describe("never the wrong company", () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     // The same family id in another company: the cache now says it came from 2222, and QuickBooks is connected to 2222.
     await db.transaction((tx) => setRosterSource(tx, "2222"));
     await db.update(qboConnection).set({ realmId: "2222" });
     // The roster read of that company brings the app's records into step with it: the family has a record linked there.
     await syncAppRecords();
     stub.invoices = [inv("7", "10", { Balance: 5 })];
-    const money = await loadFamilyMoney("10");
+    const money = await moneyOf("10");
     expect(money.figures).toMatchObject({ current: true, totalCents: 500 });
     expect(numbers(money.figures!.open)).toEqual(["INV-7"]);
     expect((await moneyRow("10"))!.realmId).toBe("2222");
@@ -661,7 +695,7 @@ describe("never the wrong company", () => {
     // And when the new company can't be asked, the old company's figures are not shown in its place.
     await db.update(familyMoney).set({ realmId: MONEY_REALM });
     await db.update(qboConnection).set({ realmId: null });
-    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect((await moneyOf("10")).figures).toBeNull();
   });
 
   it("does not keep figures when the company changes while QuickBooks is answering", async () => {
@@ -670,7 +704,7 @@ describe("never the wrong company", () => {
     stub.invoices = [inv("1", "10")];
     stub.apiDelayMs = 1000; // well inside the read's limit, and long enough for the change below on a loaded machine
     const asked = stub.apiCalls().length;
-    const loading = loadFamilyMoney("10");
+    const loading = moneyOf("10");
     for (let i = 0; i < 500 && stub.apiCalls().length === asked; i++) await new Promise((r) => setTimeout(r, 10)); // QuickBooks has the question
     expect(stub.apiCalls().length).toBeGreaterThan(asked);
     await db.transaction((tx) => setRosterSource(tx, "2222"));
@@ -683,8 +717,8 @@ describe("never the wrong company", () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "20")];
-    await loadFamilyMoney("10");
-    await loadFamilyMoney("20");
+    await moneyOf("10");
+    await moneyOf("20");
     await seedFamilyMoney(FAMILY_A);
     expect(await db.select().from(familyMoney)).toHaveLength(3);
     expect(await clearRosterOfOtherCompany(MONEY_REALM, SYSTEM)).toBe(false); // the same company keeps them
@@ -698,11 +732,11 @@ describe("never the wrong company", () => {
     await twoFamilies();
     await connectCompany(stub);
     stub.invoices = [inv("1", "10")];
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     await ageMoney("10", 6 * MINUTE);
     await db.update(qboConnection).set({ lastError: "Intuit no longer accepts this connection. Connect QuickBooks again. (invalid_grant)", lastErrorAt: new Date(), accessExpiresAt: new Date(Date.now() - 1000) });
     const asked = stub.calls.length;
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: false, totalCents: 8500 });
+    expect((await moneyOf("10")).figures).toMatchObject({ current: false, totalCents: 8500 });
     expect(stub.calls).toHaveLength(asked); // no token refresh was tried
     expect((await moneyRow("10"))!.failedCode).toBe("needs_admin");
   });
@@ -715,19 +749,19 @@ describe("the cross-check against QuickBooks' own balance (v1 spec §8.3)", () =
     await setFreshSeconds(0);
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 100 }), inv("9", "20")];
     balanceWithJobs(250);
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ totalCents: 18500, credit: false }); // higher: nothing is said to the parent
+    expect((await moneyOf("10")).figures).toMatchObject({ totalCents: 18500, credit: false }); // higher: nothing is said to the parent
     expect(await moneyRow("10")).toMatchObject({ totalCents: 18500, balanceWithJobsCents: 25000 });
     // The row names the app's own family (a uuid), never the family's customer.
     const rivera = String(await familyRecordOf("10")), chen = String(await familyRecordOf("20"));
     const [first] = await audits();
     expect(first).toMatchObject({ door: "system", actorId: null, targetType: "family", targetId: rivera, after: { invoicesCents: 18500, balanceWithJobsCents: 25000, currency: "USD" } });
-    await loadFamilyMoney("10");
-    await loadFamilyMoney("10");
+    await moneyOf("10");
+    await moneyOf("10");
     expect(await audits()).toHaveLength(1);
-    await loadFamilyMoney("20"); // another family's difference ($85.00 of invoices, a balance of zero) is its own row
+    await moneyOf("20"); // another family's difference ($85.00 of invoices, a balance of zero) is its own row
     expect((await audits()).map((a) => a.targetId).sort()).toEqual([rivera, chen].sort());
     await ageMoney("10", 25 * 60 * MINUTE); // the next day
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     expect((await audits()).filter((a) => a.targetId === rivera)).toHaveLength(2);
     expect((await audits()).filter((a) => a.targetId === chen)).toHaveLength(1);
   });
@@ -737,7 +771,7 @@ describe("the cross-check against QuickBooks' own balance (v1 spec §8.3)", () =
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 100 })];
     balanceWithJobs(135);
-    const money = await loadFamilyMoney("10");
+    const money = await moneyOf("10");
     expect(money.figures).toMatchObject({ totalCents: 18500, credit: true }); // the figure stays the sum
     expect(await audits()).toHaveLength(1);
   });
@@ -756,12 +790,12 @@ describe("the cross-check against QuickBooks' own balance (v1 spec §8.3)", () =
     await setFreshSeconds(0);
     stub.invoices = [inv("1", "12"), inv("2", other.qboId, { Balance: 0, TotalAmt: 50 })];
     balanceWithJobs(35); // the family's own $85.00, less $50.00 held as a credit for the customer it is not shown
-    const money = await loadFamilyMoney("10");
+    const money = await moneyOf("10");
     expect(money.figures).toMatchObject({ current: true, totalCents: 8500, credit: false });
     expect(numbers(money.figures!.open)).toEqual(["INV-1"]);
     expect(await moneyRow("10")).toMatchObject({ totalCents: 8500, balanceWithJobsCents: null, mismatchAuditedAt: null });
     balanceWithJobs(500); // nor is what that customer owes audited as this family's difference
-    await loadFamilyMoney("10");
+    await moneyOf("10");
     expect(await audits()).toHaveLength(0);
     expect(stub.apiCalls().filter((c) => c.path.includes("/customer/"))).toEqual([]); // the balance is not asked for at all
   });
@@ -771,7 +805,7 @@ describe("the cross-check against QuickBooks' own balance (v1 spec §8.3)", () =
     await connectCompany(stub);
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 100 })];
     balanceWithJobs(185);
-    expect((await loadFamilyMoney("10")).figures).toMatchObject({ totalCents: 18500, credit: false });
+    expect((await moneyOf("10")).figures).toMatchObject({ totalCents: 18500, credit: false });
     expect(await audits()).toHaveLength(0);
     expect(await db.select().from(auditLog)).toHaveLength(0); // a parent's own read is not audited either
   });

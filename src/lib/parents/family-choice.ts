@@ -2,16 +2,21 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { guardian, parent, parentAuthSession } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { enabledGuardianRows, parentActor } from "./sessions";
+import { endParentSessions, enterableGuardianRows, parentActor } from "./sessions";
 
 /**
- * After a correct code: the person's invited rows become active (spec §2 Status changes), and with exactly one enabled
- * family that family is entered now and the sign-in is audited with it. With two or more, the sign-in is audited when
- * the parent chooses (chooseFamily).
+ * After a correct code: the person's invited rows become active (spec §2 Status changes), and with exactly one family
+ * they may enter (an open row naming an active app family record, enterableGuardianRows(), as the gate counts them)
+ * that family is entered now and the sign-in is audited with it. With two or more, the sign-in is audited when the
+ * parent chooses (chooseFamily). The session still stores the row's `family_qbo_id`, which the gate turns into the
+ * app's family (src/lib/auth/resolve.ts).
  *
  * `sessionId` is the session just made for this sign-in (parent-code-plugin.ts): the family is entered on it. If that
  * session has been ended in the meantime (a block, a change of address, the person's last link closing), nobody
- * signed in: nothing is activated or audited as a sign-in, and `sessionEnded` says so.
+ * signed in: nothing is activated or audited as a sign-in, and `sessionEnded` says so. A person left with no family to
+ * enter since the code was checked (verifySigninCode() refuses one before) is refused here as the gate refuses them:
+ * nothing is activated, their sessions end, `signin.refused` `no_enabled_guardian` is audited, and `sessionEnded` says
+ * so, so the plugin answers "rejected" and sets no cookie.
  */
 export async function completeParentSignin(parentId: string, ip: string | null, sessionId?: string): Promise<{ familyQboId: string | null; sessionEnded?: true }> {
   const [p] = await db.select().from(parent).where(eq(parent.id, parentId));
@@ -25,6 +30,11 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
     const mine = await tx.select({ id: guardian.id, status: guardian.status }).from(guardian).where(eq(guardian.parentId, parentId)).orderBy(guardian.id).for("update");
     // A reconcile that held these rows has finished by now, and whatever it ended is ended.
     if (!(await sessionLives(tx))) return false;
+    if ((await enterableGuardianRows(parentId, tx)).length === 0) {
+      await endParentSessions(parentId, tx);
+      await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: parentId, after: { reason: "no_enabled_guardian" }, ip }, tx);
+      return false;
+    }
     const invited = mine.filter((g) => g.status === "invited").map((g) => g.id);
     if (!invited.length) return true;
     await tx.update(guardian).set({ status: "active", updatedAt: new Date() }).where(inArray(guardian.id, invited));
@@ -34,7 +44,7 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
     return true;
   });
   if (!activated) return ENDED;
-  const rows = await enabledGuardianRows(parentId);
+  const rows = await enterableGuardianRows(parentId);
   if (rows.length !== 1) return (await sessionLives(db)) ? { familyQboId: null } : ENDED;
   const familyQboId = rows[0]!.familyQboId;
   const entered = await db.transaction(async (tx) => {
@@ -51,7 +61,8 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
 /**
  * The chooser and **Switch family**, given one of the person's own guardian rows by its id: the chooser binds the row,
  * never a family's QuickBooks id. Refuses (and audits, with the id sent) a row that isn't one of the person's own
- * enabled rows, the same way whatever the reason. `guardianId: null` is an argument the caller couldn't use as a row's
+ * rows the chooser offers (enterableGuardianRows(): open, naming an active family record), the same way whatever the
+ * reason. `guardianId: null` is an argument the caller couldn't use as a row's
  * id: refused the same way, with what was sent recorded as `sent` when the caller passes it (a short string only). The
  * session is then given that row's family, as the sign-in gives it.
  */
@@ -59,7 +70,7 @@ export async function chooseFamily(o: { sessionId: string; parentId: string; gua
   const [p] = await db.select().from(parent).where(eq(parent.id, o.parentId));
   if (!p) return false;
   const actor = parentActor(p);
-  const row = o.guardianId === null ? undefined : (await enabledGuardianRows(o.parentId)).find((r) => r.id === o.guardianId);
+  const row = o.guardianId === null ? undefined : (await enterableGuardianRows(o.parentId)).find((r) => r.id === o.guardianId);
   if (!row || p.blocked) {
     const after = o.guardianId !== null ? { reason: "family_not_enabled", guardianId: o.guardianId }
       : o.sent !== undefined ? { reason: "family_not_enabled", sent: o.sent } : { reason: "family_not_enabled" };

@@ -5,6 +5,7 @@ import { findMyBuyout } from "@/lib/buyouts/my-buyouts";
 import { BUYOUT_WORDS, perUnitWords, unitsWords } from "@/lib/buyouts/rules";
 import { formatMoney } from "@/lib/money/cents";
 import { loadMyFamily } from "@/lib/parents/my-family";
+import { shapeHolds } from "@/lib/roster/shape";
 import { getClubSettings } from "@/lib/settings/club";
 import { NotSetUpBox } from "../../../../family-boxes";
 import { confirmBuyoutAction, switchBackAction } from "../../actions";
@@ -23,11 +24,13 @@ export const dynamic = "force-dynamic";
 export default async function PayInsteadPage({ params }: { params: Promise<{ requirementId: string; choice: string }> }) {
   const { requirementId, choice } = await params;
   const ctx = await requireParentPage(`/volunteer/pay-instead/${encodeURIComponent(requirementId)}/${encodeURIComponent(choice)}`);
-  const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
-  if (!family) {
+  // While the membership shape can't say whose customers are the family's, nothing can be billed: the page says the
+  // family isn't set up, as it did when loadMyFamily() went by the shape (shapeHolds(), the buy-out's and money's rule).
+  const [family, club, holds] = await Promise.all([loadMyFamily(ctx), getClubSettings(), shapeHolds()]);
+  if (!family || !holds) {
     return <main className="wrap single"><h1 className="page-title">Pay instead of volunteering</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
-  const found = await findMyBuyout(ctx, family, requirementId, choice);
+  const found = await findMyBuyout(ctx, requirementId, choice);
   if (!found) notFound();
   const v = found.view;
   const forWhom = v.key === "family" ? "your family" : v.who;
@@ -57,7 +60,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
             <>
               <h3>Changed your mind?</h3>
               <p>You can switch back to volunteering until the invoice is paid. The invoice is then cancelled, and nothing is owed for it.</p>
-              <SwitchBack act={switchBackAction.bind(null, v.requirementId, v.key)} />
+              <SwitchBack act={switchBackAction.bind(null, v.requirementId, v.key, v.subjectStamp)} />
             </>
           )}
           {b.state === "invoiced" && b.invoicePaid && <p className="help">It&apos;s paid, so it can&apos;t be switched back here. If something isn&apos;t right, the club&apos;s treasurer can sort it out.</p>}
@@ -72,7 +75,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
             <li>The amount is fixed now: volunteering later doesn&apos;t lower it.</li>
             <li>You can switch back to volunteering until it&apos;s paid, and the invoice is then cancelled.</li>
           </ul>
-          <ConfirmBuyout label={`Confirm: invoice me ${formatMoney(v.quote.amountCents)}`} act={confirmBuyoutAction.bind(null, v.requirementId, v.key, v.stamp)} />
+          <ConfirmBuyout label={`Confirm: invoice me ${formatMoney(v.quote.amountCents)}`} act={confirmBuyoutAction.bind(null, v.requirementId, v.key, v.subjectStamp, v.stamp)} />
         </section>
       ) : (
         <section className="box" aria-labelledby="cost-h"><h2 id="cost-h">Nothing to pay</h2>

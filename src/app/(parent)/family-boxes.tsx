@@ -22,10 +22,10 @@ export function StudentsBox({ students, season = null }: { students: MyStudent[]
       {season && step && <p>{season.name} · {step.name}</p>}
       {students.length > 0 ? (
         <ul className="students">
-          {students.map((s, i) => {
-            const mine = step && s.id !== null ? standing.get(String(s.id)) : undefined;
+          {students.map((s) => {
+            const mine = step ? standing.get(String(s.id)) : undefined;
             return (
-              <li key={s.id === null ? `no-record-${i}` : String(s.id)}>
+              <li key={String(s.id)}>
                 <span className="who"><b>{s.name}</b></span>
                 {mine && step && (
                   <>

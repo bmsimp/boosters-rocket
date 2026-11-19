@@ -32,12 +32,14 @@ import { db } from "@/lib/db/client";
 import { auditLog, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { requestSigninCode, verifySigninCode, hashSigninCode } from "@/lib/parents/signin-codes";
+import { enterableGuardianRows } from "@/lib/parents/sessions";
 import { env } from "@/env";
 import { resetDb, seedWorkingMail } from "../helpers/db";
 import { runReconcile } from "../helpers/reconcile";
-import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu } from "../helpers/roster-cache";
+import { seedCache, seedRosterRead, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu } from "../helpers/roster-cache";
 
 const IP = "203.0.113.40";
+const REALM = "9130000000000001";
 const OLD = "ana@example.com", NEW = "ana.new@example.com";
 const T0 = new Date("2026-11-10T12:00:00Z");
 const codeOf = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
@@ -59,8 +61,13 @@ async function addressChangeUnderWay(): Promise<{ finish: () => Promise<void> }>
   await vi.waitFor(() => expect(gate.reached).toBe(true), { timeout: 10_000 });
   return {
     finish: async () => {
-      await vi.waitFor(async () => expect(await someoneWaitsForALock()).toBe(true), { timeout: 10_000, interval: 50 });
-      gate.held = null; gate.release();
+      // The gate is let go whatever happens, so a failure here can't leave the reconcile holding its locks into the
+      // next test's set-up.
+      try {
+        await vi.waitFor(async () => expect(await someoneWaitsForALock()).toBe(true), { timeout: 10_000, interval: 50 });
+      } finally {
+        gate.held = null; gate.release();
+      }
       expect(await changing).toMatchObject({ ran: true, emailChanged: 1 });   // the reconcile was not the loser of a deadlock
     },
   };
@@ -69,13 +76,17 @@ async function addressChangeUnderWay(): Promise<{ finish: () => Promise<void> }>
 describe("a sign-in that meets a change of address", () => {
   let ana: typeof parent.$inferSelect;
   beforeEach(async () => {
-    gate.held = null; gate.reached = false;
+    // A reconcile an earlier test left at the gate is let go before anything else.
+    gate.held = null; gate.reached = false; gate.release();
     await resetDb(); outbox.length = 0;
-    await seedWorkingMail(); await seedShape(); await seedParentSettings(SIGNINS_ON);
+    // The roster's company first, so the read below gives the family its app record: a code goes only to a person with
+    // an open row in an active family (enterableGuardianRows()).
+    await seedWorkingMail(); await seedRosterRead({ realmId: REALM }); await seedShape(); await seedParentSettings(SIGNINS_ON);
     await seedCache(roster(OLD));
     await runReconcile({ cause: "test" });
     [ana] = await db.select().from(parent) as [typeof parent.$inferSelect];
     expect(ana.email).toBe(OLD);
+    expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
   });
 
   it("mails no code to an address that is being replaced", async () => {

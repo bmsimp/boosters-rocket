@@ -3,8 +3,8 @@
 // QuickBooks through confirmMyBuyout() and switchMyBuyoutBack(), called only from the parent's own actions
 // (src/app/(parent)/volunteer/pay-instead/actions.ts); every write goes on the write queue first and is tried once at
 // once, then by the worker's queue job (src/lib/roster/queue.ts), through sendBuyoutWrite(). The family is the
-// session's: the requirement and the subject are found within it (./my-buyouts.ts), the customer billed is that
-// family's own from the roster cache, and nothing the browser sends names a customer, an item or an amount. It imports
+// session's (ctx.familyId): the requirement and the subject are found within it (./my-buyouts.ts), the customer billed
+// is the family's own linked customer or its student's, under it in the roster cache, and nothing the browser sends names a customer, an item or an amount. It imports
 // no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -12,18 +12,17 @@ import { db, type Tx } from "@/lib/db/client";
 import { buyout, familyMoney, qboCustomer, requirement, writeQueue, type BuyoutState, type BuyoutWrite, type QueuedWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { familyLinkedTo } from "@/lib/families/links";
+import { customerOfFamily, customerOfStudent, familyLinkedTo } from "@/lib/families/links";
 import { activeFamilyOf, studentsStillIn } from "@/lib/families/session-family";
 import type { ParentCtx } from "@/lib/guards";
 import { formatMoney, toCents } from "@/lib/money/cents";
-import type { MyFamily } from "@/lib/parents/my-family";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { parentActor } from "@/lib/parents/sessions";
 import { INVOICE_WRITES, isQboId, qboCreateInvoice, qboInvoices, qboVoidInvoice, WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { errorNeedsAdmin, QboError } from "@/lib/quickbooks/endpoints";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { afterFailedTry, classify } from "@/lib/roster/write-rules";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
+import { ROSTER_LOCK, shapeHolds } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { isUuid } from "@/lib/seasons/ids";
 import { ROSTER_BUSY, takePlace } from "@/lib/volunteer/my-volunteer";
@@ -37,6 +36,8 @@ const LEASE_MS = 5 * 60_000;
 
 export type Result = { ok: true; message: string } | { ok: false; errors: string[] };
 const no = (...errors: string[]): Result => ({ ok: false, errors });
+/** A stamp as a page is given one (quoteStamp(), subjectStamp()): a short string, checked before anything is read. */
+const isStamp = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 64;
 
 /** What a guardian is told. Calm about money, and the same whatever the cause: never that QuickBooks is down. */
 export const BUYOUT_COPY = {
@@ -346,9 +347,11 @@ async function writable(tx: Tx, realmId: string): Promise<boolean> {
 
 /**
  * A guardian confirms "Pay instead of volunteering" for one requirement and one of the family's own subjects. Every
- * argument came from a browser: the requirement and the key are looked up within the session's family, and the quote
- * is worked out again; the stamp of the quote the page showed must match it, or nothing is done and the new amount is
- * said. In one transaction, holding the roster lock shared (no refresh or change of company runs between the checks and
+ * argument came from a browser: the requirement and the key are looked up within the session's family, the stamp of
+ * the subject the page showed (subjectStamp()) must name the subject the key names now, or nothing is done and the
+ * reload words are said, and the quote is worked out again; the stamp of the quote the page showed must match it, or
+ * nothing is done and the new amount is said. While the membership shape doesn't hold (shapeHolds(): none, or one
+ * naming a customer type QuickBooks no longer has) the family is not set up for it, before and under the lock. In one transaction, holding the roster lock shared (no refresh or change of company runs between the checks and
  * the write): the requirement is read again, the customer billed is checked to be the family's own and active, the
  * family's record to be the session's and active and a student's record to be active and in it, the buy-out is
  * recorded as being invoiced by those records (at most one stands per requirement and family, or requirement and
@@ -356,15 +359,17 @@ async function writable(tx: Tx, realmId: string): Promise<boolean> {
  * the write queue, and the choice is audited. The create is then tried
  * once at once, never waiting for the connection row; the worker's queue job does the rest.
  */
-export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, requirementId: unknown, key: unknown, stamp: unknown): Promise<Result> {
-  if (!isUuid(requirementId) || !isChoiceKey(key) || typeof stamp !== "string" || stamp.length === 0 || stamp.length > 64) return no(BUYOUT_COPY.notFromPage);
-  if (!family) return no(BUYOUT_COPY.notSetUp);
+export async function confirmMyBuyout(ctx: ParentCtx, requirementId: unknown, key: unknown, subject: unknown, stamp: unknown): Promise<Result> {
+  if (!isUuid(requirementId) || !isChoiceKey(key) || !isStamp(subject) || !isStamp(stamp)) return no(BUYOUT_COPY.notFromPage);
+  if (!(await shapeHolds())) return no(BUYOUT_COPY.notSetUp);
   const actor = parentActor({ id: ctx.parentId, email: ctx.email });
   const take = await takeRateLimit("buyout_parent", ctx.parentId);
   if (take === "first_refusal") await writeAudit({ actor, action: "volunteer.buyout.limit", targetType: "parent", targetId: ctx.parentId, after: { code: "rate_limited" }, ip: ctx.ip });
   if (take !== "taken") return no(BUYOUT_COPY.rateLimited);
-  const t = await findMyBuyout(ctx, family, requirementId, key);
-  if (!t) return no(BUYOUT_COPY.notFromPage);
+  const t = await findMyBuyout(ctx, requirementId, key);
+  // Which subject first: a key that has come to name another student since the page was drawn is the reload words,
+  // never the price-changed ones (the quote's stamp below speaks for the price alone).
+  if (!t || t.view.subjectStamp !== subject) return no(BUYOUT_COPY.notFromPage);
   if (t.view.buyout) return no(BUYOUT_COPY.already);
   const q = t.view.quote;
   if (!q.ok) return no(q.why === "met" ? BUYOUT_COPY.met : BUYOUT_COPY.notOffered);
@@ -373,18 +378,24 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
   const made = await takePlace(async (tx): Promise<{ r: Result; item?: Item }> => {
     await tx.execute(sql`set local lock_timeout = '10s'`);
     await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+    // The membership shape, read again under the lock (a shape save holds it): while it can't say whose customers are
+    // the family's, nothing is billed (shapeHolds(), as money shows no figures then).
+    if (!(await shapeHolds(tx))) return { r: no(BUYOUT_COPY.notSetUp) };
     if (!(await writable(tx, t.realmId))) return { r: no(BUYOUT_COPY.cantNow) };
     const [r] = await tx.select().from(requirement).where(eq(requirement.id, t.requirement.id)).for("share");
     if (!r || r.kind !== "volunteer" || r.buyoutUnitCents === null || r.itemQboId === null) return { r: no(BUYOUT_COPY.notOffered) };
     if (r.buyoutUnitCents !== q.unitCents || r.itemQboId !== t.itemQboId || r.amount !== t.requirement.amount || r.amountUnit !== t.requirement.amountUnit) return { r: no(BUYOUT_COPY.changed(amount)) };
-    // Who is billed: the family's own customer, or the student's own, active and directly under the session's family now.
-    const [customer] = await tx.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId }).from(qboCustomer)
-      .where(and(eq(qboCustomer.qboId, t.customerQboId), eq(qboCustomer.active, true)));
-    const ours = customer && (r.appliesTo === "family" ? customer.qboId === ctx.familyQboId : customer.parentQboId === ctx.familyQboId);
-    if (!ours) return { r: no(BUYOUT_COPY.notFromPage) };
     // Whose it is: the session's own family record, still active, and for a per-student requirement the student's own
     // record, still active and in that family, as the page found them (sessionFamily()), read again under the lock.
-    if ((r.appliesTo === "family") !== (t.studentId === null) || (await activeFamilyOf(ctx.familyQboId, tx)) !== t.familyId) return { r: no(BUYOUT_COPY.notFromPage) };
+    if ((r.appliesTo === "family") !== (t.studentId === null) || String(ctx.familyId) !== String(t.familyId) || (await activeFamilyOf(ctx.familyId, tx)) === null) return { r: no(BUYOUT_COPY.notFromPage) };
+    // Who is billed, read again under the lock: the family's own linked customer, or the student's own linked customer,
+    // active and directly under the family's now (QuickBooks' tree: open question 14).
+    const familyCustomer = await customerOfFamily(t.familyId, tx);
+    const subjectCustomer = t.studentId === null ? familyCustomer : await customerOfStudent(t.studentId, tx);
+    const [customer] = familyCustomer === null || subjectCustomer !== t.customerQboId ? [] : await tx.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId }).from(qboCustomer)
+      .where(and(eq(qboCustomer.qboId, t.customerQboId), eq(qboCustomer.active, true)));
+    const ours = customer && (r.appliesTo === "family" ? customer.qboId === familyCustomer : customer.parentQboId === familyCustomer);
+    if (!ours) return { r: no(BUYOUT_COPY.notFromPage) };
     if (t.studentId !== null && !(await studentsStillIn(t.familyId, [t.studentId], tx)).has(String(t.studentId))) return { r: no(BUYOUT_COPY.notFromPage) };
     const [row] = await tx.insert(buyout).values({
       requirementId: r.id, familyId: t.familyId, studentId: t.studentId, customerQboId: t.customerQboId, itemQboId: r.itemQboId,
@@ -420,21 +431,25 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
 
 /**
  * A guardian switches back to volunteering, before the buy-out's invoice is paid. The requirement and the key are found
- * within the session's family, and the buy-out is the family's own. The invoice is read live first: only one with
+ * within the session's family, and the buy-out is the family's own. The stamp the page was given (subjectStamp()) must
+ * name the subject the key names now: a key that has come to name another of the family's students since the page was
+ * drawn is refused with the reload words, and nothing is read or voided; so is everything while the membership shape
+ * doesn't hold (shapeHolds(), checked again in the void's transaction), with the not-set-up words. The invoice is read live first: only one with
  * nothing paid on it (its balance is its total) is voided; a paid or part-paid one is the treasurer's to sort out, in
  * QuickBooks. The void goes on the write queue in one transaction with its audit row, and is tried once at once (it
  * reads the invoice again just before it is sent). A buy-out still being invoiced can't be switched back until the
  * create's outcome is known.
  */
-export async function switchMyBuyoutBack(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, requirementId: unknown, key: unknown): Promise<Result> {
-  if (!isUuid(requirementId) || !isChoiceKey(key)) return no(BUYOUT_COPY.notFromPage);
-  if (!family) return no(BUYOUT_COPY.notSetUp);
+export async function switchMyBuyoutBack(ctx: ParentCtx, requirementId: unknown, key: unknown, stamp: unknown): Promise<Result> {
+  if (!isUuid(requirementId) || !isChoiceKey(key) || !isStamp(stamp)) return no(BUYOUT_COPY.notFromPage);
+  if (!(await shapeHolds())) return no(BUYOUT_COPY.notSetUp);
   const actor = parentActor({ id: ctx.parentId, email: ctx.email });
   const take = await takeRateLimit("buyout_parent", ctx.parentId);
   if (take === "first_refusal") await writeAudit({ actor, action: "volunteer.buyout.limit", targetType: "parent", targetId: ctx.parentId, after: { code: "rate_limited" }, ip: ctx.ip });
   if (take !== "taken") return no(BUYOUT_COPY.rateLimited);
-  const t = await findMyBuyout(ctx, family, requirementId, key);
-  if (!t?.view.buyout) return no(t ? BUYOUT_COPY.nothingToSwitch : BUYOUT_COPY.notFromPage);
+  const t = await findMyBuyout(ctx, requirementId, key);
+  if (!t || t.view.subjectStamp !== stamp) return no(BUYOUT_COPY.notFromPage);
+  if (!t.view.buyout) return no(BUYOUT_COPY.nothingToSwitch);
   const [b] = await db.select().from(buyout).where(and(eq(buyout.familyId, t.familyId), eq(buyout.requirementId, t.requirement.id), forSubject(t),
     inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));
   if (!b) return no(BUYOUT_COPY.nothingToSwitch);
@@ -452,7 +467,9 @@ export async function switchMyBuyoutBack(ctx: ParentCtx, family: Pick<MyFamily, 
   // voided and the buy-out ends, as the guardian asked.
   if (!inv) return no(BUYOUT_COPY.invoiceGone);
   if (inv.totalCents > 0 && inv.balanceCents < inv.totalCents) return no(BUYOUT_COPY.paidSome);
-  const item = await db.transaction((tx) => queueVoid(tx, b, "switched_back", { actor, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS), ip: ctx.ip }));
+  const item = await db.transaction(async (tx) => (await shapeHolds(tx))
+    ? queueVoid(tx, b, "switched_back", { actor, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS), ip: ctx.ip }) : "not_set_up" as const);
+  if (item === "not_set_up") return no(BUYOUT_COPY.notSetUp);
   if (!item) return no(BUYOUT_COPY.nothingToSwitch);
   const step = await sendBuyoutWrite(item, new Date(), { mayWait: false, actor });
   if (step === "done") return { ok: true, message: BUYOUT_COPY.switched };

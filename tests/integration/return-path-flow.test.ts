@@ -9,6 +9,7 @@ import ChooseFamily from "@/app/choose-family/page";
 import { chooseFamilyAction } from "@/app/choose-family/actions";
 import { resetDb, seedGuardian, seedWorkingMail } from "../helpers/db";
 import { seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { recordOfCustomer } from "../helpers/app-records";
 
 /**
  * The page a parent asked for, carried from the page's own guard through the sign-in page and the family chooser
@@ -56,8 +57,8 @@ describe("the page a parent asked for", () => {
 
     it("lets a signed-in parent through and returns the family from the session, whatever address is passed", async () => {
       asParent(a.identity);
-      expect(await requireParentPage("/payments")).toMatchObject({ familyQboId: a.identity.familyQboId, parentId: a.identity.parentId });
-      expect(await requireParentPage("//evil.example")).toMatchObject({ familyQboId: a.identity.familyQboId });
+      expect(await requireParentPage("/payments")).toMatchObject({ familyId: a.identity.familyId, parentId: a.identity.parentId });
+      expect(await requireParentPage("//evil.example")).toMatchObject({ familyId: a.identity.familyId });
     });
   });
 
@@ -69,7 +70,7 @@ describe("the page a parent asked for", () => {
       asRefusedParent();
       expect(await parentLayoutCtx()).toBeNull();
       asParent(a.identity);
-      expect(await parentLayoutCtx()).toMatchObject({ parentId: a.identity.parentId, familyQboId: a.identity.familyQboId });
+      expect(await parentLayoutCtx()).toMatchObject({ parentId: a.identity.parentId, familyId: a.identity.familyId });
     });
   });
 
@@ -105,7 +106,7 @@ describe("the page a parent asked for", () => {
 
     it("lists only the signed-in parent's own families, whatever the address says", async () => {
       const second = await seedGuardian({ parentId: a.identity.parentId, familyQboId: "QBO-ALDERQUIST-SECOND-7099" });
-      asParentChoosing({ ...a.identity, families: [...a.identity.families, { guardianId: second.id, familyQboId: "QBO-ALDERQUIST-SECOND-7099" }] });
+      asParentChoosing({ ...a.identity, families: [...a.identity.families, { guardianId: second.id, familyId: await recordOfCustomer("QBO-ALDERQUIST-SECOND-7099", "family") }] });
       for (const next of ["/payments", "//evil.example", b.spec.family.qboId]) {
         const html = await renderPage(ChooseFamily, { searchParams: { next } });
         expect(html).toContain(a.spec.family.name);

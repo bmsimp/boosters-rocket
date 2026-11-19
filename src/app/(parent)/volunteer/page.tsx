@@ -41,7 +41,7 @@ export default async function VolunteerPage() {
   if (!family) {
     return <main className="wrap single"><h1 className="page-title">Volunteer</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
-  const [mine, season, credit, buyouts] = await Promise.all([loadMyVolunteering(ctx), loadMySeason(ctx, family.students), loadMyCredit(ctx, family.students ?? []), loadMyBuyouts(ctx, family)]);
+  const [mine, season, credit, buyouts] = await Promise.all([loadMyVolunteering(ctx), loadMySeason(ctx), loadMyCredit(ctx), loadMyBuyouts(ctx)]);
   const asked = volunteerLines(season);
   // Paying instead: offered on what isn't met yet, and shown wherever a buy-out stands (src/lib/buyouts/my-buyouts.ts).
   const payInstead = buyouts.filter((b) => b.buyout !== null || (b.may === "choose" && b.quote.ok));

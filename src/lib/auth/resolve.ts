@@ -2,13 +2,19 @@ import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { staffUser, staffAuthUser, staffAuthAccount, parentAuthUser, parent, parentAuthSession } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { enabledGuardianRows, endParentSessions, parentActor } from "@/lib/parents/sessions";
+import { endParentSessions, enterableGuardianRows, parentActor } from "@/lib/parents/sessions";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
+import type { AppFamilyId } from "@/lib/families/ids";
 
 export type StaffIdentity = { door: "staff"; staffUserId: string; name: string; email: string };
-export type ParentFamily = { guardianId: string; familyQboId: string };
+/** One family the person may enter: their open guardian row in it, and the app's own family record that row names. */
+export type ParentFamily = { guardianId: string; familyId: AppFamilyId };
+/**
+ * A signed-in parent with a family chosen: `familyId` is the app's own family record, the only family every parent
+ * read and write is for (AGENTS.md, Privacy). No QuickBooks id of the family is in it.
+ */
 export type ParentIdentity = {
-  door: "parent"; parentId: string; sessionId: string; guardianId: string; familyQboId: string; name: string; email: string; families: ParentFamily[];
+  door: "parent"; parentId: string; sessionId: string; guardianId: string; familyId: AppFamilyId; name: string; email: string; families: ParentFamily[];
 };
 export type ParentSessionState =
   | { status: "ok"; identity: ParentIdentity }
@@ -62,7 +68,14 @@ function toStaff(s: typeof staffUser.$inferSelect): StaffIdentity {
 
 /**
  * Spec §2 and invariant 1: every parent request re-checks the person and the chosen family. A blocked person, or one with
- * no enabled row, is signed out everywhere; a chosen family that isn't enabled any more sends the parent back to choose.
+ * no row that counts, is signed out everywhere; a chosen family that doesn't count any more sends the parent back to
+ * choose. A row counts when it is open and names an active app family record (enterableGuardianRows(); app-owned
+ * families spec §6).
+ *
+ * This is the one place the session's family becomes the app's: the session still stores the family's QuickBooks id
+ * (`parent_auth_session.family_qbo_id`, until stage 3's fifth slice moves the column), which is matched here to the
+ * person's own rows by each row's `family_qbo_id`, and the identity carries that row's `family_id`. Nothing after the
+ * gate sees the QuickBooks id.
  */
 export async function resolveParentSession(s: { id: string; userId: string; familyQboId: string | null }, ip: string | null = null): Promise<ParentSessionState> {
   const [row] = await db.select({ p: parent }).from(parentAuthUser).innerJoin(parent, eq(parent.id, parentAuthUser.parentId)).where(eq(parentAuthUser.id, s.userId));
@@ -75,13 +88,13 @@ export async function resolveParentSession(s: { id: string; userId: string; fami
     await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "signins_off" }, ip });
     return { status: "none" };
   }
-  const rows = p.blocked ? [] : await enabledGuardianRows(p.id);
+  const rows = p.blocked ? [] : await enterableGuardianRows(p.id);
   if (rows.length === 0) {
     await endParentSessions(p.id);
     await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: p.blocked ? "blocked" : "no_enabled_guardian" }, ip });
     return { status: "none" };
   }
-  const families = rows.map((r) => ({ guardianId: r.id, familyQboId: r.familyQboId }));
+  const families = rows.map((r) => ({ guardianId: r.id, familyId: r.familyId }));
   const chosen = s.familyQboId ? rows.find((r) => r.familyQboId === s.familyQboId) : undefined;
   if (!chosen) {
     if (s.familyQboId) {
@@ -90,5 +103,5 @@ export async function resolveParentSession(s: { id: string; userId: string; fami
     }
     return { status: "choose", parentId: p.id, sessionId: s.id, name: p.name, families };
   }
-  return { status: "ok", identity: { door: "parent", parentId: p.id, sessionId: s.id, guardianId: chosen.id, familyQboId: chosen.familyQboId, name: p.name, email: p.email, families } };
+  return { status: "ok", identity: { door: "parent", parentId: p.id, sessionId: s.id, guardianId: chosen.id, familyId: chosen.familyId, name: p.name, email: p.email, families } };
 }

@@ -1,7 +1,7 @@
 // Privacy: the one module a parent's Volunteer pages read and write through (v1 spec §11.2, §12 invariant 7). The
-// family is the session's (ctx.familyQboId) and nothing else: found as the app's own active family through that
-// customer's own link, with its own students (sessionFamily(), src/lib/families/session-family.ts; stage 2 of the
-// app-owned families spec), and every sign-up is read and written by those records. Of other families a parent gets
+// family is the session's (ctx.familyId, the app's own family record) and nothing else, only while that record is
+// active, with its own active students (sessionFamily(), src/lib/families/session-family.ts; stage 3 of the app-owned
+// families spec), and every sign-up is read and written by those records. No link to the accounting system is needed. Of other families a parent gets
 // one number per shift, the places filled, and never a name, a sign-up or a count of their own. Every id from the
 // browser (a shift, a sign-up, the student who fills a place, by the app's own id) is looked up within the session's
 // family, or refused. It never imports a staff-only module (./setup.ts, src/lib/roster/queries.ts, the seasons'
@@ -14,7 +14,6 @@ import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { activeFamilyOf, sessionFamily, studentsStillIn, type SessionFamily } from "@/lib/families/session-family";
 import { sendMail } from "@/lib/mail/send";
-import type { MyFamily } from "@/lib/parents/my-family";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { isUuid } from "@/lib/seasons/ids";
@@ -72,7 +71,7 @@ const whoWords = (ctx: Pick<ParentCtx, "parentId">, s: typeof volunteerSignup.$i
  * end; a cancelled event or shift is not offered, though a sign-up for one says the club cancelled it. A session whose
  * family has no active app record sees the events and no sign-ups.
  */
-export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, now: Date = new Date()): Promise<MyVolunteering> {
+export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyId" | "parentId">, now: Date = new Date()): Promise<MyVolunteering> {
   const [{ timeZone: zone }, { cutoffHours }] = await Promise.all([getClubSettings(), getVolunteerSettings()]);
   // From the day before the club's today: a shift that started yesterday evening can still be going on.
   const from = calendarDayIn(zone, new Date(now.getTime() - 86_400_000));
@@ -87,7 +86,7 @@ export async function loadMyVolunteering(ctx: Pick<ParentCtx, "familyQboId" | "p
   const listed = events.map((e) => myEvent(e, ongoing.filter((s) => s.eventId === e.id).map((s) => myShift(e, s, filled.get(s.id) ?? 0, zone, now)))).filter((e) => e.shifts.length > 0);
 
   // The family's own sign-ups, and only those: the session's family, as its app record, is the only one asked about.
-  const familyId = await activeFamilyOf(ctx.familyQboId);
+  const familyId = await activeFamilyOf(ctx.familyId);
   if (familyId === null) return { events: listed, signups: [], cutoffHours };
   const mine = await db.select({ s: volunteerSignup, shift: volunteerShift, event: volunteerEvent }).from(volunteerSignup)
     .innerJoin(volunteerShift, eq(volunteerShift.id, volunteerSignup.shiftId)).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
@@ -124,16 +123,15 @@ export type ShiftForMe = { event: MyEvent; shift: MyShift; minutes: number; mine
  * One shift as the signed-in family sees it before signing up: the event, the places filled, who in the family is
  * already on it, and for each person who could fill a place, the requirements of the current season it would count
  * toward for them, with how much it counts and where they stand. Null for a shift that isn't offered (unknown,
- * cancelled, or its event cancelled), or a session whose family has no active app record, which the page answers with
- * a 404. `family` is what loadMyFamily(ctx) returned for the same session; its students are checked against the
- * roster cache and the app's records under the session's family (sessionFamily()).
+ * cancelled, or its event cancelled), or a session whose family record is not active, which the page answers with a
+ * 404. The students who could fill a place are the family's own active students (sessionFamily()).
  */
-export async function loadShiftForMe(ctx: Pick<ParentCtx, "familyQboId" | "parentId" | "name">, family: Pick<MyFamily, "students">, shiftId: string, now: Date = new Date()): Promise<ShiftForMe | null> {
+export async function loadShiftForMe(ctx: Pick<ParentCtx, "familyId" | "parentId" | "name">, shiftId: string, now: Date = new Date()): Promise<ShiftForMe | null> {
   if (!isUuid(shiftId)) return null;
   const [row] = await db.select({ shift: volunteerShift, event: volunteerEvent }).from(volunteerShift).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
     .where(and(eq(volunteerShift.id, shiftId), isNull(volunteerShift.cancelledAt), isNull(volunteerEvent.cancelledAt)));
   if (!row) return null;
-  const mineFamily = await sessionFamily(ctx.familyQboId, family.students);
+  const mineFamily = await sessionFamily(ctx.familyId);
   if (!mineFamily) return null;
   const zone = (await getClubSettings()).timeZone;
   const { shift, event } = row;
@@ -197,20 +195,20 @@ const NOT_SET_UP = "Your family isn't set up in the portal yet, so you can't sig
 
 /**
  * Takes one place on a shift for the signed-in guardian or one of the family's active students (`who`: "me", or the
- * student's app id as the page was given it). The shift row is locked for the length of the transaction, so two people
+ * student's app id as the page was given it, looked up among the family's own active students and checked again under
+ * the lock: a student's id is the same in every family). The shift row is locked for the length of the transaction, so two people
  * taking the last place at the same moment are put one after the other: the first gets it, the second is told the
  * shift is full. The roster lock is held too, shared, so no refresh (which brings the app's records into step) or
  * change of QuickBooks company runs between the check that the family and the student are its own and the write.
  * After the write, the guardian gets a confirmation with a calendar file.
  */
-export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, shiftId: unknown, who: unknown, now: Date = new Date()): Promise<Result> {
+export async function signUpForShift(ctx: ParentCtx, shiftId: unknown, who: unknown, now: Date = new Date()): Promise<Result> {
   if (!isUuid(shiftId) || (who !== "me" && !isUuid(who))) return no(NOT_FROM_PAGE);
-  if (!family) return no(NOT_SET_UP);
   // Each place taken emails the guardian: a page pressed again and again would fill their mailbox.
   const take = await takeRateLimit("volunteer_signup_parent", ctx.parentId);
   if (take === "first_refusal") await writeAudit({ actor: { door: "parent", id: ctx.parentId, label: ctx.email }, action: "volunteer.signup.refused", targetType: "parent", targetId: ctx.parentId, after: { code: "rate_limited" }, ip: ctx.ip });
   if (take !== "taken") return no(RATE_LIMITED);
-  const mineFamily = await sessionFamily(ctx.familyQboId, family.students);
+  const mineFamily = await sessionFamily(ctx.familyId);
   if (!mineFamily) return no(NOT_SET_UP);
   const student = who === "me" ? null : mineFamily.students.find((s) => String(s.id) === who) ?? null;
   if (who !== "me" && !student) return no(NOT_FROM_PAGE);
@@ -220,7 +218,7 @@ export async function signUpForShift(ctx: ParentCtx, family: Pick<MyFamily, "stu
     await tx.execute(sql`set local lock_timeout = '10s'`);
     await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
     // Checked again under the lock: the family is still the session's own active record, and the student still in it.
-    const familyId = await activeFamilyOf(ctx.familyQboId, tx);
+    const familyId = await activeFamilyOf(ctx.familyId, tx);
     if (familyId === null || String(familyId) !== String(mineFamily.familyId)) return { r: no(NOT_FROM_PAGE) };
     if (student && !(await studentsStillIn(familyId, [student.id], tx)).has(String(student.id))) return { r: no(NOT_FROM_PAGE) };
     const [shift] = await tx.select().from(volunteerShift).where(eq(volunteerShift.id, shiftId)).for("update");
@@ -279,13 +277,12 @@ export async function takePlace<T>(work: (tx: Tx) => Promise<T>): Promise<T | "b
  * Cancels one of the family's own sign-ups, until the club's cut-off before the shift starts. A sign-up id that isn't
  * the session family's own is answered as one that isn't there, whoever it belongs to.
  */
-export async function cancelMySignup(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, signupId: unknown, now: Date = new Date()): Promise<Result> {
+export async function cancelMySignup(ctx: ParentCtx, signupId: unknown, now: Date = new Date()): Promise<Result> {
   if (!isUuid(signupId)) return no(NOT_FROM_PAGE);
-  if (!family) return no("Your family isn't set up in the portal yet. Please ask the club.");
   const [{ timeZone: zone }, { cutoffHours }] = await Promise.all([getClubSettings(), getVolunteerSettings()]);
   const GONE = "That sign-up isn't there any more. Reload the page.";
   return db.transaction(async (tx) => {
-    const familyId = await activeFamilyOf(ctx.familyQboId, tx);
+    const familyId = await activeFamilyOf(ctx.familyId, tx);
     if (familyId === null) return no(GONE);
     const [s] = await tx.select().from(volunteerSignup)
       .where(and(eq(volunteerSignup.id, signupId), eq(volunteerSignup.familyId, familyId), isNull(volunteerSignup.cancelledAt))).for("update");

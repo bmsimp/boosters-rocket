@@ -71,6 +71,9 @@ describe("a parent the roster refresh made signs in", () => {
     expect(ana).toMatchObject({ name: "Ana Rivera", email: "ana@example.com", blocked: false });
     const [link] = await db.select().from(guardian);
     expect(link).toMatchObject({ parentId: ana!.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
+    // The refresh brought the app's records into step: her row names the family record of customer 10, which the gate enters.
+    const familyId = link!.familyId;
+    expect(familyId).not.toBeNull();
     expect(await db.select().from(parentAuthSession)).toEqual([]);
 
     // She types her address her own way and gets a code at the address QuickBooks holds.
@@ -82,7 +85,9 @@ describe("a parent the roster refresh made signs in", () => {
     // The next page request is hers, in the Rivera family, and the link is active.
     const state = await pageRequest(cookieFrom(res));
     expect(state).toMatchObject({ status: "ok", identity: { door: "parent", parentId: ana!.id, name: "Ana Rivera", email: "ana@example.com",
-      familyQboId: "10", guardianId: link!.id, families: [{ guardianId: link!.id, familyQboId: "10" }] } });
+      familyId, guardianId: link!.id, families: [{ guardianId: link!.id, familyId }] } });
+    // The identity names the app's family alone, never the QuickBooks id the session still stores.
+    expect(JSON.stringify(state)).not.toContain('"10"');
     expect((await db.select().from(guardian))[0]).toMatchObject({ status: "active", disabledReason: null });
     const [account] = await db.select().from(parentAuthUser);
     const [session] = await db.select().from(parentAuthSession);
@@ -95,7 +100,7 @@ describe("a parent the roster refresh made signs in", () => {
 
     // A second refresh that finds nothing changed leaves her signed in.
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
-    expect(await pageRequest(cookieFrom(res))).toMatchObject({ status: "ok", identity: { familyQboId: "10" } });
+    expect(await pageRequest(cookieFrom(res))).toMatchObject({ status: "ok", identity: { familyId } });
   }, 30_000);
 
   it("and is out again with the refresh that no longer finds them in QuickBooks", async () => {
@@ -121,6 +126,8 @@ describe("a parent the roster refresh made signs in", () => {
     const cookie = cookieFrom(res);
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
     const [ana] = await db.select().from(parent);
+    const [{ familyId }] = (await db.select().from(guardian)) as [typeof guardian.$inferSelect];
+    expect(familyId).not.toBeNull();
 
     (stub.customers.find((c) => c.Id === "11") as { PrimaryEmailAddr: { Address: string } }).PrimaryEmailAddr = { Address: "Ana.New@Example.com" };
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
@@ -134,6 +141,6 @@ describe("a parent the roster refresh made signs in", () => {
     expect(second).toMatchObject({ to: "ana.new@example.com" });
     const again = await post("/portal-code/verify", { email: "ana.new@example.com", code: codeIn(second!) });
     expect(await again.json()).toEqual({ ok: true, next: "/" });
-    expect(await pageRequest(cookieFrom(again))).toMatchObject({ status: "ok", identity: { parentId: ana!.id, email: "ana.new@example.com", familyQboId: "10" } });
+    expect(await pageRequest(cookieFrom(again))).toMatchObject({ status: "ok", identity: { parentId: ana!.id, email: "ana.new@example.com", familyId } });
   }, 30_000);
 });

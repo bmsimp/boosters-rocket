@@ -12,7 +12,6 @@ import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { checkIn, loadCheckInForMe } from "@/lib/volunteer/check-in";
 import { cancelMySignup } from "@/lib/volunteer/my-volunteer";
-import { loadMyFamily } from "@/lib/parents/my-family";
 import { VOLUNTEER_SETTINGS_KEY } from "@/lib/volunteer/settings";
 import CheckInPage from "@/app/(parent)/volunteer/check-in/[code]/page";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
@@ -195,7 +194,7 @@ describe("after checking in", () => {
     const { shifts: [shift] } = await seedEvent({ onDate: t.onDate, shifts: [{ startsAt: t.startsAt, endsAt: t.endsAt }] });
     const s = await seedSignup({ shiftId: shift!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, guardianName: FAMILY_A.parent.name });
     expect(await checkIn(ctxOf(a.identity), shift!.checkinCode, s.id)).toMatchObject({ ok: true });
-    expect(await cancelMySignup(ctxOf(a.identity), await loadMyFamily(ctxOf(a.identity)), s.id)).toEqual({ ok: false, errors: ["This place is checked in already, so it can't be cancelled. Thank you for helping!"] });
+    expect(await cancelMySignup(ctxOf(a.identity), s.id)).toEqual({ ok: false, errors: ["This place is checked in already, so it can't be cancelled. Thank you for helping!"] });
     asParent(a.identity);
     const page = textOf(await renderPage(VolunteerPage));
     expect(page).toContain("Checked in");

@@ -9,7 +9,7 @@ import { mailWorking } from "@/lib/mail/settings";
 import { sendMail, currentBrand } from "@/lib/mail/send";
 import { signinCodeMessage } from "@/lib/mail/messages";
 import { takeRateLimit, type RateLimitTake } from "./rate-limit";
-import { enabledGuardianRows, lockedPerson, parentActor } from "./sessions";
+import { enterableGuardianRows, lockedPerson, parentActor } from "./sessions";
 import { getParentSettings, parentDoorClosed } from "./settings";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
@@ -60,7 +60,7 @@ export async function requestSigninCode(rawEmail: string, ip: string | null, now
   const [p] = await db.select().from(parent).where(eq(parent.email, email));
   if (!p) { await refuse("unknown_email", email, null, ip); return DONE; }
   if (p.blocked) { await refuse("blocked", email, p, ip); return DONE; }
-  if ((await enabledGuardianRows(p.id)).length === 0) { await refuse("no_enabled_guardian", email, p, ip); return DONE; }
+  if ((await enterableGuardianRows(p.id)).length === 0) { await refuse("no_enabled_guardian", email, p, ip); return DONE; }
 
   const code = generateSigninCode();
   const stored = await db.transaction(async (tx) => {
@@ -139,7 +139,7 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
   // sent). Whether the address is still theirs is settled last of all, once the session exists (signinStands).
   const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));
   const reason = parentDoorClosed(await getParentSettings()) ? "signins_off"
-    : !fresh || fresh.blocked ? "blocked" : (await enabledGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
+    : !fresh || fresh.blocked ? "blocked" : (await enterableGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
   if (reason) {
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason }, ip });
     return REJECTED;

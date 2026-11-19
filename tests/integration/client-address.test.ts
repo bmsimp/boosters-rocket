@@ -18,7 +18,7 @@ import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getStaffAuth } from "@/lib/auth/staff-auth";
 import { getParentState } from "@/lib/auth/identity";
 import { env } from "@/env";
-import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 
 /**
  * The address a request came from is read in one place (src/lib/request.ts) from the header the deployment names
@@ -66,7 +66,7 @@ describe("the address a client comes from", () => {
   beforeEach(async () => {
     await resetDb(); outbox.length = 0; await seedWorkingMail();
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    await seedGuardian({ parentId: a.id, familyQboId: "F1" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
   });
   afterEach(() => { env.CLIENT_IP_HEADER = setting; });
 
