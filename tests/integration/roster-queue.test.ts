@@ -27,10 +27,18 @@ vi.mock("@/lib/volunteer/moved-student", async (original) => {
   } };
 });
 
+// A switch to make finishing a found create fail: looking up whether the new customer has a student record already
+// (the first thing changeOwnRecord() does for a new student) throws while it is on.
+const linkFails = vi.hoisted(() => ({ on: false }));
+vi.mock("@/lib/families/links", async (original) => {
+  const m = await original<typeof import("@/lib/families/links")>();
+  return { ...m, studentLinkedTo: (...args: Parameters<typeof m.studentLinkedTo>) => { if (linkFails.on) throw new Error("connection lost"); return m.studentLinkedTo(...args); } };
+});
+
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, formWithdrawal, jobRun, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
-import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
+import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, waitingWords, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
 import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
 import { runDueJobs } from "@/lib/jobs/runner";
@@ -55,7 +63,7 @@ const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", s
 
 let op: ReturnType<typeof asOp>;
 beforeEach(async () => {
-  await resetDb(); stub.reset(); cacheFails.on = false; followFails.times = 0;
+  await resetDb(); stub.reset(); cacheFails.on = false; followFails.times = 0; linkFails.on = false;
   await connectRoster(stub);
   stub.calls.length = 0;
   op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
@@ -330,6 +338,9 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(await runWriteQueue()).toMatchObject({ ran: true });
     expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: true, lastCode: "finish_failed", tries: 2 });
     expect((await auditsOf("roster.write.retry"))[0]!.after).toMatchObject({ code: "finish_failed", tries: 2 });
+    // QuickBooks has it: the pages say the portal finishes it on its side, not that it is waiting to reach QuickBooks.
+    const [shown] = await loadOpenWrites();
+    expect(waitingWords(shown!)).toBe("Done in QuickBooks: the portal finishes it on its side after its next read of QuickBooks");
     // At the queue's last try it is stuck, for staff to look at on Reconciliation; nothing was sent at any try.
     await db.update(writeQueue).set({ tries: 7, nextTryAt: ago(MIN) }).where(eq(writeQueue.id, item.id));
     await runWriteQueue();
@@ -337,6 +348,25 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(posts()).toEqual([]);
     expect((await db.select().from(student).where(eq(student.id, leo)))[0]).toMatchObject({ familyId: await recordOfCustomer("10", "family") });
     expect(await auditsOf("roster.student.move.followed")).toEqual([]);
+  });
+
+  it("a create found made whose finish failed keeps the customer it was found as, and is never sent again once a read no longer shows it as sent", async () => {
+    const w = { op: "create" as const, role: "student" as const, name: "Rosa Rivera", typeQboId: "3", familyQboId: "10", email: null };
+    stub.customers.push({ Id: "77", DisplayName: "Rosa Rivera", Active: true, SyncToken: "0", ParentRef: { value: "10" }, Job: true, CustomerTypeRef: { value: "3" } });
+    const item = await seedQueued(w, { sent: true, code: "timeout" });
+    linkFails.on = true;
+    await runWriteQueue();
+    linkFails.on = false;
+    expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: true, lastCode: "finish_failed", resultQboId: "77" });
+    // The treasurer renames the new customer in QuickBooks before the next try: the read after it no longer finds it by
+    // its name, and it is not sent a second time.
+    stub.customers.find((c) => c.Id === "77")!.DisplayName = "Rosa M. Rivera";
+    await db.insert(setting).values({ key: REFRESH_ASK_KEY, value: { at: new Date().toISOString() } }); // so the next wake reads the roster again
+    await db.update(writeQueue).set({ nextTryAt: ago(MIN) }).where(eq(writeQueue.id, item.id));
+    await runWriteQueue();
+    expect(posts()).toEqual([]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", lastCode: "made_unmatched", resultQboId: "77" });
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.customerId, "77"))).toEqual([]);
   });
 
   it("a create QuickBooks answered with another customer is held with that customer, and is never sent again when the read doesn't show it as sent", async () => {

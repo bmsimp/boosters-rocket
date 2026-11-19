@@ -46,7 +46,9 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *
  * Lock order, the same everywhere: the address locks first (lockEmail(), in the order of the addresses), then the
  * person's row (`parent`), then what hangs on the person, in this order: their email change requests, their sign-in
- * codes, their sessions. So:
+ * codes, their set-up and reset links (`parent_signin_token`) and remembered devices (`parent_device`), their sessions.
+ * Nothing makes links or devices yet (the sign-in release's slice SI-1); the slice that first does deletes them in that
+ * place in blockPerson(), setSignins(false) and clearParentAccess(). So:
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request and
  *   changes the address, then deletes the person's other requests, then their unused codes, then their sessions, and
  *   only then, in a savepoint, the roster lock and the app's records;
@@ -72,8 +74,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   welcome, an unused code, a session), then clears the owed welcomes, then deletes the unused codes, then the
  *   sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;
  * - the daily clean-up (cleanUp(), src/lib/jobs/cleanup.ts) takes FOR UPDATE, in id order, the row of every person
- *   with an expired request, a spent or expired code or an expired session, then deletes those requests, then the
- *   codes, then the sessions;
+ *   with an expired request, a spent or expired code, a used or expired link, an expired device or an expired session,
+ *   then deletes those requests, then the codes, then the links and devices, then the sessions;
  * - clearParentAccess() (company-change.ts), on a change of company, takes FOR UPDATE, in id order, every person's
  *   row, then the open guardian rows, then deletes every request, then the unused codes, then the sessions;
  * - a code request calls this before it touches a code.

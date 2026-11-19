@@ -4,7 +4,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
@@ -26,7 +26,7 @@ const MONEY_COMPANY = "4620000000000001";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, signinLinks: 0, rememberedDevices: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -53,6 +53,8 @@ describe("the daily clean-up deletes only what is past use", () => {
     await seedParentSession(ana.authUserId, { expiresAt: at(90 * DAY) });
     await staffSession("live", at(7 * DAY));
     await db.insert(signinCode).values({ parentId: ana.id, codeHash: "h", expiresAt: at(CODE_TTL_MS), createdAt: NOW });
+    await db.insert(parentSigninToken).values({ parentId: ana.id, purpose: "setup", tokenHash: "link", expiresAt: at(7 * DAY) });
+    await db.insert(parentDevice).values({ parentId: ana.id, tokenHash: "device", expiresAt: at(90 * DAY) });
     await db.insert(rateLimitEvent).values({ kind: "code_send_ip", subject: "203.0.113.7", at: NOW });
     await db.insert(parentEmailChange).values({ parentId: ana.id, newEmail: "new@example.com", tokenHash: "tok", expiresAt: at(EMAIL_CHANGE_TTL_MS) });
     await db.insert(jobRun).values({ job: ROSTER_JOB, startedAt: NOW, finishedAt: NOW, outcome: "ok", startedBy: "worker" });
@@ -85,6 +87,41 @@ describe("the daily clean-up deletes only what is past use", () => {
     const left = await ids(db.select({ id: signinCode.id }).from(signinCode));
     expect(left).toEqual([expiresNow, secondLeft, usedYoung, usedAtEdge].sort());
     expect(left).not.toContain(expiredGone); expect(left).not.toContain(usedOld);
+  });
+
+  it("set-up and reset links: a used one goes, and one that expired a second ago; one with a second left stays", async () => {
+    // The sign-in release's one-time links (slice SI-1): nothing makes them yet, so they are seeded here as a later slice
+    // will store them. One unused link per person and purpose, so each person below holds at most one of each.
+    const people = await Promise.all(["a", "b", "c", "d"].map((n) => seedParent({ name: n })));
+    const link = async (i: number, purpose: "setup" | "reset", v: { expiresAt: Date; usedAt?: Date }) =>
+      String((await db.insert(parentSigninToken).values({ parentId: people[i]!.id, purpose, tokenHash: `h${i}${purpose}`, createdAt: at(-DAY), ...v })
+        .returning({ id: parentSigninToken.id }))[0]!.id);
+    const expiredGone = await link(0, "setup", { expiresAt: at(-SEC) });
+    const usedGone = await link(1, "reset", { expiresAt: at(DAY), usedAt: at(-SEC) });
+    const usedAndExpired = await link(1, "setup", { expiresAt: at(-DAY), usedAt: at(-2 * DAY) });
+    const expiresNow = await link(2, "setup", { expiresAt: NOW });
+    const secondLeft = await link(3, "reset", { expiresAt: at(SEC) });
+    const setupBesideReset = await link(3, "setup", { expiresAt: at(7 * DAY) });
+    expect(await clean()).toEqual({ ...NOTHING, signinLinks: 3 });
+    const left = await ids(db.select({ id: parentSigninToken.id }).from(parentSigninToken));
+    expect(left).toEqual([expiresNow, secondLeft, setupBesideReset].sort());
+    for (const gone of [expiredGone, usedGone, usedAndExpired]) expect(left).not.toContain(gone);
+    expect(describeCleanup({ ...NOTHING, signinLinks: 1 })).toBe("Removed 1 used or expired password link.");
+    expect(describeCleanup({ ...NOTHING, signinLinks: 3 })).toBe("Removed 3 used or expired password links.");
+  });
+
+  it("remembered devices: one that expired a second ago goes, one with a second left stays, however long ago either was used", async () => {
+    const ana = await seedParent({ name: "Ana" });
+    const device = async (tokenHash: string, expiresAt: Date, lastUsedAt: Date) =>
+      String((await db.insert(parentDevice).values({ parentId: ana.id, tokenHash, createdAt: at(-100 * DAY), lastUsedAt, expiresAt })
+        .returning({ id: parentDevice.id }))[0]!.id);
+    const gone = await device("d-gone", at(-SEC), at(-SEC));
+    const edge = await device("d-edge", NOW, at(-90 * DAY));
+    const kept = await device("d-kept", at(SEC), at(-90 * DAY));
+    expect(await clean()).toEqual({ ...NOTHING, rememberedDevices: 1 });
+    expect(await ids(db.select({ id: parentDevice.id }).from(parentDevice))).toEqual([edge, kept].sort());
+    expect([edge, kept]).not.toContain(gone);
+    expect(describeCleanup({ ...NOTHING, rememberedDevices: 2 })).toBe("Removed 2 expired remembered devices.");
   });
 
   it("rate-limit records: only those outside their kind's window, an unknown kind after the longest window", async () => {
@@ -289,7 +326,7 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, signinLinks: 0, rememberedDevices: 0, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
     expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
   });

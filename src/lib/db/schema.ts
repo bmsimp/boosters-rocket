@@ -196,6 +196,49 @@ export const signinCode = pgTable("signin_code", {
   createdAt: created(),
 }, (t) => [uniqueIndex("signin_code_one_live").on(t.parentId).where(sql`used_at IS NULL`)]);
 
+/**
+ * A one-time link's token for a person, of the sign-in release (section 6 of the app-owned families spec, "Signing in"):
+ * a set-up link, which chooses a first password, or a reset link, which chooses a new one. Only the keyed hash of the
+ * token is stored (an HMAC, as a sign-in code's is), never the token. At most one unused token per person and purpose;
+ * a token is spent by setting `used_at`. An unused token past its expiry still holds that place until the clean-up
+ * deletes it, so making a link first deletes or spends the person's unused link of that purpose, expired or not, under
+ * the person's lock and in the same transaction, as a new sign-in code replaces the old one (signin-codes.ts); an insert
+ * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes one past its expiry or
+ * used. Nothing makes one yet (slice SI-1): the slice that first does adds these rows to everything that ends all of a
+ * person's sign-in (blocking, sign-ins switched off, the change-of-company clear).
+ */
+export const parentSigninToken = pgTable("parent_signin_token", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  purpose: text("purpose", { enum: ["setup", "reset"] }).notNull(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  createdAt: created(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+}, (t) => [
+  uniqueIndex("parent_signin_token_one_live_uq").on(t.parentId, t.purpose).where(sql`used_at IS NULL`),
+  index("parent_signin_token_hash_ix").on(t.tokenHash),
+]);
+
+/**
+ * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
+ * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
+ * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-1): the slice that first does
+ * adds these rows to everything that ends all of a person's sign-in (blocking, sign-ins switched off, the
+ * change-of-company clear).
+ */
+export const parentDevice = pgTable("parent_device", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  createdAt: created(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, (t) => [
+  uniqueIndex("parent_device_token_uq").on(t.tokenHash),
+  index("parent_device_parent_ix").on(t.parentId),
+]);
+
 /** One row per counted event; rate-limit.ts counts rows in a sliding window (spec §1 Rate limits). */
 export const rateLimitEvent = pgTable("rate_limit_event", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -1176,9 +1219,15 @@ export const staffAuthVerification = staffAuth.verification;
 // rows by their `family_id` on every request (src/lib/auth/resolve.ts); it is never a QuickBooks id. Migration 0037
 // carried each session's QuickBooks family over to it (clearing one it couldn't), and 0038 dropped `family_qbo_id`. A
 // change of company deletes every session before the app's records go (clearParentAccess()).
+// `strong_at` (the sign-in release, slice SI-1): when this session last proved the password and the second step, null
+// until a later slice stamps it. It is the portal's alone: it is not a Better Auth additional field, so the library
+// never names it. Its drizzle adapter inserts and updates only the fields its own schema knows, leaving this column at
+// its null, and returns only those fields (so /get-session never answers it, and a session the library makes again
+// from an old one starts with none). Nullable for that reason; no backfill.
 const parentAuth = authTables("parent_auth",
   { parentId: uuid("parent_id").notNull().unique().references(() => parent.id, { onDelete: "cascade" }) },
-  { familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>() },
+  { familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
+    strongAt: timestamp("strong_at", { withTimezone: true }) },
   (t) => [index("parent_auth_session_family_ix").on(t.familyId!)]);
 export const parentAuthUser = parentAuth.user;
 export const parentAuthSession = parentAuth.session;

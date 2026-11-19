@@ -6,7 +6,7 @@ import { getParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
 import { missingForSignins, NO_STUDENTS_IN_SHAPE, peopleWithAccess, setRequireStudents, setSignins, setWelcome, signinCounts, studentsEffect } from "@/lib/parents/switches";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { resetDb, seedGuardian, seedGuardianInFamily, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
-import { storeShape } from "../helpers/roster-cache";
+import { seedParentSettings, storeShape } from "../helpers/roster-cache";
 import { saveShape } from "@/lib/roster/shape";
 import { studentsRuleInForce } from "@/lib/parents/sessions";
 
@@ -56,7 +56,7 @@ describe("the parent switches", () => {
     const [row] = await audits("settings.parents.save");
     expect(row).toMatchObject({ door: "staff", actorLabel: "admin@club.org", permission: "Settings.Parents.ReadWrite", targetType: "setting", targetId: PARENTS_KEY, ip: "203.0.113.9" });
     expect(row!.before).toMatchObject({ signin: false });
-    expect(row!.after).toEqual({ signin: true, welcome: false, requireActiveStudents: false });
+    expect(row!.after).toEqual({ signin: true, welcome: false, requireActiveStudents: false, level: "standard" });
     for (const action of ["parent.create", "parent.access.granted", "parent.access.ended"]) expect(await audits(action)).toEqual([]);
   });
 
@@ -147,7 +147,7 @@ describe("the parent switches", () => {
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
     expect(await rows()).toEqual(before);
     expect(await audits("parent.access.ended")).toEqual([]);
-    expect((await audits("settings.parents.save")).at(-1)!.after).toEqual({ signin: true, welcome: false, requireActiveStudents: true });
+    expect((await audits("settings.parents.save")).at(-1)!.after).toEqual({ signin: true, welcome: false, requireActiveStudents: true, level: "standard" });
     expect(await signinCounts()).toEqual({ people: 0, families: 0, welcomeNow: 0 });
     // A student comes back: she counts again, with no row reopened, since none was closed.
     await db.update(student).set({ active: true });
@@ -204,5 +204,22 @@ describe("the parent switches", () => {
     await db.update(family).set({ active: false }).where(eq(family.id, row.familyId!));
     expect(await peopleWithAccess()).toBe(1);
     expect(await db.select().from(setting).where(eq(setting.key, PARENTS_KEY))).toHaveLength(1);
+  });
+
+  it("keeps whatever sign-in level is stored through every switch: nothing writes the level yet", async () => {
+    // Slice SI-1 of the sign-in release: the level exists and nothing sets it, so a save of any switch keeps it as stored.
+    await seedWorkingMail(); await seedAna(); await storeShape();
+    await seedParentSettings({ level: "strict" });
+    const stored = async () => (await db.select().from(setting).where(eq(setting.key, PARENTS_KEY)))[0]!.value as Record<string, unknown>;
+    for (const press of [() => setSignins(true, admin), () => setWelcome(true, admin), () => setRequireStudents(true, admin),
+      () => setRequireStudents(false, admin), () => setWelcome(false, admin), () => setSignins(false, admin)]) {
+      expect(await press()).toEqual({ ok: true });
+      expect(await getParentSettings()).toMatchObject({ level: "strict" });
+      expect(await stored()).toMatchObject({ level: "strict" });
+      const last = (await audits("settings.parents.save")).at(-1)!;
+      expect(last.before).toMatchObject({ level: "strict" });
+      expect(last.after).toMatchObject({ level: "strict" });
+    }
+    expect(await audits("settings.parents.save")).toHaveLength(6);
   });
 });

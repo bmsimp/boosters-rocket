@@ -102,6 +102,43 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     expect(await audits("volunteer.buyout.flagged")).toHaveLength(3);
   });
 
+  it("takes its own student_moved flag off once QuickBooks holds the student under the family again, and off one it then finds paid", async () => {
+    const p = await buyoutFamily(stub);
+    await seedSignedInParent(CHENOWETH);
+    const by = p.identity.parentId;
+    const back = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Back", appliesTo: "student" }), familyQboId: FAMILY, subjectQboId: S1, chosenBy: by, invoiceQboId: "9906" });
+    const paidLater = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Paid later", appliesTo: "student" }), familyQboId: FAMILY, subjectQboId: S2, chosenBy: by, invoiceQboId: "9907" });
+    // Both students moved to another family in QuickBooks by mistake: the check flags both, voiding nothing.
+    await moveInQuickBooksOnly([S1, S2], CHENOWETH.family.qboId);
+    await moneyRun([]);
+    expect(await checkBuyoutInvoices()).toMatchObject({ ran: true, flagged: 2, unflagged: 0 });
+    expect(await row(back.id)).toMatchObject({ state: "invoiced", flag: "student_moved" });
+    expect(await row(paidLater.id)).toMatchObject({ state: "invoiced", flag: "student_moved" });
+    // Moved back in QuickBooks: the family's figures hold both invoices again, one of them paid since.
+    await moveInQuickBooksOnly([S1, S2], FAMILY);
+    await moneyRun([stored("9906", S1), stored("9907", S2, { balanceCents: 0 })]);
+    expect(await checkBuyoutInvoices()).toMatchObject({ ran: true, paid: 1, flagged: 0, unflagged: 1 });
+    expect(await row(back.id)).toMatchObject({ state: "invoiced", flag: null, flaggedAt: null });
+    expect(await row(paidLater.id)).toMatchObject({ state: "paid", flag: null });
+    expect((await audits("volunteer.buyout.unflagged")).map((a) => [a.targetId, a.before])).toEqual([[back.id, { flag: "student_moved" }]]);
+    expect((await audits("volunteer.buyout.paid")).map((a) => [a.targetId, a.before])).toEqual([[paidLater.id, { state: "invoiced", flag: "student_moved" }]]);
+    // Nothing is left for Reconciliation: a paid one is not offered a "paid in full" close it never asked for.
+    expect(await loadBuyoutsToLook()).toEqual([]);
+    expect(stub.apiCalls().filter((c) => c.method === "POST")).toEqual([]);
+  });
+
+  it("keeps a student_moved flag a void set beside it, though the student is under the family", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ appliesTo: "student" }), familyQboId: FAMILY, subjectQboId: S1, chosenBy: p.identity.parentId,
+      invoiceQboId: "9908", flag: "student_moved" });
+    // A void was tried for it (a staff move's), and kept: part of it was paid.
+    await db.transaction((tx) => queueVoid(tx, b, "student_moved", { actor: WORKER_ACTOR, label: "student moved", nextTryAt: later(60) }));
+    await db.update(buyout).set({ state: "invoiced", flag: "student_moved", lastCode: "paid" }).where(eq(buyout.id, b.id));
+    await moneyRun([stored("9908", S1, { balanceCents: 3000 })]);
+    expect(await checkBuyoutInvoices()).toMatchObject({ ran: true, unflagged: 0 });
+    expect(await row(b.id)).toMatchObject({ state: "invoiced", flag: "student_moved" });
+  });
+
   it("ends one voided in QuickBooks as voided, so the family is not left reading 'Buy-out invoiced' for good", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();

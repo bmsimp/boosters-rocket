@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun, qboConnection, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
+import { auditLog, buyout, jobRun, qboConnection, role, roleAssignment, roleRule, setting } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
@@ -400,10 +400,14 @@ describe("the lines for the worker's jobs with no run history of their own", () 
     await markJob(BUYOUT_CHECK_MARK, { counts: { paid: 2, flagged: 1, voided: 0, voiding: 0, unflagged: 0 }, failed: 0 }, new Date(Date.now() + 1000));
     const requirementId = await seedBuyoutRequirement();
     await seedBuyout({ requirementId, familyQboId: "10", chosenBy: randomUUID(), flag: "missing" });
+    // And one whose student the check found no longer under the family, with no void tried; one a void was tried for is the treasurer's, not counted.
+    await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Gate shifts" }), familyQboId: "10", chosenBy: randomUUID(), flag: "student_moved" });
+    const voidTried = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Clean-up shifts" }), familyQboId: "10", chosenBy: randomUUID(), flag: "student_moved" });
+    await db.update(buyout).set({ lastCode: "paid" }).where(eq(buyout.id, voidTried.id));
     const flagged = await check();
     expect(flagged).toMatchObject({ state: "attention", fix: { href: "/staff/reconciliation" } });
     expect(flagged.notes).toEqual([
-      "1 buy-out invoice is flagged and waiting for the club: QuickBooks no longer shows it, or shows it on another customer. The Reconciliation page lists it.",
+      "2 buy-out invoices are flagged and waiting for the club: QuickBooks no longer shows them, shows them on another customer, or no longer holds the student billed under the family. The Reconciliation page lists them.",
       "The last time it changed something: 2 marked paid, 1 flagged for the club.",
     ]);
     await markJob(BUYOUT_CHECK_MARK, "threw", new Date(Date.now() + 2000));
