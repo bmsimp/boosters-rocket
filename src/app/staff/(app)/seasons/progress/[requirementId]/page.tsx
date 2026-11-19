@@ -74,7 +74,7 @@ export default async function RequirementProgressPage({ params, searchParams }: 
               { key: "name", header: r.appliesTo === "family" ? "Family" : "Student", rowHeader: true, cell: (row) => row.name },
               ...(r.appliesTo === "student" ? [{ key: "family", header: "Family", cell: (row: ProgressRow) => row.familyName }] : []),
               { key: "state", header: "Where it stands", cell: (row) => <Standing row={row} /> },
-              // The family's QuickBooks id is the address; its name is only the link's words.
+              // The family's app record is the address (family-pages.ts); its name is only the link's words.
               { key: "page", header: "The family's page", cell: (row) => <Link href={familyProgressPage(row.familyId, season.id)}>Everything asked of {row.familyName}</Link> },
               ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (row: ProgressRow) => (
                 <div className="row-actions">

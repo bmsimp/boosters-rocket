@@ -304,6 +304,20 @@ describe("the Reconciliation page (Roster.Read)", () => {
     expect(chen).not.toContain("Void the volunteer buy-out invoice");
   });
 
+  it("links a Needs attention family to its page by the family's record, and a customer with no family record nowhere", async () => {
+    // The stub's company: Chen (20) has no student, so it is listed; the stray student (50) is under no family, and has no page.
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    const html = await renderPage(ReconciliationPage);
+    const start = html.indexOf('id="attention-h"');
+    expect(start).toBeGreaterThan(-1);
+    const attention = html.slice(start, html.indexOf("</section>", start));
+    expect(attention).toContain("Stray Student");
+    const links = [...attention.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]);
+    expect(links).toEqual([await idOf("20")]);
+    expect(attention).not.toContain('href="/staff/roster/20"');
+    expect(attention).not.toContain('href="/staff/roster/50"');
+  });
+
   it("offers Try again now and Give up to staff who may change the roster, and the money worth a look to staff who may see money", async () => {
     await seedQueued(RENAME, { familyQboId: "10" });
     await seedWorthALook();

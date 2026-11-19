@@ -191,9 +191,9 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
 }
 
 /**
- * An item as the Reconciliation page and a family's page show it. `familyQboId` is the customer of the family record
- * the item is filed under, for the link to that family's page (addressed by customer until the staff family pages
- * move); null when it is filed under none (a new family or member) or the record has no link in the roster's company.
+ * An item as the Reconciliation page and a family's page show it. `familyId` is the family record the item is filed
+ * under, for the link to that family's page (addressed by the record's own id); null when it is filed under none (a new
+ * family or member) or the record has no link in the roster's company.
  */
 export type QueueView = {
   id: string; state: "waiting" | "stuck"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
