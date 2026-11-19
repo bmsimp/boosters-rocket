@@ -311,13 +311,14 @@ export async function loadFamilyMoney(familyId: AppFamilyId, o: { timeoutMs?: nu
 }
 
 /**
- * Whether the membership shape can be trusted to say whose invoices are a family's: not when it names a customer type
- * QuickBooks no longer has (the staff roster shows nothing then either). Before stage 3's fourth slice a page asked
- * loadMyFamily() first, which went by the same rule; the family is the app's own record now, so money keeps it here.
+ * Whether the membership shape can be trusted to say whose invoices are a family's: not when there is none, nor when
+ * it names a customer type QuickBooks no longer has (the staff roster shows nothing then either). Before stage 3's
+ * fourth slice a page asked loadMyFamily() first, which went by the same rule; the family is the app's own record now,
+ * so money keeps it here, and with no shape nothing is read and no failed try is stamped.
  */
 async function shapeHolds(): Promise<boolean> {
   const [shape, types] = await Promise.all([getShape(), db.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType)]);
-  return shape === null || missingTypes(shape, types).length === 0;
+  return shape !== null && missingTypes(shape, types).length === 0;
 }
 
 async function figuresToShow(familyId: AppFamilyId, o: { timeoutMs?: number }): Promise<Omit<FamilyMoney, "today">> {

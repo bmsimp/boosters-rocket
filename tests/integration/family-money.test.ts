@@ -601,6 +601,19 @@ describe("stored figures are shown only while they are still this family's", () 
     expect(aged!.totalCents).toBe(before!.totalCents);
   });
 
+  it("with no membership shape at all, shows nothing, asks QuickBooks nothing and stamps no failed try", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    // A database without the setting (restored without it, say), while the family's record and link stand.
+    await db.delete(setting).where(eq(setting.key, "membership.shape"));
+    expect(await familyRecordOf("10")).not.toBeNull();
+    const asked = stub.calls.length;
+    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(stub.calls).toHaveLength(asked);
+    expect(await db.select().from(familyMoney)).toEqual([]);
+  });
+
   it("a change of membership shape forgets what every family was last seen to owe", async () => {
     await twoFamilies();
     await connectCompany(stub);
