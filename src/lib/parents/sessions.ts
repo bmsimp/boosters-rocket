@@ -1,6 +1,6 @@
 import { and, eq, exists, gt, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthSession, signinCode, student } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthSession, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import type { Actor } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster/shape";
@@ -46,15 +46,20 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *
  * Lock order, the same everywhere: the address locks first (lockEmail(), in the order of the addresses), then the
  * person's row (`parent`), then what hangs on the person, in this order: their email change requests, their sign-in
- * codes, their set-up and reset links (`parent_signin_token`) and remembered devices (`parent_device`), their sessions.
- * Nothing makes links or devices yet (the sign-in release's slice SI-1); the slice that first does deletes them in that
- * place in blockPerson(), setSignins(false) and clearParentAccess(). So:
+ * codes, their set-up and reset links (`parent_signin_token`), their password (the `credential` row of
+ * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
+ * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet, but everything that ends all of a
+ * person's sign-in deletes both already, in that place. So:
+ * - choosePasswordFromLink() (password-set.ts) takes the row FOR UPDATE, then for a reset deletes the unused codes, then
+ *   spends its link (the link's row FOR UPDATE), then replaces or inserts the password, then for a reset forgets the
+ *   devices and ends the sessions; mintSigninLink() takes the row FOR UPDATE, then replaces the unused link of its
+ *   purpose;
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request and
  *   changes the address, then deletes the person's other requests, then their unused codes, then their sessions, and
  *   only then, in a savepoint, the roster lock and the app's records;
  * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
- *   sessions; renamePerson() (people.ts) takes the row FOR UPDATE and touches nothing that hangs on it;
+ *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE and touches nothing that hangs on it;
  * - the staff writes of guardians.ts take the parents' settings lock shared first (setSignins() and setWelcome() take
  *   it before the people they touch), then the person's locks, and only then the roster lock shared, as the email
  *   confirm takes the roster after the person's locks: a write that held the roster lock while it waited for a person
@@ -71,13 +76,14 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
  *   it (FOR KEY SHARE, below);
  * - setSignins(false) (switches.ts) takes FOR UPDATE, in id order, the row of every person it will touch (an owed
- *   welcome, an unused code, a session), then clears the owed welcomes, then deletes the unused codes, then the
- *   sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;
+ *   welcome, an unused code, an unused link, a device, a session), then clears the owed welcomes, then deletes the
+ *   unused codes, then the unused links, then the devices, then the sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;
  * - the daily clean-up (cleanUp(), src/lib/jobs/cleanup.ts) takes FOR UPDATE, in id order, the row of every person
  *   with an expired request, a spent or expired code, a used or expired link, an expired device or an expired session,
  *   then deletes those requests, then the codes, then the links and devices, then the sessions;
  * - clearParentAccess() (company-change.ts), on a change of company, takes FOR UPDATE, in id order, every person's
- *   row, then the open guardian rows, then deletes every request, then the unused codes, then the sessions;
+ *   row, then the open guardian rows, then deletes every request, then the unused codes, then the unused links, then
+ *   the devices, then the sessions;
  * - a code request calls this before it touches a code.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
@@ -179,6 +185,21 @@ export function guardianRowCounts(studentsRule: boolean): SQL {
     .where(and(eq(family.id, guardian.familyId), eq(family.active, true), studentsRule ? hasActiveStudent(family.id) : undefined))))!;
 }
 
-export async function deleteUnusedSigninCodes(parentId: string, tx: Tx): Promise<void> {
-  await tx.delete(signinCode).where(and(eq(signinCode.parentId, parentId), isNull(signinCode.usedAt)));
+/** The person's sign-in codes not yet used, and how many there were. */
+export async function deleteUnusedSigninCodes(parentId: string, tx: Tx): Promise<number> {
+  const rows = await tx.delete(signinCode).where(and(eq(signinCode.parentId, parentId), isNull(signinCode.usedAt))).returning({ id: signinCode.id });
+  return rows.length;
+}
+
+/** The person's set-up and reset links not yet used (signin-links.ts), and how many there were. A used one stays until the daily clean-up. */
+export async function deleteUnusedSigninLinks(parentId: string, tx: Tx): Promise<number> {
+  const rows = await tx.delete(parentSigninToken).where(and(eq(parentSigninToken.parentId, parentId), isNull(parentSigninToken.usedAt)))
+    .returning({ id: parentSigninToken.id });
+  return rows.length;
+}
+
+/** Every device remembered for the person (`parent_device`), and how many there were: each asks for the second step again. */
+export async function forgetDevices(parentId: string, tx: Tx): Promise<number> {
+  const rows = await tx.delete(parentDevice).where(eq(parentDevice.parentId, parentId)).returning({ id: parentDevice.id });
+  return rows.length;
 }

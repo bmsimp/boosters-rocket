@@ -15,7 +15,7 @@ export class AccessDenied extends Error {
 export type StaffCtx = StaffIdentity & { effective: Effective; ip: string | null };
 export type ParentCtx = ParentIdentity & { ip: string | null };
 
-export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock"; permission?: Permission; self?: true };
+export type GuardInfo = { door: "staff" | "parent" | "setup" | "setup-unlock" | "before-sign-in"; permission?: Permission; self?: true };
 const registry = new WeakMap<object, GuardInfo>();
 export function registerGuard(fn: object, info: GuardInfo): void { registry.set(fn, info); }
 export function guardOf(fn: unknown): GuardInfo | undefined {
@@ -70,6 +70,22 @@ export function parentAction<A extends unknown[], R>(fn: (ctx: ParentCtx, ...arg
     return fn(ctx, ...args);
   };
   registry.set(wrapped, { door: "parent" });
+  return wrapped;
+}
+
+export type BeforeSignInCtx = { ip: string | null };
+
+/**
+ * An action a visitor takes before they have signed in: choosing a password from a set-up or reset link. There is no
+ * session to check, so, as setupUnlockAction()'s (src/lib/setup/guard.ts), its guard is the check its function performs:
+ * the link it is given, looked up and checked in full (src/lib/parents/signin-links.ts), limited per address and per
+ * link, with one answer for every refusal. The function is given only the visitor's address. Registered as the door
+ * "before-sign-in", which tests/integration/invariants.test.ts allows in one file only, src/app/sign-in/password-actions.ts:
+ * a new use of it is a decision, with its own checklist in AGENTS.md ("Page or action before sign-in").
+ */
+export function beforeSignInAction<A extends unknown[], R>(fn: (ctx: BeforeSignInCtx, ...args: A) => Promise<R>) {
+  const wrapped = async (...args: A): Promise<R> => fn({ ip: await requestIp() }, ...args);
+  registry.set(wrapped, { door: "before-sign-in" });
   return wrapped;
 }
 
