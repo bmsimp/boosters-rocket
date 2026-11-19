@@ -116,9 +116,17 @@ export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<
  * sign in. The caller passes the setting it read.
  */
 export function hasRowThatCounts(requireActiveStudents: boolean): SQL {
-  return exists(db.select({ id: guardian.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
-    .where(and(eq(guardian.parentId, parent.id), ne(guardian.status, "disabled"), eq(family.active, true),
-      requireActiveStudents ? hasActiveStudent(family.id) : undefined)));
+  return exists(db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, parent.id), guardianRowCounts(requireActiveStudents))));
+}
+
+/**
+ * enterableGuardianRows()'s rule as a condition on a query of `guardian`: this row counts. Mail sent to a family's
+ * guardians that asks them to sign in (the due-date, form and volunteer reminders) goes only to rows that count, so
+ * nobody is asked to sign in where the gate would refuse them. The caller passes the setting it read.
+ */
+export function guardianRowCounts(requireActiveStudents: boolean): SQL {
+  return and(ne(guardian.status, "disabled"), exists(db.select({ id: family.id }).from(family)
+    .where(and(eq(family.id, guardian.familyId), eq(family.active, true), requireActiveStudents ? hasActiveStudent(family.id) : undefined))))!;
 }
 
 export async function deleteUnusedSigninCodes(parentId: string, tx: Tx): Promise<void> {

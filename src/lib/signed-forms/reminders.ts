@@ -4,7 +4,7 @@
 // batch with counts, never an address. It reads every family's forms, so it is never imported by parent code
 // (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import "server-only";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { env } from "@/env";
 import { db } from "@/lib/db/client";
 import { formReminderClaim, formReminderRound, guardian, parent, requirement, signatureRequest, type FormReminders } from "@/lib/db/schema";
@@ -14,6 +14,7 @@ import { formReminderMessage } from "@/lib/mail/messages";
 import { currentBrand, sendMail } from "@/lib/mail/send";
 import { getStoredMailConfig } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { guardianRowCounts } from "@/lib/parents/sessions";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
 // The season and the requests both name the app's own families and students (stage 2 of the app-owned families spec):
 // the families are the app's active ones, read once, by loadSeasonFamilies(), and guardians are a family's by their
@@ -68,8 +69,10 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
   ]);
   const inScope = families.filter((f) => (scope?.kind === "family" ? String(f.id) === scope.familyId : requestFilter ? String(f.id) === String(requestFilter.familyId) : true));
   const familyIds = inScope.map((f) => f.id);
+  // Only guardians the gate would let in: a reminder asks them to sign in and sign.
+  const { requireActiveStudents } = await getParentSettings();
   const links = familyIds.length === 0 ? [] : await db.select({ familyId: guardian.familyId, parentId: guardian.parentId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyId, familyIds), ne(guardian.status, "disabled"), eq(parent.blocked, false)));
+    .where(and(inArray(guardian.familyId, familyIds), guardianRowCounts(requireActiveStudents), eq(parent.blocked, false)));
   const waived = new Set(waivers.map((w) => `${w.requirementId}|${String(w.subjectId)}`));
   const owed = new Map<string, Owed>();
   for (const f of forms) {

@@ -5,7 +5,7 @@
 // Families and students are the app's own records (stage 2 of the app-owned families spec), as the season's are: the
 // families are the app's active ones, read once (loadSeasonFamilies()), and a claim names the app's family.
 import "server-only";
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { guardian, parent, requirement, season, seasonStep, volunteerEvent, volunteerReminder, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -15,6 +15,7 @@ import { currentBrand, sendMail } from "@/lib/mail/send";
 import { volunteerDueMessage, volunteerReminderMessage, type VolunteerDueWords } from "@/lib/mail/messages";
 import { mailWorking } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { guardianRowCounts } from "@/lib/parents/sessions";
 import { everyCover, everyonesFacts } from "@/lib/seasons/everyone";
 import { isCovered, type SubjectId } from "@/lib/seasons/progress";
 import { toRequirement } from "@/lib/seasons/recorded";
@@ -67,7 +68,7 @@ async function dayBefore(tomorrow: string, now: Date): Promise<{ sent: number; f
     .innerJoin(parent, eq(parent.id, volunteerSignup.signedUpBy))
     .innerJoin(guardian, and(eq(guardian.parentId, volunteerSignup.signedUpBy), eq(guardian.familyId, volunteerSignup.familyId)))
     .where(and(eq(volunteerEvent.onDate, tomorrow), isNull(volunteerEvent.cancelledAt), isNull(volunteerShift.cancelledAt), isNull(volunteerSignup.cancelledAt),
-      ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+      guardianRowCounts((await getParentSettings()).requireActiveStudents), eq(parent.blocked, false)))
     .orderBy(asc(volunteerShift.startsAt), asc(volunteerSignup.createdAt));
   // A student who has moved to another family, or is no longer active, takes the place out of the old family's list.
   const moved = new Set<string>();
@@ -127,7 +128,8 @@ async function nudges(today: string, now: Date): Promise<{ sent: number; failed:
   }
   if (owed.length === 0) return { sent: 0, failed: 0 };
   const people = await db.select({ familyId: guardian.familyId, parentId: parent.id, email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyId, [...new Map(owed.map((o) => [String(o.familyId), o.familyId])).values()]), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+    .where(and(inArray(guardian.familyId, [...new Map(owed.map((o) => [String(o.familyId), o.familyId])).values()]),
+      guardianRowCounts((await getParentSettings()).requireActiveStudents), eq(parent.blocked, false)))
     .orderBy(asc(guardian.familyId), asc(parent.createdAt), asc(parent.id));
   const emails = owed.flatMap((o) => people.filter((p) => String(p.familyId) === String(o.familyId))
     .map((p) => ({ ...o, parentId: p.parentId, email: p.email, key: nudgeKey(o.familyId, o.dueOn, p.parentId) })));
