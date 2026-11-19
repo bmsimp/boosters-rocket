@@ -16,6 +16,7 @@ import { beginConnect, completeConnect } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { runDueJobs, lastWake, TOKEN_JOB } from "@/lib/jobs/runner";
+import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import * as welcomeModule from "@/lib/parents/welcome";
 import { workerToken } from "@/lib/jobs/worker-token";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
@@ -116,13 +117,16 @@ describe("scheduled jobs", () => {
   });
 
   // The held-address review's notice and the previous company's snapshot went with the review (stage 3 of the
-  // app-owned families spec): no wake sends the one or expires the other, and a snapshot an older portal stored is left.
-  it("runs no review notice and no snapshot expiry, and leaves a stored snapshot as it is", async () => {
+  // app-owned families spec): no wake sends the one or runs the other's expiry. A snapshot an older portal stored is a
+  // retired feature's setting, which the daily clean-up removes (RETIRED_SETTINGS), due on this first wake.
+  it("runs no review notice and no snapshot expiry, and the daily clean-up removes a stored snapshot", async () => {
     const snapshot = { key: "parents.previous_company", value: { realmId: "1111", newRealmId: "2222", at: new Date().toISOString(), families: [], approvals: [] } };
     await db.insert(setting).values(snapshot);
-    expect(await runDueJobs(hours(91 * 24))).toEqual({ ran: [] });
-    expect((await db.select().from(setting)).filter((x) => x.key === snapshot.key).map((x) => x.value)).toEqual([snapshot.value]);
-    expect((await db.select().from(auditLog)).filter((x) => x.action === "settings.parents.save" || x.action === "parent.review_notice.sent")).toEqual([]);
+    expect(await runDueJobs(hours(91 * 24))).toEqual({ ran: [{ job: CLEANUP_JOB, ok: true }] });
+    expect((await db.select().from(setting)).filter((x) => x.key === snapshot.key)).toEqual([]);
+    const log = await db.select().from(auditLog);
+    expect(log.filter((x) => x.action === "settings.parents.save" || x.action === "parent.review_notice.sent")).toEqual([]);
+    expect(log.filter((x) => x.action === "cleanup.run").map((x) => x.after)).toEqual([expect.objectContaining({ retiredSettings: 1 })]);
   });
 
   it("an unexpected error in the token job is recorded as a fixed failure and the roster job still runs", async () => {

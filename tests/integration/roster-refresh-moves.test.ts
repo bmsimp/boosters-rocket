@@ -79,6 +79,11 @@ const followed = () => auditsOf("roster.student.move.followed");
 const lastRun = async () => (await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1))[0]!;
 const signup = async (id: string) => (await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, id)))[0]!;
 const anaId = async () => (await db.select().from(parent).where(eq(parent.email, "ana@example.com")))[0]!.id;
+/**
+ * Ana, the Rivera family's guardian, as the portal holds her: a roster read makes no sign-in from QuickBooks (stage 3's
+ * slice 7a), so she is seeded before the read, whose records' step puts her row in the Rivera family's record.
+ */
+const anaBeforeTheRead = () => guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
 
 /** Leo, under the Rivera family, with an open form, a signed one with its evidence, a place still to come, and one done and checked in. */
 async function seedLeo() {
@@ -108,7 +113,7 @@ beforeEach(async () => {
 });
 
 describe("a student QuickBooks moved to another family, read by a refresh", () => {
-  beforeEach(async () => { await connectRoster(stub); });
+  beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
 
   it("is followed as a move made in the portal: the forms and the place still to come follow, the place done stays, once", async () => {
     const leo = await seedLeo();
@@ -349,6 +354,7 @@ describe("not followed when the cache a refresh replaces isn't this company's", 
   // anything (open question 18), so it clears nothing and follows nothing. (The rule that a cleared cache has no move to
   // follow stays in the refresh for when stage 4 lets a company change again.)
   it("a refresh over another company's cache is refused, and follows nothing", async () => {
+    await anaBeforeTheRead();
     await connectRoster(stub);
     await seedLeo();
     await db.transaction((tx) => setRosterSource(tx, "9130000000000999"));
@@ -363,7 +369,7 @@ describe("not followed when the cache a refresh replaces isn't this company's", 
 });
 
 describe("buy-outs of a student QuickBooks moved are the daily check's, and never voided twice", () => {
-  beforeEach(async () => { await connectRoster(stub); });
+  beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
 
   /** A money run that read every family, as the daily check follows it. */
   const moneyRun = () => db.insert(jobRun).values({ job: MONEY_JOB, startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), outcome: "ok", startedBy: "worker" });

@@ -112,7 +112,7 @@ describe("the owner's runbook, in its order", () => {
   it("leaves check 25, a second sandbox company, for the mapping screen, so the host stays on the first one part 2 needs", () => {
     const checks = part1.slice(part1.indexOf("8. **Run checks 18 to 24**"), part1.indexOf("9. **Export"));
     expect(checks.length).toBeGreaterThan(0);
-    expect(checks).toMatch(/Check 25, a second sandbox company, and the match review that follows it, wait for the mapping screen/);
+    expect(checks).toMatch(/\*\*Check 25, a second sandbox company, waits for the mapping screen:\*\*/);
     expect(checks).not.toMatch(/connect the first sandbox company/);
   });
 
