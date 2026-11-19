@@ -8,11 +8,12 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
-// A switch to make the cache's side of a write fail after QuickBooks took it: the reconcile throws while it is on.
+// A switch to make the cache's side of a write fail after QuickBooks took it: bringing the app's own records into step
+// (which a write's cache transaction ends with) throws while it is on.
 const reconcileFails = vi.hoisted(() => ({ on: false }));
-vi.mock("@/lib/parents/reconcile", async (original) => {
-  const m = await original<typeof import("@/lib/parents/reconcile")>();
-  return { ...m, reconcileAccess: async (...args: Parameters<typeof m.reconcileAccess>) => { if (reconcileFails.on) throw new Error("deadlock detected"); return m.reconcileAccess(...args); } };
+vi.mock("@/lib/families/in-step", async (original) => {
+  const m = await original<typeof import("@/lib/families/in-step")>();
+  return { ...m, keepAppRecordsInStep: async (...args: Parameters<typeof m.keepAppRecordsInStep>) => { if (reconcileFails.on) throw new Error("deadlock detected"); return m.keepAppRecordsInStep(...args); } };
 });
 
 import { and, eq, sql } from "drizzle-orm";
