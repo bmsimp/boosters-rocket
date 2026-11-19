@@ -76,6 +76,13 @@ const MAY_ROSTER_ASK = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions
  */
 const ROSTER_LINK = "createInQuickBooksAndLink";
 const MAY_ROSTER_LINK = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
+/**
+ * Adding a family or member (stage 3's slice 9d): the portal's own record first, then, for a staff member who may link
+ * families to accounting, its create sent through the module's own ask. Started only by the module itself and the one
+ * staff action, so no other module can send a family's create by way of it.
+ */
+const ROSTER_ADD = "addFamily";
+const MAY_ROSTER_ADD = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 /** Which body each roster write sends. */
 const ROSTER_BODY = { qboCreateCustomer: "create", qboRenameCustomer: "rename", qboMoveCustomer: "reparent", qboSetCustomerActive: "active" } as const;
 /** The fields the roster writes' bodies can carry, in the order CUSTOMER_WRITES writes them. */
@@ -507,6 +514,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       expect(naming(ROSTER_SEND)).toEqual([...MAY_ROSTER_SEND].sort());
       expect(naming(ROSTER_ASK)).toEqual([...MAY_ROSTER_ASK].sort());
       expect(naming(ROSTER_LINK), `${ROSTER_LINK} sends creates to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_LINK].sort());
+      expect(naming(ROSTER_ADD), `${ROSTER_ADD} sends a family's create to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_ADD].sort());
     });
 
     it("refuse a body that could carry another field", () => {
