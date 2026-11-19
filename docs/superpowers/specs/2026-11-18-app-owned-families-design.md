@@ -209,6 +209,14 @@ screen and the differences. Nobody's sign-in changes because of what it reads.
   Blocking stays.
 - The review for an email under two families goes away: one guardian simply belongs to both.
 - Only staff add guardians. A parent cannot invite a second guardian.
+- Staff remove a guardian from a family. The owner, on 2026-11-18: "a removed guardian loses portal access at once;
+  their Parent record in QuickBooks is made inactive only under the balance rule". So removing ends the guardian's
+  access to that family in the app at once, whatever the family owes; making their Parent record inactive in
+  QuickBooks, refused while anyone owes, comes with the source move. *(Built in the app in stage 3's slice 7b, with
+  add, reinstate and a change of name; the QuickBooks half waits for slice S9.)*
+- The parent door is closed until an Admin switches sign-ins on (Open questions, 15: the switch is how an Admin says the
+  club is ready), so a guardian staff add before then can't sign in until it is *(the lead's reading; stage 3's slice
+  7b)*.
 
 **What leaves.** The owner retired deriving logins from QuickBooks and the two-family review. The lead's reading is
 that what only serves them goes too: held addresses, the clean-up preview's dry run, and the previous-company snapshot

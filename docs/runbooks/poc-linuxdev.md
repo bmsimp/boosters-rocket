@@ -344,7 +344,9 @@ something QuickBooks held (an address under two families, an inactive record) st
    the same email and family prints "That person is already a guardian in that family." The same email with
    `--family POC-FAMILY-2` adds a second family to the same person.
    The tester can't sign in until parent sign-ins are switched on (section 5, "Parent sign-ins"): the parent door is
-   closed until an Admin switches them on, however the guardian came to be.
+   closed until an Admin switches them on, however the guardian came to be. A tester can also be added without the
+   script, on the family's page under **Families** (the **Portal sign-ins** box, **Add guardian**), for a family the
+   roster has read from QuickBooks.
    The seeded row has no family record of the portal's own until the roster is next read, and until then the tester
    can't sign in to it. Once the portal has read a roster from a company (even if QuickBooks is disconnected now),
    read the roster again (**Refresh now** on the staff roster page; reconnect QuickBooks first if it is

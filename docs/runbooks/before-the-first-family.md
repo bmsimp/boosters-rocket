@@ -421,7 +421,10 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    guardians, not QuickBooks' parents.
    **Pass:** the number of people and families looks right for the guardians the portal holds, and **Parents** lists
    each one with their families. **If not:** a guardian you expected and don't see is the portal's to add, not a
-   QuickBooks record to fix.
+   QuickBooks record to fix: on the family's page under **Families**, the **Portal sign-ins** box, **Add guardian**,
+   with their name and the email address they will sign in with. Nobody can sign in, whoever you add, until parent
+   sign-ins are switched on (part 7). A guardian who shouldn't sign in for a family any more is removed from the same
+   box (**Remove**, with a note only staff see): they are signed out of that family at once.
 4. **The daily read of every family's invoices, at the club's size.** The day after connecting, open Health.
    **Pass:** **Every family's invoices** is "Working" and finished within the day. A run longer than a few minutes
    carries on at the next wake by itself. QuickBooks turning the portal away for asking too often shows as a stop with
@@ -436,7 +439,7 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 ## 7. A pilot with a few families
 
 1. **Choose three to five families** who will tell you what confused them. Check each has its guardians in the portal,
-   with the email address each signs in with.
+   with the email address each signs in with, and add any that are missing on the family's page (part 6, step 3).
    **Pass:** **Parents** lists each of their guardians, and Settings, Parent sign-ins counts them among those who could
    sign in.
 2. **Switch parent sign-ins on, and leave welcome emails off:** Settings, Parent sign-ins, **Set up** (or
@@ -517,6 +520,12 @@ work another. Any time before the pilot.
     active, so nothing anyone changed is overwritten. The check's "Making a family inactive once everyone under it is
     inactive" row says whether QuickBooks raises it: on its second run (2026-11-17) it left the family's version as it
     was.
+19. The lead's choices, not the owner's (2026-11-19, stage 3's slice 7b): nobody can sign in until parent sign-ins
+    are switched on, not even before they were first switched on (earlier, a sign-in seeded by hand worked until
+    then); adding, removing and reinstating a guardian and changing a person's name take the same permission as
+    blocking (`Parents.ReadWrite`); removing a guardian needs a note, kept for staff in the audit log; and a guardian
+    can't be added to a family with no customer in QuickBooks linked to it until the portal's changes are sent on to
+    QuickBooks.
 
 ## Results
 
