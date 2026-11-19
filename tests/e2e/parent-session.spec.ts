@@ -117,6 +117,21 @@ test("every requirement and waiver the seed gives another family alone is search
     + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
 });
 
+test("every buy-out the seed gives another family is searched for", async () => {
+  // As above, for buy-outs: another family's must be findable by its id and by its requirement's title. Buy-outs name
+  // the app's own family (stage 2 of the app-owned families spec): another family's is one whose family isn't the one
+  // the Quetzalcoatl family's customer is linked to. Every state counts, so both passes of a run (the close spec ends
+  // the Rivera family's refused one, and Zelda's own choices are her family's) find the same rows.
+  const family = sql`SELECT family_id FROM accounting_link WHERE customer_id = ${PARENT_SESSION_FAMILY} AND family_id IS NOT NULL`;
+  const rows = await sql`SELECT b.id, b.state, r.title, l.customer_id AS family_customer FROM buyout b JOIN requirement r ON r.id = b.requirement_id
+    LEFT JOIN accounting_link l ON l.family_id = b.family_id WHERE b.family_id NOT IN (${family})`;
+  expect(rows.length).toBeGreaterThanOrEqual(1);
+  const unsearched = rows.flatMap((r) => [r.id as string, r.title as string].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)))
+    .map((v) => `${v} (a buy-out of ${r.family_customer}, ${r.state})`));
+  expect(unsearched, `scripts/seed-e2e.ts gives another family these buy-outs, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
+    + `would find them on a parent page: ${unsearched.join(", ")}. Add its id and a recognizable part of its requirement's title.`).toEqual([]);
+});
+
 test("every volunteer sign-up the seed gives another family is searched for", async () => {
   // As above, for volunteering: a sign-up of another family must be findable by its student's customer id or the name of
   // whoever fills it. Sign-ups name the app's own family and student (stage 2 of the app-owned families spec): another

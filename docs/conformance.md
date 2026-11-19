@@ -356,7 +356,7 @@ more of them; the roadmap's own Known gaps section is the current list.
 | Step 4 | Volunteer credit not allocated; sign-ups not rate-limited; cancelling an event or shift has no confirm | No longer true | Step 5 (`allocateCredit()`); `0731592`; `24bd468` |
 | Step 4 | A payment paid more than 12 months ago reads "No invoice yet"; the item list is read only on a press | Still true | `src/lib/money/invoices.ts`, `src/lib/money/items.ts` |
 | Step 4 | A student moved in QuickBooks leaves an opened form, and a place, behind | Still true for a move made in QuickBooks | `refreshRoster()` runs no `afterStudentMoved()` |
-| Step 4 | A family whose read always fails stalls the daily money run | No longer true | `e2442d6`; `money-sweep.test.ts` "stops at a family whose read keeps failing". Still true: a family passed over as not a family gets a failed-try stamp |
+| Step 4 | A family whose read always fails stalls the daily money run | No longer true | `e2442d6`; `money-sweep.test.ts` "stops at a family whose read keeps failing". A family passed over as not a family gets no failed-try stamp either: `8a17c5f`; `money-sweep.test.ts` "stamps no failed try on a family the cache stops holding as one" |
 | Step 4 | The Item list's inactive items have only met the stub | Still true | Sandbox check |
 | Step 4 | The test teardown drops scratch databases by name | Still true | `scratchDatabase()` in `tests/setup/database-url.ts` |
 | Step 4 | The installability browser test fails in a worktree with a long path | Still true | Windows path limit |
@@ -370,7 +370,7 @@ more of them; the roadmap's own Known gaps section is the current list.
 | Step 5 review | A queued move whose answer named another record runs no follow-ups | Still true | `src/lib/roster/queue.ts` |
 | Step 5 review | The copy for a guardian whose student moved goes only as an attachment | Still true | `src/lib/signed-forms/copies.ts` |
 | Step 5 review | Any guardian checks in another guardian's place; no check-in from inside the installed app | Still true | Owner's call |
-| Step 6 | No staff action closes a stuck, refused or flagged buy-out; no Health line for the check; no staff page of one family's buy-outs | Still true | `src/lib/buyouts/staff.ts` |
+| Step 6 | No staff action closes a stuck, refused or flagged buy-out; no Health line for the check; no staff page of one family's buy-outs | No longer true | `cb8ed77`, `aa35a66`: staff close one no unpaid invoice of stands, from Reconciliation and the family's buy-outs page (`src/lib/buyouts/close.ts`, `/staff/roster/[id]/buyouts`; `tests/integration/buyouts-close.test.ts`); `b259bfe`: the Health page's `buyout_check` line |
 | Step 6 | Copying a season drops the buy-out price; the move's follow-up row doesn't count buy-outs | No longer true | `aee9768`, `fea2769` |
 | Step 6 | The write queue clears the sent flag on a retry that sent nothing | No longer true | `7e3ba2b`; `roster-queue.test.ts` "stays one that may have been made when a resend after it sends nothing" |
 | Step 6 | The portal reaches Documenso at its public address | Still true | `src/lib/documenso/client.ts` |
