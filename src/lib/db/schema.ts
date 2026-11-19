@@ -485,7 +485,9 @@ export type RosterWrite =
    * A move of a linked student, saved in the portal first since stage 3's slice 9f (moveStudent()): `syncToken` is the
    * student link's own version (empty when it has none, and then nothing is sent before a live read);
    * `fromFamilyQboId`, the move's before-value, the customer of the family left (or, for a move that takes the place
-   * of a refused one, that one's), which a stale answer's live read is compared with (empty when there is none);
+   * of a refused one, that one's), which a stale answer's live read is compared with (empty when there is none;
+   * `top`, TOP_OF_TREE in src/lib/roster/writes.ts, for a student QuickBooks has under no customer, set by "Send the
+   * portal's value" when its row showed them so);
    * `toFamilyQboId`, the customer of the family joined (empty while that family has no link: the item is kept refused
    * until it has one). `fromFamilyId` and `toFamilyId` are the app's own families left and joined (none on a move
    * queued before that slice); `checked`, that it was sent with a version read live after the parent read as the

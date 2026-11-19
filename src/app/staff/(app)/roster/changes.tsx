@@ -45,7 +45,8 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
 /**
  * The writes waiting or stuck for this family or member, and the changes saved in the portal first that QuickBooks
  * refused (stage 3's slice 9e), each under its own heading: shown to everyone who can see the page, with no buttons (the
- * Reconciliation page has them). A refused change blocks nothing here.
+ * Reconciliation page has them). A refused change blocks nothing here, but that a kept move holds back making either of
+ * its families inactive (MOVE_PENDING) until it is sent or given up.
  */
 export function Waiting({ items }: { items: QueueView[] }) {
   const open = items.filter((i) => i.state !== "refused"), refused = items.filter((i) => i.state === "refused");
@@ -63,7 +64,7 @@ export function Waiting({ items }: { items: QueueView[] }) {
       )}
       {refused.length > 0 && (
         <section className="box" aria-labelledby="refused-h"><h2 id="refused-h">Kept in the portal, not in QuickBooks</h2>
-          <p>These changes are saved in the portal, but they didn&apos;t go through to QuickBooks (QuickBooks refused them, the portal held them back as QuickBooks has something else, or they couldn&apos;t be sent), so QuickBooks still has something else. They don&apos;t stop other changes. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
+          <p>These changes are saved in the portal, but they didn&apos;t go through to QuickBooks (QuickBooks refused them, the portal held them back as QuickBooks has something else, or they couldn&apos;t be sent), so QuickBooks still has something else. They don&apos;t stop other changes, except that a student&apos;s move kept here stops either of its two families being made inactive until it is sent or given up. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
           <DataTable caption="Each change that didn't go through, and why" captionHidden rows={refused} rowKey={(i) => i.id} columns={[
             { key: "change", header: "Change", rowHeader: true, cell: (i) => <>{i.words}{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
             { key: "why", header: "Why", cell: (i) => keptWordsFor(i.write, i.lastCode, i.holds) },
@@ -243,7 +244,7 @@ export function MoveStudents({ students, families, rosterTag, act }: { students:
   if (students.length === 0) return null;
   return (
     <section className="box" aria-labelledby="move-students-h"><h2 id="move-students-h">Move a student</h2>
-      <p>A move is saved in the portal first: the student&apos;s unfinished forms start again in the new family, their places on shifts still to come are given up, and a buy-out invoice of theirs is voided, at once. For a student linked to QuickBooks the move is then sent there. Their invoices follow once QuickBooks has the move: until then the family they left still sees them, and the family they joined doesn&apos;t.</p>
+      <p>A move is saved in the portal first, and what follows it happens at once, whatever QuickBooks then does with the move: the student&apos;s unfinished forms start again in the new family, their places on shifts still to come are given up, an unpaid volunteer buy-out invoice of theirs is queued to be voided, and any other buy-out of theirs (a paid one, say) is flagged for the club. For a student linked to QuickBooks the move is then sent there. Their invoices follow once QuickBooks has the move: until then the family they left still sees them, and the family they joined doesn&apos;t. Where guardians may sign in only to a family with an active student, moving a family&apos;s last active student out keeps its guardians out until it has one again.</p>
       {families.length === 0 ? <Notice tone="info" live="none">The portal has no other active family to move a student to.</Notice> : students.map((s) => (
         <details key={s.id} className="more"><summary>Move the student {s.name}</summary>
           {s.blocked !== null ? <Notice tone="info" live="none">{s.blocked}</Notice> : <MoveForm families={families} act={act.bind(null, rosterTag, s.id)} />}

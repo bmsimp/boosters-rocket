@@ -17,8 +17,8 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, familyMoney, qboCustomer, student, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { askFamilyInactive, BEING_SENT, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, FAMILY_WAITING, familyCover, INACTIVE_THERE_CODE, keptMoveWords, MAKING_LOCK,
-  MOVE_PENDING, moveStudent, NO_FAMILY_CUSTOMER, PLACE_DIFFERS, portalValueStamp, renameLinked, sendPortalValue, SENDING_LOCK, WRITE_COPY } from "@/lib/roster/writes";
+import { askFamilyInactive, BEING_SENT, BEING_SENT_NOW, changeInPortal, createInQuickBooksAndLink, FAMILY_BUSY, FAMILY_SENDING, FAMILY_WAITING, familyCover, INACTIVE_THERE_CODE, keptMoveWords, MAKING_LOCK,
+  MOVE_PENDING, moveStudent, NO_FAMILY_CUSTOMER, PLACE_DIFFERS, portalValueStamp, renameLinked, sendPortalValue, SENDING_LOCK, TOP_OF_TREE, WRITE_COPY } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, REFUSED_NOT_AGAIN, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { afterStudentMoved } from "@/lib/roster/writes";
@@ -26,6 +26,7 @@ import { sessionFamily } from "@/lib/families/session-family";
 import { findMyForm } from "@/lib/forms/my-forms";
 import { findMySignedPdf } from "@/lib/forms/my-evidence";
 import { loadFamilyMoney } from "@/lib/money/family-money";
+import { loadMySeason } from "@/lib/seasons/my-season";
 import FormsPage from "@/app/(parent)/forms/page";
 import FormPage from "@/app/(parent)/forms/[id]/page";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
@@ -54,6 +55,7 @@ afterAll(() => stub.close());
 vi.setConfig({ testTimeout: 60_000 });
 
 const LEO = "12", RIVERA = "10", CHEN = "20";
+const UNIFORM_FEE = "Uniform fee", UNIFORM_ITEM = "7701";
 const MIN = 60_000;
 const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const bodies = () => posts().map((c) => JSON.parse(c.body) as Record<string, unknown>);
@@ -102,7 +104,8 @@ describe("a move by the app's own records", () => {
     // The records stand alone: their links are gone, so nothing of QuickBooks can name them.
     await db.delete(accountingLink).where(sql`${accountingLink.customerId} in (${RIVERA}, ${LEO}, ${CHEN})`);
     stub.calls.length = 0;
-    expect(await move(chen)).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal. Leo Rivera isn't linked to QuickBooks, so nothing was sent there." });
+    // The buy-out's void is queued at the save, whatever QuickBooks does with the move, and the answer says so.
+    expect(await move(chen)).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal. Leo Rivera isn't linked to QuickBooks, so nothing was sent there. Leo Rivera's unpaid volunteer buy-out invoice is to be voided all the same, whatever QuickBooks does with the move, since the family that chose it is no longer theirs." });
     expect(stub.apiCalls()).toEqual([]);
     expect(await items()).toEqual([]);
     expect(await studentRow(leo)).toMatchObject({ familyId: chen });
@@ -216,6 +219,22 @@ describe("a move by the app's own records", () => {
       expect((await items()).map((i) => [i.state, i.lastCode])).toEqual([["refused", PLACE_DIFFERS]]);
     });
 
+    it("a student QuickBooks has at the top of its tree: kept, and the press sends the move from the place the row showed, under no customer", async () => {
+      const c = inStub(LEO); delete c.ParentRef; delete c.Job; c.SyncToken = "1";
+      expect((await refreshRoster(WORKER)).ok).toBe(true);
+      stub.calls.length = 0;
+      expect(await move(chen)).toMatchObject({ ok: true, status: "attention" });
+      expect(posts()).toEqual([]);
+      const [kept] = await items();
+      expect(kept).toMatchObject({ state: "refused", lastCode: PLACE_DIFFERS });
+      const [row] = (await loadOpenWrites()).filter((w) => w.write.op === "move");
+      expect(row!.shown).toBe("");
+      expect(await sendPortalValue(kept!.id, "", portalValueStamp(kept!.id, ""), op)).toMatchObject({ ok: true });
+      expect(bodies()).toEqual([BODY("1", CHEN)]);
+      expect(await queueItem(kept!.id)).toMatchObject({ state: "done", request: expect.objectContaining({ fromFamilyQboId: TOP_OF_TREE, checked: true }) });
+      expect(await followed()).toHaveLength(1); // the save's, never the press's
+    });
+
     it("QuickBooks already under the family joined: found, nothing more sent, no second follow-up, the link not aligned", async () => {
       Object.assign(inStub(LEO), { ParentRef: { value: CHEN }, SyncToken: "1" }); // moved there in QuickBooks, unread
       expect(await move(chen)).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal. QuickBooks has them in that family already, so nothing was sent." });
@@ -270,7 +289,7 @@ describe("a move by the app's own records", () => {
       expect((await auditsOf("roster.write.replaced"))[0]).toMatchObject({ targetId: first!.id });
       const second = (await items()).find((i) => i.state === "refused")!;
       expect(second.request).toMatchObject({ fromFamilyQboId: RIVERA, toFamilyQboId: RIVERA });
-      expect((await auditsOf("roster.record.moved")).at(-1)!.after).toMatchObject({ comparedWith: RIVERA, replaced: [first!.id] });
+      expect((await auditsOf("roster.record.moved")).find((r) => (r.after as { queueId?: string }).queueId === second.id)!.after).toMatchObject({ comparedWith: RIVERA, replaced: [first!.id] });
       // A value that isn't what the row showed is refused before anything is read.
       expect(await sendPortalValue(second.id, CHEN, portalValueStamp(second.id, "40"), op)).toEqual({ ok: false, errors: ["That didn't go through. Reload the page and try again."] });
       // QuickBooks moved again since the row was drawn: nothing sent, the newer place said.
@@ -320,6 +339,30 @@ describe("a move by the app's own records", () => {
     stub.rateLimitNext = 1;
     expect(await move(chen)).toMatchObject({ ok: true, status: "waiting" });
     expect(await move(rivera)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    // The family joined isn't made inactive while the move waits; "Try again now" waits out a send under way.
+    const c = (await familyCover(CHEN))!;
+    expect((await askFamilyInactive(CHEN, [[c.family.qboId, c.family.syncToken], ...c.under.map((u): [string, string] => [u.qboId, u.syncToken])], tag, op)).result)
+      .toEqual({ ok: false, errors: [MOVE_PENDING] });
+    const [waiting] = await items();
+    expect(await holding(SENDING_LOCK, String(leo), () => tryAgainNow(waiting!.id, op))).toEqual({ ok: false, errors: [BEING_SENT_NOW] });
+  });
+
+  it("a family being changed in QuickBooks at that moment (made inactive, say) holds back a move into or out of it, and the family action a move under way", async () => {
+    // askFamilyInactive() holds the family's "being sent" lock from its checks to its last step; a move tries it shared.
+    expect(await holding(SENDING_LOCK, String(chen), () => move(chen))).toEqual({ ok: false, errors: [FAMILY_BUSY] });
+    expect(await holding(SENDING_LOCK, String(rivera), () => move(chen))).toEqual({ ok: false, errors: [FAMILY_BUSY] });
+    const c = (await familyCover(RIVERA))!;
+    const shown = [[c.family.qboId, c.family.syncToken], ...c.under.map((u): [string, string] => [u.qboId, u.syncToken])] as [string, string][];
+    expect((await holding(SENDING_LOCK, String(rivera), () => askFamilyInactive(RIVERA, shown, tag, op))).result).toEqual({ ok: false, errors: [BEING_SENT] });
+    expect(posts()).toEqual([]);
+    expect(await auditsOf("roster.record.moved")).toEqual([]);
+    expect(await followed()).toEqual([]);
+    expect(await studentRow(leo)).toMatchObject({ familyId: rivera, active: true });
+  });
+
+  it("with \"Families with no active student\" in force, the answer says whose guardians the move keeps out and lets in", async () => {
+    await seedParentSettings({ requireActiveStudents: true });
+    expect(await move(chen)).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal and in QuickBooks. Rivera Family has no active student now, so its guardians can't sign in to it until it has one again. Chen Family has an active student now, so its guardians can sign in to it." });
   });
 });
 
@@ -345,7 +388,8 @@ describe("what each family sees while a move hasn't reached QuickBooks, and afte
     op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     [leo, rivera, chen] = [await recordOfCustomer(LEO, "student"), await recordOfCustomer(RIVERA, "family"), await recordOfCustomer(CHEN, "family")];
     // A per-student form open and one signed, a place to come and one done and checked in, an invoiced per-student buy-out, and an invoice of Leo's own.
-    const season = await seedSeason({ name: "Moving season", steps: [{ name: "Join" }] });
+    // A per-student payment requirement met by Leo's own invoice (9001, carrying its product), as a parent's season reads it.
+    const season = await seedSeason({ name: "Moving season", steps: [{ name: "Join", requirements: [{ title: UNIFORM_FEE, appliesTo: "student", kind: "payment", item: UNIFORM_ITEM }] }] });
     const openReq = await seedFormRequirement({ stepId: season.stepIds.Join!, title: "Medical release", appliesTo: "student", form: formSetting({ id: "envelope_tmplmedical" }) });
     const signedReq = await seedFormRequirement({ stepId: season.stepIds.Join!, title: "Photo consent", appliesTo: "student", form: formSetting({ id: "envelope_tmplphoto" }), position: 60 });
     const open = await seedRequest({ requirementId: openReq, familyQboId: RIVERA, subjectQboId: LEO, state: "waiting", envelopeId: "envelope_seenopen",
@@ -361,32 +405,50 @@ describe("what each family sees while a move hasn't reached QuickBooks, and afte
     const done = await seedSignup({ shiftId: past!.id, familyQboId: RIVERA, signedUpBy: ana.parentId, student: { qboId: LEO, name: "Leo Rivera" } });
     await seedCheckIn({ signupId: done.id, familyQboId: RIVERA, by: ana.parentId });
     await seedBuyout({ requirementId: await seedBuyoutRequirement({ appliesTo: "student" }), familyQboId: RIVERA, subjectQboId: LEO, chosenBy: ana.parentId, invoiceQboId: "5001" });
-    stub.invoices.push(stubInvoice("9001", LEO));
+    stub.invoices.push(stubInvoice("9001", LEO, { Line: [{ DetailType: "SalesItemLineDetail", Amount: 85, SalesItemLineDetail: { ItemRef: { value: UNIFORM_ITEM } } }] }));
     stub.calls.length = 0;
   });
 
-  /** What the family left and the family joined see while QuickBooks still has Leo under the Rivera family. */
-  async function inBetween() {
+  /** Leo's payment line on a parent's season, or null when their family's season names no Leo. */
+  const leoPaymentLine = async (ctx: Awaited<ReturnType<typeof ctxOf>>) =>
+    (await loadMySeason(ctx))?.steps.flatMap((st) => st.students).find((st) => st.id === leo)?.lines.find((l) => l.title === UNIFORM_FEE)?.words ?? null;
+
+  /**
+   * What the family left and the family joined see while QuickBooks doesn't have the move: `joined`, the family the
+   * portal moved Leo to (Chen's, whose guardian Mei signs in, unless said); `underRivera`, whether QuickBooks still has
+   * Leo under the Rivera family (whose invoices each family sees follows QuickBooks' tree).
+   */
+  async function inBetween(o: { joined?: AppFamilyId; underRivera?: boolean } = {}) {
+    const joined = o.joined ?? chen;
     const [anaCtx, meiCtx] = [await ctxOf(ana), await ctxOf(mei)];
     expect(await studentsOf(rivera)).not.toContain("Leo Rivera");
-    expect(await studentsOf(chen)).toContain("Leo Rivera");
-    // Forms: the signed form is Chen's now, read as "Signed" with no PDF; the open one starts again there, not opened.
+    expect(await studentsOf(joined)).toContain("Leo Rivera");
+    // Season: the family left's names no Leo, and his payment line is the family joined's.
+    expect(await leoPaymentLine(anaCtx)).toBeNull();
+    // Forms: the signed form goes with Leo, read as "Signed" with no PDF; the open one starts again there, not opened.
+    expect(await requestNow(forms.open)).toMatchObject({ familyId: joined, state: "not_opened" });
+    expect(await requestNow(forms.signed)).toMatchObject({ familyId: joined, state: "complete" });
     expect(await findMyForm(anaCtx, forms.signed)).toBeNull();
-    expect((await findMyForm(meiCtx, forms.open))?.row).toMatchObject({ state: "not_opened" });
-    expect(await findMySignedPdf(meiCtx, forms.signed)).toBeNull();
-    asParent(meiCtx);
-    const theirs = await renderPage(FormPage, { params: { id: forms.signed } });
-    expect(theirs).toContain("Signed");
-    expect(theirs).not.toContain("Ana Rivera");
+    expect(await findMyForm(anaCtx, forms.open)).toBeNull();
     asParent(anaCtx);
     expect(await renderPage(FormsPage)).not.toContain("Leo Rivera");
+    if (joined === chen) {
+      expect(await invoicesOf(chen)).not.toContain("9001");
+      expect(await leoPaymentLine(meiCtx)).not.toBeNull(); // his line is on the family joined's season
+      expect((await findMyForm(meiCtx, forms.open))?.row).toMatchObject({ state: "not_opened" });
+      expect(await findMySignedPdf(meiCtx, forms.signed)).toBeNull();
+      asParent(meiCtx);
+      const theirs = await renderPage(FormPage, { params: { id: forms.signed } });
+      expect(theirs).toContain("Signed");
+      expect(theirs).not.toContain("Ana Rivera");
+    }
     // Volunteering: the place to come is given up; the credit earned stays with the Rivera family.
     expect((await db.select().from(volunteerSignup)).filter((s) => s.cancelledAt === null).map((s) => s.familyId)).toEqual([rivera]);
     expect((await db.select().from(volunteerCredit)).map((c) => c.familyId)).toEqual([rivera]);
-    // Money follows QuickBooks' tree: the Rivera family still sees Leo's invoice, the Chen family doesn't.
-    expect(await invoicesOf(rivera)).toContain("9001");
-    expect(await invoicesOf(chen)).not.toContain("9001");
-    // The buy-out's void is queued, so the Chen family is never billed for the Rivera family's choice.
+    // Money follows QuickBooks' tree: while it has Leo under the Rivera family, they still see his invoice, and the family joined doesn't.
+    if (o.underRivera !== false) expect(await invoicesOf(rivera)).toContain("9001");
+    expect(await invoicesOf(joined)).not.toContain("9001");
+    // The buy-out's void is queued, so the family joined is never billed for the Rivera family's choice.
     expect((await db.select().from(writeQueue)).filter((i) => i.request.op === "invoice_void")).toHaveLength(1);
   }
 
@@ -401,18 +463,26 @@ describe("what each family sees while a move hasn't reached QuickBooks, and afte
     for (const f of [rivera, chen]) expect((await db.select().from(familyMoney).where(eq(familyMoney.familyId, f)))[0]?.staleAt ?? "no row", String(f)).not.toBeNull();
     expect(await invoicesOf(chen)).toContain("9001");
     expect(await invoicesOf(rivera)).not.toContain("9001");
+    // Read live by that load, the family joined's season now reads Leo's invoice.
+    expect(await leoPaymentLine(await ctxOf(mei))).toContain("Not paid yet");
     expect(await followed()).toHaveLength(1);
+  });
+
+  it("waiting with its answer lost (maybe sent): the same in-between until QuickBooks' move is read", async () => {
+    stub.dropApi = true;
+    expect(await move(chen)).toMatchObject({ ok: true, status: "waiting" });
+    stub.dropApi = false;
+    expect((await items())[0]).toMatchObject({ state: "waiting", sent: true });
+    await inBetween();
   });
 
   it("kept refused into a family with no customer, then given up: the family left still sees the invoice throughout", async () => {
     const [okafor] = await db.insert(family).values({ name: "Okafor Family", active: true }).returning({ id: family.id });
     expect(await move(okafor!.id)).toMatchObject({ ok: true, status: "attention" });
-    expect(await studentsOf(okafor!.id)).toContain("Leo Rivera");
-    expect(await studentsOf(rivera)).not.toContain("Leo Rivera");
-    expect(await invoicesOf(rivera)).toContain("9001");
+    await inBetween({ joined: okafor!.id });
     const [kept] = await items();
     await giveUp(kept!.id, "Not making the family in QuickBooks.", op);
-    expect(await invoicesOf(rivera)).toContain("9001");
+    await inBetween({ joined: okafor!.id });
     expect(await qboParentOfLeo()).toBe(RIVERA);
   });
 
@@ -420,9 +490,8 @@ describe("what each family sees while a move hasn't reached QuickBooks, and afte
     stub.beforeUpdate = (c) => { if (c.Id === LEO && (c.ParentRef as { value?: string } | undefined)?.value === RIVERA) { c.ParentRef = { value: "40" }; c.SyncToken = "1"; } };
     expect(await move(chen)).toMatchObject({ ok: true, status: "attention" });
     stub.beforeUpdate = null;
-    expect(await studentsOf(chen)).toContain("Leo Rivera");
     expect(await qboParentOfLeo()).toBe("40");
-    expect(await invoicesOf(chen)).not.toContain("9001");
+    await inBetween({ underRivera: false });
   });
 });
 

@@ -544,7 +544,7 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
   // A rename saved in the portal first (stage 3's slice 9e) left the portal holding the new name already: renaming it
   // back to QuickBooks' name would undo the portal's value, which a change that didn't get through never does.
   if (item.request.op === "move" && isSavedFirst(item)) {
-    return { ok: true as const, message: `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to, with what followed the move. QuickBooks has the move only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, QuickBooks keeps them where it has them, and until it has the move the family they left still sees their invoices. ${GIVEN_UP_NEXT.move}` };
+    return { ok: true as const, message: `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to. ${MOVE_FOLLOWED_STAYS} QuickBooks has the move only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, QuickBooks keeps them where it has them, and until it has the move the family they left still sees their invoices. ${GIVEN_UP_NEXT.move}` };
   }
   if (item.request.op === "rename" && isSavedFirst(item)) {
     return { ok: true as const, message: "Given up. Nothing more will be sent for it. The portal keeps the name it saved. QuickBooks has it only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, the two names differ, and a later rename on the record's family's page is checked against QuickBooks' name first: while they differ it is held back and listed on this page, where “Send the portal's value” sends it. Or rename it in QuickBooks." };
@@ -582,12 +582,15 @@ function givenUpNext(item: Item): string {
  */
 function refusedGivenUpWords(item: Item): string {
   const w = item.request;
-  if (w.op === "move") return `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to, and QuickBooks keeps them where it has them: until QuickBooks has the move, the family they left still sees their invoices. ${GIVEN_UP_NEXT.move}`;
+  if (w.op === "move") return `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to, and QuickBooks keeps them where it has them: until QuickBooks has the move, the family they left still sees their invoices. ${MOVE_FOLLOWED_STAYS} ${GIVEN_UP_NEXT.move}`;
   if (w.op === "create") return "Given up. Nothing more will be sent for it. The student the portal saved first stays in the portal, unlinked: to make them in QuickBooks later, press “Create in QuickBooks and link” on their family's page.";
   return "Given up. Nothing more will be sent for it. The portal keeps its own name, and QuickBooks keeps the one it has. A later rename on the record's family's page is checked against QuickBooks' name first: while the two differ it is held back and listed on this page, where “Send the portal's value” sends it. Or rename it in QuickBooks.";
 }
 /** Why "Try again now" isn't taken for a change QuickBooks refused. */
 export const REFUSED_NOT_AGAIN = "This change didn't go through and is kept in the portal, so it isn't tried again by itself: use “Send the portal's value” to send it again on purpose, or “Give up”.";
+
+/** A move given up undoes none of its follow-ups, which ran when the portal saved it (slice 9f): said, so staff know a buy-out invoice is voided all the same. */
+const MOVE_FOLLOWED_STAYS = "What followed the move when the portal saved it stays as it is: their unfinished forms started again, their places to come given up, and any unpaid volunteer buy-out invoice of theirs voided.";
 
 /** What staff can do once a roster change QuickBooks may have made is given up, by what it was (a create: givenUpNext()). */
 const GIVEN_UP_NEXT: Partial<Record<QueuedWrite["op"], string>> = {

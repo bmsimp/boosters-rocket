@@ -1016,6 +1016,10 @@ describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
   it("layered with no student type: no student is added or moved", async () => {
     tag = await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: null, parentTypeId: "2" } });
     expect(await askRosterWrite({ op: "create", role: "student", name: "Rosa", familyQboId: "10", email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
+    // A student record the portal holds (one with no link) isn't moved either: the shape offers no move (moveStudent()).
+    const [kim] = await db.insert(student).values({ familyId: await recordOfCustomer("10", "family"), name: "Kim Rivera", active: true }).returning({ id: student.id });
+    expect(await moveStudent(String(kim!.id), String(await recordOfCustomer("20", "family")), tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
+    expect((await db.select().from(student).where(eq(student.id, kim!.id)))[0]).toMatchObject({ familyId: await recordOfCustomer("10", "family") });
     expect(NOT_HERE.noStudents).toMatch(/can't tell a student/);
     expect(posts()).toEqual([]);
   });

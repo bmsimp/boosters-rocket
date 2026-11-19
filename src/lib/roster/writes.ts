@@ -20,6 +20,7 @@ import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppSt
 import { recordNameWords } from "@/lib/families/words";
 import { isUuid } from "@/lib/seasons/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
+import { studentsRuleInForce } from "@/lib/parents/sessions";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 import { buyoutsForMovedStudent } from "@/lib/buyouts/moved";
@@ -389,11 +390,12 @@ function auditAfter(w: RosterWrite, answer: Record<string, unknown>) {
  * (volunteerForMovedStudent, src/lib/volunteer/moved-student.ts: places on shifts still to come are given up, credit
  * stays with the family it was earned for), then its per-student buy-outs (buyoutsForMovedStudent, src/lib/buyouts/moved.ts:
  * an unpaid invoice queued to void, anything else flagged), then the audit row of the move's follow-up with their counts. The answer's
- * `tell` emails the guardians whose places were given up: call it after the transaction commits. The move comes by the
+ * `tell` emails the guardians whose places were given up: call it after the transaction commits; `buyouts` says how many
+ * buy-outs had a void queued and how many were flagged, for the staff member's answer. The move comes by the
  * app's own records (stage 3's slice 9f), linked to QuickBooks or not, and is followed once, where the portal saves it.
  */
 export async function afterStudentMoved(tx: Tx, move: { studentId: AppStudentId; fromFamilyId: AppFamilyId; toFamilyId: AppFamilyId; cause: string },
-  o: { actor: Actor; ip: string | null }): Promise<{ tell: () => Promise<unknown> }> {
+  o: { actor: Actor; ip: string | null }): Promise<{ tell: () => Promise<unknown>; buyouts: { voiding: number; flagged: number } }> {
   const who = { studentId: move.studentId, fromFamilyId: move.fromFamilyId, toFamilyId: move.toFamilyId };
   const forms = await formsForMovedStudent(tx, { ...who, actor: o.actor, ip: o.ip });
   const volunteer = await volunteerForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
@@ -402,18 +404,20 @@ export async function afterStudentMoved(tx: Tx, move: { studentId: AppStudentId;
     after: { studentId: String(move.studentId), fromFamilyId: String(move.fromFamilyId), toFamilyId: String(move.toFamilyId), cause: move.cause,
       formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled,
       buyoutsToVoid: buyouts.voiding, buyoutsFlagged: buyouts.flagged } }, tx);
-  return { tell: volunteer.tell };
+  return { tell: volunteer.tell, buyouts: { voiding: buyouts.voiding, flagged: buyouts.flagged } };
 }
 
 /**
  * Both families' figures marked stale when the cache takes QuickBooks' answer of a move (applyWritten(), and the queue's
  * found-done path after a send), in the caller's transaction: whose invoices a family sees follows QuickBooks' tree
- * (open question 14), so neither the family left nor the family joined shows figures from before the move. The
+ * (open question 14), so the next load of Home or Payments (loadFamilyMoney(), which reads a marked row live) shows
+ * neither family figures from before the move. The Season and Volunteer pages and the due-date reminders read the
+ * stored figures as they are (paymentStandings() reads no mark) until such a load or the daily run reads them. The
  * families are the move's own records (`fromFamilyId`, `toFamilyId`); a move queued before slice 9f names them by
  * customer, through their links. Not one of the move's follow-ups, which ran when the portal saved it.
  */
 export async function markMoveMoneyStale(tx: Tx, w: Extract<RosterWrite, { op: "move" }>): Promise<void> {
-  const of = async (record: AppFamilyId | undefined, customer: string) => record ?? (customer === "" ? null : await familyLinkedTo(customer, tx));
+  const of = async (record: AppFamilyId | undefined, customer: string) => record ?? (customer === "" || customer === TOP_OF_TREE ? null : await familyLinkedTo(customer, tx));
   const families = [...new Set([await of(w.fromFamilyId, w.fromFamilyQboId), await of(w.toFamilyId, w.toFamilyQboId)].flatMap((f) => (f === null ? [] : [String(f)])))];
   if (!families.length) return;
   await tx.update(familyMoney).set({ staleAt: new Date(), updatedAt: new Date() }).where(inArray(familyMoney.familyId, families.map(asAppFamilyId)));
@@ -1046,6 +1050,17 @@ export type FamilyInactiveAnswer = { result: WriteResult; changed: boolean };
  * (roster.family.deactivate) says how it went.
  */
 export async function askFamilyInactive(familyQboId: string, shown: ReadonlyArray<readonly [string, string]>, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<FamilyInactiveAnswer> {
+  // The family's "being sent" lock, held from before the checks to the last step's answer (slice 9f): a student's move
+  // into or out of the family tries it shared under the roster lock (moveHolding()) and is refused while it is held, so
+  // no move is saved in the portal while QuickBooks is being asked to make the family's students inactive, and a step
+  // never makes inactive a student the portal has just moved to another family. Held by someone else (a rename of the
+  // family on its way, say), nothing is checked or sent.
+  const record = await familyLinkedTo(familyQboId);
+  if (record === null) return familyInactiveHolding(familyQboId, shown, rosterTag, o);
+  return (await whileSending(String(record), () => familyInactiveHolding(familyQboId, shown, rosterTag, o))) ?? { result: refuse(BEING_SENT), changed: false };
+}
+
+async function familyInactiveHolding(familyQboId: string, shown: ReadonlyArray<readonly [string, string]>, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<FamilyInactiveAnswer> {
   const summary = (outcome: "done" | "stopped" | "refused", code: string | null, made: string[], notMade: string[], more: { maybe?: string[]; alreadyInactive?: string[] } = {}) =>
     writeAudit({ actor: o.actor, action: "roster.family.deactivate", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: familyQboId,
       after: { outcome, ...(code ? { code: code.slice(0, 40) } : {}), made, notMade, ...(more.maybe?.length ? { maybe: more.maybe } : {}), ...(more.alreadyInactive?.length ? { alreadyInactive: more.alreadyInactive } : {}) } });
@@ -1777,6 +1792,14 @@ export const INACTIVE_THERE_CODE = "inactive_there";
  * portal and QuickBooks last agreed on), or that carries no before-value, and whose live read found it so (slice 9f).
  */
 export const PLACE_DIFFERS = "place_differs";
+/**
+ * A move's before-value for a student QuickBooks has at the top of its tree, under no customer: set by "Send the
+ * portal's value" when the row showed them so, and compared with a live parent of none. Not digits, so it is never
+ * taken for a customer, never sent and never matched against one.
+ */
+export const TOP_OF_TREE = "top";
+/** The customer a move's before-value names, or null for none (empty) and for the top of the tree. */
+const beforeCustomer = (w: MoveWrite): string | null => (w.fromFamilyQboId === "" || w.fromFamilyQboId === TOP_OF_TREE ? null : w.fromFamilyQboId);
 /** The code of a linked student's move into a family with no customer in QuickBooks: saved, kept, nothing sent (slice 9f). */
 export const NO_FAMILY_CUSTOMER = "no_family_customer";
 /** How long a change saved first is the at-once try's before the worker may take it: longer than one try takes. */
@@ -1834,6 +1857,15 @@ export async function itemLockFree(tx: Tx, item: Pick<QueueRow, "request" | "fam
   if (lock === null) return true;
   const keys = "making" in lock ? makingLock(lock.making) : sql`${sql.raw(String(SENDING_LOCK))}, hashtext(${lock.sending}::text)`;
   const [r] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${keys}) as locked`)) as unknown as { locked: boolean }[];
+  return r?.locked === true;
+}
+
+/**
+ * Whether nobody holds the record's "being sent" lock (whileSending()) at this moment: tried shared, and held so to the
+ * end of the caller's transaction, so no such send starts before the caller's change is committed.
+ */
+async function sendingFree(tx: Tx, recordId: string): Promise<boolean> {
+  const [r] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${sql.raw(String(SENDING_LOCK))}, hashtext(${recordId}::text)) as locked`)) as unknown as { locked: boolean }[];
   return r?.locked === true;
 }
 
@@ -1944,7 +1976,7 @@ async function tryMove(w: MoveWrite, realmId: string, o: { mayWait: boolean; rea
   const parent = parentOf(live.answer);
   if (parent !== null && parent === w.toFamilyQboId) return { is: "in_place" };
   if (!live.active) return { is: "changed", holds: parent, code: INACTIVE_THERE_CODE };
-  if (w.fromFamilyQboId === "" || parent !== w.fromFamilyQboId) {
+  if (w.fromFamilyQboId === "" || (parent ?? TOP_OF_TREE) !== w.fromFamilyQboId) {
     return { is: "changed", holds: parent, code: why === "stale" ? "fault_5010" : why === "no_version" ? NO_LINK_VERSION : why === "differs" ? PLACE_DIFFERS : "moved_on" };
   }
   const again: MoveWrite = { ...w, syncToken: live.syncToken, checked: true };
@@ -2228,7 +2260,7 @@ export async function trySavedItem(item: QueueRow, write: RenameWrite | CreateWr
     // The cache already shows the student under another customer than the move's before-value, or inactive: read live
     // before anything is sent (stage 3's slice 9f, by the rule a rename follows).
     const [c] = o.readFirst ? [] : await db.select({ parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer).where(eq(qboCustomer.qboId, write.qboId));
-    const readFirst = o.readFirst ?? (c !== undefined && (c.parentQboId !== write.fromFamilyQboId || !c.active) ? "differs" : null);
+    const readFirst = o.readFirst ?? (c !== undefined && ((c.parentQboId ?? TOP_OF_TREE) !== write.fromFamilyQboId || !c.active) ? "differs" : null);
     const t = await tryMove(write, item.realmId, { mayWait, readFirst, actor: o.actor, ip: o.ip, permission: o.permission });
     switch (t.is) {
       case "answer": return taken(t.write, t.answer, t.resent);
@@ -2437,6 +2469,8 @@ async function addStudentHolding(familyId: AppFamilyId, rawName: string, rosterT
 
 /** A family a move of a student into or out of which hasn't reached QuickBooks yet: it isn't made inactive meanwhile. */
 export const MOVE_PENDING = "A student's move into or out of this family hasn't reached QuickBooks yet (it is waiting, stuck or kept on the Reconciliation page), so nothing was changed. Finish it there, or give it up, then try again.";
+/** A move refused because one of its two families is being changed in QuickBooks at that moment (made inactive, say: askFamilyInactive()). */
+export const FAMILY_BUSY = "One of the two families is being changed in QuickBooks at this moment (made inactive, say), so the student wasn't moved. Try again in a minute.";
 const MOVE_FAILED = "That didn't go through, so nothing was changed: the student is still in the family they were in. Try again in a minute.";
 const movesOf = (studentId: AppStudentId) => and(eq(writeQueue.studentId, studentId), sql`${writeQueue.request}->>'op' = 'move'`);
 
@@ -2504,7 +2538,7 @@ export async function moveStudent(rawStudentId: string, rawToFamilyId: string, r
 
 async function moveHolding(studentId: AppStudentId, toFamilyId: AppFamilyId, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
   type Saved = { ok: true; quickbooks: "not_sent" | "sending" | "has_it" | "kept"; item: QueueRow | null; write: MoveWrite | null; tell: () => Promise<unknown>;
-    said: { student: string; from: string; to: string } } | { ok: false; result: WriteResult };
+    said: { student: string; from: string; to: string }; notes: string[] } | { ok: false; result: WriteResult };
   let saved: Saved;
   try {
     saved = await db.transaction(async (tx): Promise<Saved> => {
@@ -2534,6 +2568,9 @@ async function moveHolding(studentId: AppStudentId, toFamilyId: AppFamilyId, ros
         if (making) return no(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
       }
       if (await studentCreateWaiting(tx, s.id)) return no(STUDENT_WAITING);
+      // Neither family being made inactive in QuickBooks, or otherwise changed there, at this moment (askFamilyInactive()
+      // holds the family's "being sent" lock for its whole run): tried shared, and held to the end of this transaction.
+      for (const f of [fromFamilyId, to.id]) if (!(await sendingFree(tx, String(f)))) return no(FAMILY_BUSY);
       const [fromCustomer, toCustomer] = await Promise.all([customerOfFamily(fromFamilyId, tx), customerOfFamily(to.id, tx)]);
       for (const c of [studentCustomer, fromCustomer, toCustomer]) if (c !== null && (await waitingForCustomer(tx, c))) return no(WRITE_COPY.waiting);
       const [cached] = studentCustomer === null ? [] : await tx.select().from(qboCustomer).where(eq(qboCustomer.qboId, studentCustomer));
@@ -2542,9 +2579,15 @@ async function moveHolding(studentId: AppStudentId, toFamilyId: AppFamilyId, ros
       // A later move takes the place of a refused one, and takes from it the family the portal and QuickBooks last agreed on.
       const replaced = await replaceRefused(tx, movesOf(s.id), { op: "move", studentId: String(s.id), toFamilyId: String(to.id) }, o);
       const agreed = replaced.map((r) => r.request).find((w): w is MoveWrite => w.op === "move" && w.fromFamilyQboId !== "")?.fromFamilyQboId;
+      // Who may sign in goes by the family's active students while the Admin's "Families with no active student" is in
+      // force (enterableGuardianRows(), src/lib/parents/sessions.ts): a move can close one family's door and open another's.
+      const rule = await studentsRuleInForce(tx);
+      const hasActive = async (f: AppFamilyId) => (await tx.select({ id: student.id }).from(student).where(and(eq(student.familyId, f), eq(student.active, true))).limit(1)).length > 0;
+      const joinedOpens = rule && !(await hasActive(to.id));
       await tx.update(student).set({ familyId: to.id, updatedAt: new Date() }).where(eq(student.id, s.id));
+      const leftCloses = rule && !(await hasActive(fromFamilyId));
       // The move's follow-ups, once, here, by the app's own records: never again when QuickBooks takes it.
-      const { tell } = await afterStudentMoved(tx, { studentId: s.id, fromFamilyId, toFamilyId: to.id, cause: `roster.record.moved#${s.id}` }, o);
+      const { tell, buyouts } = await afterStudentMoved(tx, { studentId: s.id, fromFamilyId, toFamilyId: to.id, cause: `roster.record.moved#${s.id}` }, o);
       const filed: Filed = { familyId: fromFamilyId, studentId: s.id };
       let quickbooks: "not_sent" | "sending" | "has_it" | "kept" = "not_sent", item: QueueRow | null = null, write: MoveWrite | null = null;
       if (studentCustomer !== null) {
@@ -2561,7 +2604,8 @@ async function moveHolding(studentId: AppStudentId, toFamilyId: AppFamilyId, ros
         before: { familyId: String(fromFamilyId) }, after: { kind: "student", studentId: String(s.id), familyId: String(to.id), fromFamilyId: String(fromFamilyId), quickbooks,
           ...(studentCustomer !== null ? { customerQboId: studentCustomer } : {}), ...(item && write ? { queueId: item.id, comparedWith: write.fromFamilyQboId } : {}),
           ...(replaced.length ? { replaced: replaced.map((r) => r.id) } : {}) } }, tx);
-      return { ok: true, quickbooks, item, write, tell, said: { student: recordNameWords(s.name, "student"), from: recordNameWords(from.name, "family"), to: recordNameWords(to.name, "family") } };
+      const said = { student: recordNameWords(s.name, "student"), from: recordNameWords(from.name, "family"), to: recordNameWords(to.name, "family") };
+      return { ok: true, quickbooks, item, write, tell, said, notes: moveNotes(said, { buyouts, leftCloses, joinedOpens }) };
     });
   } catch {
     // A follow-up, the save or its audit row failed: the transaction kept nothing (no record moved, no follow-up, no item).
@@ -2571,6 +2615,25 @@ async function moveHolding(studentId: AppStudentId, toFamilyId: AppFamilyId, ros
   // The guardians whose places a moved student gave up are told once the move is committed. A mail failure is the
   // notices' own to record; it never undoes the move.
   await saved.tell().catch(() => undefined);
+  const answer = await movedAnswer(saved, o);
+  if (!saved.notes.length || !answer.ok) return answer;
+  return { ...answer, message: `${answer.message} ${saved.notes.join(" ")}` };
+}
+
+/** What the follow-ups and the sign-in rule did beside the move itself, in words for the staff member's answer. */
+function moveNotes(said: { student: string; from: string; to: string }, o: { buyouts: { voiding: number; flagged: number }; leftCloses: boolean; joinedOpens: boolean }): string[] {
+  const notes: string[] = [];
+  // Voided whatever becomes of the move in QuickBooks: the family that chose the buy-out is no longer the student's.
+  if (o.buyouts.voiding) notes.push(`${said.student}'s unpaid volunteer buy-out invoice is to be voided all the same, whatever QuickBooks does with the move, since the family that chose it is no longer theirs.`);
+  if (o.buyouts.flagged) notes.push(`A volunteer buy-out of ${said.student}'s that can't simply be voided (a paid one, say) is flagged for the club on the Reconciliation page.`);
+  if (o.leftCloses) notes.push(`${said.from} has no active student now, so its guardians can't sign in to it until it has one again.`);
+  if (o.joinedOpens) notes.push(`${said.to} has an active student now, so its guardians can sign in to it.`);
+  return notes;
+}
+
+/** moveStudent()'s answer for a move saved, by what was sent: for a move put on the queue, the at-once try's. */
+async function movedAnswer(saved: { quickbooks: "not_sent" | "sending" | "has_it" | "kept"; item: QueueRow | null; write: MoveWrite | null; said: { student: string; from: string; to: string } },
+  o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
   const { student: who, from, to } = saved.said;
   const moved = `Moved ${who} to ${to} in the portal`;
   const money = moveMoneyWords(who, from, to);
@@ -2707,7 +2770,7 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
       const toCustomer = await customerOfFamily(s.familyId, tx);
       if (toCustomer === null) return no(CREATE_FAMILY_FIRST);
       const fromCustomer = w.fromFamilyId === undefined ? null : await customerOfFamily(w.fromFamilyId, tx);
-      for (const c of [w.qboId, toCustomer, fromCustomer, w.fromFamilyQboId === "" ? null : w.fromFamilyQboId]) if (c !== null && (await waitingForCustomer(tx, c))) return no(WRITE_COPY.waiting);
+      for (const c of [w.qboId, toCustomer, fromCustomer, beforeCustomer(w)]) if (c !== null && (await waitingForCustomer(tx, c))) return no(WRITE_COPY.waiting);
       return { ok: true, item, write: { ...w, toFamilyQboId: toCustomer }, realmId: source };
     }
     return no(NO_LONGER_REFUSED);
@@ -2747,8 +2810,9 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
       return { ok: false, errors: [`QuickBooks moved the student again since this page was shown${(await placeName(parent)) ? `: it has them under “${await placeName(parent)}” now` : ""}. Nothing was sent. Reload the page to see it, then send the portal's move if it is still wanted.`] };
     }
     // Sent with the live version, on purpose, from the place the staff member was shown: that place is what a later try
-    // compares QuickBooks' parent with (`fromFamilyQboId`), should this answer be lost.
-    write = { ...write, syncToken: live.syncToken, checked: true, fromFamilyQboId: shown };
+    // compares QuickBooks' parent with (`fromFamilyQboId`), should this answer be lost; a row that showed them under no
+    // customer is compared so (TOP_OF_TREE), never as a move with no before-value, which is held whatever QuickBooks has.
+    write = { ...write, syncToken: live.syncToken, checked: true, fromFamilyQboId: shown === "" ? TOP_OF_TREE : shown };
   }
   const sent = write;
   // For its send the item goes back on the queue, waiting, holding what is sent, and is tried as any change saved first
