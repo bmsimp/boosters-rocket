@@ -12,7 +12,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, parent, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { addFamily, askFamilyInactive, askRosterWrite, familyCover, familyHereWords, REFRESH_ASK_KEY, WRITE_COPY } from "@/lib/roster/writes";
+import { addFamily, askFamilyInactive, askRosterWrite, familyCover, familyHereWords, moveStudent, PLACE_DIFFERS, REFRESH_ASK_KEY, WRITE_COPY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { NOT_HERE } from "@/lib/roster/operations";
@@ -61,6 +61,9 @@ const shownFor = async (familyQboId: string): Promise<[string, string][]> => {
  */
 const add = (role: "family" | "member", name: string, typeQboId: string | null = null) => addFamily({ role, name, typeQboId }, tag, { ...op, mayLink: true });
 const familyNamed = async (name: string) => (await db.select().from(family).where(eq(family.name, name)))[0];
+/** A student moved as a family's page moves one (stage 3's slice 9f): by the app's ids of the student and the family joined, saved in the portal first. */
+const move = async (studentQboId: string, toFamilyQboId: string) =>
+  moveStudent(String(await recordOfCustomer(studentQboId, "student")), String(await recordOfCustomer(toFamilyQboId, "family")), tag, op);
 /** An open invoice on a customer, for what it owes. */
 const owes = (Id: string, customer: string, amount: number) => ({ Id, SyncToken: "0", CustomerRef: { value: customer }, TotalAmt: amount, Balance: amount });
 
@@ -118,13 +121,18 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect((await auditsOf("roster.customer.rename"))[0]).toMatchObject({ before: { name: "Leo Rivera", syncToken: "0" }, after: { name: "Leon Rivera", syncToken: "1" } });
   });
 
-  it("moves a student to another family, and records the move for what follows the student", async () => {
-    const r = await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op);
-    expect(r).toEqual({ ok: true, message: "Moved in QuickBooks." });
+  it("moves a student to another family: saved in the portal first, with what follows the student, then sent with the link's version", async () => {
+    const [leo, rivera, chen] = [await recordOfCustomer("12", "student"), await recordOfCustomer("10", "family"), await recordOfCustomer("20", "family")];
+    const r = await move("12", "20");
+    expect(r).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal and in QuickBooks." });
     expect(sent()).toEqual([{ Id: "12", SyncToken: "0", sparse: true, ParentRef: { value: "20" }, Job: true, BillWithParent: true }]);
     expect(await cached("12")).toMatchObject({ parentQboId: "20", syncToken: "1" });
     expect((await auditsOf("roster.student.move"))[0]).toMatchObject({ before: { familyQboId: "10" }, after: { familyQboId: "20" } });
-    expect((await auditsOf("roster.student.move.followed"))[0]).toMatchObject({ targetId: "12", after: { fromFamilyQboId: "10", toFamilyQboId: "20" } });
+    expect((await auditsOf("roster.student.move.followed"))[0]).toMatchObject({ targetType: "student", targetId: String(leo),
+      after: { studentId: String(leo), fromFamilyId: String(rivera), toFamilyId: String(chen), cause: `roster.record.moved#${leo}` } });
+    expect((await auditsOf("roster.record.moved"))[0]).toMatchObject({ targetType: "student", targetId: String(leo), before: { familyId: String(rivera) },
+      after: { familyId: String(chen), quickbooks: "sending", customerQboId: "12", comparedWith: "10" } });
+    expect((await queue()).map((i) => [i.state, i.familyId, i.studentId])).toEqual([["done", rivera, leo]]);
   });
 
   it("moves a student with an open form, a signed form and a place on a shift to come: the forms and the place follow the move", async () => {
@@ -139,7 +147,7 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     const { shifts: [shift] } = await seedEvent({ inDays: 20 });
     const place = await seedSignup({ shiftId: shift!.id, familyQboId: "10", signedUpBy: ana.id, student: { qboId: "12", name: "Leo Rivera" } });
 
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: true, message: "Moved in QuickBooks." });
+    expect(await move("12", "20")).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal and in QuickBooks." });
 
     // The open form starts again under the new family, and its document waits for the worker to withdraw it.
     expect(await requestByCustomer(open)).toMatchObject({ familyQboId: "20", state: "not_opened", envelopeId: null });
@@ -153,8 +161,8 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     // The place on a shift still to come is given up; the old family keeps nothing of the student's there.
     const [after] = await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, place.id));
     expect(after!.cancelledAt).not.toBeNull();
-    expect((await auditsOf("roster.student.move.followed"))[0]).toMatchObject({ targetId: "12",
-      after: { fromFamilyQboId: "10", toFamilyQboId: "20", formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1 } });
+    expect((await auditsOf("roster.student.move.followed"))[0]).toMatchObject({ targetId: String(await recordOfCustomer("12", "student")),
+      after: { formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1 } });
   });
 
   it("makes a family inactive in one action: everyone under it first, then the family, and its parents can no longer enter it", async () => {
@@ -288,11 +296,11 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     });
 
-    it("a move: the student's record goes to the family moved to, after its follow-ups, once", async () => {
+    it("a move: the student's record goes to the family moved to at the save, with its follow-ups once; QuickBooks taking it changes no record", async () => {
       const leo = await recordOfCustomer("12", "student"), chen = await recordOfCustomer("20", "family");
-      await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op);
+      await move("12", "20");
       expect(await studentRow(leo)).toMatchObject({ familyId: chen, active: true });
-      expect((await auditsOf("roster.student.move"))[0]!.after).toMatchObject({ appRecord: { kind: "student", studentId: String(leo), set: { familyId: String(chen) } } });
+      expect((await auditsOf("roster.student.move"))[0]!.after).not.toHaveProperty("appRecord");
       expect(await auditsOf("roster.student.move.followed")).toHaveLength(1);
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     });
@@ -383,19 +391,21 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "1", name: "Leon Rivera" }, tag, op)).toEqual({ ok: false, errors: ["That is its name already, so there was nothing to change."] });
     });
 
-    it("a student is moved only into one of the app's own active families: a family added in QuickBooks alone is refused before anything is sent", async () => {
+    it("a student is moved only into one of the app's own active families: an id that is no family record, or an inactive one, is refused before anything is saved or sent", async () => {
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
-      stub.customers.push({ Id: "70", DisplayName: "Nguyen Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
-      expect((await refreshRoster(WORKER)).ok).toBe(true);
-      expect(await db.select().from(accountingLink).where(eq(accountingLink.customerId, "70"))).toEqual([]); // no record for it
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "70" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOurs] });
+      // A family added in QuickBooks alone has no record since slice 9c, so the page has no id to send for it.
+      expect(await moveStudent(String(leo), "00000000-0000-4000-8000-000000000000", tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOurs] });
+      expect(await moveStudent(String(leo), String(leo), tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOurs] }); // a student isn't a family
+      expect(await moveStudent(String(rivera), String(rivera), tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.gone] }); // a family isn't a student
+      expect(await moveStudent("12", String(rivera), tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.gone] });             // a QuickBooks id isn't one
+      expect(await move("12", "10")).toEqual({ ok: false, errors: ["The student is in that family already, so there was nothing to change."] });
+      // Nor into a family of the app's that is inactive, though its customer is active.
+      await db.update(family).set({ active: false }).where(eq(family.id, await recordOfCustomer("20", "family")));
+      expect(await move("12", "20")).toEqual({ ok: false, errors: [WRITE_COPY.notOurs] });
       expect(posts()).toEqual([]);
       expect(await studentRow(leo)).toMatchObject({ familyId: rivera, active: true });
       expect(await auditsOf("roster.student.move.followed")).toEqual([]);
-      // Nor into a family of the app's that is inactive, though its customer is active.
-      await db.update(family).set({ active: false }).where(eq(family.id, await recordOfCustomer("20", "family")));
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOurs] });
-      expect(posts()).toEqual([]);
+      expect(await auditsOf("roster.record.moved")).toEqual([]);
     });
 
     it("a family QuickBooks made inactive itself: the action sends nothing and makes its record inactive, audited with before and after; pressed again, nothing more", async () => {
@@ -414,7 +424,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: ["That family is inactive in QuickBooks already, so there was nothing to change."] });
     });
 
-    it("a move QuickBooks has that the portal's record doesn't (given up on the queue, or made in QuickBooks): moving there sends nothing, and the record, forms and places follow; any other move waits for it", async () => {
+    it("a move QuickBooks has that the portal's record doesn't (given up on the queue, or made in QuickBooks): moving there sends nothing, and the record, forms and places follow once", async () => {
       const rivera = await recordOfCustomer("10", "family"), chen = await recordOfCustomer("20", "family"), leo = await recordOfCustomer("12", "student");
       const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
       const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
@@ -422,20 +432,35 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       Object.assign(inStub("12"), { ParentRef: { value: "20" }, SyncToken: "1" });
       expect((await refreshRoster(WORKER)).ok).toBe(true);
       expect(await studentRow(leo)).toMatchObject({ familyId: rivera });
-      // Back to the family the portal holds him in, or anywhere else: refused, as the two disagree where he is.
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "10" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.elsewhere] });
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: true, message: WRITE_COPY.movedFollowed });
+      // An ordinary move since slice 9f: to the family QuickBooks has him in, nothing is sent and there is no item.
+      expect(await move("12", "20")).toEqual({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal. QuickBooks has them in that family already, so nothing was sent." });
       expect(posts()).toEqual([]);
+      expect(await queue()).toEqual([]);
       expect(await studentRow(leo)).toMatchObject({ familyId: chen, active: true });
       expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "20", state: "not_opened" });
-      expect((await auditsOf("roster.student.move.followed")).map((a) => (a.after as { cause: string }).cause)).toEqual(["roster.record.follows#12"]);
-      expect((await auditsOf("roster.record.follows")).map((a) => [a.before, a.after])).toEqual([[{ kind: "student", studentId: String(leo), name: "Leo Rivera", active: true, familyId: String(rivera) },
-        { op: "move", role: "student", code: "already_moved", appRecord: { kind: "student", studentId: String(leo), set: { familyId: String(chen) } } }]]);
+      expect((await auditsOf("roster.student.move.followed")).map((a) => (a.after as { cause: string }).cause)).toEqual([`roster.record.moved#${leo}`]);
+      expect((await auditsOf("roster.record.moved"))[0]!.after).toMatchObject({ fromFamilyId: String(rivera), familyId: String(chen), quickbooks: "has_it" });
+      expect(await auditsOf("roster.record.follows")).toEqual([]);
       // Asked again: nothing more to change.
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: ["The student is in that family already, so there was nothing to change."] });
+      expect(await move("12", "20")).toEqual({ ok: false, errors: ["The student is in that family already, so there was nothing to change."] });
     });
 
-    it("a student QuickBooks has under a family that isn't the app's: the record can't follow there, and a move to one of the app's families is sent, the record going with it", async () => {
+    it("a move QuickBooks has elsewhere, into a family of the portal's with no link: kept, nothing sent, the portal's record moved", async () => {
+      const leo = await recordOfCustomer("12", "student");
+      // Leo moved in QuickBooks to the Chen family, and the portal moves him on to a family of its own with no link.
+      Object.assign(inStub("12"), { ParentRef: { value: "20" }, SyncToken: "1" });
+      expect((await refreshRoster(WORKER)).ok).toBe(true);
+      const [okafor] = await db.insert(family).values({ name: "Okafor Family", active: true }).returning({ id: family.id });
+      const linked = await db.select().from(accountingLink).where(eq(accountingLink.familyId, okafor!.id));
+      expect(linked).toEqual([]);
+      expect(await moveStudent(String(leo), String(okafor!.id), tag, op)).toMatchObject({ ok: true, status: "attention" });
+      expect(posts()).toEqual([]);
+      expect(await studentRow(leo)).toMatchObject({ familyId: okafor!.id });
+      expect((await queue()).map((i) => [i.state, i.lastCode])).toEqual([["refused", "no_family_customer"]]);
+      expect(inStub("12")).toMatchObject({ ParentRef: { value: "20" } });
+    });
+
+    it("a student QuickBooks has under a family that isn't the app's, moved to one of the app's families: the record moves at the save, and the move is held by the field, nothing sent over QuickBooks' place", async () => {
       const rivera = await recordOfCustomer("10", "family"), chen = await recordOfCustomer("20", "family"), leo = await recordOfCustomer("12", "student");
       const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
       const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
@@ -445,30 +470,25 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       Object.assign(inStub("12"), { ParentRef: { value: "70" }, SyncToken: "1" });
       expect((await refreshRoster(WORKER)).ok).toBe(true);
       expect(await studentRow(leo)).toMatchObject({ familyId: rivera });
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "70" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.elsewhereNotOurs] });
+      // The cache has him under Okafor, not the Rivera family the portal moves him from: read live first, and held.
+      const r = await move("12", "20");
+      expect(r).toMatchObject({ ok: true, status: "attention" });
+      expect((r as { message: string }).message).toContain("QuickBooks has the student under “Okafor Family” now.");
       expect(posts()).toEqual([]);
-      // To another of the app's families: sent, and the record, with its forms, goes from the family the portal held it in.
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: true, message: "Moved in QuickBooks." });
-      expect(sent()).toEqual([{ Id: "12", SyncToken: "1", sparse: true, ParentRef: { value: "20" }, Job: true, BillWithParent: true }]);
+      expect(inStub("12")).toMatchObject({ ParentRef: { value: "70" } });
       expect(await studentRow(leo)).toMatchObject({ familyId: chen, active: true });
       expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "20" });
-      expect((await auditsOf("roster.student.move.followed")).map((a) => a.after)).toEqual([expect.objectContaining({ fromFamilyQboId: "10", toFamilyQboId: "20" })]);
+      expect((await auditsOf("roster.student.move.followed")).map((a) => a.after)).toEqual([expect.objectContaining({ fromFamilyId: String(rivera), toFamilyId: String(chen) })]);
+      expect((await queue()).map((i) => [i.state, i.lastCode, i.request])).toEqual([["refused", PLACE_DIFFERS, expect.objectContaining({ op: "move", fromFamilyQboId: "10", toFamilyQboId: "20" })]]);
     });
 
-    it("a student QuickBooks has under a family that isn't the app's, moved back to the family the portal holds them in: sent, and the record and its forms stay", async () => {
-      const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
-      const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
-      const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
-      const requestId = await seedRequest({ requirementId, familyQboId: "10", subjectQboId: "12", state: "waiting", envelopeId: "envelope_leoback" });
+    it("a student QuickBooks has under a family that isn't the app's, asked to move to the family the portal holds them in: nothing to change, nothing sent", async () => {
       stub.customers.push({ Id: "70", DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
       Object.assign(inStub("12"), { ParentRef: { value: "70" }, SyncToken: "1" });
       expect((await refreshRoster(WORKER)).ok).toBe(true);
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "10" }, tag, op)).toEqual({ ok: true, message: "Moved in QuickBooks." });
-      expect(sent()).toEqual([{ Id: "12", SyncToken: "1", sparse: true, ParentRef: { value: "10" }, Job: true, BillWithParent: true }]);
-      expect(await cached("12")).toMatchObject({ parentQboId: "10" });
-      expect(await studentRow(leo)).toMatchObject({ familyId: rivera, active: true });
-      expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "10", state: "waiting" });
-      expect((await auditsOf("roster.student.move.followed")).map((a) => a.after)).toEqual([expect.objectContaining({ fromFamilyQboId: "70", toFamilyQboId: "10" })]);
+      expect(await move("12", "10")).toEqual({ ok: false, errors: ["The student is in that family already, so there was nothing to change."] });
+      expect(posts()).toEqual([]);
+      expect(await auditsOf("roster.student.move.followed")).toEqual([]);
     });
 
     it("nothing is sent for a family or student whose own record is inactive in the portal", async () => {
@@ -482,7 +502,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       await db.update(family).set({ active: true }).where(eq(family.id, rivera));
       await db.update(student).set({ active: false }).where(eq(student.id, leo));
       expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
-      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect(await move("12", "20")).toEqual({ ok: false, errors: ["That is inactive in the portal, so nothing was changed."] });
       expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
       expect(posts()).toEqual([]);
     });
@@ -943,7 +963,7 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     await seedQueued({ op: "rename", role: "student", qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" });
     expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     await db.update(writeQueue).set({ state: "stuck" });
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(await move("12", "20")).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     await db.update(writeQueue).set({ state: "done" });
     expect((await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).ok).toBe(true);
   });
@@ -952,10 +972,10 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     tag = await connectRoster(stub);
     await seedQueued({ op: "deactivate", role: "family", qboId: "20", syncToken: "0" });
     expect(await askRosterWrite({ op: "create", role: "parent", name: "Wen Chen", familyQboId: "20", email: "wen@example.com", typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(await move("12", "20")).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     expect(posts()).toEqual([]);
     await db.update(writeQueue).set({ state: "given_up" });
-    expect((await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).ok).toBe(true);
+    expect((await move("12", "20")).ok).toBe(true);
   });
 });
 
@@ -970,11 +990,6 @@ describe("every id the page sends is looked up on the roster, in the role the ch
     await no({ op: "deactivate", qboId: "999", syncToken: "0" }, WRITE_COPY.gone);
     await no({ op: "create", role: "student", name: "Rosa", familyQboId: "12", email: null, typeQboId: null }, WRITE_COPY.gone);  // a student isn't a family
     await no({ op: "create", role: "student", name: "Rosa", familyQboId: "30", email: null, typeQboId: null }, WRITE_COPY.gone);
-    await no({ op: "move", qboId: "11", syncToken: "0", toFamilyQboId: "20" }, WRITE_COPY.notOffered);   // a parent isn't moved
-    await no({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "21" }, WRITE_COPY.gone);         // to a parent, not a family
-    await no({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "30" }, WRITE_COPY.gone);
-    await no({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "10" }, "The student is in that family already, so there was nothing to change.");
-    await no({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "40" }, "That family is inactive in QuickBooks, so nobody can be moved to it.");
     await no({ op: "create", role: "student", name: "Rosa", familyQboId: "40", email: null, typeQboId: null }, "This family is inactive in QuickBooks, so nobody can be added to it.");
     await no({ op: "deactivate", qboId: "40", syncToken: "0" }, "That is inactive in QuickBooks already, so there was nothing to change.");
     await no({ op: "create", role: "member", name: "Rosa", familyQboId: null, email: null, typeQboId: "1" }, WRITE_COPY.notOffered);
@@ -1001,7 +1016,10 @@ describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
   it("layered with no student type: no student is added or moved", async () => {
     tag = await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: null, parentTypeId: "2" } });
     expect(await askRosterWrite({ op: "create", role: "student", name: "Rosa", familyQboId: "10", email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.gone] }); // not a student here
+    // A student record the portal holds (one with no link) isn't moved either: the shape offers no move (moveStudent()).
+    const [kim] = await db.insert(student).values({ familyId: await recordOfCustomer("10", "family"), name: "Kim Rivera", active: true }).returning({ id: student.id });
+    expect(await moveStudent(String(kim!.id), String(await recordOfCustomer("20", "family")), tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
+    expect((await db.select().from(student).where(eq(student.id, kim!.id)))[0]).toMatchObject({ familyId: await recordOfCustomer("10", "family") });
     expect(NOT_HERE.noStudents).toMatch(/can't tell a student/);
     expect(posts()).toEqual([]);
   });
@@ -1019,7 +1037,6 @@ describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
     // A member is renamed and made inactive like anyone.
     expect((await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana R. Rivera" }, tag, op)).ok).toBe(true);
     expect((await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).ok).toBe(true);
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "11" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
   });
 
   it("flat with one member type: that type, without asking", async () => {

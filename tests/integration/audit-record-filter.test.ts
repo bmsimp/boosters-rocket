@@ -154,6 +154,28 @@ describe("the audit page's filter for one family or student", () => {
     expect(await tagged(`student:${leo}`)).toEqual([]);
   });
 
+  it("finds a student's move under the student and under both families, the rows written before the move was saved in the portal first and those since", async () => {
+    // Since slice 9f: the portal's save and its follow-ups target the student record and name both families in their
+    // body; the send to QuickBooks targets the student's customer, naming where the cache and QuickBooks' answer had them.
+    // Before: the follow-ups targeted the customer and named the families' customers.
+    const tag = (t: string, body: { before?: Record<string, unknown>; after: Record<string, unknown> }) => ({ ...body, after: { ...body.after, tag: t } });
+    await bodied("roster.record.moved", "student", leo, tag("saved", { before: { familyId: rivera }, after: { kind: "student", studentId: leo, familyId: chen, fromFamilyId: rivera, quickbooks: "sending" } }));
+    await bodied("roster.student.move.followed", "student", leo, tag("followed", { after: { studentId: leo, fromFamilyId: rivera, toFamilyId: chen, cause: `roster.record.moved#${leo}` } }));
+    await bodied("roster.student.move", "qbo_customer", "12", tag("sent", { before: { name: "Leo Rivera", familyQboId: "10" }, after: { role: "student", familyQboId: "20" } }));
+    await bodied("roster.student.move.followed", "qbo_customer", "12", tag("old-followed", { after: { fromFamilyQboId: "10", toFamilyQboId: "20", cause: "roster.refresh#7" } }));
+    // Kai moved out of the Chen family to a family neither search is about: Chen's, and never Rivera's.
+    const OTHER = "7d1f0b2a-6666-4c3d-8e9f-000000000001";
+    await bodied("roster.record.moved", "student", kai, tag("kai-left-chen", { before: { familyId: chen }, after: { kind: "student", studentId: kai, familyId: OTHER, fromFamilyId: chen, quickbooks: "not_sent" } }));
+    const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+    const leos = ["saved", "followed", "sent", "old-followed"].sort();
+    expect(await tagged(`family:${rivera}`)).toEqual(leos);
+    expect(await tagged(rivera)).toEqual(leos);
+    expect(await tagged(`family:${chen}`)).toEqual([...leos, "kai-left-chen"].sort());
+    expect(await tagged(`student:${leo}`)).toEqual(leos);
+    expect(await tagged(`student:${kai}`)).toEqual(["kai-left-chen"]);
+  });
+
   it("finds a family's roster page reads written while the page was addressed by its customer, and those written since, by its record", async () => {
     // Before stage 3's third slice: the roster page read under the customer. Since: under the app's own family.
     await row("roster.family.read", "qbo_customer", "10");

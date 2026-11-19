@@ -217,10 +217,12 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
 
 describe("a student who moves in the portal (afterStudentMoved)", () => {
   async function move(by: string) {
-    // The cache already says the student is under the other family when the follow-ups run (applyWritten), and the
-    // student's own record with it.
+    // The follow-ups run at the portal's save (moveStudent(), stage 3's slice 9f), before QuickBooks or the cache has the
+    // move, and take it by the app's own records, read here before moveInCache() moves the record. They read no cache,
+    // so moving the cache first (as a move QuickBooks has taken leaves it) changes nothing they do.
+    const move = { studentId: await recordOfCustomer(S1, "student"), fromFamilyId: await recordOfCustomer(FAMILY, "family"), toFamilyId: await recordOfCustomer(CHENOWETH.family.qboId, "family") };
     await moveInCache([S1], CHENOWETH.family.qboId);
-    return db.transaction((tx) => afterStudentMoved(tx, { studentQboId: S1, fromFamilyQboId: FAMILY, toFamilyQboId: CHENOWETH.family.qboId, cause: "test" },
+    return db.transaction((tx) => afterStudentMoved(tx, { ...move, cause: "test" },
       { actor: { door: "staff", id: by, label: "registrar@club.org" }, ip: null }));
   }
 

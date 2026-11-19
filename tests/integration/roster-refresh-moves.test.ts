@@ -18,7 +18,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { buyout, formWithdrawal, jobRun, parent, qboCustomer, setting, signatureConsent, signedFormEvidence, student, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
+import { applyWritten, moveStudent, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
@@ -40,8 +40,9 @@ import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith,
 
 /**
  * A move is followed only when staff make it in the portal (afterStudentMoved(), src/lib/roster/writes.ts): the
- * student's forms, volunteer places and buy-outs, once, in the move's own transaction (or the queue's, when QuickBooks
- * took it and the portal found it made later), the guardians told after the commit. Since stage 3's slice 9c a roster
+ * student's forms, volunteer places and buy-outs, once, in the transaction moveStudent() saves the move in (stage 3's
+ * slice 9f), the guardians told after the commit; neither QuickBooks' answer nor the queue finding the move made runs
+ * them again. Since stage 3's slice 9c a roster
  * refresh follows nothing: a student moved, renamed or made inactive in QuickBooks keeps their record, forms, places
  * and buy-outs where the app has them, and the daily buy-out check voids nothing for it (stage 4 shows such a change
  * as a difference).
@@ -77,6 +78,9 @@ const signedInNow = async (g: { authUserId: string; familyQboId: string }) =>
   ({ session: await seedParentSession(g.authUserId, { familyQboId: g.familyQboId }) });
 const cached = async (qboId: string) => (await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, qboId)))[0];
 const followed = () => auditsOf("roster.student.move.followed");
+/** Leo moved to the Chen family as a family's page moves him (stage 3's slice 9f): saved in the portal first, by the app's ids. */
+const moveLeo = async (op: Parameters<typeof moveStudent>[3]) =>
+  moveStudent(String(await recordOfCustomer(LEO, "student")), String(await recordOfCustomer(CHEN, "family")), await currentRosterTag(), op);
 const signup = async (id: string) => (await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, id)))[0]!;
 const anaId = async () => (await db.select().from(parent).where(eq(parent.email, "ana@example.com")))[0]!.id;
 /** Leo's own record as the app holds it. */
@@ -150,8 +154,9 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
     const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     // Each guardian is told only once the move is committed.
     mail.atSend = async () => (await leoRecord()).familyId === (await recordOfCustomer(CHEN, "family"));
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.student.move#${LEO}`, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
+    expect(await moveLeo(op)).toMatchObject({ ok: true });
+    const leoId = String(await recordOfCustomer(LEO, "student"));
+    expect(await followed()).toEqual([expect.objectContaining({ targetId: leoId, after: expect.objectContaining({ cause: `roster.record.moved#${leoId}`, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
     // The open form starts again under the new family, its document queued for withdrawal; the signed one moves with its evidence.
     expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened", envelopeId: null, signers: [] });
     expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete" });
@@ -171,12 +176,15 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
     expect(mail.outbox).toHaveLength(1);
   });
 
-  it("a move whose answer named another record changes nothing at once; the queue finishes it once a read shows it, follow-ups and record together", async () => {
+  it("a move whose answer named another record changes nothing at once; the queue finishes it once a read shows it, and follows nothing", async () => {
+    // A move is the portal's own change (stage 3's slice 9f): its record moved and its follow-ups ran when moveStudent()
+    // saved it. QuickBooks' answer, taken now or found later, moves no record and follows nothing again.
     const leo = await seedLeo();
+    const before = await leosThings(leo);
     moveInQuickBooks(LEO, CHEN);
     await applyWritten({ op: "move", role: "student", qboId: LEO, syncToken: "0", fromFamilyQboId: RIVERA, toFamilyQboId: CHEN },
       { Id: "13", DisplayName: "Someone Else", SyncToken: "1", ParentRef: { value: CHEN } },
-      // Filed under the records the staff action's checks found (prepare()), as every real send is.
+      // Filed under the records the staff action's checks found, as every real send is.
       { realmId: REALM, actor: WORKER.actor, ip: null, linkedBy: null, filed: { familyId: await recordOfCustomer(RIVERA, "family"), studentId: await recordOfCustomer(LEO, "student") } });
     expect(await followed()).toEqual([]);
     expect((await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY)))).toHaveLength(1);
@@ -184,32 +192,35 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
     const [item] = await db.select().from(writeQueue);
     expect(item).toMatchObject({ state: "waiting", sent: true, lastCode: "answer_other", targetQboId: LEO });
 
-    // A refresh alone follows nothing; the queue, after one, finds the move made and finishes it.
+    // A refresh alone follows nothing; the queue, after one, finds the move made and marks it done, following nothing.
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toEqual([]);
     await db.update(writeQueue).set({ nextTryAt: new Date(Date.now() - 60_000) });
     expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
     expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.write.found#${LEO}`, formsReset: 1, formsMoved: 1, placesGivenUp: 1 }) })]);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    expect(await leoRecord()).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family") });
+    expect(await followed()).toEqual([]);
+    const now = await leosThings(leo);
+    expect({ ...now, queue: [] }).toEqual({ ...before, queue: [] });
+    expect(now.record).toMatchObject({ familyId: await recordOfCustomer(RIVERA, "family") });
+    expect(mail.outbox).toEqual([]);
     expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
 
-  it("a queued move QuickBooks made already: the queue follows it once it finds it, and the refresh before that follows nothing", async () => {
+  it("a queued move QuickBooks made already: the queue marks it done once it finds it, and neither it nor the refresh before it follows anything", async () => {
     const leo = await seedLeo();
+    const before = await leosThings(leo);
     moveInQuickBooks(LEO, CHEN);
     // Sent after the last read, its answer lost: the queue reads the roster again before it looks for it.
     const item = await seedQueued({ op: "move", role: "student", qboId: LEO, syncToken: "0", fromFamilyQboId: RIVERA, toFamilyQboId: CHEN }, { sent: true, lastTriedAt: new Date() });
 
     expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    expect((await followed()).map((r) => (r.after as { cause: string }).cause)).toEqual([`roster.write.found#${LEO}`]);
-    expect((await followed())[0]!.after).toMatchObject({ formsMoved: 1, formsReset: 1, placesGivenUp: 1 });
-    expect(await leoRecord()).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family") });
-    expect(await db.select().from(formWithdrawal)).toHaveLength(1);
-    expect(mail.outbox).toHaveLength(1);
+    expect(await followed()).toEqual([]);
+    const now = await leosThings(leo);
+    expect({ ...now, queue: [] }).toEqual({ ...before, queue: [] });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
+    expect(await db.select().from(formWithdrawal)).toEqual([]);
+    expect(mail.outbox).toEqual([]);
     expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
 });
@@ -247,7 +258,7 @@ describe("buy-outs of a student QuickBooks moved are voided by nothing; a move i
     const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     moveInQuickBooks(LEO, RIVERA); // back where the app holds him, so the portal's move is offered
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: inStub(LEO).SyncToken as string, toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
+    expect(await moveLeo(op)).toMatchObject({ ok: true });
     expect(await voids()).toHaveLength(1);
     expect((await voids())[0]!.request).toMatchObject({ buyoutId: b.invoiced.id, why: "student_moved" });
     for (let i = 0; i < 2; i++) {
@@ -301,7 +312,7 @@ describe("what each family reads after a student QuickBooks moved", () => {
     const mei = await signedInNow(meiRow);
     const leo = await seedLeo();
     const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
+    expect(await moveLeo(op)).toMatchObject({ ok: true });
 
     const meiNow = await identityNow(mei.session.id);
     asParent(meiNow);

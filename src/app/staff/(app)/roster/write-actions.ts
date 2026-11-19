@@ -2,8 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, linkStudentMadeAfterGivingUp, renameLinked, sendPortalValue, type PortalChange,
-  type WriteAsk, type WriteResult } from "@/lib/roster/writes";
+import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, linkStudentMadeAfterGivingUp, moveStudent, renameLinked, sendPortalValue,
+  type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
 import { giveUp, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
 import { NAME_MAX } from "@/lib/roster/names";
 
@@ -125,9 +125,16 @@ export const renameParentAction = staffAction(P, async (ctx, rosterTag: string, 
   return run(ctx, { op: "rename", qboId, syncToken, name: newName, parentOnly: true }, rosterTag);
 });
 
-export const moveAction = staffAction(P, async (ctx, rosterTag: string, qboId: string, syncToken: string, toFamilyQboId: string): Promise<WriteResult> => {
-  if (!tag(rosterTag) || !id(qboId) || !version(syncToken) || !id(toFamilyQboId)) return NOT_FROM_PAGE;
-  return run(ctx, { op: "move", qboId, syncToken, toFamilyQboId }, rosterTag);
+/**
+ * A student moved to another of the portal's own families (stage 3's slice 9f): saved in the portal first, with what
+ * follows a move, then sent to QuickBooks for a linked student (moveStudent()). The page sends the student's and the
+ * family's app ids, uuids, and no version and no QuickBooks id.
+ */
+export const moveAction = staffAction(P, async (ctx, rosterTag: string, studentId: string, toFamilyId: string): Promise<WriteResult> => {
+  if (!canRead(ctx) || !tag(rosterTag) || !uuid(studentId) || !uuid(toFamilyId)) return NOT_FROM_PAGE;
+  const r = await moveStudent(studentId, toFamilyId, rosterTag, op(ctx));
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
 });
 
 export const deactivateAction = staffAction(P, async (ctx, rosterTag: string, qboId: string, syncToken: string): Promise<WriteResult> => {

@@ -81,8 +81,8 @@ export async function previewShape(shape: MembershipShape): Promise<ShapePreview
  * through the student link, as the roster lists it under the family's customer (`customer`; null when it has no link,
  * or the roster lists that customer elsewhere or not at all). `linked`: the record has a student link at all.
  * `elsewhere`: the linked customer, where the roster lists it under another family (since stage 3's slice 9c the
- * portal and QuickBooks can disagree where a student is: a move QuickBooks took that was given up, or one made in
- * QuickBooks alone), with that family's customer and its name in QuickBooks. Names are the record's (recordNameWords()
+ * portal and QuickBooks can disagree where a student is: a move made in QuickBooks alone, or, since slice 9f, a move
+ * saved in the portal first that QuickBooks hasn't taken), with that family's customer and its name in QuickBooks. Names are the record's (recordNameWords()
  * when the portal knows none).
  */
 export type RecordStudent = { id: AppStudentId; name: string; active: boolean; customer: Cust | null; linked: boolean;
