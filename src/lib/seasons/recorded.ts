@@ -2,7 +2,8 @@
 // query (./my-season.ts) and the staff ones (./staff-progress.ts); it imports no staff-only module, and reads only the
 // requirements and the families or students it is asked about. The season's records name the app's own families and
 // students (stage 2 of the app-owned families spec), and every kind's rule is asked by those ids (the payment rule turns
-// them into customers itself, for the figures still kept by customer: src/lib/money/payment-standings.ts). Every read
+// them into customers itself: its figures are kept by the app's family, but whose invoices are whose is still the roster
+// cache's tree of customers, src/lib/money/payment-standings.ts). Every read
 // here takes the families and students it is for; the same reads for everyone, for staff, are in
 // ./everyone.ts (STAFF_ONLY_IMPORTS), built on factsFrom(). The chosen lists and ticks themselves are read in
 // ./season-rows.ts.
