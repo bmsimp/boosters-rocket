@@ -31,7 +31,7 @@ import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stu
 import { connectForms, formSetting, requestByCustomer, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { addToCache, fam, moveInCache, par, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
-import { subjectColumns } from "../helpers/app-records";
+import { subjectColumns, syncAppRecords } from "../helpers/app-records";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
 
 /**
@@ -186,6 +186,7 @@ describe("kept signed forms the matrix doesn't lead to", () => {
     expect(othersOf(await renderPage(SignedFormsPage, { searchParams: {} }))).not.toContain("/staff/forms/evidence/");
     // A's student leaves the roster: A's signed form is listed apart, B's stays in the table.
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, FAMILY_A.students[1]!.qboId));
+    await syncAppRecords(); // as the roster read that saw it does: the matrix lists the app's active students
     let others = othersOf(await renderPage(SignedFormsPage, { searchParams: {} }));
     expect(others).toContain(`/staff/forms/evidence/${a.forms!.evidence.id}`);
     expect(others).not.toContain(`/staff/forms/evidence/${b.forms!.evidence.id}`);

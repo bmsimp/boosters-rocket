@@ -71,7 +71,7 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
                 { key: "step", header: "Step", cell: (f) => f.stepName },
                 { key: "asked", header: "Asked of", cell: (f) => (f.appliesTo === "family" ? "Each family" : "Each student") },
                 { key: "due", header: "Due", cell: (f) => (f.dueOn ? <CalendarDate iso={f.dueOn} /> : "No due date") },
-                { key: "signed", header: "Signed", numeric: true, cell: (f) => (matrix.families ? tally(f.counts) : "") },
+                { key: "signed", header: "Signed", numeric: true, cell: (f) => tally(f.counts) },
                 ...(writes ? [{ key: "remind", header: "Reminders", quiet: true, cell: (f: MatrixForm) => (f.setting ? (
                   <>
                     <RemindButton label="Remind now" run={remindFormAction.bind(null, f.id)} />
@@ -101,8 +101,7 @@ export default async function SignedFormsPage({ searchParams }: { searchParams: 
                 <div className="matrix-filter-go"><button type="submit" className="btn btn-line">Show</button>{filtered && <Link href="/staff/forms">Show everyone</Link>}</div>
               </form>
 
-              {!matrix.families ? <Notice tone="warning">The roster can&apos;t be shown right now, so nobody is listed. Check QuickBooks under Roster.</Notice>
-                : matrix.families.length === 0 ? <Notice tone="info">{filtered ? "Nobody matches that." : "Nobody on the roster is asked for these forms."}</Notice> : (
+              {matrix.families.length === 0 ? <Notice tone="info">{filtered ? "Nobody matches that." : "Nobody on the roster is asked for these forms."}</Notice> : (
                   <div className="matrix-wrap" role="region" aria-labelledby="who-h" tabIndex={0}>
                     <DataTable caption="Students down the side, by family, and the season's forms across" captionHidden className="matrix"
                       rowKey={(row: MatrixRow) => `${row.kind}-${row.id}`}

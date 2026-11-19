@@ -21,7 +21,6 @@ type Done<T = object> = ({ ok: true } & T) | Refused;
 const refuse = (...errors: string[]): Refused => ({ ok: false, errors });
 export const REASON_MAX = 500, BULK_MAX = 5000;
 const GONE = "That isn't there any more. Reload the page.";
-const NO_ROSTER = "The roster can't be shown right now, so nothing was changed. Check QuickBooks under Roster.";
 const NOT_COVERED = "Someone in that list isn't covered by this requirement any more. Reload the page and try again.";
 
 export type ProgressRow = SeasonSubject & {
@@ -38,8 +37,8 @@ export type LeftRow = { subjectId: SubjectId; kind: "family" | "student"; name: 
 export type RequirementProgress = RequirementSetup & {
   /** True for a kind staff meet by hand (a checklist item). */
   ticked: boolean;
-  /** Everyone the requirement is asked of now, by family and then by name; null when the roster can't be shown. */
-  rows: ProgressRow[] | null;
+  /** Everyone the requirement is asked of now, by family and then by name. */
+  rows: ProgressRow[];
   left: LeftRow[];
   counts: { asked: number; done: number; waived: number; todo: number };
   /** The company the roster was read from, for the page's ticks and waivers to carry (roster-lock.ts). */
@@ -80,26 +79,24 @@ export async function loadRequirementProgress(requirementId: string, amounts: "a
   const [families, { facts, recorded }] = await Promise.all([loadSeasonFamilies(), everyonesFacts([setup.requirement], { amounts, parentId: null })]);
   const who = await staffNames(recorded.flatMap((r) => [r.metBy, r.waivedBy]));
   const by = new Map(recorded.map((r) => [String(r.subjectId), r]));
-  const covered = families ? coveredBy(setup.requirement, families) : null;
-  const rows = covered?.map((s): ProgressRow => {
+  const covered = coveredBy(setup.requirement, families);
+  const rows = covered.map((s): ProgressRow => {
     const line = lineFor(setup.requirement, s.id, facts), r = by.get(String(s.id));
     return { ...s, state: line.state, words: line.words, metAt: iso(r?.metAt ?? null), metBy: r?.metBy ? who.get(r.metBy) ?? null : null,
       waivedAt: iso(r?.waivedAt ?? null), waivedBy: r?.waivedBy ? who.get(r.waivedBy) ?? null : null, waivedReason: r?.waivedReason ?? null };
-  }) ?? null;
+  });
   // Recorded for someone not asked now: they left the roster, or a chosen list no longer names them.
-  const shown = new Set((covered ?? []).map((s) => String(s.id)));
-  const gone = covered ? recorded.filter((r) => !shown.has(String(r.subjectId))) : [];
+  const shown = new Set(covered.map((s) => String(s.id)));
+  const gone = recorded.filter((r) => !shown.has(String(r.subjectId)));
   const kind = setup.requirement.appliesTo;
   const names = await recordNames(kind, gone.map((r) => r.subjectId));
   const left = gone.map((r): LeftRow => ({ subjectId: r.subjectId, kind, name: names.get(String(r.subjectId)) ?? null, metAt: iso(r.metAt), waivedAt: iso(r.waivedAt), waivedReason: r.waivedReason }));
-  return { ...setup, ticked: KIND_RULES[setup.requirement.kind]?.ticked ?? false, rows, left, counts: countsOf(rows ?? []), rosterTag };
+  return { ...setup, ticked: KIND_RULES[setup.requirement.kind]?.ticked ?? false, rows, left, counts: countsOf(rows), rosterTag };
 }
 
 export type OverviewRequirement = { id: string; title: string; required: boolean; appliesTo: Requirement["appliesTo"]; counts: RequirementProgress["counts"] };
 export type ProgressOverview = {
   season: { id: string; name: string; isCurrent: boolean };
-  /** False when the roster can't be shown: the counts are then all zero and mean nothing. */
-  roster: boolean;
   steps: { id: string; name: string; requirements: OverviewRequirement[] }[];
 };
 
@@ -113,10 +110,10 @@ export async function loadProgressOverview(seasonId: string): Promise<ProgressOv
   const requirements = rows.map((r) => ({ stepId: r.stepId, requirement: toRequirement(r, covers.get(r.id) ?? []) }));
   const [families, { facts }] = await Promise.all([loadSeasonFamilies(), everyonesFacts(requirements.map((r) => r.requirement), { amounts: "none", parentId: null })]);
   return {
-    season: { id: s.id, name: s.name, isCurrent: s.isCurrent }, roster: families !== null,
+    season: { id: s.id, name: s.name, isCurrent: s.isCurrent },
     steps: steps.map((x) => ({ id: x.id, name: x.name, requirements: requirements.filter((r) => r.stepId === x.id).map(({ requirement: r }) => ({
       id: r.id, title: r.title, required: r.required, appliesTo: r.appliesTo,
-      counts: countsOf(coveredBy(r, families ?? []).map((subject) => lineFor(r, subject.id, facts))),
+      counts: countsOf(coveredBy(r, families).map((subject) => lineFor(r, subject.id, facts))),
     })) })),
   };
 }
@@ -141,8 +138,8 @@ export type FamilyProgress = SeasonStanding & {
 /**
  * One family's standing through one season, in full: what a parent of the family sees, and the reason for each waiver.
  * The family is the app's record its page's address names, found as the season keeps it (seasonFamilyAt()). Null
- * when there is no such season, when the roster can't be shown, or when the family isn't an active family on it (a
- * record made inactive, or one whose customer QuickBooks has made inactive or no longer lists as a family). Only that
+ * when there is no such season, or when the family record isn't active (one whose customer QuickBooks has made
+ * inactive or no longer lists as a family, while the records mirror the roster). Only that
  * family's records are read. The page that shows this audits the read.
  */
 export async function loadFamilyProgress(familyId: AppFamilyId, seasonId: string, amounts: "all" | "none"): Promise<FamilyProgress | null> {
@@ -155,8 +152,8 @@ export async function loadFamilyProgress(familyId: AppFamilyId, seasonId: string
   return { ...standing, family: { id: found.id, name: found.name }, season: { id: s.id, name: s.name, isCurrent: s.isCurrent }, today, waivers };
 }
 
-type Target = { setup: RequirementSetup; families: SeasonFamily[] | null };
-/** The requirement and the roster, read under the roster lock (lockRosterAs) by the transaction that writes. */
+type Target = { setup: RequirementSetup; families: SeasonFamily[] };
+/** The requirement and the app's families, read under the roster lock (lockRosterAs) by the transaction that writes. */
 const target = async (requirementId: string, tx: Tx): Promise<Target | null> => {
   const setup = await getRequirementSetup(requirementId, tx);
   return setup ? { setup, families: await loadSeasonFamilies() } : null;
@@ -189,11 +186,8 @@ export async function setTicks(requirementId: string, rosterTag: string, subject
     const t = await target(requirementId, tx);
     if (!t) return refuse(GONE);
     if (!KIND_RULES[t.setup.requirement.kind]?.ticked) return refuse("This kind of requirement isn't ticked off by hand.");
-    const covered = new Map((t.families ? coveredBy(t.setup.requirement, t.families) : []).map((s) => [String(s.id), s]));
-    if (ticked) {
-      if (!t.families) return refuse(NO_ROSTER);
-      if (ids.some((id) => !covered.has(id))) return refuse(NOT_COVERED);
-    }
+    const covered = new Map(coveredBy(t.setup.requirement, t.families).map((s) => [String(s.id), s]));
+    if (ticked && ids.some((id) => !covered.has(id))) return refuse(NOT_COVERED);
     const [r] = await tx.select({ id: requirement.id }).from(requirement).where(eq(requirement.id, requirementId)).for("update");
     if (!r) return refuse(GONE);
     const existing = await rowsOfRequirement(r.id, tx);
@@ -234,7 +228,6 @@ export async function waiveRequirement(requirementId: string, rosterTag: string,
     if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
     const t = await target(requirementId, tx);
     if (!t) return refuse(GONE);
-    if (!t.families) return refuse(NO_ROSTER);
     const subject = coveredBy(t.setup.requirement, t.families).find((s) => String(s.id) === subjectId);
     if (!subject) return refuse(NOT_COVERED);
     const [r] = await tx.select({ id: requirement.id }).from(requirement).where(eq(requirement.id, requirementId)).for("update");
@@ -256,7 +249,7 @@ export async function removeWaiver(requirementId: string, rosterTag: string, sub
     if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
     const t = await target(requirementId, tx);
     if (!t) return refuse(GONE);
-    const subject = t.families ? coveredBy(t.setup.requirement, t.families).find((s) => String(s.id) === subjectId) : undefined;
+    const subject = coveredBy(t.setup.requirement, t.families).find((s) => String(s.id) === subjectId);
     const row = (await rowsOfRequirement(requirementId, tx)).get(subjectId);
     if (!row?.waivedAt) return { ok: true as const, changed: false };
     if (row.metAt) await tx.update(requirementProgress).set({ waivedAt: null, waivedBy: null, waivedReason: null, updatedAt: new Date() }).where(eq(requirementProgress.id, row.id));
