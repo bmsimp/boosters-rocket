@@ -144,7 +144,7 @@ describe("one family never sees another's data on a parent page", () => {
       }
       const leaked = markersIn(outcome.html, other.markers);
       expect(leaked, `${file}, rendered for ${viewer.spec.family.name}, contains data of ${other.spec.family.name}: ${leaked.join(", ")}. `
-        + `Every query on a parent page takes the family from ctx.familyQboId (the session), never from the URL or a form.`).toEqual([]);
+        + `Every query on a parent page takes the family from ctx.familyId (the session), never from the URL or a form.`).toEqual([]);
 
       const own = markersIn(outcome.html, viewer.markers);
       if (route in NO_FAMILY_DATA) {
@@ -167,7 +167,7 @@ describe("one family never sees another's data on a parent page", () => {
         if (!("html" in outcome)) continue; // a 404 or a redirect: nothing shown
         const leaked = markersIn(outcome.html, other.markers);
         expect(leaked, `${file}, asked by ${viewer.spec.family.name} for ${other.spec.family.name}'s ids in the address, shows: ${leaked.join(", ")}. `
-          + `An id from the URL is untrusted: look it up within ctx.familyQboId and answer notFound() when it isn't there.`).toEqual([]);
+          + `An id from the URL is untrusted: look it up within ctx.familyId and answer notFound() when it isn't there.`).toEqual([]);
       }
     });
 

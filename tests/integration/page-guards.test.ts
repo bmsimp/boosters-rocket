@@ -118,7 +118,7 @@ const ROUTE_HANDLERS: Record<string, string> = {
 
 /**
  * Modules that read across families, for staff pages only: never imported by anything under src/app/(parent)/.
- * A parent page reads through a query that takes ctx.familyQboId and returns that family alone.
+ * A parent page reads through a query that takes ctx.familyId and returns that family alone.
  */
 const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string }[] = [
   { module: "@/lib/roster/queries", names: "all", why: "loadRosterPage() and rosterEntry() load every family in the club" },
@@ -314,7 +314,7 @@ function moduleFile(module: string, importer: string): string {
 
 /** Everything in a parent file that reaches a staff-only module, in words that say what to do instead; empty when there is nothing. */
 function staffOnlyImportProblems(file: string, source = read(file)): string[] {
-  const instead = `Read through a query that takes ctx.familyQboId and returns that family alone.`;
+  const instead = `Read through a query that takes ctx.familyId and returns that family alone.`;
   const problems: string[] = [];
   for (const use of moduleUses(source)) {
     if (use.module === null) {
