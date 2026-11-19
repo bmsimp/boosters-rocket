@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planAppRecords, type PlanCustomer, type PlanGuardian, type PlanInput } from "@/lib/families/plan";
+import { planAppRecords, planForOneFamily, type PlanCustomer, type PlanGuardian, type PlanInput } from "@/lib/families/plan";
 import { recordNameWords } from "@/lib/families/words";
 
 /** The rules of the app's own records (src/lib/families/plan.ts), with no database. */
@@ -65,5 +65,36 @@ describe("planAppRecords", () => {
     expect([...plan.families.keys()]).toEqual(["1", "2"]);
     expect(plan.students.size).toBe(0);
     expect(plan.membershipLinks.size).toBe(0);
+  });
+});
+
+describe("planForOneFamily", () => {
+  // "Create a family from this" (src/lib/roster/no-family.ts): the import's own plan, narrowed to one family customer.
+  const whole = planAppRecords(input({
+    customers: [c("10", "Rivera Family", "F"), c("11", "Ana Rivera", "P", "10"), c("12", "Leo Rivera", "S", "10"), c("13", "Mia Rivera", "S", "10", false),
+      c("20", "Chen Family", "F"), c("22", "Mei Chen", "S", "20"), c("30", "Lincoln High", "M")],
+    guardians: [g("a", "10", "11"), g("b", "20", null)],
+  }));
+
+  it("holds that family's record and its students' as the whole plan has them, and nobody else's", () => {
+    const one = planForOneFamily(whole, "10");
+    expect([...one.families]).toEqual([["10", { name: "Rivera Family", active: true }]]);
+    expect([...one.students]).toEqual([
+      ["12", { name: "Leo Rivera", active: true, familyCustomerId: "10" }],
+      ["13", { name: "Mia Rivera", active: false, familyCustomerId: "10" }],
+    ]);
+  });
+
+  it("points and links no guardian row", () => {
+    const one = planForOneFamily(whole, "10");
+    expect(one.memberships.size).toBe(0);
+    expect(one.membershipLinks.size).toBe(0);
+  });
+
+  it("is empty for a customer the plan holds no family record of: a student, another type, one it doesn't know", () => {
+    for (const id of ["12", "30", "99"]) {
+      const one = planForOneFamily(whole, id);
+      expect([one.families.size, one.students.size], id).toEqual([0, 0]);
+    }
   });
 });

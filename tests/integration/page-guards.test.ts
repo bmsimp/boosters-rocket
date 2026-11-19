@@ -153,7 +153,8 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/staff-home/today", names: "all", why: "the staff home's counts read every family's forms and every shift's sign-ups" },
   { module: "@/lib/quickbooks/sandbox-check/run", names: "all", why: "the Admin's check of the portal's requests reads every customer and some families' invoices" },
   { module: "@/lib/quickbooks/sandbox-check/writes", names: "all", why: "the check's writes to QuickBooks, for an Intuit sandbox company only" },
-  { module: "@/lib/families/roster-import", names: "all", why: "the import of the app's own records from the roster: it reads every family's customers, sign-ins and records" },
+  { module: "@/lib/families/roster-import", names: "all", why: "the import of the app's own records from the roster: it reads every family's customers, sign-ins and records (its one caller under src/ is src/lib/roster/no-family.ts, since stage 3's slice 10)" },
+  { module: "@/lib/roster/no-family", names: "all", why: "the customers no family is linked to read every customer of the roster cache, and 'Create a family from this' makes a family of any of them" },
   { module: "@/lib/parents/guardians", names: "all", why: "staff add, remove and reinstate guardians: it gives any address a sign-in for any family" },
 ];
 

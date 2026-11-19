@@ -94,3 +94,17 @@ export function planAppRecords(i: PlanInput): Plan {
   }
   return { families, students, memberships, membershipLinks };
 }
+
+/**
+ * The plan narrowed to one family customer: its family record and the student records of the customers the plan holds
+ * directly under it, by the same rules, and no membership (so no guardian row is pointed or linked). What "Create a
+ * family from this" makes (src/lib/roster/no-family.ts, through importRecordsFromRoster()'s `one`): one definition of
+ * which customers are a family's students and what each record is named, not a second copy. Empty when the plan has no
+ * family record of that customer.
+ */
+export function planForOneFamily(plan: Plan, familyCustomerId: string): Plan {
+  const f = plan.families.get(familyCustomerId);
+  if (f === undefined) return EMPTY_PLAN;
+  return { families: new Map([[familyCustomerId, f]]), students: new Map([...plan.students].filter(([, s]) => s.familyCustomerId === familyCustomerId)),
+    memberships: new Map(), membershipLinks: new Map() };
+}

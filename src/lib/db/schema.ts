@@ -157,7 +157,9 @@ export const guardian = pgTable("guardian", {
  * only. `origin` says how the link came to be: every link stage 1 makes is `carried_over` from the roster cache on
  * `linked_at`, with nobody named; one the portal makes for a customer it has just created in QuickBooks (a staff
  * member's new family, member or student, stage 3's slice 9c) is `created`, with `linked_by` the staff member who asked;
- * a later stage's admin confirms links (`confirmed`, `linked_by`). Nothing deletes one but a change of company, which
+ * one "Create a family from this" makes (stage 3's slice 10, src/lib/roster/no-family.ts), for a customer no family
+ * was linked to and the students under it, is `confirmed`, with `linked_by` the staff member with the linking
+ * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it. Nothing deletes one but a change of company, which
  * deletes every row. A lookup always asks for one kind (src/lib/families/links.ts).
  */
 export const accountingLink = pgTable("accounting_link", {
