@@ -204,7 +204,7 @@ describe("the worker's read of every family", () => {
     expect((await audits("money.read_all")).at(-1)!.after).toEqual({ families: 4, read: 3, couldNotRead: 1, passedOverWithNoRecord: 1 });
 
     const treasurer = await seedStaff({ email: "treasurer@club.org" });
-    expect(await familyFromCustomer("25", { actor: { door: "staff", id: treasurer.id, label: treasurer.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: treasurer.id }))
+    expect(await familyFromCustomer("25", { actor: { door: "staff", id: treasurer.id, label: treasurer.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: treasurer.id, mayChangeFamilies: false }))
       .toMatchObject({ ok: true });
     expect(await runMoneyJob({ paceMs: 0, now: later(26 * HOUR) })).toEqual({ ran: true, finished: true, ok: true });
     expect(invoiceQueries(stub).join(" ")).toContain("'25'");

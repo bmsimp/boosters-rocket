@@ -72,16 +72,28 @@ export const NO_FAMILY_COPY = {
   no_shape: "The membership shape isn't chosen, or names a customer type QuickBooks no longer has, so the portal can't tell which customers are families. Nothing was made. An Admin can choose it under Settings, QuickBooks.",
 } as const;
 
+/**
+ * Who adds a made family's guardians, said to the reader: the family's page offers the add only to staff who may change
+ * families (Roster.Family.ReadWrite), which the linking permission doesn't bring.
+ */
+export const guardiansAddedBy = (mayChangeFamilies: boolean): string => (mayChangeFamilies
+  ? "add its guardians on its page, under Families."
+  : "someone who may change families adds its guardians on its page, under Families.");
+
 /** The unique index on a customer's family link: the last line against making a second family of one customer. */
 const FAMILY_LINK_UQ = "accounting_link_family_customer_uq";
 /** The import found a family record of the customer after the list said it had none: nothing is kept. */
 class HasFamilyAlready extends Error {}
-/** Whether the database refused a second family link of the customer: a unique violation of that index, anywhere in the causes. */
-const secondFamilyLink = (e: unknown): boolean => {
+/**
+ * Whether the database refused a second family link of the customer: a unique violation of that index, anywhere in the
+ * causes (the import wraps what it throws in AppRecordsFailed, and drizzle the database's error). A unique violation
+ * that names any other constraint, or none, is not this one, and is thrown.
+ */
+export const isSecondFamilyLink = (e: unknown): boolean => {
   if (typeof e !== "object" || e === null) return false;
   const pg = e as { code?: unknown; constraint_name?: unknown; cause?: unknown };
-  if (pg.code === "23505") return pg.constraint_name === undefined || pg.constraint_name === FAMILY_LINK_UQ;
-  return secondFamilyLink(pg.cause);
+  if (pg.code === "23505") return pg.constraint_name === FAMILY_LINK_UQ;
+  return isSecondFamilyLink(pg.cause);
 };
 
 /**
@@ -99,8 +111,9 @@ const secondFamilyLink = (e: unknown): boolean => {
  * exactly as it is, and counted in the answer and the audit row. A second press, or two at once, makes one family: the
  * second finds the link the first made. The unique index on a customer's family link is the last line, answered in
  * words. One audit row (`accounting.family.from_customer`) in the same transaction, naming the app's new family.
+ * `mayChangeFamilies` says whether the staff member may add the guardians themself, so the answer says who does.
  */
-export async function familyFromCustomer(customerId: string, o: { actor: Actor; ip: string | null; permission: string; staffUserId: string }): Promise<Done> {
+export async function familyFromCustomer(customerId: string, o: { actor: Actor; ip: string | null; permission: string; staffUserId: string; mayChangeFamilies: boolean }): Promise<Done> {
   if (typeof customerId !== "string" || !isQboId(customerId)) return no(NO_FAMILY_COPY.notFromPage);
   try {
     return await db.transaction(async (tx): Promise<Done> => {
@@ -123,10 +136,10 @@ export async function familyFromCustomer(customerId: string, o: { actor: Actor; 
       const students = made.students.made.length, left = made.students.leftAlone.length;
       return { ok: true, message: `${offered.name} is a family in the portal now, linked to its QuickBooks customer${students ? `, with ${plural(students, "student", "students")}` : ""}.`
         + (left ? ` ${plural(left, "student", "students")} under it in QuickBooks already had a record in the portal and ${left === 1 ? "was" : "were"} left as ${left === 1 ? "it was" : "they were"}.` : "")
-        + " Nobody can sign in for it yet: add its guardians on its page, under Families." };
+        + ` Nobody can sign in for it yet: ${guardiansAddedBy(o.mayChangeFamilies)}` };
     });
   } catch (e) {
-    if (e instanceof HasFamilyAlready || secondFamilyLink(e)) return no(NO_FAMILY_COPY.already);
+    if (e instanceof HasFamilyAlready || isSecondFamilyLink(e)) return no(NO_FAMILY_COPY.already);
     throw e;
   }
 }

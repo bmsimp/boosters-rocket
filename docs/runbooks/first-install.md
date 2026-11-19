@@ -151,7 +151,8 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    customer into the portal's own families by itself. Bring each family in from **Reconciliation** in the staff menu:
    under **Customers with no family**, **Create a family from this** makes the family and its students, linked to
    their customers in QuickBooks (an Admin can do it, and so can anyone given "Link families to accounting"). Then add
-   its guardians on its page, under **Families**. The reviewed import of every family at once comes with stage 4 of
+   its guardians on its page, under **Families** (an Admin can, and so can anyone whose role may give or end a
+   guardian's sign-in for a family; "Link families to accounting" alone can't). The reviewed import of every family at once comes with stage 4 of
    the roadmap.
 4. Before any family signs in: [before the first family](before-the-first-family.md), the checks only a person can
    make, from real phones to a pilot with a few families.

@@ -16,7 +16,8 @@ const ID_MAX = 64;
 
 export const familyFromCustomerAction = staffAction(P, async (ctx: StaffCtx, customerQboId: string): Promise<Done> => {
   if (!can(ctx.effective, "Roster.Read") || typeof customerQboId !== "string" || customerQboId.length === 0 || customerQboId.length > ID_MAX) return NOT_FROM_PAGE;
-  const r = await familyFromCustomer(customerQboId, { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId });
+  const r = await familyFromCustomer(customerQboId, { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P, staffUserId: ctx.staffUserId,
+    mayChangeFamilies: can(ctx.effective, "Roster.Family.ReadWrite") });
   // The new family shows on the Families pages and every staff page that lists families.
   if (r.ok) revalidatePath("/", "layout");
   return r;

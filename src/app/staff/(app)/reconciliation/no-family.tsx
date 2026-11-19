@@ -27,10 +27,12 @@ function whatItMakes(c: { students: number; inactiveStudents: number; studentsWi
  * it. A server component: the client list is given each row's words and the action bound to its customer, nothing
  * else. Names are QuickBooks text, shown as text only.
  */
-export async function CustomersWithNoFamily() {
+export async function CustomersWithNoFamily({ mayChangeFamilies }: { mayChangeFamilies: boolean }) {
   const list = await customersWithNoFamily();
-  const rows: NoFamilyRow[] = list.state !== "listed" ? [] : list.customers.map((c, i) => ({
-    key: `${i}`, name: c.name,
+  // Each row is keyed by its customer, so a press waiting for its answer stays on its own row when a family made takes
+  // an earlier row off the list. The id is in the browser already: the press bound to the row carries it.
+  const rows: NoFamilyRow[] = list.state !== "listed" ? [] : list.customers.map((c) => ({
+    key: c.qboId, name: c.name,
     students: c.students === 0 ? "None" : `${plural(c.students, "student", "students")}${c.inactiveStudents ? `, ${c.inactiveStudents} inactive` : ""}`,
     makes: whatItMakes(c), act: familyFromCustomerAction.bind(null, c.qboId),
   }));
@@ -38,7 +40,7 @@ export async function CustomersWithNoFamily() {
     <section className="box" aria-labelledby="no-family-h"><h2 id="no-family-h">Customers with no family{rows.length ? ` (${rows.length})` : ""}</h2>
       <p>Customers QuickBooks lists as a family that no family in the portal is linked to: one added in QuickBooks since the portal&apos;s families were set up, say.
         Creating a family from one makes the family and its students in the portal, linked to their customers, so its invoices show to its guardians.
-        It makes no guardian and gives nobody a sign-in: add its guardians on the family&apos;s page, under Families. Nothing is sent to QuickBooks.</p>
+        {` It makes no guardian and gives nobody a sign-in: ${mayChangeFamilies ? "add its guardians" : "someone who may change families adds its guardians"} on the family's page, under Families. Nothing is sent to QuickBooks.`}</p>
       {list.state !== "listed" ? <Notice tone="warning" live="none">{WHY_NONE[list.state]}</Notice> : <NoFamilyRows rows={rows} />}
     </section>
   );

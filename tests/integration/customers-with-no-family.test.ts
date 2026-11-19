@@ -11,11 +11,15 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, qboConnection, qboCustomerType, setting, student } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, qboConnection, qboCustomerType, setting, student } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
-import { customersWithNoFamily, familyFromCustomer, NO_FAMILY_COPY } from "@/lib/roster/no-family";
+import { loadFamilyMoney } from "@/lib/money/family-money";
+import { addGuardian } from "@/lib/parents/guardians";
+import { customersWithNoFamily, familyFromCustomer, isSecondFamilyLink, NO_FAMILY_COPY } from "@/lib/roster/no-family";
 import { rosterEntry } from "@/lib/roster/queries";
 import { refreshRoster } from "@/lib/roster/refresh";
+import { askRosterWrite } from "@/lib/roster/writes";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { ROSTER_LOCK, SHAPE_KEY } from "@/lib/roster/shape";
 import { SOURCE_KEY } from "@/lib/roster/source";
 import { familyFromCustomerAction } from "@/app/staff/(app)/reconciliation/family-actions";
@@ -26,6 +30,7 @@ import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, connectRoster, REALM, staffWith, WORKER } from "../helpers/roster-writes";
 import { appRecordRows, NO_CHANGES, recordOfCustomer, whatAFreshRunWouldChange } from "../helpers/app-records";
 import { rowNamed, tableRows } from "../helpers/table";
+import { stubInvoice } from "../helpers/money";
 
 /**
  * Customers with no family (stage 3's slice 10 of the app-owned families spec, open question 19): since slice 9c a
@@ -59,6 +64,11 @@ async function addInQuickBooks(...customers: ReturnType<typeof qc>[]) {
 /** The Patel family added in QuickBooks: Asha (a student), Ravi (a student made inactive) and Nita (a parent). */
 const PATELS = [qc("70", "Patel Family", "1"), qc("71", "Asha Patel", "3", under("70")), qc("72", "Ravi Patel", "3", { ...under("70"), Active: false }),
   qc("73", "Nita Patel", "2", under("70"))];
+
+/** How the action calls familyFromCustomer() for a staff member with the linking permission (and, unless told, Roster.Family.ReadWrite). */
+const asLinker = (staff: { id: string; email: string }, mayChangeFamilies = true) => ({ ...asOp(staff), permission: "Accounting.Link.ReadWrite", mayChangeFamilies });
+/** The family record a customer's family link names, as made by a press. */
+const madeFamilyOf = async (customerId: string) => (await familyLinksOf(customerId))[0]!.familyId!;
 
 const listed = async () => {
   const list = await customersWithNoFamily();
@@ -119,7 +129,7 @@ describe("Create a family from this", () => {
     await connectRoster(stub);
     await addInQuickBooks(...PATELS);
     const treasurer = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    const r = await familyFromCustomer("70", { ...asOp(treasurer), permission: "Accounting.Link.ReadWrite" });
+    const r = await familyFromCustomer("70", asLinker(treasurer));
     expect(r).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. Nobody can sign in for it yet: add its guardians on its page, under Families." });
 
     const [link] = await familyLinksOf("70");
@@ -158,7 +168,7 @@ describe("Create a family from this", () => {
     const leoBefore = await db.select().from(student).where(eq(student.id, leo));
     const linkBefore = await studentLinkOf("12");
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    const r = await familyFromCustomer("70", asOp(staff));
+    const r = await familyFromCustomer("70", asLinker(staff));
     expect(r).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. 1 student under it in QuickBooks already had a record in the portal and was left as it was. Nobody can sign in for it yet: add its guardians on its page, under Families." });
     expect(await db.select().from(student).where(eq(student.id, leo))).toEqual(leoBefore);
     expect(leoBefore[0]!.familyId).toEqual(rivera);
@@ -167,11 +177,98 @@ describe("Create a family from this", () => {
     expect((row!.after as { studentsLeftAlone: unknown[] }).studentsLeftAlone).toEqual([{ studentId: String(leo), customerQboId: "12" }]);
   });
 
+  it("leaves a student whose record is inactive and in no family exactly as it is, and says so", async () => {
+    await connectRoster(stub);
+    // Sam's customer was off the roster when the records were made: his record is inactive, in no family, linked to
+    // his customer (as migration 0023 made one). QuickBooks now holds him under the Patel family; a read changes no record.
+    const sam = await recordOfCustomer("74", "student");
+    await addInQuickBooks(...PATELS, qc("74", "Sam Patel", "3", under("70")));
+    const samBefore = await db.select().from(student).where(eq(student.id, sam));
+    expect(samBefore[0]).toMatchObject({ active: false, familyId: null });
+    const linkBefore = await studentLinkOf("74");
+    expect(await listed()).toEqual([{ qboId: "70", name: "Patel Family", students: 3, inactiveStudents: 1, studentsWithRecord: 1 }]);
+    const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("70", asLinker(staff))).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. 1 student under it in QuickBooks already had a record in the portal and was left as it was. Nobody can sign in for it yet: add its guardians on its page, under Families." });
+    expect(await db.select().from(student).where(eq(student.id, sam))).toEqual(samBefore);
+    expect(await studentLinkOf("74")).toEqual(linkBefore);
+    const kids = await db.select({ name: student.name }).from(student).where(eq(student.familyId, await madeFamilyOf("70")));
+    expect(kids.map((k) => k.name).sort()).toEqual(["Asha Patel", "Ravi Patel"]);
+    const [row] = await audits("accounting.family.from_customer");
+    expect((row!.after as { studentsLeftAlone: unknown[] }).studentsLeftAlone).toEqual([{ studentId: String(sam), customerQboId: "74" }]);
+  });
+
+  it("tells a treasurer who may not change families that someone who may adds the guardians", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(...PATELS);
+    const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("70", asLinker(staff, false))).toEqual({ ok: true, message: "Patel Family is a family in the portal now, linked to its QuickBooks customer, with 2 students. Nobody can sign in for it yet: someone who may change families adds its guardians on its page, under Families." });
+  });
+
+  it("leaves a family like any other: staff add a guardian and a student to it, and a page load reads its money", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(...PATELS);
+    stub.invoices.push(stubInvoice("9001", "70", { TotalAmt: 20, Balance: 20 }));
+    const staff = await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]);
+    expect(await familyFromCustomer("70", asLinker(staff))).toMatchObject({ ok: true });
+    const patels = await madeFamilyOf("70");
+
+    expect(await addGuardian(patels, { name: "Nita Patel", email: "nita@example.com" }, asOp(staff))).toMatchObject({ ok: true, outcome: "added" });
+    expect(await db.select({ status: guardian.status }).from(guardian).where(eq(guardian.familyId, patels))).toEqual([{ status: "invited" }]);
+    expect(await askRosterWrite({ op: "create", role: "student", name: "Dev Patel", familyQboId: "70", email: null, typeQboId: null }, await currentRosterTag(), asOp(staff)))
+      .toMatchObject({ ok: true });
+    const kids = await db.select({ name: student.name }).from(student).where(eq(student.familyId, patels));
+    expect(kids.map((k) => k.name).sort()).toEqual(["Asha Patel", "Dev Patel", "Ravi Patel"]);
+
+    // Its money, through the family link the press confirmed, read live at the page load.
+    expect((await loadFamilyMoney(patels)).figures).toMatchObject({ current: true, totalCents: 2000 });
+  });
+
+  it("answers in words when the unique index finds a family link made meanwhile outside the roster lock, keeping nothing", async () => {
+    await connectRoster(stub);
+    await addInQuickBooks(...PATELS);
+    const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    // A family link of the customer made by a transaction that takes no roster lock and hasn't committed: the press
+    // can't see it, so its re-check of the list passes, and its insert of the link waits on the unique index.
+    let commit = () => {};
+    let other: Promise<void> = Promise.resolve();
+    await new Promise<void>((ready) => {
+      other = db.transaction(async (tx) => {
+        const [f] = await tx.insert(family).values({ name: "Patel Family (made elsewhere)", active: true }).returning({ id: family.id });
+        await tx.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "70", familyId: f!.id, origin: "confirmed", linkedBy: staff.id });
+        ready();
+        await new Promise<void>((r) => { commit = () => r(); });
+      });
+    });
+    const press = familyFromCustomer("70", asLinker(staff));
+    await untilALockIsAwaited(15_000, 1);
+    commit();
+    await other;
+    expect(await press).toEqual({ ok: false, errors: [NO_FAMILY_COPY.already] });
+    // Only the other transaction's family and link: the press kept nothing.
+    const links = await familyLinksOf("70");
+    expect(links).toHaveLength(1);
+    expect((await db.select().from(family).where(eq(family.id, links[0]!.familyId!)))[0]!.name).toBe("Patel Family (made elsewhere)");
+    expect(await db.select().from(family).where(eq(family.name, "Patel Family"))).toEqual([]);
+    for (const id of ["71", "72"]) expect(await studentLinkOf(id), id).toBeUndefined();
+    expect(await audits("accounting.family.from_customer")).toEqual([]);
+  });
+
+  it("knows a second family link by its index under any wrapping, and no other unique violation", () => {
+    const violation = (constraint_name?: string) => ({ code: "23505", ...(constraint_name === undefined ? {} : { constraint_name }) });
+    // As the import throws it: AppRecordsFailed, around drizzle's error, around the database's.
+    expect(isSecondFamilyLink(new Error("records", { cause: new Error("query", { cause: violation("accounting_link_family_customer_uq") }) }))).toBe(true);
+    expect(isSecondFamilyLink(new Error("records", { cause: new Error("query", { cause: violation("accounting_link_student_customer_uq") }) }))).toBe(false);
+    expect(isSecondFamilyLink(violation())).toBe(false);
+    expect(isSecondFamilyLink({ code: "23503", constraint_name: "accounting_link_family_customer_uq" })).toBe(false);
+    expect(isSecondFamilyLink(new Error("something else"))).toBe(false);
+    expect(isSecondFamilyLink(null)).toBe(false);
+  });
+
   it("makes a member's family in flat books, with no students", async () => {
     await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["1"] } });
     await addInQuickBooks(qc("70", "Patel Family", "1"), qc("71", "Asha Patel", "3", under("70")));
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
-    expect(await familyFromCustomer("70", asOp(staff))).toMatchObject({ ok: true });
+    expect(await familyFromCustomer("70", asLinker(staff))).toMatchObject({ ok: true });
     const [link] = await familyLinksOf("70");
     expect(await db.select().from(student).where(eq(student.familyId, link!.familyId!))).toEqual([]);
     expect(await studentLinkOf("71")).toBeUndefined();
@@ -191,7 +288,7 @@ describe("Create a family from this", () => {
         await new Promise<void>((r) => { release = () => r(); });
       });
     });
-    const presses = [familyFromCustomer("70", asOp(staff)), familyFromCustomer("70", asOp(staff))];
+    const presses = [familyFromCustomer("70", asLinker(staff)), familyFromCustomer("70", asLinker(staff))];
     await untilALockIsAwaited(15_000, 2);
     release();
     await held;
@@ -199,7 +296,7 @@ describe("Create a family from this", () => {
     expect(answers.filter((a) => a.ok)).toHaveLength(1);
     expect(answers.filter((a) => !a.ok)).toEqual([{ ok: false, errors: [NO_FAMILY_COPY.already] }]);
     // And a press after them.
-    expect(await familyFromCustomer("70", asOp(staff))).toEqual({ ok: false, errors: [NO_FAMILY_COPY.already] });
+    expect(await familyFromCustomer("70", asLinker(staff))).toEqual({ ok: false, errors: [NO_FAMILY_COPY.already] });
     expect(await familyLinksOf("70")).toHaveLength(1);
     expect(await db.select().from(student).where(eq(student.familyId, (await familyLinksOf("70"))[0]!.familyId!))).toHaveLength(2);
     expect(await audits("accounting.family.from_customer")).toHaveLength(1);
@@ -211,19 +308,19 @@ describe("Create a family from this", () => {
     const staff = await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
     const before = await appRecordRows();
     const refused = (errors: string) => ({ ok: false, errors: [errors] });
-    for (const odd of ["", "7O", "70 ", "-70", "1".repeat(20), "x".repeat(100)]) expect(await familyFromCustomer(odd, asOp(staff)), odd).toEqual(refused(NO_FAMILY_COPY.notFromPage));
-    for (const id of ["80", "85", "86", "71", "73", "99999"]) expect(await familyFromCustomer(id, asOp(staff)), id).toEqual(refused(NO_FAMILY_COPY.notOffered));
-    expect(await familyFromCustomer("10", asOp(staff))).toEqual(refused(NO_FAMILY_COPY.already));
+    for (const odd of ["", "7O", "70 ", "-70", "1".repeat(20), "x".repeat(100)]) expect(await familyFromCustomer(odd, asLinker(staff)), odd).toEqual(refused(NO_FAMILY_COPY.notFromPage));
+    for (const id of ["80", "85", "86", "71", "73", "99999"]) expect(await familyFromCustomer(id, asLinker(staff)), id).toEqual(refused(NO_FAMILY_COPY.notOffered));
+    expect(await familyFromCustomer("10", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.already));
 
     await db.update(qboConnection).set({ realmId: "9130000000000999" });
-    expect(await familyFromCustomer("70", asOp(staff))).toEqual(refused(NO_FAMILY_COPY.other_company));
+    expect(await familyFromCustomer("70", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.other_company));
     await db.update(qboConnection).set({ realmId: REALM });
     const shape = (await db.select().from(setting).where(eq(setting.key, SHAPE_KEY)))[0]!;
     await db.delete(setting).where(eq(setting.key, SHAPE_KEY));
-    expect(await familyFromCustomer("70", asOp(staff))).toEqual(refused(NO_FAMILY_COPY.no_shape));
+    expect(await familyFromCustomer("70", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.no_shape));
     await db.insert(setting).values({ key: SHAPE_KEY, value: shape.value });
     await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
-    expect(await familyFromCustomer("70", asOp(staff))).toEqual(refused(NO_FAMILY_COPY.no_company));
+    expect(await familyFromCustomer("70", asLinker(staff))).toEqual(refused(NO_FAMILY_COPY.no_company));
 
     expect(await appRecordRows()).toEqual(before);
     expect(await audits("accounting.family.from_customer")).toEqual([]);
@@ -262,7 +359,10 @@ describe("the action and the Reconciliation section", () => {
       expect(await familyFromCustomerAction(odd as never), JSON.stringify(odd)).toEqual(NOT_FROM_PAGE);
     }
     expect(await familyLinksOf("70")).toEqual([]);
-    expect(await familyFromCustomerAction("70")).toMatchObject({ ok: true });
+    // A treasurer who may not change families is told who adds the guardians: the family's page offers them no add.
+    const made = await familyFromCustomerAction("70");
+    expect(made).toMatchObject({ ok: true });
+    expect((made as { message: string }).message).toMatch(/Nobody can sign in for it yet: someone who may change families adds its guardians on its page, under Families\.$/);
     expect(await familyLinksOf("70")).toHaveLength(1);
     expect(revalidatedPaths()).toContain("/");
   });
@@ -275,7 +375,7 @@ describe("the action and the Reconciliation section", () => {
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
     const html = section(await renderPage(ReconciliationPage))!;
     expect(html).toContain("Customers with no family");
-    expect(html).toContain("It makes no guardian and gives nobody a sign-in");
+    expect(html).toContain("It makes no guardian and gives nobody a sign-in: someone who may change families adds its guardians on the family&#x27;s page, under Families.");
     expect(tableRows(html)).toHaveLength(2);
     expect(rowNamed(html, "Patel Family")).toEqual(["Patel Family", "2 students, 1 inactive",
       "A family, linked to this customer, with 2 students, each linked to their own. 1 student is inactive in QuickBooks and stays inactive here.",
