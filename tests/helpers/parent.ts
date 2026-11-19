@@ -211,8 +211,8 @@ export async function seedTwoFamilies(): Promise<{ a: SeededParent; b: SeededPar
   const buyouts = await seedTwoFamilyBuyouts({ spec: FAMILY_A, parentId: a.identity.parentId }, { spec: FAMILY_B, parentId: b.identity.parentId }, seasons.season);
   a.buyout = buyouts.a; a.markers.push(...buyouts.a.markers);
   b.buyout = buyouts.b; b.markers.push(...buyouts.b.markers);
-  // The app's own families, students and links for both, made by the function the roster read runs
-  // (src/lib/families/in-step.ts), so a test that reads them finds them. Their ids are markers too: the season keeps
+  // The app's own families, students and links for both, made by the import, as migration 0023 made them
+  // (src/lib/families/roster-import.ts), so a test that reads them finds them. Their ids are markers too: the season keeps
   // its records by them (stage 2 of the app-owned families spec), and no page of one family may carry the other's.
   await syncAppRecords();
   a.markers.push(...(await appIdsOf(FAMILY_A)));

@@ -48,7 +48,9 @@ that has read a sandbox's customers refuses the club's real books
 6. Choose the membership shape (**Layered** when families have students and parents under them; **Flat** when each
    member is a customer of their own) and the customer types, select **Preview**, check the counts and names, then
    **Save this shape**.
-7. Open **Roster** in the staff menu: the families are listed. **Health** says QuickBooks is "Connected" and names
+7. Open **Roster** in the staff menu: its counts line has the counts QuickBooks has. Its families are the portal's
+   own: a read of QuickBooks brings no customer into them, so a fresh installation lists none until the import that
+   will bring them in is built (the roadmap's S10 and stage 4). **Health** says QuickBooks is "Connected" and names
    the company as a sandbox.
 8. Check the portal's requests: **Settings**, **QuickBooks**, **Check the portal's requests**, **Run the check**. In a
    sandbox company it tries every request the portal makes, on a few test records of its own, and says for each

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
-import { loadRosterPage, familyEntry } from "@/lib/roster/queries";
+import { loadRosterPage, familyEntry, rosterFamilies, type RecordStudent } from "@/lib/roster/queries";
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { familyCover, versionsOf } from "@/lib/roster/writes";
@@ -26,9 +26,15 @@ export const dynamic = "force-dynamic";
 
 /** A customer's own standing in QuickBooks, or that there is none for a record. */
 const standing = (c: Cust | null) => (c === null ? "No customer" : c.active ? "Active" : "Inactive");
+/**
+ * A student record's standing in QuickBooks: its customer's under this family; or, for a record whose linked customer
+ * QuickBooks lists elsewhere (since stage 3's slice 9c the two can disagree), where that is. QuickBooks text, as text.
+ */
+const studentStanding = (s: RecordStudent) => (s.customer ? standing(s.customer) : s.elsewhere ? `Under ${s.elsewhere.familyName} in QuickBooks`
+  : s.linked ? "Not under a family in QuickBooks" : "No customer");
 
 /** One row of a people table: a record's name (a student's) or a customer's (a parent's, a member's), with what QuickBooks holds for them. */
-type Person = { key: string; name: string; customer: Cust | null };
+type Person = { key: string; name: string; customer: Cust | null; standing?: string };
 const ofCustomer = (c: Cust): Person => ({ key: c.qboId, name: c.displayName, customer: c });
 
 /**
@@ -42,7 +48,7 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
       { key: "email", header: "Email", cell: (p: Person) => p.customer?.email ?? "No email address" },
       { key: "phone", header: "Phone", cell: (p: Person) => p.customer?.phone ?? "No phone number" },
     ] : []),
-    { key: "status", header: "In QuickBooks", cell: (p) => standing(p.customer) },
+    { key: "status", header: "In QuickBooks", cell: (p) => p.standing ?? standing(p.customer) },
   ];
   return (
     <section className="box" aria-labelledby={id}><h2 id={id}>{title}</h2>
@@ -126,24 +132,34 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const signins = await familySignins(familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's
-  // version and sends QuickBooks ids, so a family the roster lists no customer for is offered none.
-  const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null;
+  // version and sends QuickBooks ids, so a family the roster lists no customer for is offered none; nor is a family
+  // whose own record is inactive in the portal (the action refuses one too, prepare() in src/lib/roster/writes.ts).
+  const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null && fam.active;
   const inQuickBooks: Family | null = customer === null ? null
     : { customer, students: fam.students.flatMap((s) => (s.customer ? [s.customer] : [])), parents: fam.parents };
-  const records = inQuickBooks ? [inQuickBooks.customer, ...inQuickBooks.students, ...inQuickBooks.parents] : [];
+  // Students whose record is inactive are offered nothing that would send; one QuickBooks has under another family is
+  // offered the move there, which sends nothing and brings the record into line.
+  const inactiveRecords = new Set(fam.students.flatMap((s) => (!s.active && s.customer ? [s.customer.qboId] : [])));
+  const elsewhere = fam.students.flatMap((s) => (s.active && s.elsewhere ? [{ name: s.name, ...s.elsewhere }] : []));
+  const records = inQuickBooks ? [inQuickBooks.customer, ...inQuickBooks.students, ...inQuickBooks.parents, ...elsewhere.map((s) => s.customer)] : [];
   const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)),
     blocked: new Set(waiting.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
   // Who making the family inactive covers: everyone active under it in the cache, at any depth, with their versions.
   const cover = edit && inQuickBooks && entry.kind === "family" ? await familyCover(inQuickBooks.customer.qboId) : null;
-  const families = page.roster?.kind === "layered" ? page.roster.families.filter((f) => f.customer.active).map((f) => ({ qboId: f.customer.qboId, name: f.customer.displayName })) : [];
+  // Where a student may be moved: the app's own active families whose customer is an active family on the roster, by the
+  // record's name. A family customer added in QuickBooks alone has no record since stage 3's slice 9c, and is not offered
+  // (the move refuses it too, prepare() in src/lib/roster/writes.ts).
+  const families = edit && page.roster?.kind === "layered" ? ((await rosterFamilies(page)) ?? [])
+    .flatMap((f) => (f.active && f.customer?.active ? [{ qboId: f.customer.qboId, name: f.name }] : [])) : [];
   return (
     <main className="wrap single">
       <h1 className="page-title">{fam.name}</h1>
-      <p className="lede">{entry.kind === "family" ? "A family" : "A member"}{customer ? <> as QuickBooks lists it{customer.active ? "" : ". It is inactive in QuickBooks"}</> : " the portal keeps, with no customer in QuickBooks"}. <Link href="/staff/roster">Back to the roster</Link></p>
+      <p className="lede">{entry.kind === "family" ? "A family" : "A member"} the portal keeps{customer ? <>, linked to its customer in QuickBooks{customer.active ? "" : ", which is inactive there"}</>
+        : fam.linked ? `, linked to a customer QuickBooks doesn't list as a ${entry.kind} now` : ", with no customer in QuickBooks"}. <Link href="/staff/roster">Back to the roster</Link></p>
       <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>
-          <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer }))} contact={false} empty="QuickBooks lists no students under this family." />
+          <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer, standing: studentStanding(s) }))} contact={false} empty="The portal holds no students for this family." />
           <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" people={fam.parents.map(ofCustomer)} contact empty="QuickBooks lists no parents under this family." />
         </>
       ) : (
@@ -155,11 +171,11 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         season={entry.kind === "family" && fam.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       <Waiting items={waiting} />
-      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} families={families} edit={edit} cover={cover} />}
+      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} families={families} edit={edit} cover={cover} inactiveRecords={inactiveRecords} elsewhere={elsewhere} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
       <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians}
-        addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it." : customer === null ? "This family has no customer in QuickBooks linked to it, so a guardian can't be added to it yet." : null} />
+        addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it." : !fam.linked ? "This family has no customer in QuickBooks linked to it, so a guardian can't be added to it yet." : null} />
       <Freshness page={page} admin={admin} />
     </main>
   );

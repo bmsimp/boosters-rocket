@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage } from "@/lib/roster/queries";
-import { loadOpenWrites, type QueueView } from "@/lib/roster/queue";
+import { loadOpenWrites, waitingWords, type QueueView } from "@/lib/roster/queue";
 import { loadBalances } from "@/lib/money/balances";
 import { linksOfCustomers } from "@/lib/families/links";
 import { LocalTime } from "@/app/components/local-time";
@@ -28,6 +28,11 @@ const CODE_WORDS: Record<string, string> = {
   fault_800: "QuickBooks won't make it inactive while customers under it are still active",
   not_the_customer: "QuickBooks answered about another record, so nothing was sent",
   no_balance: "QuickBooks didn't say what they owe, so nothing was sent",
+  // QuickBooks took it, or may have, and the portal finishes it on its side after its next read (src/lib/roster/queue.ts).
+  cache_failed: "QuickBooks made the change, but the portal couldn't take it in at the time: it finishes it after its next read of QuickBooks, sending nothing again",
+  answer_other: "QuickBooks answered about another record, so the portal looks for the change after its next read of QuickBooks, sending nothing again",
+  made_unmatched: "QuickBooks made a customer for it, but not under the name, family and type sent, so it won't be sent again: check it in QuickBooks, then give it up",
+  finish_failed: "QuickBooks has the change, but the portal couldn't finish it on its side: it tries again later",
 };
 const codeWords = (code: string | null) => (code === null ? null
   : CODE_WORDS[code] ?? (/^http_5\d\d/.test(code) ? "QuickBooks had a problem of its own" : /^token_/.test(code) ? "the portal couldn't get a key to QuickBooks" : "QuickBooks refused it"));
@@ -36,7 +41,7 @@ const codeWords = (code: string | null) => (code === null ? null
 function Writes({ items, caption, canChange }: { items: QueueView[]; caption: string; canChange: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => (
-      <>{i.words}<span className="when">{i.state === "stuck" ? "Stuck: it won't be tried again until someone asks" : "Waiting to reach QuickBooks"}</span></>) },
+      <>{i.words}<span className="when">{i.state === "stuck" ? "Stuck: it won't be tried again until someone asks" : waitingWords(i)}</span></>) },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "tries", header: "Tries", cell: (i) => (
       <>{i.tries} {i.tries === 1 ? "time" : "times"}, last <LocalTime iso={i.lastTriedAt} />{i.state === "waiting" && i.nextTryAt ? <span className="when">Next try <LocalTime iso={i.nextTryAt} /></span> : null}</>) },
@@ -79,6 +84,7 @@ export default async function ReconciliationPage() {
           <>
             <p>QuickBooks couldn&apos;t take these when they were asked for. The worker tries a waiting change again, at longer and longer gaps;
               one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
+              One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.</p>
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} /></>}

@@ -1,8 +1,8 @@
 // Staff only: check-in codes, corrections to volunteer credit, and one family's credit as staff see it (v1 spec §11.4).
 // Notes and reasons staff write are read here and nowhere a parent goes. Every write is one transaction with its audit
 // row (before and after); a write that names families or students, or rests on them, takes the roster lock with the
-// page's roster tag first (lockRosterAs), so no refresh (which brings the app's records into step) or change of company
-// runs in between. Families and students are the app's own records (stage 2 of the app-owned families spec): the
+// page's roster tag first (lockRosterAs), so no staff roster write (which may change a family's or student's record) or
+// change of company runs in between. Families and students are the app's own records (stage 2 of the app-owned families spec): the
 // families are the app's active ones, read once, by loadSeasonFamilies(), and a family's page is addressed by the app's family id,
 // found as the season keeps it in one place (seasonFamilyAt()). Never imported by parent code
 // (tests/integration/page-guards.test.ts).

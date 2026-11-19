@@ -1,5 +1,13 @@
-// Reads every family's customers, sign-ins and records to keep the app's own records in step: staff and worker code
-// only, never imported by a parent page (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
+// The import of the app's own records from the roster cache. It reads every family's customers, sign-ins and records,
+// so it is staff code only, never imported by a parent page (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
+//
+// Nothing under src/ calls it (stage 3's slice 9c of the app-owned families spec): the records stand alone, and no
+// roster read, staff write, read-again, shape save or email confirm changes them from the cache any more; a staff
+// write changes its own record itself (changeOwnRecord(), src/lib/roster/writes.ts). It is kept whole as the import a
+// later slice's "Create a family from this" and stage 4's import will call, and as the one statement of the rules
+// migration 0023's fill followed (tests/integration/app-records-fill.test.ts proves the two make the same records). The
+// tests' helpers call it after they write the cache (syncAppRecords(), tests/helpers/app-records.ts), so the records
+// they seed are the ones an import would make.
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
@@ -62,49 +70,33 @@ async function loadPlanInput(tx: Tx, realmId: string): Promise<Omit<PlanInput, "
   return { shape, customers, refs, hints, guardians };
 }
 
-/** Thrown when bringing the records into step fails, so the roster read can say which part failed (app_records_failed). */
+/** Thrown when the import fails, with what failed as its cause, so a caller can tell it from its own failures. */
 export class AppRecordsFailed extends Error {}
-
-/**
- * The server log line for a roster read whose app records' step failed (AppRecordsFailed's cause): the error's class
- * name and, for a database error, its SQLSTATE and the constraint it broke. Never the message, the query or its
- * parameters: any of them can hold a name or an address. Drizzle wraps a driver error, so the code and constraint are
- * looked for on its cause too. It lives here, not in the roster code, which logs nothing at all (QuickBooks spec §7).
- */
-export function logAppRecordsFailure(e: unknown): void {
-  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
-  const err = (typeof e === "object" && e !== null ? e : {}) as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
-  const pg = (err.code === undefined && typeof err.cause === "object" && err.cause !== null ? err.cause : err) as typeof err;
-  const name = typeof e === "object" && e !== null ? e.constructor?.name ?? "Object" : typeof e;
-  console.error("[roster] app records failed", { name, code: str(pg.code), constraint: str(pg.constraint_name) ?? str(pg.constraint) });
-}
 
 const inChunks = async <T>(rows: T[], f: (chunk: T[]) => Promise<unknown>) => { for (let i = 0; i < rows.length; i += CHUNK) await f(rows.slice(i, i + CHUNK)); };
 
 /**
- * Makes the app's own records and links agree with the roster cache and what the current company's records name
- * (./plan.ts says what that is): the one definition of "in step" until stage 3 makes the app the source. It changes
- * only what differs, so a second run changes nothing. It never deletes a record or a link: one nothing needs any more
- * is made inactive and keeps its id and its link, and is the same record, active again, when its customer is named
- * again. Only a change of company removes them (clearAppRecords(), ./company-change.ts). A cache that names no company
- * leaves every record inactive. Every link it makes is carried over from the roster, now, with nobody named.
+ * Imports the app's own records and links from the roster cache and what the current company's records name
+ * (./plan.ts says what that is). Until stage 3's slice 9c a mirror of the cache ran it after every change of it; now
+ * nothing under src/ calls it (the note at the top of this file). It changes only what differs, so a second run
+ * changes nothing. It never deletes a record or a link: one nothing needs any more is made inactive and keeps its id
+ * and its link, and is the same record, active again, when its customer is named again. Only a change of company
+ * removes them (clearAppRecords(), ./company-change.ts). A cache that names no company leaves every record inactive.
+ * Every link it makes is carried over from the roster, now, with nobody named.
  *
- * It writes no audit row of its own and returns what it made and changed: the change that ran it puts that on its own
- * audit row, in the same transaction, whenever anything changed (appRecordsAudit()). Its callers, each after it changes
- * the roster cache: the roster read (src/lib/roster/refresh.ts), a staff roster write and the queue's (applyWritten()),
- * a read-again (src/lib/roster/writes.ts), a confirmed change of a parent's sign-in email that the cache took
- * (src/lib/parents/email-change.ts), and saveShape() after a new membership shape. The caller owns the transaction and
- * holds the roster lock (ROSTER_LOCK) exclusively.
+ * It writes no audit row of its own and returns what it made and changed: its caller puts that on its own audit row,
+ * in the same transaction, whenever anything changed (appRecordsAudit()). The caller owns the transaction and holds the
+ * roster lock (ROSTER_LOCK) exclusively.
  */
-export async function keepAppRecordsInStep(tx: Tx): Promise<AppRecordChanges> {
+export async function importRecordsFromRoster(tx: Tx): Promise<AppRecordChanges> {
   try {
-    return await bringIntoStep(tx);
+    return await importInto(tx);
   } catch (e) {
     throw new AppRecordsFailed("The portal's own family records couldn't be brought up to date.", { cause: e });
   }
 }
 
-async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
+async function importInto(tx: Tx): Promise<AppRecordChanges> {
   const realmId = await getRosterSource(tx);
   const changes = noAppRecordChanges();
 

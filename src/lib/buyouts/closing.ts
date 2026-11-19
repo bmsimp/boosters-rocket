@@ -17,7 +17,7 @@ export type CloseItem = { op: "invoice_create" | "invoice_void"; state: "waiting
 /** What the rule reads of one buy-out: the row's own fields, and every queue item made for it. */
 export type CloseFacts = { state: BuyoutState; flag: Flag | null; lastCode: string | null; invoiceQboId: string | null; items: readonly CloseItem[] };
 
-export type CloseWhy = "refused" | "never_sent" | "invoice_gone" | "looks_gone" | "paid_in_full";
+export type CloseWhy = "refused" | "never_sent" | "invoice_gone" | "looks_gone" | "moved_away" | "paid_in_full";
 export type KeepWhy = "ended" | "in_flight" | "may_be_made" | "invoice_stands" | "other_customer" | "part_paid" | "nothing_to_do";
 /** Whether staff may close it, why, and in words what closing does or what to do in QuickBooks first. */
 export type CloseVerdict = { may: true; why: CloseWhy; words: string } | { may: false; why: KeepWhy; words: string };
@@ -27,8 +27,18 @@ export const CLOSE_WORDS: Record<CloseWhy, string> = {
   never_sent: "The invoice was never sent to QuickBooks, so nothing was billed. Closing it gives up the stuck change and lets the family choose again or volunteer.",
   invoice_gone: "QuickBooks no longer shows the invoice, so nothing is owed on it. Closing it ends the buy-out here; the family can choose again or volunteer.",
   looks_gone: "QuickBooks didn't show the invoice at the last daily read. Closing reads QuickBooks again first, and closes it only if the invoice is still not there: nothing is owed on it then, and the family can choose again or volunteer.",
+  moved_away: "The student it was billed to is under another family, or inactive, in QuickBooks, so the daily check can't follow its invoice. Void the invoice in QuickBooks if it shouldn't be billed. Closing reads QuickBooks first, and closes it only if the invoice is voided or gone: nothing is owed on it then, and the family can choose again or volunteer.",
   paid_in_full: "The invoice is paid in full, but the buy-out was to be cancelled. If the family is owed the money back, refund it in QuickBooks. Closing it ends the buy-out here, and the family volunteers instead.",
 };
+
+/**
+ * A `student_moved` flag the daily check set by itself (./daily-check.ts, flagMovedAway()): on an invoiced buy-out, with
+ * no void ever tried (no code from one, and no void item). A move staff made, or a void, sets the flag with a void
+ * beside it. Only this flag is the check's to take off again, once the student is back under the family.
+ */
+export function movedAwayByTheCheck(f: { state: BuyoutState; flag: Flag | null; lastCode: string | null; items: readonly Pick<CloseItem, "op">[] }): boolean {
+  return f.state === "invoiced" && f.flag === "student_moved" && f.lastCode === null && !f.items.some((i) => i.op === "invoice_void");
+}
 
 const keep = (why: KeepWhy, words: string): CloseVerdict => ({ may: false, why, words });
 const close = (why: CloseWhy): CloseVerdict => ({ may: true, why, words: CLOSE_WORDS[why] });
@@ -63,6 +73,9 @@ export function closeVerdict(f: CloseFacts): CloseVerdict {
   if (f.state === "invoiced" && f.lastCode === "paid" && (f.flag === "paid_before_void" || f.flag === "student_moved")) {
     return keep("part_paid", "Something was paid on the invoice and the rest is still owed. Settle it in QuickBooks first, by refunding and voiding it or by its being paid in full: the daily check then sees it voided or paid.");
   }
+  // Flagged by the daily check alone (no void was tried, so no code): the student is no longer under the family in
+  // QuickBooks, and the check can't follow the invoice. Read again live by the close, as looks_gone is.
+  if (movedAwayByTheCheck(f)) return close("moved_away");
   if (f.state === "stuck") {
     return keep("invoice_stands", open.length > 0
       ? "The invoice may still be owed in QuickBooks. Void it there if it shouldn't be billed, then use Try again now, above: the portal reads the invoice first and sees it voided."

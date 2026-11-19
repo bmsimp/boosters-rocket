@@ -36,13 +36,14 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 - **"Needs attention"**, with one of these notes:
   - "The QuickBooks connection couldn't be refreshed" or "expires within 30 days": reconnect the same company.
   - "The last roster refresh failed": the note gives Intuit's reason. If it repeats, check that the Intuit app's keys
-    are still valid on the developer site, then reconnect. Two reasons are the portal's own, not Intuit's: "The portal's
-    own family and student records couldn't be brought up to date" (`app_records_failed`) and "The forms and volunteer
-    places of a student who moved to another family couldn't be brought up to date" (`follow_up_failed`). (An older
-    run may still say "The parent sign-ins couldn't be brought up to date", `reconcile_failed`: a refresh no longer
-    decides sign-ins, so it can't happen again.) Whichever it is, the roster and the family records stay as they were
-    until a refresh succeeds, and no refresh changes who can sign in; press **Refresh** on the Roster page once. If it fails
-    the same way again, that is a fault in the portal for whoever maintains it.
+    are still valid on the developer site, then reconnect. A refresh only stores QuickBooks' customer list: it changes
+    none of the portal's own families, students or sign-ins, so while it fails the portal goes on as it was, with
+    families seeing their invoices as last read. (An older run may still give a reason that is the portal's own: "The
+    parent sign-ins couldn't be brought up to date" (`reconcile_failed`), "The portal's own family and student records
+    couldn't be brought up to date" (`app_records_failed`) or "The forms and volunteer places of a student who moved to
+    another family couldn't be brought up to date" (`follow_up_failed`). A refresh no longer does any of those, so none
+    can happen again.) Press **Refresh** on the Roster page once. If a refresh that isn't Intuit's fails the same way
+    again ("The roster couldn't be saved", `save_failed`), that is a fault in the portal for whoever maintains it.
   - "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect
     QuickBooks, then connect the company the roster was read from." (`roster_company`): the connection holds a different
     company from the one the portal's families came from, stored before the portal refused that (or by hand). Until
@@ -87,7 +88,8 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 ## Buy-out invoices
 
 The check of each volunteer buy-out's invoice that follows the daily read of every family's invoices: a paid one is
-marked paid, and one QuickBooks no longer shows, or shows on another customer, is flagged for the club.
+marked paid, and one QuickBooks no longer shows, or shows on another customer, or whose student QuickBooks no longer
+holds under the family, is flagged for the club.
 
 - **"Not running"** while QuickBooks isn't connected, and **"Not yet run"** before the first daily read: nothing to do.
 - **"The last check of the buy-out invoices stopped with an error."** The worker tries again a minute later. If it
@@ -96,8 +98,9 @@ marked paid, and one QuickBooks no longer shows, or shows on another customer, i
   didn't follow it: the worker isn't running, or stopped part way through its wake. See the worker line.
 - **"N buy-out invoices are flagged and waiting for the club."** Open **Reconciliation** (the line's link): each
   flagged buy-out names its family, requirement and amount. The treasurer looks in QuickBooks for an invoice whose
-  private note reads "Booster Rocket buy-out". The flag goes by itself once a later check finds the invoice where it
-  belongs.
+  private note reads "Booster Rocket buy-out". For a student QuickBooks holds under another family, or inactive, put
+  the student back in QuickBooks if that was a mistake, or void the invoice there and close the buy-out. The flag goes
+  by itself once a later check finds the invoice where it belongs, its student back under the family.
 
 ## Outgoing mail
 

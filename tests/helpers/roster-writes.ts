@@ -20,8 +20,9 @@ export const REALM = "9130000000000001";
 /**
  * Ana Rivera as the portal holds her, beside fznCompany()'s parent record of hers (customer 11, under the Rivera
  * Family, 10): the person, her sign-in account and an invited guardian row in that family from that record, written
- * directly (since stage 3 of the app-owned families spec nothing makes a sign-in from QuickBooks). With a roster read
- * before or after, her row is in the Rivera family's record and linked to customer 11.
+ * directly (since stage 3 of the app-owned families spec nothing makes a sign-in from QuickBooks), and the records
+ * imported after it (syncAppRecords()): with the roster read first (connectRoster()), her row is in the Rivera family's
+ * record and linked to customer 11. A roster read made after it changes neither.
  */
 export async function seedAnaRivera(o: { status?: "invited" | "active" } = {}) {
   const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
@@ -32,7 +33,9 @@ export async function seedAnaRivera(o: { status?: "invited" | "active" } = {}) {
 
 /**
  * The stub holds an FZN-shaped company (fznCompany(), unless `company` is given), QuickBooks is connected to it, the
- * shape is saved and the roster read once. Returns the roster tag a page would carry.
+ * shape is saved and the roster read once, and the app's own records are imported from that read (syncAppRecords()):
+ * since stage 3's slice 9c a read makes no record, so this stands for a club whose records migration 0023 made from
+ * the same roster. Returns the roster tag a page would carry.
  */
 export async function connectRoster(stub: QboStub, o: { shape?: MembershipShape; company?: ReturnType<typeof fznCompany>; accessExpiresInMs?: number } = {}): Promise<string> {
   Object.assign(stub, o.company ?? fznCompany());
@@ -40,6 +43,7 @@ export async function connectRoster(stub: QboStub, o: { shape?: MembershipShape;
   await saveShape(o.shape ?? FZN_SHAPE, { actor: WORKER.actor, ip: null });
   const r = await refreshRoster(WORKER);
   if (!r.ok) throw new Error(`the roster couldn't be read from the stub: ${r.reason}`);
+  await syncAppRecords();
   return currentRosterTag();
 }
 

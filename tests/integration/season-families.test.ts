@@ -4,15 +4,15 @@ import { db } from "@/lib/db/client";
 import { family, qboConnection, qboCustomerType, setting, student } from "@/lib/db/schema";
 import { asAppFamilyId, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { loadRosterPage } from "@/lib/roster/queries";
-import { SHAPE_KEY } from "@/lib/roster/shape";
+import { saveShape, SHAPE_KEY } from "@/lib/roster/shape";
 import { setRosterSource } from "@/lib/roster/source";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { loadProgressOverview, loadRequirementProgress, setTicks } from "@/lib/seasons/staff-progress";
 import { loadSeasonFamilies, seasonFamilyAt } from "@/lib/seasons/subjects";
 import { loadMatrix } from "@/lib/signed-forms/matrix";
 import { resetDb, seedStaff } from "../helpers/db";
-import { addToCache, fam, moveInCache, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
-import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { addToCache, fam, moveInCache, moveInQuickBooksOnly, P_SHAPE, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
+import { recordOfCustomer } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { formSetting, seedFormRequirement } from "../helpers/forms";
 
@@ -34,7 +34,7 @@ const ROSTER = [
 
 /** As the reader gives them: each family's name with its students' names. */
 const shown = async () => (await loadSeasonFamilies()).map((f) => [f.name, f.students.map((s) => s.name)]);
-/** A family and its students made by hand, with no link to any customer: the kind of family that can exist once the app makes families (S9). */
+/** A family and its students made by hand, with no link to any customer: the kind of family that can exist once the app makes families (stage 3's slice 9d). */
 const unlinked = async (name: string | null, students: (string | null)[]): Promise<{ id: AppFamilyId; students: AppStudentId[] }> => {
   const [f] = await db.insert(family).values({ name, active: true }).returning();
   const made = students.length ? await db.insert(student).values(students.map((s) => ({ name: s, active: true, familyId: f!.id }))).returning() : [];
@@ -43,7 +43,7 @@ const unlinked = async (name: string | null, students: (string | null)[]): Promi
 
 let actor: { door: "staff"; id: string; label: string };
 beforeEach(async () => {
-  // A roster read from company 1111, so the app's own records are made for it, then kept in step with the cache.
+  // A roster read from company 1111, and the app's own records imported from it, as migration 0023 made them.
   await resetDb(); await db.transaction((tx) => setRosterSource(tx, "1111")); await seedShape(); await addToCache(ROSTER);
   const staff = await seedStaff({ email: "ticker@club.org", name: "Tia Ticker" });
   actor = { door: "staff", id: staff.id, label: staff.email };
@@ -73,8 +73,14 @@ describe("loadSeasonFamilies()", () => {
   it("follows the records, not the cache: a record made inactive, and a student moved", async () => {
     await db.update(family).set({ active: false }).where(eq(family.id, await recordOfCustomer("20", "family")));
     expect(await shown()).toEqual([["Rivera Family", ["leo Rivera", "Maya Rivera"]]]);
-    // While the records mirror the cache they are the same thing: a student moved in QuickBooks moves with the read.
+    // A student moved in QuickBooks alone stays where the app has them (stage 3's slice 9c); one whose record moved
+    // (moveInCache(), as a move staff make leaves it) is under the family moved to.
     await db.update(family).set({ active: true }).where(eq(family.id, await recordOfCustomer("20", "family")));
+    await moveInQuickBooksOnly(["13"], "20");
+    expect(await shown()).toEqual([
+      ["Chen <b>Family</b>", ["Kai <i>Chen</i>"]],
+      ["Rivera Family", ["leo Rivera", "Maya Rivera"]],
+    ]);
     await moveInCache(["13"], "20");
     expect(await shown()).toEqual([
       ["Chen <b>Family</b>", ["Kai <i>Chen</i>", "leo Rivera"]],
@@ -133,10 +139,11 @@ describe("loadSeasonFamilies()", () => {
     const row = matrix.families.find((f) => f.id === String(hand.id))!.rows.find((r) => r.kind === "student")!;
     expect([row.name, row.cells[0]!.state]).toEqual(["Hal Handmade", "not_opened"]);
     expect(matrix.allForms[0]!.counts).toEqual({ signed: 0, needed: 4, waived: 0 });
-    // Until S9 the records only mirror QuickBooks: the next keep-in-step (any roster read or staff write) makes a
-    // record with no link inactive, and it leaves the lists. S9 stops that, and this changes with it.
-    await syncAppRecords();
-    expect((await loadSeasonFamilies()).map((f) => f.id)).not.toContain(hand.id);
+    // Nothing makes a record with no link inactive (stage 3's slice 9c): a shape saved again, as every roster read and
+    // staff write before it, leaves it as it is. (The import, which nothing in the portal runs, still would.)
+    await saveShape(P_SHAPE, { actor, ip: null });
+    expect((await loadSeasonFamilies()).map((f) => f.id)).toContain(hand.id);
+    expect((await db.select().from(family).where(eq(family.id, hand.id)))[0]).toMatchObject({ active: true });
   });
 
   it("lists nobody while QuickBooks is connected to another company than the roster's, as before stage 3; everyone otherwise", async () => {

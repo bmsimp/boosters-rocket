@@ -13,8 +13,8 @@ import type { SeededSeason } from "./season";
  * counted from today in UTC (the club's zone until a test sets one), so an event `inDays` ahead is still to come
  * whenever the test runs. Families and students are given by their QuickBooks ids, as the fixtures know them, and
  * stored as the app's own records volunteering keeps (stage 2 of the app-owned families spec): each found through its
- * link of its kind, in the company the roster was read from. One with no record yet brings the records into step with
- * the roster cache as it stands, as a roster read would; one the roster doesn't hold is made inactive
+ * link of its kind, in the company the roster was read from. One with no record yet imports the records from the roster
+ * cache as it stands (syncAppRecords(), as migration 0023 made them); one the roster doesn't hold is made inactive
  * (recordOfCustomer()). So a test that seeds a sign-up or credit seeds a roster company first (seedSignedInParent() does).
  */
 async function linked(customerId: string, kind: "family" | "student"): Promise<boolean> {

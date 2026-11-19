@@ -15,7 +15,7 @@ import { syncAppRecords } from "../helpers/app-records";
 /**
  * Signed-form evidence of an earlier company (`earlier_company_at` set) is the club's record, kept for staff alone. Its
  * QuickBooks ids are that company's: a number there may be a different family's number now. So it gets no app family
- * (stage 1 of the app-owned families spec, src/lib/families/in-step.ts), and no parent of the family that has that
+ * (stage 1 of the app-owned families spec, src/lib/families/roster-import.ts), and no parent of the family that has that
  * number now sees anything of it, on any page or in the download. Run again after every later stage: each moves
  * something closer to the app's own ids, and this must stay true.
  */
@@ -54,7 +54,7 @@ describe("an earlier company's signed forms", () => {
     archivedIds = rows.map((r) => r.id);
     const sha = createHash("sha256").update(archivedPdf).digest("hex");
     await db.insert(signedFormFile).values(rows.map((r) => ({ evidenceId: r.id, kind: "sealed_pdf" as const, position: 1, itemId: "envelope_item_quillfeather", bytes: archivedPdf, size: archivedPdf.byteLength, sha256: sha })));
-    // Keep the app's records in step with it there, as the next roster read would.
+    // Import the app's records from what is stored now, as a stage 4 import would.
     await syncAppRecords();
   });
 

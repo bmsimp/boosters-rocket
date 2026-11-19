@@ -60,10 +60,13 @@ describe("the roster pages", () => {
     await db.insert(roleAssignment).values({ roleId: r!.id, staffUserId: reader.id });
     who.staff = { door: "staff", staffUserId: reader.id, name: reader.name, email: reader.email };
   });
+  // The roster read, and the app's own records imported from it (a read makes none since stage 3's slice 9c), as
+  // migration 0023 made them for a club with this roster.
   const ready = async () => {
     await seedConnected(stub);
     await saveShape(FZN_SHAPE, { actor: worker.actor, ip: null });
     await refreshRoster(worker);
+    await syncAppRecords();
   };
 
   it("refuses staff without Roster.Read", async () => {
@@ -147,7 +150,7 @@ describe("the roster pages", () => {
     await ready();
     const ana = await seedParent({ name: "Ana R.", email: "ana.portal@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
-    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
+    await syncAppRecords(); // each membership in its family record, as the import puts it
     const html = await entry("10");
     expect(html).toContain("Rivera Family");
     expect(html).toContain("Leo Rivera");
@@ -194,6 +197,7 @@ describe("the roster pages", () => {
     await seedConnected(stub);
     await saveShape({ kind: "flat", memberTypeIds: ["2"] }, { actor: worker.actor, ip: null });
     await refreshRoster(worker);
+    await syncAppRecords();
     const html = await list();
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Find a member");
@@ -245,7 +249,7 @@ describe("the roster pages", () => {
     await ready();
     const lost = await seedParent({ name: "Lost Person", email: "lost.person@example.com" });
     await seedGuardian({ parentId: lost.id, familyQboId: "NO-SUCH-ID" });
-    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
+    await syncAppRecords(); // each membership in its family record, as the import puts it
     const html = await list();
     expect(html).toContain("Lost Person");
     expect(html).toContain("NO-SUCH-ID");
@@ -274,20 +278,20 @@ describe("the roster pages", () => {
     expect(await list()).toContain("QuickBooks lists no customers of the member types.");
   });
 
-  it("says the families are listed after the next read when the cache names no company, so the portal has no records of them yet", async () => {
+  it("says QuickBooks lists families the portal has none of, and that a read doesn't bring them in", async () => {
     // A cache read before the portal recorded the roster's company, shown while QuickBooks is disconnected: the counts
-    // are QuickBooks' own, but the list is of the app's records, and none is made while the cache names no company.
+    // are QuickBooks' own, but the list is of the app's records, and no read makes one (stage 3's slice 9c).
     await seedShape(); await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10")]); await seedRosterRead();
     const html = await list();
     expect(html).toContain("1 family");
-    expect(html).toContain("The roster lists families, but they haven&#x27;t been read into the portal&#x27;s own records yet. They are listed here after the next read from QuickBooks.");
+    expect(html).toContain("QuickBooks lists families, but none of them is one of the portal&#x27;s own families: a read of QuickBooks doesn&#x27;t bring customers into the portal.");
     expect(html).not.toContain("QuickBooks lists no customers of the family type.");
     expect(html).not.toContain("Rivera Family</a>");
   });
 
   it("holds back the sign-in rule while the cache names no company, and keeps QuickBooks' own tidy rules", async () => {
-    // No company recorded, so no family record is made and every guardian row's family is null: the sign-in rule
-    // can't hold a sign-in to anything yet, and waits for the read the Families list says is coming.
+    // No company recorded, so the import makes no family record and every guardian row's family is null: the sign-in
+    // rule can't hold a sign-in to anything yet, and waits for a read that records the company.
     await seedShape();
     await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10"), fam("20", "Gone Family", { active: false }), stu("22", "Gil Gone", "20")]);
     await seedRosterRead();
@@ -300,8 +304,8 @@ describe("the roster pages", () => {
     expect(before).toContain("family_no_parent:10");
     expect(before.filter((r) => r.startsWith("signin_unknown"))).toEqual([]);
     expect(await list()).not.toContain("isn&#x27;t attached to any family the portal keeps");
-    // Once a read records the company the records are made, and the rule judges every sign-in: both are held to a
-    // family of the roster. The inactive family's open sign-in asks nothing of staff: nobody can enter that family.
+    // Once a read records the company (seedRosterRead() imports the records after it, as 0023 made them), the rule
+    // judges every sign-in: both are held to a family of the roster. The inactive family's open sign-in asks nothing of staff: nobody can enter that family.
     await seedRosterRead({ realmId: "1111" });
     const after = await rules();
     expect(after).toContain("family_no_parent:10");

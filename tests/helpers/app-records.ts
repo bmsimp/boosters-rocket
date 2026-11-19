@@ -1,29 +1,32 @@
-// The app's own families, students and links in tests (stage 1 of the app-owned families spec): the one function that
-// keeps them in step, run as the portal runs it, and ways to read them back by the customers they are linked to.
+// The app's own families, students and links in tests (stage 1 of the app-owned families spec): the import that makes
+// them from the roster cache, and ways to read them back by the customers they are linked to. Since stage 3's slice 9c
+// the portal runs the import nowhere (no roster read, staff write or shape save brings the records into step), but the
+// helpers that write the cache still run it after (tests/helpers/roster-cache.ts), so a test's records are those an
+// import of its cache makes, as migration 0023 and the mirror before slice 9c made them.
 import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, guardian, student } from "@/lib/db/schema";
-import { keepAppRecordsInStep } from "@/lib/families/in-step";
+import { importRecordsFromRoster } from "@/lib/families/roster-import";
 import { noAppRecordChanges, type AppRecordChanges } from "@/lib/families/changes";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { getRosterSource } from "@/lib/roster/source";
 
-/** Runs keepAppRecordsInStep() in its own transaction, as the roster read does inside its own. */
-export const syncAppRecords = (): Promise<AppRecordChanges> => db.transaction((tx) => keepAppRecordsInStep(tx));
+/** Runs the import, importRecordsFromRoster(), in its own transaction, as the mirror ran it until slice 9c. */
+export const syncAppRecords = (): Promise<AppRecordChanges> => db.transaction((tx) => importRecordsFromRoster(tx));
 
-/** What a run that finds the records in step returns. */
+/** What a run that finds the records as an import of the cache would make them returns. */
 export const NO_CHANGES: AppRecordChanges = noAppRecordChanges();
 
 class RolledBack extends Error {}
 
 /**
- * What a run of keepAppRecordsInStep() would change now, worked out and rolled back: NO_CHANGES when the records are
- * in step. The one definition of "in step" is that function, so this is how a test asks whether they are.
+ * What a run of the import would change now, worked out and rolled back: NO_CHANGES when the records are what an
+ * import of the cache makes. How a test asks whether the app's own change of its record left it as an import would.
  */
 export async function whatAFreshRunWouldChange(): Promise<AppRecordChanges> {
   const out: { changes?: AppRecordChanges } = {};
   try {
-    await db.transaction(async (tx) => { out.changes = await keepAppRecordsInStep(tx); throw new RolledBack(); });
+    await db.transaction(async (tx) => { out.changes = await importRecordsFromRoster(tx); throw new RolledBack(); });
   } catch (e) {
     if (!(e instanceof RolledBack)) throw e;
   }

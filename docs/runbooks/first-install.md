@@ -146,7 +146,9 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
 
 1. QuickBooks: [Intuit](intuit.md).
 2. Forms: [Documenso, parts 2 to 4](documenso.md#2-the-first-documenso-account).
-3. Parent sign-ins: under **Settings**, **Parent sign-ins**, once QuickBooks has read the roster.
+3. Parent sign-ins: under **Settings**, **Parent sign-ins**, once QuickBooks has read the roster. A guardian is
+   added on their family's page, and a fresh installation has no families yet: a read of QuickBooks brings no
+   customer into the portal's own families until the import that will is built (the roadmap's S10 and stage 4).
 4. Before any family signs in: [before the first family](before-the-first-family.md), the checks only a person can
    make, from real phones to a pilot with a few families.
 

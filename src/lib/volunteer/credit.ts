@@ -64,7 +64,7 @@ export async function allocateFamilies(familyIds: readonly AppFamilyId[] | null,
     .from(requirement).innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId))
     .where(and(inArray(requirement.id, requirementIds), eq(requirement.kind, "volunteer")))
     .orderBy(asc(season.createdAt), asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
-  // The family's own active students, in it now (the app's own records, kept in step with the roster): a student who
+  // The family's own active students, in it now (the app's own records): a student who
   // has moved takes no slot here, so their past check-ins stay with this family and count toward its per-family
   // requirements alone.
   const students = await q.select({ id: student.id, familyId: student.familyId }).from(student)

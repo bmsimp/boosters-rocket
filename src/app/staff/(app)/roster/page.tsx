@@ -41,8 +41,9 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const withPage = !roster ? [] : roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId);
   const pageOf = (await linksOfCustomers({ families: withPage, students: [] })).familyOfCustomer;
   const named = (qboId: string | null, name: string) => { const at = qboId === null ? undefined : pageOf.get(qboId); return at ? <a href={familyPage(at)}>{name}</a> : name; };
-  // The rows are records, which are made only once the cache names its company (keepAppRecordsInStep()): a cache read
-  // before the portal recorded that (shown while QuickBooks is disconnected) lists customers the records don't hold yet.
+  // The rows are records, which no read of QuickBooks makes (stage 3's slice 9c): a customer added in QuickBooks, or a
+  // cache read before the portal recorded its company (shown while QuickBooks is disconnected), lists customers the
+  // records don't hold.
   const listedInCache = !roster ? 0 : roster.kind === "flat" ? roster.members.length : roster.families.length;
   const noun = roster?.kind === "flat" ? "member" : "family";
   const nouns = roster?.kind === "flat" ? "members" : "families";
@@ -57,7 +58,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   return (
     <main className="wrap single">
       <h1 className="page-title">Roster</h1>
-      <p className="lede">The club&apos;s {roster?.kind === "flat" ? "members" : "families"} as QuickBooks lists them. This is a copy of what QuickBooks holds: a change made here is sent to QuickBooks first.</p>
+      <p className="lede">The club&apos;s {roster?.kind === "flat" ? "members" : "families"}, each beside its customer in QuickBooks. A change made here is sent to QuickBooks first, then made here too; a change made in QuickBooks doesn&apos;t change the portal&apos;s {roster?.kind === "flat" ? "members" : "families"}.</p>
 
       {!roster && (
         <Notice tone={page.brokenTypes.length ? "warning" : "info"} title="Nothing to show yet" titleId="roster-none-h">
@@ -78,7 +79,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
           </form>
           {rows.length === 0
             ? <Notice tone="info">{typed ? <>No {noun} matches &quot;{typed}&quot;.</>
-                : listedInCache > 0 ? <>The roster lists {nouns}, but they haven&apos;t been read into the portal&apos;s own records yet. They are listed here after the next read from QuickBooks.</>
+                : listedInCache > 0 ? <>QuickBooks lists {nouns}, but none of them is one of the portal&apos;s own {nouns}: a read of QuickBooks doesn&apos;t bring customers into the portal.</>
                 : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</Notice>
             : <DataTable caption={typed ? <>{rows.length} {rows.length === 1 ? noun : nouns} matching &quot;{typed}&quot;</> : <>Every {noun} on the roster, by name</>}
                 columns={columns} rows={rows} rowKey={(r) => String(r.id)} />}

@@ -1,13 +1,13 @@
 // Staff add, remove and reinstate a family's guardians, in the app only (stage 3's slice 7b of the app-owned families
 // spec, section 6: "Staff add a guardian to a family with a name and email"). Nothing is sent to QuickBooks: a
-// guardian's Parent customer, or their address in a family's email field, arrives with the source move (S9). Staff
+// guardian's Parent customer, or their address in a family's email field, arrives with stage 3's slice 9e. Staff
 // only: called from src/app/staff/(app)/parents/actions.ts behind `Roster.Family.ReadWrite` (the lead's choice: giving
 // an address a family's sign-in goes with the permission that changes a family); never from parent code, which may not
 // import it (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): it gives any address access to any family.
 //
 // Every write here holds what keeps a family record and its link still under it: the roster lock, shared, taken before
-// the family is looked at and before any guardian row is, so no roster read (which brings the app's records into step)
-// and no change of company runs between the check and the write. The locks come in the one order ./sessions.ts gives
+// the family is looked at and before any guardian row is, so no staff roster write (which may change a family's
+// record) and no change of company runs between the check and the write. The locks come in the one order ./sessions.ts gives
 // (lockedPerson()): the parents' settings lock, shared, first (a switch takes it before the people it touches, so a
 // welcome switched on or off meanwhile is seen as it ends); then the person's own: for an add, the address lock and the
 // `parent` row that holds the address; for a remove or a reinstate, the `parent` row alone (their address isn't
@@ -17,9 +17,9 @@
 // requests, codes and sessions) last. The roster lock is waited for at most three seconds, as the email confirm waits
 // for it (a roster read holds it through its whole QuickBooks read, and the person's row held meanwhile would hold up
 // that person's code request and the daily clean-up): when it is busy, nothing has been written and the answer is
-// `busy`. A guardian row keeps `family_qbo_id` the family's own linked customer, since keepAppRecordsInStep()
-// (src/lib/families/in-step.ts) still puts a row in the family that column names: a row written so is in step already,
-// and the next run changes nothing.
+// `busy`. A guardian row keeps `family_qbo_id` the family's own linked customer while that column stands (NOT NULL, and
+// the unique index of a person in a family), and names the family itself in `family_id`: nothing else gives a row its
+// family since stage 3's slice 9c (no roster read brings the records into step).
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
@@ -103,7 +103,7 @@ async function familyRefusal(tx: Tx, familyId: AppFamilyId | null): Promise<{ re
   const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, familyId));
   if (!f) return { refusal: "no_family" };
   if (!f.active) return { refusal: "inactive" };
-  // Until the source move lets a membership stand without one, a guardian row names the family's customer.
+  // Until stage 3's slice 9d lets a membership stand without one, a guardian row names the family's customer.
   const customer = await customerOfFamily(familyId, tx);
   return customer === null ? { refusal: "no_link" } : { customer };
 }
@@ -225,7 +225,7 @@ export type RemoveGuardianResult = { ok: true; sessionsEnded: number } | { ok: f
  * row all their unused requests and codes; that family's sessions end, every session once it was the last open row;
  * the family's unfinished forms still waiting for their signature start again; and `parent.access.ended` keeps staff's
  * note. Access ends at once whatever the guardian owes (the owner's decision of 2026-11-18); their Parent record in
- * QuickBooks is made inactive, under the balance rule, only once the source move sends it (S9). A row already closed
+ * QuickBooks is made inactive, under the balance rule, only once stage 3's slice 9e sends it. A row already closed
  * is refused, and so is a roster read holding its lock past the wait.
  */
 export async function removeGuardian(guardianId: string, rawNote: string, o: StaffOp, w: Waits = {}): Promise<RemoveGuardianResult> {

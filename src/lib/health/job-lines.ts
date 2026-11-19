@@ -1,9 +1,9 @@
 // Two lines of the Health page (./report.ts) for worker jobs that keep no job_run row of their own: the volunteer
 // reminders (src/lib/volunteer/reminders.ts) and the daily check of the buy-out invoices (src/lib/buyouts/daily-check.ts).
 // Each says when the job last ran and what it did or that it failed, from what the worker marked (src/lib/jobs/marks.ts).
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { buyout, jobRun, setting } from "@/lib/db/schema";
+import { buyout, jobRun, setting, writeQueue } from "@/lib/db/schema";
 import { BUYOUT_CHECK_MARK, failedLast, readMark, REMINDERS_MARK } from "@/lib/jobs/marks";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import type { HealthLine } from "./report";
@@ -48,6 +48,7 @@ export async function volunteerRemindersLine(o: { signin: boolean; welcome: bool
 
 const DID_WORDS: [key: string, one: string, many: string][] = [
   ["paid", "1 marked paid", "{n} marked paid"], ["voided", "1 ended as voided in QuickBooks", "{n} ended as voided in QuickBooks"],
+  // Read only from a mark written before stage 3's slice 9c, when the check still voided for a move made in QuickBooks.
   ["voiding", "1 set to be voided (its student moved)", "{n} set to be voided (their students moved)"],
   ["flagged", "1 flagged for the club", "{n} flagged for the club"], ["unflagged", "1 flag taken off", "{n} flags taken off"],
 ];
@@ -58,14 +59,16 @@ export async function buyoutCheckLine(o: { connected: boolean; needsAdmin: boole
     readMark(BUYOUT_CHECK_MARK),
     db.select().from(jobRun).where(and(eq(jobRun.job, MONEY_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1),
     db.select().from(setting).where(eq(setting.key, BUYOUTS_CHECKED_KEY)),
-    // The check's own flags (an invoice QuickBooks no longer shows, or shows on another customer), waiting for the treasurer.
-    db.select({ n: sql<number>`count(*)::int` }).from(buyout).where(and(eq(buyout.state, "invoiced"), inArray(buyout.flag, ["missing", "other_customer"]))),
+    // The check's own flags (an invoice QuickBooks no longer shows, or shows on another customer, and a student it no
+    // longer holds under the family with no void tried: movedAwayByTheCheck(), src/lib/buyouts/closing.ts), waiting for the treasurer.
+    db.select({ n: sql<number>`count(*)::int` }).from(buyout).where(and(eq(buyout.state, "invoiced"), or(inArray(buyout.flag, ["missing", "other_customer"]),
+      and(eq(buyout.flag, "student_moved"), isNull(buyout.lastCode), sql`not exists (select 1 from ${writeQueue} where ${writeQueue.request}->>'op' = 'invoice_void' and ${writeQueue.request}->>'buyoutId' = ${buyout.id}::text)`)))),
   ]);
   // Before the worker marked it, the check still kept the run it followed: when that was written is when it last ran.
   const ranAt = mark?.ranAt ?? checked?.updatedAt.toISOString() ?? null;
   const base = { key: "buyout_check" as const, title: "Buy-out invoices", times: [{ label: "Last checked", at: ranAt }, { label: "Last failure", at: mark?.failedAt ?? null }] };
   const flagged = flags?.n ?? 0;
-  const flagNote = flagged > 0 ? [`${flagged === 1 ? "1 buy-out invoice is" : `${flagged} buy-out invoices are`} flagged and waiting for the club: QuickBooks no longer shows ${flagged === 1 ? "it" : "them"}, or shows ${flagged === 1 ? "it" : "them"} on another customer. The Reconciliation page lists ${flagged === 1 ? "it" : "them"}.`] : [];
+  const flagNote = flagged > 0 ? [`${flagged === 1 ? "1 buy-out invoice is" : `${flagged} buy-out invoices are`} flagged and waiting for the club: QuickBooks no longer shows ${flagged === 1 ? "it" : "them"}, shows ${flagged === 1 ? "it" : "them"} on another customer, or no longer holds the student billed under the family. The Reconciliation page lists ${flagged === 1 ? "it" : "them"}.`] : [];
   const reconciliation = { href: "/staff/reconciliation", label: "Open Reconciliation" };
   const did = mark?.did ? DID_WORDS.filter(([k]) => (mark.did![k] ?? 0) > 0).map(([k, one, many]) => (mark.did![k] === 1 ? one : many.replace("{n}", String(mark.did![k])))) : [];
   const didNote = mark?.didAt ? [`The last time it changed something: ${did.join(", ")}.`] : ranAt ? ["It has found nothing to change so far."] : [];
@@ -87,5 +90,5 @@ export async function buyoutCheckLine(o: { connected: boolean; needsAdmin: boole
       says: "Hasn't run yet. After each daily read of every family's invoices, it checks each buy-out invoice against what QuickBooks showed." };
   }
   return { ...base, state: flagged > 0 ? "attention" : "ok", word: flagged > 0 ? "Needs attention" : "Working", notes: [...flagNote, ...didNote], fix: flagged > 0 ? reconciliation : null,
-    says: "After each daily read of every family's invoices, checks each buy-out invoice against what QuickBooks showed: a paid one is marked paid, and one QuickBooks no longer shows is flagged for the club." };
+    says: "After each daily read of every family's invoices, checks each buy-out invoice against what QuickBooks showed: a paid one is marked paid, and one QuickBooks no longer shows, or whose student it no longer holds under the family, is flagged for the club." };
 }

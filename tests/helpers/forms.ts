@@ -46,8 +46,8 @@ export async function seedFormRequirement(o: { stepId: string; title: string; ap
 /**
  * A request is given here by its family's and subject's QuickBooks ids, as the tests name families, and stored by the
  * app's own records they are linked to (stage 2 of the app-owned families spec): the family's record, and for a
- * per-student requirement the student's (familyRecord(), studentRecord(), which bring the records into step first when
- * a customer has none yet, so a test that seeds one seeds a roster company first).
+ * per-student requirement the student's (familyRecord(), studentRecord(), which import the records from the cache first
+ * when a customer has none yet, so a test that seeds one seeds a roster company first).
  */
 export type SeedRequest = {
   requirementId: string; familyQboId: string; subjectQboId: string; state?: SignatureRequestState;
