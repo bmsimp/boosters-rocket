@@ -10,7 +10,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 import { createHash } from "node:crypto";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, guardian, parent, setting, signedFormCopy, signedFormEvidence, signedFormFile, signatureRequest } from "@/lib/db/schema";
+import { accountingLink, auditLog, guardian, parent, qboConnection, requirement, setting, signedFormCopy, signedFormEvidence, signedFormFile, signatureRequest } from "@/lib/db/schema";
 import { EVIDENCE_PER_WAKE, evidenceHealth, runEvidenceJob, storeEvidence } from "@/lib/signed-forms/evidence-job";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { healthReport } from "@/lib/health/report";
@@ -21,6 +21,8 @@ import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement
 import { FAMILY_A, FAMILY_B, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
+import { seedConnected, startQboStub } from "../helpers/qbo-stub";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 
 /**
  * Signed forms kept (src/lib/signed-forms/evidence-job.ts and copies.ts), against the Documenso stub: the worker
@@ -205,23 +207,110 @@ describe("the worker keeps a completed form's evidence", () => {
   });
 });
 
-describe("evidence the portal can't keep for want of its own records", () => {
-  it("asks Documenso nothing for a form whose family has no link in the roster's company, records no_link, and says so on the Health page as the roster's to mend", async () => {
-    const { id } = await signedForA();
-    // Family A's link in the roster's company is gone (its record stays): the evidence couldn't keep whose form it is.
-    await db.delete(accountingLink).where(eq(accountingLink.familyId, await familyRecord(FAMILY_A.family.qboId)));
-    stub.calls.length = 0;
-    expect(await runEvidenceJob()).toMatchObject({ fetched: 1, stored: 0, failed: 1 });
-    expect(stub.apiCalls()).toEqual([]);
-    expect(await requestNow(id)).toMatchObject({ evidenceOwed: true, evidenceError: "no_link", evidenceTries: 1 });
-    expect(await db.select().from(signedFormEvidence)).toEqual([]);
-    expect(await evidenceHealth()).toMatchObject({ waiting: 1, noLink: 1 });
+describe("evidence of a family or student with no QuickBooks link, and the one state that waits", () => {
+  /** A per-family form of the same season, signed by family A's guardian: its subject is the family. */
+  const signedFamilyFormForA = async () => {
+    const [r] = await db.select({ stepId: requirement.stepId }).from(requirement).where(eq(requirement.id, requirementId));
+    const familyForm = await seedFormRequirement({ stepId: r!.stepId, title: "Code of conduct", appliesTo: "family", form: formSetting({ id: templateId }), position: 2 });
+    return signedInStub(stub, { requirementId: familyForm, templateId, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.family.qboId, guardians: [guardianOf(a)] });
+  };
+  // Made by hand: until the source move (stage 3, S9) the keep-in-step makes a record with no link inactive, so
+  // syncAppRecords() is never called after; the records are read before their links go.
+  const unlinkFamily = async (familyId: AppFamilyId) => { await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId)); };
+  const unlinkStudent = async (studentId: AppStudentId) => { await db.delete(accountingLink).where(eq(accountingLink.studentId, studentId)); };
+
+  it("keeps a per-family form of a family with no link, with no QuickBooks copy and no company, and warns of nothing", async () => {
+    const familyId = await familyRecord(FAMILY_A.family.qboId);
+    const { id, envelopeId } = await signedFamilyFormForA();
+    await unlinkFamily(familyId);
+    expect(await runEvidenceJob()).toMatchObject({ fetched: 1, stored: 1, failed: 0 });
+    const [evidence] = await db.select().from(signedFormEvidence);
+    expect(evidence).toMatchObject({ requestId: id, realmId: null, familyQboId: null, subjectQboId: null, subjectKind: "family", familyId, studentId: null,
+      earlierCompanyAt: null, formTitle: "Code of conduct", familyName: FAMILY_A.family.name, envelopeId });
+    expect(evidence!.signers).toEqual([{ parentId: a.identity.parentId, name: FAMILY_A.parent.name, email: FAMILY_A.parent.email, signedAt: expect.any(String) }]);
+    expect((await db.select().from(signedFormFile).where(eq(signedFormFile.evidenceId, evidence!.id))).map((f) => f.kind).sort())
+      .toEqual(["audit_log_json", "audit_log_pdf", "certificate_pdf", "sealed_pdf"]);
+    expect(await requestNow(id)).toMatchObject({ evidenceOwed: false, evidenceError: null });
+    const stored = (await audits("forms.evidence.stored")).find((r) => r.targetId === evidence!.id);
+    expect(stored!.after).toMatchObject({ requestId: id, envelopeId, realmId: null, familyId: String(familyId) });
+    expect(await evidenceHealth()).toMatchObject({ waiting: 0, otherCompany: 0 });
     const line = (await healthReport()).find((l) => l.key === "forms")!;
-    expect(line).toMatchObject({ state: "attention", says: expect.stringContaining("can't be filed until the portal can find their families in the roster's QuickBooks company"),
-      fix: { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" } });
-    expect(line.notes.join(" ")).toContain("1 signed form can't be filed");
-    expect(line.notes.join(" ")).toContain("After the roster is read again it tries again on its own schedule");
-    expect(line.notes.join(" ")).not.toContain("Check that Documenso answers");
+    expect(line.notes.join(" ")).not.toContain("can't be filed");
+    expect(line.says).not.toContain("can't be filed");
+  });
+
+  it("never fills in a kept copy when a link is made afterwards: the first copy stands", async () => {
+    const familyId = await familyRecord(FAMILY_A.family.qboId);
+    const { id } = await signedFamilyFormForA();
+    await unlinkFamily(familyId);
+    await runEvidenceJob();
+    // The family is linked again (as staff will link one from S9), and the evidence is fetched once more.
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: FAMILY_A.family.qboId, familyId, origin: "confirmed" });
+    await db.update(signatureRequest).set({ evidenceOwed: true }).where(eq(signatureRequest.id, id));
+    expect(await runEvidenceJob()).toMatchObject({ fetched: 1, stored: 0, mismatches: 0, failed: 0 });
+    expect(await db.select().from(signedFormEvidence)).toEqual([expect.objectContaining({ requestId: id, realmId: null, familyQboId: null, subjectQboId: null })]);
+    expect(await requestNow(id)).toMatchObject({ evidenceOwed: false });
+  });
+
+  it("keeps a per-student form of a linked family whose student has no link: the family's copy and the company, and no subject copy", async () => {
+    const studentId = await studentRecord(FAMILY_A.students[0]!.qboId);
+    const { id } = await signedForA();
+    await unlinkStudent(studentId);
+    expect(await runEvidenceJob()).toMatchObject({ stored: 1, failed: 0 });
+    expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ requestId: id, realmId: REALM, familyQboId: FAMILY_A.family.qboId, subjectQboId: null,
+      subjectKind: "student", familyId: await familyRecord(FAMILY_A.family.qboId), studentId });
+  });
+
+  it("keeps a form when the roster names no company at all, with no copy and no company", async () => {
+    const familyId = await familyRecord(FAMILY_A.family.qboId), studentId = await studentRecord(FAMILY_A.students[0]!.qboId);
+    const { id } = await signedForA();
+    await db.delete(setting).where(eq(setting.key, SOURCE_KEY));
+    expect(await runEvidenceJob()).toMatchObject({ stored: 1, failed: 0 });
+    expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ requestId: id, realmId: null, familyQboId: null, subjectQboId: null, familyId, studentId });
+  });
+
+  it("keeps nothing and asks Documenso nothing while QuickBooks is connected to a company other than the roster's, and says so on the Health page", async () => {
+    const { id } = await signedForA();
+    // The links stand, but no lookup answers while another company is connected: "no link" can't be told from "can't look".
+    const qbo = await startQboStub();
+    try {
+      await seedConnected(qbo, { realmId: "4620816365000000999" });
+      stub.calls.length = 0;
+      const t0 = new Date();
+      expect(await runEvidenceJob(t0)).toMatchObject({ fetched: 1, stored: 0, failed: 1 });
+      expect(stub.apiCalls()).toEqual([]);
+      const row = await requestNow(id);
+      expect(row).toMatchObject({ evidenceOwed: true, evidenceError: "other_company", evidenceTries: 1 });
+      expect(row.evidenceNextAt!.getTime() - t0.getTime()).toBe(5 * 60_000);
+      expect(await db.select().from(signedFormEvidence)).toEqual([]);
+      expect(await evidenceHealth()).toMatchObject({ waiting: 1, otherCompany: 1 });
+      const line = (await healthReport()).find((l) => l.key === "forms")!;
+      expect(line).toMatchObject({ state: "attention", says: expect.stringContaining("can't be filed while QuickBooks is connected to a company other than the one the roster was read from"),
+        fix: { href: "/staff/settings/quickbooks", label: "Open QuickBooks settings" } });
+      expect(line.notes.join(" ")).toContain("1 signed form can't be filed yet");
+      expect(line.notes.join(" ")).not.toContain("Check that Documenso answers");
+      // The fetched files can't be kept either, if the connection changed while they were fetched.
+      await expect(storeEvidence(row, { files: [], originals: [], completedAt: null })).rejects.toMatchObject({ code: "other_company" });
+
+      // The roster's company again: the next try keeps it, with its copies.
+      await db.delete(qboConnection);
+      expect(await runEvidenceJob(new Date(t0.getTime() + 5 * 60_000))).toMatchObject({ stored: 1, failed: 0 });
+      expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ requestId: id, realmId: REALM, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.students[0]!.qboId });
+    } finally {
+      await qbo.close();
+    }
+  });
+
+  it("keeps on its normal schedule a form whose last try was recorded under the old code no_link", async () => {
+    const familyId = await familyRecord(FAMILY_A.family.qboId);
+    const { id } = await signedFamilyFormForA();
+    await unlinkFamily(familyId);
+    const due = new Date(Date.now() + 60 * 60_000);
+    await db.update(signatureRequest).set({ evidenceTries: 3, evidenceError: "no_link", evidenceNextAt: due }).where(eq(signatureRequest.id, id));
+    expect(await evidenceHealth()).toMatchObject({ waiting: 1, otherCompany: 0 });
+    expect((await runEvidenceJob()).fetched).toBe(0);
+    expect(await runEvidenceJob(due)).toMatchObject({ fetched: 1, stored: 1 });
+    expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ requestId: id, realmId: null, familyQboId: null });
   });
 
   it("keeps nothing of a form that moved to another family while its files were fetched, and records moved_while_fetched", async () => {
