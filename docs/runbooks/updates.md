@@ -43,7 +43,10 @@ if you use this installation's proxy.
 
 1. `docker compose ps`: `app` and `documenso` say `healthy`, `migrate` says `Exited (0)`. If `migrate` failed,
    `docker compose logs migrate` says why, and the app was not started on a database it couldn't bring up to date.
-   One reason is the backup check, below.
+   One reason is the backup check, below. Another is a change the database refuses: its message starts with
+   "Migration ... stopped, and changed nothing". Every change of one update is made together or not at all, so
+   when one stops, none of them is kept and the database is exactly as the version you were running left it. Keep
+   it as it is, report the message, and run the previous version until a fix comes ([Going back](#going-back)).
 2. Sign in as an Admin and open **Health**: **Version** names the new version, and every line reads as it did before
    ([Health page warnings](health-warnings.md) for any that doesn't).
 3. Open the portal as a parent would (a test family): Home, Payments, Forms.
@@ -79,8 +82,12 @@ switch the check off for every update after this one.
 
 ## Going back
 
-The databases move forward with an update and can't be moved back on their own, so going back is a restore of the
-backup from part 1:
+After a `migrate` that failed, nothing was changed, so no restore is needed: put back the previous version's files and
+image (step 1 below) and start it the way you started it, for example `docker compose up -d`. Its `migrate` finds
+nothing to do, and the portal runs as it did before the update.
+
+Otherwise the databases move forward with an update and can't be moved back on their own, so going back is a restore
+of the backup from part 1:
 
 1. Put back the previous version's files and image: `git checkout <previous version>` and, for the published image, the
    previous version in `BOOSTER_ROCKET_IMAGE` (not `stable`), then `docker compose pull`.
