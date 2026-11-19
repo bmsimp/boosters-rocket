@@ -229,6 +229,33 @@ describe("one request and one signed form", () => {
   });
 });
 
+describe("a signed form kept with no QuickBooks company (its family had no link)", () => {
+  it("is among the current forms, never in the earlier company's archive, and shows no QuickBooks number", async () => {
+    const id = a.forms!.evidence.id;
+    await db.update(signedFormEvidence).set({ realmId: null, familyQboId: null, subjectQboId: null, subjectName: null }).where(eq(signedFormEvidence.id, id));
+    asStaff(reader);
+    const archiveOf = (html: string) => html.split("Earlier company")[1]!;
+    const othersOf = (html: string) => html.split("Other kept signed forms")[1]!.split("Earlier company")[0]!;
+    let html = await renderPage(SignedFormsPage, { searchParams: {} });
+    // The table leads to it while its season is current.
+    expect(html.split("Other kept signed forms")[0]).toContain(`/staff/forms/evidence/${id}`);
+    expect(archiveOf(html)).not.toContain(id);
+    // Once its season isn't, it is listed apart with the company's other kept forms: still not archived.
+    await db.update(season).set({ isCurrent: false });
+    await db.insert(season).values({ name: "Spring 2027", isCurrent: true });
+    html = await renderPage(SignedFormsPage, { searchParams: {} });
+    expect(othersOf(html)).toContain(`/staff/forms/evidence/${id}`);
+    expect(archiveOf(html)).not.toContain(id);
+    // Its page names the student it was signed for in words, with no number, and says nothing of an earlier company.
+    const text = textOf(await renderPage(EvidencePage, { params: { id } }));
+    expect(text).toContain("Signed for A student whose name the portal doesn't know");
+    expect(text).not.toContain("no longer connected");
+    expect((await audits("forms.evidence.read")).find((r) => r.targetId === id)!.after).toMatchObject({ earlierCompany: false });
+    const res = await staffDownload(new Request(`http://localhost/staff/forms/evidence/${id}/evidence-record-json`), { params: Promise.resolve({ id, file: "evidence-record-json" }) });
+    expect(JSON.parse(await res.text())).toMatchObject({ quickBooksCompany: null, fromAnEarlierCompany: false, family: { qboId: null }, signedFor: { kind: "student", qboId: null } });
+  });
+});
+
 describe("reminders", () => {
   beforeEach(async () => {
     await connectForms({ origin: "http://127.0.0.1:9", token: "api_never_called" }); // no reminder calls Documenso

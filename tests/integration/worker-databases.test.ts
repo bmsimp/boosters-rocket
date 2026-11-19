@@ -68,7 +68,10 @@ describe("a run's worker databases", { timeout: 300_000 }, () => {
   it("makes again a leftover that was cut off part of the way through its migrations", async () => {
     await inside(W2.url, async (pg) => {
       await pg`create table left_behind (id int)`;
-      await pg`delete from drizzle.__drizzle_migrations where id = (select max(id) from drizzle.__drizzle_migrations)`; // the tables say otherwise
+      // The tables say otherwise. Every record but the first is forgotten, not only the last: the run that follows then
+      // has to make tables that are already there, which fails whatever the newest migration is (one that only loosens a
+      // column, like 0036, can be applied twice and would leave the database looking sound).
+      await pg`delete from drizzle.__drizzle_migrations where id > (select min(id) from drizzle.__drizzle_migrations)`;
     });
     await prepareWorkerDatabase(RUN.url, 2);
     expect(await hasTable(W2.url, "left_behind")).toBe(false);

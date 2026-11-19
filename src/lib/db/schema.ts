@@ -936,12 +936,16 @@ export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
  * request, stored once every file of it is in signed_form_file. It is the club's record and outlives everything it came
  * from: it has no foreign key to the request, the requirement or the consents, and nothing in the portal deletes it.
  * The names, signers and consents are copies as they were. `realm_id` is the QuickBooks company the family belonged to
- * (the roster cache's company then); when a different company is connected the row is kept, `request_id` is cut
- * (`earlier_company_at` is set), and from then on it is shown only in the staff archive: its QuickBooks ids may name
- * another family in the new company. `mismatch_at` is set when a later fetch gave a stored file a different hash.
+ * (the roster cache's company then), or null when the family had no link there, or the roster named no company: a
+ * family the club keeps by hand signs forms like any other. When a different company is connected the row is kept,
+ * `request_id` is cut (`earlier_company_at` is set), and from then on it is shown only in the staff archive: its
+ * QuickBooks ids may name another family in the new company. `mismatch_at` is set when a later fetch gave a stored file
+ * a different hash.
  *
  * `family_qbo_id`, `subject_qbo_id` and `subject_kind` are the record's own copies of whose form it was, in QuickBooks'
- * ids: never changed or removed once stored, and never used to find a family. The current company's evidence also
+ * ids: the customers the family's and the subject's own links named when it was kept, each null when that record had
+ * no link then (migration 0036; kept with a company only, so both are null when `realm_id` is). Never changed or
+ * removed once stored (a link made later fills nothing in), and never used to find a family. The current company's evidence also
  * names the app's own family whose form it is now (`family_id`, which moves with a student, as the request does) and,
  * for a per-student form, the app's own student (`student_id`): that is how the portal finds a family's evidence
  * (stage 2 of the app-owned families spec; migration 0028 filled them). An earlier company's evidence names neither,
@@ -950,11 +954,11 @@ export type EvidenceOriginal = { itemId: string; sha256: string; size: number };
 export const signedFormEvidence = pgTable("signed_form_evidence", {
   id: uuid("id").primaryKey().defaultRandom(),
   requestId: uuid("request_id"),                           // signature_request.id, with no foreign key; null once its company is an earlier one
-  realmId: text("realm_id"),                               // the QuickBooks company the request's family belonged to
+  realmId: text("realm_id"),                               // the QuickBooks company the request's family belonged to; null with no link
   earlierCompanyAt: timestamp("earlier_company_at", { withTimezone: true }),
   requirementId: uuid("requirement_id"),                   // requirement.id, with no foreign key
-  familyQboId: text("family_qbo_id").notNull(),            // the record's copy: never changed, never matched to a family
-  subjectQboId: text("subject_qbo_id").notNull(),          // the record's copy: never changed, never matched to a family
+  familyQboId: text("family_qbo_id"),                      // the record's copy, null with no link: never changed, never matched to a family
+  subjectQboId: text("subject_qbo_id"),                    // the record's copy, null with no link: never changed, never matched to a family
   subjectKind: text("subject_kind", { enum: ["family", "student"] }).notNull(),
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),   // the current company's only
   studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // a per-student form's, the current company's only
