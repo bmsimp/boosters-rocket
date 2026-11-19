@@ -10,7 +10,7 @@
 # The owner and the repository come from the workflow's own context, so a fork publishes under its own name. The only
 # credential is the token GitHub gives this run, allowed to write packages and nothing else. Every action is pinned to
 # a commit; .github/dependabot.yml proposes new ones. It runs where CI does: on GitHub's hosted runners, or on the
-# club's own when the repository variable CI_RUNNER_LABELS names one (ci/runner/). CI doesn't run on pushes to main, so
+# club's own when the repository variable CI_RUNNER_LABELS names one (ci/runner/), Dependabot never. CI doesn't run on pushes to main, so
 # run it there by hand (gh workflow run ci.yml --ref main) and let it finish green before publishing a release.
 name: release
 on:
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   ci-passed:
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    runs-on: ${{ (github.actor == 'dependabot[bot]' || github.event.pull_request.user.login == 'dependabot[bot]') && fromJSON('["ubuntu-latest"]') || fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     permissions:
       actions: read
@@ -45,7 +45,7 @@ jobs:
 
   image:
     needs: ci-passed
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    runs-on: ${{ (github.actor == 'dependabot[bot]' || github.event.pull_request.user.login == 'dependabot[bot]') && fromJSON('["ubuntu-latest"]') || fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 60
     permissions:
       contents: read

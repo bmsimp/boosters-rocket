@@ -5,6 +5,12 @@ GitHub's hosted runners unless the repository variable `CI_RUNNER_LABELS` names 
 list of its labels: `["self-hosted","br-ci"]` for the one in this folder. Delete the variable and they go back to the
 hosted runners.
 
+**Only for code the club trusts.** A job on this runner can start a privileged container in the runner's own Docker
+daemon, and so become root on the machine the runner lives on. Use it only for a private repository whose code and
+dependencies the club trusts; keep "Run workflows from fork pull requests" switched off in the repository's Actions
+settings; never point a public repository at it. Dependabot's pull requests always run on GitHub's hosted runners,
+whatever the variable says, since they bring code from elsewhere.
+
 This folder is that runner, for a Linux machine with Docker:
 
 - `compose.yml`: two containers in the compose project `br-ci`. `br-ci-dind` is the CI's own Docker daemon, so the
@@ -14,12 +20,13 @@ This folder is that runner, for a Linux machine with Docker:
   capped at 4 GB and 5 GB, swap included. Every container, volume and network is named `br-ci-*`.
 - `Dockerfile`: GitHub's runner image plus shellcheck, PowerShell, the docker compose plugin and the GitHub CLI.
 - `entrypoint.sh`: registers the runner (`register`) or runs it.
-- `job-started.sh`: before each job, removes whatever an earlier job left in the CI's daemon (containers, networks,
+- `job-started.sh`: before each job, empties the shared `/tmp` and removes whatever an earlier job left in the CI's
+  daemon (containers, networks,
   volumes; once a week unused images and old build cache), stops a server a cancelled job left running and gives the
   work folder back to the runner. It refuses to touch any daemon but `br-ci-dind`.
 
-A run takes longer than on GitHub's runners on a small machine (40 to 60 minutes on four slow cores, the two jobs one
-after the other), and the first one longer still while the images and caches fill.
+On four slow cores a run took about 22 minutes, the two jobs one after the other (the tests about 20, the image about
+2); the first run takes longer while the images and caches fill.
 
 ## Bring it up
 
