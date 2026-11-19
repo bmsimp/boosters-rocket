@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentEmailChange, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -110,10 +110,20 @@ export function describeCleanup(c: CleanupCounts): string {
 export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCounts> {
   const n = (rows: unknown[]) => rows.length;
   const staffSessions = n(await tx.delete(staffAuthSession).where(lt(staffAuthSession.expiresAt, now)).returning({ id: staffAuthSession.id }));
-  const parentSessions = n(await tx.delete(parentAuthSession).where(lt(parentAuthSession.expiresAt, now)).returning({ id: parentAuthSession.id }));
-  const signinCodes = n(await tx.delete(signinCode)
-    .where(and(or(isNotNull(signinCode.usedAt), lt(signinCode.expiresAt, now)), lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS))))
-    .returning({ id: signinCode.id }));
+  // What hangs on a person goes in the order src/lib/parents/sessions.ts gives (lockedPerson()): the rows of everyone
+  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their sessions. So the
+  // clean-up never waits on a person's change of address while that change waits on it.
+  const requestGone = lt(parentEmailChange.expiresAt, now);
+  const codeGone = and(or(isNotNull(signinCode.usedAt), lt(signinCode.expiresAt, now)), lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)));
+  const sessionGone = lt(parentAuthSession.expiresAt, now);
+  await tx.select({ id: parent.id }).from(parent).where(or(
+    inArray(parent.id, tx.select({ id: parentEmailChange.parentId }).from(parentEmailChange).where(requestGone)),
+    inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(codeGone)),
+    inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)).where(sessionGone)),
+  )).orderBy(parent.id).for("update");
+  const emailChanges = n(await tx.delete(parentEmailChange).where(requestGone).returning({ id: parentEmailChange.id }));
+  const signinCodes = n(await tx.delete(signinCode).where(codeGone).returning({ id: signinCode.id }));
+  const parentSessions = n(await tx.delete(parentAuthSession).where(sessionGone).returning({ id: parentAuthSession.id }));
 
   const kinds = Object.keys(RATE_LIMITS) as RateLimitKind[];
   let rateLimitEvents = 0;
@@ -126,7 +136,6 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   rateLimitEvents += n(await tx.delete(rateLimitEvent)
     .where(and(notInArray(rateLimitEvent.kind, kinds), lt(rateLimitEvent.at, new Date(now.getTime() - longest)))).returning({ id: rateLimitEvent.id }));
 
-  const emailChanges = n(await tx.delete(parentEmailChange).where(lt(parentEmailChange.expiresAt, now)).returning({ id: parentEmailChange.id }));
   // A family's figures go only when its family customer (the customer its family record's own link names, in the
   // roster's company) is gone from the roster cache altogether: never because the family is inactive, since an inactive
   // customer is still in the cache. Skipped while the cache is empty.

@@ -20,8 +20,9 @@ export async function blockPerson(parentId: string, rawReason: string, o: StaffO
     const [p] = await tx.select().from(parent).where(eq(parent.id, parentId)).for("update");
     if (!p) return { ok: false as const, reason: "not_found" as const };
     await tx.update(parent).set({ blocked: true, blockedAt: new Date(), blockedBy: o.actor.id, blockedReason: reason, welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.id, p.id));
-    await deleteUnusedSigninCodes(p.id, tx);
+    // What hangs on the person, in the order ./sessions.ts gives (lockedPerson()): requests, then codes, then sessions.
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, p.id), isNull(parentEmailChange.usedAt)));
+    await deleteUnusedSigninCodes(p.id, tx);
     const sessionsEnded = await endParentSessions(p.id, tx);
     const formsReset = await formsForGoneSigner(tx, { parentId: p.id, family: "every family", reason: "blocked", actor: o.actor, ip: o.ip });
     await writeAudit({ actor: o.actor, action: "parent.block", permission: o.permission, targetType: "parent", targetId: p.id,

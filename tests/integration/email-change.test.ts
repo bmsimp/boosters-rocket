@@ -375,6 +375,28 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect(saved[0]!.after).toMatchObject({ email: NEW, app: "address_taken", quickbooks: "holds_new_address" });
     expect((await requests()).find((q) => q.newEmail === NEW)!.usedAt).not.toBeNull();
   });
+
+  // A second press of the same link, past the link check before the first spent it, finds the change made in QuickBooks
+  // and the request spent by the first, which ended "taken": it is told as the first was, and signs nobody out.
+  it("a second confirmation that races one that ended with the address taken is told the same, and nobody is signed out", async () => {
+    const { r } = await seedContactFamilies(stub);
+    asParent(r.identity);
+    await asking(NEW);
+    const token = linkTo(NEW);
+    let first: Promise<unknown> | null = null, other: string | null = null;
+    stub.onApiRequest = async (call) => {
+      if (call.method === "POST") { if (!other) other = (await seedParent({ name: "Somebody Else", email: NEW })).id; return; }
+      // The second press's read of the record: the first press runs to its end before QuickBooks answers it.
+      if (!first) { first = confirmEmailChangeAction(token); await first; }
+    };
+    const second = await confirmEmailChangeAction(token);
+    expect(await first).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
+    expect(second).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
+    expect(posts()).toHaveLength(1);
+    expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
+    expect(await sessionsOf(r.identity.parentId)).toHaveLength(1);
+    expect((await audits()).filter((a) => a.action === "parent.email.save")).toHaveLength(1);
+  });
 });
 
 describe("confirming: what goes wrong changes nothing in the portal", () => {

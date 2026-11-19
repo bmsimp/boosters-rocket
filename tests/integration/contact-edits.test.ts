@@ -14,6 +14,8 @@ import { db } from "@/lib/db/client";
 import { auditLog, guardian, qboConnection, qboCustomer, rateLimitEvent } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { CONTACT_COPY, loadMyContact } from "@/lib/parents/contact-edits";
+import { canChangeMyEmail } from "@/lib/parents/email-change";
+import { loadMyFamily } from "@/lib/parents/my-family";
 import { NOT_THE_FORM, type ContactValues } from "@/lib/parents/contact-fields";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
@@ -681,6 +683,36 @@ describe("the record must be the signed-in parent's in QuickBooks now, not only 
     expect(await save({ phone: NEW_PHONE, ...blank })).toEqual({ ok: false, errors: [CONTACT_COPY.tryLater] });
     expect(posts()).toHaveLength(0);
     expect((await audits()).map((a) => [a.actorId, a.after])).toEqual([[work.identity.parentId, { code: "not_theirs" }]]);
+  });
+
+  // Nothing rewrites a guardian row's source on a roster read any more, so a record the club has given another person's
+  // address is no longer the parent's own once the cache holds it so: "Your details" shows none of it, and the parent
+  // reads their own name and address, as for a sign-in with no record of its own (fieldSignsIn(), myOwnRecord()).
+  it("a record the club has given another person's address in the roster is not shown as theirs, until it holds theirs again", async () => {
+    const { r } = await seedContactFamilies(stub);
+    const OTHER = { displayName: "Ottilie Otherperson", email: "ottilie.other@family-r.example", phone: "512-555-0777" };
+    const readdress = (to: { displayName: string; email: string; phone: string | null }) => db.update(qboCustomer).set(to).where(eq(qboCustomer.qboId, R_PARENT));
+    await readdress(OTHER);
+    asParent(r.identity);
+    const notShown = (text: string) => { for (const secret of Object.values(OTHER)) expect(text, secret).not.toContain(secret); };
+    const family = await loadMyFamily(ctxOf(r.identity));
+    expect(family!.me).toBeNull();
+    notShown(JSON.stringify(family));
+    expect(await loadMyContact(ctxOf(r.identity))).toEqual({ state: "none" });
+    expect(await canChangeMyEmail(ctxOf(r.identity))).toBe(false);
+    for (const page of [FamilyPage, FamilyDetailsPage]) {
+      const html = await renderPage(page);
+      notShown(html);
+      expect(html).toContain(RIVERA.parent.email);
+      expect(html).not.toContain("Change my sign-in email");
+      expect(html).not.toContain("<form");
+    }
+    expect(stub.apiCalls()).toEqual([]);
+    // Their address put back: the record is theirs again.
+    await readdress({ displayName: RIVERA.parent.name, email: RIVERA.parent.email, phone: RIVERA.parent.phone });
+    expect((await loadMyFamily(ctxOf(r.identity)))!.me).toEqual({ name: RIVERA.parent.name, email: RIVERA.parent.email, phone: RIVERA.parent.phone, edits: "own" });
+    expect(await canChangeMyEmail(ctxOf(r.identity))).toBe(true);
+    expect(await renderPage(FamilyDetailsPage)).toContain("<form");
   });
 });
 

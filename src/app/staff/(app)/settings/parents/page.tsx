@@ -1,6 +1,6 @@
 import { requireStaffPage } from "@/lib/guards";
 import { getParentSettings } from "@/lib/parents/settings";
-import { closedForNoStudents, missingForSignins, NO_STUDENTS_IN_SHAPE, signinCounts, studentsEffect, studentsRuleUsable } from "@/lib/parents/switches";
+import { closedForNoStudents, missingForSignins, NO_STUDENTS_IN_SHAPE, signinCounts, STUDENTS_RULE_NOT_IN_USE, studentsEffect, studentsRuleUsable } from "@/lib/parents/switches";
 import { Notice } from "@/app/components/notice";
 import { SwitchButton } from "./forms";
 import { StateWords } from "@/app/components/state-words";
@@ -36,9 +36,11 @@ export default async function ParentSettingsPage() {
 
       <section className="box" aria-labelledby="ps-options-h"><h2 id="ps-options-h">Options</h2>
         <h3>Families with no active student</h3>
-        <p>{s.requireActiveStudents ? "On: a family with no active student can't sign in. Nobody's sign-in is ended for it: they can sign in again once the family has an active student, or this is switched off."
-          : !usable ? `Off. ${NO_STUDENTS_IN_SHAPE}`
-          : `Off: students don't affect who can sign in. Switching this on would stop ${n(students.people, "person", "people")} signing in, in ${n(students.families, "family", "families")} with no active student, until the family has one.`}</p>
+        {s.requireActiveStudents && !usable
+          ? <Notice tone="info" live="none">{STUDENTS_RULE_NOT_IN_USE}</Notice>
+          : <p>{s.requireActiveStudents ? "On: a family with no active student can't sign in. Nobody's sign-in is ended for it: they can sign in again once the family has an active student, or this is switched off."
+            : !usable ? `Off. ${NO_STUDENTS_IN_SHAPE}`
+            : `Off: students don't affect who can sign in. Switching this on would stop ${n(students.people, "person", "people")} signing in, in ${n(students.families, "family", "families")} with no active student, until the family has one.`}</p>}
         {closedEarlier > 0 && <p>{`${n(closedEarlier, "sign-in", "sign-ins")} an earlier version of the portal ended for this ${closedEarlier === 1 ? "stays" : "stay"} ended, whatever this is set to and whatever students the family has.`}</p>}
         {(s.requireActiveStudents || usable) && <SwitchButton quiet label={s.requireActiveStudents ? "Let those families sign in" : "Require an active student"} pendingLabel="Saving…" act={setRequireStudentsAction.bind(null, !s.requireActiveStudents)} />}
       </section>

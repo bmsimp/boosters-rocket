@@ -2,8 +2,8 @@
 // `Parents.ReadWrite`, never behind `Roster.Read`. `familySignins` returns one family's own guardians, for its page.
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parent, qboCustomer, student, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
-import { getParentSettings } from "./settings";
+import { auditLog, family, guardian, parent, qboCustomer, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
+import { hasActiveStudent, studentsRuleInForce } from "./sessions";
 import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
 
@@ -51,20 +51,23 @@ export function accessWords(o: { status: GuardianStatus; reason: DisabledReason 
   return { kind: "can", words: o.status === "invited" ? "Can sign in (hasn't yet)" : "Can sign in" };
 }
 
-/** FamilyStanding of each family record named, read as the gate reads it, with the stored setting. */
+/**
+ * FamilyStanding of each family record named, read as the gate reads it: the students rule as it is in force
+ * (studentsRuleInForce()) and a family's active students by the gate's own condition (hasActiveStudent()), so staff
+ * never read "can't" where the gate lets the person in.
+ */
 async function familyStandings(ids: (AppFamilyId | null)[]): Promise<(id: AppFamilyId | null) => FamilyStanding> {
   const unique = [...new Set(ids.filter((id): id is AppFamilyId => id !== null))];
-  const [{ requireActiveStudents }, rows] = await Promise.all([getParentSettings(), unique.length
-    ? db.select({ id: family.id, active: family.active,
-      hasStudent: sql<boolean>`exists (select 1 from ${student} where ${student.familyId} = ${family.id} and ${student.active})` })
-      .from(family).where(inArray(family.id, unique))
-    : Promise.resolve([])]);
+  const [studentsRule, rows, withStudents] = await Promise.all([studentsRuleInForce(),
+    unique.length ? db.select({ id: family.id, active: family.active }).from(family).where(inArray(family.id, unique)) : Promise.resolve([]),
+    unique.length ? db.select({ id: family.id }).from(family).where(and(inArray(family.id, unique), hasActiveStudent(family.id))) : Promise.resolve([])]);
   const found = new Map(rows.map((r) => [String(r.id), r]));
+  const hasStudent = new Set(withStudents.map((r) => String(r.id)));
   return (id) => {
     const f = id === null ? undefined : found.get(String(id));
     if (!f) return "no_record";
     if (!f.active) return "inactive";
-    return requireActiveStudents && f.hasStudent !== true ? "no_students" : "counts";
+    return studentsRule && !hasStudent.has(String(f.id)) ? "no_students" : "counts";
   };
 }
 

@@ -55,3 +55,14 @@ export function fieldHasChange(field: string | null, from: string, to: string, f
   const usable = parseEmailField(field).usable;
   return !usable.includes(old) && (firstOnly ? usable[0] === next : usable.includes(next));
 }
+
+/**
+ * Whether `email` signs in through a record whose email field is `field`, by the record's own rule (MyRecord.signsInBy,
+ * ./my-family.ts): its first usable address alone on a parent's own record or a flat member's, any of them on a
+ * family's record in a club with no parent type. The one rule for it: a parent's record is theirs to see
+ * (myOwnRecord()), to change (./contact-edits.ts) and to change the address of (./email-change.ts) only while it holds.
+ */
+export function fieldSignsIn(field: string | null, email: string, signsInBy: "first" | "every"): boolean {
+  const usable = parseEmailField(field).usable;
+  return (signsInBy === "every" ? usable : usable.slice(0, 1)).includes(email.trim().toLowerCase());
+}

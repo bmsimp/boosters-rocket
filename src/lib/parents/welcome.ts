@@ -8,7 +8,7 @@ import { getStoredMailConfig, mailWorking } from "@/lib/mail/settings";
 import { welcomeMessage } from "@/lib/mail/messages";
 import type { StaffOp } from "./people";
 import { getParentSettings, parentDoorClosed } from "./settings";
-import { enterableGuardianRows, hasRowThatCounts } from "./sessions";
+import { enterableGuardianRows, hasRowThatCounts, studentsRuleInForce } from "./sessions";
 
 export const WELCOME_BATCH = 5;
 export const WELCOME_RETRY_MS = 15 * 60_000;
@@ -44,7 +44,7 @@ const welcomesOn = async () => { const s = await getParentSettings(); return s.w
  */
 export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: number; failed: number }> {
   if (!(await welcomesOn()) || !(await mailWorking())) return { sent: 0, failed: 0 };
-  const counts = hasRowThatCounts((await getParentSettings()).requireActiveStudents);
+  const counts = hasRowThatCounts(await studentsRuleInForce());
   const due = await db.select().from(parent)
     .where(and(eq(parent.welcomeOwed, true), eq(parent.blocked, false), counts,
       or(isNull(parent.welcomeTriedAt), lt(parent.welcomeTriedAt, new Date(now.getTime() - WELCOME_RETRY_MS)))))

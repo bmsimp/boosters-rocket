@@ -15,6 +15,7 @@ import type { AppStudentId } from "@/lib/families/ids";
 import { customerOfFamily } from "@/lib/families/links";
 import { sessionFamily } from "@/lib/families/session-family";
 import { recordNameWords } from "@/lib/families/words";
+import { fieldSignsIn } from "./email-field";
 
 /**
  * One of the family's active students: the app's own record, and its name in words. A page keys and matches a student
@@ -36,7 +37,10 @@ export type MyFamily = {
   name: string;
   /** The family's active students, by name. Null when the membership shape lists no students: the page says nothing rather than guess. */
   students: MyStudent[] | null;
-  /** The signed-in person's own QuickBooks record, when their sign-in came from one in this family; otherwise null. */
+  /**
+   * The signed-in person's own QuickBooks record, when their sign-in came from one in this family and its email field
+   * still holds the address they sign in with; otherwise null.
+   */
   me: MyContact | null;
   /** When the roster was last read from QuickBooks successfully. */
   rosterReadAt: string | null;
@@ -74,7 +78,10 @@ const contact = (r: Row, edits: "own" | "family"): MyContact & { edits: "own" | 
  * roster (loadRosterPage), narrowly: while QuickBooks is connected, a cache read from another company, or one that
  * doesn't say which, gives none; so does a membership shape that is missing or names a customer type QuickBooks no
  * longer has, and a family with no link to its customer, or one the cache doesn't hold active as a family. Only the
- * family's own customer and its direct sub-customers are read. Inactive records are left out.
+ * family's own customer and its direct sub-customers are read. Inactive records are left out. A record is the person's
+ * own only while its email field, as the cache holds it, still holds the address they sign in with, by the rule the
+ * writes check QuickBooks' own answer by (fieldSignsIn(), ./email-field.ts): a record the club has given another
+ * person's address is not shown to them, and they have no record of their own here.
  */
 export async function loadMyFamily(ctx: ParentCtx): Promise<MyFamily | null> {
   return (await read(ctx))?.family ?? null;
@@ -109,7 +116,9 @@ type Shape = NonNullable<Awaited<ReturnType<typeof getShape>>>;
 /**
  * The person's own QuickBooks record in this family, from the roster cache: found through the family's own link (its
  * customer, in the records' company) and the source of the guardian row the session chose, by the rules loadMyFamily()
- * gives. Null whenever any of it doesn't hold.
+ * gives, and only while its email field holds the person's sign-in address (fieldSignsIn()). Nothing rewrites a row's
+ * source when the club re-addresses or reuses a record, so the field is what says the record is still theirs. Null
+ * whenever any of it doesn't hold.
  */
 async function myOwnRecord(ctx: ParentCtx, shape: Shape | null): Promise<{ contact: MyContact & { edits: "own" | "family" }; mine: Mine } | null> {
   if (!shape) return null;
@@ -142,7 +151,8 @@ async function myOwnRecord(ctx: ParentCtx, shape: Shape | null): Promise<{ conta
     // The member is its own family: its own record and nothing under it.
     if (family.typeQboId === null || !shape.memberTypeIds.includes(family.typeQboId)) return null;
     // Every address on a member's record signs in through it, so its details are shared like a family's.
-    return sourceId === familyId ? { contact: contact(family, "family"), mine: { row: family, signsInBy: "first", typeQboIds: shape.memberTypeIds } } : null;
+    return sourceId === familyId && fieldSignsIn(family.email, ctx.email, "first")
+      ? { contact: contact(family, "family"), mine: { row: family, signsInBy: "first", typeQboIds: shape.memberTypeIds } } : null;
   }
 
   if (family.typeQboId !== shape.familyTypeId) return null;
@@ -152,6 +162,8 @@ async function myOwnRecord(ctx: ParentCtx, shape: Shape | null): Promise<{ conta
   const mine = shape.parentTypeId === null ? (sourceId === familyId ? family : undefined)
     : under.find((r) => r.qboId === sourceId && r.typeQboId === shape.parentTypeId);
   if (!mine) return null;
+  const signsInBy = shape.parentTypeId === null ? "every" : "first";
+  if (!fieldSignsIn(mine.email, ctx.email, signsInBy)) return null;
   return { contact: contact(mine, shape.parentTypeId === null ? "family" : "own"),
-    mine: shape.parentTypeId === null ? { row: mine, signsInBy: "every", typeQboIds: [shape.familyTypeId] } : { row: mine, signsInBy: "first", typeQboIds: [shape.parentTypeId] } };
+    mine: shape.parentTypeId === null ? { row: mine, signsInBy, typeQboIds: [shape.familyTypeId] } : { row: mine, signsInBy, typeQboIds: [shape.parentTypeId] } };
 }

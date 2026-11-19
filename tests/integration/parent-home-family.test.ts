@@ -451,7 +451,8 @@ describe("Home", () => {
     await seedShape();
     await addToCache([
       fam("H-FAM", `${IMG} Family`),
-      par("H-PAR", `Hana ${SCRIPT}`, "H-FAM", `hana@hostile.example"><b>bold</b>`, { phone: `555<svg onload=alert(3)>` }),
+      // The field still holds her address first, so the record is hers (fieldSignsIn()); the rest of it is markup.
+      par("H-PAR", `Hana ${SCRIPT}`, "H-FAM", `hana@hostile.example, "><b>bold</b>`, { phone: `555<svg onload=alert(3)>` }),
       stu("H-STU", `Hal ${IMG}`, "H-FAM"),
     ]);
     const p = await seedParentIn({ familyQboId: "H-FAM", name: `Hana ${SCRIPT}`, email: "hana@hostile.example", sourceQboId: "H-PAR" });

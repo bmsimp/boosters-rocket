@@ -20,7 +20,7 @@ import { runDueJobs } from "@/lib/jobs/runner";
 import { setSignins, setWelcome } from "@/lib/parents/switches";
 import { sendOwedWelcomes, resendWelcome, WELCOME_RETRY_MS } from "@/lib/parents/welcome";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
-import { seedParentSettings } from "../helpers/roster-cache";
+import { seedParentSettings, storeShape } from "../helpers/roster-cache";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { localhostCertificate } from "../helpers/tls";
 
@@ -227,6 +227,8 @@ describe("welcome emails", () => {
     // With it on, a family with no active student is skipped too, and its person stays owed.
     sink.messages.length = 0;
     await db.update(parent).set({ welcomeOwed: true, welcomedAt: null, welcomeTriedAt: null });
+    // In force only while the stored shape names students (studentsRuleInForce()).
+    await storeShape();
     await seedParentSettings({ requireActiveStudents: true });
     expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
     expect(sink.messages.map((m) => m.to[0]!)).toEqual([withStudent.email]);
@@ -242,6 +244,7 @@ describe("welcome emails", () => {
   });
 
   it("switching welcomes on, or sign-ins on with welcomes on, marks only people with a row that counts", async () => {
+    await storeShape(); // the students rule is in force only while the shape names students
     await seedParentSettings({ signin: false, everEnabled: true, requireActiveStudents: true });
     const counts = await person("Counts", { family: "50" });
     await db.insert(student).values({ familyId: counts.familyId, name: "Sam", active: true });

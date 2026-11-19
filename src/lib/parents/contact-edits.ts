@@ -14,7 +14,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { getRosterSource } from "@/lib/roster/source";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { asShown, fieldErrors, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
-import { parseEmailField } from "./emails";
+import { fieldSignsIn } from "./email-field";
 import { loadMyRecord, type MyContact, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { askForRosterRefresh } from "./refresh-ask";
@@ -84,9 +84,12 @@ type Mine = { record: MyRecord; email: string };
  * as QuickBooks has it now, whatever the cache still says: the one asked for, still active, still where the cache has
  * it (one moved to another family is not theirs to change), still of a customer type that makes it theirs (a parent's
  * record made a Family is another family to the portal), and its email field must still hold the address they
- * signed in with, by the rule that gave them the sign-in (their record's, my-family.ts): the first address on a parent's own
- * record, any address on a family's. When the club takes a parent's address off a record, nothing the record holds now
- * is shown to them, and they change none of it (their sign-in is the app's own, and stays).
+ * signed in with, by the rule that gave them the sign-in (fieldSignsIn(), ./email-field.ts, with the record's
+ * `signsInBy`): the first address on a parent's own record, any address on a family's. When the club takes a parent's
+ * address off a record, nothing QuickBooks' answer holds is shown to them and they change none of it; what the page
+ * shows otherwise is the roster cache's copy, which is theirs only while it holds their address by the same rule
+ * (myOwnRecord(), ./my-family.ts: once a roster read brings the change in, they have no record of their own here).
+ * Their sign-in is the app's own, and stays either way.
  */
 function formOf(customer: Record<string, unknown> | null, { record, email }: Mine): { ok: true; form: ContactForm } | Failed {
   if (!customer || customer.Id !== record.qboId) return failed("bad_answer");
@@ -95,8 +98,7 @@ function formOf(customer: Record<string, unknown> | null, { record, email }: Min
   if (under !== record.parentQboId) return failed("moved");
   if (!record.typeQboIds.includes(isRow(customer.CustomerTypeRef) ? str(customer.CustomerTypeRef.value) : "")) return failed("retyped");
   const field = isRow(customer.PrimaryEmailAddr) && typeof customer.PrimaryEmailAddr.Address === "string" ? customer.PrimaryEmailAddr.Address : null;
-  const addresses = parseEmailField(field).usable;
-  if (!(record.signsInBy === "every" ? addresses : addresses.slice(0, 1)).includes(email.trim().toLowerCase())) return failed("not_theirs");
+  if (!fieldSignsIn(field, email, record.signsInBy)) return failed("not_theirs");
   const version = customer.SyncToken;
   if (typeof version !== "string" || !/^\d{1,20}$/.test(version)) return failed("bad_answer");
   return { ok: true, form: { values: valuesOf(customer), version } };

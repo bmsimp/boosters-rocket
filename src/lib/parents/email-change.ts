@@ -22,8 +22,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { takeEmailIntoCache } from "@/lib/roster/cache-email";
-import { fieldHasChange, replaceAddressInField } from "./email-field";
-import { parseEmailField } from "./emails";
+import { fieldHasChange, fieldSignsIn, replaceAddressInField } from "./email-field";
 import { loadMyRecord, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { appRecordsAudit, noAppRecordChanges } from "@/lib/families/changes";
@@ -213,11 +212,15 @@ function liveOf(customer: Record<string, unknown> | null, record: MyRecord): Liv
  * nothing, or nothing to rely on (as for the phone and address). Every other failure means nothing was changed.
  */
 const mayHaveChanged = (code: string): boolean => code === "timeout" || code === "unreachable" || code === "bad_answer" || /^http_5\d\d(_|$)/.test(code);
-/** Postgres could not take a lock in time (lock_not_available). Drizzle wraps the driver's error, so its cause is read too. */
-const lockNotAvailable = (e: unknown): boolean => {
+/** The Postgres error code of a failure, if it has one. Drizzle wraps the driver's error, so its cause is read too. */
+const pgCode = (e: unknown): unknown => {
   const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
-  return code(e) === "55P03" || code((e as { cause?: unknown } | null)?.cause) === "55P03";
+  return code(e) ?? code((e as { cause?: unknown } | null)?.cause);
 };
+/** Postgres could not take a lock in time (lock_not_available). */
+const lockNotAvailable = (e: unknown): boolean => pgCode(e) === "55P03";
+/** Postgres ended the transaction to break a deadlock (40P01), or for a serialization failure (40001): worth one more try. */
+const worthAnotherTry = (e: unknown): boolean => pgCode(e) === "40P01" || pgCode(e) === "40001";
 class NotThisCompany extends Error {}
 
 /**
@@ -231,19 +234,28 @@ class NotThisCompany extends Error {}
  * email field is sent, with the version just read, so a change made in QuickBooks meanwhile is refused and nothing is
  * overwritten. A field that already reads as the change made (the answer to an earlier try was lost, and the parent
  * was told the portal can't tell) is taken as made and nothing is sent again: this try finishes the portal's side, so
- * the two are never left apart while the link lives, and a new link for the same address finishes it after that. One
- * address is one person: an address another person signs in with is refused before anything is sent.
+ * the two are never left apart while the link lives, and a new link for the same address finishes it after that, until
+ * a roster read brings the new address into the cache: from then the record's field no longer holds the address the
+ * person signs in with, so it is not theirs here (loadMyRecord()) and the parent is told to ask the club. One address is one
+ * person: an address another person signs in with is refused before anything is sent.
  *
- * Then the portal, only after QuickBooks has said yes, in one transaction. First the person, under both address locks
- * and the person's row (the order ./sessions.ts gives): their own address changes (`parent.email` and their sign-in
- * account's), their unused sign-in codes and other links go and their sessions end, so the old address signs in
- * nowhere from that moment. Then the roster cache takes QuickBooks' answer and the app's own records are brought into
- * step, holding the roster lock (waiting a few seconds at most), or, when the lock isn't free, the cache is left alone
- * and the worker is asked to read the roster at its next wake; the person's change stands either way. The change is
- * audited with the address before and after. Nothing here opens, moves or closes a guardian row: the person keeps the
- * families they had. Should another person have come to hold the new address since the check above (two links to one
- * address confirmed at once), the person keeps theirs, the audit row says QuickBooks holds the new one, and the parent
- * is told to ask the club: nothing is promised, and nobody is signed out.
+ * Then the portal, only after QuickBooks has said yes, in one transaction. First the person, in the order ./sessions.ts
+ * gives (lockedPerson()): both address locks, then the person's row, then the request is spent and their own address
+ * changes (`parent.email` and their sign-in account's), then their other links go, then their unused sign-in codes,
+ * then their sessions end, so the old address signs in nowhere from that moment. Only then, in a savepoint, the roster
+ * lock (waiting a few seconds at most): the roster cache takes QuickBooks' answer and the app's own records are brought
+ * into step, or, when the lock isn't free, the cache is left alone and the worker is asked to read the roster at its
+ * next wake; the person's change stands either way. The change is audited with the address before and after. Nothing
+ * here opens, moves or closes a guardian row: the person keeps the families they had. Should another person have come
+ * to hold the new address since the check above (two links to one address confirmed at once), the person keeps
+ * theirs, the audit row says QuickBooks holds the new one, and the parent is told to ask the club: nothing is promised,
+ * and nobody is signed out; a second press of the same link after that is told the same.
+ *
+ * Should that transaction fail once QuickBooks has the address (Postgres ending it for a deadlock or a serialization
+ * failure is tried once more), a small transaction of its own records it (`parent.email.save` with its short code:
+ * QuickBooks holds the new address, the app is unchanged) and asks the worker for a roster refresh, and the parent is
+ * told the portal can't tell yet, as after a lost answer: the request is still live, so opening the link again finds
+ * the change made in QuickBooks, sends nothing, and finishes the app's side.
  *
  * A token is spent when the change is made, or when it can never succeed. After a failure that changed nothing
  * (QuickBooks out of reach or busy, the record changed meanwhile, an answer the portal can't tell about) it works
@@ -306,8 +318,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   if (fieldHasChange(live.field, oldEmail, newEmail, firstOnly)) {
     answer = { field: live.field, version: live.version, updatedAt: null }; // an earlier try made it: nothing is sent
   } else {
-    const signsIn = parseEmailField(live.field).usable;
-    if (!(firstOnly ? signsIn.slice(0, 1) : signsIn).includes(oldEmail)) {
+    if (!fieldSignsIn(live.field, oldEmail, record.signsInBy)) {
       // The club took the address off the record, or put another before it: the sign-in it gave is ending.
       await spend(row.id);
       return refuse("not_in_field", [EMAIL_COPY.booksChanged], record.qboId);
@@ -341,15 +352,16 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
       ? { field: back.field, version: back.version, updatedAt: Number.isNaN(stamped) ? null : new Date(stamped) } : null;
   }
 
-  // QuickBooks has the change. From here the request is spent, whatever happens to the portal's copy.
+  // QuickBooks has the change. From here the request is spent with the person's change, whatever happens to the roster
+  // cache; only when the person's change itself can't be made does it stay live (below), so the link can finish it.
   const audit = (tx: Tx, after: Record<string, unknown>) => writeAudit({ actor, action: "parent.email.save", targetType: "qbo_customer", targetId: record.qboId,
     before: { email: oldEmail, field: live.field }, after: { email: newEmail, familyId: String(ctx.familyId), ...after }, ip: ctx.ip }, tx);
   const lockWait = Math.max(1, Math.floor(o.lockWaitMs ?? LOCK_WAIT_MS));
-  const outcome = await db.transaction(async (tx): Promise<"changed" | "taken" | null> => {
-    // The person first, under the locks every change of a sign-in address takes, in the order ./sessions.ts gives: both
-    // addresses, then the person's row, and only then their links, codes and sessions. An ask and a block take the row
-    // before the links too, so neither can wait on this one while it waits on them. The roster comes last: nothing
-    // that holds the roster lock waits for a person's row.
+  const finish = () => db.transaction(async (tx): Promise<"changed" | "taken" | null> => {
+    // The person first, in the order ./sessions.ts gives (lockedPerson()): both addresses, then the person's row, then
+    // what hangs on the person, their email change requests, sign-in codes and sessions, in that order. An ask, a
+    // block, the switches and the daily clean-up take the same rows in the same order, so none of them can wait on this
+    // one while it waits on them. The roster comes last: nothing that holds the roster lock waits for a person's row.
     for (const address of [oldEmail, newEmail].sort()) await lockEmail(tx, address);
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
     // A change this call found made, on a request already spent, was finished by the confirmation that spent it: a second
@@ -363,9 +375,9 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     if (!taken) {
       await tx.update(parent).set({ email: newEmail, updatedAt: new Date() }).where(eq(parent.id, ctx.parentId));
       await tx.update(parentAuthUser).set({ email: newEmail, updatedAt: new Date() }).where(eq(parentAuthUser.parentId, ctx.parentId));
-      // A code sent to the old address must not work, nor another link asked for before this one.
-      await deleteUnusedSigninCodes(ctx.parentId, tx);
+      // Another link asked for before this one must not work, nor a code sent to the old address.
       await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
+      await deleteUnusedSigninCodes(ctx.parentId, tx);
       // Every session was proved with the old address: the person signs in again, with the new one.
       sessionsEnded = await endParentSessions(ctx.parentId, tx);
     }
@@ -397,14 +409,32 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     return taken ? "taken" : "changed";
   });
 
+  let outcome: "changed" | "taken" | null;
+  try {
+    outcome = await finish().catch((e: unknown) => { if (worthAnotherTry(e)) return finish(); throw e; });
+  } catch (e) {
+    // QuickBooks holds the new address and the app could not take it: recorded on its own, the refresh asked for, and
+    // the parent told the portal can't tell yet. The request was not spent, so the link finishes the app's side.
+    const failed = typeof pgCode(e) === "string" ? `app_failed_${String(pgCode(e)).slice(0, 8)}` : "app_failed";
+    await db.transaction(async (tx) => {
+      await askForRosterRefresh(tx);
+      await audit(tx, { field: answer?.field ?? null, portal: "refresh_asked", code: failed, app: "unchanged", quickbooks: "holds_new_address" });
+    });
+    return { ok: false, errors: [EMAIL_COPY.unsure] };
+  }
+
   // The new address can never be the person's here, so nothing is promised and nobody was signed out: the words are
   // the ones for a change the parent asks the club for, which say nothing of why.
   if (outcome === "taken") return { ok: false, errors: [EMAIL_COPY.askTheClub] };
+  // A second press, on a request another confirmation spent: told as that one was. When it changed the person's
+  // address it ended their sessions; when it didn't (the address was taken), nothing is promised and nobody was signed
+  // out, so this press is told to ask the club too.
+  if (outcome === null && (await db.select({ email: parent.email }).from(parent).where(eq(parent.id, ctx.parentId)))[0]?.email !== newEmail) {
+    return { ok: false, errors: [EMAIL_COPY.askTheClub] };
+  }
   // What the parent is told depends on the outcome alone: the new address can sign in to this family now, or not yet.
-  // The family the request was asked in, which liveRequest() matched to the session's own (ctx.familyId). A second press
-  // that found the change finished by the first is told as the first was.
-  const made = outcome === "changed" || ((await db.select({ email: parent.email }).from(parent).where(eq(parent.id, ctx.parentId)))[0]?.email === newEmail);
-  const inFamily = made && (await enterableGuardianRows(ctx.parentId)).some((r) => r.familyId === row.familyId);
+  // The family the request was asked in, which liveRequest() matched to the session's own (ctx.familyId).
+  const inFamily = (await enterableGuardianRows(ctx.parentId)).some((r) => r.familyId === row.familyId);
   return { ok: true, message: inFamily ? EMAIL_COPY.done(newEmail) : EMAIL_COPY.finishing, signedOut: true };
 }
 

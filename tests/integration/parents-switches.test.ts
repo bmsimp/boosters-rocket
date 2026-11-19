@@ -8,6 +8,7 @@ import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { resetDb, seedGuardian, seedGuardianInFamily, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { storeShape } from "../helpers/roster-cache";
 import { saveShape } from "@/lib/roster/shape";
+import { studentsRuleInForce } from "@/lib/parents/sessions";
 
 const admin = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: "203.0.113.9", permission: "Settings.Parents.ReadWrite" };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
@@ -156,8 +157,8 @@ describe("the parent switches", () => {
   });
 
   // With no student type the app holds no active student, so the setting would keep every parent out: it is never
-  // switched on then, and a shape saved without one switches it off.
-  it("the active-students setting is refused while the shape names no students, and a shape saved without them switches it off", async () => {
+  // switched on then, and a shape saved without one leaves it stored but not in force (studentsRuleInForce()).
+  it("the active-students setting is refused while the shape names no students, and a shape saved without them leaves it stored but not in force", async () => {
     await seedWorkingMail(); await seedAna(); await setSignins(true, admin);
     for (const shape of [null, { kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }]) {
       if (shape) await storeShape(shape);
@@ -169,14 +170,23 @@ describe("the parent switches", () => {
     expect(await setRequireStudents(false, admin)).toEqual({ ok: true });
     await storeShape();
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
-    // A shape with students keeps it; one without switches it off, on both audit rows.
+    expect(await studentsRuleInForce()).toBe(true);
+    // A shape save never touches the parents' settings: one with students keeps the rule in force; one without leaves
+    // the stored value as it is, not in force; one with students again puts it back in force, with nothing switched.
+    // (Who it then lets in is tests/integration/parent-door.test.ts: a shape save here, with no roster company, also
+    // takes Ana's row out of its family record, as keepAppRecordsInStep() does with no company.)
+    const saved = (await audits("settings.parents.save")).length;
     await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S2", parentTypeId: "P" }, { actor: admin.actor, ip: null });
-    expect((await getParentSettings()).requireActiveStudents).toBe(true);
-    await saveShape({ kind: "flat", memberTypeIds: ["M"] }, { actor: admin.actor, ip: null });
-    expect(await getParentSettings()).toMatchObject({ signin: true, requireActiveStudents: false });
-    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ requireActiveStudents: false, cause: "settings.membership.save" });
-    expect((await audits("settings.membership.save")).at(-1)!.after).toMatchObject({ requireActiveStudentsSwitchedOff: true });
-    expect((await audits("settings.membership.save")).at(-2)!.after).not.toHaveProperty("requireActiveStudentsSwitchedOff");
+    expect(await studentsRuleInForce()).toBe(true);
+    for (const shape of [{ kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }]) {
+      await saveShape(shape, { actor: admin.actor, ip: null });
+      expect(await getParentSettings()).toMatchObject({ signin: true, requireActiveStudents: true });
+      expect(await studentsRuleInForce()).toBe(false);
+    }
+    await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: "P" }, { actor: admin.actor, ip: null });
+    expect(await studentsRuleInForce()).toBe(true);
+    expect(await audits("settings.parents.save")).toHaveLength(saved);
+    expect((await audits("settings.membership.save")).map((r) => r.after)).not.toContainEqual(expect.objectContaining({ requireActiveStudentsSwitchedOff: expect.anything() }));
   });
 
   it("counts the people who can sign in now by the gate's rule: never blocked, never of an inactive family", async () => {

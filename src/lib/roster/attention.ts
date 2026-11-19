@@ -7,7 +7,7 @@ import type { AppFamilyId } from "@/lib/families/ids";
  * record's customer through its family link in the roster's company (`customerQboId`; null when it has none).
  */
 export type SignIn = { guardianId: string; familyId: AppFamilyId | null; customerQboId: string | null; name: string; email: string; status: "invited" | "active" | "disabled" };
-export type AttentionRule = "family_no_parent" | "family_no_student" | "not_under_family" | "family_is_sub" | "no_email" | "same_email" | "signin_unknown" | "inactive_with_signin";
+export type AttentionRule = "family_no_parent" | "family_no_student" | "not_under_family" | "family_is_sub" | "no_email" | "same_email" | "signin_unknown";
 export type AttentionItem = { rule: AttentionRule; qboId: string | null; name: string; detail: string };
 
 const item = (rule: AttentionRule, c: Cust, detail: string): AttentionItem => ({ rule, qboId: c.qboId, name: c.displayName, detail });
@@ -20,9 +20,11 @@ function sameEmail(people: Cust[], detail: string): AttentionItem[] {
 
 /**
  * The club's clean-up list (spec §5 Needs attention). Pure; it changes nothing. Inactive customers are left out of the
- * QuickBooks clean-up rules; the two sign-in rules look at every customer, and only at sign-ins that are not closed.
+ * QuickBooks clean-up rules; the sign-in rule looks at every customer, and only at sign-ins that are not closed.
  * A sign-in is held to the customer its membership's family record is linked to; one whose family record has no
- * customer is the app's own family's, not a thing to tidy in QuickBooks, and is left to the portal.
+ * customer is the app's own family's, not a thing to tidy in QuickBooks, and is left to the portal. An inactive
+ * family's open sign-ins ask nothing of staff: nobody can enter an inactive family (the gate, src/lib/parents/sessions.ts),
+ * and nothing in QuickBooks or the portal would clear them from the list.
  */
 export function needsAttention(roster: Roster, shape: MembershipShape, signIns: SignIn[]): AttentionItem[] {
   const out: AttentionItem[] = [];
@@ -47,16 +49,11 @@ export function needsAttention(roster: Roster, shape: MembershipShape, signIns: 
   }
   for (const s of signIns) {
     if (s.familyId !== null && s.customerQboId === null) continue;
-    const customer = s.customerQboId === null ? undefined : known.get(s.customerQboId);
-    if (!customer) {
-      // A closed sign-in can't be used, and nothing in QuickBooks would clear it from the list: leave it out.
-      if (s.status === "disabled") continue;
-      out.push({ rule: "signin_unknown", qboId: null, name: s.name, detail: s.customerQboId === null
-        ? "This portal sign-in isn't attached to any family the portal keeps."
-        : `This portal sign-in is attached to QuickBooks ID ${s.customerQboId}, which isn't a ${roster.kind === "flat" ? "member" : "family"} in QuickBooks.` });
-    } else if (!customer.active && s.status !== "disabled" && !out.some((o) => o.rule === "inactive_with_signin" && o.qboId === customer.qboId)) {
-      out.push(item("inactive_with_signin", customer, "This is inactive in QuickBooks. Its guardians' sign-ins are still open in the portal, but nobody can sign in to it while it is inactive."));
-    }
+    // A closed sign-in can't be used, and nothing in QuickBooks would clear it from the list: leave it out.
+    if (s.status === "disabled" || (s.customerQboId !== null && known.has(s.customerQboId))) continue;
+    out.push({ rule: "signin_unknown", qboId: null, name: s.name, detail: s.customerQboId === null
+      ? "This portal sign-in isn't attached to any family the portal keeps."
+      : `This portal sign-in is attached to QuickBooks ID ${s.customerQboId}, which isn't a ${roster.kind === "flat" ? "member" : "family"} in QuickBooks.` });
   }
   return out;
 }

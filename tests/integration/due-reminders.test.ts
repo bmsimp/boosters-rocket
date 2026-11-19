@@ -20,6 +20,8 @@ import { resetDb, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { ageMoney } from "../helpers/money";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { TRIP_DEPOSIT_ITEM } from "../helpers/season";
+import { P_SHAPE } from "../helpers/roster-cache";
+import { SHAPE_KEY } from "@/lib/roster/shape";
 import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 
 /**
@@ -191,7 +193,7 @@ describe("the reminders before a due date", () => {
     expect(await sendDueReminders(at("2027-03-09T18:59:00Z"))).toEqual({ sent: 0, failed: 0 });
   });
 
-  it("goes to the family's guardians with an open link who aren't blocked", async () => {
+  it("goes to the family's guardians whose row counts at the gate and who aren't blocked", async () => {
     const { a, b } = await season();
     await db.update(parent).set({ blocked: true }).where(eq(parent.id, a.identity.parentId));
     await db.update(guardian).set({ status: "disabled" }).where(eq(guardian.id, b.identity.guardianId));
@@ -211,6 +213,20 @@ describe("the reminders before a due date", () => {
     expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 1, failed: 0 });
     expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
     expect((await db.select({ status: guardian.status }).from(guardian)).every((g) => g.status !== "disabled")).toBe(true);
+    // Stored on beside a shape that names no students (as one saved before stage 3's slice 7a may be), it is not in
+    // force (studentsRuleInForce()): B is reminded as with it off. The shape is stored alone, bringing nothing into step.
+    const shape = (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, SHAPE_KEY)))[0]!.value;
+    for (const stale of [{ kind: "flat", memberTypeIds: ["F"] }, { ...P_SHAPE, studentTypeId: null }]) {
+      await db.delete(requirementReminder); mail.outbox.length = 0;
+      await db.update(setting).set({ value: stale }).where(eq(setting.key, SHAPE_KEY));
+      await sendDueReminders(at(WAKE));
+      expect(mail.outbox.map((m) => m.to)).toContain(FAMILY_B.parent.email);
+    }
+    // A shape with students again: the rule is in force again, and B is not reminded.
+    await db.delete(requirementReminder); mail.outbox.length = 0;
+    await db.update(setting).set({ value: shape }).where(eq(setting.key, SHAPE_KEY));
+    expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 1, failed: 0 });
+    expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
   });
 
   it("claims each email before sending it, so two wakes at once send it once, and tries a failed one again after 15 minutes", async () => {

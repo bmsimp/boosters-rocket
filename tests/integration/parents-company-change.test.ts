@@ -129,7 +129,7 @@ describe("connecting a different QuickBooks company", () => {
     expect(await familySignins(await recordOfCustomer("20", "family"))).toEqual([]); // a record the old links never name
     const page = await loadRosterPage();
     expect(page.roster).not.toBeNull();
-    expect(page.attention.filter((a) => a.rule === "signin_unknown" || a.rule === "inactive_with_signin")).toEqual([]);
+    expect(page.attention.filter((a) => a.rule === "signin_unknown")).toEqual([]);
     expect(JSON.stringify(page)).not.toContain("Ana Rivera");
     expect(JSON.stringify(page)).not.toContain("Mei Chen");
     expect((await rosterEntry(await recordOfCustomer("12", "family")))!.signIns).toEqual([]);

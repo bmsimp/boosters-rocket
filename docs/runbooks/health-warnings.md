@@ -165,8 +165,8 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 ## Parent sign-ins
 
 - **"Off"** / **"Not switched on yet."** No parent can sign in. It is a choice: **Settings**, **Parent sign-ins**
-  switches them on (once QuickBooks and mail work). Reconnecting the same QuickBooks company leaves them as they are; a
-  different company can't be connected until the mapping screen ships.
+  switches them on (once outgoing mail works: QuickBooks plays no part in who can sign in). Reconnecting the same
+  QuickBooks company leaves them as they are; a different company can't be connected until the mapping screen ships.
 - **"Needs attention"**, with "The latest sign-ins have no address: the proxy in front of the portal doesn't send the
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.

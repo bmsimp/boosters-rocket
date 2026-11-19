@@ -6,7 +6,6 @@ import { writeAudit } from "@/lib/audit/log";
 import type { QboOp } from "@/lib/quickbooks/connection";
 import { keepAppRecordsInStep } from "@/lib/families/in-step";
 import { appRecordsAudit } from "@/lib/families/changes";
-import { getParentSettings, putParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
 
 export const SHAPE_KEY = "membership.shape";
 /** Postgres advisory lock held for the length of a refresh and of a shape save, so neither overlaps the other (spec §2 Refreshing). */
@@ -40,7 +39,8 @@ export function shapeTypeIds(s: MembershipShape | null): string[] {
 /**
  * Whether a shape lets a family have students: a layered one that names a student type. Only then does the app hold
  * active student records (src/lib/families/plan.ts makes them from that type alone), so only then can the Admin's
- * "Families with no active student" mean anything other than "nobody signs in" (src/lib/parents/switches.ts).
+ * "Families with no active student" mean anything other than "nobody signs in": the rule is in force only then
+ * (studentsRuleInForce(), src/lib/parents/sessions.ts), and is switched on only then (src/lib/parents/switches.ts).
  */
 export const shapeNamesStudents = (s: MembershipShape | null): boolean => s?.kind === "layered" && s.studentTypeId !== null;
 
@@ -102,8 +102,9 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
 /**
  * Saves the shape and, in the same transaction, drops email and phone from every customer the new shape doesn't name
  * (spec §1 Rules), forgets what each family was last seen to owe (`family_money`) and brings the app's own records in
- * line with the new shape (keepAppRecordsInStep()); a shape with no students also switches "Families with no active
- * student" off (shapeNamesStudents()). It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
+ * line with the new shape (keepAppRecordsInStep()). It leaves the parents' settings alone: "Families with no active
+ * student" is simply not in force while the shape names no students (studentsRuleInForce(), src/lib/parents/sessions.ts).
+ * It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
  * a refresh afterward to bring the rest of the cache up to date. A shape `getShape` wouldn't read back is refused (it
  * throws): saved, it would show as "no shape" while its audit row said otherwise.
  */
@@ -123,23 +124,7 @@ export async function saveShape(input: MembershipShape, o: QboOp): Promise<void>
     // It also decides who in the cache is a family or a student: the app's own records follow it here, not only at the
     // refresh the caller starts next, which may not run.
     const appRecords = await keepAppRecordsInStep(tx);
-    // A shape with no students leaves every family without an active student record, so "Families with no active
-    // student", left on, would keep every parent out. It goes off with the shape, said on both audit rows. The
-    // parents' settings lock comes after the roster's here; nothing takes them the other way round.
-    let studentsRuleOff = false;
-    if (!shapeNamesStudents(shape)) {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
-      const parents = await getParentSettings(tx);
-      if (parents.requireActiveStudents) {
-        const next = { ...parents, requireActiveStudents: false };
-        await putParentSettings(tx, next);
-        await writeAudit({ actor: o.actor, action: "settings.parents.save", permission: o.permission, targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
-          before: parents, after: { ...next, cause: "settings.membership.save" } }, tx);
-        studentsRuleOff = true;
-      }
-    }
     await writeAudit({ actor: o.actor, action: "settings.membership.save", permission: o.permission, targetType: "setting", targetId: SHAPE_KEY, ip: o.ip,
-      before: before ? { shape: before, words: describeShape(before, types) } : null,
-      after: { shape, words: describeShape(shape, types), ...(studentsRuleOff ? { requireActiveStudentsSwitchedOff: true } : {}), ...appRecordsAudit(appRecords) } }, tx);
+      before: before ? { shape: before, words: describeShape(before, types) } : null, after: { shape, words: describeShape(shape, types), ...appRecordsAudit(appRecords) } }, tx);
   });
 }

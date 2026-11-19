@@ -14,7 +14,7 @@ import { formReminderMessage } from "@/lib/mail/messages";
 import { currentBrand, sendMail } from "@/lib/mail/send";
 import { getStoredMailConfig } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
-import { guardianRowCounts } from "@/lib/parents/sessions";
+import { guardianRowCounts, studentsRuleInForce } from "@/lib/parents/sessions";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
 // The season and the requests both name the app's own families and students (stage 2 of the app-owned families spec):
 // the families are the app's active ones, read once, by loadSeasonFamilies(), and guardians are a family's by their
@@ -44,7 +44,8 @@ type Owed = { requirementId: string; parentId: string; names: string[]; requestI
 /**
  * Who is owed a reminder now, for the current season's forms with a template: for each family or student a form is
  * asked of and that hasn't signed it or had it waived, the guardians who still have to sign (whoStillHasToSign), out
- * of those with an open link to that family who aren't blocked. Narrowed to one form, one family or one request.
+ * of those whose row in that family counts at the gate (guardianRowCounts()) and who aren't blocked. Narrowed to one
+ * form, one family or one request.
  */
 async function owedReminders(scope: ReminderScope | null, requirementIds: string[] | null): Promise<{ owed: Owed[]; forms: { id: string; title: string; dueOn: string | null }[] } | null> {
   const s = await currentSeason();
@@ -70,9 +71,9 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
   const inScope = families.filter((f) => (scope?.kind === "family" ? String(f.id) === scope.familyId : requestFilter ? String(f.id) === String(requestFilter.familyId) : true));
   const familyIds = inScope.map((f) => f.id);
   // Only guardians the gate would let in: a reminder asks them to sign in and sign.
-  const { requireActiveStudents } = await getParentSettings();
+  const studentsRule = await studentsRuleInForce();
   const links = familyIds.length === 0 ? [] : await db.select({ familyId: guardian.familyId, parentId: guardian.parentId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyId, familyIds), guardianRowCounts(requireActiveStudents), eq(parent.blocked, false)));
+    .where(and(inArray(guardian.familyId, familyIds), guardianRowCounts(studentsRule), eq(parent.blocked, false)));
   const waived = new Set(waivers.map((w) => `${w.requirementId}|${String(w.subjectId)}`));
   const owed = new Map<string, Owed>();
   for (const f of forms) {
