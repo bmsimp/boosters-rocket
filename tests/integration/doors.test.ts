@@ -10,6 +10,7 @@ import { can, effectivePermissions } from "@/lib/permissions/effective";
 import { ADMIN_ONLY, type Permission } from "@/lib/permissions/registry";
 import { resetDb, seedStaff } from "../helpers/db";
 import { moneyMarkers, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { mintLink, unknownToken } from "../helpers/signin-links";
 
 /**
  * Three of the v1 spec's privacy invariants (§12), checked for everything on disk rather than page by page:
@@ -124,7 +125,7 @@ describe("invariant 4: the public pages show no family data", () => {
   let a: SeededParent, b: SeededParent;
   beforeAll(async () => { await resetDb(); ({ a, b } = await seedTwoFamilies()); });
 
-  /** Every public page there is: the two sign-in doors, the refusal, the not-found page and the error pages. */
+  /** Every public page there is: the two sign-in doors, the refusal, the not-found page and the error pages (the set-up and reset links' pages, which need a link, below). */
   const PUBLIC: { file: string; props?: object }[] = [
     { file: "src/app/sign-in/page.tsx" },
     // With a return address that names one family's form: the page still says nothing about it.
@@ -140,6 +141,20 @@ describe("invariant 4: the public pages show no family data", () => {
     if (!("html" in outcome)) expect.fail(`${file} did not render for a visitor with no session: ${JSON.stringify(outcome)}`);
     const text = outcome.html.toLowerCase();
     expect(markers().filter((m) => text.includes(m.toLowerCase()))).toEqual([]);
+  });
+
+  // The set-up and reset pages (slice SI-2) are public too: with a token that names no link (the refusal), and with a
+  // live link of family A's own parent (the form), they show none of either family's data, A's included.
+  it.each([["set-up", "setup"], ["reset", "reset"]] as const)("the %s link's page shows a visitor with no session none of either family's data", async (folder, purpose) => {
+    const Page = await load(`src/app/sign-in/${folder}/[token]/page.tsx`);
+    const live = await mintLink(a.identity.parentId, purpose);
+    for (const [token, form] of [[unknownToken(), false], [live, true]] as const) {
+      const outcome = await pageOutcome(Page, { params: { token } });
+      if (!("html" in outcome)) expect.fail(`${folder} did not render for a visitor with no session: ${JSON.stringify(outcome)}`);
+      expect(outcome.html.includes('type="password"'), `${folder}: the form is shown only for a live link`).toBe(form);
+      const text = outcome.html.toLowerCase();
+      expect(markers().filter((m) => text.includes(m.toLowerCase()))).toEqual([]);
+    }
   });
 
   it("the family chooser sends a visitor with no session to sign in, showing nothing", async () => {
