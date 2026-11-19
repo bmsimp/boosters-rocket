@@ -4,14 +4,14 @@
 // answers nothing while QuickBooks is connected to another company), found again on each load, and the customers whose
 // invoices may show are that customer and its active direct sub-customers of the student or parent type in the roster
 // cache. A family with no active record, or with no link, has no figures: nothing is read from QuickBooks for it and
-// nothing is written. The stored figures are kept by the app's own family (family_money.family_id). This module is in the staff-only import scan
+// nothing is written; an active family the portal can tell has no link is told so (`notConnected`). The stored figures are kept by the app's own family (family_money.family_id). This module is in the staff-only import scan
 // (tests/integration/page-guards.test.ts).
 import { eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, qboConnection, qboCustomer, qboCustomerType, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { customerOfFamily } from "@/lib/families/links";
+import { customerOfFamily, familyLinkState } from "@/lib/families/links";
 import { activeFamilyOf } from "@/lib/families/session-family";
 import { isQboId, qboCustomerById, qboInvoices, type QboGetOptions } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
@@ -62,9 +62,13 @@ export type MoneyFigures = {
 };
 /**
  * `figures` is null when there is nothing to show: no successful read yet for this family in the connected company.
+ * `notConnected` is true only for an active family the portal can tell has no link to a customer (familyLinkState()
+ * says `none`): the page says the club hasn't connected the family's payments yet, and `figures` is null. Every other
+ * case with no figures (QuickBooks connected to another company, a shape that doesn't hold, a family the cache no
+ * longer holds as one, a failed read with nothing stored) leaves it false, and the page says what it always has.
  * `today` is the club's own date (YYYY-MM-DD, clubToday()): the day each due date is said against ("in 8 days", "Was due").
  */
-export type FamilyMoney = { familyName: string | null; figures: MoneyFigures | null; today: string };
+export type FamilyMoney = { familyName: string | null; figures: MoneyFigures | null; notConnected: boolean; today: string };
 
 /**
  * Whether QuickBooks' BalanceWithJobs for the family customer adds up the same customers as the family's total. It
@@ -302,7 +306,7 @@ function readOnce(familyId: AppFamilyId, timeoutMs: number): Promise<boolean> {
  * stored there is nothing to show. Figures from another QuickBooks company are never shown, nor figures that hold an
  * invoice of a customer who is no longer this family's (mayShow), and nothing is shown for a family whose customer the
  * roster cache does not hold as an active family, nor for one with no active record or no link to a customer (nothing
- * is read or written for it either).
+ * is read or written for it either). Of those, only an active family the portal can tell has no link is `notConnected`.
  */
 export async function loadFamilyMoney(familyId: AppFamilyId, o: { timeoutMs?: number } = {}): Promise<FamilyMoney> {
   const shown = await figuresToShow(familyId, o);
@@ -325,21 +329,27 @@ async function figuresToShow(familyId: AppFamilyId, o: { timeoutMs?: number }): 
   // The family's customer is found through its own link on each load, never carried from one to the next; the
   // customers whose invoices may show are those of that customer (mayShow checks every stored invoice against them).
   // A family with no active record has no figures to show (its name is still the cache's, as before); one with no link
-  // has neither.
+  // has neither. An active family the portal can tell has no link (familyLinkState(): `none`, told from `unknown` by the
+  // roster's company and the connection, never by the lookup's silence alone) is `notConnected`, decided before the
+  // shape is asked about: with no link there are no invoices of its own whatever the shape. Nothing is read from
+  // QuickBooks and nothing is written for it.
   const load = async () => {
-    const [active, familyQboId, holds] = await Promise.all([activeFamilyOf(familyId), customerOfFamily(familyId), shapeHolds()]);
-    if (familyQboId === null || !holds) return { shows: false, row: undefined, source: null, family: null, familyName: null };
-    const [source, family] = await Promise.all([getRosterSource(), familyCustomers(familyQboId)]);
+    const [active, link, holds] = await Promise.all([activeFamilyOf(familyId), familyLinkState(familyId), shapeHolds()]);
+    if (link.state !== "linked") return { shows: false, notConnected: active !== null && link.state === "none", row: undefined, source: null, family: null, familyName: null };
+    if (!holds) return { shows: false, notConnected: false, row: undefined, source: null, family: null, familyName: null };
+    const [source, family] = await Promise.all([getRosterSource(), familyCustomers(link.customerId)]);
     const row = active === null ? undefined : await storedRow(familyId);
-    return { shows: active !== null, row, source, family, familyName: family?.familyName ?? null };
+    return { shows: active !== null, notConnected: false, row, source, family, familyName: family?.familyName ?? null };
   };
   const [stored, settings] = await Promise.all([load(), getMoneySettings()]);
-  if (!stored.shows) return { familyName: stored.familyName, figures: null };
-  if (isFresh(stored.row, stored.source, stored.family, settings.freshSeconds)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, true) };
-  if (failedJustNow(stored.row)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, false) };
+  const answer = (from: { familyName: string | null; notConnected: boolean }, figures: MoneyFigures | null) =>
+    ({ familyName: from.familyName, figures, notConnected: from.notConnected });
+  if (!stored.shows) return answer(stored, null);
+  if (isFresh(stored.row, stored.source, stored.family, settings.freshSeconds)) return answer(stored, figuresOf(stored.row, stored.source, stored.family, true));
+  if (failedJustNow(stored.row)) return answer(stored, figuresOf(stored.row, stored.source, stored.family, false));
   const current = await readOnce(familyId, o.timeoutMs ?? CALL_TIMEOUT_MS);
   // Everything is read again: the roster cache may have been replaced while QuickBooks was answering.
   const after = await load();
-  if (!after.shows) return { familyName: after.familyName, figures: null };
-  return { familyName: after.familyName, figures: figuresOf(after.row, after.source, after.family, current) };
+  if (!after.shows) return answer(after, null);
+  return answer(after, figuresOf(after.row, after.source, after.family, current));
 }

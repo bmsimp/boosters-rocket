@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, familyMoney, qboConnection, qboCustomer, setting, type StoredInvoice } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, familyMoney, qboConnection, qboCustomer, setting, type StoredInvoice } from "@/lib/db/schema";
 import { setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
 import PaymentsPage from "@/app/(parent)/payments/page";
@@ -35,6 +35,7 @@ const NOT_CURRENT = "We couldn&#x27;t get the latest figures from QuickBooks jus
 const NOTHING = "We can&#x27;t show what you owe right now. Please check back in a little while.";
 const NOT_SET_UP = "Your family isn&#x27;t set up here yet";
 const PAID_UP = "You&#x27;re all paid up. Thank you!";
+const NOT_CONNECTED = "The club hasn&#x27;t connected your payments to the portal yet. Until then, the treasurer can tell you what you owe.";
 const CREDIT = "The boosters may be holding a credit for you. The treasurer can tell you how it will be applied.";
 /** Every Pay button on the page, as its opening tag. */
 const pays = (html: string) => [...html.matchAll(/<a\b[^>]*class="btn[^"]*\bpay"[^>]*>/g)].map((m) => m[0]);
@@ -163,6 +164,7 @@ describe("the Payments page", () => {
     expect(pay).toContain('aria-label="Pay $85.00, paused until the figures are up to date"');
     expect(html).not.toContain("connect.intuit.com");
     expect(text(html)).not.toMatch(/invalid_grant|needs_admin|not_connected|Admin|disconnected/);
+    expect(html).not.toContain(NOT_CONNECTED);
   });
 
   it("QuickBooks down, with nothing stored: a calm line, no figures, and no reason given", async () => {
@@ -178,6 +180,7 @@ describe("the Payments page", () => {
     expect(pays(html)).toEqual([]);
     expect(html).not.toContain("offline-note");
     expect(text(html)).not.toMatch(/error|failed|500|QuickBooks is|disconnected/i);
+    expect(html).not.toContain(NOT_CONNECTED);
   });
 
   it("all paid: nothing owed, a thank-you, and no Pay button", async () => {
@@ -200,6 +203,8 @@ describe("the Payments page", () => {
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(PAID_UP);
     expect(html).toContain("No paid invoices from the last 12 months.");
+    // A linked family that owes nothing reads its own words, never the unlinked family's.
+    expect(html).not.toContain(NOT_CONNECTED);
   });
 
   it("the credit line: QuickBooks' balance is lower than the invoices add up to, and the figure stays the sum", async () => {
@@ -235,6 +240,7 @@ describe("the Payments page", () => {
     asParent(r.identity);
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(NOTHING);
+    expect(html).not.toContain(NOT_CONNECTED);
     expect(html).not.toMatch(/INV-OTHER-COMPANY|\$42\.42|other-company/);
     expect(stub.calls).toHaveLength(0);
     // The same row, named as the roster's company, is shown: it was the company that refused it, not a missing link.
@@ -274,6 +280,7 @@ describe("the Payments page", () => {
     const asked = stub.calls.length;
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(NOTHING);
+    expect(html).not.toContain(NOT_CONNECTED);
     expect(html).not.toMatch(NO_FIGURES);
     expect(stub.calls).toHaveLength(asked);
     // And the same when the shape names a customer type QuickBooks no longer has: whose invoices are whose can't be told.
@@ -281,6 +288,7 @@ describe("the Payments page", () => {
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" });
     const broken = await renderPage(PaymentsPage);
     expect(broken).toContain(NOTHING);
+    expect(broken).not.toContain(NOT_CONNECTED);
     expect(broken).not.toMatch(NO_FIGURES);
     expect(stub.calls).toHaveLength(asked);
   });
@@ -312,6 +320,63 @@ describe("the Payments page", () => {
     expect(html).not.toContain('class="sum"');
     expect(html).toContain('<span class="amount num">CA$85.00</span>');
     expect(html).toContain('<span class="amount num">$85.00</span>');
+  });
+});
+
+describe("a family with no link to the club's books", () => {
+  /** The Riverquill family signed in, its record active, its family link deleted by hand (nothing brings it into step after). */
+  async function unlinkedRiverquills(): Promise<SeededParent> {
+    const r = await riverquills();
+    stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" }), inv("2", FAMILY, { Balance: 0, TxnDate: new Date().toISOString().slice(0, 10) })];
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, r.identity.familyId));
+    return r;
+  }
+  /** Anything of money: an amount, an invoice, a Pay button, the paid list or the not-current note. */
+  const ANY_MONEY = /INV-|\$\d|connect\.intuit\.com|Paid in the last 12 months|offline-note|class="btn[^"]*\bpay"/;
+  const BOX = `<section class="box money" aria-labelledby="money-h"><h2 id="money-h">What you owe</h2><p class="help" role="status">${NOT_CONNECTED}</p></section>`;
+  /** The money box alone, from its opening tag to its own end (it holds no section of its own). */
+  const moneyBox = (html: string) => {
+    const start = html.indexOf('<section class="box money"');
+    return start < 0 ? null : html.slice(start, html.indexOf("</section>", start) + "</section>".length);
+  };
+
+  it("Payments: the words in the money box, and nothing else of money; QuickBooks is asked nothing", async () => {
+    const r = await unlinkedRiverquills();
+    asParent(r.identity);
+    const html = await renderPage(PaymentsPage);
+    expect(html).toContain('<h1 class="page-title">Payments</h1>');
+    expect(moneyBox(html)).toBe(BOX);
+    expect(html).not.toMatch(ANY_MONEY);
+    expect(html).not.toContain("QuickBooks"); // Payments holds nothing but the money: nothing on it names QuickBooks
+    expect(pays(html)).toEqual([]);
+    expect(html).not.toContain(NOTHING);
+    expect(stub.calls).toHaveLength(0);
+    expect(await db.select().from(familyMoney)).toEqual([]);
+  });
+
+  it("Home: the same words where the money box stands, with no way to Payments from it and no amount", async () => {
+    const r = await unlinkedRiverquills();
+    asParent(r.identity);
+    const html = await renderPage(HomePage);
+    expect(moneyBox(html)).toBe(BOX);
+    expect(html).not.toMatch(ANY_MONEY);
+    expect(html).not.toContain("See your payments");
+    expect(stub.calls).toHaveLength(0);
+    expect(await db.select().from(familyMoney)).toEqual([]);
+  });
+
+  it("a club whose roster names no company: Home and Payments read the same words", async () => {
+    const r = await seedSignedInParent(RIVERA);
+    // As a club that has never read a roster from QuickBooks: no company named, nothing connected, no link of the family's.
+    await db.delete(setting).where(eq(setting.key, "roster.source"));
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, r.identity.familyId));
+    asParent(r.identity);
+    for (const page of [PaymentsPage, HomePage]) {
+      const html = await renderPage(page);
+      expect(moneyBox(html)).toBe(BOX);
+      expect(html).not.toMatch(ANY_MONEY);
+    }
+    expect(stub.calls).toHaveLength(0);
   });
 });
 

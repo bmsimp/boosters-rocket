@@ -50,6 +50,32 @@ export async function customerOfFamily(familyId: AppFamilyId, tx?: Tx): Promise<
   return l?.customerId ?? null;
 }
 
+/**
+ * Whether this app family has a family link, told apart from not being able to tell, for the words an unlinked family
+ * reads about money (src/lib/money/family-money.ts). customerOfFamily() answers nothing in both cases; this reads, beside
+ * the link itself, the roster's company and the connection, as recordsCompany() does:
+ * - `linked`: its family link in the records' company names `customerId` (what customerOfFamily() answers).
+ * - `none`: the portal can tell it has none: the roster names a company, QuickBooks is not connected to a different one,
+ *   and the family has no family link in that company; or the roster names no company at all (a club that has never
+ *   read one) and the family has no link of any system or company.
+ * - `unknown`: QuickBooks is connected to another company than the roster's, so no link of the roster's company may
+ *   answer; or the roster names no company while the family still holds a link of some company.
+ * It reads this family's links only.
+ */
+export type FamilyLinkState = { state: "linked"; customerId: string } | { state: "none" } | { state: "unknown" };
+export async function familyLinkState(familyId: AppFamilyId, tx?: Tx): Promise<FamilyLinkState> {
+  const q = tx ?? db;
+  const [source, connection] = await Promise.all([getRosterSource(tx), getConnection(tx)]);
+  if (source === null) {
+    const [any] = await q.select({ id: accountingLink.id }).from(accountingLink).where(eq(accountingLink.familyId, familyId)).limit(1);
+    return any ? { state: "unknown" } : { state: "none" };
+  }
+  if (connection?.realmId && connection.realmId !== source) return { state: "unknown" };
+  const [l] = await q.select({ customerId: accountingLink.customerId }).from(accountingLink)
+    .where(and(eq(accountingLink.familyId, familyId), eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, source)));
+  return l ? { state: "linked", customerId: l.customerId } : { state: "none" };
+}
+
 /** The customer this app student is linked to, or null. */
 export async function customerOfStudent(studentId: AppStudentId, tx?: Tx): Promise<string | null> {
   const realmId = await recordsCompany(tx);

@@ -20,7 +20,7 @@ import { resetDb } from "../helpers/db";
 import { syncAppRecords } from "../helpers/app-records";
 import { ageMoney, connectCompany, familyRecordOf, invoiceQueries, moneyRow, setFreshSeconds, stubInvoice as inv } from "../helpers/money";
 import { FAMILY_A, MONEY_REALM, seedFamilyMoney } from "../helpers/parent";
-import { startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, fam, moveInCache, par, seedShape, stu } from "../helpers/roster-cache";
 
 let stub: QboStub;
@@ -137,7 +137,8 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     const familyId = (await familyRecordOf("10"))!;
     // The family is the app's own, active; only its link to QuickBooks is gone (from stage 3 a family may have none).
     await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId));
-    expect(await loadFamilyMoney(familyId)).toMatchObject({ familyName: null, figures: null });
+    // The portal can tell it has none (the roster names a company, and QuickBooks is connected to that one): it is told so.
+    expect(await loadFamilyMoney(familyId)).toMatchObject({ familyName: null, figures: null, notConnected: true });
     expect(stub.calls).toHaveLength(0);
     expect(await db.select().from(familyMoney)).toHaveLength(0);
   });
@@ -150,6 +151,87 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     expect((await moneyOf("50")).figures).toBeNull(); // one bad id among the family's customers refuses the whole read
     expect(stub.calls).toHaveLength(0);
     expect((await moneyRow("50"))?.failedCode).toBe("bad_id");
+  });
+});
+
+describe("a family with no link to the club's books (stage 3: the words an unlinked family reads)", () => {
+  /** The Rivera family's app record, active, with its family link deleted by hand: nothing brings it into step after. */
+  async function unlinked() {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    const familyId = (await familyRecordOf("10"))!;
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId));
+    return familyId;
+  }
+
+  it("is told so while QuickBooks is disconnected too: the roster still names the company, and the family has no link there", async () => {
+    const familyId = await unlinked();
+    await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
+    expect(await loadFamilyMoney(familyId)).toEqual({ familyName: null, figures: null, notConnected: true, today: calendarDayIn("UTC") });
+    expect(stub.calls).toHaveLength(0);
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
+  });
+
+  it("is told so whatever the shape says: with no link there are no invoices of its own to sort", async () => {
+    const familyId = await unlinked();
+    await db.delete(setting).where(eq(setting.key, "membership.shape"));
+    expect((await loadFamilyMoney(familyId)).notConnected).toBe(true);
+    expect(stub.calls).toHaveLength(0);
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
+  });
+
+  it("is not told so while QuickBooks is connected to another company than the roster's: the portal can't tell", async () => {
+    const familyId = await unlinked();
+    await db.update(qboConnection).set({ realmId: "2222" });
+    expect(await loadFamilyMoney(familyId)).toEqual({ familyName: null, figures: null, notConnected: false, today: calendarDayIn("UTC") });
+    expect(stub.calls).toHaveLength(0);
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
+  });
+
+  it("is not told so for a family whose record is inactive: it is shown no money at all", async () => {
+    const familyId = await unlinked();
+    await db.update(family).set({ active: false }).where(eq(family.id, familyId));
+    expect(await loadFamilyMoney(familyId)).toMatchObject({ figures: null, notConnected: false });
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it("a club whose roster names no company at all: a family with no link anywhere is told so, and nothing is asked or written", async () => {
+    // A club that has never read a roster from QuickBooks: no company named, no connection, and a family the app holds
+    // with no link (from stage 3's later slices a family staff add may be one).
+    const [made] = await db.insert(family).values({ name: "Okafor Family", active: true }).returning({ id: family.id });
+    expect(await db.select().from(setting).where(eq(setting.key, "roster.source"))).toEqual([]);
+    expect(await loadFamilyMoney(made!.id)).toEqual({ familyName: null, figures: null, notConnected: true, today: calendarDayIn("UTC") });
+    // And the same while QuickBooks is connected but no roster has been read from it yet.
+    await seedConnected(stub, { realmId: MONEY_REALM });
+    expect((await loadFamilyMoney(made!.id)).notConnected).toBe(true);
+    expect(stub.calls).toHaveLength(0);
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
+  });
+
+  // A linked family never reads the words: they would hide what it owes. Each state with no figures keeps today's answer
+  // (the failed read with nothing stored, the cache that no longer holds it and the missing shape are asserted whole below).
+  it.each([
+    ["QuickBooks is connected to another company than the roster's", () => db.update(qboConnection).set({ realmId: "2222" })],
+    ["the shape names a customer type QuickBooks no longer has", () => seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" })],
+    ["the cache no longer holds it as an active family", () => db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "10"))],
+    ["QuickBooks fails with nothing stored", async () => { stub.failNext = 2; }],
+  ])("a linked family is not told so when %s", async (_what, breakIt) => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    const familyId = (await familyRecordOf("10"))!;
+    await breakIt();
+    expect(await loadFamilyMoney(familyId)).toMatchObject({ figures: null, notConnected: false });
+  });
+
+  it("a roster that names no company beside a family that still holds a link: not told so, since the portal can't tell", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    const familyId = (await familyRecordOf("10"))!;
+    await db.delete(setting).where(eq(setting.key, "roster.source"));
+    expect(await loadFamilyMoney(familyId)).toMatchObject({ figures: null, notConnected: false });
+    expect(stub.calls).toHaveLength(0);
   });
 });
 
@@ -284,7 +366,7 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     await twoFamilies();
     await connectCompany(stub);
     stub.failNext = 2;
-    expect(await moneyOf("10")).toEqual({ familyName: "Rivera Family", figures: null, today: calendarDayIn("UTC") });
+    expect(await moneyOf("10")).toEqual({ familyName: "Rivera Family", figures: null, notConnected: false, today: calendarDayIn("UTC") });
     expect(await moneyRow("10")).toMatchObject({ readAt: null, invoices: null, totalCents: null, realmId: null, failedCode: "http_500" });
     stub.reset();
     expect((await moneyOf("10")).figures).toBeNull(); // too soon to ask again
@@ -575,7 +657,7 @@ describe("stored figures are shown only while they are still this family's", () 
     await moneyOf("10");
     await db.update(qboCustomer).set({ active: false, displayName: "Rivera Family (deleted)" }).where(eq(qboCustomer.qboId, "10"));
     const asked = stub.calls.length;
-    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, notConnected: false, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
     // The roster read that made it inactive has not brought the records into step yet: the family record is still
     // active, so the failed try is stamped on its row.
@@ -595,7 +677,7 @@ describe("stored figures are shown only while they are still this family's", () 
     await ageMoney("10", 6 * MINUTE);
     const [aged] = await db.select().from(familyMoney);
     const asked = stub.calls.length;
-    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, notConnected: false, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
     expect(await db.select().from(familyMoney)).toEqual([aged]); // not even a failed try is stamped
     expect(aged!.totalCents).toBe(before!.totalCents);
@@ -609,7 +691,7 @@ describe("stored figures are shown only while they are still this family's", () 
     await db.delete(setting).where(eq(setting.key, "membership.shape"));
     expect(await familyRecordOf("10")).not.toBeNull();
     const asked = stub.calls.length;
-    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, notConnected: false, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
     expect(await db.select().from(familyMoney)).toEqual([]);
   });
