@@ -42,6 +42,19 @@ export function missingTypes(s: MembershipShape, types: TypeRow[]): string[] {
   return shapeTypeIds(s).filter((t) => !known.has(t));
 }
 
+/**
+ * Whether the membership shape can be trusted to say whose customers are a family's: not when there is none, nor when
+ * it names a customer type QuickBooks no longer has (the staff roster shows nothing then either). Before stage 3's
+ * fourth slice a parent's money and buy-outs asked loadMyFamily() first, which went by the same rule; the family is the
+ * app's own record now, so what still reads QuickBooks' tree for a parent asks this: a page load's money
+ * (src/lib/money/family-money.ts) and a buy-out's offer, confirm and switch-back (src/lib/buyouts/). Parent code may
+ * import it.
+ */
+export async function shapeHolds(tx?: Tx): Promise<boolean> {
+  const [shape, types] = await Promise.all([getShape(tx), (tx ?? db).select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType)]);
+  return shape !== null && missingTypes(shape, types).length === 0;
+}
+
 export function parseShapeForm(f: ShapeForm, types: TypeRow[]): { ok: true; shape: MembershipShape } | { ok: false; errors: string[] } {
   const known = new Set(types.map((t) => t.qboId));
   const pick = (v: string | undefined) => (v ?? "").trim() || null;
