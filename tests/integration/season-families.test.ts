@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { family, qboCustomerType, setting, student } from "@/lib/db/schema";
+import { family, qboConnection, qboCustomerType, setting, student } from "@/lib/db/schema";
 import { asAppFamilyId, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { SHAPE_KEY } from "@/lib/roster/shape";
@@ -19,7 +19,8 @@ import { formSetting, seedFormRequirement } from "../helpers/forms";
 /**
  * The one reader the staff side's seasons, volunteering, forms and staff home take their families from
  * (loadSeasonFamilies(), stage 3 of the app-owned families spec): the app's own active families and their active
- * students, read from the app's tables alone. No QuickBooks connection is made anywhere in this file.
+ * students, read from the app's tables alone. No QuickBooks connection is made anywhere in this file; one test stores
+ * a connection row by hand, to show the one state that lists nobody.
  */
 
 // Two active families with students, an inactive family whose student is still active under it, and a student
@@ -136,6 +137,25 @@ describe("loadSeasonFamilies()", () => {
     // record with no link inactive, and it leaves the lists. S9 stops that, and this changes with it.
     await syncAppRecords();
     expect((await loadSeasonFamilies()).map((f) => f.id)).not.toContain(hand.id);
+  });
+
+  it("lists nobody while QuickBooks is connected to another company than the roster's, as before stage 3; everyone otherwise", async () => {
+    const fall = await seedSeason({ name: "Fall 2026", steps: [{ name: "Start", requirements: [{ title: "Banquet RSVP", appliesTo: "family" }] }] });
+    const rsvp = fall.requirementIds["Banquet RSVP"]!, rivera = await recordOfCustomer("10", "family");
+    const everyone = await shown();
+    expect(everyone.map(([name]) => name)).toEqual(["Chen <b>Family</b>", "Rivera Family"]);
+    // A connection to another company stored without a connect's refusal (from before it, or by hand); no request is made.
+    await db.insert(qboConnection).values({ environment: "sandbox", clientId: "test-client-id", clientSecretCiphertext: "unused", clientSecretKeyId: "unused", realmId: "2222" });
+    expect(await loadSeasonFamilies()).toEqual([]);
+    expect(await seasonFamilyAt(rivera)).toBeNull();
+    const progress = (await loadRequirementProgress(rsvp, "none"))!;
+    expect([progress.rows, progress.counts.asked]).toEqual([[], 0]);
+    // Connected to the roster's own company, and disconnected: everyone, as before.
+    await db.update(qboConnection).set({ realmId: "1111" });
+    expect(await shown()).toEqual(everyone);
+    await db.update(qboConnection).set({ realmId: null });
+    expect(await shown()).toEqual(everyone);
+    expect((await seasonFamilyAt(rivera))!.name).toBe("Rivera Family");
   });
 
   it("doesn't go blank while the membership shape is broken or unsaved, as the roster pages do", async () => {

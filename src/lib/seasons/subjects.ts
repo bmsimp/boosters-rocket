@@ -4,7 +4,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { family, student } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { linksOf } from "@/lib/families/links";
+import { connectedToAnotherCompany, linksOf } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
 import { getShape } from "@/lib/roster/shape";
 import { isCovered, type Requirement } from "./progress";
@@ -41,6 +41,10 @@ function tied<T extends Named>(rows: readonly T[]): T[] {
 }
 
 async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
+  // The one exception to reading the app's tables alone, kept on purpose until stage 4 (the mapping screen): while
+  // QuickBooks is connected to a company other than the roster's, the records are that other company's customers' and
+  // nobody is listed, as before stage 3 when this went through loadRosterPage(), so no page acts on them and no job mails them.
+  if (await connectedToAnotherCompany()) return [];
   const [families, students] = await Promise.all([
     db.select({ id: family.id, name: family.name }).from(family).where(only === undefined ? eq(family.active, true) : and(eq(family.active, true), eq(family.id, only))),
     // An active student is always in a family (student_active_in_family); only those of an active family are kept below.
@@ -68,9 +72,11 @@ async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
  * the season's, volunteering's and forms' staff pages and jobs, and the staff home, read the club's families through.
  * Read from the app's own tables alone (`family`, and `student` by its `family_id`): no link, no membership shape and
  * no QuickBooks connection is needed, so a family with no QuickBooks customer is here like any other, and the list
- * stands while the shape is broken or QuickBooks is disconnected. While the records mirror the roster cache (every
- * roster read and staff write keeps them in step) these are the roster's active families and the active students
- * directly under each; in flat books a member is a family and nobody is a student. By name, as the roster lists them.
+ * stands while the shape is broken or QuickBooks is disconnected. The one exception: while QuickBooks is connected to a
+ * company other than the roster cache's (connectedToAnotherCompany()), nobody is listed, as before, until stage 4.
+ * While the records mirror the roster cache (every roster read and staff write keeps them in step) these are the
+ * roster's active families and the active students directly under each; in flat books a member is a family and nobody
+ * is a student. By name, as the roster lists them.
  */
 export async function loadSeasonFamilies(): Promise<SeasonFamily[]> {
   return activeFamilies();
@@ -79,7 +85,7 @@ export async function loadSeasonFamilies(): Promise<SeasonFamily[]> {
 /**
  * The family a staff page's address names, by the app's own family id (checked by familyRecordAt() first), as the
  * season keeps it: the one place the season's and volunteer credit's family pages find it. Null when the record isn't
- * active.
+ * active, and while QuickBooks is connected to another company than the roster's (loadSeasonFamilies()).
  */
 export async function seasonFamilyAt(familyId: AppFamilyId): Promise<SeasonFamily | null> {
   return (await activeFamilies(familyId))[0] ?? null;

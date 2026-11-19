@@ -29,6 +29,7 @@ import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import { refreshRosterAction } from "@/app/staff/(app)/roster/actions";
 import { AccessDenied } from "@/lib/guards";
 import { disconnect } from "@/lib/quickbooks/connection";
+import { loadRosterPage } from "@/lib/roster/queries";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
 import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
@@ -280,6 +281,29 @@ describe("the roster pages", () => {
     expect(html).toContain("The roster lists families, but they haven&#x27;t been read into the portal&#x27;s own records yet. They are listed here after the next read from QuickBooks.");
     expect(html).not.toContain("QuickBooks lists no customers of the family type.");
     expect(html).not.toContain("Rivera Family</a>");
+  });
+
+  it("holds back the two sign-in rules while the cache names no company, and keeps QuickBooks' own tidy rules", async () => {
+    // No company recorded, so no family record is made and every guardian row's family is null: the sign-in rules
+    // can't hold a sign-in to anything yet, and wait for the read the Families list says is coming.
+    await seedShape();
+    await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10"), fam("20", "Gone Family", { active: false }), stu("22", "Gil Gone", "20")]);
+    await seedRosterRead();
+    const ana = await seedParent({ name: "Ana Rivera" }), gil = await seedParent({ name: "Gail Gone" });
+    await seedGuardian({ parentId: ana.id, familyQboId: "10" }); await seedGuardian({ parentId: gil.id, familyQboId: "20" });
+    await syncAppRecords();
+    const rules = async () => (await loadRosterPage()).attention.map((a) => `${a.rule}:${a.qboId ?? a.name}`);
+    expect((await loadRosterPage()).signIns.map((s) => [s.name, s.familyId, s.customerQboId]).sort()).toEqual([["Ana Rivera", null, null], ["Gail Gone", null, null]]);
+    const before = await rules();
+    expect(before).toContain("family_no_parent:10");
+    expect(before.filter((r) => r.startsWith("signin_unknown") || r.startsWith("inactive_with_signin"))).toEqual([]);
+    expect(await list()).not.toContain("isn&#x27;t attached to any family the portal keeps");
+    // Once a read records the company the records are made, and the rules judge every sign-in as before.
+    await seedRosterRead({ realmId: "1111" });
+    const after = await rules();
+    expect(after).toContain("family_no_parent:10");
+    expect(after).toContain("inactive_with_signin:20");
+    expect(after.filter((r) => r.startsWith("signin_unknown"))).toEqual([]);
   });
 
   it("keeps No family matches for a search that finds nothing", async () => {

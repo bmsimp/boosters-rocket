@@ -9,7 +9,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, guardian, parent, requirement, requirementProgress, requirementReminder, setting } from "@/lib/db/schema";
+import { auditLog, familyMoney, guardian, parent, qboConnection, requirement, requirementProgress, requirementReminder, setting } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { formatMoney } from "@/lib/money/cents";
 import { getParentSettings, putParentSettings } from "@/lib/parents/settings";
@@ -131,6 +131,17 @@ describe("the reminders before a due date", () => {
     expect(fee.text).toContain(`${FEE}: Not paid yet.`);
     expect(fee.text + fee.html).not.toContain(B_FEE_LEFT);
     expect(fee.text).toContain("http://localhost:3000/payments");
+  });
+
+  it("sends nothing while QuickBooks is connected to another company than the roster's, as before stage 3, and all again once disconnected", async () => {
+    await season();
+    // A connection to another company stored without a connect's refusal (from before it, or by hand); no request is made.
+    await db.insert(qboConnection).values({ environment: "sandbox", clientId: "test-client-id", clientSecretCiphertext: "unused", clientSecretKeyId: "unused", realmId: "9130000000000002" });
+    expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 0, failed: 0 });
+    expect(mail.outbox).toEqual([]);
+    expect(await db.select().from(requirementReminder)).toEqual([]);
+    await db.update(qboConnection).set({ realmId: null });
+    expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 3, failed: 0 });
   });
 
   it("sends nothing about a payment the figures can't tell about, and nothing about a paid one however old its figures", async () => {

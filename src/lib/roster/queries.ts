@@ -57,9 +57,13 @@ export async function loadRosterPage(): Promise<RosterPage> {
   const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
   // The sign-in rules' own findings (parents spec §1 What is flagged), shown whether or not sign-ins are switched on yet.
   const access = roster && shape ? (await loadDecision())?.decision.flags ?? [] : [];
+  // A cache that names no company has no family records yet (keepAppRecordsInStep() makes none until a read records
+  // it), so no sign-in can be held to one: the two sign-in rules wait for that read, which the Families list says is
+  // coming, rather than flag every open sign-in as attached to no family. QuickBooks' own tidy rules still run.
+  const judged = from === null ? [] : people;
   return {
     connected: conn.connected, shape, shapeWords: shape ? describeShape(shape, typeRows) : null, brokenTypes, roster,
-    attention: roster && shape ? [...needsAttention(roster, shape, people), ...access] : [], signIns: people, types: typeRows,
+    attention: roster && shape ? [...needsAttention(roster, shape, judged), ...access] : [], signIns: people, types: typeRows,
     lastRun: last ? { at: (last.finishedAt ?? last.startedAt).toISOString(), ok: last.outcome === "ok", detail: last.detail } : null,
     lastOkAt: lastOk?.finishedAt?.toISOString() ?? null,
   };
