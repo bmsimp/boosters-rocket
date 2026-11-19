@@ -8,11 +8,12 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, parent, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { addFamily, askFamilyInactive, askRosterWrite, familyCover, familyHereWords, moveStudent, PLACE_DIFFERS, REFRESH_ASK_KEY, WRITE_COPY } from "@/lib/roster/writes";
+import { addFamily, askFamilyInactive, askRosterWrite, CREDIT_BALANCE, coverStamp, deactivateLinked, familyCover, familyHereWords, LINKED_DEACTIVATE, moveStudent, PLACE_DIFFERS, REFRESH_ASK_KEY,
+  WRITE_COPY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { NOT_HERE } from "@/lib/roster/operations";
@@ -50,11 +51,23 @@ beforeEach(async () => {
   op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
 });
 
-/** The list a family's page shows and binds into its form: every id it covers, the family's too, with its version. */
-const shownFor = async (familyQboId: string): Promise<[string, string][]> => {
+/**
+ * The stamp a family's page binds into its form (stage 3's slice 9g): whom the cover it drew holds, sealed with the
+ * family record's app id (coverStamp()), as the page makes it.
+ */
+const stampFor = async (familyQboId: string): Promise<string> => {
   const c = (await familyCover(familyQboId))!;
-  return [[c.family.qboId, c.family.syncToken], ...c.under.map((u): [string, string] => [u.qboId, u.syncToken])];
+  return coverStamp(String(await recordOfCustomer(familyQboId, "family")), [c.family.qboId, ...c.under.map((u) => u.qboId)]);
 };
+/** The family action as the page's form sends it: the family record's app id and the stamp. */
+const inactivate = async (familyQboId: string, stamp: string, o: Parameters<typeof askFamilyInactive>[3] = op) =>
+  askFamilyInactive(String(await recordOfCustomer(familyQboId, "family")), stamp, tag, o);
+/** A linked student (layered) made inactive as their family's page asks it: by the record, with no version (stage 3's slice 9g). */
+const offStudent = async (studentQboId: string, o: Parameters<typeof deactivateLinked>[2] = op) =>
+  deactivateLinked({ kind: "student", recordId: String(await recordOfCustomer(studentQboId, "student")) }, tag, o);
+/** A linked member (flat) made inactive as their page asks it: by the member's own family record. */
+const offMember = async (memberQboId: string, o: Parameters<typeof deactivateLinked>[2] = op) =>
+  deactivateLinked({ kind: "family", recordId: String(await recordOfCustomer(memberQboId, "family")) }, tag, o);
 /**
  * A family (layered books) or member (flat books) added as the Families list adds one (stage 3's slice 9d): the portal's
  * own record first, then sent to QuickBooks, by a staff member who may link families to accounting.
@@ -64,6 +77,8 @@ const familyNamed = async (name: string) => (await db.select().from(family).wher
 /** A student moved as a family's page moves one (stage 3's slice 9f): by the app's ids of the student and the family joined, saved in the portal first. */
 const move = async (studentQboId: string, toFamilyQboId: string) =>
   moveStudent(String(await recordOfCustomer(studentQboId, "student")), String(await recordOfCustomer(toFamilyQboId, "family")), tag, op);
+/** A student customer's link to its student record, for the version the portal last aligned with. */
+const studentLinkOf = async (customerId: string) => (await db.select().from(accountingLink).where(and(eq(accountingLink.customerId, customerId), isNotNull(accountingLink.studentId))))[0];
 /** An open invoice on a customer, for what it owes. */
 const owes = (Id: string, customer: string, amount: number) => ({ Id, SyncToken: "0", CustomerRef: { value: customer }, TotalAmt: amount, Balance: amount });
 
@@ -170,7 +185,7 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     const { ana } = await seedAnaRivera();
     expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
     stub.calls.length = 0;
-    const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
+    const r = await inactivate("10", await stampFor("10"), op);
     expect(r).toEqual({ changed: true, result: { ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." } });
     // QuickBooks is asked what each owes first, then sent three writes: the two under the family, then the family.
     expect(sent()).toEqual([{ Id: "11", SyncToken: "0", sparse: true, Active: false }, { Id: "12", SyncToken: "0", sparse: true, Active: false },
@@ -204,27 +219,35 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     const c = (await familyCover("10"))!;
     expect(c.family).toMatchObject({ qboId: "10", name: "Rivera Family" });
     expect(c.under.map((u) => [u.qboId, u.depth])).toEqual([["13", 2], ["11", 1], ["12", 1]]);
-    expect(await askFamilyInactive("10", await shownFor("10"), tag, op)).toMatchObject({ result: { ok: true } });
+    expect(await inactivate("10", await stampFor("10"), op)).toMatchObject({ result: { ok: true } });
     expect(sent().map((b) => b.Id)).toEqual(["13", "11", "12", "10"]);
     expect((await auditsOf("roster.customer.deactivate")).find((a) => a.targetId === "13")!.after).toMatchObject({ role: "other" });
   });
 
-  it("refuses a list the page showed when someone has been added under the family since, and a family made inactive alone", async () => {
-    const shown = await shownFor("10");
-    expect(await askFamilyInactive("10", shown.filter(([id]) => id !== "12"), tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } });
-    expect(await askFamilyInactive("10", shown.map(([id, t]): [string, string] => [id, id === "11" ? "7" : t]), tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } });
+  it("refuses a stamp of another cover (someone added under the family since, or another family's), and a family made inactive alone", async () => {
+    const rivera = String(await recordOfCustomer("10", "family"));
+    const shown = await stampFor("10");
+    // A cover the page didn't draw: one leaving Leo out, and the stamp of another family's cover.
+    expect(await inactivate("10", coverStamp(rivera, ["10", "11"]))).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } });
+    expect(await inactivate("10", "A".repeat(22))).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } });
     expect(await askRosterWrite({ op: "deactivate", qboId: "10", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [familyHereWords("Rivera Family")] });
     expect(familyHereWords("Rivera Family")).toContain("“Make Rivera Family inactive”"); // the button as the page names it
-    expect(await askFamilyInactive("20", shown, tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } }); // another family's list
-    expect(await askFamilyInactive("12", shown, tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.gone] } });       // a student isn't a family
-    expect(await askFamilyInactive("10", shown, "a-tag-of-another-company", op)).toEqual({ changed: false, result: { ok: false, errors: [ROSTER_MOVED] } });
+    expect(await inactivate("20", shown)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } }); // another family's list
+    const leo = String(await recordOfCustomer("12", "student"));
+    expect(await askFamilyInactive(leo, shown, tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.gone] } });  // a student isn't a family
+    expect(await askFamilyInactive("10", shown, tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.gone] } }); // a QuickBooks id isn't one
+    expect(await askFamilyInactive(rivera, shown, "a-tag-of-another-company", op)).toEqual({ changed: false, result: { ok: false, errors: [ROSTER_MOVED] } });
+    // Someone added under the family in QuickBooks since the page was drawn, and taken into the cache by a read.
+    stub.customers.push({ Id: "15", DisplayName: "Rosa Rivera", Active: true, SyncToken: "0", ParentRef: { value: "10" }, Job: true, CustomerTypeRef: { value: "3" } });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    expect(await inactivate("10", shown)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } });
     expect(stub.apiCalls().filter((c) => c.method === "GET" && c.path.includes("/customer/"))).toEqual([]);
     expect(posts()).toEqual([]);
   });
 
   it("refuses while a change to anyone under the family is waiting", async () => {
     await seedQueued({ op: "rename", role: "student", qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" });
-    expect(await askFamilyInactive("10", await shownFor("10"), tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.waiting] } });
+    expect(await inactivate("10", await stampFor("10"), op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.waiting] } });
     expect(posts()).toEqual([]);
   });
 
@@ -307,7 +330,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
 
     it("a student made inactive: their record is inactive; a parent made inactive changes no record", async () => {
       const leo = await recordOfCustomer("12", "student");
-      await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op);
+      await offStudent("12");
       expect(await studentRow(leo)).toMatchObject({ active: false, familyId: await recordOfCustomer("10", "family") });
       expect((await auditsOf("roster.customer.deactivate"))[0]!.after).toMatchObject({ appRecord: { kind: "student", studentId: String(leo), set: { active: false } } });
       const before = await appRecordRows();
@@ -318,7 +341,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
 
     it("a family made inactive with everyone under it: each student's record as its step goes through, the family's at the end", async () => {
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
-      expect(await askFamilyInactive("10", await shownFor("10"), tag, op)).toMatchObject({ result: { ok: true } });
+      expect(await inactivate("10", await stampFor("10"), op)).toMatchObject({ result: { ok: true } });
       expect(await studentRow(leo)).toMatchObject({ active: false });
       expect(await familyRow(rivera)).toMatchObject({ active: false });
       const rows = (await auditsOf("roster.customer.deactivate")).reverse();
@@ -329,7 +352,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
     it("a family whose own last step's answer is lost: held on the queue, and the queue makes the family's record inactive once a read shows it", async () => {
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
       stub.onApiRequest = (c) => { stub.loseUpdateAnswer = c.method === "POST" && /"Id":"10"/.test(c.body); };
-      const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
+      const r = await inactivate("10", await stampFor("10"), op);
       stub.onApiRequest = null; stub.loseUpdateAnswer = false;
       expect((r.result as { errors: string[] }).errors.at(-1)).toBe("Whether Rivera Family is still active shows once the roster is read again.");
       expect(await studentRow(leo)).toMatchObject({ active: false });
@@ -346,21 +369,23 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
     it("someone QuickBooks shows inactive already: nothing is sent, and their record is made inactive, as the queue makes it", async () => {
       const leo = await recordOfCustomer("12", "student");
       stub.customers.find((c) => c.Id === "12")!.Active = false; // made inactive in QuickBooks; the cache doesn't know yet
-      expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: true, message: WRITE_COPY.inactiveFollowed });
+      expect(await offStudent("12")).toEqual({ ok: true, message: WRITE_COPY.inactiveFollowed });
       expect(posts()).toEqual([]);
       expect(await studentRow(leo)).toMatchObject({ active: false });
       expect((await auditsOf("roster.record.follows"))[0]).toMatchObject({ targetId: "12", permission: "Roster.Family.ReadWrite",
         after: { op: "deactivate", role: "student", code: "already_inactive", appRecord: { kind: "student", studentId: String(leo), set: { active: false } } } });
       expect(await auditsOf("roster.write.refused")).toEqual([]);
-      // Asked again from the same page once the cache shows it: nothing more to change, so refused as before.
+      // Asked again from the same page: the portal's own record is inactive now, so nothing is read or sent.
       expect((await refreshRoster(WORKER)).ok).toBe(true);
-      expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: ["That is inactive in QuickBooks already, so there was nothing to change."] });
+      stub.calls.length = 0;
+      expect(await offStudent("12")).toEqual({ ok: false, errors: ["That is inactive in the portal, so nothing was changed."] });
+      expect(stub.apiCalls()).toEqual([]);
     });
 
     it("the family action: whoever QuickBooks shows inactive already is passed over and their record made inactive", async () => {
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
       stub.customers.find((c) => c.Id === "12")!.Active = false;
-      expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera, then Rivera Family." });
+      expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera, then Rivera Family." });
       expect(sent().map((b) => b.Id)).toEqual(["11", "10"]);
       expect(await studentRow(leo)).toMatchObject({ active: false });
       expect(await familyRow(rivera)).toMatchObject({ active: false });
@@ -372,7 +397,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       // Leo moved to the Chen family in QuickBooks alone: the app still holds him in the Rivera family's record.
       Object.assign(stub.customers.find((c) => c.Id === "12")!, { ParentRef: { value: "20" }, SyncToken: "1" });
       expect((await refreshRoster(WORKER)).ok).toBe(true);
-      expect((await askFamilyInactive("20", await shownFor("20"), tag, op)).result).toMatchObject({ ok: true });
+      expect((await inactivate("20", await stampFor("20"), op)).result).toMatchObject({ ok: true });
       expect(sent().map((b) => b.Id)).toEqual(["12", "21", "20"]);
       expect(await studentRow(leo)).toMatchObject({ active: true, familyId: rivera });
       expect((await auditsOf("roster.customer.deactivate")).find((a) => a.targetId === "12")!.after).not.toHaveProperty("appRecord");
@@ -413,7 +438,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       for (const id of ["11", "12", "10"]) Object.assign(inStub(id), { Active: false, SyncToken: "1" });
       expect((await refreshRoster(WORKER)).ok).toBe(true);
       expect(await familyRow(rivera)).toMatchObject({ active: true }); // a read changes no record
-      const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
+      const r = await inactivate("10", await stampFor("10"), op);
       expect(r).toEqual({ changed: true, result: { ok: true, message: "Rivera Family is inactive in QuickBooks already, so nothing was sent. The portal's own family is inactive now too. The roster is being read again to show it." } });
       expect(posts()).toEqual([]);
       expect(await familyRow(rivera)).toMatchObject({ active: false });
@@ -421,7 +446,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect(follows.map((a) => [a.targetId, a.before, a.after])).toEqual([["10", { kind: "family", familyId: String(rivera), name: "Rivera Family", active: true },
         { op: "deactivate", role: "family", code: "already_inactive", appRecord: { kind: "family", familyId: String(rivera), set: { active: false } } }]]);
       expect((await auditsOf("roster.family.deactivate"))[0]!.after).toMatchObject({ outcome: "done", code: "already_inactive", alreadyInactive: ["10"] });
-      expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: ["That family is inactive in QuickBooks already, so there was nothing to change."] });
+      expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: false, errors: ["That family is inactive in QuickBooks already, so there was nothing to change."] });
     });
 
     it("a move QuickBooks has that the portal's record doesn't (given up on the queue, or made in QuickBooks): moving there sends nothing, and the record, forms and places follow once", async () => {
@@ -498,12 +523,12 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect(await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email: "luis@example.com", typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOursToAdd] });
       expect(await askRosterWrite({ op: "rename", qboId: "10", syncToken: "0", name: "Rivera-Diaz Family" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
       expect(await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana M. Rivera" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
-      expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
       await db.update(family).set({ active: true }).where(eq(family.id, rivera));
       await db.update(student).set({ active: false }).where(eq(student.id, leo));
       expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
       expect(await move("12", "20")).toEqual({ ok: false, errors: ["That is inactive in the portal, so nothing was changed."] });
-      expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect(await offStudent("12")).toEqual({ ok: false, errors: ["That is inactive in the portal, so nothing was changed."] });
       expect(posts()).toEqual([]);
     });
 
@@ -511,7 +536,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
       // The family's own write is the one QuickBooks turns away.
       stub.onApiRequest = (c) => { stub.updateFault = c.method === "POST" && /"Id":"10"/.test(c.body) ? "6000" : null; };
-      expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result.ok).toBe(false);
+      expect((await inactivate("10", await stampFor("10"), op)).result.ok).toBe(false);
       expect(await studentRow(leo)).toMatchObject({ active: false });
       expect(await familyRow(rivera)).toMatchObject({ active: true });
     });
@@ -533,7 +558,8 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       const ana = await recordOfCustomer("11", "family");
       await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana R. Rivera" }, tag, op);
       expect(await familyRow(ana)).toMatchObject({ name: "Ana R. Rivera", active: true });
-      expect((await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "1" }, tag, op)).ok).toBe(true);
+      expect((await offMember("11")).ok).toBe(true);
+      expect(sent().at(-1)).toEqual({ Id: "11", SyncToken: "1", sparse: true, Active: false }); // the link's own version, aligned by the rename
       expect(await familyRow(ana)).toMatchObject({ name: "Ana R. Rivera", active: false });
       expect((await auditsOf("roster.customer.deactivate"))[0]!.after).toMatchObject({ appRecord: { kind: "family", familyId: String(ana), set: { active: false } } });
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
@@ -547,10 +573,10 @@ describe("nobody with a balance is made inactive (the owner's decision of 2026-1
 
   it("a balance on the family: nothing is sent, and staff are told who, with the amount only for Finance.Balance.Read", async () => {
     stub.invoices = [owes("901", "10", 42.5)];
-    const shown = await shownFor("10");
-    expect(await askFamilyInactive("10", shown, tag, op)).toEqual({ changed: false, result: { ok: false,
+    const shown = await stampFor("10");
+    expect(await inactivate("10", shown, op)).toEqual({ changed: false, result: { ok: false,
       errors: ["Rivera Family has an open balance in QuickBooks.", `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] } });
-    expect(await askFamilyInactive("10", shown, tag, { ...(await treasurer()), showAmounts: true })).toEqual({ changed: false, result: { ok: false,
+    expect(await inactivate("10", shown, { ...(await treasurer()), showAmounts: true })).toEqual({ changed: false, result: { ok: false,
       errors: ["Rivera Family owes $42.50 in QuickBooks.", `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] } });
     expect(posts()).toEqual([]);
     expect(await cached("10")).toMatchObject({ active: true });
@@ -560,22 +586,52 @@ describe("nobody with a balance is made inactive (the owner's decision of 2026-1
 
   it("a balance on one member of the family: nobody is made inactive, the others neither", async () => {
     stub.invoices = [owes("902", "12", 15)];
-    const r = await askFamilyInactive("10", await shownFor("10"), tag, { ...op, showAmounts: true });
+    const r = await inactivate("10", await stampFor("10"), { ...op, showAmounts: true });
     expect(r.result).toEqual({ ok: false, errors: ["Leo Rivera owes $15.00 in QuickBooks.", `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] });
     expect(posts()).toEqual([]);
     for (const id of ["10", "11", "12"]) expect(await cached(id)).toMatchObject({ active: true });
   });
 
-  it("a credit is left to QuickBooks: only an amount owed stops it", async () => {
+  it("a credit stops it too (stage 3's slice 9g): any balance, owed or a credit, and nothing is sent", async () => {
+    // A credit: the customer's own Balance below zero, as QuickBooks shows an unapplied payment or credit memo.
     stub.invoices = [owes("903", "12", -20)];
-    expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toMatchObject({ ok: true });
+    expect((await inactivate("10", await stampFor("10"))).result).toEqual({ ok: false, errors: ["Leo Rivera has a credit in QuickBooks.", `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] });
+    expect((await auditsOf("roster.family.deactivate"))[0]!.after).toEqual({ outcome: "refused", code: CREDIT_BALANCE, made: [], notMade: ["11", "12", "10"] });
+    expect((await inactivate("10", await stampFor("10"), { ...(await treasurer()), showAmounts: true })).result)
+      .toEqual({ ok: false, errors: ["Leo Rivera has a credit of $20.00 in QuickBooks.", `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] });
+    // One owing and one with a credit: both named, and the row's code says something is owed.
+    stub.invoices = [owes("903", "12", -20), owes("909", "11", 5)];
+    expect((await inactivate("10", await stampFor("10"))).result).toEqual({ ok: false, errors: ["Ana Rivera has an open balance in QuickBooks.", "Leo Rivera has a credit in QuickBooks.",
+      `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] });
+    // One student alone, and a Parent customer, the same way.
+    stub.invoices = [owes("903", "12", -20), owes("910", "21", -3)];
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [`Leo Rivera has a credit in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`] });
+    expect((await auditsOf("roster.write.refused"))[0]!.after).toMatchObject({ op: "deactivate", role: "student", code: CREDIT_BALANCE });
+    expect(await askRosterWrite({ op: "deactivate", qboId: "21", syncToken: "0" }, tag, { ...op, showAmounts: true }))
+      .toEqual({ ok: false, errors: [`Mei Chen has a credit of $3.00 in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`] });
+    expect(WRITE_COPY.balanceFix).toMatch(/a credit used or refunded/);
+    expect(posts()).toEqual([]);
+    expect(await queue()).toEqual([]);
+    for (const id of ["10", "11", "12", "21"]) expect(await cached(id)).toMatchObject({ active: true });
+  });
+
+  it("a linked student or member is never made inactive by a customer's id and a page's version: only by the record", async () => {
+    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [LINKED_DEACTIVATE] });
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await offStudent("12")).toEqual({ ok: true, message: "Made inactive in QuickBooks." });
+    expect(sent()).toEqual([{ Id: "12", SyncToken: "0", sparse: true, Active: false }]);
+    // Anything but a record's uuid is no record; a family's record asked as a student, or a layered family as a member, is refused.
+    expect(await deactivateLinked({ kind: "student", recordId: "12" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.gone] });
+    expect(await deactivateLinked({ kind: "student", recordId: String(await recordOfCustomer("20", "family")) }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.gone] });
+    expect(await deactivateLinked({ kind: "family", recordId: String(await recordOfCustomer("20", "family")) }, tag, op)).toEqual({ ok: false, errors: [familyHereWords("Chen Family")] });
+    expect(sent()).toHaveLength(1);
   });
 
   it("one student or parent with a balance is not made inactive either, and nothing is sent", async () => {
     stub.invoices = [owes("904", "12", 30)];
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op))
+    expect(await offStudent("12"))
       .toEqual({ ok: false, errors: [`Leo Rivera has an open balance in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`] });
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, { ...op, showAmounts: true }))
+    expect(await offStudent("12", { ...op, showAmounts: true }))
       .toEqual({ ok: false, errors: [`Leo Rivera owes $30.00 in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`] });
     expect(posts()).toEqual([]);
     expect((await auditsOf("roster.write.refused"))[0]!.after).toMatchObject({ op: "deactivate", role: "student", code: "open_balance" });
@@ -584,33 +640,34 @@ describe("nobody with a balance is made inactive (the owner's decision of 2026-1
   it("a balance that appears between the read and the write: QuickBooks' refusal (6220) is told in the same words, not as a code", async () => {
     // QuickBooks answers the read with no balance; the invoice lands just before the write.
     stub.onApiRequest = (c) => { if (c.method === "POST") stub.invoices = [owes("905", "12", 30)]; };
-    const one = await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op);
+    const one = await offStudent("12");
     expect(one).toEqual({ ok: false, errors: ["QuickBooks says there is a balance on Leo Rivera's account, so they weren't made inactive. It has to be settled in QuickBooks first: paid or written off, or a credit used or refunded. Then try again."] });
     expect(JSON.stringify(one)).not.toMatch(/6220/);
     expect((await auditsOf("roster.write.refused"))[0]!.after).toMatchObject({ op: "deactivate", code: "fault_6220" });
     expect(await queue()).toEqual([]);
     // In the family action, the first one under it: nobody is made inactive, and the family is still active.
     stub.invoices = []; stub.onApiRequest = (c) => { if (c.method === "POST") stub.invoices = [owes("906", "11", 30)]; };
-    const fam = await askFamilyInactive("10", await shownFor("10"), tag, op);
+    const fam = await inactivate("10", await stampFor("10"), op);
     expect(fam).toEqual({ changed: false, result: { ok: false, errors: ["Nobody was made inactive.",
       "QuickBooks says there is a balance on Ana Rivera's account, so they weren't made inactive. It has to be settled in QuickBooks first: paid or written off, or a credit used or refunded. Then try again.",
       "Not made inactive yet: Leo Rivera.", "Rivera Family is still active. Press “Make Rivera Family inactive” again to carry on with whoever is still active."] } });
     expect((await auditsOf("roster.family.deactivate"))[0]!.after).toEqual({ outcome: "stopped", code: "fault_6220", made: [], notMade: ["11", "12", "10"] });
   });
 
-  it("what is owed couldn't be read: nothing is sent; one student's change waits to reach QuickBooks as before, never sent", async () => {
+  it("what is owed couldn't be read: refused in words, nothing sent and nothing queued (open question 11), for a family, a student and a Parent customer", async () => {
     stub.dropApi = true;
-    expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnread] });
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnread] });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnread] });
+    expect(await askRosterWrite({ op: "deactivate", qboId: "21", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnread] });
+    expect((await auditsOf("roster.write.refused")).map((a) => (a.after as { code: string }).code)).toEqual(["unreachable", "unreachable"]);
     expect(await queue()).toEqual([]);
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toMatchObject({ ok: true, queued: true });
-    expect((await queue())[0]).toMatchObject({ sent: false, lastCode: "unreachable" });
     expect(posts()).toEqual([]);
   });
 
   it("an answer with no balance in it isn't taken for nothing owed", async () => {
     stub.quirks.balances = false;
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnknown] });
-    expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnknown] });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnknown] });
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnknown] });
     expect(posts()).toEqual([]);
   });
 });
@@ -620,9 +677,9 @@ describe("making a family inactive can stop part way, says what is now true, and
   const CARRY_ON = "Rivera Family is still active. Press “Make Rivera Family inactive” again to carry on with whoever is still active.";
 
   it("a refusal part way: who was made inactive, who wasn't and why, and the family still active; pressed again, it finishes", async () => {
-    const shown = await shownFor("10");
+    const shown = await stampFor("10");
     stub.onApiRequest = (c) => { stub.updateFault = c.method === "POST" && /"Id":"12"/.test(c.body) ? "6000" : null; };
-    const first = await askFamilyInactive("10", shown, tag, op);
+    const first = await inactivate("10", shown, op);
     expect(first).toEqual({ changed: true, result: { ok: false, errors: ["Made inactive in QuickBooks: Ana Rivera.",
       "QuickBooks wouldn't make Leo Rivera inactive, so it wasn't changed. Check it in QuickBooks.", CARRY_ON] } });
     expect(await cached("11")).toMatchObject({ active: false });
@@ -631,9 +688,13 @@ describe("making a family inactive can stop part way, says what is now true, and
     expect(sent().map((b) => b.Id)).toEqual(["11", "12"]); // the family was never sent
     expect((await auditsOf("roster.family.deactivate"))[0]!.after).toEqual({ outcome: "stopped", code: "fault_6000", made: ["11"], notMade: ["12", "10"] });
     expect(await queue()).toEqual([]);
-    // Pressed again from the same page: Ana is inactive now and passed over; Leo and then the family are made inactive.
+    // The page is made again after the stop (`changed`), so its stamp covers whoever is still active: pressed with the
+    // old one, the cover no longer reads so and nothing is sent; pressed from the page as made again, Ana is passed over
+    // and Leo and then the family are made inactive.
     stub.onApiRequest = null; stub.updateFault = null; stub.calls.length = 0;
-    expect(await askFamilyInactive("10", shown, tag, op)).toEqual({ changed: true, result: { ok: true, message: "Made inactive in QuickBooks: Leo Rivera, then Rivera Family." } });
+    expect(await inactivate("10", shown, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.coverChanged] } });
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await inactivate("10", await stampFor("10"), op)).toEqual({ changed: true, result: { ok: true, message: "Made inactive in QuickBooks: Leo Rivera, then Rivera Family." } });
     expect(sent().map((b) => b.Id)).toEqual(["12", "10"]);
     expect(await cached("10")).toMatchObject({ active: false });
   });
@@ -641,7 +702,7 @@ describe("making a family inactive can stop part way, says what is now true, and
   it("QuickBooks still refusing the family (800: someone under it the cache doesn't show yet): said in words, and the roster read again", async () => {
     // A customer under the family that QuickBooks has and the cache doesn't: QuickBooks refuses the family.
     stub.onApiRequest = (c) => { if (c.method === "POST" && /"Id":"10"/.test(c.body)) stub.customers.push({ Id: "19", DisplayName: "New Rivera", Active: true, SyncToken: "0", ParentRef: { value: "10" }, Job: true }); };
-    const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
+    const r = await inactivate("10", await stampFor("10"), op);
     expect(r).toEqual({ changed: true, result: { ok: false, errors: ["Made inactive in QuickBooks: Ana Rivera and Leo Rivera.",
       "QuickBooks won't make Rivera Family inactive while customers under it are still active, and it has someone under Rivera Family the roster here doesn't show yet, so Rivera Family wasn't changed. The roster is being read again: try again in a few minutes.", CARRY_ON] } });
     // Not a loop: the worker is asked to read the roster, after which the page lists the one QuickBooks has.
@@ -654,11 +715,11 @@ describe("making a family inactive can stop part way, says what is now true, and
   });
 
   it("QuickBooks can't be reached part way: it stops, the lost answer is held on the queue as possibly made, the queue finishes it after a read, and pressing again carries on", async () => {
-    const shown = await shownFor("10");
+    const shown = await stampFor("10");
     const leo = await recordOfCustomer("12", "student");
     // The second write reaches QuickBooks, which makes Leo inactive, and the answer never comes back.
     stub.onApiRequest = (c) => { stub.loseUpdateAnswer = c.method === "POST" && /"Id":"12"/.test(c.body); };
-    const first = await askFamilyInactive("10", shown, tag, op);
+    const first = await inactivate("10", shown, op);
     expect(first.changed).toBe(true);
     expect(first.result).toEqual({ ok: false, errors: ["Made inactive in QuickBooks: Ana Rivera.",
       "The portal can't tell whether QuickBooks made Leo Rivera inactive: its answer didn't arrive. The roster is read again within a few minutes to see, and the portal finishes it then without sending it twice.",
@@ -674,7 +735,7 @@ describe("making a family inactive can stop part way, says what is now true, and
     expect((await auditsOf("roster.family.deactivate"))[0]!.after).toEqual({ outcome: "stopped", code: "unreachable", made: ["11"], notMade: ["10"], maybe: ["12"] });
     // Pressed again before the queue has found it: refused, as anything with a change waiting is.
     stub.onApiRequest = null; stub.loseUpdateAnswer = false;
-    expect(await askFamilyInactive("10", shown, tag, op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.waiting] } });
+    expect(await inactivate("10", await stampFor("10"), op)).toEqual({ changed: false, result: { ok: false, errors: [WRITE_COPY.waiting] } });
     // The worker reads the roster (Leo is inactive there), finds the change made, sends nothing, and makes his record inactive.
     stub.calls.length = 0;
     await db.update(writeQueue).set({ nextTryAt: new Date(Date.now() - 60_000) });
@@ -684,14 +745,14 @@ describe("making a family inactive can stop part way, says what is now true, and
     expect((await db.select().from(student).where(eq(student.id, leo)))[0]).toMatchObject({ active: false });
     expect((await auditsOf("roster.write.done"))[0]!.after).toMatchObject({ how: "found", appRecord: { kind: "student", studentId: String(leo), set: { active: false } } });
     // Pressed again, the family alone is sent.
-    expect((await askFamilyInactive("10", shown, tag, op)).result).toEqual({ ok: true, message: "Made Rivera Family inactive in QuickBooks." });
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: true, message: "Made Rivera Family inactive in QuickBooks." });
     expect(sent().map((b) => b.Id)).toEqual(["10"]);
   });
 
   it("QuickBooks turning the first write away unread (429): nothing was made inactive, the family is still active, nothing is queued", async () => {
-    const shown = await shownFor("10");
+    const shown = await stampFor("10");
     stub.onApiRequest = (c) => { if (c.method === "POST") stub.rateLimitNext = 1; };
-    const r = await askFamilyInactive("10", shown, tag, op);
+    const r = await inactivate("10", shown, op);
     expect(r).toEqual({ changed: false, result: { ok: false, errors: ["Nobody was made inactive.",
       "QuickBooks couldn't take that just now, so Ana Rivera wasn't changed. Try again in a few minutes.", "Not made inactive yet: Leo Rivera.", CARRY_ON] } });
     for (const id of ["10", "11", "12"]) expect(await cached(id)).toMatchObject({ active: true });
@@ -705,24 +766,28 @@ describe("what QuickBooks shows of each record, read before anything is sent, an
 
   it("a QuickBooks that raises a family's version when a customer under it changes: the family is sent with the version just read", async () => {
     stub.quirks.parentVersionFollows = true;
-    expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toMatchObject({ ok: true });
+    expect((await inactivate("10", await stampFor("10"), op)).result).toMatchObject({ ok: true });
     // Two customers under it were made inactive, so the family's version went from 0 to 2 before its own write.
     expect(sent().at(-1)).toEqual({ Id: "10", SyncToken: "2", sparse: true, Active: false });
     expect(await cached("10")).toMatchObject({ active: false });
   });
 
-  it("a QuickBooks that leaves the family's version alone: the family is sent with the version the page showed", async () => {
-    expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toMatchObject({ ok: true });
+  it("a QuickBooks that leaves the family's version alone: the family is sent with the version just read, which is the same", async () => {
+    expect((await inactivate("10", await stampFor("10"), op)).result).toMatchObject({ ok: true });
     expect(sent().at(-1)).toEqual({ Id: "10", SyncToken: "0", sparse: true, Active: false });
   });
 
-  it("a version newer than the page's, before anything is sent: nothing is changed, the record is read again and the page made again", async () => {
+  it("each step carries its own link's version, never a page's: a stale one is read again and, still active with no balance, sent once more (stage 3's slice 9g)", async () => {
     stub.customers.find((c) => c.Id === "12")!.SyncToken = "3"; // changed in QuickBooks since the roster was read
-    const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
-    expect(r).toEqual({ changed: true, result: { ok: false, errors: ["Leo Rivera changed in QuickBooks since the page was shown, so nothing was changed. Look at the list again, and confirm it."] } });
-    expect(posts()).toEqual([]);
-    expect(await cached("12")).toMatchObject({ syncToken: "3" });
-    // One student alone the same way: not sent, and shown as QuickBooks has it.
+    const r = await inactivate("10", await stampFor("10"), op);
+    expect(r).toEqual({ changed: true, result: { ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." } });
+    // Ana has no link of her kind: sent with the version her read showed. Leo: his link's own (0), refused as stale,
+    // read again (3) and sent once more with it.
+    expect(sent()).toEqual([{ Id: "11", SyncToken: "0", sparse: true, Active: false }, { Id: "12", SyncToken: "0", sparse: true, Active: false },
+      { Id: "12", SyncToken: "3", sparse: true, Active: false }, { Id: "10", SyncToken: "0", sparse: true, Active: false }]);
+    expect((await studentLinkOf("12"))!.syncedToken).toBe("4");
+    expect((await auditsOf("roster.customer.deactivate")).find((a) => a.targetId === "12")!.after).toMatchObject({ resent: "stale" });
+    // A Parent customer alone keeps its page's version: one QuickBooks has moved on from is read again and shown.
     const one = await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op);
     expect(one).toMatchObject({ ok: true });
     stub.customers.find((c) => c.Id === "21")!.SyncToken = "5";
@@ -731,7 +796,7 @@ describe("what QuickBooks shows of each record, read before anything is sent, an
 
   it("someone QuickBooks shows inactive already is passed over, and the roster is asked to be read again", async () => {
     stub.customers.find((c) => c.Id === "11")!.Active = false; // made inactive in QuickBooks; the cache doesn't know yet
-    expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: true, message: "Made inactive in QuickBooks: Leo Rivera, then Rivera Family." });
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: true, message: "Made inactive in QuickBooks: Leo Rivera, then Rivera Family." });
     expect(sent().map((b) => b.Id)).toEqual(["12", "10"]);
     expect(await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY))).toHaveLength(1);
     expect((await auditsOf("roster.family.deactivate"))[0]!.after).toMatchObject({ outcome: "done", alreadyInactive: ["11"] });
@@ -742,47 +807,77 @@ describe("what QuickBooks shows of each record, read before anything is sent, an
   });
 
   it("the family's last step refused as changed (5010) says it changed while this was running, and the page is made again", async () => {
-    stub.beforeUpdate = (c) => { if (c.Id === "10") c.SyncToken = "9"; }; // someone in QuickBooks, at that very moment
-    const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
+    // Someone in QuickBooks at that very moment, twice: each send meets a newer version than the read just before it.
+    stub.beforeUpdate = (c) => { if (c.Id === "10") c.SyncToken = String(Number(c.SyncToken) + 1); };
+    const r = await inactivate("10", await stampFor("10"), op);
     expect(r).toEqual({ changed: true, result: { ok: false, errors: ["Made inactive in QuickBooks: Ana Rivera and Leo Rivera.",
       "Rivera Family changed in QuickBooks while this was running, so it wasn't made inactive. Press “Make Rivera Family inactive” again.",
       "Rivera Family is still active. Press “Make Rivera Family inactive” again to carry on with whoever is still active."] } });
-    expect(await cached("10")).toMatchObject({ active: true, syncToken: "9" });
+    expect(sent().filter((b) => b.Id === "10").map((b) => b.SyncToken)).toEqual(["0", "1"]); // sent once more, never a third time
+    expect(await cached("10")).toMatchObject({ active: true, syncToken: "2" });
+    expect(await queue()).toEqual([]);
   });
 
-  it("the very first step refused as changed (5010): nothing is made inactive, and the page is made again with the record as it is now", async () => {
+  it("the very first step refused as changed (5010): read again, still active with no balance, and sent once more with the version just read", async () => {
     stub.beforeUpdate = (c) => { if (c.Id === "11") c.SyncToken = "4"; };
-    const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
-    expect(r.changed).toBe(true);
-    expect((r.result as { errors: string[] }).errors.slice(0, 2)).toEqual(["Nobody was made inactive.",
-      "Ana Rivera changed in QuickBooks since the page was shown, so it wasn't changed. Reload the page to see it as QuickBooks has it now."]);
-    expect(await cached("11")).toMatchObject({ active: true, syncToken: "4" });
+    const r = await inactivate("10", await stampFor("10"), op);
+    expect(r).toEqual({ changed: true, result: { ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." } });
+    expect(sent().map((b) => [b.Id, b.SyncToken])).toEqual([["11", "0"], ["11", "4"], ["12", "0"], ["10", "0"]]);
+  });
+
+  it("a step's stale answer whose read shows them inactive there: passed over, nothing more sent, the record follows", async () => {
+    const leo = await recordOfCustomer("12", "student");
+    // Made inactive in QuickBooks at the very moment the portal sends it.
+    stub.beforeUpdate = (c) => { if (c.Id === "12") { c.Active = false; c.SyncToken = "1"; } };
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera, then Rivera Family." });
+    expect(sent().map((b) => b.Id)).toEqual(["11", "12", "10"]);
+    expect((await db.select().from(student).where(eq(student.id, leo)))[0]).toMatchObject({ active: false });
+    expect((await studentLinkOf("12"))!.syncedToken).toBe("0"); // not the portal's send that made it so
+    expect((await auditsOf("roster.record.follows")).map((a) => a.targetId)).toEqual(["12"]);
+  });
+
+  it("a balance that appears meanwhile: on a step's read after a stale answer, and on the family's own read before its last step", async () => {
+    stub.beforeUpdate = (c) => { if (c.Id === "12" && c.SyncToken === "0") { c.SyncToken = "1"; stub.invoices = [owes("911", "12", 8)]; } };
+    const r = await inactivate("10", await stampFor("10"), op);
+    expect(r.result).toEqual({ ok: false, errors: ["Made inactive in QuickBooks: Ana Rivera.", `Leo Rivera has an open balance in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`,
+      "Rivera Family is still active. Press “Make Rivera Family inactive” again to carry on with whoever is still active."] });
+    expect(sent().map((b) => b.Id)).toEqual(["11", "12"]); // never sent again with a balance standing
+    // The family's own: an invoice lands on it after its members' writes, before its own read.
+    stub.beforeUpdate = null; stub.invoices = []; stub.calls.length = 0;
+    stub.onApiRequest = (c) => { if (c.method === "POST" && /"Id":"12"/.test(c.body)) stub.invoices = [owes("912", "10", 4)]; };
+    const fam = await inactivate("10", await stampFor("10"), op);
+    expect(fam.result).toEqual({ ok: false, errors: ["Made inactive in QuickBooks: Leo Rivera.", `Rivera Family has an open balance in QuickBooks. It wasn't made inactive. ${WRITE_COPY.balanceFix}`,
+      "Rivera Family is still active. Press “Make Rivera Family inactive” again to carry on with whoever is still active."] });
+    // Leo's link still holds the version before the first press's stale answer: sent with it, then once more.
+    expect(sent().map((b) => [b.Id, b.SyncToken])).toEqual([["12", "0"], ["12", "1"]]);
+    expect((await auditsOf("roster.family.deactivate"))[0]!.after).toMatchObject({ outcome: "stopped", code: "open_balance", made: ["12"], notMade: ["10"] });
+    expect(await cached("10")).toMatchObject({ active: true });
   });
 
   it("a balance read QuickBooks refuses outright says so, without asking to wait, and nothing is queued", async () => {
     stub.customers = stub.customers.filter((c) => c.Id !== "12"); // QuickBooks no longer answers for Leo: a 400
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.balanceRefused] });
-    expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.balanceRefused] });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.balanceRefused] });
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: false, errors: [WRITE_COPY.balanceRefused] });
     expect(WRITE_COPY.balanceRefused).not.toMatch(/try again in a few minutes/i);
     expect(await queue()).toEqual([]);
     expect(posts()).toEqual([]);
   });
 
   it("two staff pressing at once: one makes them inactive, the other is stopped, and nobody is sent twice to any effect", async () => {
-    const shown = await shownFor("10");
+    const shown = await stampFor("10");
     const other = asOp(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const [a, b] = await Promise.all([askFamilyInactive("10", shown, tag, op), askFamilyInactive("10", shown, tag, other)]);
+    const [a, b] = await Promise.all([inactivate("10", shown, op), inactivate("10", shown, other)]);
     expect([a, b].filter((x) => x.result.ok)).toHaveLength(1);
     for (const id of ["10", "11", "12"]) expect(await cached(id)).toMatchObject({ active: false });
     expect((await auditsOf("roster.customer.deactivate")).map((x) => x.targetId).sort()).toEqual(["10", "11", "12"]);
   });
 
   it("waits for a roster read holding the lock, sending nothing meanwhile, then goes ahead", async () => {
-    const shown = await shownFor("10");
+    const shown = await stampFor("10");
     const lock = await holdTheRosterLock();
     let pending: Promise<unknown>;
     try {
-      pending = askFamilyInactive("10", shown, tag, op);
+      pending = inactivate("10", shown, op);
       await untilALockIsAwaited();
       expect(stub.apiCalls().filter((c) => c.method === "POST" || c.path.includes("/customer/"))).toEqual([]);
     } finally { await lock.release(); }
@@ -880,7 +975,7 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
   it("a value QuickBooks won't take is refused", async () => {
     tag = await connectRoster(stub);
     stub.updateFault = "6000";
-    const r = await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op);
+    const r = await offStudent("12");
     expect(r).toEqual({ ok: false, errors: [WRITE_COPY.refused] });
     expect(await queue()).toEqual([]);
     expect(await cached("12")).toMatchObject({ active: true });
@@ -889,13 +984,13 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
   it("not connected, a connection only an Admin can mend, and another company are said, and nothing is sent", async () => {
     tag = await connectRoster(stub);
     await db.update(qboConnection).set({ lastError: "Intuit no longer accepts this connection. (invalid_grant)" });
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.needsAdmin] });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.needsAdmin] });
     await db.update(qboConnection).set({ lastError: null, refreshTokenCiphertext: null });
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notConnected] });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.notConnected] });
     await db.delete(qboConnection);
     await connectRoster(stub);
     await db.transaction((tx) => setRosterSource(tx, "4444")); // the cache came from another company
-    const other = await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op);
+    const other = await offStudent("12");
     expect(other).toEqual({ ok: false, errors: [ROSTER_MOVED] }); // the page was shown the other roster
     expect(posts()).toEqual([]);
     expect(await queue()).toEqual([]);
@@ -942,7 +1037,7 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     expect(items.map((i) => [i.request.op, i.familyId, i.studentId])).toEqual([["rename", rivera, leo], ["deactivate", chen, null], ["create", patel, null]]);
   });
 
-  it("a connection row held elsewhere while the token needs renewing is busy: queued as not sent, and the staff member never waits for it", async () => {
+  it("a connection row held elsewhere while the token needs renewing is busy: a write is queued as not sent, a make-inactive's balance read refused, and the staff member never waits for it", async () => {
     tag = await connectRoster(stub);
     await db.update(qboConnection).set({ accessExpiresAt: new Date(Date.now() + 60_000) }); // within 5 minutes of expiring: the write must refresh first
     let release!: () => void, locked!: () => void;
@@ -951,21 +1046,24 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     await taken;
     stub.calls.length = 0;
     try {
-      const r = await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op);
+      // The balance can't be read: refused, nothing queued (open question 11).
+      expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.balanceUnread] });
+      expect(await queue()).toEqual([]);
+      const r = await askRosterWrite({ op: "rename", qboId: "21", syncToken: "0", name: "Mei L. Chen", parentOnly: true }, tag, op);
       expect(r).toMatchObject({ ok: true, queued: true });
     } finally { release(); await holding; }
-    expect((await queue())[0]).toMatchObject({ sent: false, lastCode: "token_busy" });
+    expect(await queue()).toEqual([expect.objectContaining({ sent: false, lastCode: "token_busy" })]);
     expect(posts()).toEqual([]);
   });
 
   it("a second change to a record with one waiting is refused until it is done", async () => {
     tag = await connectRoster(stub);
     await seedQueued({ op: "rename", role: "student", qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" });
-    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     await db.update(writeQueue).set({ state: "stuck" });
     expect(await move("12", "20")).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     await db.update(writeQueue).set({ state: "done" });
-    expect((await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).ok).toBe(true);
+    expect((await offStudent("12")).ok).toBe(true);
   });
 
   it("nobody is added to, or moved into, a family whose own change is still waiting", async () => {
@@ -1036,7 +1134,8 @@ describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
     expect(await askRosterWrite({ op: "create", role: "student", name: "Kim", familyQboId: "11", email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
     // A member is renamed and made inactive like anyone.
     expect((await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana R. Rivera" }, tag, op)).ok).toBe(true);
-    expect((await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).ok).toBe(true);
+    expect((await offMember("12")).ok).toBe(true);
+    expect(await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "1" }, tag, op)).toEqual({ ok: false, errors: [LINKED_DEACTIVATE] }); // a member goes by the record
   });
 
   it("flat with one member type: that type, without asking", async () => {
@@ -1057,7 +1156,7 @@ describe("nothing of a refusal is kept but its code", () => {
   it("QuickBooks' words never reach the audit log", async () => {
     tag = await connectRoster(stub);
     stub.updateFault = "6000";
-    await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op);
+    await offStudent("12");
     expect(JSON.stringify(await audits())).not.toMatch(/must never store/);
     expect(fznCompany().customers.length).toBeGreaterThan(0);
   });

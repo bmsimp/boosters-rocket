@@ -14,10 +14,10 @@ import { db } from "@/lib/db/client";
 import { auditLog, family, familyMoney, guardian, qboConnection, qboCustomer, student, writeQueue } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { NOT_HERE } from "@/lib/roster/operations";
-import { MAKING_LOCK } from "@/lib/roster/writes";
+import { coverStamp, familyCover, LINKED_DEACTIVATE, MAKING_LOCK } from "@/lib/roster/writes";
 import { TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
 import { addGuardianAction, reinstateGuardianAction, removeGuardianAction } from "@/app/staff/(app)/parents/actions";
-import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction,
+import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, deactivateLinkedAction, familyInactiveAction, giveUpAction, moveAction,
   renameHereAction, renameLinkedAction, renameParentAction, sendPortalValueAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
@@ -40,8 +40,17 @@ const idOf = async (customer: string) => String(await recordOfCustomer(customer,
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" };
 const SOME_UUID = "00000000-0000-4000-8000-000000000000";
-/** The Rivera family's list as its page binds it: the family, Ana and Leo, each at the version the stub's company starts at. */
-const RIVERA_SHOWN: [string, string][] = [["10", "0"], ["11", "0"], ["12", "0"]];
+/** A stamp of the shape a family's page binds (coverStamp()), sealing no cover: for the checks made before anything is looked up. */
+const SOME_STAMP = "A".repeat(22);
+/**
+ * The Rivera family's make-inactive as its page binds it (stage 3's slice 9g): the family record's app id and the stamp
+ * of whom the cover the page drew holds, never an id or a version to trust.
+ */
+const riveraInactive = async (tag: string) => {
+  const c = (await familyCover("10"))!;
+  const id = String(await recordOfCustomer("10", "family"));
+  return familyInactiveAction(tag, id, coverStamp(id, [c.family.qboId, ...c.under.map((u) => u.qboId)]));
+};
 const everyAction = (tag: string, itemId: string) => [
   () => createAction(tag, "family", "Patel Family"),
   () => addStudentAction(tag, SOME_UUID, "Rosa Rivera"),
@@ -50,8 +59,9 @@ const everyAction = (tag: string, itemId: string) => [
   () => renameParentAction(tag, "21", "0", "Mei L. Chen"),
   () => sendPortalValueAction(itemId, "", "stamp"),
   () => moveAction(tag, SOME_UUID, SOME_UUID),
-  () => deactivateAction(tag, "12", "0"),
-  () => familyInactiveAction(tag, "10", RIVERA_SHOWN),
+  () => deactivateAction(tag, "21", "0"),
+  () => deactivateLinkedAction(tag, "student", SOME_UUID),
+  () => familyInactiveAction(tag, SOME_UUID, SOME_STAMP),
   () => tryAgainAction(itemId),
   () => giveUpAction(itemId, "Done by hand."),
 ];
@@ -107,12 +117,16 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
       () => moveAction(tag, SOME_UUID, "20"),
       () => moveAction(tag, SOME_UUID, 20 as unknown as string),
       () => deactivateAction(tag, ["12"] as unknown as string, "0"),
-      () => familyInactiveAction(tag, "10", []),
-      () => familyInactiveAction(tag, "10", "10:0" as unknown as [string, string][]),
-      () => familyInactiveAction(tag, "10", [["10", "zero"]]),
-      () => familyInactiveAction(tag, "10", [["10", "0", "extra"]] as unknown as [string, string][]),
-      () => familyInactiveAction(tag, "10", Array.from({ length: 201 }, (_, i): [string, string] => [String(i), "0"])),
-      () => familyInactiveAction(tag, 10 as unknown as string, RIVERA_SHOWN),
+      // A linked student's or member's make-inactive names the record by its app id, and sends no version and no QuickBooks id.
+      () => deactivateLinkedAction(tag, "student", "12"),
+      () => deactivateLinkedAction(tag, "parent" as "student", SOME_UUID),
+      () => deactivateLinkedAction(tag, "student", 12 as unknown as string),
+      // The family action: the family record's app id and the stamp of whom the page covered, nothing else.
+      () => familyInactiveAction(tag, "10", SOME_STAMP),
+      () => familyInactiveAction(tag, SOME_UUID, ""),
+      () => familyInactiveAction(tag, SOME_UUID, "not a stamp, but words"),
+      () => familyInactiveAction(tag, SOME_UUID, [["10", "0"]] as unknown as string),
+      () => familyInactiveAction(tag, 10 as unknown as string, SOME_STAMP),
       () => tryAgainAction("not-a-uuid"),
       () => giveUpAction("00000000-0000-4000-8000-000000000000", 7 as unknown as string),
     ];
@@ -141,18 +155,18 @@ describe("making a family inactive from its page: one action, the amount of a ba
   it("says who owes, with the amount only to staff who may see money, and sends nothing", async () => {
     owing();
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const plain = await familyInactiveAction(tag, "10", RIVERA_SHOWN);
+    const plain = await riveraInactive(tag);
     expect(plain).toMatchObject({ ok: false, errors: expect.arrayContaining(["Leo Rivera has an open balance in QuickBooks."]) });
     expect(JSON.stringify(plain)).not.toContain("$12.50");
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Finance.Balance.Read"]));
-    expect(await familyInactiveAction(tag, "10", RIVERA_SHOWN)).toMatchObject({ ok: false, errors: expect.arrayContaining(["Leo Rivera owes $12.50 in QuickBooks."]) });
+    expect(await riveraInactive(tag)).toMatchObject({ ok: false, errors: expect.arrayContaining(["Leo Rivera owes $12.50 in QuickBooks."]) });
     expect(posts()).toEqual([]);
     expect(revalidatedPaths()).toEqual([]);
   });
 
   it("makes the family and everyone under it inactive, and the pages are made again", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    expect(await familyInactiveAction(tag, "10", RIVERA_SHOWN)).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." });
+    expect(await riveraInactive(tag)).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." });
     expect(revalidatedPaths()).toContain("/");
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("A family the portal keeps, linked to its customer in QuickBooks, which is inactive there.");
@@ -169,7 +183,7 @@ describe("making a family inactive from its page: one action, the amount of a ba
     expect(html).toContain("Make Rivera Family inactive");
     expect(html).toContain("QuickBooks has Rivera Family inactive already");
     stub.calls.length = 0;
-    expect(await familyInactiveAction(tag, "10", [["10", "1"]])).toMatchObject({ ok: true, message: expect.stringContaining("Rivera Family is inactive in QuickBooks already, so nothing was sent.") });
+    expect(await riveraInactive(tag)).toMatchObject({ ok: true, message: expect.stringContaining("Rivera Family is inactive in QuickBooks already, so nothing was sent.") });
     expect(posts()).toEqual([]);
     expect((await db.select().from(family).where(eq(family.id, await recordOfCustomer("10", "family"))))[0]).toMatchObject({ active: false });
     expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Make Rivera Family inactive");
@@ -178,7 +192,7 @@ describe("making a family inactive from its page: one action, the amount of a ba
   it("a stop part way is made again on the pages too, so the list shown next is whoever is still active", async () => {
     stub.onApiRequest = (c) => { stub.updateFault = c.method === "POST" && /"Id":"12"/.test(c.body) ? "6000" : null; };
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const r = await familyInactiveAction(tag, "10", RIVERA_SHOWN);
+    const r = await riveraInactive(tag);
     expect(r).toMatchObject({ ok: false, errors: expect.arrayContaining(["Made inactive in QuickBooks: Ana Rivera."]) });
     expect(revalidatedPaths()).toContain("/");
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
@@ -194,7 +208,9 @@ describe("a family's page brings the portal's own records into line with what Qu
     expect((await refreshRoster(WORKER)).ok).toBe(true);
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("Make Leo Rivera inactive in the portal");
-    expect(await deactivateAction(tag, "12", "1")).toMatchObject({ ok: true });
+    // By the record, as the page's form sends it: no version and no QuickBooks id; by a customer's id it is refused.
+    expect(await deactivateAction(tag, "12", "1")).toEqual({ ok: false, errors: [LINKED_DEACTIVATE] });
+    expect(await deactivateLinkedAction(tag, "student", String(await recordOfCustomer("12", "student")))).toMatchObject({ ok: true });
     expect(posts()).toEqual([]);
     expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ active: false });
     // Once the record is inactive too, nothing that would send is offered for them.

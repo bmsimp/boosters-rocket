@@ -25,8 +25,9 @@ const CODE_WORDS: Record<string, string> = {
   token_busy: "QuickBooks was busy with another request", http_429: "QuickBooks asked the portal to slow down", unreachable: "QuickBooks couldn't be reached",
   timeout: "QuickBooks didn't answer in time", bad_answer: "QuickBooks' answer couldn't be read", moved_on: "the record changed in QuickBooks since, so it wasn't sent again",
   gone: "the record is no longer on the roster", fault_5010: "the record changed in QuickBooks since", fault_6240: "the name is taken in QuickBooks",
-  // Making someone inactive (src/lib/roster/writes.ts): never sent while they owe, and what QuickBooks refused, in words.
+  // Making someone inactive (src/lib/roster/writes.ts): never sent while they have any balance, and what QuickBooks refused, in words.
   open_balance: "they owe something in QuickBooks, so they weren't made inactive: it has to be paid or written off there first, then give this up and ask again",
+  credit_balance: "they have a credit in QuickBooks, so they weren't made inactive: it has to be used or refunded there first, then give this up and ask again",
   fault_6220: "QuickBooks says there is a balance on their account: it has to be settled there first (paid or written off, or a credit used or refunded)",
   fault_800: "QuickBooks won't make it inactive while customers under it are still active",
   not_the_customer: "QuickBooks answered about another record, so nothing was sent",

@@ -12,8 +12,8 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, isSavedFirst, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, owedBy, REFRESH_ASK_KEY,
-  replaceRefusedCreates, sendWrite, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
+import { alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, CREDIT_BALANCE, isSavedFirst, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, REFRESH_ASK_KEY,
+  replaceRefusedCreates, sendWrite, tryDeactivate, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
@@ -102,15 +102,25 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     return step === "waiting" || step === "stuck" ? step : "done";
   }
   const w = item.request as RosterWrite;
-  if (!isSavedFirst(item)) return tryRosterItem(item, w, now, refreshedAt);
+  if (!isSavedFirst(item) && !isLinkedDeactivate(item)) return tryRosterItem(item, w, now, refreshedAt);
   // One sender at a time (stage 3's slice 9e): a change saved first is tried only holding the lock its at-once try and
-  // "Send the portal's value" hold (whileItemHeld()). While someone holds it, nothing is sent and no try is counted: the
-  // item is left for the next wake.
+  // "Send the portal's value" hold (whileItemHeld()), and so, since slice 9g, is a make-inactive filed under a student or
+  // member, by the lock its record's rename, move and make-inactive hold. While someone holds it, nothing is sent and no
+  // try is counted: the item is left for the next wake.
   const step = await whileItemHeld(item, () => tryRosterItem(item, w, now, refreshedAt));
   if (step !== null) return step;
   await db.update(writeQueue).set({ nextTryAt: now, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
   return "skipped";
 }
+
+/**
+ * A make-inactive filed under the record it is for (stage 3's slice 9g): a student's, under its student record, or a
+ * member's, under its own family record. Tried holding that record's "being sent" lock (lockOfItem()).
+ */
+export const isLinkedDeactivate = (item: Pick<Item, "request" | "studentId" | "familyId">) => {
+  const w = item.request;
+  return w.op === "deactivate" && ((w.role === "student" && item.studentId !== null) || (w.role === "member" && item.familyId !== null));
+};
 
 /** The worker's share of a change saved first, from a try's outcome (trySavedItem(), ./writes.ts). */
 function savedStep(t: SavedTry): Step {
@@ -144,16 +154,32 @@ async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt:
     if (w.op === "create" && item.resultQboId !== null) return settle(item, { state: "stuck", code: "made_unmatched", sent: true }, now);
   }
   if (w.op === "deactivate") {
-    // Nobody with a balance is made inactive, here as when staff press it (src/lib/roster/writes.ts): what the customer
-    // owes is read first. One who owes makes the item stuck (`open_balance`), and nothing is sent; one QuickBooks shows
-    // inactive already is done. A read that may go through later waits for the next try, as a send would.
-    const owed = await owedBy(w.qboId, item.realmId, { mayWait: true });
-    if (!owed.ok) {
-      if (classify(owed.code).kind !== "retry") return settle(item, { state: "stuck", code: owed.code, sent: item.sent }, now);
-      return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: owed.code, sent: item.sent }, now);
+    // Nobody with a balance is made inactive, here as when staff press it (src/lib/roster/writes.ts): the balance is read
+    // again first, by the one rule (balanceStops()). Any balance makes the item stuck (`open_balance`, or
+    // `credit_balance` for a credit), and nothing is sent; one QuickBooks shows inactive already is found made. A read
+    // that may go through later waits for the next try, as a send would; one that won't makes it stuck. A stale answer
+    // is settled by the Active flag (tryDeactivate(), stage 3's slice 9g), never simply stuck.
+    const t = await tryDeactivate(w, item.realmId, { mayWait: true, name: "", showAmounts: false, actor: WORKER_ACTOR, ip: null });
+    switch (t.is) {
+      case "inactive_there": return finishFound(item, w, w.qboId, now);
+      case "stopped": {
+        if (t.stop.code === "open_balance" || t.stop.code === CREDIT_BALANCE || classify(t.stop.code).kind !== "retry") return settle(item, { state: "stuck", code: t.stop.code, sent: item.sent }, now);
+        return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: t.stop.code, sent: item.sent }, now);
+      }
+      case "stale_again": return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "fault_5010", sent: item.sent }, new Date());
+      case "failed": {
+        const failure = classify(t.code);
+        if (failure.kind !== "retry") return settle(item, { state: "stuck", code: t.code, sent: item.sent }, new Date());
+        // Sent with another version than the item held (a resend after a live read): kept, so a later look finds it as sent.
+        return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: t.code, sent: item.sent || t.sent, ...(t.sent ? { request: t.write } : {}) }, new Date());
+      }
+      case "answer": {
+        const { cached } = await applyWritten(t.write, t.answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id, linkedBy: item.askedBy,
+          filed: { familyId: item.familyId, studentId: item.studentId }, ...(t.resent ? { auditExtra: { resent: "stale" } } : {}),
+          inside: (tx) => markDone(item, "sent", typeof t.answer.Id === "string" ? t.answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
+        return cached ? "done" : "waiting";
+      }
     }
-    if (owed.cents > 0) return settle(item, { state: "stuck", code: "open_balance", sent: item.sent }, now);
-    if (!owed.active) return finishFound(item, w, w.qboId, now);
   }
   // A change saved first is tried as at once and on a press (the one path): its outcome settles the item.
   if ((w.op === "rename" || w.op === "create" || w.op === "move") && isSavedFirst(item)) return saved(null);
