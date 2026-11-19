@@ -213,6 +213,9 @@ describe("a family with no link to the club's books (stage 3: the words an unlin
   // (the failed read with nothing stored, the cache that no longer holds it and the missing shape are asserted whole below).
   it.each([
     ["QuickBooks is connected to another company than the roster's", () => db.update(qboConnection).set({ realmId: "2222" })],
+    // The nearest state to an unlinked family's: the roster names a company and nothing is connected. The link in the
+    // roster's company is what says the family is linked, never the connection.
+    ["QuickBooks is disconnected, with nothing stored", () => db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null })],
     ["the shape names a customer type QuickBooks no longer has", () => seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" })],
     ["the cache no longer holds it as an active family", () => db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "10"))],
     ["QuickBooks fails with nothing stored", async () => { stub.failNext = 2; }],
