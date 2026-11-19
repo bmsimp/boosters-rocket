@@ -152,16 +152,20 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
  * roster lock while the cache is still the item's company; the guardians whose places were given up are told after
  * the commit. `qboId` is the customer it was found as: the one a create made.
  */
-async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<"done" | "linked_elsewhere"> {
+type Found = "done" | typeof CUSTOMER_HAS_FAMILY | typeof FAMILY_HAS_CUSTOMER;
+async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Found> {
   let tell: (() => Promise<unknown>) | null = null;
-  const how = await db.transaction(async (tx): Promise<"done" | "linked_elsewhere"> => {
+  const how = await db.transaction(async (tx): Promise<Found> => {
     let appRecord: OwnRecordChange | null = null;
     if (await lockRosterAs(tx, rosterTagOf(item.realmId))) {
       // A family's own create (stage 3's slice 9d), found made as a customer another family is linked to already (made
-      // a family of on Reconciliation meanwhile, say): no second family link is made, and the item is left for staff.
+      // a family of on Reconciliation meanwhile, say), or with its own family linked to another customer meanwhile: no
+      // second link is made, on either side, and the item is left for staff.
       if (w.op === "create" && (w.role === "family" || w.role === "member") && item.familyId !== null) {
         const holder = await familyLinkedTo(qboId, tx);
-        if (holder !== null && String(holder) !== String(item.familyId)) return "linked_elsewhere";
+        if (holder !== null && String(holder) !== String(item.familyId)) return CUSTOMER_HAS_FAMILY;
+        const own = await customerOfFamily(item.familyId, tx);
+        if (own !== null && own !== qboId) return FAMILY_HAS_CUSTOMER;
       }
       if (w.op === "move") {
         ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
@@ -185,19 +189,21 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<"do
  * leads to its being sent again.
  */
 async function finishFound(item: Item, w: RosterWrite, qboId: string, now: Date): Promise<Step> {
-  let how: "done" | "linked_elsewhere";
+  let how: Found;
   try {
     how = await foundDone(item, w, qboId);
   } catch {
     return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "finish_failed", sent: item.sent, ...(w.op === "create" ? { resultQboId: qboId } : {}) }, now);
   }
-  // QuickBooks made it, and another family is linked to that customer: stuck with its own code, never sent again
-  // (`result_qbo_id` keeps the customer), for staff to look at on Reconciliation.
-  if (how === "linked_elsewhere") return settle(item, { state: "stuck", code: CUSTOMER_HAS_FAMILY, sent: true, resultQboId: qboId }, now);
+  // QuickBooks made it, and another family is linked to that customer, or this family to another customer: stuck with
+  // its own code, never sent again (`result_qbo_id` keeps the customer), for staff to look at on Reconciliation.
+  if (how !== "done") return settle(item, { state: "stuck", code: how, sent: true, resultQboId: qboId }, now);
   return "done";
 }
 /** The code of a family's create found made as a customer another family is linked to already (finishFound()). */
 export const CUSTOMER_HAS_FAMILY = "customer_has_family";
+/** The code of a family's create found made while the family it is filed under was linked to another customer meanwhile (finishFound()). */
+export const FAMILY_HAS_CUSTOMER = "family_has_customer";
 
 /**
  * The worker's share of the queue at one wake: a roster refresh first when one was asked for (a family made inactive)
@@ -367,13 +373,30 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
   // copy of the roster after the next read, but the portal's own family or student keeps what it had, until staff bring
   // it into line from the family's page (a move or a make-inactive QuickBooks has already sends nothing there).
   return { ok: true as const, message: isBuyoutWrite(item.request) ? "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it."
-    : `Given up. Nothing more will be sent for it. If QuickBooks did make the change, the roster's copy of QuickBooks shows it after its next read, but the portal's own family or student stays as it was. ${GIVEN_UP_NEXT[item.request.op] ?? ""}`.trim() };
+    : `Given up. Nothing more will be sent for it. If QuickBooks did make the change, the roster's copy of QuickBooks shows it after its next read, but the portal's own family or student stays as it was. ${givenUpNext(item)}`.trim() };
 }
 
-/** What staff can do once a roster change QuickBooks may have made is given up, by what it was. */
+/**
+ * What staff can do next once a create is given up, by what it was made for: a family or member, or a student, the
+ * portal saved first (filed under its record: stage 3's slice 9d) stays in the portal unlinked; any other new customer
+ * (a student added to a linked family, a parent, a create queued before slice 9d) has no record in the portal.
+ */
+function givenUpNext(item: Item): string {
+  const w = item.request;
+  if (w.op !== "create") return GIVEN_UP_NEXT[w.op] ?? "";
+  const readFirst = "once a roster read shows whether QuickBooks made it, press “Create in QuickBooks and link”";
+  if ((w.role === "family" || w.role === "member") && item.familyId !== null) {
+    return `The ${w.role} the portal saved first stays in the portal, unlinked: ${readFirst} on its page (a name QuickBooks has already is met with another).`;
+  }
+  if (w.role === "student" && item.studentId !== null) {
+    return `The student the portal saved first stays in the portal, unlinked: ${readFirst} on their family's page (a name QuickBooks has already is met with another).`;
+  }
+  return "If QuickBooks made the new customer, it has no record in the portal: look for it in QuickBooks.";
+}
+
+/** What staff can do once a roster change QuickBooks may have made is given up, by what it was (a create: givenUpNext()). */
 const GIVEN_UP_NEXT: Partial<Record<QueuedWrite["op"], string>> = {
   move: "To bring the portal's own record into line, open the family's page and move the student to the family QuickBooks has them in: nothing is sent, and the record, forms and places follow. If that family isn't one of the portal's own, the page offers a move to one that is instead, which is sent to QuickBooks.",
   deactivate: "To bring the portal's own record into line, open the family's page and make them inactive there: nothing is sent when QuickBooks has them inactive already.",
   rename: "To bring the portal's own record into line, rename it on the family's page to the name QuickBooks has: nothing is sent.",
-  create: "A family the portal saved first stays in the portal, unlinked: once a roster read shows whether QuickBooks made it, press “Create in QuickBooks and link” on its page (a name QuickBooks has already is met with another). Any other new customer QuickBooks made has no record in the portal: look for it in QuickBooks.",
 };

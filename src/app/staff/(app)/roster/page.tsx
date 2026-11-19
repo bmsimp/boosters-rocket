@@ -99,7 +99,8 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
         </section>
       )}
 
-      {roster && page.shape && mayAdd && <CreateBox shape={page.shape} rosterTag={rosterTag} goes={goes}
+      {/* Not while the cache names no company (read before the portal recorded it): addFamily() refuses there. */}
+      {roster && page.shape && mayAdd && rosterTag !== "none" && <CreateBox shape={page.shape} rosterTag={rosterTag} goes={goes}
         memberTypes={page.shape.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
       {roster && page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
 

@@ -12,8 +12,9 @@ import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, qboConnection, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { addFamily, changeInPortal, createInQuickBooksAndLink, FAMILY_WAITING, WRITE_COPY } from "@/lib/roster/writes";
-import { CUSTOMER_HAS_FAMILY, runWriteQueue } from "@/lib/roster/queue";
+import { addFamily, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, FAMILY_WAITING, studentsBeingMade, WRITE_COPY } from "@/lib/roster/writes";
+import { CUSTOMER_HAS_FAMILY, FAMILY_HAS_CUSTOMER, giveUp, runWriteQueue } from "@/lib/roster/queue";
+import { ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { customersWithNoFamily } from "@/lib/roster/no-family";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { addGuardian } from "@/lib/parents/guardians";
@@ -173,6 +174,8 @@ describe("adding a family: the portal's own record first, sent to QuickBooks onl
     stub.dropApi = true;
     await addFamily({ role: "family", name: "Oak Family", typeQboId: null }, tag, linker());
     stub.dropApi = false;
+    expect(posts()).toHaveLength(1); // the create itself, dropped: nothing after it may send anything
+    stub.calls.length = 0;
     const oak = String((await familyNamed("Oak Family"))!.id);
     for (const ask of [{ op: "add_student" as const, familyId: oak, name: "Ash Oak" }, { op: "rename_family" as const, familyId: oak, name: "Oak Household" }, { op: "deactivate_family" as const, familyId: oak }]) {
       expect(await changeInPortal(ask, tag, op), ask.op).toEqual({ ok: false, errors: [FAMILY_WAITING] });
@@ -180,6 +183,52 @@ describe("adding a family: the portal's own record first, sent to QuickBooks onl
     expect((await createInQuickBooksAndLink(oak, null, tag, op)).result).toEqual({ ok: false, errors: [FAMILY_WAITING] });
     expect(await addGuardian((await familyNamed("Oak Family"))!.id, { name: "Ann Oak", email: "ann@example.com" }, op)).toEqual({ ok: false, reason: "waiting" });
     expect(posts()).toEqual([]);
+  });
+
+  it("while a family's create is on its way to QuickBooks, nothing else is changed on it, so no second customer can be made", async () => {
+    // At the moment QuickBooks receives the create, before it answers: a rename, a make-inactive, a second "Create in
+    // QuickBooks and link" and a guardian are each tried, as staff on another page could.
+    const tried: unknown[] = [];
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      stub.onApiRequest = null;
+      const oak = (await familyNamed("Oak Family"))!.id;
+      tried.push(await changeInPortal({ op: "rename_family", familyId: String(oak), name: "Oak Household" }, tag, op));
+      tried.push(await changeInPortal({ op: "deactivate_family", familyId: String(oak) }, tag, op));
+      tried.push((await createInQuickBooksAndLink(String(oak), null, tag, op)).result);
+      tried.push(await addGuardian(oak, { name: "Ann Oak", email: "ann@example.com" }, op));
+    };
+    expect(await addFamily({ role: "family", name: "Oak Family", typeQboId: null }, tag, linker())).toMatchObject({ ok: true, message: expect.stringContaining("linked to its new customer") });
+    expect(tried).toEqual([{ ok: false, errors: [FAMILY_SENDING] }, { ok: false, errors: [FAMILY_SENDING] }, { ok: false, errors: [FAMILY_SENDING] }, { ok: false, reason: "making" }]);
+    expect(posts()).toHaveLength(1);
+    expect(stubNamed("Oak Family")).toHaveLength(1);
+    const oak = (await familyNamed("Oak Family"))!;
+    expect(oak).toMatchObject({ active: true });
+    expect(await linkOfFamily(oak.id)).toMatchObject({ customerId: stubNamed("Oak Family")[0]!.Id });
+    // Once the answer is in, the family is changed as any linked one is.
+    expect(await changeInPortal({ op: "rename_family", familyId: String(oak.id), name: "Oak Household" }, tag, op)).toMatchObject({ ok: false, errors: [expect.stringContaining("linked to QuickBooks")] });
+  });
+
+  it("a waiting create found made while its family was linked to another customer meanwhile makes no second link, and is stuck with its own code", async () => {
+    const oak = await unlinkedFamily("Oak Family");
+    stub.customers.push({ Id: "77", SyncToken: "0", DisplayName: "Oak Family", Active: true, CustomerTypeRef: { value: "1" } });
+    const item = await seedQueued({ op: "create", role: "family", name: "Oak Family", typeQboId: "1", familyQboId: null, email: null },
+      { familyId: oak, sent: true, code: "unreachable", lastTriedAt: new Date(), nextTryAt: ago(1000) });
+    await db.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: "78", familyId: oak, origin: "confirmed", linkedBy: op.staffUserId });
+    expect(await runWriteQueue()).toMatchObject({ ok: true });
+    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", lastCode: FAMILY_HAS_CUSTOMER, resultQboId: "77" });
+    expect((await db.select().from(accountingLink).where(eq(accountingLink.familyId, oak))).map((l) => l.customerId)).toEqual(["78"]);
+    expect((await familyLinks()).filter((l) => l.customerId === "77")).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("refuses, saving nothing, on a page shown another company's roster", async () => {
+    const before = (await db.select().from(family)).length;
+    expect(await addFamily({ role: "family", name: "Oak Family", typeQboId: null }, "an-old-tag", linker())).toEqual({ ok: false, errors: [ROSTER_MOVED] });
+    const oak = await unlinkedFamily("Ash Family");
+    expect(await changeInPortal({ op: "rename_family", familyId: String(oak), name: "Ash Household" }, "an-old-tag", op)).toEqual({ ok: false, errors: [ROSTER_MOVED] });
+    expect(await db.select().from(family)).toHaveLength(before + 1);
+    expect(stub.apiCalls()).toEqual([]);
   });
 
   it("flat books: a holder's member is made of the type chosen and linked; without the permission, no type is asked", async () => {
@@ -249,6 +298,67 @@ describe("Create in QuickBooks and link", () => {
     await runWriteQueue();
     expect(await linkOfFamily(oak)).toMatchObject({ customerId: stubNamed("Oak Family")[0]!.Id });
     expect(posts()).toHaveLength(1);
+  });
+
+  it("a student's lost answer is held filed under the family and that student, left out of what wasn't made, and linked to the student's record by the found-done path", async () => {
+    const oak = await unlinkedFamily("Oak Family", ["Amy Oak"]);
+    const [amy] = await studentsOf(oak);
+    // The family's create is answered; the student's is made, and its answer lost.
+    let creates = 0;
+    stub.onApiRequest = (call) => { if (call.method === "POST" && ++creates === 2) stub.loseUpdateAnswer = true; };
+    const r = await createInQuickBooksAndLink(String(oak), null, tag, op);
+    stub.onApiRequest = null; stub.loseUpdateAnswer = false;
+    expect(r.result).toMatchObject({ ok: false, errors: expect.arrayContaining(["Made in QuickBooks and linked: Oak Family.", expect.stringContaining("The portal can't tell whether QuickBooks made Amy Oak")]) });
+    expect((r.result as { errors: string[] }).errors.join(" ")).not.toContain("Not made in QuickBooks yet");
+    expect((await auditsOf("roster.family.created_in_quickbooks"))[0]!.after).toMatchObject({ outcome: "stopped", notMade: [], maybe: true, stoppedAt: { kind: "student", id: String(amy!.id) } });
+    const [item] = await db.select().from(writeQueue);
+    expect(item).toMatchObject({ state: "waiting", sent: true, familyId: oak, studentId: amy!.id, request: { op: "create", role: "student", name: "Amy Oak" } });
+    // Changed nowhere meanwhile, and not offered on the family's page.
+    expect(await changeInPortal({ op: "rename_student", studentId: String(amy!.id), name: "Amy Oakes" }, tag, op)).toEqual({ ok: false, errors: [expect.stringContaining("Making this student in QuickBooks is still waiting on the queue")] });
+    expect(await studentsBeingMade([amy!.id])).toEqual(new Set([String(amy!.id)]));
+    await db.update(writeQueue).set({ nextTryAt: ago(1000) });
+    await runWriteQueue();
+    expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
+    expect(await linkOfStudent(amy!.id)).toMatchObject({ customerId: stubNamed("Amy Oak")[0]!.Id, origin: "created" });
+    expect(await studentsOf(oak)).toHaveLength(1);
+    expect(posts()).toHaveLength(2);
+  });
+
+  it("a student's name QuickBooks' names hold (a waiting rename's) stops the run before it is sent, with Name (2) offered", async () => {
+    const oak = await unlinkedFamily("Oak Family", ["Sam Oak"]);
+    const [sam] = await studentsOf(oak);
+    const rivera = stub.customers.find((c) => c.DisplayName === "Rivera Family")!;
+    await seedQueued({ op: "rename", role: "family", qboId: rivera.Id as string, syncToken: String(rivera.SyncToken), name: "Sam Oak", was: "Rivera Family" }, { nextTryAt: null });
+    const r = await createInQuickBooksAndLink(String(oak), null, tag, op);
+    expect(r.result).toEqual({ ok: false, errors: ["Made in QuickBooks and linked: Oak Family.",
+      "“Sam Oak” is already a name in QuickBooks, and every name there must be different, so Sam Oak wasn't made there. Rename them on this page, for instance to “Sam Oak (2)”, then press “Create in QuickBooks and link” again.",
+      "Not made in QuickBooks yet: Sam Oak.", "Press “Create in QuickBooks and link” again to carry on with whatever is still unlinked."] });
+    expect(sent().map((b) => b.DisplayName)).toEqual(["Oak Family"]);
+    expect((await auditsOf("roster.family.created_in_quickbooks"))[0]!.after).toMatchObject({ code: "name_taken", notMade: [String(sam!.id)] });
+  });
+
+  it("adds nobody under a linked family's customer with a change of its own waiting", async () => {
+    const oak = await unlinkedFamily("Oak Family", ["Amy Oak"]);
+    stub.otherNames = ["Amy Oak"];
+    await createInQuickBooksAndLink(String(oak), null, tag, op);
+    stub.otherNames = [];
+    const customer = (await linkOfFamily(oak))!.customerId;
+    await seedQueued({ op: "rename", role: "family", qboId: customer, syncToken: "0", name: "Oak Household", was: "Oak Family" }, { nextTryAt: null });
+    stub.calls.length = 0;
+    expect((await createInQuickBooksAndLink(String(oak), null, tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(posts()).toEqual([]);
+  });
+
+  it("giving up a student's create held as possibly made says the student stays in the portal, unlinked", async () => {
+    const oak = await unlinkedFamily("Oak Family", ["Amy Oak"]);
+    let creates = 0;
+    stub.onApiRequest = (call) => { if (call.method === "POST" && ++creates === 2) stub.loseUpdateAnswer = true; };
+    await createInQuickBooksAndLink(String(oak), null, tag, op);
+    stub.onApiRequest = null; stub.loseUpdateAnswer = false;
+    const [item] = await db.select().from(writeQueue);
+    const r = await giveUp(item!.id, "Checking it in QuickBooks", op);
+    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("The student the portal saved first stays in the portal, unlinked") });
+    expect((r as { message: string }).message).not.toContain("family the portal saved first");
   });
 
   it("QuickBooks too busy to take it (429): nothing queued, try again", async () => {
@@ -321,6 +431,12 @@ describe("an unlinked family's own changes are saved in the portal only, and aud
     // Inactive now: refused.
     expect(await changeInPortal({ op: "rename_family", familyId: String(oak), name: "Oak Again" }, tag, op)).toEqual({ ok: false, errors: ["That is inactive in the portal, so nothing was changed."] });
     expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("a guardian is refused, not added with no customer, while QuickBooks is connected to another company and the portal can't tell a family's link", async () => {
+    const rivera = (await familyNamed("Rivera Family"))!.id;
+    await db.update(qboConnection).set({ realmId: "9999" });
+    expect(await addGuardian(rivera, { name: "Ann Rivera", email: "ann.rivera@example.com" }, op)).toEqual({ ok: false, reason: "other_company" });
   });
 
   it("refuses a linked family or student, which go to QuickBooks first, and a name another family holds", async () => {

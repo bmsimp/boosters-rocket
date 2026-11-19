@@ -28,7 +28,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { family, guardian, parent, parentAuthUser } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/email";
-import { customerOfFamily } from "@/lib/families/links";
+import { familyLinkState } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { recordNameWords } from "@/lib/families/words";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
@@ -102,16 +102,22 @@ async function oweWelcome(tx: Tx, p: Person): Promise<{ welcomeOwed?: true }> {
 
 /**
  * Why a family can't take a guardian now, or the customer its own family link names when it can (null for a family
- * with no link, which takes guardians since stage 3's slice 9d): its record, active, and no create of its own waiting
- * or stuck on the queue (nothing else is changed on a family while its customer is still being made).
+ * with no link, which takes guardians since stage 3's slice 9d): its record, active, no create of its own waiting or
+ * stuck on the queue (`waiting`) or being sent at this moment (`making`: nothing else is changed on a family while its
+ * customer is still being made), and whether it has a link known (`other_company` while the portal can't tell, as
+ * when QuickBooks is connected to another company than the roster's: a row made then would name no customer for a
+ * family that has one, and is never filled in later).
  */
-async function familyRefusal(tx: Tx, familyId: AppFamilyId | null): Promise<{ refusal: "no_family" | "inactive" | "waiting" } | { customer: string | null }> {
+async function familyRefusal(tx: Tx, familyId: AppFamilyId | null): Promise<{ refusal: "no_family" | "inactive" | "waiting" | "making" | "other_company" } | { customer: string | null }> {
   if (familyId === null) return { refusal: "no_family" };
   const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, familyId));
   if (!f) return { refusal: "no_family" };
   if (!f.active) return { refusal: "inactive" };
-  if (await familyCreateWaiting(tx, familyId)) return { refusal: "waiting" };
-  return { customer: await customerOfFamily(familyId, tx) };
+  const making = await familyCreateWaiting(tx, familyId);
+  if (making) return { refusal: making === "sending" ? "making" : "waiting" };
+  const link = await familyLinkState(familyId, tx);
+  if (link.state === "unknown") return { refusal: "other_company" };
+  return { customer: link.state === "linked" ? link.customerId : null };
 }
 
 /** The names of the families a person is an open guardian of now, by name: what staff are shown before an add reuses them. */
@@ -139,7 +145,7 @@ export type AddGuardianResult =
   | { ok: true; outcome: "added" | "reinstated"; person: "new" | "existing"; name: string; guardianId: string; parentId: string }
   /** The address belongs to a person already: nothing was written; staff are asked whether this is them. */
   | { ok: false; reason: "same_person"; person: { id: string; name: string; families: string[] } }
-  | { ok: false; reason: "invalid_name" | "invalid_email" | "no_family" | "inactive" | "waiting" | "blocked" | "already" | "busy" };
+  | { ok: false; reason: "invalid_name" | "invalid_email" | "no_family" | "inactive" | "waiting" | "making" | "other_company" | "blocked" | "already" | "busy" };
 
 /**
  * Adds a guardian to a family: one address is one person (spec section 6: "one guardian simply belongs to both"). Under
@@ -156,8 +162,8 @@ export type AddGuardianResult =
  * company (its ids are another company's), that row taken for the new membership, as the old unique (customer, person)
  * index needs. The person's row is found by its family record (`guardian_family_id_parent_uq`), and for a linked family
  * by its customer too. A welcome is owed by oweWelcome()'s rule. Refused, changing nothing: a name or address the
- * portal can't take, a family record that isn't there or is inactive, one whose own create is waiting on the queue, a
- * blocked person, one with an open row in the family already, and a roster read holding its lock past the wait
+ * portal can't take, a family record that isn't there or is inactive, one whose own create is waiting on the queue or
+ * being sent (`making`), one whose link the portal can't tell (`other_company`: familyRefusal()), a blocked person, one with an open row in the family already, and a roster read holding its lock past the wait
  * (`busy`). Emails nobody: the welcome job sends the welcome.
  */
 export async function addGuardian(familyId: AppFamilyId, input: { name: string; email: string; samePerson?: string | null }, o: StaffOp, w: Waits = {}): Promise<AddGuardianResult> {
@@ -254,7 +260,7 @@ export async function removeGuardian(guardianId: string, rawNote: string, o: Sta
   });
 }
 
-export type ReinstateGuardianResult = { ok: true } | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "other_customer" | "busy" };
+export type ReinstateGuardianResult = { ok: true } | { ok: false; reason: "not_found" | "already_open" | "previous_company" | "blocked" | "no_family" | "inactive" | "waiting" | "making" | "other_company" | "other_customer" | "busy" };
 
 /**
  * Opens a closed membership again: the same row, as it was before it closed (`status_before_disable`, else invited),
@@ -262,8 +268,8 @@ export type ReinstateGuardianResult = { ok: true } | { ok: false; reason: "not_f
  * family and is offered nothing. Audited `parent.access.granted`, `reinstated`; a welcome is owed by oweWelcome()'s
  * rule. A family with no link takes it back too (stage 3's slice 9d): the row names no customer, or the family's own,
  * and one that names another customer (`other_customer`) is not this family's to reopen. Refused for a blocked person,
- * a family record that is gone or inactive, one whose own create is waiting on the queue, and a roster read holding its
- * lock past the wait.
+ * a family record that is gone or inactive, one whose own create is waiting on the queue or being sent, one whose link
+ * the portal can't tell (familyRefusal()), and a roster read holding its lock past the wait.
  */
 export async function reinstateGuardian(guardianId: string, o: StaffOp, w: Waits = {}): Promise<ReinstateGuardianResult> {
   return db.transaction(async (tx): Promise<ReinstateGuardianResult> => {

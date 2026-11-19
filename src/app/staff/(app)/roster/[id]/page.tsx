@@ -7,7 +7,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { loadRosterPage, familyEntry, rosterFamilies, type RecordStudent } from "@/lib/roster/queries";
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { familyCover, versionsOf } from "@/lib/roster/writes";
+import { familyCover, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
 import { loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familySignins, type FamilySignin } from "@/lib/parents/directory";
@@ -139,13 +139,17 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null && fam.active;
   // The family's own create waiting or stuck on the queue (stage 3's slice 9d): nothing else is changed on it meanwhile.
   const making = !fam.linked && waiting.some((w) => w.write.op === "create" && (w.write.role === "family" || w.write.role === "member"));
-  // A family with no link, and students with none, are changed in the portal only, connected or not (stage 3's slice 9d).
-  const changesHere = can(ctx.effective, "Roster.Family.ReadWrite") && page.shape !== null && fam.active && !making;
-  const hereStudents = fam.students.filter((s) => s.active && !s.linked);
+  // A family with no link, and students with none, are changed in the portal only, connected or not (stage 3's slice 9d),
+  // on a roster of the portal's company (changeInPortal() refuses one whose cache names none).
+  const changesHere = can(ctx.effective, "Roster.Family.ReadWrite") && page.shape !== null && fam.active && !making && rosterTag !== "none";
+  // A student whose own create is waiting or stuck on the queue is changed nowhere meanwhile, and not made again.
+  const beingMade = await studentsBeingMade(fam.students.filter((s) => s.active && !s.linked).map((s) => s.id));
+  const hereStudents = fam.students.filter((s) => s.active && !s.linked && !beingMade.has(String(s.id)));
   const studentType = page.shape?.kind === "layered" && page.shape.studentTypeId !== null;
   // "Create in QuickBooks and link": for an active family with no link, or with active students with none (where the
-  // books have a student type), to staff who may change families and link them to accounting.
-  const toMake = !fam.linked || (studentType && hereStudents.length > 0 && customer !== null);
+  // books have a student type) under a customer QuickBooks holds as an active family, to staff who may change families
+  // and link them to accounting (createInQuickBooksAndLink() refuses one under an inactive customer).
+  const toMake = !fam.linked || (studentType && hereStudents.length > 0 && customer !== null && customer.active);
   const inQuickBooks: Family | null = customer === null ? null
     : { customer, students: fam.students.flatMap((s) => (s.customer ? [s.customer] : [])), parents: fam.parents };
   // Students whose record is inactive are offered nothing that would send; one QuickBooks has under another family is
@@ -177,9 +181,10 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       ) : (
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />
       )}
-      {/* Buy-outs for any family or member, active or not: one made inactive may still have one to close. */}
+      {/* Buy-outs for any family or member, active or not: one made inactive may still have one to close. What it owes
+          only for a family linked to an active family customer: its page stands for no other (loadFamilyBalance()). */}
       <Elsewhere familyId={familyId} buyouts
-        money={entry.kind === "family" && fam.active && can(ctx.effective, "Finance.Balance.Read")}
+        money={entry.kind === "family" && fam.active && customer !== null && customer.active && can(ctx.effective, "Finance.Balance.Read")}
         season={entry.kind === "family" && fam.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       <Waiting items={waiting} />

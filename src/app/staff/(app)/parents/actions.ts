@@ -61,12 +61,16 @@ const NAME_FIELD_MAX = 200, EMAIL_FIELD_MAX = 320, NOTE_MAX = 2000;
 // changes nothing and says so.
 const BUSY_WORDS = "The roster is being read from QuickBooks just now, so nothing was changed. Try again in a minute.";
 const WAITING_WORDS = "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
+const MAKING_WORDS = "This family is being made in QuickBooks at this moment, so nobody can be added to it. Try again in a minute.";
+const OTHER_COMPANY_WORDS = "QuickBooks is connected to a different company from the one this roster was read from, so the portal can't tell which customer this family is linked to, and nobody was added. An Admin can sort that out under QuickBooks.";
 const ADD_REFUSED = {
   invalid_name: "Give the guardian's name, up to 100 characters.",
   invalid_email: "That isn't an email address the portal can send a sign-in code to. Check it and try again.",
   no_family: NOT_FROM_PAGE.errors[0]!,
   inactive: "This family is inactive in the portal, so nobody can be added to it.",
   waiting: WAITING_WORDS,
+  making: MAKING_WORDS,
+  other_company: OTHER_COMPANY_WORDS,
   blocked: "The person with this address is blocked. Unblock them on their page first.",
   already: "The person with this address is already one of this family's guardians.",
   busy: BUSY_WORDS,
@@ -115,6 +119,8 @@ const REINSTATE_REFUSED = {
   no_family: "This sign-in isn't in a family the portal holds, so it can't be brought back.",
   inactive: "This family is inactive in the portal, so nobody can sign in to it.",
   waiting: WAITING_WORDS.replace("nobody can be added to it for now", "this sign-in can't be brought back for now"),
+  making: MAKING_WORDS.replace("nobody can be added to it", "this sign-in can't be brought back just now"),
+  other_company: OTHER_COMPANY_WORDS.replace("and nobody was added", "and this sign-in wasn't brought back"),
   other_customer: "This sign-in was made for a different customer in QuickBooks than this family's own, so it can't be brought back here.",
   busy: BUSY_WORDS,
 } as const;
