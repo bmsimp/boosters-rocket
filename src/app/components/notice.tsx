@@ -51,10 +51,15 @@ export function Notice({ tone, title, titleId, level = 2, live, className, child
   );
 }
 
-/** What a server action answered, as a notice: done with its message, or a problem with its sentences. */
-export function ActionOutcome({ state }: { state: { ok: true; message: string } | { ok: false; errors: string[] } | null }) {
+/**
+ * What a server action answered, as a notice: done with its message, or a problem with its sentences. An answer that
+ * went through but isn't finished says so in its own `status` (a change saved in the portal first: `waiting` for
+ * QuickBooks, or the portal can't tell yet, is information; `attention`, refused, held back or given up meanwhile,
+ * needs attention); an answer with none is done, as every other page's is.
+ */
+export function ActionOutcome({ state }: { state: { ok: true; message: string; status?: "waiting" | "attention" } | { ok: false; errors: string[] } | null }) {
   if (!state) return null;
-  if (state.ok) return <Notice tone="done">{state.message}</Notice>;
+  if (state.ok) return <Notice tone={state.status === "attention" ? "warning" : state.status === "waiting" ? "info" : "done"}>{state.message}</Notice>;
   return (
     <Notice tone="problem">
       {state.errors.length === 1 ? state.errors[0] : <ul className="notice-list">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}

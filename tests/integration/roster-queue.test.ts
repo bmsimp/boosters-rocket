@@ -107,15 +107,20 @@ describe("a write that QuickBooks didn't act on is sent again when its time come
     expect(await queueItem(tired.id)).toMatchObject({ state: "stuck", tries: 8, nextTryAt: null });
     expect(await queueItem(old.id)).toMatchObject({ state: "stuck", tries: 3 });
     expect(await auditsOf("roster.write.stuck")).toHaveLength(2);
-    expect(await queueCounts()).toEqual({ waiting: 0, stuck: 2 });
+    expect(await queueCounts()).toEqual({ waiting: 0, stuck: 2, refused: 0 });
   });
 
-  it("is stuck when QuickBooks now refuses it outright, with nothing changed", async () => {
+  it("a rename saved in the portal first that QuickBooks now refuses outright is kept as refused (stage 3's slice 9e), with nothing changed there", async () => {
     const item = await seedQueued(RENAME, { sent: false });
     stub.updateFault = "6000";
     await runWriteQueue();
-    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", lastCode: "fault_6000" });
+    expect(await queueItem(item.id)).toMatchObject({ state: "refused", lastCode: "fault_6000", nextTryAt: null });
+    expect((await auditsOf("roster.write.kept_refused"))[0]).toMatchObject({ targetId: item.id, after: { state: "refused", code: "fault_6000" } });
     expect(await cached("12")).toMatchObject({ displayName: "Leo Rivera" });
+    // A parent's rename keeps today's rules: stuck.
+    const parent = await seedQueued({ op: "rename", role: "parent", qboId: "21", syncToken: "0", name: "Mei L. Chen", was: "Mei Chen" }, { sent: false });
+    await runWriteQueue();
+    expect(await queueItem(parent.id)).toMatchObject({ state: "stuck", lastCode: "fault_6000" });
   });
 });
 
@@ -139,13 +144,25 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(await queueItem(item.id)).toMatchObject({ state: "done", resultQboId: "77" });
   });
 
-  it("an update whose record moved on since is stuck: nothing is overwritten", async () => {
-    inStub("12").DisplayName = "Leo R. Rivera"; inStub("12").SyncToken = "2";   // someone else's change in QuickBooks
+  it("an update whose record moved on since is never sent over it: a parent's is stuck, a rename saved first is read live and kept refused when the name changed", async () => {
+    inStub("21").DisplayName = "Mei R. Chen"; inStub("21").SyncToken = "2";   // someone else's change in QuickBooks
+    const parent = await seedQueued({ op: "rename", role: "parent", qboId: "21", syncToken: "0", name: "Mei L. Chen", was: "Mei Chen" }, { sent: true, code: "http_500" });
+    inStub("12").DisplayName = "Leo R. Rivera"; inStub("12").SyncToken = "2";
     const item = await seedQueued(RENAME, { sent: true, code: "http_500" });
     await runWriteQueue();
     expect(posts()).toEqual([]);
     expect(inStub("12").DisplayName).toBe("Leo R. Rivera");
-    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", lastCode: "moved_on" });
+    expect(await queueItem(parent.id)).toMatchObject({ state: "stuck", lastCode: "moved_on" });
+    expect(await queueItem(item.id)).toMatchObject({ state: "refused", lastCode: "moved_on", sent: true });
+  });
+
+  it("a rename saved first whose record moved on for another reason (its name as the portal held it) is sent once with the version just read", async () => {
+    inStub("12").SyncToken = "2"; // the version raised in QuickBooks by something other than the name
+    const item = await seedQueued(RENAME, { sent: true, code: "http_500" });
+    await runWriteQueue();
+    expect(posts().map((c) => JSON.parse(c.body))).toEqual([{ Id: "12", SyncToken: "2", sparse: true, DisplayName: "Leon Rivera" }]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "done" });
+    expect((await auditsOf("roster.customer.rename"))[0]!.after).toMatchObject({ queueId: item.id, resent: "stale", fieldAsHeld: true });
   });
 
   it("one that didn't go through is sent again once a roster read shows it isn't there", async () => {
@@ -174,11 +191,11 @@ describe("a write QuickBooks may already have made is never simply sent again (v
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
   });
 
-  it("stays one that may have been made when QuickBooks refuses its resend outright", async () => {
+  it("stays one that may have been made when QuickBooks refuses its resend outright: a rename saved first is kept as refused", async () => {
     const item = await seedQueued(RENAME, { sent: true, code: "timeout" });
     stub.updateFault = "6000";
     await runWriteQueue();
-    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", sent: true, lastCode: "fault_6000" });
+    expect(await queueItem(item.id)).toMatchObject({ state: "refused", sent: true, lastCode: "fault_6000" });
   });
 
   it("waits for a roster read that works: while QuickBooks can't be read, nothing is sent", async () => {

@@ -154,7 +154,10 @@ describe("migrations 0034 and 0035: the write queue names the app's own records 
   });
 
   describe("once every item of the roster's company has its records", () => {
-    beforeAll(async () => { await migrateWith(path.resolve("drizzle")); });
+    // Up to 0040, the last before 0041 (stage 3's slice 9e), which refuses while a rename of a family, member or student,
+    // or a student's create, is waiting or stuck for the roster's company, as this file's renames and student create
+    // are: that refusal is 0041's own test's (migrate-link-synced-token).
+    beforeAll(async () => { await migrateWith(migrationsUpTo(40)); });
 
     it("files each item under its family's own family record, and names a student's change's own student record", async () => {
       const rows = new Map((await q(async (pg) => [...await pg`SELECT id, family_id, student_id FROM write_queue`])).map((r) => [r.id as string, r]));
