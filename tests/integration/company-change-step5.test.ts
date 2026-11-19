@@ -136,8 +136,9 @@ describe("connecting a different company after step 5", () => {
     const { a } = await seedTwoFamilies();
     const requestId = a.forms!.ids.signed;
     const familyId = a.identity.familyId;
-    let commit!: () => void;
+    let commit!: () => void, inserted!: () => void;
     const held = new Promise<void>((resolve) => { commit = resolve; });
+    const ready = new Promise<void>((resolve) => { inserted = resolve; });
     // As storeEvidence() does (stage 3's slice 9d): the roster lock held shared, the request locked, the evidence
     // inserted, the commit still to come. The clear, which holds the roster lock exclusively, waits for it.
     const storing = db.transaction(async (tx) => {
@@ -145,8 +146,11 @@ describe("connecting a different company after step 5", () => {
       await tx.select().from(signatureRequest).where(eq(signatureRequest.id, requestId)).for("update");
       await tx.insert(signedFormEvidence).values({ requestId, realmId: "1111", requirementId: null, familyQboId: a.spec.family.qboId, subjectQboId: a.spec.family.qboId,
         subjectKind: "family", familyId, formTitle: "In flight", envelopeId: "envelope_inflight", signers: [], consents: [], originals: [] });
+      inserted();
       await held;
     });
+    // The store holds its locks before the clear starts, so the lock the clear waits for is the store's.
+    await ready;
     const clearing = clearRosterOfOtherCompany("2222", admin);
     await untilALockIsAwaited();
     commit();

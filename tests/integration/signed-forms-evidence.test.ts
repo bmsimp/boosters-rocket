@@ -246,13 +246,17 @@ describe("evidence of a family or student with no QuickBooks link, and the one s
     await unlinkFamily(familyId);
     // A link write, as "Create in QuickBooks and link" makes one (stage 3's slice 9d): under the roster lock held
     // exclusively. The store waits for it, then reads the link in its own transaction.
-    let commit!: () => void;
+    let commit!: () => void, locked!: () => void;
     const held = new Promise<void>((resolve) => { commit = resolve; });
+    const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
     const linking = db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      locked();
       await tx.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: FAMILY_A.family.qboId, familyId, origin: "created" });
       await held;
     });
+    // The link's writer holds the lock before the store starts, so the lock the store waits for is that one.
+    await lockTaken;
     const storing = runEvidenceJob();
     await untilALockIsAwaited();
     commit();
