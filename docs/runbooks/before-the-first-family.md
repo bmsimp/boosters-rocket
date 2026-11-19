@@ -32,8 +32,7 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    **Pass:** `main` on GitHub shows the merge. **If not:** resolve what GitHub says blocks it, then merge.
 3. **Get the host's env file ready before the deploy.** On the host, `~/booster-rocket/.env.poc` needs an `APP_URL`
    line with the portal's address (the new deploy script refuses without one), and the user who deploys must be able to write
-   to `~/booster-rocket-backups` (or set `BR_BACKUP_DIR` to a folder they can). If the proof of concept's seed script
-   is still wanted there, add the line `BR_PROOF_OF_CONCEPT=yes`.
+   to `~/booster-rocket-backups` (or set `BR_BACKUP_DIR` to a folder they can).
    **Pass:** `grep APP_URL ~/booster-rocket/.env.poc` prints the line, and `ls -ld ~/booster-rocket-backups` shows the
    deploying user as owner (or the folder doesn't exist yet). **If not:** add the line; `mkdir ~/booster-rocket-backups`.
 4. **Deploy** as section 8 of [the proof of concept's runbook](poc-linuxdev.md#8-deploy) says, but first bring the
