@@ -118,9 +118,14 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
     .where(and(notInArray(rateLimitEvent.kind, kinds), lt(rateLimitEvent.at, new Date(now.getTime() - longest)))).returning({ id: rateLimitEvent.id }));
 
   const emailChanges = n(await tx.delete(parentEmailChange).where(lt(parentEmailChange.expiresAt, now)).returning({ id: parentEmailChange.id }));
+  // A family's figures go only when its family customer (the customer its family record's own link names, in the
+  // roster's company) is gone from the roster cache altogether: never because the family is inactive, since an inactive
+  // customer is still in the cache. Skipped while the cache is empty.
   const money = n(await tx.delete(familyMoney)
-    .where(sql`exists (select 1 from qbo_customer) and not exists (select 1 from qbo_customer c where c.qbo_id = ${familyMoney.familyQboId})`)
-    .returning({ id: familyMoney.familyQboId }));
+    .where(sql`exists (select 1 from qbo_customer) and not exists (select 1 from accounting_link l join qbo_customer c on c.qbo_id = l.customer_id
+      where l.family_id = ${familyMoney.familyId} and l.system = 'quickbooks'
+        and l.realm_id = (select s.value->>'realmId' from setting s where s.key = 'roster.source'))`)
+    .returning({ id: familyMoney.familyId }));
 
   const cutoff = new Date(now.getTime() - JOB_HISTORY_DAYS * 86_400_000);
   const jobRuns = n(await tx.delete(jobRun).where(and(lt(jobRun.startedAt, cutoff),

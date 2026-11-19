@@ -9,16 +9,17 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { auditLog, family, familyMoney, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { loadFamilyMoney, MAX_LIVE_READS, RETRY_AFTER_FAILURE_MS } from "@/lib/money/family-money";
 import { saveShape } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { calendarDayIn } from "@/lib/settings/club";
 import { resetDb } from "../helpers/db";
-import { ageMoney, connectCompany, invoiceQueries, moneyRow, setFreshSeconds, stubInvoice as inv } from "../helpers/money";
+import { syncAppRecords } from "../helpers/app-records";
+import { ageMoney, connectCompany, familyRecordOf, invoiceQueries, moneyRow, setFreshSeconds, stubInvoice as inv } from "../helpers/money";
 import { FAMILY_A, MONEY_REALM, seedFamilyMoney } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { addToCache, fam, par, seedShape, stu } from "../helpers/roster-cache";
+import { addToCache, fam, moveInCache, par, seedShape, stu } from "../helpers/roster-cache";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -108,14 +109,16 @@ describe("whose invoices are a family's (v1 spec §8.2)", () => {
     ["a customer the shape doesn't call a family", "12"],
     ["a customer of a type outside the shape", "15"],
     ["an id that isn't in the cache", "999"],
-  ])("shows nothing, and asks QuickBooks nothing, for %s", async (_what, id) => {
+  ])("shows nothing, asks QuickBooks nothing and writes nothing, for %s", async (_what, id) => {
     await twoFamilies();
     await addToCache([{ qboId: "15", displayName: "A Sponsor", typeQboId: "M" }]);
     await connectCompany(stub);
     stub.invoices = [inv("1", "12"), inv("2", "15"), inv("3", "999")];
     expect((await loadFamilyMoney(id)).figures).toBeNull();
     expect(stub.calls).toHaveLength(0);
-    expect((await moneyRow(id))?.failedCode).toBe("not_a_family");
+    // It has no family record of the app's own (the student has a student record only), so there is no row to stamp.
+    expect(await familyRecordOf(id)).toBeNull();
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
   });
 
   it("never sends an id that isn't digits to QuickBooks: such a family only ever shows what is stored", async () => {
@@ -189,7 +192,7 @@ describe("reading and keeping (v1 spec §8.2: live, with a short cache)", () => 
     stub.onApiRequest = async (call) => {
       if (!call.path.endsWith("/query")) return;
       stub.onApiRequest = null;
-      await db.update(familyMoney).set({ staleAt: new Date() }).where(eq(familyMoney.familyQboId, "10"));
+      await db.update(familyMoney).set({ staleAt: new Date() }).where(eq(familyMoney.familyId, (await familyRecordOf("10"))!));
     };
     expect(numbers((await loadFamilyMoney("10")).figures!.open)).toEqual(["INV-1"]);
     const row = (await moneyRow("10"))!;
@@ -370,10 +373,12 @@ describe("two requests for the same family never both go to QuickBooks", () => {
     const asked = stub.calls.length;
     let release!: () => void;
     const held = new Promise<void>((r) => { release = r; });
-    // Another session takes the family's lock and keeps it, as a second copy of the portal would while it reads.
+    // Another session takes the family's lock and keeps it, as a second copy of the portal would while it reads (or the
+    // worker's run, which keys it the same: by the app family's own id).
     let locked!: () => void;
     const taken = new Promise<void>((r) => { locked = r; });
-    const holder = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(7461002, hashtext('10'))`); locked(); await held; });
+    const familyId = String(await familyRecordOf("10"));
+    const holder = db.transaction(async (tx) => { await tx.execute(sql`select pg_advisory_xact_lock(7461002, hashtext(${familyId}::text))`); locked(); await held; });
     await taken;
     try {
       expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: false, totalCents: 8500 }); // the old row, marked as not current
@@ -507,7 +512,7 @@ describe("stored figures are shown only while they are still this family's", () 
     stub.invoices = [inv("1", "10"), inv("2", "12", { Balance: 40 })];
     expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 12500 });
     // The roster refresh finds Leo (12) under the Chen family now, and then QuickBooks stops answering.
-    await db.update(qboCustomer).set({ parentQboId: "20" }).where(eq(qboCustomer.qboId, "12"));
+    await moveInCache(["12"], "20");
     stub.failNext = 2;
     expect((await loadFamilyMoney("10")).figures).toBeNull(); // not the row that holds Leo's invoice, read seconds ago
     expect((await moneyRow("10"))!.failedCode).toBe("http_500");
@@ -551,7 +556,28 @@ describe("stored figures are shown only while they are still this family's", () 
     const asked = stub.calls.length;
     expect(await loadFamilyMoney("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
+    // The roster read that made it inactive has not brought the records into step yet: the family record is still
+    // active, so the failed try is stamped on its row.
     expect((await moneyRow("10"))!.failedCode).toBe("not_a_family");
+  });
+
+  it("a parent of a family whose record is inactive is shown no money, and nothing is read or written for it", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    stub.invoices = [inv("1", "10")];
+    expect((await loadFamilyMoney("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
+    const [before] = await db.select().from(familyMoney);
+    // QuickBooks made the family inactive, and the roster read brought the records into step: its record is inactive.
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "10"));
+    await syncAppRecords();
+    expect((await db.select({ active: family.active }).from(family).where(eq(family.id, (await familyRecordOf("10"))!)))[0]!.active).toBe(false);
+    await ageMoney("10", 6 * MINUTE);
+    const [aged] = await db.select().from(familyMoney);
+    const asked = stub.calls.length;
+    expect(await loadFamilyMoney("10")).toEqual({ familyName: null, figures: null, today: calendarDayIn("UTC") });
+    expect(stub.calls).toHaveLength(asked);
+    expect(await db.select().from(familyMoney)).toEqual([aged]); // not even a failed try is stamped
+    expect(aged!.totalCents).toBe(before!.totalCents);
   });
 
   it("a change of membership shape forgets what every family was last seen to owe", async () => {
@@ -587,13 +613,23 @@ describe("never the wrong company", () => {
     await twoFamilies();
     expect((await loadFamilyMoney("10")).figures).toBeNull();
     expect(stub.calls).toHaveLength(0);
+    // The roster names no company, so the family has no record yet, and nothing is written.
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
+  });
+
+  it("asks nothing when the roster's company is connected no more, and stamps the failed try on the family's row", async () => {
+    await twoFamilies();
+    await connectCompany(stub);
+    await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
+    expect((await loadFamilyMoney("10")).figures).toBeNull();
+    expect(stub.calls).toHaveLength(0);
     expect((await moneyRow("10"))!.failedCode).toBe("not_connected");
   });
 
   it.each([
     ["the roster cache was read from another company than the connected one", "1111"],
     ["the roster cache doesn't say which company it was read from", null],
-  ])("refuses a live read when %s", async (_what, source) => {
+  ])("refuses a live read, and writes nothing, when %s", async (_what, source) => {
     await twoFamilies();
     await connectCompany(stub);
     if (source) await db.transaction((tx) => setRosterSource(tx, source));
@@ -601,7 +637,9 @@ describe("never the wrong company", () => {
     stub.invoices = [inv("1", "10")];
     expect((await loadFamilyMoney("10")).figures).toBeNull();
     expect(stub.calls).toHaveLength(0);
-    expect((await moneyRow("10"))!.failedCode).toBe("other_company");
+    // No link answers in either case (links.ts goes by the records' company), so the session's customer has no family
+    // record here and there is no row to stamp.
+    expect(await db.select().from(familyMoney)).toHaveLength(0);
   });
 
   it("treats a stored row from another company as absent, however fresh it is", async () => {
@@ -612,6 +650,8 @@ describe("never the wrong company", () => {
     // The same family id in another company: the cache now says it came from 2222, and QuickBooks is connected to 2222.
     await db.transaction((tx) => setRosterSource(tx, "2222"));
     await db.update(qboConnection).set({ realmId: "2222" });
+    // The roster read of that company brings the app's records into step with it: the family has a record linked there.
+    await syncAppRecords();
     stub.invoices = [inv("7", "10", { Balance: 5 })];
     const money = await loadFamilyMoney("10");
     expect(money.figures).toMatchObject({ current: true, totalCents: 500 });
@@ -635,7 +675,8 @@ describe("never the wrong company", () => {
     expect(stub.apiCalls().length).toBeGreaterThan(asked);
     await db.transaction((tx) => setRosterSource(tx, "2222"));
     expect((await loading).figures).toBeNull();
-    expect(await moneyRow("10")).toMatchObject({ readAt: null, invoices: null, failedCode: "other_company" });
+    // Stamped on the row of the family the read began with (the roster now names another company, so read it whole).
+    expect(await db.select().from(familyMoney)).toEqual([expect.objectContaining({ readAt: null, invoices: null, failedCode: "other_company" })]);
   });
 
   it("deletes every money row when a different company is connected", async () => {
@@ -676,16 +717,19 @@ describe("the cross-check against QuickBooks' own balance (v1 spec §8.3)", () =
     balanceWithJobs(250);
     expect((await loadFamilyMoney("10")).figures).toMatchObject({ totalCents: 18500, credit: false }); // higher: nothing is said to the parent
     expect(await moneyRow("10")).toMatchObject({ totalCents: 18500, balanceWithJobsCents: 25000 });
+    // The row names the app's own family (a uuid), never the family's customer.
+    const rivera = String(await familyRecordOf("10")), chen = String(await familyRecordOf("20"));
     const [first] = await audits();
-    expect(first).toMatchObject({ door: "system", actorId: null, targetType: "family", targetId: "10", after: { invoicesCents: 18500, balanceWithJobsCents: 25000, currency: "USD" } });
+    expect(first).toMatchObject({ door: "system", actorId: null, targetType: "family", targetId: rivera, after: { invoicesCents: 18500, balanceWithJobsCents: 25000, currency: "USD" } });
     await loadFamilyMoney("10");
     await loadFamilyMoney("10");
     expect(await audits()).toHaveLength(1);
     await loadFamilyMoney("20"); // another family's difference ($85.00 of invoices, a balance of zero) is its own row
-    expect((await audits()).map((a) => a.targetId)).toEqual(["10", "20"]);
+    expect((await audits()).map((a) => a.targetId).sort()).toEqual([rivera, chen].sort());
     await ageMoney("10", 25 * 60 * MINUTE); // the next day
     await loadFamilyMoney("10");
-    expect((await audits()).map((a) => a.targetId)).toEqual(["10", "20", "10"]);
+    expect((await audits()).filter((a) => a.targetId === rivera)).toHaveLength(2);
+    expect((await audits()).filter((a) => a.targetId === chen)).toHaveLength(1);
   });
 
   it("says the club may be holding a credit when QuickBooks' balance is lower than the invoices add up to", async () => {

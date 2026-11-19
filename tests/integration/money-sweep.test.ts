@@ -10,13 +10,13 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun, qboConnection, qboCustomer, qboItem, setting } from "@/lib/db/schema";
+import { auditLog, familyMoney, jobRun, qboConnection, qboCustomer, qboItem, setting } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { runMoneyAndItems } from "@/lib/jobs/money-job";
 import { askForMoneyRun, MONEY_JOB, moneyRunView, RUN_KEY, runMoneyJob, STOPS_AT_ONE_FAMILY } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { resetDb, seedStaff } from "../helpers/db";
-import { connectCompany, invoiceQueries, moneyRow, stubInvoice as inv } from "../helpers/money";
+import { connectCompany, familyRecordOf, invoiceQueries, moneyRow, stubInvoice as inv } from "../helpers/money";
 import { MONEY_REALM } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
@@ -174,6 +174,23 @@ describe("the worker's read of every family", () => {
     expect((await moneyRow("30"))!.failedAt).toBeInstanceOf(Date);
   });
 
+  it("passes over a roster family with no family record, asking QuickBooks nothing about it and stamping nothing, and never stops there", async () => {
+    await threeFamilies();
+    // A family the cache holds that the app's records have not caught up with: written to the cache by hand, with no
+    // reconcile after it (in the portal the records follow in the same transaction as every change to the cache).
+    await db.insert(qboCustomer).values({ qboId: "25", displayName: "Unrecorded Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
+    stub.customers.push(customer("25", 0));
+    for (let run = 0; run < STOPS_AT_ONE_FAMILY + 1; run++) {
+      expect(await runMoneyJob({ paceMs: 0, now: later(run * 26 * HOUR) })).toEqual({ ran: true, finished: true, ok: true });
+    }
+    expect(invoiceQueries(stub).join(" ")).not.toContain("'25'");
+    expect(await familyRecordOf("25")).toBeNull();
+    expect(await db.select().from(familyMoney)).toHaveLength(3); // the three families with records, and nothing for 25
+    const last = (await audits("money.read_all")).at(-1)!;
+    expect(last.after).toEqual({ families: 4, read: 3, couldNotRead: 1, passedOverWithNoRecord: 1 });
+    expect((await runs()).every((r) => r.outcome === "ok")).toBe(true);
+  });
+
   it("leaves the rest for the next wake when a wake's time is spent, and still writes one audit row for the run", async () => {
     await threeFamilies();
     expect(await runMoneyJob({ paceMs: 0, budgetMs: 0 })).toEqual({ ran: true, finished: false, ok: true });
@@ -299,7 +316,8 @@ describe("the cross-check, customer by customer", () => {
       { customerQboId: "11", name: "Ana Rivera", balanceCents: 0, invoicesCents: 0, currency: "USD" },
       { customerQboId: "12", name: "Leo Rivera", balanceCents: 5000, invoicesCents: 3000, currency: "USD" },
     ]);
-    expect((await audits("money.balance_mismatch")).map((r) => [r.targetId, r.after])).toEqual([["10", expect.objectContaining({
+    // The row names the app's own family, never the family's customer.
+    expect((await audits("money.balance_mismatch")).map((r) => [r.targetType, r.targetId, r.after])).toEqual([["family", String(await familyRecordOf("10")), expect.objectContaining({
       customers: [{ customerQboId: "12", balanceCents: 5000, invoicesCents: 3000, currency: "USD" }] })]]);
     await runMoneyJob({ paceMs: 0, now: later(25 * HOUR) });
     expect(await audits("money.balance_mismatch")).toHaveLength(1); // the same day: not again

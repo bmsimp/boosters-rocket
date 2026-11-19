@@ -7,7 +7,6 @@ import "server-only";
 import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, student, type StoredInvoice } from "@/lib/db/schema";
-import { linksOf } from "@/lib/families/links";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import type { SubjectId, SubjectsAsked } from "@/lib/seasons/progress";
 import { moneyRows } from "@/lib/money/stored";
@@ -31,8 +30,7 @@ export const buyoutRecords = (b: Pick<Row, "familyId" | "studentId">): { familyI
  * family, a per-student one by its student. A per-student buy-out counts for its student only while the student's own
  * record is active and in the family it was chosen from: a student who has moved brings nothing of the old family's
  * choice to the new one, and the old family no longer has the student to count it for. Whether its invoice is paid is
- * read from the stored figures of the family that chose it, found by the customer the family's link names (`family_money`
- * is kept by the family's customer until the money slice of stage 2).
+ * read from the stored figures of the family that chose it (`family_money`, kept by the app's own family).
  */
 export async function buyoutFacts(requirementIds: readonly string[], asked: SubjectsAsked | null,
   key: (requirementId: string, subject: SubjectId) => string, tx?: Tx): Promise<Map<string, BuyoutFact>> {
@@ -53,11 +51,9 @@ export async function buyoutFacts(requirementIds: readonly string[], asked: Subj
   const inFamily = new Map<AppStudentId, AppFamilyId | null>(records.map((s) => [s.id, s.familyId]));
   const kept = rows.filter((r) => r.studentId === null || inFamily.get(r.studentId) === r.familyId);
   const families = [...new Set(kept.map((r) => r.familyId))];
-  const [links, source] = await Promise.all([linksOf({ families, students: [] }, tx), getRosterSource(tx)]);
-  const money = await moneyRows([...new Set(links.customerOfFamily.values())], tx);
+  const [money, source] = await Promise.all([moneyRows(families, tx), getRosterSource(tx)]);
   for (const r of kept) {
-    const customer = links.customerOfFamily.get(r.familyId);
-    const row = customer === undefined ? undefined : money.get(customer);
+    const row = money.get(r.familyId);
     // Figures from another company than the buy-out's, or than the roster's, say nothing about its invoice.
     const figures = row && row.realmId === r.realmId && row.realmId === source ? row.invoices : null;
     out.set(key(r.requirementId, subjectOfBuyout(r)), { state: r.state, invoicePaid: paidIn(figures, r.invoiceQboId) });

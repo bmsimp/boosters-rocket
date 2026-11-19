@@ -37,9 +37,10 @@ export default async function FamilyBalancePage({ params }: { params: Promise<{ 
   if (familyQboId.length > 64) notFound();
   const family = await loadFamilyBalance(familyQboId);
   if (!family) notFound();
-  // A staff read of one family's balance and invoices (v1 spec §13): recorded before anything is shown.
+  // A staff read of one family's balance and invoices (v1 spec §13): recorded before anything is shown, naming the
+  // app's family, or the customer for one with no family record (as the family's buy-outs page does).
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "money.family.read", permission: "Finance.Balance.Read",
-    targetType: "qbo_customer", targetId: familyQboId, ip: ctx.ip });
+    ...(family.familyId === null ? { targetType: "qbo_customer", targetId: familyQboId } : { targetType: "family", targetId: String(family.familyId) }), ip: ctx.ip });
   const f = family.figures;
   const total = f && f.currency !== null ? formatMoney(f.totalCents, f.currency) : null;
   return (

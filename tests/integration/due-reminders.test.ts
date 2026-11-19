@@ -141,7 +141,7 @@ describe("the reminders before a due date", () => {
     expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 2, failed: 0 });
     expect(mail.outbox.map((m) => m.subject).some((s) => s.includes("March 24"))).toBe(false);
     // No figures at all for B: the same.
-    await db.delete(familyMoney).where(eq(familyMoney.familyQboId, FAMILY_B.family.qboId));
+    await db.delete(familyMoney).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY_B.family.qboId, "family")));
     await db.delete(requirementReminder);
     mail.outbox.length = 0;
     expect(await sendDueReminders(at("2027-03-10T10:00:00Z"))).toEqual({ sent: 2, failed: 0 });

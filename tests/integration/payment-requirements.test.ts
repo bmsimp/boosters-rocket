@@ -100,7 +100,7 @@ describe("what a parent reads for a payment requirement", () => {
     await seeded();
     invoices();
     // A row as the portal stored it before this slice: fresh, but its invoices don't say what they carry.
-    await db.insert(familyMoney).values({ familyQboId: FAMILY, realmId: MONEY_REALM, readAt: new Date(), totalCents: 0, currency: "USD",
+    await db.insert(familyMoney).values({ familyId: await recordOfCustomer(FAMILY, "family"), realmId: MONEY_REALM, readAt: new Date(), totalCents: 0, currency: "USD",
       invoices: [{ qboId: "1", number: "INV-1", customerQboId: FAMILY, forName: null, date: "2026-11-01", dueDate: null, totalCents: 8500, balanceCents: 0, currency: "USD", payLink: null }] });
     expect(textOf(await seasonText())).toContain("Band fee No invoice yet");
     const { MoneyBox } = await import("@/app/(parent)/money-box");

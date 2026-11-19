@@ -41,8 +41,9 @@ type RuleBase = {
 
 /**
  * A kind's rule, asked by the app's own ids: since stage 2 of the app-owned families spec every kind's records, and the
- * season's, name the app's families and students. Payments read figures still kept by the family's customer; their
- * rule turns the records into customers itself (src/lib/money/payment-standings.ts).
+ * season's, name the app's families and students. Payments read figures kept by the app's family, but whose invoices
+ * are whose is still the roster's tree of customers: their rule turns the records into customers itself
+ * (src/lib/money/payment-standings.ts).
  */
 export type AppKindRule = RuleBase & {
   /**

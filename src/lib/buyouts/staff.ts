@@ -135,8 +135,7 @@ export type FamilyBuyout = {
  * One family's buy-outs, every state, newest first: the ones it chose (`buyout.family_id`, the app's family linked to
  * the customer in the page's address, active or not), with the requirement, who it was for, the amount, how it stands,
  * what the family's stored figures last said of its invoice, and whether staff may close it. The family's own figures
- * only (by its customer, until the money slice), and only from the company the buy-out's invoice is in and the roster
- * came from. `familyId` is the app's family, for the page's audit row: null when the customer has no family record.
+ * only (its app family's row), and only from the company the buy-out's invoice is in and the roster came from. `familyId` is the app's family, for the page's audit row: null when the customer has no family record.
  */
 export async function loadFamilyBuyouts(familyQboId: string): Promise<{ familyId: AppFamilyId | null; familyName: string | null; buyouts: FamilyBuyout[] }> {
   const familyId = await familyLinkedTo(familyQboId);
@@ -144,8 +143,8 @@ export async function loadFamilyBuyouts(familyQboId: string): Promise<{ familyId
     .where(eq(buyout.familyId, familyId)).orderBy(desc(buyout.createdAt));
   const students = rows.flatMap(({ b }) => (b.studentId === null ? [] : [b.customerQboId]));
   const [names, items, money, source] = await Promise.all([namesOf([familyQboId, ...new Set(students)]), itemsOf(rows.map(({ b }) => b.id)),
-    moneyRows([familyQboId]), getRosterSource()]);
-  const row = money.get(familyQboId);
+    moneyRows(familyId === null ? [] : [familyId]), getRosterSource()]);
+  const row = familyId === null ? undefined : money.get(familyId);
   return { familyId, familyName: names.get(familyQboId) ?? null, buyouts: rows.map(({ b, title }) => {
     const figures = row?.invoices && row.readAt && row.realmId === b.realmId && row.realmId === source ? row : null;
     const inv = b.invoiceQboId && figures ? figures.invoices!.find((i) => i.qboId === b.invoiceQboId) ?? null : null;

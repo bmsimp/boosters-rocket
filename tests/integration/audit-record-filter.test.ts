@@ -83,6 +83,22 @@ describe("the audit page's filter for one family or student", () => {
     for (const record of [`family:${rivera}`, rivera]) for (const e of [EVIDENCE_OLD, EVIDENCE_NEW]) expect(await targets(record)).not.toContain(`signed_form_evidence:${e}`);
   });
 
+  it("finds a family's money rows written before the money cache moved, by its customer, and those written since, by its record", async () => {
+    // Before: the cross-check's difference under "family" by the customer, and the Balances page's read by the customer.
+    await row("money.balance_mismatch", "family", "10");
+    await row("money.family.read", "qbo_customer", "10");
+    // Since: both by the app's own family; the Chen family's own row never comes with Rivera's.
+    await row("money.balance_mismatch", "family", rivera);
+    await row("money.family.read", "family", rivera);
+    await row("money.balance_mismatch", "family", chen);
+    const rivers = [`family:${rivera}`, `family:${rivera}`, "family:10", "qbo_customer:10",
+      `signature_request:${FORM_OLD}`, `signature_request:${FORM_NEW}`, `signature_request:${FORM_MOVED}`];
+    const money = ["family:10", "qbo_customer:10", `family:${rivera}`, `family:${rivera}`];
+    expect(await targets(`family:${rivera}`)).toEqual([...rivers, ...money].sort());
+    expect(await targets(rivera)).toEqual([...rivers, ...money].sort());
+    expect(await targets(`family:${chen}`)).toEqual([`family:${chen}`, `family:${chen}`, "family:20", "qbo_customer:20", `signature_request:${FORM_MOVED}`].sort());
+  });
+
   it("finds a student's ticks and moved places under the old key and the new, and never another's whose id ends the same", async () => {
     expect(await targets(`student:${leo}`)).toEqual([`requirement_progress:${REQ}:12`, `requirement_progress:${REQ}:${leo}`, "student:12", `student:${leo}`,
       `signature_request:${FORM_OLD}`, `signature_request:${FORM_NEW}`, `signature_request:${FORM_MOVED}`].sort());

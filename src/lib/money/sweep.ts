@@ -10,6 +10,8 @@ import { connectionView, getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { getShape } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
+import type { AppFamilyId } from "@/lib/families/ids";
+import { linksOfCustomers } from "@/lib/families/links";
 import { readFamilyForRun } from "./family-money";
 import { familiesCustomers } from "./stored";
 
@@ -30,8 +32,13 @@ const RETRY_MS = 15 * 60_000;
 /** The advisory lock that makes one run at a time, in every copy of the portal. */
 const RUN_LOCK = 7461003;
 
-/** A family that couldn't be read for one of these reasons is counted and passed over; anything else stops the run, to carry on next time. */
-const PASS_OVER = new Set(["bad_answer", "fault", "bad_id", "not_a_family", "http_400"]);
+/**
+ * A family that couldn't be read for one of these reasons is counted and passed over; anything else stops the run, to
+ * carry on next time. `no_record`: a family of the roster with no family record of the app's own in the roster's
+ * company, so there is no row to keep its figures in (the records are made in the same transaction as every change
+ * to the cache, so this is a moment's gap at most); QuickBooks is asked nothing, and nothing is stamped.
+ */
+const PASS_OVER = new Set(["bad_answer", "fault", "bad_id", "not_a_family", "http_400", "no_record"]);
 /**
  * Runs in a row that may stop at the same family before the next one passes it over: a family whose read always fails
  * (always too slow, say) would otherwise stop every run there, and the families after it would never be read again.
@@ -48,6 +55,8 @@ type RunState = {
   read: number; failed: number;
   /** Families this run passed over because the runs before it stopped at them (STOPS_AT_ONE_FAMILY). */
   passedOver?: number;
+  /** Families this run passed over because they had no family record (`no_record`), counted among those not read. */
+  noRecord?: number;
   /** A staff member asked for a run: the next wake starts it. */
   requested: { by: string; label: string | null; at: string } | null;
   /** The family the last runs stopped at, and how many runs in a row stopped there. */
@@ -63,6 +72,7 @@ async function getState(tx?: Tx): Promise<RunState> {
     startedAfter: typeof v.startedAfter === "string" ? v.startedAfter : null,
     read: typeof v.read === "number" ? v.read : 0, failed: typeof v.failed === "number" ? v.failed : 0,
     ...(typeof v.passedOver === "number" ? { passedOver: v.passedOver } : {}),
+    ...(typeof v.noRecord === "number" ? { noRecord: v.noRecord } : {}),
     requested: v.requested && typeof v.requested.by === "string" ? v.requested : null,
     stoppedAt: v.stoppedAt && typeof v.stoppedAt.qboId === "string" && typeof v.stoppedAt.times === "number" ? { qboId: v.stoppedAt.qboId, times: v.stoppedAt.times } : null,
   };
@@ -71,9 +81,16 @@ async function saveState(state: RunState, tx?: Tx): Promise<void> {
   await (tx ?? db).insert(setting).values({ key: RUN_KEY, value: state }).onConflictDoUpdate({ target: setting.key, set: { value: state, updatedAt: new Date() } });
 }
 
-/** Every family the roster cache holds, in id order (numbers as numbers): the order a run reads them in. */
-async function familiesInOrder(): Promise<string[]> {
-  return [...(await familiesCustomers(null)).keys()].sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+/**
+ * Every family the roster cache holds, in customer id order (numbers as numbers): the order a run reads them in, and
+ * the run's place (`after`, `stoppedAt`) is a customer id, a money record. Each comes with the app family its own
+ * family link names, read for every family in one query (only the family kind: a customer may have a student record
+ * too), or null when it has none.
+ */
+async function familiesInOrder(): Promise<{ familyQboId: string; familyId: AppFamilyId | null }[]> {
+  const customers = [...(await familiesCustomers(null)).keys()].sort((a, b) => a.localeCompare(b, "en", { numeric: true }));
+  const links = await linksOfCustomers({ families: customers, students: [] });
+  return customers.map((familyQboId) => ({ familyQboId, familyId: links.familyOfCustomer.get(familyQboId) ?? null }));
 }
 const isAfter = (id: string, cursor: string | null) => cursor === null || id.localeCompare(cursor, "en", { numeric: true }) > 0;
 
@@ -132,7 +149,7 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
       if (!conn.connected || conn.needsAdmin || shape === null || source === null || source !== c?.realmId) return { ran: false };
       const [run] = await db.insert(jobRun).values({ job: MONEY_JOB, startedBy: state.requested?.by ?? "worker" }).returning();
       // A run that stopped part way left `after`: this one carries on from there.
-      state = { ...state, runId: run!.id, startedAfter: state.after, read: 0, failed: 0, passedOver: undefined };
+      state = { ...state, runId: run!.id, startedAfter: state.after, read: 0, failed: 0, passedOver: undefined, noRecord: undefined };
       await saveState(state);
     }
     const runId = state.runId!;
@@ -154,6 +171,7 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
         await writeAudit({ actor: WORKER_ACTOR, action: outcome === "ok" ? "money.read_all" : "money.read_all.failed", targetType: "job_run", targetId: String(runId),
           after: { families: total, read: state.read, couldNotRead: state.failed, ...(carriedOn ? { carriedOnFromAnEarlierRun: true } : {}),
             ...(code ? { stoppedBy: code } : {}), ...(state.passedOver ? { passedOverAfterStops: state.passedOver } : {}),
+            ...(state.noRecord ? { passedOverWithNoRecord: state.noRecord } : {}),
             ...(requestedBy ? { askedBy: { id: requestedBy.by, label: requestedBy.label } } : {}) } }, tx);
       });
     };
@@ -166,10 +184,14 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
     }
     const pace = pacer(o.paceMs ?? PACE_MS);
     const deadline = Date.now() + (o.budgetMs ?? WAKE_BUDGET_MS);
-    for (const familyQboId of families.filter((id) => isAfter(id, state.after))) {
+    for (const { familyQboId, familyId } of families.filter((f) => isAfter(f.familyQboId, state.after))) {
       if (Date.now() >= deadline) return { ran: true, finished: false, ok: true };
       let outcome: Awaited<ReturnType<typeof readFamilyForRun>>;
-      try { outcome = await readFamilyForRun(familyQboId, { pace }); } catch { outcome = { ok: false, code: "unexpected" }; }
+      if (familyId === null) {
+        outcome = { ok: false, code: "no_record" };
+      } else {
+        try { outcome = await readFamilyForRun(familyId, familyQboId, { pace }); } catch { outcome = { ok: false, code: "unexpected" }; }
+      }
       if (!(await stillOpen())) return { ran: true, finished: true, ok: false };
       let passedOver = false;
       if (!outcome.ok && !PASS_OVER.has(outcome.code)) {
@@ -185,7 +207,8 @@ export async function runMoneyJob(o: { now?: Date; budgetMs?: number; paceMs?: n
         passedOver = true;
       }
       state = { ...state, after: familyQboId, read: state.read + (outcome.ok ? 1 : 0), failed: state.failed + (outcome.ok ? 0 : 1),
-        stoppedAt: passedOver || state.stoppedAt?.qboId === familyQboId ? null : state.stoppedAt, ...(passedOver ? { passedOver: (state.passedOver ?? 0) + 1 } : {}) };
+        stoppedAt: passedOver || state.stoppedAt?.qboId === familyQboId ? null : state.stoppedAt, ...(passedOver ? { passedOver: (state.passedOver ?? 0) + 1 } : {}),
+        ...(!outcome.ok && outcome.code === "no_record" ? { noRecord: (state.noRecord ?? 0) + 1 } : {}) };
       await saveState(state);
     }
     await finish("ok", `${done()}${carriedOn ? ", carrying on from where the last run stopped" : ""}.`, null);

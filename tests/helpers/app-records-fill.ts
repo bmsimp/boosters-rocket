@@ -32,6 +32,7 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
   { line: `    UNION ALL SELECT "subject_qbo_id", "subject_name", 2, "updated_at", "id" FROM "signature_request" WHERE btrim("subject_name") <> ''`, by: "0029_forms_app_ids_finish" },
   { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "buyout" WHERE "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0031_buyouts_app_ids_finish" },
   { line: `    UNION ALL SELECT b."subject_qbo_id", r."applies_to" FROM "buyout" b JOIN "requirement" r ON r."id" = b."requirement_id" WHERE b."realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0031_buyouts_app_ids_finish" },
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "family_money" WHERE "realm_id" IS NULL OR "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0033_family_money_app_ids_finish" },
 ];
 
 /**

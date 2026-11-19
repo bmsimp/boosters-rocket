@@ -109,8 +109,10 @@ test("showing the seeded figures asked QuickBooks nothing: they are still as the
   await context.addCookies([parentSessionCookie()]);
   await page.goto("/payments");
   await expect(page.locator(".money .amt")).toHaveText("$185.00");
-  const rows = await sql`SELECT family_qbo_id, failed_at, failed_code, total_cents, realm_id FROM family_money ORDER BY family_qbo_id`;
-  expect(rows.map((r) => [r.family_qbo_id, r.failed_at, r.failed_code, Number(r.total_cents)])).toEqual([[PARENT_SESSION_FAMILY, null, null, 18500], ["E2E-FAMILY-2", null, null, 37666]]);
+  // Each row is kept by the app's own family, named here by the customer its family link names.
+  const rows = await sql`SELECT l.customer_id AS family_customer, m.failed_at, m.failed_code, m.total_cents, m.realm_id FROM family_money m
+    JOIN accounting_link l ON l.family_id = m.family_id ORDER BY l.customer_id COLLATE "C"`;
+  expect(rows.map((r) => [r.family_customer, r.failed_at, r.failed_code, Number(r.total_cents)])).toEqual([[PARENT_SESSION_FAMILY, null, null, 18500], ["E2E-FAMILY-2", null, null, 37666]]);
   const [connection] = await sql`SELECT last_error FROM qbo_connection`;
   expect(connection!.last_error).toBeNull();
 });

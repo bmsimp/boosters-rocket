@@ -1,10 +1,16 @@
 // Parent-facing: everything here takes one family's id, which the caller takes from the session (ctx.familyQboId), and
 // returns that family's money alone. Nothing in a request ever chooses the customers: they are read from the roster
-// cache for that family. This module is in the staff-only import scan (tests/integration/page-guards.test.ts).
+// cache for that family. The stored figures are kept by the app's own family (family_money.family_id, stage 2 of the
+// app-owned families spec): the session's customer becomes that family here, through its own family link and only
+// while the record is active (activeFamilyOf()), on each load, and the customers whose invoices may show are those of
+// the same customer the family was found from. This module is in the staff-only import scan
+// (tests/integration/page-guards.test.ts).
 import { eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, qboConnection, qboCustomer, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
+import type { AppFamilyId } from "@/lib/families/ids";
+import { activeFamilyOf } from "@/lib/families/session-family";
 import { isQboId, qboCustomerById, qboInvoices, type QboGetOptions } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { getRosterSource } from "@/lib/roster/source";
@@ -30,7 +36,7 @@ export const RETRY_AFTER_FAILURE_MS = 30_000;
 export const MAX_LIVE_READS = 4;
 /** How long a page load waits for one of those places before it shows what is stored. */
 const PLACE_WAIT_MS = 2_000;
-/** First key of the per-family advisory lock; the second is a hash of the family's id. */
+/** First key of the per-family advisory lock; the second is a hash of the app family's own id, in page loads and the run alike. */
 const MONEY_LOCK = 7461002;
 const MONEY_ACTOR = { door: "system", id: null, label: "portal" } as const;
 
@@ -188,7 +194,7 @@ export type ReadOutcome = { ok: true } | { ok: false; code: string };
  * row's figures are replaced only by a successful read; a failed try records its time and short code and leaves them
  * alone. A difference in the cross-check is recorded for staff, once per family per day at most (v1 spec §8.3).
  */
-async function readAndKeep(tx: Tx, familyQboId: string, before: MoneyRow | undefined, family: FamilyCustomers | null, how: ReadHow): Promise<ReadOutcome> {
+async function readAndKeep(tx: Tx, familyId: AppFamilyId, familyQboId: string, before: MoneyRow | undefined, family: FamilyCustomers | null, how: ReadHow): Promise<ReadOutcome> {
   // The figures are as of when QuickBooks was first asked, not when it had answered: a buy-out invoice made while it was
   // answering marks the row behind (staleAt) after this, so the next look reads it again rather than taking these
   // figures, which may not hold it, as current (isFresh, and the daily check of buy-out invoices).
@@ -202,7 +208,7 @@ async function readAndKeep(tx: Tx, familyQboId: string, before: MoneyRow | undef
     // the run read): nothing was asked of QuickBooks and nothing failed, so nothing is stamped on a row for it.
     if (how.kind === "run" && outcome.code === "not_a_family") return { ok: false, code: outcome.code };
     const failed = { failedAt: now, failedCode: outcome.code.slice(0, 40), updatedAt: now };
-    await tx.insert(familyMoney).values({ familyQboId, ...failed }).onConflictDoUpdate({ target: familyMoney.familyQboId, set: failed });
+    await tx.insert(familyMoney).values({ familyId, ...failed }).onConflictDoUpdate({ target: familyMoney.familyId, set: failed });
     return { ok: false, code: outcome.code };
   }
   const customers = differing(outcome.checks);
@@ -214,16 +220,20 @@ async function readAndKeep(tx: Tx, familyQboId: string, before: MoneyRow | undef
     // A page load leaves the worker's customer check as it was: that is a record of its own read, with its own time.
     ...(how.kind === "run" ? { checkedAt: outcome.checks ? now : null, customerChecks: outcome.checks } : {}),
   };
-  await tx.insert(familyMoney).values({ familyQboId, ...figures }).onConflictDoUpdate({ target: familyMoney.familyQboId, set: figures });
+  await tx.insert(familyMoney).values({ familyId, ...figures }).onConflictDoUpdate({ target: familyMoney.familyId, set: figures });
   if (differs && !auditedToday) {
-    await writeAudit({ actor: MONEY_ACTOR, action: "money.balance_mismatch", targetType: "family", targetId: familyQboId,
+    await writeAudit({ actor: MONEY_ACTOR, action: "money.balance_mismatch", targetType: "family", targetId: String(familyId),
       after: { invoicesCents: outcome.totalCents, balanceWithJobsCents: outcome.balanceWithJobsCents, currency: outcome.currency, ...(customers.length ? { customers } : {}) } }, tx);
   }
   return { ok: true };
 }
 
-/** The two keys of the family's advisory lock. */
-const familyLock = (familyQboId: string) => sql`${sql.raw(String(MONEY_LOCK))}, hashtext(${familyQboId}::text)`;
+/** The two keys of the family's advisory lock: by the app family's own id, so a page load and the run exclude each other. */
+const familyLock = (familyId: AppFamilyId) => sql`${sql.raw(String(MONEY_LOCK))}, hashtext(${String(familyId)}::text)`;
+
+/** The stored row of one app family. */
+const storedRow = async (familyId: AppFamilyId, tx?: Tx): Promise<MoneyRow | undefined> =>
+  (await (tx ?? db).select().from(familyMoney).where(eq(familyMoney.familyId, familyId)))[0];
 
 /**
  * Asks QuickBooks for one family's figures, for a page load, and keeps them. True when the stored figures are now
@@ -236,14 +246,17 @@ async function liveRead(familyQboId: string, timeoutMs: number): Promise<boolean
   if (!(await takePlace())) return false;
   try {
     return await db.transaction(async (tx) => {
-      const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${familyLock(familyQboId)}) as locked`)) as unknown as { locked: boolean }[];
+      // The session's customer as the app's family, found again here: with no active record nothing is read or written.
+      const familyId = await activeFamilyOf(familyQboId, tx);
+      if (familyId === null) return false;
+      const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock(${familyLock(familyId)}) as locked`)) as unknown as { locked: boolean }[];
       if (!lock?.locked) return false;
-      const [before] = await tx.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId));
+      const before = await storedRow(familyId, tx);
       const family = await familyCustomers(familyQboId, tx);
       // Whoever held the lock a moment ago may have just read it, or just failed to.
       if (isFresh(before, await getRosterSource(tx), family, (await getMoneySettings(tx)).freshSeconds)) return true;
       if (failedJustNow(before)) return false;
-      return (await readAndKeep(tx, familyQboId, before, family, { kind: "page", timeoutMs })).ok;
+      return (await readAndKeep(tx, familyId, familyQboId, before, family, { kind: "page", timeoutMs })).ok;
     });
   } finally {
     givePlace();
@@ -252,15 +265,16 @@ async function liveRead(familyQboId: string, timeoutMs: number): Promise<boolean
 
 /**
  * One family read from QuickBooks for the worker's run over every family (./sweep.ts), however fresh its figures are,
- * with the customer-by-customer check. It waits its turn for the family's lock (a page load holding it finishes first)
- * and may wait for the connection row; it takes none of the places kept for page loads. A failure's code is its own
- * short code, by which the run decides whether to carry on.
+ * with the customer-by-customer check: `familyId` is the app family the run found linked to the family customer
+ * `familyQboId`, whose customers are read. It waits its turn for the family's lock (a page load holding it finishes
+ * first) and may wait for the connection row; it takes none of the places kept for page loads. A failure's code is its
+ * own short code, by which the run decides whether to carry on.
  */
-export async function readFamilyForRun(familyQboId: string, o: { pace: () => Promise<void>; timeoutMs?: number }): Promise<ReadOutcome> {
+export async function readFamilyForRun(familyId: AppFamilyId, familyQboId: string, o: { pace: () => Promise<void>; timeoutMs?: number }): Promise<ReadOutcome> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${familyLock(familyQboId)})`);
-    const [before] = await tx.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId));
-    return readAndKeep(tx, familyQboId, before, await familyCustomers(familyQboId, tx), { kind: "run", timeoutMs: o.timeoutMs ?? RUN_CALL_TIMEOUT_MS, pace: o.pace });
+    await tx.execute(sql`select pg_advisory_xact_lock(${familyLock(familyId)})`);
+    const before = await storedRow(familyId, tx);
+    return readAndKeep(tx, familyId, familyQboId, before, await familyCustomers(familyQboId, tx), { kind: "run", timeoutMs: o.timeoutMs ?? RUN_CALL_TIMEOUT_MS, pace: o.pace });
   });
 }
 
@@ -282,7 +296,7 @@ function readOnce(familyQboId: string, timeoutMs: number): Promise<boolean> {
  * timeout; if that can't be done, the last figures QuickBooks gave are shown marked as not current, and with none
  * stored there is nothing to show. Figures from another QuickBooks company are never shown, nor figures that hold an
  * invoice of a customer who is no longer this family's (mayShow), and nothing is shown for an id the roster cache does
- * not hold as an active family.
+ * not hold as an active family, nor for one with no active family record (nothing is read or written for it either).
  */
 export async function loadFamilyMoney(familyQboId: string, o: { timeoutMs?: number } = {}): Promise<FamilyMoney> {
   const shown = await figuresToShow(familyQboId, o);
@@ -291,15 +305,21 @@ export async function loadFamilyMoney(familyQboId: string, o: { timeoutMs?: numb
 }
 
 async function figuresToShow(familyQboId: string, o: { timeoutMs?: number }): Promise<Omit<FamilyMoney, "today">> {
+  // The session's customer becomes the app's family on each load, never carried from one to the next; the customers
+  // whose invoices may show are those of that same customer (mayShow checks every stored invoice against them).
+  // A family with no active record has no figures to show (its name is still the cache's, as before).
   const load = async () => {
-    const [[row], source, family] = await Promise.all([db.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId)), getRosterSource(), familyCustomers(familyQboId)]);
-    return { row, source, family, familyName: family?.familyName ?? null };
+    const [familyId, source, family] = await Promise.all([activeFamilyOf(familyQboId), getRosterSource(), familyCustomers(familyQboId)]);
+    const row = familyId === null ? undefined : await storedRow(familyId);
+    return { familyId, row, source, family, familyName: family?.familyName ?? null };
   };
   const [stored, settings] = await Promise.all([load(), getMoneySettings()]);
+  if (stored.familyId === null) return { familyName: stored.familyName, figures: null };
   if (isFresh(stored.row, stored.source, stored.family, settings.freshSeconds)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, true) };
   if (failedJustNow(stored.row)) return { familyName: stored.familyName, figures: figuresOf(stored.row, stored.source, stored.family, false) };
   const current = await readOnce(familyQboId, o.timeoutMs ?? CALL_TIMEOUT_MS);
   // Everything is read again: the roster cache may have been replaced while QuickBooks was answering.
   const after = await load();
+  if (after.familyId === null) return { familyName: after.familyName, figures: null };
   return { familyName: after.familyName, figures: figuresOf(after.row, after.source, after.family, current) };
 }

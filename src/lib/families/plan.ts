@@ -11,10 +11,10 @@ import type { MembershipShape } from "@/lib/roster/shape";
  *   and each student of the roster (a customer of the student type directly under one of those families) a student
  *   record in that family. Each is active when its own customer is.
  * - Every customer a record of the current company names as a family (`refs`: a guardian row's family, a session's, a
- *   waiting email change's, `family_money`'s, the write queue's) has a family record too, and every one named as a
+ *   waiting email change's, the write queue's) has a family record too, and every one named as a
  *   student a student record, whatever the roster holds it as: a record names a customer as the kind its column holds.
  *   One the roster doesn't hold as that kind is inactive. The records stage 2 re-keyed (the season's, volunteering's,
- *   form requests and buy-outs) are not among them: they name a record by its id and keep it (./in-step.ts). A student the roster doesn't hold is planned in no family; keepAppRecordsInStep() keeps the
+ *   form requests, buy-outs and the money cache) are not among them: they name a record by its id and keep it (./in-step.ts). A student the roster doesn't hold is planned in no family; keepAppRecordsInStep() keeps the
  *   family such a student was last in, which a first fill (migration 0023) never knew.
  * - A record is named from the cache, else by the name it has already (`known`, by kind: the cache held it once), else
  *   from `hints` (a current-company kept form's). Otherwise it has no name: the portal never knew one.

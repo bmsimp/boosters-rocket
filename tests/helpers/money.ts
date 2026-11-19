@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { familyMoney, setting } from "@/lib/db/schema";
+import { accountingLink, familyMoney, setting } from "@/lib/db/schema";
+import { QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { MONEY_KEY } from "@/lib/money/settings";
-import { setRosterSource } from "@/lib/roster/source";
+import { getRosterSource, setRosterSource } from "@/lib/roster/source";
 import { MONEY_REALM, type ParentFamilySpec } from "./parent";
 import { seedConnected, type QboStub } from "./qbo-stub";
 import { syncAppRecords } from "./app-records";
@@ -35,7 +36,22 @@ export async function connectCompany(stub: QboStub, realmId = MONEY_REALM): Prom
   await syncAppRecords();
 }
 
-export const moneyRow = async (familyQboId: string) => (await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, familyQboId)))[0];
+/**
+ * The app family a family customer's own family link names, in the company the roster names (never a student link, and
+ * never another company's); null when it has none. Read only: it makes no record.
+ */
+export async function familyRecordOf(familyQboId: string): Promise<AppFamilyId | null> {
+  const realmId = await getRosterSource();
+  if (realmId === null) return null;
+  const [l] = await db.select({ familyId: accountingLink.familyId }).from(accountingLink).where(and(eq(accountingLink.system, QUICKBOOKS),
+    eq(accountingLink.realmId, realmId), eq(accountingLink.customerId, familyQboId), isNotNull(accountingLink.familyId)));
+  return l?.familyId ?? null;
+}
+/** The stored figures of a family customer's app family (familyRecordOf()), or undefined. */
+export const moneyRow = async (familyQboId: string) => {
+  const familyId = await familyRecordOf(familyQboId);
+  return familyId === null ? undefined : (await db.select().from(familyMoney).where(eq(familyMoney.familyId, familyId)))[0];
+};
 export const invoiceQueries = (stub: QboStub) => stub.apiCalls().filter((c) => c.path.endsWith("/query") && /from Invoice\b/.test(c.query.get("query") ?? "")).map((c) => c.query.get("query"));
 
 /** The stored freshness window (src/lib/money/settings.ts). */
@@ -49,5 +65,5 @@ export async function ageMoney(familyQboId: string, ms: number): Promise<void> {
   const row = await moneyRow(familyQboId);
   if (!row) throw new Error(`ageMoney: nothing is stored for ${familyQboId}`);
   const back = (d: Date | null) => (d ? new Date(d.getTime() - ms) : null);
-  await db.update(familyMoney).set({ readAt: back(row.readAt), failedAt: back(row.failedAt), mismatchAuditedAt: back(row.mismatchAuditedAt) }).where(eq(familyMoney.familyQboId, familyQboId));
+  await db.update(familyMoney).set({ readAt: back(row.readAt), failedAt: back(row.failedAt), mismatchAuditedAt: back(row.mismatchAuditedAt) }).where(eq(familyMoney.familyId, row.familyId));
 }

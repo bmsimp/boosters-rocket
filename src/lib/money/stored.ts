@@ -4,6 +4,7 @@
 import { inArray, or } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, qboCustomer, type StoredInvoice } from "@/lib/db/schema";
+import type { AppFamilyId } from "@/lib/families/ids";
 import { getShape, type MembershipShape } from "@/lib/roster/shape";
 
 export type MoneyRow = typeof familyMoney.$inferSelect;
@@ -83,10 +84,10 @@ export function mayShow(row: MoneyRow | undefined, source: string | null, family
 /** Whether each stored invoice says which products and services it carries. A row stored before the portal read them is read again (isFresh). */
 export const knowsItems = (row: ShownRow): boolean => row.invoices.every((i) => Array.isArray(i.itemQboIds));
 
-/** The stored rows of these families (all of them, with null). */
-export async function moneyRows(familyQboIds: readonly string[] | null, tx?: Tx): Promise<Map<string, MoneyRow>> {
-  if (familyQboIds?.length === 0) return new Map();
+/** The stored rows of these app families (all of them, with null), by the family's own id. */
+export async function moneyRows(familyIds: readonly AppFamilyId[] | null, tx?: Tx): Promise<Map<AppFamilyId, MoneyRow>> {
+  if (familyIds?.length === 0) return new Map();
   const q = (tx ?? db).select().from(familyMoney);
-  const rows = familyQboIds === null ? await q : await q.where(inArray(familyMoney.familyQboId, [...familyQboIds]));
-  return new Map(rows.map((r) => [r.familyQboId, r]));
+  const rows = familyIds === null ? await q : await q.where(inArray(familyMoney.familyId, [...familyIds]));
+  return new Map(rows.map((r) => [r.familyId, r]));
 }

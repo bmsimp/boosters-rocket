@@ -440,7 +440,7 @@ test("an app brought back to the front after a minute away reads its page again,
   await expect(page.locator(".money .asof time")).not.toContainText("UTC"); // the page is awake: the browser has drawn the time
   try {
     // Meanwhile the family's figures change (an invoice paid from another device, read by another page load).
-    await sql`UPDATE family_money SET total_cents = 10000 WHERE family_qbo_id = 'E2E-FAMILY'`;
+    await sql`UPDATE family_money SET total_cents = 10000 WHERE family_id = (SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL)`;
     // A glance at a text message: nothing is read again.
     await putAwayFor(5_000);
     await bringBack();
@@ -452,7 +452,7 @@ test("an app brought back to the front after a minute away reads its page again,
     await expect(owed).toHaveText("$100.00");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Zelda");
   } finally {
-    await sql`UPDATE family_money SET total_cents = 18500 WHERE family_qbo_id = 'E2E-FAMILY'`;
+    await sql`UPDATE family_money SET total_cents = 18500 WHERE family_id = (SELECT family_id FROM accounting_link WHERE customer_id = 'E2E-FAMILY' AND family_id IS NOT NULL)`;
   }
 });
 

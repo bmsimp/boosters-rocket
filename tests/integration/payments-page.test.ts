@@ -23,7 +23,7 @@ import { ageMoney, CHENOWETH, connectCompany, invoiceQueries, moneyRow, RIVERA, 
 import { FAMILY_A, FAMILY_B, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedShape } from "../helpers/roster-cache";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -213,7 +213,9 @@ describe("the Payments page", () => {
     expect(html).not.toContain("$135.00");
     expect(html).not.toContain("$50.00");
     // Recorded for staff, by the system, not as something the parent did.
-    expect((await db.select().from(auditLog)).map((row) => [row.door, row.action, row.targetId])).toEqual([["system", "money.balance_mismatch", FAMILY]]);
+    // It names the app's own family, never the family's customer.
+    expect((await db.select().from(auditLog)).map((row) => [row.door, row.action, row.targetType, row.targetId]))
+      .toEqual([["system", "money.balance_mismatch", "family", String(await recordOfCustomer(FAMILY, "family"))]]);
     balanceWithJobs(250); // higher than the sum: nothing is said
     await ageMoney(FAMILY, 6 * MINUTE);
     expect(await renderPage(PaymentsPage)).not.toContain(CREDIT);
@@ -410,6 +412,22 @@ describe("the money box for Home", () => {
     expect(html).toContain(NOTHING);
     expect(html).toContain('href="/payments"');
   });
+
+  // The box asks loadMyFamily() nothing itself: what keeps it safe is that loadFamilyMoney() shows nothing of a family
+  // whose own record is inactive, however fresh its stored figures.
+  it("shows no money for a family whose record is inactive, and reads and writes nothing for it", async () => {
+    const r = await seedSignedInParent(RIVERA);
+    await seedFamilyMoney({ ...RIVERA, invoices: [{ number: "INV-STILL-STORED", cents: 4242 }] });
+    expect(await renderPage(() => MoneyBox({ ctx: r.identity }))).toContain("INV-STILL-STORED"); // fresh, and shown
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, FAMILY));
+    await syncAppRecords(); // as the roster read that found it inactive leaves the records
+    const before = await db.select().from(familyMoney);
+    const html = await renderPage(() => MoneyBox({ ctx: r.identity }));
+    expect(html).toContain(NOTHING);
+    expect(html).not.toMatch(/INV-STILL-STORED|\$42\.42/);
+    expect(await db.select().from(familyMoney)).toEqual(before);
+    expect(stub.calls).toHaveLength(0);
+  });
 });
 
 describe("one family never sees another's money", () => {
@@ -477,9 +495,10 @@ describe("a buy-out's invoice on Payments", () => {
   /** A's figures with two more invoices: its own buy-out's (9174, open) and one that carries B's buy-out's invoice id (9285, paid). */
   async function withBuyoutInvoices() {
     const { a, b } = await seedTwoFamilies();
-    const [row] = await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, FAMILY_A.family.qboId));
+    const familyA = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    const [row] = await db.select().from(familyMoney).where(eq(familyMoney.familyId, familyA));
     await db.update(familyMoney).set({ invoices: [onA("9174", 7438), ...row!.invoices!, onA("9285", 0)], totalCents: row!.totalCents! + 7438, balanceWithJobsCents: null })
-      .where(eq(familyMoney.familyQboId, FAMILY_A.family.qboId));
+      .where(eq(familyMoney.familyId, familyA));
     return { a, b };
   }
 

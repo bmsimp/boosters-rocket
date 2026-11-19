@@ -42,7 +42,7 @@ const stored = (qboId: string, customerQboId: string, o: Partial<StoredInvoice> 
 async function moneyRun(invoices: StoredInvoice[], o: { readAt?: Date } = {}) {
   const [run] = await db.insert(jobRun).values({ job: MONEY_JOB, startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), outcome: "ok", startedBy: "worker" }).returning();
   const figures = { realmId: MONEY_REALM, readAt: o.readAt ?? new Date(), invoices, totalCents: 0, currency: "USD" };
-  await db.insert(familyMoney).values({ familyQboId: FAMILY, ...figures }).onConflictDoUpdate({ target: familyMoney.familyQboId, set: figures });
+  await db.insert(familyMoney).values({ familyId: await recordOfCustomer(FAMILY, "family"), ...figures }).onConflictDoUpdate({ target: familyMoney.familyId, set: figures });
   return run!;
 }
 
@@ -65,7 +65,7 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     await moneyRun([stored("9901", FAMILY), stored("9902", FAMILY, { balanceCents: 0 }), stored("9904", S2)]);
     // The new family's figures hold the moved student's invoice, open, as a money read would.
     const theirFigures = { realmId: MONEY_REALM, readAt: new Date(), invoices: [stored("9905", S1)], totalCents: 10000, currency: "USD", staleAt: null };
-    await db.insert(familyMoney).values({ familyQboId: CHENOWETH.family.qboId, ...theirFigures }).onConflictDoUpdate({ target: familyMoney.familyQboId, set: theirFigures });
+    await db.insert(familyMoney).values({ familyId: await recordOfCustomer(CHENOWETH.family.qboId, "family"), ...theirFigures }).onConflictDoUpdate({ target: familyMoney.familyId, set: theirFigures });
 
     expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 1, flagged: 2, voided: 0, voiding: 1, unflagged: 0 });
     expect(await row(fine.id)).toMatchObject({ state: "invoiced", flag: null });
@@ -88,7 +88,7 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     await runWriteQueue(later(1));
     expect(await row(moved.id)).toMatchObject({ state: "voided", endReason: "student_moved" });
     expect(stub.apiCalls().filter((c) => c.method === "POST").map((c) => [c.query.get("operation"), JSON.parse(c.body)])).toEqual([["void", { Id: "9905", SyncToken: "2" }]]);
-    const [theirs] = await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, CHENOWETH.family.qboId));
+    const [theirs] = await db.select().from(familyMoney).where(eq(familyMoney.familyId, await recordOfCustomer(CHENOWETH.family.qboId, "family")));
     expect(theirs!.staleAt).not.toBeNull();
 
     // Each run is followed once; a later run with nothing new audits nothing again.
@@ -116,13 +116,13 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     // The run read the family, then the guardian's invoice was made, marking the figures behind.
     const b = await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "5001" });
     await moneyRun([], { readAt: new Date(Date.now() - 30_000) });
-    await db.update(familyMoney).set({ staleAt: new Date() }).where(eq(familyMoney.familyQboId, FAMILY));
+    await db.update(familyMoney).set({ staleAt: new Date() }).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY, "family")));
     expect((await checkBuyoutInvoices()).flagged).toBe(0);
     expect((await row(b.id)).flag).toBeNull();
     // A flag set before (as an older check did) is taken off once the figures show the invoice where it belongs.
     await db.update(buyout).set({ flag: "missing", flaggedAt: new Date() }).where(eq(buyout.id, b.id));
     await moneyRun([stored("5001", FAMILY)]);
-    await db.update(familyMoney).set({ staleAt: null }).where(eq(familyMoney.familyQboId, FAMILY));
+    await db.update(familyMoney).set({ staleAt: null }).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY, "family")));
     expect(await checkBuyoutInvoices()).toMatchObject({ ran: true, flagged: 0, unflagged: 1 });
     expect(await row(b.id)).toMatchObject({ state: "invoiced", flag: null });
     expect(await audits("volunteer.buyout.unflagged")).toHaveLength(1);

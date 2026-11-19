@@ -4,7 +4,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
@@ -16,6 +16,12 @@ import { EMAIL_CHANGE_TTL_MS } from "@/lib/parents/email-change";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
 import { resetDb, seedParent, seedParentSession } from "../helpers/db";
 import { addToCache, fam } from "../helpers/roster-cache";
+import { recordOfCustomer } from "../helpers/app-records";
+import { QUICKBOOKS } from "@/lib/families/ids";
+import { setRosterSource } from "@/lib/roster/source";
+
+/** The company the roster cache is marked as read from, in the money tests: the app's records are made from it. */
+const MONEY_COMPANY = "4620000000000001";
 
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
@@ -115,16 +121,24 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(await ids(db.select({ id: parentEmailChange.id }).from(parentEmailChange))).toEqual([edge, kept].sort());
   });
 
-  it("money: figures for a family the roster cache no longer holds go; a family still in it keeps its own", async () => {
+  it("money: figures for a family whose customer the roster cache no longer holds go; a family still in it keeps its own", async () => {
+    await db.transaction((tx) => setRosterSource(tx, MONEY_COMPANY));
     await addToCache([fam("F1", "Rivera Family"), fam("F2", "Chenoweth Family", { active: false })]);
-    await db.insert(familyMoney).values([{ familyQboId: "F1", totalCents: 100 }, { familyQboId: "F2", totalCents: 200 }, { familyQboId: "F-LEFT", totalCents: 300 }]);
-    expect(await clean()).toEqual({ ...NOTHING, familyMoney: 1 });
-    // An inactive family is still in the cache: its row is not this job's to judge (family-money.ts refuses to show it).
-    expect((await db.select().from(familyMoney)).map((r) => r.familyQboId).sort()).toEqual(["F1", "F2"]);
+    // Each row is kept by the app's family; F-LEFT's record is linked to a customer the cache doesn't hold, and F-ELSEWHERE's
+    // only to a customer of another company (whose number the cache happens to hold).
+    const [f1, f2, left] = [await recordOfCustomer("F1", "family"), await recordOfCustomer("F2", "family"), await recordOfCustomer("F-LEFT", "family")];
+    const [elsewhere] = await db.insert(family).values({ name: null, active: false }).returning({ id: family.id });
+    await db.insert(accountingLink).values({ system: QUICKBOOKS, realmId: "4620000000000999", customerId: "F1", familyId: elsewhere!.id, origin: "carried_over" });
+    await db.insert(familyMoney).values([{ familyId: f1, totalCents: 100 }, { familyId: f2, totalCents: 200 }, { familyId: left, totalCents: 300 }, { familyId: elsewhere!.id, totalCents: 400 }]);
+    expect(await clean()).toEqual({ ...NOTHING, familyMoney: 2 });
+    // An inactive family (its customer and its record) is still in the cache: its row is not this job's to judge
+    // (family-money.ts refuses to show it).
+    expect((await db.select().from(familyMoney)).map((r) => String(r.familyId)).sort()).toEqual([String(f1), String(f2)].sort());
   });
 
   it("money: nothing goes while the roster cache holds no customers at all", async () => {
-    await db.insert(familyMoney).values([{ familyQboId: "F1", totalCents: 100 }]);
+    await db.transaction((tx) => setRosterSource(tx, MONEY_COMPANY));
+    await db.insert(familyMoney).values([{ familyId: await recordOfCustomer("F1", "family"), totalCents: 100 }]);
     expect(await clean()).toEqual(NOTHING);
     expect(await db.select().from(familyMoney)).toHaveLength(1);
   });

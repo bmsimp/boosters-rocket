@@ -112,7 +112,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 8.2.3 | A Pay button per invoice from `InvoiceLink`, https on an Intuit domain or no button | | Built | `src/lib/money/pay-link.ts`; `tests/unit/money-pay-link.test.ts`; `payments-page.test.ts` "checks a stored pay link again before showing it". Owner check: a real company's links |
 | 8.2.4 | Read live when the page loads, with a short cache, shown with an "as of" time | | Built | `payments-page.test.ts` "stale figures are read again from QuickBooks before the page shows them" and the as-of assertion in "fresh figures" |
 | 8.2.5 | QuickBooks unreachable: the last known figures, marked as not current | Pay switched off; the note never names an outage (AGENTS.md, Money) | Built | `payments-page.test.ts` "QuickBooks down, with figures stored", "figures that are not current because" |
-| 8.2.6 | Never another family's invoices; nothing in a request picks a customer | | Built | `payments-page.test.ts` "family A's page holds none of family B's invoices", "nothing in the request chooses the family" |
+| 8.2.6 | Never another family's invoices; nothing in a request picks a customer | The stored figures are kept by the app's own family since stage 2 of the app-owned families spec (migrations 0032 and 0033), found from the session's customer on each load; whose invoices a family sees is still the roster's tree (AGENTS.md, Money) | Built | `payments-page.test.ts` "family A's page holds none of family B's invoices", "nothing in the request chooses the family"; `family-money.test.ts` "a parent of a family whose record is inactive is shown no money"; `tests/integration/migrate-money.test.ts` |
 
 ### §8.3 Lessons from the CiviCRM extension
 
@@ -135,7 +135,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 8.4.5 | Volunteer reminders and due-date nudges daily, plus the day-before reminder | | Built | `tests/integration/volunteer-reminders.test.ts` |
 | 8.4.6 | Buy-out invoice status with the nightly reconciliation | After each daily money run | Built | `tests/integration/buyouts-check.test.ts` "marks a paid one paid, flags one QuickBooks no longer shows" |
 | 8.4.7 | Expired email-change and session clean-up daily | Every table is cleaned or kept on purpose; Better Auth's verification rows added in this step | Built | `tests/integration/cleanup.test.ts` |
-| 8.4.8 | (new) Every family's invoices read daily by the worker | Added by step 4 (Money for staff); a family whose read keeps failing is passed over after three stopped runs (this step) | Built | `money-sweep.test.ts` "reads each family in turn", "stops at a family whose read keeps failing" |
+| 8.4.8 | (new) Every family's invoices read daily by the worker | Added by step 4 (Money for staff); a family whose read keeps failing is passed over after three stopped runs (this step); a roster family with no family record of the app's own is passed over as `no_record`, never stopping a run (stage 2) | Built | `money-sweep.test.ts` "reads each family in turn", "stops at a family whose read keeps failing", "passes over a roster family with no family record" |
 
 ## §9 Commitment forms and signatures
 

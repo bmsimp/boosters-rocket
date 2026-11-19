@@ -81,10 +81,14 @@ test("every customer the seed gives another family is searched for", async () =>
 
 test("every invoice the seed gives another family is searched for", async () => {
   // As above, for money: each invoice stored for a family other than the Quetzalcoatl family must be findable by its
-  // number and its amount, and by its pay link when it has one.
+  // number and its amount, and by its pay link when it has one. The figures are kept by the app's own family (stage 2
+  // of the app-owned families spec): another family's are those whose family isn't the one the Quetzalcoatl family's
+  // customer is linked to, named here by the customer their family's link names.
   type Stored = { number: string; totalCents: number; payLink: string | null };
-  const rows = await sql`SELECT family_qbo_id, invoices, total_cents FROM family_money WHERE family_qbo_id <> ${PARENT_SESSION_FAMILY}`;
-  const invoices = rows.flatMap((r) => (r.invoices as Stored[]).map((i) => ({ family: r.family_qbo_id as string, ...i })));
+  const family = sql`SELECT family_id FROM accounting_link WHERE customer_id = ${PARENT_SESSION_FAMILY} AND family_id IS NOT NULL`;
+  const rows = await sql`SELECT l.customer_id AS family_customer, m.invoices, m.total_cents FROM family_money m
+    LEFT JOIN accounting_link l ON l.family_id = m.family_id WHERE m.family_id NOT IN (${family})`;
+  const invoices = rows.flatMap((r) => (r.invoices as Stored[]).map((i) => ({ family: r.family_customer as string, ...i })));
   expect(invoices.length).toBeGreaterThanOrEqual(3);
   const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
   const searched = (value: string) => OTHER_FAMILIES.some((s) => value.includes(s));

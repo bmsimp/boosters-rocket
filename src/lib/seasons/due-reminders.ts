@@ -110,18 +110,21 @@ async function owedToday(due: { kind: DueKind; days: number; dueOn: string }[]) 
   const payments = requirements.some((r) => r.kind === "payment");
   // As a parent's page sees it: a payment's amount only from figures read within freshSeconds. A payment with no figures
   // that may be shown has no standing of its own, and reads as "No invoice yet", which sends nothing (paymentVerdict).
-  // The figures are kept by the family's QuickBooks id (the money cache, still keyed by customer: a boundary AGENTS.md
-  // lists, Seasons), so each family and student is taken to its family's customer here.
+  // The figures are kept by the app's family, so a family and each of its students read the family's row by its id.
   const [{ facts }, figures] = await Promise.all([
     everyonesFacts(requirements, { amounts: "fresh", parentId: null }),
-    moneyRows(payments ? families.map((f) => f.qboId) : []),
+    moneyRows(payments ? families.map((f) => f.id) : []),
   ]);
-  const familyCustomerOf = new Map(families.flatMap((f) => [[String(f.id), f.qboId] as const, ...f.students.map((s) => [String(s.id), f.qboId] as const)]));
+  const familyOf = new Map(families.flatMap((f) => [[String(f.id), f.id] as const, ...f.students.map((s) => [String(s.id), f.id] as const)]));
+  const readAtOf = (subject: SubjectId): Date | null => {
+    const family = familyOf.get(String(subject));
+    return family === undefined ? null : figures.get(family)?.readAt ?? null;
+  };
   // The figures' age is judged by the real time, whatever day the wake is deciding for.
   const nowMs = Date.now();
   const verdict = (r: (typeof requirements)[number], subject: SubjectId): Verdict => r.kind === "checklist"
     ? checklistVerdict(facts.standing(r, subject), facts.waived(r.id, subject))
-    : paymentVerdict({ standing: facts.standing(r, subject), readAt: figures.get(familyCustomerOf.get(String(subject)) ?? "")?.readAt ?? null, waived: facts.waived(r.id, subject), nowMs });
+    : paymentVerdict({ standing: facts.standing(r, subject), readAt: readAtOf(subject), waived: facts.waived(r.id, subject), nowMs });
   return owedReminders({ due, requirements, families, verdict });
 }
 
