@@ -7,7 +7,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
   accountingLink, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, guardian, parentAuthSession, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
@@ -16,6 +16,7 @@ import {
 import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { clearRosterOfOtherCompany, getRosterSource, setRosterSource } from "@/lib/roster/source";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { resetDb, seedStaff, untilALockIsAwaited } from "../helpers/db";
 import { seedTwoFamilies } from "../helpers/parent";
 import { recordOfCustomer } from "../helpers/app-records";
@@ -137,8 +138,10 @@ describe("connecting a different company after step 5", () => {
     const familyId = a.identity.familyId;
     let commit!: () => void;
     const held = new Promise<void>((resolve) => { commit = resolve; });
-    // As storeEvidence() does: the request locked, the evidence inserted, the commit still to come.
+    // As storeEvidence() does (stage 3's slice 9d): the roster lock held shared, the request locked, the evidence
+    // inserted, the commit still to come. The clear, which holds the roster lock exclusively, waits for it.
     const storing = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
       await tx.select().from(signatureRequest).where(eq(signatureRequest.id, requestId)).for("update");
       await tx.insert(signedFormEvidence).values({ requestId, realmId: "1111", requirementId: null, familyQboId: a.spec.family.qboId, subjectQboId: a.spec.family.qboId,
         subjectKind: "family", familyId, formTitle: "In flight", envelopeId: "envelope_inflight", signers: [], consents: [], originals: [] });
