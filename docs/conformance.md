@@ -135,7 +135,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 8.4.4 | Signature reminders as configured per form | Days before the due date and weekly after, from 9:00 club time | Built | `tests/integration/signed-forms-staff.test.ts` "saves a form's schedule, and sends it at the first wake on or after 9 on the club's clock" |
 | 8.4.5 | Volunteer reminders and due-date nudges daily, plus the day-before reminder | | Built | `tests/integration/volunteer-reminders.test.ts` |
 | 8.4.6 | Buy-out invoice status with the nightly reconciliation | After each daily money run | Built | `tests/integration/buyouts-check.test.ts` "marks a paid one paid, flags one QuickBooks no longer shows" |
-| 8.4.7 | Expired email-change and session clean-up daily | Every table is cleaned or kept on purpose; Better Auth's verification rows added in this step | Built | `tests/integration/cleanup.test.ts` |
+| 8.4.7 | Expired email-change and session clean-up daily | Every table is cleaned or kept on purpose; Better Auth's verification rows added in this step; the sign-in release's one-time links (used or expired) and remembered devices (expired) added in its slice SI-1 | Built | `tests/integration/cleanup.test.ts` |
 | 8.4.8 | (new) Every family's invoices read daily by the worker | Added by step 4 (Money for staff); a family whose read keeps failing is passed over after three stopped runs (this step); a roster family with no family record of the app's own is passed over as `no_record`, never stopping a run (stage 2) | Built | `money-sweep.test.ts` "reads each family in turn", "stops at a family whose read keeps failing", "passes over a roster family with no family record" |
 
 ## §9 Commitment forms and signatures
