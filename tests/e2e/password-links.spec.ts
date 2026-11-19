@@ -1,20 +1,25 @@
 import { test, expect } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
-import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks } from "./signin-links";
+import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, removeZeldaSessionsMadeHere } from "./signin-links";
 
 /**
- * A set-up link in the browser (the sign-in release, slice SI-2): opened, a password chosen and set. The password is
- * long and random, so it passes the breach check whether the real service answers or can't be reached (both outcomes
- * are asserted against a stub in tests/integration/password-links.test.ts). Zelda's link and the password are removed
- * after, so the seed is as it was for the next pass and the next spec. Nothing links to these pages yet.
+ * A set-up link in the browser (the sign-in release, slices SI-2 and SI-3a): opened, a password chosen and set, and,
+ * the seed's club being at Standard, Zelda signed in: she has two families, so she lands on the chooser. The password
+ * is long and random, so it passes the breach check whether the real service answers or can't be reached (both
+ * outcomes are asserted against a stub in tests/integration/password-links.test.ts). Zelda's link, the password and
+ * the session it signed her in with are removed after, so the seed is as it was for the next pass and the next spec.
  */
 const sql = postgres(process.env.DATABASE_URL!);
-test.afterEach(async () => { await removeZeldaLinks(sql); });
+test.afterEach(async () => { await removeZeldaLinks(sql); await removeZeldaSessionsMadeHere(sql); });
 test.afterAll(async () => { await sql.end(); });
+/** Zelda's sessions still choosing a family: a sign-in into two families makes one. */
+const choosingSessions = async () => (await sql`SELECT count(*)::int AS n FROM parent_auth_session s JOIN parent_auth_user u ON u.id = s.user_id
+  JOIN parent p ON p.id = u.parent_id WHERE p.email = 'zelda@example.com' AND s.family_id IS NULL`)[0]!.n as number;
 
-test("a set-up link sets a password, and says so", async ({ page }) => {
+test("a set-up link sets a password and signs the parent in, landing on the chooser", async ({ page }) => {
   const token = await mintZeldaLink(sql, "setup");
+  const before = await choosingSessions();
   const res = await page.goto(`/sign-in/set-up/${token}`);
   expect(res?.headers()["cache-control"]).toContain("no-store");
   // The token is in the address: the answer itself says to send no referrer, before any of the page's own requests.
@@ -27,8 +32,9 @@ test("a set-up link sets a password, and says so", async ({ page }) => {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Type it again").fill(password);
   await page.getByRole("button", { name: "Save my password" }).click();
-  await expect(page.getByText("Your password is set.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Go to sign in" })).toHaveAttribute("href", "/sign-in");
+  // Signed in: Zelda is a guardian of two families, so the portal sends her to choose one.
+  await expect(page).toHaveURL(/\/choose-family$/);
+  expect(await choosingSessions()).toBe(before + 1);
   const [row] = await sql`SELECT count(*)::int AS n FROM parent_auth_account a JOIN parent_auth_user u ON u.id = a.user_id
     JOIN parent p ON p.id = u.parent_id WHERE p.email = 'zelda@example.com' AND a.provider_id = 'credential'`;
   expect(row!.n).toBe(1);

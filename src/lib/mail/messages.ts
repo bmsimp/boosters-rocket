@@ -57,6 +57,39 @@ export function emailChangeNoticeMessage(b: Brand, to: string): MailMessage {
   return { to, subject: `Your ${b.clubName} sign-in email`, text: text(lines), html: html(b, lines) };
 }
 
+/*
+ * The two links of the page "Set up or reset my password" (the sign-in release, slice SI-3a; src/lib/parents/
+ * password-request.ts). Each goes to the address asked for, read under the person's lock, and to no other. Each holds
+ * the link on a line of its own, how long it works (`life`, in words, from LINK_LIFE_MS), that the club never asks for a
+ * password by email or phone, and what to do if the reader didn't ask. No family, student or other person is named.
+ */
+const NEVER_ASKS = (b: Brand) => `${b.clubName} will never ask you for your password, by email or by phone. Don't share it with anyone.`;
+const DID_NOT_ASK = "If you didn't ask for this, you can ignore this email: nothing changes unless the link is used. If these emails keep coming, please tell the club.";
+
+/** A set-up link: the person has no password yet, and chooses one with it. */
+export function passwordSetupMessage(b: Brand, to: string, o: { link: string; life: string }): MailMessage {
+  const lines = [
+    `We got a request to set up a password for signing in to ${b.clubName} with this email address. To choose your password, open this link:`,
+    o.link,
+    `The link works once, for ${o.life}.`,
+    NEVER_ASKS(b),
+    DID_NOT_ASK,
+  ];
+  return { to, subject: `Set up your ${b.clubName} password`, text: text(lines), html: html(b, lines) };
+}
+
+/** A reset link: the person has a password, and chooses a new one with it. */
+export function passwordResetMessage(b: Brand, to: string, o: { link: string; life: string }): MailMessage {
+  const lines = [
+    `We got a request to reset the password you use to sign in to ${b.clubName} with this email address. To choose a new password, open this link:`,
+    o.link,
+    `The link works once, for ${o.life}. Until you use it, your password stays as it is.`,
+    NEVER_ASKS(b),
+    DID_NOT_ASK,
+  ];
+  return { to, subject: `Reset your ${b.clubName} password`, text: text(lines), html: html(b, lines) };
+}
+
 /* ---- Volunteering (v1 spec §11.3). Each goes to the guardian who took the place, and says only what is theirs: the
    person filling it, the event and the shift. Nothing about who else is signed up. ---- */
 

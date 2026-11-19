@@ -89,6 +89,7 @@ function staffPageProblem(file: string, source = read(file)): string | null {
 const OTHER_PAGES: Record<string, string> = {
   "src/app/sign-in/page.tsx": "Public: the parent sign-in form. Shows no family data (tests/e2e/public-pages.spec.ts).",
   "src/app/sign-in/set-up/[token]/page.tsx": "No session: the set-up link in its address is the guard (linkVerdict(), src/lib/parents/signin-links.ts). Opening it writes nothing; it shows the form or one message, the same for every refusal, and nothing of a person or family. Its action (beforeSignInAction, src/app/sign-in/password-actions.ts) checks the link again under the person's lock (tests/integration/password-links.test.ts).",
+  "src/app/sign-in/password/page.tsx": "No session and no token: its guard is its limits and its one answer. The page asks for an email address and its action (askPasswordLinkAction, a beforeSignInAction in src/app/sign-in/password-actions.ts) answers the same words for every address and every outcome, limited per address (counted under a keyed hash) and per IP address, and mails a set-up or reset link only to a person the portal may mail; opening the page writes nothing, and it shows nothing of a person or family (tests/integration/password-request.test.ts).",
   "src/app/sign-in/reset/[token]/page.tsx": "No session: the reset link in its address is the guard, as the set-up page's (linkVerdict(), src/lib/parents/signin-links.ts). Opening it writes nothing; it shows the form or one message, the same for every refusal, and nothing of a person or family (tests/integration/password-links.test.ts).",
   "src/app/staff/sign-in/page.tsx": "Public: the staff sign-in buttons. Shows no family data (tests/e2e/public-pages.spec.ts).",
   "src/app/refused/page.tsx": "Public: one fixed message, the same whoever is refused and whatever the reason.",
@@ -393,7 +394,15 @@ const PARENT_CODE_ELSEWHERE = [
   // What a set-up or reset link's page and action run for a visitor with no session (the pages and their action are
   // under src/app/sign-in, BEFORE_SIGN_IN_CODE below): they read one person from a token anyone can send.
   "src/lib/parents/signin-links.ts",
+  "src/lib/parents/link-state.ts",
   "src/lib/parents/password-set.ts",
+  // What the page that mails a set-up or reset link runs (slice SI-3a): it reads one person from an address anyone can
+  // type. And the one finish of a sign-in, with the step that copies its cookie onto a link form's answer.
+  "src/lib/parents/password-request.ts",
+  "src/lib/parents/password-request-rule.ts",
+  "src/lib/auth/parent-signin-finish.ts",
+  "src/lib/auth/parent-link-signin.ts",
+  "src/lib/auth/session-cookie-copy.ts",
 ];
 
 /**
@@ -423,7 +432,8 @@ describe("parent code never imports the staff-only queries", () => {
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/payments/page.tsx", "src/app/(parent)/money-box.tsx", "src/lib/money/family-money.ts"]));
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/forms/[id]/page.tsx", "src/app/(parent)/forms/actions.ts", "src/lib/forms/my-forms.ts", "src/lib/forms/signing.ts", "src/lib/documenso/client.ts"]));
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/sign-in/page.tsx", "src/app/sign-in/password-link-page.tsx", "src/app/sign-in/password-form.tsx",
-      "src/app/sign-in/password-actions.ts", "src/app/sign-in/set-up/[token]/page.tsx", "src/app/sign-in/reset/[token]/page.tsx"]));
+      "src/app/sign-in/password-actions.ts", "src/app/sign-in/set-up/[token]/page.tsx", "src/app/sign-in/reset/[token]/page.tsx",
+      "src/app/sign-in/password/page.tsx", "src/app/sign-in/password-request-form.tsx"]));
     // read() throws for a file that is gone, so a module renamed or removed can't stay listed and unscanned.
     for (const file of PARENT_CODE_ELSEWHERE) expect(read(file).length, file).toBeGreaterThan(0);
   });

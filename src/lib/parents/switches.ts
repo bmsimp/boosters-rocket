@@ -5,6 +5,7 @@ import { writeAudit } from "@/lib/audit/log";
 import { mailWorking } from "@/lib/mail/settings";
 import { getShape, shapeNamesStudents } from "@/lib/roster/shape";
 import type { StaffOp } from "./people";
+import { unspentLink } from "./link-state";
 import { hasRowThatCounts, studentsRuleInForce } from "./sessions";
 import { getParentSettings, putParentSettings, PARENTS_KEY, type ParentSettings } from "./settings";
 
@@ -89,12 +90,12 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
       // sessions. Passwords stay: switching sign-ins on again lets the same people in the same way.
       await lockPeople(tx, or(eq(parent.welcomeOwed, true),
         inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(isNull(signinCode.usedAt))),
-        inArray(parent.id, tx.select({ id: parentSigninToken.parentId }).from(parentSigninToken).where(isNull(parentSigninToken.usedAt))),
+        inArray(parent.id, tx.select({ id: parentSigninToken.parentId }).from(parentSigninToken).where(unspentLink)),
         inArray(parent.id, tx.select({ id: parentDevice.parentId }).from(parentDevice)),
         inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)))));
       const owed = await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true)).returning({ id: parent.id });
       const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
-      const links = await tx.delete(parentSigninToken).where(isNull(parentSigninToken.usedAt)).returning({ id: parentSigninToken.id });
+      const links = await tx.delete(parentSigninToken).where(unspentLink).returning({ id: parentSigninToken.id });
       const devices = await tx.delete(parentDevice).returning({ id: parentDevice.id });
       const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
       return { sessionsEnded: ended.length, codesDeleted: codes.length, linksDeleted: links.length, devicesForgotten: devices.length,

@@ -33,7 +33,7 @@ import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
-import { linkRows, mintLink, seedDevice } from "../helpers/signin-links";
+import { holdLink, linkRows, mintLink, seedDevice } from "../helpers/signin-links";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -215,9 +215,11 @@ describe("confirming: QuickBooks first, then the portal", () => {
   it("own Parent record: the one address is changed in QuickBooks, then the person, and the old address signs in nowhere", async () => {
     const { r, c } = await seedContactFamilies(stub);
     await aCode(r.identity.parentId);
-    // A set-up and a reset link mailed to the old address, and a device remembered for it.
+    // A set-up and a reset link mailed to the old address, a second set-up link held while its mail is on its way
+    // there (the request page), and a device remembered for it.
     await mintLink(r.identity.parentId, "setup");
     await mintLink(r.identity.parentId, "reset");
+    await holdLink(r.identity.parentId, "setup");
     await seedDevice(r.identity.parentId);
     asParent(r.identity);
     await asking(NEW);
@@ -260,7 +262,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     const saved = (await audits()).filter((a) => a.action === "parent.email.save");
     // One row says it all: the cache took QuickBooks' answer, and the person's address changed, signing them out.
     expect(saved).toEqual([{ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
-      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "cached", app: "changed", sessionsEnded: 1, linksDeleted: 2, devicesForgotten: 1 } }]);
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "cached", app: "changed", sessionsEnded: 1, linksDeleted: 3, devicesForgotten: 1 } }]);
     // Nothing decided access from QuickBooks: no sign-in was opened, moved or closed, and no address was changed by a rule.
     for (const action of ["parent.email.changed", "parent.access.granted", "parent.access.moved", "parent.access.ended", "parent.hold.opened"]) {
       expect((await audits()).map((a) => a.action)).not.toContain(action);

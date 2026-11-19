@@ -1,7 +1,7 @@
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { parent, signinCode } from "@/lib/db/schema";
+import { parent, parentAuthAccount, parentAuthUser, parentSigninToken, signinCode } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/setup/state";
 import { env } from "@/env";
@@ -149,26 +149,51 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
 }
 
 /**
- * The last check of a sign-in, made once the session row exists: the address the code was proved with is still the
- * person's, they are not blocked, and the code it spent (`codeId`, from verifySigninCode()) is still there. Read under
- * the lock an address change, a block or a password reset waits for (lockedPerson), and after the session is stored,
- * so there is no moment in which a session proved with a replaced address, or before a reset, can slip through. A
- * reset deletes the person's codes spent within a code's life (choosePasswordFromLink(), password-set.ts), so a code
- * spent before a reset that committed first is gone here; the daily clean-up keeps a spent code until a code's life
- * has passed since it was spent (cleanUp(), cleanup.ts), so it never takes one this soon. A change that committed first is seen here and the caller
- * removes the session; a change that comes later ends the person's sessions itself, and by then this one is stored
- * where it can see it.
+ * What a set-up link's sign-in spent, as the transaction that set its password read and wrote it under the person's
+ * lock (choosePasswordFromLink(), password-set.ts): the link's own row, now spent, and the `credential` row the set
+ * wrote, by its id and the `updated_at` it was given. It never reaches the browser.
  */
-export async function signinStands(parentId: string, rawEmail: string, ip: string | null, codeId: string): Promise<boolean> {
+export type LinkSigninProof = { linkId: string; credentialId: string; credentialUpdatedAt: Date };
+
+/**
+ * The last check of a sign-in, made once the session row exists: the address the sign-in was proved with is still the
+ * person's, they are not blocked, and what the sign-in spent still stands. Read under the lock an address change, a
+ * block or a password reset waits for (lockedPerson), and after the session is stored, so there is no moment in which a
+ * session proved with a replaced address, or before a reset, can slip through. A change that committed first is seen
+ * here and the caller removes the session; a change that comes later ends the person's sessions itself, and by then
+ * this one is stored where it can see it. What the sign-in spent is one of two things:
+ * - a code (`proof` is the code's row id, from verifySigninCode()): it is still there. A reset deletes the person's
+ *   codes spent within a code's life (choosePasswordFromLink(), password-set.ts), so a code spent before a reset that
+ *   committed first is gone here (`code_gone`); the daily clean-up keeps a spent code until a code's life has passed
+ *   since it was spent (cleanUp(), cleanup.ts), so it never takes one this soon.
+ * - a set-up link (a LinkSigninProof, from the transaction that set the password with it): the link's row is still
+ *   there and spent (`link_gone` otherwise), and the person's `credential` row is still the one that transaction wrote,
+ *   by its id and its `updated_at` (`password_changed` otherwise): a reset, or a staff reset, that committed between the
+ *   set and this check has replaced the password, and the session made from the old one is refused here.
+ * Every refusal is audited `signin.refused` with its short reason, and the caller answers it as one refusal.
+ */
+export async function signinStands(parentId: string, rawEmail: string, ip: string | null, proof: string | LinkSigninProof): Promise<boolean> {
   const email = normalizeEmail(rawEmail);
   const seen = await db.transaction(async (tx) => {
     const live = await lockedPerson(tx, parentId);
-    const [code] = await tx.select({ id: signinCode.id }).from(signinCode).where(and(eq(signinCode.id, codeId), eq(signinCode.parentId, parentId)));
-    return { live, codeKept: code !== undefined };
+    if (typeof proof === "string") {
+      const [code] = await tx.select({ id: signinCode.id }).from(signinCode).where(and(eq(signinCode.id, proof), eq(signinCode.parentId, parentId)));
+      return { live, spent: code !== undefined ? null : "code_gone" as const };
+    }
+    const [link] = await tx.select({ usedAt: parentSigninToken.usedAt }).from(parentSigninToken)
+      .where(and(eq(parentSigninToken.id, proof.linkId), eq(parentSigninToken.parentId, parentId)));
+    // The column is read through sql<Date>: the Better Auth tables are built by one generic function (schema.ts), and
+    // drizzle's inferred type of this column comes out as never.
+    const passwords = await tx.select({ updatedAt: sql<Date>`${parentAuthAccount.updatedAt}`.mapWith(parentAuthAccount.updatedAt) }).from(parentAuthAccount)
+      .where(and(eq(parentAuthAccount.id, proof.credentialId), eq(parentAuthAccount.providerId, "credential"),
+        inArray(parentAuthAccount.userId, tx.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, parentId)))));
+    const stored = passwords[0]?.updatedAt;
+    const samePassword = stored !== undefined && stored.getTime() === proof.credentialUpdatedAt.getTime();
+    return { live, spent: !samePassword ? "password_changed" as const : !link || link.usedAt === null ? "link_gone" as const : null };
   });
   const { live } = seen;
-  if (live && email && live.email === email && !live.blocked && seen.codeKept) return true;
+  if (live && email && live.email === email && !live.blocked && seen.spent === null) return true;
   await writeAudit({ actor: { door: "parent", id: parentId, label: email }, action: "signin.refused", targetType: "parent", targetId: parentId,
-    after: { reason: live?.blocked ? "blocked" : !live || !email || live.email !== email ? "address_changed" : "code_gone" }, ip });
+    after: { reason: live?.blocked ? "blocked" : !live || !email || live.email !== email ? "address_changed" : seen.spent }, ip });
   return false;
 }

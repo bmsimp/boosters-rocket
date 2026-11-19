@@ -27,6 +27,8 @@ export default async function ParentSignIn({ searchParams }: { searchParams?: Pr
         <h1 className="page-title">Sign in</h1>
         {ready && confirmingEmail && <p className="help">To confirm your new email, sign in with the address you use now. The new one works once the change is confirmed.</p>}
         {ready ? <CodeSignIn next={next} /> : <p role="status">{SIGNIN_UNAVAILABLE}</p>}
+        {/* A set-up link for a first password, or a reset link for a forgotten one (./password, slice SI-3a). */}
+        {ready && <p><a className="link-line" href="/sign-in/password">Set up or reset my password</a></p>}
         <p className="lede"><a className="link-line" href="/staff/sign-in">Board and staff sign in here</a></p>
         {/* How to put the portal on the home screen. It takes nothing from the server, and "Not now" puts it away on this device. */}
         <InstallHint />

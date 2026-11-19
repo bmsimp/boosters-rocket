@@ -58,7 +58,7 @@ function buildParentAuth() {
     // Spec §1: 90 days, renewed by use; no cookie cache, so ended sessions stop at the next request. Better Auth only
     // sets the row's first expiry and refuses a row past it. Its own refresh stays off: the portal renews the row
     // itself (renewParentSession in src/lib/parents/sessions.ts, called from identity.ts), and the cookie is set once,
-    // at sign-in, to outlive it (parent-code-plugin.ts).
+    // at sign-in, to outlive it, by the one finish every sign-in goes through (parent-signin-finish.ts).
     // `familyId` is the app's own family record the session chose (`parent_auth_session.family_id`, a uuid), null until
     // it chooses: never a QuickBooks id. input: false, so no route takes it from the browser: only the portal writes it
     // (family-choice.ts), and the gate clears it (src/lib/auth/resolve.ts). It is returned, as every field is unless

@@ -76,10 +76,14 @@ export function parentAction<A extends unknown[], R>(fn: (ctx: ParentCtx, ...arg
 export type BeforeSignInCtx = { ip: string | null };
 
 /**
- * An action a visitor takes before they have signed in: choosing a password from a set-up or reset link. There is no
- * session to check, so, as setupUnlockAction()'s (src/lib/setup/guard.ts), its guard is the check its function performs:
- * the link it is given, looked up and checked in full (src/lib/parents/signin-links.ts), limited per address and per
- * link, with one answer for every refusal. The function is given only the visitor's address. Registered as the door
+ * An action a visitor takes before they have signed in: choosing a password from a set-up or reset link, and asking
+ * for such a link by email ("Set up or reset my password"). There is no session to check, so, as setupUnlockAction()'s
+ * (src/lib/setup/guard.ts), its guard is the check its function performs: the link it is given, looked up and checked
+ * in full (src/lib/parents/signin-links.ts), limited per address and per link, with one answer for every refusal; or,
+ * for the ask, which carries no token, its limits (per address, under a keyed hash, and per IP address) and its one
+ * answer for every address (src/lib/parents/password-request.ts). A sign-in it leads to is finished only by the one
+ * finish every sign-in goes through (src/lib/auth/parent-signin-finish.ts). The function is given only the visitor's
+ * address. Registered as the door
  * "before-sign-in", which tests/integration/invariants.test.ts allows in one file only, src/app/sign-in/password-actions.ts:
  * a new use of it is a decision, with its own checklist in AGENTS.md ("Page or action before sign-in").
  */

@@ -30,6 +30,22 @@ export async function mintZeldaLink(sql: postgres.Sql, purpose: LinkPurpose): Pr
   return token;
 }
 
+/**
+ * The key a per-address count of "Set up or reset my password" is kept under, as src/lib/parents/password-request.ts
+ * keeps it (hashAskedAddress(): an HMAC-SHA256 keyed with BETTER_AUTH_SECRET over `password-ask:<address>`).
+ */
+export const askedAddressHash = (address: string) =>
+  createHmac("sha256", process.env.BETTER_AUTH_SECRET!).update(`password-ask:${address}`).digest("hex");
+
+/** The session the seed gives Zelda (scripts/seed-e2e.ts), which every other session of hers was made by a spec. */
+export const SEEDED_ZELDA_SESSION = "e2e-parent-session";
+
+/** Ends the sessions a spec signed Zelda in with, keeping the one the seed gave her. */
+export async function removeZeldaSessionsMadeHere(sql: postgres.Sql): Promise<void> {
+  await sql`DELETE FROM parent_auth_session WHERE id <> ${SEEDED_ZELDA_SESSION}
+            AND user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
+}
+
 /** Removes every link of Zelda's and her password, which the seed gives her none of. */
 export async function removeZeldaLinks(sql: postgres.Sql): Promise<void> {
   await sql`DELETE FROM parent_signin_token WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`;

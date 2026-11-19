@@ -12,12 +12,13 @@ import type { AppFamilyId } from "@/lib/families/ids";
  * parent chooses (chooseFamily). The session stores the row's own family record (`family_id`), which the gate matches
  * to the person's rows that count on every request (src/lib/auth/resolve.ts).
  *
- * `sessionId` is the session just made for this sign-in (parent-code-plugin.ts): the family is entered on it. If that
+ * `sessionId` is the session just made for this sign-in (finishParentSignin(), src/lib/auth/parent-signin-finish.ts,
+ * for a code or a set-up link): the family is entered on it. If that
  * session has been ended in the meantime (a block, a change of address, the person's last link closing), nobody
  * signed in: nothing is activated or audited as a sign-in, and `sessionEnded` says so. A person left with no family to
  * enter since the code was checked (verifySigninCode() refuses one before) is refused here as the gate refuses them:
  * nothing is activated, their sessions end, `signin.refused` `no_enabled_guardian` is audited, and `sessionEnded` says
- * so, so the plugin answers "rejected" and sets no cookie.
+ * so, so the finish refuses and sets no cookie.
  */
 export async function completeParentSignin(parentId: string, ip: string | null, sessionId?: string): Promise<{ familyId: AppFamilyId | null; sessionEnded?: true }> {
   const [p] = await db.select().from(parent).where(eq(parent.id, parentId));

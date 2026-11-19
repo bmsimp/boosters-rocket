@@ -88,6 +88,8 @@ const BEFORE_SIGN_IN: Target[] = [
   { label: "/sign-in/set-up/[token]", address: "/sign-in/set-up/", signedIn: false, link: "setup" },
   { label: "/sign-in/reset/[token]", address: "/sign-in/reset/", signedIn: false, link: "reset" },
   { label: "/sign-in/set-up/[token], a link that can't be used", address: `/sign-in/set-up/${NO_SUCH_LINK}`, signedIn: false },
+  // "Set up or reset my password" (slice SI-3a): the form, never submitted here.
+  { label: "/sign-in/password", address: "/sign-in/password", signedIn: false },
   { label: "/offline.html", address: "/offline.html", signedIn: false },
   // An address with no page: a signed-in parent keeps the frame around it (src/app/not-found.tsx), anyone else gets it plain.
   { label: "not found, signed in", address: "/no-such-page", signedIn: true, status: 404 },

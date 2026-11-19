@@ -11,4 +11,4 @@ export type SmtpSecurity = "starttls" | "tls";
 export type StoredMailConfig =
   | { method: "graph"; mailbox: string }
   | { method: "smtp"; host: string; port: number; security: SmtpSecurity; username: string; from: string; passwordCiphertext: string; passwordKeyId: string };
-export type MailPurpose = "signin_code" | "welcome" | "email_change_confirm" | "email_change_notice" | "test" | "volunteer_confirm" | "volunteer_notice" | "form_copy" | "form_reminder" | "volunteer_reminder" | "due_reminder";
+export type MailPurpose = "signin_code" | "welcome" | "email_change_confirm" | "email_change_notice" | "test" | "volunteer_confirm" | "volunteer_notice" | "form_copy" | "form_reminder" | "volunteer_reminder" | "due_reminder" | "password_setup" | "password_reset";

@@ -53,7 +53,10 @@ describe("database rate limits", () => {
     expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window },
       // Choosing a password from a set-up or reset link (src/lib/parents/password-set.ts): a flood per IP address, as
       // the code request's, and the tries one link may take (a token can't be guessed).
-      password_link_ip: { max: 60, ...window }, password_link_token: { max: 10, ...window } });
+      password_link_ip: { max: 60, ...window }, password_link_token: { max: 10, ...window },
+      // Asking for a set-up or reset link by email (src/lib/parents/password-request.ts): as the code request, 3 per
+      // address (counted under a keyed hash of it) and a flood stop per IP address.
+      password_ask_email: { max: 3, ...window }, password_ask_ip: { max: 60, ...window } });
     // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
     // hour, each a write to the club's QuickBooks, and the reads the edit page makes as it opens.
     expect(contact_save_parent).toEqual({ max: 6, windowMs: 60 * 60 * 1000 });

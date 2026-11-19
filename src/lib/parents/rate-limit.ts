@@ -4,7 +4,7 @@ import { rateLimitEvent } from "@/lib/db/schema";
 
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
-  | "password_link_ip" | "password_link_token";
+  | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -24,6 +24,13 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // is not applied, as with the codes.
   password_link_ip: { max: 60, windowMs: WINDOW_MS },
   password_link_token: { max: 10, windowMs: WINDOW_MS },
+  // Asking for a set-up or reset link by email (the page "Set up or reset my password", password-request.ts). Each ask
+  // may mail the address, so it is held as the code request is: 3 per address, as code_send_email, since nobody needs
+  // more than a few links in a quarter of an hour and each new one replaces the last; counted under a keyed hash of the
+  // address, never the address, so no count holds an outsider's address. 60 per IP address, as code_send_ip, a flood
+  // stop only, for a room of parents on the school's one address; not applied with no address.
+  password_ask_email: { max: 3, windowMs: WINDOW_MS },
+  password_ask_ip: { max: 60, windowMs: WINDOW_MS },
   // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
   // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
   // from QuickBooks each time, so that is bounded too, well above what editing takes.
