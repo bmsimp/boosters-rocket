@@ -40,8 +40,11 @@ describe("chooseFamilyAction", () => {
     const two = renderToStaticMarkup(await ChooseFamily());
     expect(two).toContain("more than one family");
     expect(two.match(/<button class="btn"/g)).toHaveLength(2);
+    // No family's QuickBooks id is on the page: each is named in words here (neither has a family record) and chosen by its row.
+    expect(two).not.toMatch(/F1|F2|Family account/);
     // The chosen family goes away and one is left: the parent is sent back here, with one family to choose.
-    expect(await redirectOf(chooseFamilyAction("F2"))).toBe("/");
+    expect(await redirectOf(chooseFamilyAction(second.id))).toBe("/");
+    expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBe("F2");
     await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, second.id));
     const one = renderToStaticMarkup(await ChooseFamily());
     expect(one.match(/<button class="btn"/g)).toHaveLength(1);
@@ -49,18 +52,20 @@ describe("chooseFamilyAction", () => {
     expect(one).toContain("Choose the family to look at.");
   });
 
-  it("refuses anything but a short string, leaves the session's family alone and doesn't audit the value", async () => {
+  it("refuses anything but a uuid, leaves the session's family alone and doesn't audit the value", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    await seedGuardian({ parentId: a.id, familyQboId: "F1" }); await seedGuardian({ parentId: a.id, familyQboId: "F2" });
+    const first = await seedGuardian({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
     await post("/portal-code/send", { email: "ana@example.com" });
     await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
     const code = /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]!;
     const res = await post("/portal-code/verify", { email: "ana@example.com", code });
     state.cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
-    expect(await redirectOf(chooseFamilyAction("F1"))).toBe("/");
+    expect(await redirectOf(chooseFamilyAction(first.id))).toBe("/");
 
     const marker = "x".repeat(10_000);
-    const bad: unknown[] = [{ familyQboId: "F2", marker: "obj-marker" }, ["F2", "arr-marker"], 4242424242, marker, "", "F".repeat(65)];
+    // A family's QuickBooks id is not a row's id, and neither is a row's id in capitals or with anything around it.
+    const bad: unknown[] = [{ guardianId: second.id, marker: "obj-marker" }, [second.id, "arr-marker"], 4242424242, marker, "", "F".repeat(65), "F2",
+      second.id.toUpperCase(), ` ${second.id}`];
     for (const v of bad) {
       expect(await redirectOf((chooseFamilyAction as (x: unknown) => Promise<void>)(v))).toBe("/choose-family");
       expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBe("F1");
@@ -69,6 +74,6 @@ describe("chooseFamilyAction", () => {
     expect(refused).toHaveLength(bad.length);
     for (const r of refused) expect(r).toMatchObject({ actorId: a.id, targetId: a.id, after: { reason: "family_not_enabled" } });
     const all = JSON.stringify(await db.select().from(auditLog));
-    for (const needle of ["obj-marker", "arr-marker", "4242424242", "xxxxxxxxxx", "F".repeat(65)]) expect(all).not.toContain(needle);
+    for (const needle of ["obj-marker", "arr-marker", "4242424242", "xxxxxxxxxx", "F".repeat(65), second.id.toUpperCase()]) expect(all).not.toContain(needle);
   });
 });

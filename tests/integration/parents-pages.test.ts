@@ -19,7 +19,9 @@ vi.mock("next/navigation", () => ({
 import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
 import { db } from "@/lib/db/client";
-import { auditLog, heldAddress, jobRun, parent, role, roleAssignment, roleRule } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { auditLog, guardian, heldAddress, jobRun, parent, role, roleAssignment, roleRule } from "@/lib/db/schema";
+import { recordNameWords } from "@/lib/families/words";
 import { AccessDenied } from "@/lib/guards";
 import { runReconcile } from "../helpers/reconcile";
 import { loadRosterPage } from "@/lib/roster/queries";
@@ -264,12 +266,17 @@ describe("the staff pages for parents", () => {
     expect(`${held.name}${held.detail}`).not.toMatch(/Rivera|Chen|sam@example\.com/);
   });
 
-  it("the family chooser names each family from the roster, and a stand-in for one it doesn't know", async () => {
-    const [ana] = await db.select().from(parent);
-    who.parentState = { status: "choose", parentId: ana!.id, sessionId: "s1", name: ana!.name,
-      families: [{ guardianId: "g1", familyQboId: "10" }, { guardianId: "g2", familyQboId: "NOPE" }] };
+  it("the family chooser names each family from its app record, says so for one it doesn't know, and sends no QuickBooks id", async () => {
+    const ana = (await db.select().from(parent)).find((p) => p.email === "ana@example.com")!;
+    const [rivera] = await db.select().from(guardian).where(eq(guardian.parentId, ana.id));
+    // A row with no family record behind it: the portal knows no name for it.
+    const unknown = await seedGuardian({ parentId: ana.id, familyQboId: "NOPE" });
+    who.parentState = { status: "choose", parentId: ana.id, sessionId: "s1", name: ana.name,
+      families: [{ guardianId: rivera!.id, familyQboId: "10" }, { guardianId: unknown.id, familyQboId: "NOPE" }] };
     const html = renderToStaticMarkup(await ChooseFamily());
     expect(html).toContain("Rivera Family");
-    expect(html).toContain("Family account NOPE");
+    expect(html).toContain(recordNameWords(null, "family"));
+    expect(html).not.toContain("Family account");
+    expect(html).not.toContain("NOPE");
   });
 });
