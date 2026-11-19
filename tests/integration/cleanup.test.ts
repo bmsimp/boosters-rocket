@@ -97,7 +97,7 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(left).not.toContain(expiredGone); expect(left).not.toContain(spentLongAgo);
   });
 
-  it("set-up and reset links: one spent over a code's life ago goes, and one that expired a second ago; one spent since, or with a second left, stays", async () => {
+  it("set-up and reset links: one spent over a code's life ago goes, and an unused one that expired a second ago; one spent since (expired or not), or with a second left, stays", async () => {
     // The sign-in release's one-time links, seeded here as the request page and the link's form store them. One unused
     // link per person and purpose, so each person below holds at most one unused one of each. A spent link stays for a
     // code's life after it was spent (slice SI-3a): a set-up link's sign-in reads it again at its last check.
@@ -113,9 +113,11 @@ describe("the daily clean-up deletes only what is past use", () => {
     const setupBesideReset = await link(3, "setup", { expiresAt: at(7 * DAY) });
     const spentJustNow = await link(4, "setup", { expiresAt: at(DAY), usedAt: at(-SEC) });
     const spentALifeAgo = await link(4, "reset", { expiresAt: at(DAY), usedAt: at(-CODE_TTL_MS) });
+    // Spent a second before it expired, a second ago: its sign-in may still be reading it again, so it stays.
+    const spentThenExpired = await link(2, "reset", { expiresAt: at(-SEC), usedAt: at(-2 * SEC) });
     expect(await clean()).toEqual({ ...NOTHING, signinLinks: 3 });
     const left = await ids(db.select({ id: parentSigninToken.id }).from(parentSigninToken));
-    expect(left).toEqual([expiresNow, secondLeft, setupBesideReset, spentJustNow, spentALifeAgo].sort());
+    expect(left).toEqual([expiresNow, secondLeft, setupBesideReset, spentJustNow, spentALifeAgo, spentThenExpired].sort());
     for (const gone of [expiredGone, usedGone, usedAndExpired]) expect(left).not.toContain(gone);
     expect(describeCleanup({ ...NOTHING, signinLinks: 1 })).toBe("Removed 1 used or expired password link.");
     expect(describeCleanup({ ...NOTHING, signinLinks: 3 })).toBe("Removed 3 used or expired password links.");

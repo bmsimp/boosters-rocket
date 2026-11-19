@@ -95,8 +95,8 @@ export function describeCleanup(c: CleanupCounts): string {
  *   the wait between two sends: until then the newest code, used or not, is what holds back the next one, and until a
  *   code's life has passed since it was spent, the sign-in that spent it reads it again at its last check
  *   (signinStands(), signin-codes.ts), which a reset refuses by deleting it.
- * - A person's set-up and reset links (`parent_signin_token`) spent more than a code's life ago (CODE_TTL_MS), or past
- *   their expiry: a link works once, and only before it expires, and until a code's life has passed since it was spent,
+ * - A person's set-up and reset links (`parent_signin_token`) spent more than a code's life ago (CODE_TTL_MS), or never
+ *   spent and past their expiry: a link works once, and only before it expires, and until a code's life has passed since it was spent,
  *   the set-up link's sign-in that spent it reads it again at its last check (signinStands(), signin-codes.ts).
  * - Remembered devices (`parent_device`) past their expiry: a device is remembered only until then, renewed by use.
  * - Rate-limit records older than their kind's window (rate-limit.ts counts only those inside it): the sign-in limits
@@ -130,8 +130,12 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
     or(lt(signinCode.usedAt, new Date(now.getTime() - CODE_TTL_MS)), and(isNull(signinCode.usedAt), lt(signinCode.expiresAt, now))),
     lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)));
   // A spent link stays for a code's life after it was spent, as a spent code does: a set-up link's sign-in reads it again
-  // at its last check (signinStands()), right after the set that spent it, and refuses the sign-in when it is gone.
-  const linkGone = or(lt(parentSigninToken.usedAt, new Date(now.getTime() - CODE_TTL_MS)), lt(parentSigninToken.expiresAt, now));
+  // at its last check (signinStands()), right after the set that spent it, and refuses the sign-in when it is gone. So
+  // only an unused link goes for its expiry: one spent a moment before it expired stays its code's life too. (A link
+  // the request page holds while its mail goes, used_at set to created_at, is a spent one here: gone after a code's
+  // life if the portal never came back to it.)
+  const linkGone = or(lt(parentSigninToken.usedAt, new Date(now.getTime() - CODE_TTL_MS)),
+    and(isNull(parentSigninToken.usedAt), lt(parentSigninToken.expiresAt, now)));
   const deviceGone = lt(parentDevice.expiresAt, now);
   const sessionGone = lt(parentAuthSession.expiresAt, now);
   await tx.select({ id: parent.id }).from(parent).where(or(

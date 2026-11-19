@@ -3,10 +3,10 @@
 // (finishParentSignin(), parent-signin-finish.ts) needs one, so the action reaches it through the parent code plugin's
 // server-only endpoint (`finishLinkSignin`, parent-code-plugin.ts: it has no path, so the router serves it to nobody),
 // and the cookie that endpoint sets is copied, as it was set, onto the action's answer. This is the one place that copy
-// is made (tests/unit/one-way-in.test.ts).
+// is made, with its pure part in session-cookie-copy.ts (tests/unit/one-way-in.test.ts).
 import "server-only";
 import { cookies, headers } from "next/headers";
-import { parseSetCookieHeader, toCookieOptions } from "better-auth/cookies";
+import { cookiesToCopy } from "./session-cookie-copy";
 import { stampClientIp } from "@/lib/request";
 import type { LinkSignin } from "@/lib/parents/password-set";
 import { getParentAuth } from "./parent-auth";
@@ -29,9 +29,7 @@ export async function signInFromLink(s: LinkSignin): Promise<string | null> {
     });
     if (!response.ok) return null;
     const jar = await cookies();
-    for (const line of set.getSetCookie()) {
-      for (const [name, attributes] of parseSetCookieHeader(line)) jar.set(name, attributes.value, toCookieOptions(attributes));
-    }
+    for (const c of cookiesToCopy(set.getSetCookie())) jar.set(c.name, c.value, c.options);
     return response.next;
   } catch {
     return null;

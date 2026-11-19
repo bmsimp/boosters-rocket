@@ -4,7 +4,7 @@
 // link and mails it, and is never stored, logged or audited.
 import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { parent, parentAuthAccount, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -46,9 +46,9 @@ export const hashLinkToken = (purpose: LinkPurpose, token: string): string =>
  * or not (an unused one past its expiry still holds the place `parent_signin_token_one_live_uq` keeps until the daily
  * clean-up), and the new one is stored with its life from `now`. Audited `parent.password.link_made` in the same
  * transaction, with the purpose, its expiry and how many it replaced, never the token or its hash; the caller's own row
- * says why the link was made. Called since slice SI-3a by the page that asks for a link (askForPasswordLink(),
- * password-request.ts, which writes `parent.password.reset_asked` in the same transaction); the welcome (SI-4) and the
- * staff reset (SI-9) will call it too. Throws for a person who doesn't exist.
+ * says why the link was made. For a caller whose mail goes out in the same work as the link (the welcome, SI-4, and the
+ * staff reset, SI-9, will call it). The page that asks for a link mails after its transaction, and so holds its link
+ * until the mail is handed over instead (holdSigninLink(), below). Throws for a person who doesn't exist.
  */
 export async function mintSigninLink(tx: Tx, o: { parentId: string; purpose: LinkPurpose; actor: Actor; ip: string | null; now?: Date }): Promise<string> {
   const now = o.now ?? new Date();
@@ -63,6 +63,65 @@ export async function mintSigninLink(tx: Tx, o: { parentId: string; purpose: Lin
   await writeAudit({ actor: o.actor, action: "parent.password.link_made", targetType: "parent", targetId: person.id,
     after: { purpose: o.purpose, expiresAt: expiresAt.toISOString(), replaced: replaced.length }, ip: o.ip }, tx);
   return token;
+}
+
+/**
+ * A held link: stored with `used_at` set to its own `created_at`, so it works for nobody yet (linkVerdict() reads it as
+ * used) and holds no place under `parent_signin_token_one_live_uq`, so the person's earlier unused link of that purpose
+ * stays as it is and keeps working. A spent link is spent later than it was made, so this marks a held one alone.
+ */
+const isHeld = sql`${parentSigninToken.usedAt} = ${parentSigninToken.createdAt}`;
+
+/**
+ * Makes a held link (isHeld, above) for a link whose mail goes out after this transaction: the request page's
+ * (askForPasswordLink(), password-request.ts). In the caller's transaction, under the person's lock the caller took; it
+ * writes no audit row, since nothing is mailed yet. Once the mail has been handed over, putHeldLinkInPlace() makes it
+ * the person's one live link of its purpose; if it never is, dropHeldLink() removes it. One the portal never comes back
+ * to (the process stopped mid-send) is a spent link to the daily clean-up, gone after a code's life.
+ */
+export async function holdSigninLink(tx: Tx, o: { parentId: string; purpose: LinkPurpose; now: Date }): Promise<{ linkId: string; token: string }> {
+  const token = randomBytes(LINK_TOKEN_BYTES).toString("base64url");
+  const [row] = await tx.insert(parentSigninToken).values({ purpose: o.purpose, parentId: o.parentId, tokenHash: hashLinkToken(o.purpose, token),
+    createdAt: o.now, expiresAt: new Date(o.now.getTime() + LINK_LIFE_MS[o.purpose]), usedAt: o.now }).returning({ id: parentSigninToken.id });
+  return { linkId: row!.id, token };
+}
+
+/**
+ * A held link whose mail has been handed over, put in place: the person's unused link of its purpose is deleted (the
+ * mail just sent replaces it, as mintSigninLink() replaces one) and the held one made unused, so it works. False, and
+ * nothing changed, when it is no longer held (removed, or the person is gone). In the caller's transaction, under the
+ * person's lock the caller took (the caller checks the person again under it first). Audited `parent.password.link_made`
+ * as mintSigninLink() audits a link, with its purpose, expiry and how many it replaced.
+ */
+export async function putHeldLinkInPlace(tx: Tx, o: { linkId: string; parentId: string; purpose: LinkPurpose; actor: Actor; ip: string | null }): Promise<boolean> {
+  const [held] = await tx.select({ id: parentSigninToken.id, expiresAt: parentSigninToken.expiresAt }).from(parentSigninToken)
+    .where(and(eq(parentSigninToken.id, o.linkId), eq(parentSigninToken.parentId, o.parentId), eq(parentSigninToken.purpose, o.purpose), isHeld)).for("update");
+  if (!held) return false;
+  const replaced = await tx.delete(parentSigninToken)
+    .where(and(eq(parentSigninToken.parentId, o.parentId), eq(parentSigninToken.purpose, o.purpose), isNull(parentSigninToken.usedAt)))
+    .returning({ id: parentSigninToken.id });
+  await tx.update(parentSigninToken).set({ usedAt: null }).where(eq(parentSigninToken.id, held.id));
+  await writeAudit({ actor: o.actor, action: "parent.password.link_made", targetType: "parent", targetId: o.parentId,
+    after: { purpose: o.purpose, expiresAt: held.expiresAt.toISOString(), replaced: replaced.length }, ip: o.ip }, tx);
+  return true;
+}
+
+/** Removes a held link whose mail never went (or whose person changed while it went), while it is still held. */
+export async function dropHeldLink(tx: Tx, linkId: string): Promise<void> {
+  await tx.delete(parentSigninToken).where(and(eq(parentSigninToken.id, linkId), isHeld));
+}
+
+/**
+ * Whether the person was sent a link of this purpose less than `withinMs` ago that may still be in their mailbox
+ * unused: a live one made since then (unused, not expired), or a held one on its way. The request page mails nothing
+ * while one is (askForPasswordLink()'s resend wait), so a second ask doesn't replace the link the first one sent.
+ */
+export async function linkSentWithin(tx: Tx, o: { parentId: string; purpose: LinkPurpose; now: Date; withinMs: number }): Promise<boolean> {
+  const [row] = await tx.select({ id: parentSigninToken.id }).from(parentSigninToken).where(and(
+    eq(parentSigninToken.parentId, o.parentId), eq(parentSigninToken.purpose, o.purpose),
+    gt(parentSigninToken.createdAt, new Date(o.now.getTime() - o.withinMs)),
+    or(and(isNull(parentSigninToken.usedAt), gt(parentSigninToken.expiresAt, o.now)), isHeld))).limit(1);
+  return row !== undefined;
 }
 
 /**

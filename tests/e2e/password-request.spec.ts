@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
-import { askedAddressHash, removeZeldaLinks, removeZeldaSessionsMadeHere, ZELDA_EMAIL } from "./signin-links";
+import { askedAddressHash, linkTokenHash, removeZeldaLinks, removeZeldaSessionsMadeHere, ZELDA_EMAIL } from "./signin-links";
 
 /**
  * "Set up or reset my password" in the browser (the sign-in release, slice SI-3a): followed from /sign-in, asked for
@@ -62,6 +62,9 @@ test("asked from /sign-in, mails Zelda a set-up link that sets her password and 
   await expect(page.getByRole("status")).toContainText(ANSWER);
 
   const token = await setupTokenMailed();
+  // The link works once the portal has put it in place, a moment after its mail was handed over.
+  await expect.poll(async () => (await sql`SELECT count(*)::int AS n FROM parent_signin_token
+    WHERE token_hash = ${linkTokenHash("setup", token)} AND used_at IS NULL`)[0]!.n, { timeout: 15_000 }).toBe(1);
   await page.goto(`/sign-in/set-up/${token}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Choose a password");
   const password = randomBytes(24).toString("base64url");

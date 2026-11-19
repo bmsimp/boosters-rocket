@@ -398,6 +398,7 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/password-request-rule.ts",
   "src/lib/auth/parent-signin-finish.ts",
   "src/lib/auth/parent-link-signin.ts",
+  "src/lib/auth/session-cookie-copy.ts",
 ];
 
 /**

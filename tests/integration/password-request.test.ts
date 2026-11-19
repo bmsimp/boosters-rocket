@@ -2,21 +2,34 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 type Msg = { to: string; subject: string; text: string; html: string };
 const outbox = vi.hoisted(() => [] as Msg[]);
-/** How the mail sender behaves: as a working one, failing every send, or never finishing one. */
-const sender = vi.hoisted(() => ({ mode: "works" as "works" | "fails" | "hangs" }));
+/**
+ * How the mail sender behaves: as a working one, failing every send, never finishing one, or waiting until the test
+ * lets it go (`release`, set while it waits). With `brandThrows`, the mail is never even written: reading the club's
+ * name for it throws, outside the sender.
+ */
+const sender = vi.hoisted(() => ({ mode: "works" as "works" | "fails" | "hangs" | "waits" | "brandThrows", release: null as null | (() => void) }));
 vi.mock("@/lib/mail/senders", () => ({
   SMTP_PASSWORD_AAD: "mail:smtp-password",
   buildSender: async () => async (m: Msg) => {
     if (sender.mode === "fails") throw new Error("the mail server said no");
     if (sender.mode === "hangs") await new Promise(() => undefined);
+    if (sender.mode === "waits") await new Promise<void>((resolve) => { sender.release = resolve; });
     outbox.push(m);
   },
 }));
+vi.mock("@/lib/mail/send", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mail/send")>();
+  return { ...actual, currentBrand: async () => {
+    if (sender.mode === "brandThrows") throw new Error("the settings could not be read");
+    return actual.currentBrand();
+  } };
+});
 import { fromIp, renderPage } from "../helpers/signed-in";
 
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
+import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parentAuthUser, parentSigninToken, rateLimitEvent, setting } from "@/lib/db/schema";
+import { auditLog, guardian, parent, parentAuthUser, parentSigninToken, rateLimitEvent, setting } from "@/lib/db/schema";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { hashAskedAddress } from "@/lib/parents/password-request";
 import { takeRateLimit, RATE_LIMITS } from "@/lib/parents/rate-limit";
@@ -42,6 +55,13 @@ const asked = () => audits("parent.password.reset_asked");
 const reasons = async () => (await asked()).map((r) => r.after as { outcome: string; reason?: string; limit?: string });
 /** The link a mail holds, and the token in it. */
 const linkIn = (m: Msg) => /\/sign-in\/(set-up|reset)\/([A-Za-z0-9_-]{43})/.exec(m.text);
+/**
+ * Until `n` links have been put in place. A mailed link works only once its mail has been handed over and the portal
+ * has then put it in place, a moment after the mail reaches the outbox.
+ */
+const untilPutInPlace = (n: number) => vi.waitFor(async () => expect(await audits("parent.password.link_made")).toHaveLength(n));
+/** As if the person's links were made longer ago than the resend wait, so the next ask may mail one. */
+const pastTheResendWait = () => db.update(parentSigninToken).set({ createdAt: new Date(Date.now() - RESEND_AFTER_MS - 1000) }).where(isNull(parentSigninToken.usedAt));
 // An ask that mails nothing starts no send at all (askForPasswordLink() returns before one), so "nothing was mailed" is
 // read as soon as the answer is back: there is nothing to wait for.
 
@@ -66,7 +86,7 @@ async function seedEveryone() {
 const OUTSIDERS = ["nobody@example.com", "coach@example.org"];
 
 describe("asking for a set-up or reset link", () => {
-  beforeEach(async () => { await resetDb(); outbox.length = 0; sender.mode = "works"; fromIp(IP); });
+  beforeEach(async () => { await resetDb(); outbox.length = 0; sender.mode = "works"; sender.release = null; fromIp(IP); });
 
   it("answers the same for every address, mails a set-up link and a reset link to the two it may, and nothing to anyone else", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
@@ -77,6 +97,7 @@ describe("asking for a set-up or reset link", () => {
     }
     for (const a of answers) expect(a).toEqual(ANSWER);
     await vi.waitFor(() => expect(outbox).toHaveLength(2));
+    await untilPutInPlace(2);
     expect(outbox.map((m) => m.to).sort()).toEqual(["ana@example.com", "ben@example.com"]);
 
     const setup = outbox.find((m) => m.to === "ana@example.com")!, reset = outbox.find((m) => m.to === "ben@example.com")!;
@@ -116,6 +137,7 @@ describe("asking for a set-up or reset link", () => {
     await seedEveryone();
     await ask("ana@example.com");
     await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    await untilPutInPlace(1);
     const SetUpPage = (await import("@/app/sign-in/set-up/[token]/page")).default;
     const html = await renderPage(SetUpPage, { params: { token: linkIn(outbox[0]!)![2]! } });
     expect(html).toContain('type="password"');
@@ -149,31 +171,103 @@ describe("asking for a set-up or reset link", () => {
     expect(await db.select().from(rateLimitEvent)).toEqual([]);
   });
 
-  it("asking again replaces the unused link", async () => {
+  it("asking again once the resend wait has passed replaces the unused link", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
     const { noPassword } = await seedEveryone();
     await ask("ana@example.com");
     await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    await untilPutInPlace(1);
+    await pastTheResendWait();
     await ask("ana@example.com");
     await vi.waitFor(() => expect(outbox).toHaveLength(2));
+    await untilPutInPlace(2);
     expect((await audits("parent.password.link_made")).map((r) => (r.after as { replaced: number }).replaced)).toEqual([0, 1]);
     expect(await db.select().from(parentSigninToken).where(eq(parentSigninToken.parentId, noPassword.id))).toHaveLength(1);
     expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: false, reason: "unknown" });
     expect(await linkVerdict("setup", linkIn(outbox[1]!)![2])).toMatchObject({ ok: true });
   });
 
-  it("a send that fails deletes the link it made, and says so", async () => {
+  it("within the resend wait, a second ask mails and makes nothing, and the link already sent keeps working", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
     const { noPassword } = await seedEveryone();
+    await ask("ana@example.com");
+    await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    await untilPutInPlace(1);
+    expect(await ask("ana@example.com")).toEqual(ANSWER);
+    expect(outbox).toHaveLength(1);
+    expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: true });
+    expect(await db.select().from(parentSigninToken).where(eq(parentSigninToken.parentId, noPassword.id))).toHaveLength(1);
+    expect((await asked()).at(-1)).toMatchObject({ targetId: noPassword.id, after: { outcome: "none", reason: "resend_wait", purpose: "setup" } });
+    // It counted against the limit per address all the same.
+    expect(await db.select().from(rateLimitEvent).where(eq(rateLimitEvent.subject, hashAskedAddress("ana@example.com")))).toHaveLength(2);
+  });
+
+  it("a second ask while the first link's mail is still on its way mails nothing either", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    await seedEveryone();
+    sender.mode = "waits";
+    await ask("ana@example.com");
+    await vi.waitFor(() => expect(sender.release).not.toBeNull());
+    await ask("ana@example.com");
+    expect((await reasons()).map((r) => r.reason)).toEqual(["resend_wait"]);
+    sender.release!();
+    await untilPutInPlace(1);
+    expect(outbox).toHaveLength(1);
+    expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: true });
+  });
+
+  it("a send that fails removes the new link, keeps the one the person already had, and says so once", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    const { noPassword } = await seedEveryone();
+    await ask("ana@example.com");
+    await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    await untilPutInPlace(1);
+    const earlier = linkIn(outbox[0]!)![2]!;
+    await pastTheResendWait();
     sender.mode = "fails";
     expect(await ask("ana@example.com")).toEqual(ANSWER);
     await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual([undefined, "mail_failed"]));
-    expect(await db.select().from(parentSigninToken)).toEqual([]);
-    expect((await asked()).at(-1)).toMatchObject({ actorId: noPassword.id, targetId: noPassword.id, after: { outcome: "none", reason: "mail_failed", purpose: "setup", linksDeleted: 1 } });
+    // The earlier link, already in the mailbox, still works: the ask that failed to reach the person took nothing.
+    expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: true, link: { parentId: noPassword.id } });
+    expect(await db.select().from(parentSigninToken)).toHaveLength(1);
+    expect(await audits("parent.password.link_made")).toHaveLength(1);
+    expect((await asked()).at(-1)).toMatchObject({ actorId: noPassword.id, targetId: noPassword.id, after: { outcome: "none", reason: "mail_failed", purpose: "setup" } });
     // The failed send is audited by the mail module, with the address and its error, never the body (and so never the token).
     const [failed] = await audits("mail.failed");
     expect(failed!.after).toMatchObject({ purpose: "password_setup", to: "ana@example.com" });
     expect(JSON.stringify(failed)).not.toContain("/sign-in/set-up/");
+  });
+
+  it("when the mail can't even be written, the new link goes, the earlier one stays, and one row says the mail failed", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    const { noPassword } = await seedEveryone();
+    await ask("ana@example.com");
+    await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    await untilPutInPlace(1);
+    const earlier = linkIn(outbox[0]!)![2]!;
+    await pastTheResendWait();
+    sender.mode = "brandThrows";
+    expect(await ask("ana@example.com")).toEqual(ANSWER);
+    await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual([undefined, "mail_failed"]));
+    expect(outbox).toHaveLength(1);
+    expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: true, link: { parentId: noPassword.id } });
+    expect(await db.select().from(parentSigninToken)).toHaveLength(1);
+  });
+
+  it("a person blocked while their link's mail is on its way gets no live link from it", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    const { noPassword } = await seedEveryone();
+    sender.mode = "waits";
+    await ask("ana@example.com");
+    await vi.waitFor(() => expect(sender.release).not.toBeNull());
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, noPassword.id));
+    sender.release!();
+    await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual(["blocked"]));
+    expect(outbox).toHaveLength(1);
+    expect(await db.select().from(parentSigninToken)).toEqual([]);
+    expect(await audits("parent.password.link_made")).toEqual([]);
+    await db.update(parent).set({ blocked: false }).where(eq(parent.id, noPassword.id));
+    expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: false, reason: "unknown" });
   });
 
   it("answers at once when the send never finishes", async () => {
@@ -187,11 +281,15 @@ describe("asking for a set-up or reset link", () => {
   it("mails nothing on the fourth ask for one address in a window or the 61st from one IP address; with no address the IP limit is skipped", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
     await seedEveryone();
+    // The first ask mails a link; the two after it, within the resend wait, mail nothing but count all the same.
     for (let i = 0; i < RATE_LIMITS.password_ask_email.max; i++) expect(await ask("ana@example.com")).toEqual(ANSWER);
-    await vi.waitFor(() => expect(outbox).toHaveLength(3));
+    await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    expect((await reasons()).filter((r) => r.reason === "resend_wait")).toHaveLength(RATE_LIMITS.password_ask_email.max - 1);
+    await untilPutInPlace(1);
+    await pastTheResendWait();
     expect(await ask("ana@example.com")).toEqual(ANSWER);
     expect(await ask("ana@example.com")).toEqual(ANSWER);
-    expect(outbox).toHaveLength(3);
+    expect(outbox).toHaveLength(1);
     // Over a limit, one row per full window, naming no person.
     const over = (await asked()).filter((r) => (r.after as { reason?: string }).reason === "rate_limited");
     expect(over).toHaveLength(1);
@@ -239,7 +337,8 @@ describe("the page", () => {
     expect(await written()).toEqual(before);
     expect(html).toContain(PASSWORD_COPY.askTitle);
     expect(html).toContain('type="email"');
-    expect(html).toContain('autocomplete="email"');
+    // React's server render writes the prop's own name (`autoComplete=`); HTML reads attribute names in any case.
+    expect(html).toMatch(/autocomplete="email"/i);
     expect(html).not.toContain(PASSWORD_COPY.askStrict.replaceAll("'", "&#x27;"));
     expect(html).toContain(PASSWORD_COPY.askLede.replaceAll("'", "&#x27;"));
     expect(html).toContain('href="/sign-in"');

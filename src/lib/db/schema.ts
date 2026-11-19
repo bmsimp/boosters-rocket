@@ -197,8 +197,11 @@ export const signinCode = pgTable("signin_code", {
  * a token is spent by setting `used_at`. An unused token past its expiry still holds that place until the clean-up
  * deletes it, so making a link first deletes or spends the person's unused link of that purpose, expired or not, under
  * the person's lock and in the same transaction, as a new sign-in code replaces the old one (signin-codes.ts); an insert
- * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes one past its expiry or
- * used. Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
+ * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes an unused one past its
+ * expiry, and one spent a code's life ago. A link whose mail is still on its way (slice SI-3a, the request page) is held:
+ * `used_at` set to its own `created_at`, so it works for nobody and holds no place, until the mail has been handed over
+ * and it is put in place (holdSigninLink(), putHeldLinkInPlace()).
+ * Made by mintSigninLink() and spent by choosePasswordFromLink() since slice SI-2 (src/lib/parents/signin-links.ts,
  * password-set.ts); blocking, sign-ins switched off, the change-of-company clear, a confirmed change of sign-in email
  * and closing a person's last open membership delete the unused ones.
  */

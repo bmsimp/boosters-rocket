@@ -96,8 +96,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   run by the one finish of every sign-in, src/lib/auth/parent-signin-finish.ts) calls it and then reads, unlocked,
  *   what the sign-in spent: the code, or a set-up link's row and the `credential` row the set wrote;
  * - "Set up or reset my password" (askForPasswordLink(), password-request.ts) takes the row FOR UPDATE, reads the
- *   password unlocked, then makes the link (mintSigninLink()); a send that fails takes the row FOR UPDATE again and
- *   deletes the link it made.
+ *   password unlocked, then holds the link (holdSigninLink()); after the send it takes the row FOR UPDATE again and
+ *   puts the link in place (putHeldLinkInPlace(), which replaces the unused one), or removes it (dropHeldLink()).
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");
