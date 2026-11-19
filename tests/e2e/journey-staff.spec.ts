@@ -3,6 +3,7 @@ import postgres from "postgres";
 import { parentSessionCookie } from "./parent-session";
 import { staffSessionCookie } from "./staff-session";
 import { noSidewaysScroll, shot, staffMenuTo } from "./journey-helpers";
+import { familyPages } from "./family-records";
 
 // A staff member's working session, walked by what they would tap (docs/walkthrough.md): the seeded Admin goes from the
 // staff home through the grouped menu to the roster and one family, its money, the Parents review, a new season with a
@@ -61,7 +62,9 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
 
   await test.step("follows the family to what it owes", async () => {
     await box(page, "More about this family").getByRole("link", { name: "What it owes" }).click();
-    await expect(page).toHaveURL(/\/staff\/balances\/E2E-FAMILY$/);
+    // Addressed by the family's app record, which the seed makes anew each time (./family-records.ts).
+    await expect(page).toHaveURL(/\/staff\/balances\/[0-9a-f-]{36}$/);
+    expect(new URL(page.url()).pathname).toBe(await familyPages.balance("E2E-FAMILY"));
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
     await expect(page.locator("main")).toContainText("$185.00");
     await noSidewaysScroll(page);

@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { parentSessionCookie } from "./parent-session";
 import { staffSessionCookie } from "./staff-session";
+import { familyPages } from "./family-records";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -142,7 +143,9 @@ test("staff open one family's season from a requirement's list, and the visit is
   // Only rows written from here on count. The list links to every family on it: none of those links is a visit.
   const [mark] = await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`;
   await row.getByRole("link", { name: "Everything asked of Quetzalcoatl Family" }).click();
-  await expect(page).toHaveURL(/\/staff\/seasons\/progress\/family\/E2E-FAMILY\?season=/);
+  // Addressed by the family's app record, which the seed makes anew each time (./family-records.ts).
+  await expect(page).toHaveURL(/\/staff\/seasons\/progress\/family\/[0-9a-f-]{36}\?season=/);
+  expect(new URL(page.url()).pathname).toBe(await familyPages.progress("E2E-FAMILY"));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await expect(page.getByRole("heading", { level: 2 })).toHaveText(["1. Join", "2. Uniforms", "3. Season", "4. Wrap-up"]);
   const uniforms = page.getByRole("region", { name: "2. Uniforms" });

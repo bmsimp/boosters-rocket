@@ -42,6 +42,8 @@ afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
 
 const FAMILY = RIVERA.family.qboId;
+/** A family's staff pages are addressed by its app family record: the one this customer's family link names. */
+const pageId = async (customer: string = FAMILY) => String(await recordOfCustomer(customer, "family"));
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 const rowOf = async (id: string) => (await db.select().from(buyout).where(eq(buyout.id, id)))[0]!;
@@ -212,7 +214,7 @@ describe("after a close, the family can choose again", () => {
     expect(await renderPage(VolunteerPage)).toContain("Buy-out waiting for the club");
     const progress = await staffWith("progress@club.org", ["Season.Progress.Read", "Roster.Read", "Roster.Family.ReadWrite"]);
     asStaff(progress);
-    expect(await renderPage(FamilyProgressPage, { params: { familyId: FAMILY } })).toContain("Buy-out waiting for the club");
+    expect(await renderPage(FamilyProgressPage, { params: { familyId: await pageId() } })).toContain("Buy-out waiting for the club");
 
     expect((await closeAsShown(b.id)).ok).toBe(true);
 
@@ -223,7 +225,7 @@ describe("after a close, the family can choose again", () => {
     expect(volunteer).not.toContain("Buy-out waiting for the club");
     expect(volunteer).not.toContain("Sorted out with the family by phone.");
     asStaff(progress);
-    const staffPage = await renderPage(FamilyProgressPage, { params: { familyId: FAMILY } });
+    const staffPage = await renderPage(FamilyProgressPage, { params: { familyId: await pageId() } });
     expect(staffPage).not.toContain("Buy-out waiting for the club");
     expect(staffPage).toContain("0 of 2 shifts done");
 
@@ -239,11 +241,14 @@ describe("a family's buy-outs page (Roster.Read)", () => {
   it("is refused without Roster.Read and to a parent session, and answers 404 for a family it doesn't know", async () => {
     const { p } = await withBuyout({ state: "refused", invoiceQboId: null });
     asStaff(await staffWith("money@club.org", ["Finance.Balance.Read"]));
-    expect(await pageOutcome(FamilyBuyoutsPage, { params: { id: FAMILY } })).toEqual({ redirect: "/refused" });
+    expect(await pageOutcome(FamilyBuyoutsPage, { params: { id: await pageId() } })).toEqual({ redirect: "/refused" });
     asParent(p.identity);
-    expect((await pageOutcome(FamilyBuyoutsPage, { params: { id: FAMILY } }))).toHaveProperty("redirect");
+    expect((await pageOutcome(FamilyBuyoutsPage, { params: { id: await pageId() } }))).toHaveProperty("redirect");
     asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
-    expect(await pageOutcome(FamilyBuyoutsPage, { params: { id: "99999" } })).toEqual({ notFound: true });
+    // A QuickBooks id (the old address), text, a uuid that names nothing, a student's record: none is a family record.
+    for (const id of [FAMILY, "99999", crypto.randomUUID(), String(await recordOfCustomer(RIVERA.students[0]!.qboId, "student"))]) {
+      expect(await pageOutcome(FamilyBuyoutsPage, { params: { id } }), id).toEqual({ notFound: true });
+    }
     expect(await audits("volunteer.buyout.family.read")).toEqual([]);
   });
 
@@ -259,7 +264,7 @@ describe("a family's buy-outs page (Roster.Read)", () => {
 
     const reader = await staffWith("reader@club.org", ["Roster.Read"]);
     asStaff(reader);
-    const html = await renderPage(FamilyBuyoutsPage, { params: { id: FAMILY } });
+    const html = await renderPage(FamilyBuyoutsPage, { params: { id: await pageId() } });
     const [read] = await audits("volunteer.buyout.family.read");
     // Naming the app's family, as the season's and volunteering's family pages do.
     expect(read).toMatchObject({ actorId: reader.id, permission: "Roster.Read", targetType: "family", targetId: String(await recordOfCustomer(FAMILY, "family")) });
@@ -277,7 +282,7 @@ describe("a family's buy-outs page (Roster.Read)", () => {
     expect(html).not.toContain("$100.00");
 
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Finance.Balance.Read"]));
-    const full = await renderPage(FamilyBuyoutsPage, { params: { id: FAMILY } });
+    const full = await renderPage(FamilyBuyoutsPage, { params: { id: await pageId() } });
     expect(full).toContain("Close this buy-out");
     expect(full).toContain("$100.00");
     expect(full).toContain("Open: $74.38 owed");
@@ -291,14 +296,16 @@ describe("a family's buy-outs page (Roster.Read)", () => {
     const other = await seedSignedInParent(CHENOWETH);
     await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Chenoweth gate shifts" }), familyQboId: CHENOWETH.family.qboId, chosenBy: other.identity.parentId, state: "refused", invoiceQboId: null });
     asStaff(await writer());
-    const html = await renderPage(FamilyBuyoutsPage, { params: { id: FAMILY } });
+    const html = await renderPage(FamilyBuyoutsPage, { params: { id: await pageId() } });
     expect(html).not.toContain("Chenoweth");
     const recon = await renderPage(ReconciliationPage);
-    expect(recon).toContain(`href="/staff/roster/${FAMILY}/buyouts"`);
-    expect(recon).toContain(`href="/staff/roster/${CHENOWETH.family.qboId}/buyouts"`);
+    expect(recon).toContain(`href="/staff/roster/${await pageId()}/buyouts"`);
+    expect(recon).toContain(`href="/staff/roster/${await pageId(CHENOWETH.family.qboId)}/buyouts"`);
+    expect(recon).toContain(`href="/staff/roster/${await pageId()}"`);
+    expect(recon).not.toContain(`href="/staff/roster/${FAMILY}/buyouts"`);
     expect(recon).toContain("Close this buy-out");
-    const entry = await renderPage(RosterEntryPage, { params: { id: FAMILY } });
-    expect(entry).toContain(`href="/staff/roster/${FAMILY}/buyouts"`);
+    const entry = await renderPage(RosterEntryPage, { params: { id: await pageId() } });
+    expect(entry).toContain(`href="/staff/roster/${await pageId()}/buyouts"`);
     expect(b.id && p).toBeTruthy();
   });
 });

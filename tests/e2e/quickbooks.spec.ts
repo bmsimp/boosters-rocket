@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
+import { familyIdOf, familyPages } from "./family-records";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -137,15 +138,18 @@ test("staff open a family from the roster, hostile names stay text, and the visi
   await page.getByLabel("Find a family").fill("river");
   await page.getByRole("button", { name: "Find" }).click();
   await expect(families.getByRole("link", { name: "Rivera Family" })).toBeVisible();
-  await expect(families.locator("a[href='/staff/roster/E2E-20']")).toHaveCount(0);
+  await expect(families.locator(`a[href='${await familyPages.roster("E2E-20")}']`)).toHaveCount(0);
+  // Each family links to its page by its app family record, never by its customer.
+  await expect(families.getByRole("link", { name: "Rivera Family" })).toHaveAttribute("href", await familyPages.roster("E2E-10"));
   // Only rows written from here on count: an earlier run, or the other project, leaves the same action behind.
   const [mark] = await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`;
   await families.getByRole("link", { name: "Rivera Family" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Rivera Family");
   await expect(page.getByRole("region", { name: "Parents in QuickBooks" }).getByRole("row").filter({ hasText: "ana@example.com" })).toContainText("555-0101");
   await expect(page.getByRole("region", { name: "Students" }).getByText("Leo Rivera", { exact: true })).toBeVisible();
-  const reads = await sql`SELECT target_id, actor_label FROM audit_log WHERE id > ${mark!.id} AND action = 'roster.family.read'`;
-  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_id: "E2E-10", actor_label: "e2e-admin@example.org" }]); // one visit, one row
+  const reads = await sql`SELECT target_type, target_id, actor_label FROM audit_log WHERE id > ${mark!.id} AND action = 'roster.family.read'`;
+  // One visit, one row, naming the app's own family record.
+  expect(reads.map((r) => ({ ...r }))).toEqual([{ target_type: "family", target_id: await familyIdOf("E2E-10"), actor_label: "e2e-admin@example.org" }]);
   await page.goto("/staff/audit");
   await expect(page.getByText("roster.family.read").first()).toBeVisible();
 });

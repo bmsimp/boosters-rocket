@@ -1,14 +1,14 @@
 // Staff only: the buy-outs staff must look at, for the Reconciliation page, and one family's buy-outs, for its own
 // staff page. The first lists every family's, so neither is ever imported by parent code (STAFF_ONLY_IMPORTS in
 // tests/integration/page-guards.test.ts). Names are QuickBooks text, shown as text only. A buy-out names the app's own
-// family and student; the staff pages are still addressed, and names still read from the roster cache, by the family's
-// and the student's customers (until stage 3 of the app-owned families spec): the family's through its record's link,
-// in the records' company, the student's as the customer its invoice is billed to.
+// family and student, and so does a family's buy-outs page's address (stage 3 of the app-owned families spec); names
+// are still read from the roster cache, by the family's and the student's customers: the family's through its record's
+// link, in the records' company, the student's as the customer its invoice is billed to.
 import "server-only";
 import { and, desc, gt, inArray, isNotNull, or, eq, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, qboCustomer, requirement, writeQueue } from "@/lib/db/schema";
-import { familyLinkedTo, linksOf } from "@/lib/families/links";
+import { customerOfFamily, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { moneyRows } from "@/lib/money/stored";
 import { getRosterSource } from "@/lib/roster/source";
@@ -21,8 +21,11 @@ const REFUSED_SHOWN_MS = 30 * 86_400_000;
 type Row = typeof buyout.$inferSelect;
 
 export type BuyoutToLook = {
-  /** `familyQboId`: the family's customer, for the links to its pages; null when its record has no link in the roster's company. */
-  id: string; familyQboId: string | null; familyName: string | null; subjectName: string | null; requirement: string;
+  /**
+   * `familyId`: the family that chose it, whose pages the links address. `familyQboId`: its customer; null when its
+   * record has no link in the roster's company, when the page offers no links to the family.
+   */
+  id: string; familyId: AppFamilyId; familyQboId: string | null; familyName: string | null; subjectName: string | null; requirement: string;
   amountCents: number; state: string; flag: string | null; code: string | null; at: string;
   /** What it is, in words, for the treasurer. */
   words: string;
@@ -100,7 +103,7 @@ export async function loadBuyoutsToLook(now: Date = new Date()): Promise<BuyoutT
   const named = rows.flatMap(({ b }) => [customerOf(b), b.studentId === null ? null : b.customerQboId]).filter((c): c is string => c !== null);
   const [names, items] = await Promise.all([namesOf([...new Set(named)]), itemsOf(rows.map(({ b }) => b.id))]);
   return rows.map(({ b, title }) => ({
-    id: b.id, familyQboId: customerOf(b), familyName: names.get(customerOf(b) ?? "") ?? null, subjectName: b.studentId === null ? null : names.get(b.customerQboId) ?? null,
+    id: b.id, familyId: b.familyId, familyQboId: customerOf(b), familyName: names.get(customerOf(b) ?? "") ?? null, subjectName: b.studentId === null ? null : names.get(b.customerQboId) ?? null,
     requirement: title, amountCents: b.amountCents, state: b.state, flag: b.flag, code: b.lastCode, at: (b.flaggedAt ?? b.updatedAt).toISOString(),
     words: wordsOf(b),
     close: verdictOf(b, items.get(b.id) ?? []), tag: closeTag(b),
@@ -132,20 +135,21 @@ export type FamilyBuyout = {
 };
 
 /**
- * One family's buy-outs, every state, newest first: the ones it chose (`buyout.family_id`, the app's family linked to
- * the customer in the page's address, active or not), with the requirement, who it was for, the amount, how it stands,
- * what the family's stored figures last said of its invoice, and whether staff may close it. The family's own figures
- * only (its app family's row), and only from the company the buy-out's invoice is in and the roster came from. `familyId` is the app's family, for the page's audit row: null when the customer has no family record.
+ * One family's buy-outs, every state, newest first: the ones it chose (`buyout.family_id`, the app's family the page's
+ * address names, active or not), with the requirement, who it was for, the amount, how it stands, what the family's
+ * stored figures last said of its invoice, and whether staff may close it. The family's own figures only (its app
+ * family's row), and only from the company the buy-out's invoice is in and the roster came from. `familyName` is the
+ * roster cache's name of the customer the family's link names in the roster's company: null when it has no link there,
+ * or the cache no longer holds that customer. `familyQboId` is that customer, for the way back to the family's page.
  */
-export async function loadFamilyBuyouts(familyQboId: string): Promise<{ familyId: AppFamilyId | null; familyName: string | null; buyouts: FamilyBuyout[] }> {
-  const familyId = await familyLinkedTo(familyQboId);
-  const rows = familyId === null ? [] : await db.select({ b: buyout, title: requirement.title }).from(buyout).innerJoin(requirement, eq(requirement.id, buyout.requirementId))
-    .where(eq(buyout.familyId, familyId)).orderBy(desc(buyout.createdAt));
+export async function loadFamilyBuyouts(familyId: AppFamilyId): Promise<{ familyQboId: string | null; familyName: string | null; buyouts: FamilyBuyout[] }> {
+  const [familyQboId, rows] = await Promise.all([customerOfFamily(familyId), db.select({ b: buyout, title: requirement.title }).from(buyout)
+    .innerJoin(requirement, eq(requirement.id, buyout.requirementId)).where(eq(buyout.familyId, familyId)).orderBy(desc(buyout.createdAt))]);
   const students = rows.flatMap(({ b }) => (b.studentId === null ? [] : [b.customerQboId]));
-  const [names, items, money, source] = await Promise.all([namesOf([familyQboId, ...new Set(students)]), itemsOf(rows.map(({ b }) => b.id)),
-    moneyRows(familyId === null ? [] : [familyId]), getRosterSource()]);
-  const row = familyId === null ? undefined : money.get(familyId);
-  return { familyId, familyName: names.get(familyQboId) ?? null, buyouts: rows.map(({ b, title }) => {
+  const [names, items, money, source] = await Promise.all([namesOf([...(familyQboId === null ? [] : [familyQboId]), ...new Set(students)]), itemsOf(rows.map(({ b }) => b.id)),
+    moneyRows([familyId]), getRosterSource()]);
+  const row = money.get(familyId);
+  return { familyQboId, familyName: familyQboId === null ? null : names.get(familyQboId) ?? null, buyouts: rows.map(({ b, title }) => {
     const figures = row?.invoices && row.readAt && row.realmId === b.realmId && row.realmId === source ? row : null;
     const inv = b.invoiceQboId && figures ? figures.invoices!.find((i) => i.qboId === b.invoiceQboId) ?? null : null;
     const invoice: InvoiceAsRead = !b.invoiceQboId ? { kind: "none", owedCents: null, readAt: null }

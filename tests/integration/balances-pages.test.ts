@@ -32,6 +32,8 @@ const withRole = async (email: string, patterns: string[]): Promise<Staff> => {
 };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => r.action === action);
 const textOf = (html: string) => html.replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").replaceAll("&#x27;", "'");
+/** A family's Balances page is addressed by its app family record: the one this customer's family link names. */
+const idOf = async (customer: string) => String(await recordOfCustomer(customer, "family"));
 const owedBy = (spec: typeof FAMILY_A) => formatMoney((spec.invoices ?? []).filter((i) => !i.paid).reduce((sum, i) => sum + i.cents, 0));
 
 let treasurer: Staff;
@@ -69,11 +71,22 @@ describe("the Balances page", () => {
     expect((await audits("money.balances.read")).map((r) => [r.actorId, r.permission, r.after])).toEqual([[treasurer.id, "Finance.Balance.Read", { onlyOwing: false, search: null }]]);
   });
 
-  it("renders QuickBooks text as text, and links each family to its own page", async () => {
+  it("renders QuickBooks text as text, and links each family to its own page by its app record", async () => {
     const html = await renderPage(BalancesPage);
     expect(html).toContain("Chen &lt;b&gt;Family&lt;/b&gt;");
     expect(html).not.toContain("<b>Family</b>");
-    expect(html).toContain(`href="/staff/balances/${encodeURIComponent(FAMILY_A.family.qboId)}"`);
+    expect(html).toContain(`href="/staff/balances/${await idOf(FAMILY_A.family.qboId)}"`);
+    expect(html).toContain(`href="/staff/balances/${await idOf("QBO-CHEN-9001")}"`);
+    expect(html).not.toContain(`href="/staff/balances/${encodeURIComponent(FAMILY_A.family.qboId)}"`);
+  });
+
+  it("lists a roster family with no family record yet, linking it nowhere: it has no page to open", async () => {
+    // Written to the cache by hand, with no reconcile after it: the records have not caught up with it.
+    await db.insert(qboCustomer).values({ qboId: "QBO-NEW-9004", displayName: "New Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
+    const html = await renderPage(BalancesPage);
+    expect(rowNamed(html, "New Family")).toEqual(["New Family", "Not read from QuickBooks yet", "Never", ""]);
+    expect([...html.matchAll(/href="\/staff\/balances\/([^"?]+)"/g)].map((m) => m[1]).sort())
+      .toEqual([await idOf(FAMILY_A.family.qboId), await idOf(FAMILY_B.family.qboId), await idOf("QBO-CHEN-9001")].sort());
   });
 
   it("filters to the families that owe, and finds a family by its own name or a student's", async () => {
@@ -124,8 +137,8 @@ describe("the Balances page", () => {
 
 describe("one family's money", () => {
   it("audits the read before anything is shown, then shows the open invoices, the total and what was paid", async () => {
-    const html = await renderPage(FamilyBalancePage, { params: { familyId: encodeURIComponent(FAMILY_A.family.qboId) } });
-    // It names the app's own family the address's customer is linked to.
+    const html = await renderPage(FamilyBalancePage, { params: { familyId: await idOf(FAMILY_A.family.qboId) } });
+    // It names the app's own family the address names.
     expect((await audits("money.family.read")).map((r) => [r.actorId, r.permission, r.targetType, r.targetId]))
       .toEqual([[treasurer.id, "Finance.Balance.Read", "family", String(await recordOfCustomer(FAMILY_A.family.qboId, "family"))]]);
     const text = textOf(html);
@@ -137,23 +150,17 @@ describe("one family's money", () => {
     for (const i of FAMILY_B.invoices!) expect(html).not.toContain(i.number);
   });
 
-  it("names the customer in its audit row for a roster family with no family record yet, and shows it no figures", async () => {
-    // Written to the cache by hand, with no reconcile after it: the records have not caught up with it.
-    await db.insert(qboCustomer).values({ qboId: "QBO-NEW-9004", displayName: "New Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
-    const html = await renderPage(FamilyBalancePage, { params: { familyId: "QBO-NEW-9004" } });
-    expect((await audits("money.family.read")).map((r) => [r.targetType, r.targetId])).toEqual([["qbo_customer", "QBO-NEW-9004"]]);
-    expect(textOf(html)).toContain("Nothing has been read from QuickBooks for this family yet");
-  });
-
-  it("answers 404, and audits nothing, for an id that isn't an active family: a student's, an inactive family's, one that isn't there", async () => {
-    for (const familyId of [FAMILY_A.students[0]!.qboId, "QBO-GONE-9003", "NOBODY", "%E0%A4%A", "x".repeat(65)]) {
-      expect(await pageOutcome(FamilyBalancePage, { params: { familyId } }), familyId).toEqual({ notFound: true });
-    }
+  it("answers 404, and audits nothing, for an id that isn't an active family's record: a QuickBooks id, a student's record, an inactive family's, one that isn't there", async () => {
+    const ids = [FAMILY_A.family.qboId, FAMILY_A.students[0]!.qboId, "QBO-GONE-9003", "NOBODY", "%E0%A4%A", "x".repeat(65), crypto.randomUUID(),
+      String(await recordOfCustomer(FAMILY_A.students[0]!.qboId, "student")),
+      await idOf("QBO-GONE-9003"), // the family QuickBooks made inactive: its record, inactive, still linked
+      await idOf(FAMILY_A.students[0]!.qboId)]; // a family record (made inactive, as 0023 made one) of a customer that isn't a family
+    for (const familyId of ids) expect(await pageOutcome(FamilyBalancePage, { params: { familyId } }), familyId).toEqual({ notFound: true });
     expect(await audits("money.family.read")).toEqual([]);
   });
 
   it("says so when nothing has been read, renders QuickBooks text as text, and says when the check hasn't run", async () => {
-    const html = await renderPage(FamilyBalancePage, { params: { familyId: "QBO-CHEN-9001" } });
+    const html = await renderPage(FamilyBalancePage, { params: { familyId: await idOf("QBO-CHEN-9001") } });
     expect(html).toContain("Chen &lt;b&gt;Family&lt;/b&gt;");
     expect(html).toContain("Kai &lt;i&gt;Chen&lt;/i&gt;");
     expect(textOf(html)).toContain("Nothing has been read from QuickBooks for this family yet");
@@ -165,7 +172,7 @@ describe("one family's money", () => {
       { customerQboId: FAMILY_A.family.qboId, name: null, balanceCents: 1428316, invoicesCents: 1428316, currency: "USD" },
       { customerQboId: FAMILY_A.students[0]!.qboId, name: FAMILY_A.students[0]!.name, balanceCents: -2500, invoicesCents: 0, currency: "USD" },
     ] }).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY_A.family.qboId, "family")));
-    const text = textOf(await renderPage(FamilyBalancePage, { params: { familyId: FAMILY_A.family.qboId } }));
+    const text = textOf(await renderPage(FamilyBalancePage, { params: { familyId: await idOf(FAMILY_A.family.qboId) } }));
     expect(text).toContain(`The family itself The same ${formatMoney(1428316)}`);
     expect(text).toContain(`${FAMILY_A.students[0]!.name} Different: its open invoices add up to $0.00 -$25.00`);
   });

@@ -129,8 +129,8 @@ export async function defaultProgressSeasonId(): Promise<string | null> {
 }
 
 export type FamilyProgress = SeasonStanding & {
-  /** The family's own id, its name, and the QuickBooks id its page's address names it by. */
-  family: { id: AppFamilyId; qboId: string; name: string };
+  /** The family's own id, which its page's address names it by, and its name. */
+  family: { id: AppFamilyId; name: string };
   season: { id: string; name: string; isCurrent: boolean };
   /** The club's date the standing was worked out for (YYYY-MM-DD). */
   today: string;
@@ -140,19 +140,19 @@ export type FamilyProgress = SeasonStanding & {
 
 /**
  * One family's standing through one season, in full: what a parent of the family sees, and the reason for each waiver.
- * The family is named as its page's address names it, by QuickBooks id, and found as its app record there
- * (seasonFamilyAt()). Null when there is no such season, when the roster can't be shown, or when the id isn't an
- * active family on it (a student's id, a parent's, a family QuickBooks has made inactive). Only that family's records
- * are read. The page that shows this audits the read.
+ * The family is the app's record its page's address names, found as the season keeps it (seasonFamilyAt()). Null
+ * when there is no such season, when the roster can't be shown, or when the family isn't an active family on it (a
+ * record made inactive, or one whose customer QuickBooks has made inactive or no longer lists as a family). Only that
+ * family's records are read. The page that shows this audits the read.
  */
-export async function loadFamilyProgress(familyQboId: string, seasonId: string, amounts: "all" | "none"): Promise<FamilyProgress | null> {
-  const [found, [s]] = await Promise.all([seasonFamilyAt(familyQboId), db.select().from(season).where(eq(season.id, seasonId))]);
+export async function loadFamilyProgress(familyId: AppFamilyId, seasonId: string, amounts: "all" | "none"): Promise<FamilyProgress | null> {
+  const [found, [s]] = await Promise.all([seasonFamilyAt(familyId), db.select().from(season).where(eq(season.id, seasonId))]);
   if (!found || !s) return null;
   const { today, standing, recorded } = await loadFamilyStanding(s.id, { familyId: found.id, students: found.students }, { amounts, parentId: null });
   const who = await staffNames(recorded.map((r) => r.waivedBy));
   const waivers = new Map(recorded.filter((r) => r.waivedAt !== null).map((r) => [pairKey(r.requirementId, r.subjectId),
     { reason: r.waivedReason ?? "", at: r.waivedAt!.toISOString(), by: r.waivedBy ? who.get(r.waivedBy) ?? null : null }]));
-  return { ...standing, family: { id: found.id, qboId: found.qboId, name: found.name }, season: { id: s.id, name: s.name, isCurrent: s.isCurrent }, today, waivers };
+  return { ...standing, family: { id: found.id, name: found.name }, season: { id: s.id, name: s.name, isCurrent: s.isCurrent }, today, waivers };
 }
 
 type Target = { setup: RequirementSetup; families: SeasonFamily[] | null };

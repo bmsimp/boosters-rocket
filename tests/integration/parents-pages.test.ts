@@ -32,6 +32,7 @@ import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import StaffHome from "@/app/staff/(app)/page";
 import ChooseFamily from "@/app/choose-family/page";
 import { decideHoldAction, reverseHoldAction, blockAction, unblockAction, resendWelcomeAction } from "@/app/staff/(app)/parents/actions";
+import { recordOfCustomer } from "../helpers/app-records";
 import { resetDb, seedGuardian, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { rowNamed } from "../helpers/table";
@@ -43,7 +44,8 @@ const ALL = [fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@exam
   fam("20", "Chen <b>Family</b>"), par("21", "Shared Sam", "20", "sam@example.com")];
 const parentsPage = async (q?: string) => renderToStaticMarkup(await ParentsPage({ searchParams: Promise.resolve(q ? { q } : {}) }));
 const personPage = async (id: string) => renderToStaticMarkup(await PersonPage({ params: Promise.resolve({ id }) }));
-const familyPage = async (id: string) => renderToStaticMarkup(await RosterEntryPage({ params: Promise.resolve({ id }) }));
+/** A family's roster page, addressed by the app family record this customer's family link names. */
+const familyPage = async (customer: string) => renderToStaticMarkup(await RosterEntryPage({ params: Promise.resolve({ id: String(await recordOfCustomer(customer, "family")) }) }));
 /** The staff home holds async server components, which only a rendering that waits for data can render. */
 // Its text-node separators (<!-- -->) are dropped, as renderToStaticMarkup would not write them.
 const staffHome = async () => (await new Response((await prerender(await StaffHome())).prelude).text()).replaceAll("<!-- -->", "");
@@ -162,7 +164,8 @@ describe("the staff pages for parents", () => {
     const html = await personPage(ana!.id);
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Rivera Family");
-    expect(html).toContain('href="/staff/roster/10"');
+    // The family's page by its app record: the membership's own family.
+    expect(html).toContain(`href="/staff/roster/${await recordOfCustomer("10", "family")}"`);
     expect(html).toContain("Resend welcome email");
     expect(html).toContain("Block");
     expect(await audits("parent.read")).toEqual([expect.objectContaining({ actorId: registrar.id, permission: "Parents.ReadWrite", targetType: "parent", targetId: ana!.id })]);
@@ -178,6 +181,7 @@ describe("the staff pages for parents", () => {
     const html = await personPage(ana!.id);
     expect(html).toContain("A family in the previous QuickBooks company");
     expect(html).not.toContain('href="/staff/roster/20"');
+    expect(html).not.toContain(`href="/staff/roster/${await recordOfCustomer("20", "family")}"`);
     expect(html).not.toContain("Chen");
     const people = (await parentsPage("ana")).split('id="people-h"')[1]!; // To review above it names Chen as Sam's other family
     expect(people).toContain("A family in the previous QuickBooks company: Can&#x27;t sign in: a different QuickBooks company was connected");

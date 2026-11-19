@@ -30,6 +30,8 @@ beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; }
 afterAll(() => stub.close());
 
 const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
+/** A family's page is addressed by its app family record: the one this customer's family link names. */
+const idOf = async (customer: string) => String(await recordOfCustomer(customer, "family"));
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" };
 /** The Rivera family's list as its page binds it: the family, Ana and Leo, each at the version the stub's company starts at. */
@@ -133,7 +135,7 @@ describe("making a family inactive from its page: one action, the amount of a ba
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     expect(await familyInactiveAction(tag, "10", RIVERA_SHOWN)).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." });
     expect(revalidatedPaths()).toContain("/");
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("It is inactive in QuickBooks");
     expect(html).not.toContain("Make Rivera Family inactive");
   });
@@ -144,7 +146,7 @@ describe("making a family inactive from its page: one action, the amount of a ba
     const r = await familyInactiveAction(tag, "10", RIVERA_SHOWN);
     expect(r).toMatchObject({ ok: false, errors: expect.arrayContaining(["Made inactive in QuickBooks: Ana Rivera."]) });
     expect(revalidatedPaths()).toContain("/");
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("Make Rivera Family inactive");
   });
 });
@@ -152,7 +154,7 @@ describe("making a family inactive from its page: one action, the amount of a ba
 describe("the roster pages offer the changes the shape allows, to staff who may make them", () => {
   it("a family's page, with both permissions: rename, add a student and a parent, move and make inactive", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     for (const words of ["Change in QuickBooks", "Add a student", "Add a parent", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Move to", "Make Rivera Family inactive",
       "From the portal you can make a family, add a student, add a parent with their own email address, rename a family, student or parent, move a student to another family and make a family, student or parent inactive."]) {
       expect(html, words).toContain(words.replaceAll("'", "&#x27;"));
@@ -162,7 +164,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
 
   it("with Roster.Read alone: what can be changed, and by whom, but no form", async () => {
     asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("Staff who may change the roster can make a family");
     for (const words of ["Change in QuickBooks", "Add a student", "Make Rivera Family inactive"]) expect(html).not.toContain(words);
     const list = await renderPage(RosterPage);
@@ -172,7 +174,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
   it("shows what is waiting to reach QuickBooks, and offers nothing for a record with a change waiting", async () => {
     await seedQueued(RENAME, { familyQboId: "10" });
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("Waiting to reach QuickBooks");
     expect(html).toContain("Rename the student “Leo Rivera” to “Leon Rivera”");
     expect(html).toContain("A change to Leo Rivera is waiting to reach QuickBooks, so nothing else can be changed for now.");
@@ -183,7 +185,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     await resetDb(); stub.reset();
     tag = await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null } });
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain(NOT_HERE.parentsInFamilyEmail.replaceAll("'", "&#x27;"));
     expect(html).not.toContain("Add a parent");
     expect(html).toContain("Add a student");
@@ -193,7 +195,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     await resetDb(); stub.reset();
     tag = await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: null, parentTypeId: "2" } });
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain(NOT_HERE.noStudents.replaceAll("'", "&#x27;"));
     expect(html).not.toContain("Add a student");
     expect(html).not.toContain("Move to");
@@ -208,7 +210,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     expect(list).toContain("<option value=\"2\">Parent</option>");
     expect(list).toContain("<option value=\"3\">Student</option>");
     expect(list).toContain(NOT_HERE.flat.replaceAll("'", "&#x27;"));
-    const member = await renderPage(RosterEntryPage, { params: { id: "11" } });
+    const member = await renderPage(RosterEntryPage, { params: { id: await idOf("11") } });
     expect(member).toContain("Change the member Ana Rivera");
     expect(member).not.toContain("Add a student");
     expect(await createAction(tag, "member", "Sky Lee", "3")).toMatchObject({ ok: true });
@@ -220,7 +222,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     company.customers.push({ Id: "70", DisplayName: "<img src=x onerror=alert(1)> Family", Active: true, SyncToken: "0", MetaData: { LastUpdatedTime: "2026-11-01T12:00:00-06:00" }, CustomerTypeRef: { value: "1" } });
     tag = await connectRoster(stub, { company });
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    const html = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt; Family");
     expect(html).not.toContain("<img src=x");
   });
@@ -262,17 +264,17 @@ describe("the Reconciliation page (Roster.Read)", () => {
     await db.insert(writeQueue).values({ realmId: REALM, request: { op: "invoice_create", buyoutId: "00000000-0000-4000-8000-0000000000b1", customerQboId: "10", itemQboId: "4343",
       units: 2, unitCents: 3719 }, familyId: await recordOfCustomer("10", "family"), sent: false, tries: 1, lastCode: "http_429", nextTryAt: new Date(), askedByLabel: "a guardian" });
     asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
-    for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: "10" } })]) {
+    for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })]) {
       expect(html).toContain("for a volunteer buy-out");
       expect(html).not.toContain("$74.38");
     }
     asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Finance.Balance.Read"]));
-    for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: "10" } })]) {
+    for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })]) {
       expect(html).toContain("$74.38 for a volunteer buy-out");
     }
   });
 
-  it("links each change to the page of the family it is filed under, by that family's customer, and a family's page lists every change under, about or into it", async () => {
+  it("links each change to the page of the family it is filed under, by that family's record, and a family's page lists every change under, about or into it", async () => {
     // The Rivera family (10) has a change of every arm: filed under it (a student's rename, a buy-out's void, a move
     // out of it) and one moving a student into Chen (20). A new family is filed under none, and the stray student (50)
     // has no family record at all: its change is found by its target alone, and links nowhere.
@@ -289,15 +291,33 @@ describe("the Reconciliation page (Roster.Read)", () => {
     const start = html.indexOf('id="writes-h"');
     expect(start).toBeGreaterThan(-1);
     const writes = html.slice(start, html.indexOf("</section>", start));
-    const links = [...writes.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]).filter((id) => ["10", "20", "50"].includes(id!));
-    expect(links).toEqual(["10", "10", "10"]);
-    const rivera = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    const [rivera10, chen20] = [await idOf("10"), await idOf("20")];
+    const links = [...writes.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]);
+    expect(links).toEqual([rivera10, rivera10, rivera10]);
+    expect(links).not.toContain(chen20);
+    const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     for (const words of ["Rename the student “Leo Rivera” to “Leon Rivera”", "Move the student Leo Rivera from Rivera Family to Chen Family", "Void the volunteer buy-out invoice of Rivera Family"]) expect(rivera).toContain(words);
     expect(rivera).not.toContain("Make the family “Patel Family”");
-    const chen = await renderPage(RosterEntryPage, { params: { id: "20" } });
+    const chen = await renderPage(RosterEntryPage, { params: { id: await idOf("20") } });
     expect(chen).toContain("Move the student Leo Rivera from Rivera Family to Chen Family");
     expect(chen).not.toContain("Rename the student “Leo Rivera”");
     expect(chen).not.toContain("Void the volunteer buy-out invoice");
+  });
+
+  it("links a Needs attention family to its page by the family's record, and a customer with no family record nowhere", async () => {
+    // The stub's company: Chen (20) has no student, so it is listed; the stray student (50) is under no family, and has no page.
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    const html = await renderPage(ReconciliationPage);
+    const start = html.indexOf('id="attention-h"');
+    expect(start).toBeGreaterThan(-1);
+    const attention = html.slice(start, html.indexOf("</section>", start));
+    expect(attention).toContain("Stray Student");
+    const links = [...attention.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]);
+    // Chen is listed once for each rule it meets, and every one of those rows links to the same record.
+    expect(links.length).toBeGreaterThan(0);
+    expect([...new Set(links)]).toEqual([await idOf("20")]);
+    expect(attention).not.toContain('href="/staff/roster/20"');
+    expect(attention).not.toContain('href="/staff/roster/50"');
   });
 
   it("offers Try again now and Give up to staff who may change the roster, and the money worth a look to staff who may see money", async () => {
@@ -309,6 +329,7 @@ describe("the Reconciliation page (Roster.Read)", () => {
     expect(html).toContain("Give up");
     expect(html).toContain("Money worth a look");
     expect(rowNamed(html, "Leo Rivera")).toEqual([expect.any(String), "Leo Rivera", "$50.00", "$0.00", expect.stringMatching(/UTC$/)]);
-    expect(html).toContain('href="/staff/balances/10"');
+    expect(html).toContain(`href="/staff/balances/${await idOf("10")}"`);
+    expect(html).not.toContain('href="/staff/balances/10"');
   });
 });

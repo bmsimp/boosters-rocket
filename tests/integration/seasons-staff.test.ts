@@ -109,7 +109,7 @@ describe("the season permissions", () => {
     const setupPages = [() => pageOutcome(SeasonsPage), () => pageOutcome(SeasonSetupPage, { params: { id: fall.seasonId } }),
       () => pageOutcome(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } })];
     const progressPages = [() => pageOutcome(ProgressPage), () => pageOutcome(RequirementProgressPage, { params: { requirementId: fitting } }),
-      () => pageOutcome(FamilyProgressPage, { params: { familyId: "10" } })];
+      async () => pageOutcome(FamilyProgressPage, { params: { familyId: await F("10") } })];
     const setupActions = [
       () => createSeasonAction("Spring", "template"), () => renameSeasonAction(fall.seasonId, "X"), () => setCurrentSeasonAction(fall.seasonId), () => clearCurrentSeasonAction(),
       () => addStepAction(fall.seasonId, "X"), () => updateStepAction(uniforms, "X", null, null), () => moveStepAction(uniforms, "later"), () => removeStepAction(uniforms),
@@ -154,7 +154,7 @@ describe("the season permissions", () => {
     const fitting = fall.requirementIds["Uniform fitting attended"]!;
     for (const html of [await renderPage(SeasonsPage), await renderPage(SeasonSetupPage, { params: { id: fall.seasonId } }),
       await renderPage(RequirementPage, { params: { id: fall.seasonId, requirementId: fitting } }), await renderPage(ProgressPage),
-      await renderPage(FamilyProgressPage, { params: { familyId: "10" } })]) {
+      await renderPage(FamilyProgressPage, { params: { familyId: await F("10") } })]) {
       expect(html).not.toMatch(/<button|<input|<select|<textarea/);
     }
     // The list of who has done it keeps its search box, and nothing that ticks or waives.
@@ -647,7 +647,7 @@ describe("one family's season, for staff", () => {
   it("shows where one family stands in every step, with the reason for a waiver, and audits the read", async () => {
     const fall = await seedFamilyFall();
     asStaff(reader);
-    const html = await renderPage(FamilyProgressPage, { params: { familyId: "10" } });
+    const html = await renderPage(FamilyProgressPage, { params: { familyId: await F("10") } });
     const text = textOf(html);
     expect(text).toContain("Rivera Family Where this family stands in Fall 2026, the current season.");
     // Each step is a table with a heading row for the family and for each student (DESIGN.md, Tables: groups).
@@ -665,7 +665,7 @@ describe("one family's season, for staff", () => {
     // A student QuickBooks has made inactive is not shown.
     expect(text).not.toContain("Gone Rivera");
 
-    // The address names the family by its QuickBooks id; the audit row names the app's own family (open question 17).
+    // The address and the audit row name the app's own family (open question 17).
     expect(await audits()).toEqual([expect.objectContaining({ action: "season.progress.family.read", permission: "Season.Progress.Read", actorId: reader.id, actorLabel: "reader@club.org",
       targetType: "family", targetId: await F("10"), ip: "203.0.113.50", after: { season: "Fall 2026" } })]);
   });
@@ -675,11 +675,12 @@ describe("one family's season, for staff", () => {
     const old = await seedSeason({ name: "Fall 2025", current: false, steps: [{ name: "Old step", requirements: [{ title: "Old item", appliesTo: "family", ticked: ["10"] }] }] });
     asStaff(reader);
     const list = await renderPage(RequirementProgressPage, { params: { requirementId: fall.requirementIds["Uniform fitting attended"]! } });
-    expect(list).toContain(`href="/staff/seasons/progress/family/10?season=${fall.seasonId}"`);
-    expect(list).toContain(`href="/staff/seasons/progress/family/20?season=${fall.seasonId}"`);
+    expect(list).toContain(`href="/staff/seasons/progress/family/${await F("10")}?season=${fall.seasonId}"`);
+    expect(list).toContain(`href="/staff/seasons/progress/family/${await F("20")}?season=${fall.seasonId}"`);
+    expect(list).not.toContain('href="/staff/seasons/progress/family/10?');
     expect(textOf(list)).toContain("Everything asked of Rivera Family");
     expect(list).not.toContain("<b>Family</b>");
-    const text = textOf(await renderPage(FamilyProgressPage, { params: { familyId: "10" }, searchParams: { season: old.seasonId } }));
+    const text = textOf(await renderPage(FamilyProgressPage, { params: { familyId: await F("10") }, searchParams: { season: old.seasonId } }));
     expect(text).toContain("Where this family stands in Fall 2025, which parents don't see.");
     expect(text).toContain("1. Old step Done What Old step asks of the family and of each student Requirement Required Where it stands Due The family Old item Required Done");
     expect(text).not.toContain("Handbook read");
@@ -688,16 +689,17 @@ describe("one family's season, for staff", () => {
   it("is not found, and writes no audit row, for anything that isn't an active family or a season", async () => {
     const fall = await seedFamilyFall();
     asStaff(reader);
-    // A student, a parent, a family QuickBooks has made inactive, nobody at all, and text that isn't an id.
-    for (const familyId of ["12", "11", "30", "999", "10%27", "%E0%A4%A", "x".repeat(65)]) {
+    // A family's QuickBooks id (the old address), text that isn't an id, a uuid that names nothing, a student's record,
+    // the record of a family QuickBooks has made inactive, and a family record (made inactive, as 0023 made one) of a parent.
+    for (const familyId of ["10", "12", "999", "10%27", "%E0%A4%A", "x".repeat(65), crypto.randomUUID(), await S("12"), await F("30"), await F("11")]) {
       expect(await pageOutcome(FamilyProgressPage, { params: { familyId } }), familyId).toEqual({ notFound: true });
     }
     for (const seasonId of [NO_SUCH, "x", `${fall.seasonId}' or '1'='1`]) {
-      expect(await pageOutcome(FamilyProgressPage, { params: { familyId: "10" }, searchParams: { season: seasonId } }), seasonId).toEqual({ notFound: true });
+      expect(await pageOutcome(FamilyProgressPage, { params: { familyId: await F("10") }, searchParams: { season: seasonId } }), seasonId).toEqual({ notFound: true });
     }
     // With no season at all there is nothing to show for anyone.
     await db.delete(requirementProgress); await db.delete(season);
-    expect(await pageOutcome(FamilyProgressPage, { params: { familyId: "10" } })).toEqual({ notFound: true });
+    expect(await pageOutcome(FamilyProgressPage, { params: { familyId: await F("10") } })).toEqual({ notFound: true });
     expect(await audits()).toEqual([]);
   });
 });
