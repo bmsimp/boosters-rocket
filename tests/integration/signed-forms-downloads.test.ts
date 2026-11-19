@@ -3,7 +3,7 @@ import { asParent, asParentChoosing, asRefusedParent, asStaff, redirectOf, rende
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, role, roleAssignment, roleRule, signatureRequest, signedFormEvidence } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, parentAuthSession, role, roleAssignment, roleRule, signatureRequest, signedFormEvidence } from "@/lib/db/schema";
 import { GET as parentDownload } from "@/app/(parent)/forms/[id]/signed/route";
 import { GET as staffDownload } from "@/app/staff/(app)/forms/evidence/[id]/[file]/route";
 import FormsPage from "@/app/(parent)/forms/page";
@@ -160,6 +160,12 @@ describe("a signed form kept while the family had no QuickBooks link", () => {
     await db.delete(accountingLink).where(eq(accountingLink.familyId, familyA));
     expect(await db.select().from(accountingLink).where(eq(accountingLink.familyId, familyA))).toEqual([]);
     expect((await db.select({ active: family.active }).from(family).where(eq(family.id, familyA)))[0]).toEqual({ active: true });
+    // The session names the family record, never a QuickBooks id (the session slice, migrations 0037 and 0038). The
+    // guardian row's QuickBooks family is changed too, as a later slice drops that column: a gate that still matched a
+    // session to a row by a QuickBooks family would find no row, so this half proves the session slice with the other two.
+    expect((await db.select({ familyId: parentAuthSession.familyId }).from(parentAuthSession).where(eq(parentAuthSession.id, a.session.id)))[0])
+      .toEqual({ familyId: familyA });
+    await db.update(guardian).set({ familyQboId: "NO-CUSTOMER-A" }).where(eq(guardian.id, a.identity.guardianId));
     // The gate signs the parent in to it from the session, which names the family record: no link is asked for.
     const signedIn = await identityNow(a.session.id);
     expect(signedIn).toMatchObject({ familyId: familyA, guardianId: a.identity.guardianId });
