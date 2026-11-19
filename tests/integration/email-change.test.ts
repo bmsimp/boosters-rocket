@@ -345,6 +345,36 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect(EMAIL_COPY.cantHere).not.toMatch(/family|another|already|taken|someone/i);
     expect(await db.select({ status: guardian.status }).from(guardian).where(eq(guardian.parentId, r.identity.parentId))).toEqual([{ status: "active" }]);
   });
+
+  // Two links to one address confirmed at once: both pass the check, both reach QuickBooks, and the one that comes
+  // second to the address locks finds the address held. Nothing can ever make it this person's, so nothing is promised.
+  it("an address another person comes to hold while QuickBooks is written is not promised, and nobody is signed out", async () => {
+    const { r } = await seedContactFamilies(stub);
+    await aCode(r.identity.parentId);
+    asParent(r.identity);
+    await asking(NEW);
+    const token = linkTo(NEW);
+    let other: string | null = null;
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST" || other) return;
+      other = (await seedParent({ name: "Somebody Else", email: NEW })).id;
+    };
+    const answer = await confirmEmailChangeAction(token);
+    expect(answer).toEqual({ ok: false, errors: [EMAIL_COPY.askTheClub] });
+    expect(other).not.toBeNull();
+    // QuickBooks took it, and the cache follows QuickBooks; the person keeps the address they sign in with.
+    expect(inQuickBooks(stub, R_PARENT).PrimaryEmailAddr).toEqual({ Address: NEW });
+    expect((await cached(R_PARENT)).email).toBe(NEW);
+    expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
+    expect(await sessionsOf(r.identity.parentId)).toHaveLength(1);
+    expect(await codesOf(r.identity.parentId)).toHaveLength(1);
+    expect((await person(other!)).email).toBe(NEW);
+    // The audit row says QuickBooks holds the new address, for staff to put the record right.
+    const saved = (await audits()).filter((a) => a.action === "parent.email.save");
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.after).toMatchObject({ email: NEW, app: "address_taken", quickbooks: "holds_new_address" });
+    expect((await requests()).find((q) => q.newEmail === NEW)!.usedAt).not.toBeNull();
+  });
 });
 
 describe("confirming: what goes wrong changes nothing in the portal", () => {

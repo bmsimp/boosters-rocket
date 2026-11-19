@@ -44,8 +44,10 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * leaves the person's address alone does not hold a code request up.
  *
  * Lock order, the same everywhere: the address locks first (lockEmail(), in the order of the addresses), then the
- * person's row, then their sign-in codes. The address change and the block take the row and then delete the person's
- * unused codes; a code request calls this before it touches a code.
+ * person's row, then what hangs on the person: their email change requests, sign-in codes and sessions. The address
+ * change (email-change.ts) takes the row before it spends its request, and only then the roster lock and the app's
+ * records; an ask and the block take the row and then delete the person's unused requests and codes; a code request
+ * calls this before it touches a code.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");
