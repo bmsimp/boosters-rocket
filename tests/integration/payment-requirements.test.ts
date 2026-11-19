@@ -10,13 +10,14 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, qboItem, requirement, role, roleAssignment, roleRule, season } from "@/lib/db/schema";
+import { accountingLink, auditLog, familyMoney, qboItem, requirement, role, roleAssignment, roleRule, season } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { runMoneyJob } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { loadMySeason } from "@/lib/seasons/my-season";
+import { loadFacts, toRequirement } from "@/lib/seasons/recorded";
 import { loadFamilyProgress, loadRequirementProgress } from "@/lib/seasons/staff-progress";
 import HomePage from "@/app/(parent)/page";
 import RequirementProgressPage from "@/app/staff/(app)/seasons/progress/[requirementId]/page";
@@ -29,7 +30,7 @@ import { resetDb, seedStaff } from "../helpers/db";
 import { ageMoney, connectCompany, invoiceQueries, RIVERA, stubInvoice as inv } from "../helpers/money";
 import { MONEY_REALM, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { addToCache, stu } from "../helpers/roster-cache";
+import { addToCache, fam, moveInCache, stu } from "../helpers/roster-cache";
 import { seedSeason } from "../helpers/season";
 import { recordOfCustomer } from "../helpers/app-records";
 
@@ -133,6 +134,61 @@ describe("what a parent reads for a payment requirement", () => {
     // The parent's own query agrees with the staff page.
     const mine = await loadMySeason(rivera.identity, (await loadMyFamily({ ...rivera.identity, ip: null }))!.students);
     expect(mine!.steps[0]!.family.map((l) => [l.title, l.state])).toEqual([["Band fee", "done"], ["Trip deposit", "todo"]]);
+  });
+});
+
+describe("a payment requirement asked by the app's own records", () => {
+  const byName = (rows: { name: string; words: string }[]) => rows.map((r) => [r.name, r.words]).sort((a, b) => a[0]!.localeCompare(b[0]!));
+
+  it("follows a student who moved to another family: their invoice counts there, and no longer for the family they left", async () => {
+    const fall = await seeded();
+    invoices();
+    await addToCache([fam("7020", "Rookwood Family")]);
+    stub.customers.push({ Id: "7020", DisplayName: "Rookwood Family", Balance: 0, BalanceWithJobs: 0 });
+    await moveInCache([RAFFERTY.qboId], "7020");
+    await runMoneyJob({ paceMs: 0 });
+    // Rafferty's own invoice is now in the Rookwood family's figures, and still his: the customer his own record is linked to.
+    const uniform = (await loadRequirementProgress(fall.requirementIds["Uniform fee"]!, "all"))!;
+    expect(byName(uniform.rows!)).toEqual([[RAFFERTY.name, "Not paid yet ($40.50 left to pay)"], [ROMILLY.name, "No invoice yet"]]);
+    // The family he left keeps its own band fee and no longer lists him.
+    const text = await seasonText();
+    expect(text).toContain("Your family Band fee Paid");
+    expect(text).toContain(`${ROMILLY.name} Uniform fee No invoice yet`);
+    expect(text).not.toContain(RAFFERTY.name);
+    // The family he joined has no invoice of its own for the band fee: his invoice carries the uniform, not the band fee.
+    const band = (await loadRequirementProgress(fall.requirementIds["Band fee"]!, "all"))!;
+    expect(byName(band.rows!)).toEqual([["Riverquill Family", "Paid"], ["Rookwood Family", "No invoice yet"]]);
+  });
+
+  it("a tick needs no link; a payment for a record with no link reads as having no figures, never another's", async () => {
+    // No path the portal runs in stage 2 leaves a record without its link: it is removed by hand here.
+    await seeded();
+    invoices();
+    await runMoneyJob({ paceMs: 0 });
+    const familyId = await recordOfCustomer(FAMILY, "family"), raffertyId = await recordOfCustomer(RAFFERTY.qboId, "student");
+    const rows = await db.select().from(requirement).orderBy(asc(requirement.position));
+    // Two checklist items, ticked off for the family and for Rafferty as staff's page would leave them.
+    const ticked = (await seedSeason({ name: "Spring 2027", current: false, steps: [{ name: "Forms", requirements: [
+      { title: "Fee form handed in", appliesTo: "family", ticked: [FAMILY] },
+      { title: "Locker form handed in", appliesTo: "student", ticked: [RAFFERTY.qboId] },
+    ] }] })).requirementIds;
+    const asked = { families: [familyId], students: [raffertyId] };
+    const viewing = { amounts: "all" as const, parentId: null };
+    const requirements = [...rows, ...(await db.select().from(requirement).where(eq(requirement.id, ticked["Fee form handed in"]!))),
+      ...(await db.select().from(requirement).where(eq(requirement.id, ticked["Locker form handed in"]!)))].map((r) => toRequirement(r, []));
+    const words = async () => {
+      const { facts } = await loadFacts(requirements, asked, viewing);
+      return requirements.map((r) => [r.title, facts.standing(r, r.appliesTo === "family" ? familyId : raffertyId).words]);
+    };
+    const linked = [["Band fee", "Paid"], ["Uniform fee", "Not paid yet ($40.50 left to pay)"], ["Trip deposit", "No invoice yet"],
+      ["Fee form handed in", "Done"], ["Locker form handed in", "Done"]];
+    expect(await words()).toEqual(linked);
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId));
+    await db.delete(accountingLink).where(eq(accountingLink.studentId, raffertyId));
+    // The ticks are the season's own records of the app's own records: still done. The figures are kept by customer, and
+    // a record with no link has none: no invoice yet, as for a family with no figures.
+    expect(await words()).toEqual([["Band fee", "No invoice yet"], ["Uniform fee", "No invoice yet"], ["Trip deposit", "No invoice yet"],
+      ["Fee form handed in", "Done"], ["Locker form handed in", "Done"]]);
   });
 });
 

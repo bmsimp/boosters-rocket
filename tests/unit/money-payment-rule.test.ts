@@ -68,19 +68,27 @@ describe("how a payment requirement stands", () => {
 
 describe("whose invoices count", () => {
   const family = [paid("1", FAMILY, [TRIP]), invoice("2", LEO, [UNIFORM]), paid("3", MAYA, [UNIFORM])];
+  // A student is given as the customer their own record is linked to; the family needs no customer: all of it is theirs.
+  const student = (customerQboId: string) => ({ appliesTo: "student" as const, customerQboId });
+  const FAMILY_ITSELF = { appliesTo: "family" as const };
 
   it("for a student: only the invoices raised on that student, so an item on a sibling's invoice is not theirs", () => {
-    expect(invoicesFor(MAYA, FAMILY, family).map((i) => i.qboId)).toEqual(["3"]);
-    expect(paymentStanding(UNIFORM, invoicesFor(MAYA, FAMILY, family))).toEqual(PAID);
-    expect(paymentStanding(UNIFORM, invoicesFor(LEO, FAMILY, family)).met).toBe(false);
+    expect(invoicesFor(student(MAYA), family).map((i) => i.qboId)).toEqual(["3"]);
+    expect(paymentStanding(UNIFORM, invoicesFor(student(MAYA), family))).toEqual(PAID);
+    expect(paymentStanding(UNIFORM, invoicesFor(student(LEO), family)).met).toBe(false);
     // The trip is on the family's own invoice: no student has one.
-    expect(paymentStanding(TRIP, invoicesFor(LEO, FAMILY, family))).toEqual(NO_INVOICE_YET);
+    expect(paymentStanding(TRIP, invoicesFor(student(LEO), family))).toEqual(NO_INVOICE_YET);
   });
 
   it("for a family: the invoices raised on any of its customers", () => {
-    expect(invoicesFor(FAMILY, FAMILY, family).map((i) => i.qboId)).toEqual(["1", "2", "3"]);
-    expect(paymentStanding(TRIP, invoicesFor(FAMILY, FAMILY, family))).toEqual(PAID);
-    expect(paymentStanding(UNIFORM, invoicesFor(FAMILY, FAMILY, family)).words).toBe("Not paid yet ($85.00 left to pay)");
+    expect(invoicesFor(FAMILY_ITSELF, family).map((i) => i.qboId)).toEqual(["1", "2", "3"]);
+    expect(paymentStanding(TRIP, invoicesFor(FAMILY_ITSELF, family))).toEqual(PAID);
+    expect(paymentStanding(UNIFORM, invoicesFor(FAMILY_ITSELF, family)).words).toBe("Not paid yet ($85.00 left to pay)");
+  });
+
+  it("for a student whose customer has none of the family's invoices: nothing, whatever the family's own invoices carry", () => {
+    expect(invoicesFor(student("99"), family)).toEqual([]);
+    expect(paymentStanding(TRIP, invoicesFor(student("99"), family))).toEqual(NO_INVOICE_YET);
   });
 });
 

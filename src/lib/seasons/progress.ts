@@ -9,8 +9,9 @@ import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 
 /**
  * Who a requirement is asked of, by the app's own id: a family for a per-family requirement, a student for a
- * per-student one (stage 2 of the app-owned families spec). Never a QuickBooks id: the area still keyed by those (money)
- * reads a season through the translation in ./recorded.ts.
+ * per-student one (stage 2 of the app-owned families spec). Never a QuickBooks id: the payment rule takes the records it is
+ * asked about to customers itself, in figuresBySubject() in src/lib/money/payment-standings.ts, for the figures the
+ * money cache still keeps by customer.
  */
 export type SubjectId = AppFamilyId | AppStudentId;
 

@@ -32,9 +32,15 @@ export function paymentStanding(itemQboId: string | null, invoices: readonly Sto
 }
 
 /**
+ * Whose invoices one payment line is about: the family's, or one student's, given as the customer that student's own
+ * record is linked to (./payment-standings.ts finds it through the link, never by guessing from the family's tree).
+ */
+export type Whose = { appliesTo: "family" } | { appliesTo: "student"; customerQboId: string };
+
+/**
  * The invoices that count for one family or student: all of the family's for the family itself, and only those raised
  * on the student's own customer for a student. `familyInvoices` is what may be shown of the family's figures.
  */
-export function invoicesFor(subjectQboId: string, familyQboId: string, familyInvoices: readonly StoredInvoice[]): StoredInvoice[] {
-  return subjectQboId === familyQboId ? [...familyInvoices] : familyInvoices.filter((i) => i.customerQboId === subjectQboId);
+export function invoicesFor(whose: Whose, familyInvoices: readonly StoredInvoice[]): StoredInvoice[] {
+  return whose.appliesTo === "family" ? [...familyInvoices] : familyInvoices.filter((i) => i.customerQboId === whose.customerQboId);
 }
