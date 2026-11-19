@@ -98,8 +98,8 @@ export function PasswordSignIn({ next }: { next: string | null }) {
   };
   const wait = Math.max(0, RESEND_SECONDS - Math.floor((now - sentAt) / 1000));
   const shown = problem && (
-    <div role="alert" className="errors">
-      <p>{problem.words}</p>
+    <div role="alert">
+      <p className="errors">{problem.words}</p>
       {problem.passwordLink && <p><a className="link-line" href="/sign-in/password">Set up or reset my password</a></p>}
     </div>
   );
