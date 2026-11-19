@@ -271,15 +271,21 @@ describe("backup and restore, really done", { timeout: 300_000 }, () => {
     expect(JSON.stringify(after.rows["public.setting"])).toContain("made.after.restore");
   });
 
-  it("refuses to replace a database that is in use", async () => {
+  it("refuses to replace a database that is in use, naming how many sessions are in it", async () => {
+    // Two sessions held open on purpose: the refusal says exactly 2, in its own words, and nothing is changed. This
+    // pins the message and the true count only. That the script never counts its own look or an autovacuum worker
+    // can't be shown on demand (neither can be made to linger at the moment it counts), so it is held by the other
+    // restores in this file, which ran into either now and then, no longer being refused.
     const held = postgres(SCRATCH_URL, { max: 1 });
+    const alsoHeld = postgres(SCRATCH_URL, { max: 1 });
     try {
       await held`select 1`;
+      await alsoHeld`select 1`;
       const r = run(RESTORE, [dump, SCRATCH, "--replace"]);
       expect(r.status).toBe(2);
-      expect(r.stderr).toMatch(/is in use \(\d+ connections?\)\. Stop the portal first/);
+      expect(r.stderr).toContain(`The database ${SCRATCH} is in use (2 connections). Stop the portal first (its app and worker), or Documenso if it is Documenso's, then run this again. Nothing was changed.`);
       expect((await held`select count(*)::int as n from setting where key = 'made.after.restore'`)[0]!.n).toBe(1);
-    } finally { await held.end({ timeout: 5 }); }
+    } finally { await held.end({ timeout: 5 }); await alsoHeld.end({ timeout: 5 }); }
   });
 
   it("refuses a file that isn't a backup, and a database name it can't use", async () => {
