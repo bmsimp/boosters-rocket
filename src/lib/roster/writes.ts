@@ -15,6 +15,8 @@ import { normalizeEmail } from "@/lib/email";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { reconcileAccess } from "@/lib/parents/reconcile";
 import { appRecordsAudit, changedAppRecords, noAppRecordChanges } from "@/lib/families/changes";
+import { familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
@@ -164,7 +166,25 @@ async function namesTaken(tx: Tx, cache: Cust[], except: string | null): Promise
     ...open.map((o) => o.request).filter((w) => w.op === "create" || w.op === "rename").map((w) => (w as { name: string }).name)];
 }
 
-type Prepared = { ok: true; write: RosterWrite; realmId: string; familyQboId: string | null; tag: string; name: string | null } | { ok: false; result: WriteResult };
+/**
+ * A write ready to send, with the app's records a queue item for it is filed under: `familyId`, the family it is under
+ * or about (a member's own, in flat books), and `studentId`, the student a rename, move or make-inactive is for. Each
+ * is null where the records have none: a new family or member (made after QuickBooks answers), a parent's own customer
+ * (a parent has no family or student record), or a customer with no record of that kind. What is sent is the write.
+ */
+type Prepared = { ok: true; write: RosterWrite; realmId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null; tag: string; name: string | null } | { ok: false; result: WriteResult };
+
+/**
+ * The app's records a write is filed under, through links of the kind each names (src/lib/families/links.ts), in the
+ * caller's transaction: the family's by its customer (`familyQboId`, or the member's own for a member's change), and a
+ * student's change's student by the student's customer.
+ */
+async function recordsOf(tx: Tx, write: RosterWrite, familyQboId: string | null): Promise<{ familyId: AppFamilyId | null; studentId: AppStudentId | null }> {
+  const familyCustomer = familyQboId ?? (write.op !== "create" && write.role === "member" ? write.qboId : null);
+  const familyId = familyCustomer === null ? null : await familyLinkedTo(familyCustomer, tx);
+  const studentId = write.op !== "create" && write.role === "student" ? await studentLinkedTo(write.qboId, tx) : null;
+  return { familyId, studentId };
+}
 
 /**
  * Everything checked before anything is sent, under the roster lock (lockRosterAs): the page was shown this company's
@@ -184,7 +204,9 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
     const roster = buildRoster(shape, cache);
     const byId = new Map(cache.map((c) => [c.qboId, c]));
     const allowed = (op: RosterOperation) => offers(shape, op);
-    const done = (write: RosterWrite, familyQboId: string | null, name: string | null = null): Prepared => ({ ok: true, write, realmId: source, familyQboId, tag: rosterTag, name });
+    // The app's records are found here, under the roster lock, from the same roster the write was checked against.
+    const done = async (write: RosterWrite, familyQboId: string | null, name: string | null = null): Promise<Prepared> =>
+      ({ ok: true, write, realmId: source, ...(await recordsOf(tx, write, familyQboId)), tag: rosterTag, name });
     // A change still waiting or stuck for this record: a family's too, before anyone is added to it or moved into it
     // (a waiting "make inactive" would land after them).
     const waitingFor = async (qboId: string) => (await tx.select({ id: writeQueue.id }).from(writeQueue)
@@ -377,10 +399,10 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
 }
 
 /** Puts a write that may go through later on the queue, audited, in one transaction. */
-async function enqueue(p: { write: RosterWrite; realmId: string; familyQboId: string | null }, code: string, sent: boolean, o: WriteOp & { staffUserId: string | null }): Promise<void> {
+async function enqueue(p: { write: RosterWrite; realmId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null }, code: string, sent: boolean, o: WriteOp & { staffUserId: string | null }): Promise<void> {
   await db.transaction(async (tx) => {
     const [item] = await tx.insert(writeQueue).values({
-      realmId: p.realmId, request: p.write, targetQboId: p.write.op === "create" ? null : p.write.qboId, familyQboId: p.familyQboId,
+      realmId: p.realmId, request: p.write, targetQboId: p.write.op === "create" ? null : p.write.qboId, familyId: p.familyId, studentId: p.studentId,
       sent, lastCode: code.slice(0, 40), nextTryAt: new Date(Date.now() + 60_000), askedBy: o.staffUserId, askedByLabel: o.actor.label,
     }).returning({ id: writeQueue.id });
     await writeAudit({ actor: o.actor, action: "roster.write.queued", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item!.id,

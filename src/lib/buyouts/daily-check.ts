@@ -62,7 +62,8 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
     const stillTheFamilys = Boolean(c?.active && c.parentQboId === familyQboId);
     if (perStudent && !stillTheFamilys) {
       // Moved in QuickBooks: the roster cache says so, whatever the figures hold. Its void goes on the queue once; a
-      // void that found something paid has flagged it, and it is left for the treasurer.
+      // void that found something paid has flagged it, and it is left for the treasurer. No item comes back only for a
+      // buy-out no longer invoiced by the time it is queued (a guardian or a move got there first): nothing to count.
       if (b.flag === "student_moved") continue;
       if (await db.transaction((tx) => queueVoid(tx, b, "student_moved", { actor: WORKER_ACTOR, label: "student moved", nextTryAt: new Date() }))) voiding++;
       continue;

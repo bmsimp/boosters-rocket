@@ -32,6 +32,8 @@ export async function buyoutsForMovedStudent(tx: Tx, move: { studentQboId: strin
   const toFamilyId = await familyLinkedTo(move.toFamilyQboId, tx);
   let voiding = 0, flagged = 0;
   for (const b of rows) {
+    // An invoiced one's void is always queued (the item is filed under the buy-out's own family): only one with no
+    // invoice to void comes back without an item, and is flagged with the rest.
     if (b.state === "invoiced" && (await queueVoid(tx, b, "student_moved", { actor: o.actor, label: "student moved", nextTryAt: new Date(), ip: o.ip }))) { voiding++; continue; }
     await tx.update(buyout).set({ flag: "student_moved", flaggedAt: new Date(), updatedAt: new Date() }).where(eq(buyout.id, b.id));
     await writeAudit({ actor: o.actor, action: "volunteer.buyout.flagged", targetType: "buyout", targetId: b.id, ip: o.ip,

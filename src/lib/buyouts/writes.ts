@@ -12,7 +12,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { buyout, familyMoney, qboCustomer, requirement, writeQueue, type BuyoutState, type BuyoutWrite, type QueuedWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { customerOfFamily, familyLinkedTo } from "@/lib/families/links";
+import { familyLinkedTo } from "@/lib/families/links";
 import { activeFamilyOf, studentsStillIn } from "@/lib/families/session-family";
 import type { ParentCtx } from "@/lib/guards";
 import { formatMoney, toCents } from "@/lib/money/cents";
@@ -115,16 +115,6 @@ const short = (code: string) => code.slice(0, 40);
 /** The family's stored figures are behind QuickBooks now: its next page load reads QuickBooks (src/lib/money/family-money.ts). */
 async function markMoneyStale(tx: Tx, familyId: AppFamilyId): Promise<void> {
   await tx.update(familyMoney).set({ staleAt: new Date(), updatedAt: new Date() }).where(eq(familyMoney.familyId, familyId));
-}
-
-/**
- * The customer of the family that chose a buy-out, through the family record's link, in the records' company: the
- * write queue is still kept by that customer (a boundary of stage 2 of the app-owned families spec, until stage 3
- * moves the queue with the session). A per-family buy-out is billed to that customer itself, so it stands in when the
- * link is gone. Null when neither says.
- */
-async function familyCustomerOf(tx: Tx, b: Pick<Row, "familyId" | "studentId" | "customerQboId">): Promise<string | null> {
-  return (await customerOfFamily(b.familyId, tx)) ?? (b.studentId === null ? b.customerQboId : null);
 }
 
 /**
@@ -313,10 +303,13 @@ export async function sendBuyoutWrite(item: Item, now: Date, o: { mayWait: boole
   return voided(item, w, b, "sent", actor);
 }
 
-/** A queue item for a buy-out write, in the transaction given. `nextTryAt` in the future holds it for the try made at once. */
-async function queueItem(tx: Tx, w: BuyoutWrite, o: { realmId: string; label: string | null; nextTryAt: Date }): Promise<Item> {
+/**
+ * A queue item for a buy-out write, in the transaction given, filed under the app's family that chose the buy-out
+ * (`buyout.family_id`): never a family from the browser. `nextTryAt` in the future holds it for the try made at once.
+ */
+async function queueItem(tx: Tx, w: BuyoutWrite, o: { realmId: string; familyId: AppFamilyId; label: string | null; nextTryAt: Date }): Promise<Item> {
   const [item] = await tx.insert(writeQueue).values({
-    realmId: o.realmId, request: w, targetQboId: null, familyQboId: w.familyQboId, sent: false, tries: 0, lastCode: null, nextTryAt: o.nextTryAt,
+    realmId: o.realmId, request: w, targetQboId: null, familyId: o.familyId, studentId: null, sent: false, tries: 0, lastCode: null, nextTryAt: o.nextTryAt,
     askedBy: null, askedByLabel: o.label,
   }).returning();
   return item!;
@@ -324,18 +317,16 @@ async function queueItem(tx: Tx, w: BuyoutWrite, o: { realmId: string; label: st
 
 /**
  * Puts the void of an invoiced buy-out on the queue, in the caller's transaction: the buy-out reads "being cancelled"
- * until it is voided. A student who moves (./moved.ts) and a guardian who switches back come here. Null when the
- * buy-out is no longer invoiced, or when its family's customer can't be found (the queue item names it): nothing is
- * queued and the buy-out is left as it is.
+ * until it is voided. A student who moves (./moved.ts) and a guardian who switches back come here. The item is filed
+ * under the buy-out's own family record, which every buy-out names, so a void is always queued for an invoiced one.
+ * Null only when the buy-out is no longer invoiced (or has no invoice to void): nothing is queued and it is left as it is.
  */
 export async function queueVoid(tx: Tx, b: Row, why: "switched_back" | "student_moved", o: { actor: Actor; label: string | null; nextTryAt: Date; ip?: string | null }): Promise<Item | null> {
   if (!b.invoiceQboId) return null;
-  const familyQboId = await familyCustomerOf(tx, b);
-  if (familyQboId === null) return null;
   const [moving] = await tx.update(buyout).set({ state: "being_voided", updatedAt: new Date() }).where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
   if (!moving) return null;
-  const item = await queueItem(tx, { op: "invoice_void", buyoutId: b.id, invoiceQboId: b.invoiceQboId, customerQboId: b.customerQboId, familyQboId, why },
-    { realmId: b.realmId, label: o.label, nextTryAt: o.nextTryAt });
+  const item = await queueItem(tx, { op: "invoice_void", buyoutId: b.id, invoiceQboId: b.invoiceQboId, customerQboId: b.customerQboId, why },
+    { realmId: b.realmId, familyId: b.familyId, label: o.label, nextTryAt: o.nextTryAt });
   await writeAudit({ actor: o.actor, action: why === "switched_back" ? "volunteer.buyout.switch_back" : "volunteer.buyout.moved", targetType: "buyout", targetId: b.id, ip: o.ip ?? null,
     before: { state: "invoiced", invoiceQboId: b.invoiceQboId, amountCents: b.amountCents }, after: { state: "being_voided", why, queueId: item.id } }, tx);
   return item;
@@ -410,10 +401,10 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
     // The invoice's bill-to address is the confirming guardian's own sign-in address, from their session (never from the
     // browser), kept with the queued create so every try sends the same one. It gives the invoice its Pay link; its
     // email status stays not set, so nothing is emailed. It goes into no audit row.
-    // The queue keeps the family by its customer (the write queue moves to the app's ids in a later slice): the session's own.
-    const item = await queueItem(tx, { op: "invoice_create", buyoutId: row.id, customerQboId: row.customerQboId, itemQboId: row.itemQboId, units: row.units, unitCents: row.unitCents, familyQboId: ctx.familyQboId,
+    // The item is filed under the family checked above, under the lock: the session's own active record.
+    const item = await queueItem(tx, { op: "invoice_create", buyoutId: row.id, customerQboId: row.customerQboId, itemQboId: row.itemQboId, units: row.units, unitCents: row.unitCents,
       billEmail: ctx.email },
-      { realmId: row.realmId, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS) });
+      { realmId: row.realmId, familyId: t.familyId, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS) });
     await writeAudit({ actor, action: "volunteer.buyout.chosen", targetType: "buyout", targetId: row.id, ip: ctx.ip,
       after: { state: "being_invoiced", requirementId: r.id, title: r.title, ...buyoutRecords(row), customerQboId: row.customerQboId, itemQboId: row.itemQboId,
         units: row.units, unitCents: row.unitCents, amountCents: row.amountCents, queueId: item.id } }, tx);

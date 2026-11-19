@@ -10,7 +10,9 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, familyMoney, jobRun, writeQueue, type StoredInvoice } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, familyMoney, jobRun, writeQueue, type StoredInvoice } from "@/lib/db/schema";
+import { queueVoid } from "@/lib/buyouts/writes";
+import { WORKER_ACTOR } from "@/lib/quickbooks/client";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 import { buyoutFacts } from "@/lib/buyouts/standing";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
@@ -234,8 +236,8 @@ describe("a student who moves in the portal (afterStudentMoved)", () => {
     await seedSignedInParent(CHENOWETH);
     const req = await seedBuyoutRequirement({ appliesTo: "student" });
     const b = await seedBuyout({ requirementId: req, familyQboId: FAMILY, subjectQboId: S1, chosenBy: p.identity.parentId, state: "being_invoiced" });
-    await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_create", buyoutId: b.id, customerQboId: S1, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 5000, familyQboId: FAMILY },
-      familyQboId: FAMILY, sent: false, tries: 0, nextTryAt: new Date() });
+    await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_create", buyoutId: b.id, customerQboId: S1, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 5000 },
+      familyId: b.familyId, sent: false, tries: 0, nextTryAt: new Date() });
     await move("00000000-0000-4000-8000-00000000aaaa");
     expect((await row(b.id)).flag).toBe("student_moved");
     await runWriteQueue(later(1));
@@ -247,11 +249,28 @@ describe("a student who moves in the portal (afterStudentMoved)", () => {
   });
 });
 
+describe("a void on the queue", () => {
+  it("is always queued for an invoiced buy-out, filed under the buy-out's own family record, even once that record has no link", async () => {
+    const p = await buyoutFamily(stub);
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement(), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "5001" });
+    // The family record's link is gone (before migration 0034 the item named the family's customer, and none was queued then).
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, b.familyId));
+    const item = await db.transaction((tx) => queueVoid(tx, b, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) }));
+    expect(item).toMatchObject({ familyId: b.familyId, studentId: null, targetQboId: null, request: { op: "invoice_void", buyoutId: b.id, invoiceQboId: "5001", customerQboId: FAMILY } });
+    expect(item!.request).not.toHaveProperty("familyQboId");
+    expect(await row(b.id)).toMatchObject({ state: "being_voided" });
+    // Only a buy-out no longer invoiced comes back without one.
+    expect(await db.transaction((tx) => queueVoid(tx, { ...b, state: "being_voided" }, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) }))).toBeNull();
+    expect(await queueOf(b.id)).toHaveLength(1);
+  });
+});
+
 describe("connecting a different company", () => {
   it("deletes every buy-out, counted in the audit row, and their queued writes with the queue", async () => {
     const { a } = await seedTwoFamilies();
+    // Filed under the family's own record: the queue goes before the records, or the clear would be refused.
     await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_void", buyoutId: "00000000-0000-4000-8000-000000000001", invoiceQboId: "9174", customerQboId: a.identity.familyQboId,
-      familyQboId: a.identity.familyQboId, why: "switched_back" }, familyQboId: a.identity.familyQboId, sent: false, nextTryAt: new Date() });
+      why: "switched_back" }, familyId: await recordOfCustomer(a.identity.familyQboId, "family"), sent: false, nextTryAt: new Date() });
     expect((await db.select().from(buyout)).length).toBe(2);
     expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
     expect(await db.select().from(buyout)).toEqual([]);

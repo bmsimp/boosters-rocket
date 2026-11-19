@@ -2,7 +2,7 @@
 // take later are tried again here by the worker, carefully: one that QuickBooks may already have made is never simply
 // sent again. Its rules are pure, in ./write-rules.ts; the send and what follows it are ./writes.ts's.
 import "server-only";
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, jobRun, qboCustomer, setting, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -16,6 +16,8 @@ import { afterStudentMoved, applyWritten, owedBy, REFRESH_ASK_KEY, sendWrite } f
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
+import { familyLinkedTo, linksOf } from "@/lib/families/links";
+import type { AppFamilyId } from "@/lib/families/ids";
 
 export const WRITE_QUEUE_JOB = "roster.write_queue";
 /** How long a try may hold an item before another wake may take it: longer than one send takes. */
@@ -188,7 +190,11 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
   return { ran, ok };
 }
 
-/** An item as the Reconciliation page and a family's page show it. */
+/**
+ * An item as the Reconciliation page and a family's page show it. `familyQboId` is the customer of the family record
+ * the item is filed under, for the link to that family's page (addressed by customer until the staff family pages
+ * move); null when it is filed under none (a new family or member) or the record has no link in the roster's company.
+ */
 export type QueueView = {
   id: string; state: "waiting" | "stuck"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null; familyQboId: string | null;
@@ -213,18 +219,26 @@ export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { s
 }
 
 /**
- * Every waiting and stuck item, newest first; for one family, only the items under or about it (`familyQboId`). With
- * `showAmounts` a buy-out invoice's words carry its amount (describeWrite).
+ * Every waiting and stuck item, newest first; for one family, only the items under or about it. The staff family page
+ * still names its family by customer (`familyQboId`, from its address), turned into that customer's family record once
+ * here, through a family link only: an item filed under that record, one whose target is that customer, or a move into
+ * it (its request names the family moved to by customer). A customer with no family record still finds its items by
+ * target. Each item's family record is turned back into its customer for the page's link in one lookup for the list.
+ * With `showAmounts` a buy-out invoice's words carry its amount (describeWrite).
  */
 export async function loadOpenWrites(o: { familyQboId?: string; showAmounts?: boolean } = {}): Promise<QueueView[]> {
+  const familyId = o.familyQboId === undefined ? null : await familyLinkedTo(o.familyQboId);
   const where = and(inArray(writeQueue.state, ["waiting", "stuck"]), o.familyQboId === undefined ? undefined
-    : sql`(${writeQueue.familyQboId} = ${o.familyQboId} or ${writeQueue.targetQboId} = ${o.familyQboId} or ${writeQueue.request}->>'toFamilyQboId' = ${o.familyQboId})`);
+    : or(familyId === null ? undefined : eq(writeQueue.familyId, familyId), eq(writeQueue.targetQboId, o.familyQboId), sql`${writeQueue.request}->>'toFamilyQboId' = ${o.familyQboId}`));
   const rows = await db.select().from(writeQueue).where(where).orderBy(desc(writeQueue.createdAt));
   if (!rows.length) return [];
   const names = new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)).map((c) => [c.qboId, c.name]));
+  const families = [...new Set(rows.map((r) => r.familyId).filter((f): f is AppFamilyId => f !== null))];
+  const links = await linksOf({ families, students: [] });
   return rows.map((r) => ({
     id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
-    lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode, familyQboId: r.familyQboId,
+    lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
+    familyQboId: r.familyId === null ? null : links.customerOfFamily.get(r.familyId) ?? null,
   }));
 }
 

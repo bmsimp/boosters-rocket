@@ -15,7 +15,7 @@ vi.mock("@/lib/parents/reconcile", async (original) => {
   return { ...m, reconcileAccess: async (...args: Parameters<typeof m.reconcileAccess>) => { if (reconcileFails.on) throw new Error("deadlock detected"); return m.reconcileAccess(...args); } };
 });
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { formWithdrawal, jobRun, qboCustomer, setting, writeQueue } from "@/lib/db/schema";
 import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
@@ -27,6 +27,7 @@ import { requestByCustomer, seedFormRequirement, seedRequest } from "../helpers/
 import { seedSeason } from "../helpers/season";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith } from "../helpers/roster-writes";
+import { recordOfCustomer } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -275,6 +276,22 @@ describe("staff try a change again, or give it up", () => {
     expect(all.map((i) => i.words).sort()).toEqual(["Make the family “Patel Family”", "Move the student Leo Rivera from Rivera Family to Chen Family", "Rename the student “Leo Rivera” to “Leon Rivera”"]);
     expect((await loadOpenWrites({ familyQboId: "20" })).map((i) => i.write.op)).toEqual(["move"]);   // the family it moves to
     expect((await loadOpenWrites({ familyQboId: "10" })).map((i) => i.write.op).sort()).toEqual(["move", "rename"]);
+    // Each is filed under the app's family record and linked by that record's customer; a new family is filed under none.
+    expect(all.map((i) => [i.write.op, i.familyQboId]).sort()).toEqual([["create", null], ["move", "10"], ["rename", "10"]]);
+    const filed = await db.select({ op: sql<string>`${writeQueue.request}->>'op'`, familyId: writeQueue.familyId, studentId: writeQueue.studentId }).from(writeQueue);
+    const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
+    expect(filed.sort((a, b) => (a.op < b.op ? -1 : 1))).toEqual([{ op: "create", familyId: null, studentId: null }, { op: "move", familyId: rivera, studentId: leo }, { op: "rename", familyId: rivera, studentId: leo }]);
+  });
+
+  it("finds a family's items by its record, its customer as target, or a move into it, and an address that names no family finds nothing", async () => {
+    // The stray student (50) has no family record: a change to it is still found by its target.
+    await seedQueued({ op: "rename", role: "student", qboId: "50", syncToken: "0", name: "Stray Two", was: "Stray Student" });
+    // A flat club's member: its item names its member as target and as the family it is filed under.
+    await seedQueued({ op: "deactivate", role: "member", qboId: "30", syncToken: "0" }, { familyQboId: "30" });
+    expect((await loadOpenWrites({ familyQboId: "50" })).map((i) => [i.write.op, i.familyQboId])).toEqual([["rename", null]]);
+    expect((await loadOpenWrites({ familyQboId: "30" })).map((i) => [i.write.op, i.familyQboId])).toEqual([["deactivate", "30"]]);
+    // Never a uuid compared with text: an address that isn't a customer, or looks like a record's id, is no error.
+    for (const address of ["E2E-40", "not a customer", String(await recordOfCustomer("10", "family"))]) expect(await loadOpenWrites({ familyQboId: address })).toEqual([]);
   });
 });
 

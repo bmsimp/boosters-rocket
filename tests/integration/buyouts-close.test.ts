@@ -13,6 +13,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, buyout, familyMoney, writeQueue, type BuyoutWrite } from "@/lib/db/schema";
+import type { AppFamilyId } from "@/lib/families/ids";
 import { AccessDenied } from "@/lib/guards";
 import { CLOSE_WORDS } from "@/lib/buyouts/closing";
 import { CLOSE_COPY } from "@/lib/buyouts/close";
@@ -50,12 +51,12 @@ const writer = () => staffWith("treasurer@club.org", ["Roster.Read", "Roster.Fam
 const standing = async (p: SeededParent, req: string) =>
   (await loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, family)).find((b) => b.requirementId === req)!;
 
-/** A queue item for a buy-out, as the write queue leaves one. */
-async function seedItem(b: { id: string; customerQboId: string }, o: { op?: "invoice_create" | "invoice_void"; state?: "waiting" | "stuck" | "done" | "given_up"; sent?: boolean } = {}) {
+/** A queue item for a buy-out, as the write queue leaves one: filed under the family that chose it. */
+async function seedItem(b: { id: string; customerQboId: string; familyId: AppFamilyId }, o: { op?: "invoice_create" | "invoice_void"; state?: "waiting" | "stuck" | "done" | "given_up"; sent?: boolean } = {}) {
   const request: BuyoutWrite = (o.op ?? "invoice_create") === "invoice_create"
-    ? { op: "invoice_create", buyoutId: b.id, customerQboId: b.customerQboId, itemQboId: "4343", units: 2, unitCents: 5000, familyQboId: FAMILY }
-    : { op: "invoice_void", buyoutId: b.id, invoiceQboId: "5001", customerQboId: b.customerQboId, familyQboId: FAMILY, why: "switched_back" };
-  const [item] = await db.insert(writeQueue).values({ realmId: "9130000000000001", request, familyQboId: FAMILY, state: o.state ?? "stuck", sent: o.sent ?? false,
+    ? { op: "invoice_create", buyoutId: b.id, customerQboId: b.customerQboId, itemQboId: "4343", units: 2, unitCents: 5000 }
+    : { op: "invoice_void", buyoutId: b.id, invoiceQboId: "5001", customerQboId: b.customerQboId, why: "switched_back" };
+  const [item] = await db.insert(writeQueue).values({ realmId: "9130000000000001", request, familyId: b.familyId, state: o.state ?? "stuck", sent: o.sent ?? false,
     tries: 8, lastCode: "http_429", nextTryAt: o.state === "waiting" ? new Date() : null, askedByLabel: "a guardian" }).returning();
   return item!;
 }
