@@ -19,7 +19,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Settings.Forms.ReadWrite": "Connect the club's Documenso",
   "Roster.Read": "See the roster: families, students and parents",
   "Roster.Family.ReadWrite": "Add, rename, move and make inactive families, students and parents in QuickBooks, and give or end a guardian's sign-in for a family: add, remove and reinstate its guardians",
-  "Settings.Parents.ReadWrite": "Switch parent sign-ins and welcome emails on or off",
+  "Settings.Parents.ReadWrite": "Switch parent sign-ins and welcome emails on or off, and email set-up links to parents with no password",
   "Parents.ReadWrite": "See every parent, change a parent's name, block or unblock a parent, and resend a welcome email",
   "Season.Steps.Read": "See the seasons, their steps and requirements",
   "Season.Steps.ReadWrite": "Set seasons up: steps, requirements and the current season",

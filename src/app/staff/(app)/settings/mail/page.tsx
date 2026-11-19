@@ -12,15 +12,15 @@ export default async function MailSettingsPage() {
   await requireStaffPage("Settings.Mail.ReadWrite");
   const [summary, attention] = await Promise.all([mailSummary(), mailAttention()]);
   const c = summary.config;
-  const words = !attention ? "Working: parents can get sign-in codes"
-    : attention.kind === "failing" ? `The last email failed: ${attention.lastError ?? "no reason was given"} Parents can't get sign-in codes until a send works again.`
+  const words = !attention ? "Working: parents can be sent sign-in codes and password links"
+    : attention.kind === "failing" ? `The last email failed: ${attention.lastError ?? "no reason was given"} Parents can't be sent sign-in codes, password links or welcome emails until a send works again.`
     : attention.kind === "not_tested" ? "Saved, but not tested since it changed, so parents can't sign in. Send a test email."
     : "Not set up yet, so parents can't sign in";
   return (
     <main className="wrap single">
       <BackToSettings />
       <h1 className="page-title">Outgoing mail</h1>
-      <p className="lede">How the portal sends sign-in codes and welcome emails. Only Admins can change this, because whoever controls outgoing mail can read parents&apos; sign-in codes.</p>
+      <p className="lede">How the portal sends sign-in codes, password links and welcome emails. Only Admins can change this, because whoever controls outgoing mail can read parents&apos; sign-in codes and the links that set their passwords.</p>
       <section className="box" aria-labelledby="mail-h"><h2 id="mail-h">What is set</h2>
         <StateWords state={attention ? "todo" : "done"} words={words} />
         <dl className="details">

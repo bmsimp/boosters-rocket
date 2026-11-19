@@ -177,11 +177,11 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const mailFix = { href: "/staff/settings/mail", label: "Open mail settings" };
   const failing = mailFailing(mail.status);
   if (!mail.config) {
-    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Not set up", says: "Not set up, so parents can't be sent sign-in codes.", times: [], notes: [], fix: mailFix });
+    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Not set up", says: "Not set up, so parents can't sign in.", times: [], notes: [], fix: mailFix });
   } else if (!mail.working) {
     lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Not tested", says: "Not tested with the settings it has now, so parents can't sign in. Send a test email from mail settings.", times: mailTimes, notes: [], fix: mailFix });
   } else if (failing) {
-    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Needs attention", says: "Tested, but the last email failed. Parents can't get sign-in codes until a send works again.", times: mailTimes,
+    lines.push({ key: "mail", title: "Outgoing mail", state: "attention", word: "Needs attention", says: "Tested, but the last email failed. Parents can't be sent sign-in codes, password links or welcome emails until a send works again.", times: mailTimes,
       notes: mail.status.lastError ? [mail.status.lastError] : [], fix: mailFix });
   } else {
     lines.push({ key: "mail", title: "Outgoing mail", state: "ok", word: "Working", says: `Tested and working, sending ${mail.config.method === "graph" ? "through Microsoft 365" : "by SMTP"}.`, times: mailTimes, notes: [], fix: null });

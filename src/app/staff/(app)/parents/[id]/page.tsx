@@ -14,6 +14,8 @@ import { blockAction, unblockAction, resendWelcomeAction, renamePersonAction } f
 import { GuardianChange } from "../guardian-change";
 import { accessState } from "../access-state";
 import { familyPage } from "@/app/staff/(app)/family-pages";
+import { lifeWords } from "@/lib/parents/link-delivery";
+import { LINK_LIFE_MS } from "@/lib/parents/signin-links";
 
 export const metadata = { title: "Parent" };
 export const dynamic = "force-dynamic";
@@ -36,7 +38,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
 
       <section className="box" aria-labelledby="pf-h"><h2 id="pf-h">Families</h2>
         <StateWords state={p.blocked ? "waived" : canSignIn ? "done" : "todo"}
-          words={p.blocked ? "Blocked: can't sign in to any family" : canSignIn ? "Can sign in" : "Can't sign in to any family right now"} />
+          words={p.blocked ? "Blocked: can't sign in to any family" : canSignIn ? (p.hasPassword ? "Can sign in" : "Can sign in once they choose a password") : "Can't sign in to any family right now"} />
         {p.families.length === 0 ? <p>This person isn&apos;t linked to any family.</p> : (
           <DataTable caption="Each family this person is linked to, and whether they can sign in to it" captionHidden
             rows={p.families} rowKey={(f) => f.guardianId} columns={[
@@ -50,7 +52,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         )}
         <dl className="details">
           <dt>Last signed in</dt><dd>{p.lastSigninAt ? <LocalTime iso={p.lastSigninAt} /> : "Never"}</dd>
-          <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
+          <dt>Password</dt><dd>{p.hasPassword ? "Chosen" : "Not chosen yet"}</dd>
+          {/* Owed while welcomed before: the mail an Admin asked for on the parents' settings page, with a link to choose a password. */}
+          <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} />{p.welcomeOwed ? ". An email with a link to choose a password is waiting to be sent" : null}</>
+            : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
         </dl>
         <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them. A guardian is added to a family from that family&apos;s page.</p>
       </section>
@@ -61,7 +66,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       </section>
 
       <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Welcome email</h2>
-        <p>Sends the welcome again, now: where to sign in, and that they sign in with this address and a code.</p>
+        <p>{p.hasPassword ? "Sends the welcome again, now: where to sign in, and that they sign in with this address and the password they chose."
+          : `Sends the welcome again, now, with a new link to choose their password. The link works once, for ${lifeWords(LINK_LIFE_MS.setup)}, and takes the place of any earlier one they haven't used, once the email has gone.`}</p>
         {parentDoorClosed(settings) ? <Notice tone="info" live="none">Parent sign-ins are switched off, so no welcome can be sent.</Notice>
           : canSignIn ? <OneButton label="Resend welcome email" pendingLabel="Sending…" act={resendWelcomeAction.bind(null, p.parentId)} />
           : <Notice tone="info" live="none">{p.blocked ? "This person is blocked, so no email can be sent." : "This person can't sign in to any family right now, so there is nothing to welcome them to."}</Notice>}
@@ -71,12 +77,12 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         {p.blocked ? (
           <>
             <Notice tone="warning" live="none">Blocked{p.blockedAt ? <> <LocalTime iso={p.blockedAt} /></> : null}. Reason: {p.blockedReason ?? "none recorded"}</Notice>
-            <p>Unblocking gives back exactly the access they had.</p>
+            <p>Unblocking lets them sign in again with the password they had, to each family whose sign-in is still open. The phones and computers the portal remembered for them stay forgotten, and a link they had before the block no longer works.</p>
             <OneButton label="Unblock" pendingLabel="Unblocking…" act={unblockAction.bind(null, p.parentId)} />
           </>
         ) : (
           <>
-            <p>Blocking signs this person out of every family at once and stops sign-in codes. They aren&apos;t told. Use it for a custody matter or misuse.</p>
+            <p>Blocking signs this person out of every family at once, and stops them signing in, getting sign-in codes or using a password link. The phones and computers the portal remembered for them are forgotten; their password is kept. They aren&apos;t told. Use it for a custody matter or misuse.</p>
             <NoteAction label="Block" field="Why? (staff only)" pendingLabel="Blocking…" act={blockAction.bind(null, p.parentId)} />
           </>
         )}

@@ -100,7 +100,8 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await signins.getByRole("button", { name: "Add guardian" }).click();
     await expect(signins.getByText(`Added ${GUARDIAN.name}.`, { exact: false })).toBeVisible();
     const row = signins.getByRole("row").filter({ hasText: GUARDIAN.email });
-    await expect(row).toContainText("Can sign in (hasn't yet)");
+    // A guardian added by staff has no password until they choose one from the welcome's link (the sign-in release, slice SI-4).
+    await expect(row).toContainText("Hasn't chosen a password yet");
     await noSidewaysScroll(page);
     await shot(page, "s04b-guardian-added");
     await row.locator("summary").click();
