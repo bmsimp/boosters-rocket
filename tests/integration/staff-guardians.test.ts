@@ -11,26 +11,34 @@ vi.mock("@/lib/auth/identity", () => ({
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "cf-connecting-ip": "203.0.113.41" }), cookies: async () => ({ get: () => undefined }) }));
 const revalidated = vi.hoisted(() => ({ count: 0 }));
 vi.mock("next/cache", () => ({ revalidatePath: () => { revalidated.count += 1; } }));
+// Mail is sent nowhere: only the tests that set mail up as working (seedWorkingMail()) send any, into this outbox.
+type Msg = { to: string; subject: string };
+const outbox = vi.hoisted(() => [] as Msg[]);
+vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { outbox.push(m); } }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => { throw Object.assign(new Error("NEXT_REDIRECT"), { url }); },
   notFound: () => { throw Object.assign(new Error("NEXT_NOT_FOUND"), { notFound: true }); },
 }));
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, formWithdrawal, guardian, parent, parentAuthSession, parentAuthUser, role, roleAssignment, roleRule, student, type RequestSigner } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, formWithdrawal, guardian, parent, parentAuthSession, parentAuthUser, role, roleAssignment, roleRule, student, type RequestSigner } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
-import { enterableGuardianRows } from "@/lib/parents/sessions";
+import { enterableGuardianRows, lockEmail } from "@/lib/parents/sessions";
+import { requestSigninCode } from "@/lib/parents/signin-codes";
+import { sendOwedWelcomes } from "@/lib/parents/welcome";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { addGuardianAction, reinstateGuardianAction, removeGuardianAction, renamePersonAction } from "@/app/staff/(app)/parents/actions";
 import PersonPage from "@/app/staff/(app)/parents/[id]/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import { NO_CHANGES, recordOfCustomer, whatAFreshRunWouldChange } from "../helpers/app-records";
-import { resetDb, seedGuardian, seedParent, seedParentSession, seedStaff } from "../helpers/db";
+import { resetDb, seedGuardian, seedParent, seedParentSession, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { holdTheRosterLock } from "../helpers/reconcile";
 import { seedCache, seedRosterRead, seedShape, seedParentSettings, storeShape, SIGNINS_ON, fam, par, stu } from "../helpers/roster-cache";
 import { seedSeason } from "../helpers/season";
 import { formSetting, requestNow, seedFormRequirement, seedRequest } from "../helpers/forms";
@@ -56,6 +64,7 @@ describe("staff manage a family's guardians", () => {
   const as = (s: typeof registrar) => { who.staff = { door: "staff", staffUserId: s.id, name: s.name, email: s.email }; };
   beforeEach(async () => {
     revalidated.count = 0;
+    outbox.length = 0;
     await resetDb();
     await seedRosterRead({ realmId: REALM });
     await seedShape(); await seedParentSettings(SIGNINS_ON);
@@ -104,8 +113,8 @@ describe("staff manage a family's guardians", () => {
       // Through the action, a third family's add says the person was there already and keeps their name.
       await seedCache([...ALL, fam("40", "Third Family")]);
       const third = await recordOfCustomer("40", "family");
-      expect(await addGuardianAction(String(third), "Someone Else", "ana@example.com")).toMatchObject({ ok: true,
-        message: expect.stringContaining(`${people[0]!.name}, who already had a sign-in with this address (their name is unchanged),`) });
+      expect(await addGuardianAction(String(third), "Someone Else", "ana@example.com")).toEqual({ ok: true,
+        message: `Added ${people[0]!.name}, who already had a sign-in with this address (their name is unchanged). They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.` });
       expect((await personOf("ana@example.com"))!.name).toBe(people[0]!.name);
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     });
@@ -172,6 +181,22 @@ describe("staff manage a family's guardians", () => {
       expect((await personOf("max@example.com"))!.welcomeOwed).toBe(false);
     });
 
+    it("the welcome job skips an owed person whose row doesn't count yet, keeps them owed, and welcomes them once it does", async () => {
+      await seedWorkingMail();
+      await storeShape(); await seedParentSettings({ welcome: true, requireActiveStudents: true });
+      await db.update(student).set({ active: false }).where(eq(student.familyId, chen));
+      await addGuardian(chen, { name: "Wen Chen", email: "wen@example.com" }, staffOp);
+      expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
+      expect(outbox).toEqual([]);
+      expect((await personOf("wen@example.com"))!).toMatchObject({ welcomeOwed: true, welcomedAt: null });
+      // The family has an active student again: the row counts, and the next run sends the welcome, once.
+      await db.update(student).set({ active: true }).where(eq(student.familyId, chen));
+      expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
+      expect(outbox.map((m) => m.to)).toEqual(["wen@example.com"]);
+      expect((await personOf("wen@example.com"))!).toMatchObject({ welcomeOwed: false, welcomedAt: expect.any(Date) });
+      expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
+    });
+
     it("lets nobody in before sign-ins are switched on, though the row is made", async () => {
       await seedParentSettings({ signin: false });
       await addGuardian(rivera, { name: "Ana Rivera", email: "ana@example.com" }, staffOp);
@@ -181,7 +206,61 @@ describe("staff manage a family's guardians", () => {
       expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
       expect(parentDoorClosed(await getParentSettings())).toBe(true);
       expect(await audits("settings.parents.save")).toEqual([]);
+      // Asking for a code is refused for them, and nothing is mailed; once sign-ins are on, the code goes.
+      await seedWorkingMail();
+      await (await requestSigninCode("ana@example.com", "203.0.113.41")).delivery;
+      expect((await audits("signin.code_refused")).map((r) => r.after)).toEqual([{ reason: "signins_off" }]);
+      expect(outbox).toEqual([]);
+      await seedParentSettings({ signin: true });
+      await (await requestSigninCode("ana@example.com", "203.0.113.41")).delivery;
+      expect((await audits("signin.code_sent")).map((r) => r.targetId)).toEqual([ana.id]);
+      expect(outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
     });
+
+    it("waits for a roster read holding the lock, having written nothing, then adds", async () => {
+      const lock = await holdTheRosterLock();
+      const adding = addGuardian(rivera, { name: "Ana Rivera", email: "ana@example.com" }, staffOp);
+      await untilALockIsAwaited();
+      expect(await personOf("ana@example.com")).toBeUndefined();
+      expect(await db.select().from(guardian)).toEqual([]);
+      await lock.release();
+      expect(await adding).toMatchObject({ ok: true, outcome: "added", person: "new" });
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    }, 30_000);
+
+    it("takes the person before the roster, as a parent's email confirm does, so a confirm under way and a staff write both go through", async () => {
+      await addGuardian(rivera, { name: "Ana Rivera", email: "ana@example.com" }, staffOp);
+      const ana = (await personOf("ana@example.com"))!;
+      const [row] = await rowsOf(ana.id);
+      // The confirm's order (email-change.ts, finish()): the address lock and the person's row, then the roster lock,
+      // exclusively. Were a staff write to hold the roster while it waited for the person, Postgres would find the
+      // cycle and abort one of the two.
+      const confirmLike = async () => {
+        let held!: () => void, go!: () => void;
+        const isHeld = new Promise<void>((r) => { held = r; }), mayGo = new Promise<void>((r) => { go = r; });
+        const done = db.transaction(async (tx) => {
+          await lockEmail(tx, "ana@example.com");
+          await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ana.id)).for("update");
+          held(); await mayGo;
+          await tx.execute(sql`set local lock_timeout = '10s'`);
+          await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+        });
+        await isHeld;
+        return { go, done };
+      };
+      const writes = [() => removeGuardian(row!.id, "Moved away.", staffOp), () => reinstateGuardian(row!.id, staffOp),
+        () => addGuardian(chen, { name: "Ana Rivera", email: "ana@example.com" }, staffOp)];
+      for (const write of writes) {
+        const confirm = await confirmLike();
+        const staff = write();
+        await untilALockIsAwaited();
+        confirm.go();
+        await confirm.done;
+        expect((await staff).ok).toBe(true);
+      }
+      expect((await rowsOf(ana.id)).map((g) => [g.familyQboId, g.status])).toEqual([["10", "invited"], ["20", "invited"]]);
+      expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    }, 60_000);
   });
 
   describe("removing", () => {
@@ -276,6 +355,22 @@ describe("staff manage a family's guardians", () => {
       expect(await errors(inactive.id)).toEqual(["This family is inactive in the portal, so nobody can sign in to it."]);
       await db.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
       expect(await errors(held.id)).toEqual(["This person is blocked. Unblock them on their page first."]);
+      expect((await rowsOf(ana.id)).every((g) => g.status === "disabled")).toBe(true);
+      expect(await audits("parent.access.granted")).toEqual([]);
+    });
+
+    it("refuses a family with no link, and a row naming a customer other than its family's own, in words, changing nothing", async () => {
+      const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+      const held = await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
+      const other = await seedGuardian({ parentId: ana.id, familyQboId: "20", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
+      await seedCache(ALL);
+      // A row in Rivera's record that names Chen's customer: not this family's row to reopen.
+      await db.update(guardian).set({ familyId: rivera }).where(eq(guardian.id, other.id));
+      const NO_LINK = "This family has no customer in QuickBooks linked to it, so this sign-in can't be brought back yet.";
+      const errors = async (id: string) => ((await reinstateGuardianAction(id)) as { errors: string[] }).errors;
+      expect(await errors(other.id)).toEqual([NO_LINK]);
+      await db.delete(accountingLink).where(eq(accountingLink.familyId, rivera));
+      expect(await errors(held.id)).toEqual([NO_LINK]);
       expect((await rowsOf(ana.id)).every((g) => g.status === "disabled")).toBe(true);
       expect(await audits("parent.access.granted")).toEqual([]);
     });

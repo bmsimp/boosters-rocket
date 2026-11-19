@@ -3,11 +3,16 @@
 // guardian's Parent customer, or their address in a family's email field, arrives with the source move (S9). Staff
 // only: called from src/app/staff/(app)/parents/actions.ts behind `Parents.ReadWrite`; never from parent code.
 //
-// Every write here holds what keeps a family record and its link still under it: the roster lock, shared, taken first,
-// so no roster read (which brings the app's records into step) and no change of company runs between the check and
-// the write. Then the parents' settings lock, shared, so a welcome switched on or off meanwhile is seen as it ends.
-// Then the person's rows in the one order ./sessions.ts gives (lockedPerson()): the address lock, the `parent` row,
-// the guardian row, and what hangs on the person (their sessions) last. A guardian row keeps `family_qbo_id` the
+// Every write here holds what keeps a family record and its link still under it: the roster lock, shared, taken before
+// the family is looked at and before any guardian row is, so no roster read (which brings the app's records into step)
+// and no change of company runs between the check and the write. The locks come in the one order ./sessions.ts gives
+// (lockedPerson()): the parents' settings lock, shared, first (a switch takes it before the people it touches, so a
+// welcome switched on or off meanwhile is seen as it ends); then the person's own, the address lock and the `parent`
+// row; then the roster lock, as a parent's email confirm takes it after the same person's locks (were the roster lock
+// held while waiting for the person, that confirm, holding the person and asking for the roster, would close a cycle
+// Postgres ends by aborting one of the two); then the guardian row, and what hangs on the person (their sessions)
+// last. A roster read never waits for a person's row, so holding one while waiting for the roster is safe against it.
+// A guardian row keeps `family_qbo_id` the
 // family's own linked customer, since keepAppRecordsInStep() (src/lib/families/in-step.ts) still puts a row in the
 // family that column names: a row written so is in step already, and the next run changes nothing.
 import { randomUUID } from "node:crypto";
@@ -39,11 +44,10 @@ export function personName(raw: string): string | null {
 /** The address staff typed, by the portal's own rule (normalizeEmail(): trimmed, lower-cased, a valid address). */
 export const guardianEmail = (raw: string): string | null => (raw.length <= EMAIL_MAX ? normalizeEmail(raw) : null);
 
-/** The roster lock, shared, then the parents' settings lock, shared: the first two locks of every write here. */
-async function holdRosterAndSettings(tx: Tx): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
-  await tx.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${PARENTS_KEY}))`);
-}
+/** The parents' settings lock, shared: the first lock of every write here, before the person's. */
+const holdSettings = (tx: Tx) => tx.execute(sql`select pg_advisory_xact_lock_shared(hashtext(${PARENTS_KEY}))`);
+/** The roster lock, shared: after the person's locks, before the family is looked at or a guardian row taken. */
+const holdRoster = (tx: Tx) => tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
 
 type Person = typeof parent.$inferSelect;
 type Row = typeof guardian.$inferSelect;
@@ -106,11 +110,12 @@ export async function addGuardian(familyId: AppFamilyId, input: { name: string; 
   const email = guardianEmail(input.email);
   if (email === null) return { ok: false, reason: "invalid_email" };
   return db.transaction(async (tx): Promise<AddGuardianResult> => {
-    await holdRosterAndSettings(tx);
-    const fam = await familyRefusal(tx, familyId);
-    if ("refusal" in fam) return { ok: false, reason: fam.refusal };
+    await holdSettings(tx);
     await lockEmail(tx, email);
     let [p] = await tx.select().from(parent).where(eq(parent.email, email)).for("update");
+    await holdRoster(tx);
+    const fam = await familyRefusal(tx, familyId);
+    if ("refusal" in fam) return { ok: false, reason: fam.refusal };
     if (p?.blocked) return { ok: false, reason: "blocked" };
     const person = p ? "existing" as const : "new" as const;
     if (!p) {
@@ -146,13 +151,16 @@ export async function addGuardian(familyId: AppFamilyId, input: { name: string; 
 }
 
 /**
- * The guardian row `guardianId` and its person, both FOR UPDATE, in the one order (the person's row, then the guardian
- * row), after the roster and settings locks. Null when there is no such row.
+ * The guardian row `guardianId` and its person, both FOR UPDATE, in the one order: the settings lock, the person's row,
+ * the roster lock, then the guardian row (a row's person never changes, so it is read unlocked to find them). Null when
+ * there is no such row.
  */
 async function lockedRow(tx: Tx, guardianId: string): Promise<{ row: Row; p: Person } | null> {
+  await holdSettings(tx);
   const [seen] = await tx.select({ parentId: guardian.parentId }).from(guardian).where(eq(guardian.id, guardianId));
   if (!seen) return null;
   const [p] = await tx.select().from(parent).where(eq(parent.id, seen.parentId)).for("update");
+  await holdRoster(tx);
   const [row] = await tx.select().from(guardian).where(eq(guardian.id, guardianId)).for("update");
   return p && row ? { row, p } : null;
 }
@@ -170,7 +178,6 @@ export async function removeGuardian(guardianId: string, rawNote: string, o: Sta
   const note = rawNote.trim();
   if (!note || note.length > REMOVE_NOTE_MAX) return { ok: false, reason: "invalid_note" };
   return db.transaction(async (tx): Promise<RemoveGuardianResult> => {
-    await holdRosterAndSettings(tx);
     const held = await lockedRow(tx, guardianId);
     if (!held) return { ok: false, reason: "not_found" };
     if (held.row.status === "disabled") return { ok: false, reason: "not_open" };
@@ -189,7 +196,6 @@ export type ReinstateGuardianResult = { ok: true } | { ok: false; reason: "not_f
  */
 export async function reinstateGuardian(guardianId: string, o: StaffOp): Promise<ReinstateGuardianResult> {
   return db.transaction(async (tx): Promise<ReinstateGuardianResult> => {
-    await holdRosterAndSettings(tx);
     const held = await lockedRow(tx, guardianId);
     if (!held) return { ok: false, reason: "not_found" };
     const { row, p } = held;

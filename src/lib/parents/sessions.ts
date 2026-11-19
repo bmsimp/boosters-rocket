@@ -53,13 +53,18 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
  *   sessions; renamePerson() (people.ts) takes the row FOR UPDATE and touches nothing that hangs on it;
- * - the staff writes of guardians.ts take the roster lock shared and then the parents' settings lock shared, before
- *   anything of a person's (advisory locks no change of a person's takes after the person's row, but the email
- *   confirm's roster step, which waits at most three seconds and then gives up its cache step: so a staff write that
- *   holds the roster lock while it waits for that person's row is never a deadlock). Then addGuardian() takes the
- *   address lock, then the row FOR UPDATE (or makes the person), then the person's guardian row in the family FOR
- *   UPDATE; removeGuardian() and reinstateGuardian() take the row FOR UPDATE, then the guardian row FOR UPDATE, and
- *   removeGuardian() then ends sessions through closeMembership() (membership.ts: the guardian row, then the sessions);
+ * - the staff writes of guardians.ts take the parents' settings lock shared first (setSignins() and setWelcome() take
+ *   it before the people they touch), then the person's locks, and only then the roster lock shared, as the email
+ *   confirm takes the roster after the person's locks: a write that held the roster lock while it waited for a person
+ *   the confirm holds, as the confirm asked for the roster, would be a deadlock, which Postgres ends by aborting one of
+ *   them (its check runs after a second, before the confirm's three-second wait is up). No roster read waits for a
+ *   person's row, so waiting for the roster while holding one is safe against it; the change-of-company clear, which
+ *   holds the roster as it takes everyone's rows, could meet these writes and the confirm alike, though nothing the
+ *   portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
+ *   roster lock, then makes the person if there is none, then takes their guardian row in the family FOR UPDATE;
+ *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE, then the roster lock, then the guardian row FOR
+ *   UPDATE, and removeGuardian() then ends sessions through closeMembership() (membership.ts: the guardian row, then
+ *   the sessions);
  * - setSignins(false) (switches.ts) takes FOR UPDATE, in id order, the row of every person it will touch (an owed
  *   welcome, an unused code, a session), then clears the owed welcomes, then deletes the unused codes, then the
  *   sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;
