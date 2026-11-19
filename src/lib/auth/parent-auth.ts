@@ -13,7 +13,11 @@ import { clientAddress, stampingHandler } from "./client-address";
  * Every Better Auth route a parent doesn't need. Several write (/update-user, the revoke routes, /unlink-account) and
  * none of them is audited, so they answer 404 (Better Auth matches these exactly, before routing). Left reachable:
  * /get-session, /sign-out, /portal-code/send, /portal-code/verify, /ok, /error, and two routes with a path parameter
- * that can't be listed and can't act here (/callback/:id has no provider; /reset-password/:token has no password).
+ * that can't be listed and can't act here: /callback/:id has no provider to call back to, and /reset-password/:token
+ * only redirects with a reset row of Better Auth's own verification table, which the portal never writes (since the
+ * sign-in release's slice SI-2 a person may have a password, but it is set and reset by the portal's own links,
+ * src/lib/parents/signin-links.ts and password-set.ts, and emailAndPassword stays off, so /sign-in/email, /reset-password
+ * and the rest answer 404 with a password present too: tests/integration/parent-door.test.ts).
  */
 export const PARENT_DISABLED_PATHS = [
   "/sign-in/social", "/sign-up/email", "/sign-in/email", "/reset-password", "/request-password-reset", "/verify-password",
