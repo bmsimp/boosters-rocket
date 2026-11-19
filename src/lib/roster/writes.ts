@@ -1710,7 +1710,7 @@ async function saveAndSend(id: AppFamilyId, ask: AddFamilyAsk, rosterTag: string
    linked one by one. Like making a family inactive it is never queued to be sent later: the staff member is waiting.
    The first step that doesn't go through stops it; a step whose answer was lost is held on the queue as possibly made,
    filed under its records, so the found-done path links it after the next roster read; pressing again carries on with
-   whatever is still unlinked. It sends nothing for a guardian (slice 9g). */
+   whatever is still unlinked. It sends nothing for a guardian (slice 9h). */
 
 type CreateWrite = Extract<RosterWrite, { op: "create" }>;
 type LinkPlan = {
@@ -2044,7 +2044,7 @@ export async function studentsBeingMade(studentIds: AppStudentId[]): Promise<Set
    as refused, nothing overwritten. What QuickBooks refuses is kept as a `refused` item, listed on Reconciliation with
    "Send the portal's value" and "Give up"; the portal's value is never undone. A move of a student is saved in the
    portal first the same way since slice 9f (moveStudent(), below). Making anyone inactive keeps slice 9c's order,
-   QuickBooks first (slice 9g). */
+   QuickBooks first, under the balance rule and with the link's own version since slice 9g (deactivateLinked(), above). */
 
 type RenameWrite = Extract<RosterWrite, { op: "rename" }>;
 type MoveWrite = Extract<RosterWrite, { op: "move" }>;

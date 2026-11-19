@@ -202,7 +202,7 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
     confirm.
     **Pass:** the list names the student and the parent, then says the family goes last; with the invoice open,
     nobody is made inactive and the page names the student as having an open balance (with the amount only for staff
-    who can see Balances), saying it must be paid or written off in QuickBooks first. Void the invoice in QuickBooks,
+    who can see Balances), saying it must be settled in QuickBooks first. Void the invoice in QuickBooks,
     confirm again: the student and the parent, then the family, are inactive in QuickBooks, and the family's parents
     can no longer sign in. **If not:** note what the page said and what QuickBooks shows for each.
 13. **A family added in the portal.** As an Admin (who may link families to accounting), on the Roster page use
@@ -535,13 +535,16 @@ work another. Any time before the pilot.
     sent later. When QuickBooks can't be reached part way, it stops, says who was made inactive and who wasn't, and
     staff press it again later. A step whose answer was lost asks for a roster refresh and waits on the queue only to
     be looked for after it, so the portal's own record follows without anything being sent twice. One student or
-    parent made inactive by itself still waits on the queue as before.
-17. The lead's choice, not the owner's (2026-11-17): a credit (a negative balance) is left to QuickBooks. The portal's
-    own check stops only an amount owed; whatever QuickBooks refuses is told in words.
+    parent made inactive by itself waits on the queue only when its send is cut off; when what they owe can't be read,
+    it is refused and staff press it again later (stage 3's slice 9g).
+17. Since stage 3's slice 9g (the app-owned families spec's open question 11): a credit (a negative balance) stops a
+    make-inactive as an amount owed does, before anything is sent; it has to be used or refunded in QuickBooks first.
+    Whatever QuickBooks refuses is still told in words.
 18. The lead's choice, not the owner's (2026-11-17): when a family is made inactive, its own last write is sent with
     the version QuickBooks has just after its students and parents were made inactive, read again at that moment,
-    rather than the one the page showed (QuickBooks may raise a family's version when a customer under it changes).
-    The family's version must still be the page's when the action begins, and the write changes only whether it is
+    (QuickBooks may raise a family's version when a customer under it changes). Since stage 3's slice 9g no step
+    carries the page's version: a student is sent with their link's own, anyone else with the one just read, and a
+    stale answer is settled by reading whether QuickBooks has them inactive. The write changes only whether it is
     active, so nothing anyone changed is overwritten. The check's "Making a family inactive once everyone under it is
     inactive" row says whether QuickBooks raises it: on its second run (2026-11-17) it left the family's version as it
     was.
