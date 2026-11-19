@@ -61,6 +61,9 @@ describe("scripts/migrate.mjs", { timeout: 30_000 }, () => {
   it("exits non-zero when the database can't be reached", () => {
     const r = spawnSync("node", ["scripts/migrate.mjs"], { env: { ...process.env, DATABASE_URL: "postgres://nobody:nope@localhost:1/none" }, encoding: "utf8" });
     expect(r.status).toBe(1);
+    expect(r.stderr).toContain("migration failed:");
+    // A refused connection is the network's answer, not the database's: never put in the database's mouth.
+    expect(r.stderr).not.toContain("the database said:");
   });
 });
 
