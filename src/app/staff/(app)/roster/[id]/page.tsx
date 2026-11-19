@@ -53,16 +53,17 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
 }
 
 /**
- * `detailed` is for staff with `Parents.ReadWrite`: only they get links to people, and the ways to remove, reinstate
- * and add a guardian (stage 3's slice 7b, in the portal only). `addable` says why a guardian can't be added now, or null
- * when one can: the action checks it again, under the roster lock.
+ * `links` is for staff with `Parents.ReadWrite`, who may open a person's page. `changes` is for staff with
+ * `Roster.Family.ReadWrite`, who change the family: only they get the ways to remove, reinstate and add a guardian
+ * (stage 3's slice 7b, in the portal only), which give or end an address's sign-in for it. `addable` says why a
+ * guardian can't be added now, or null when one can: the action checks it again, under the roster lock.
  */
-function SignIns({ familyId, signins, detailed, addable }: { familyId: AppFamilyId; signins: FamilySignin[]; detailed: boolean; addable: string | null }) {
+function SignIns({ familyId, signins, links, changes, addable }: { familyId: AppFamilyId; signins: FamilySignin[]; links: boolean; changes: boolean; addable: string | null }) {
   const columns: Column<FamilySignin>[] = [
-    { key: "name", header: "Person", rowHeader: true, cell: (s) => (detailed ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
+    { key: "name", header: "Person", rowHeader: true, cell: (s) => (links ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
     { key: "email", header: "Email", cell: (s) => s.email },
     { key: "words", header: "Sign-in", cell: (s) => s.words },
-    ...(detailed ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
+    ...(changes ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
   ];
   return (
     <section className="box" aria-labelledby="entry-signins-h"><h2 id="entry-signins-h">Portal sign-ins</h2>
@@ -70,12 +71,12 @@ function SignIns({ familyId, signins, detailed, addable }: { familyId: AppFamily
       {signins.length === 0 ? <Notice tone="info" live="none">Nobody can sign in for it yet.</Notice> : (
         <DataTable caption="Each person, and whether they can sign in" captionHidden rows={signins} rowKey={(s) => s.guardianId} columns={columns} />
       )}
-      {detailed && (
+      {changes && (
         <>
           <h3>Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
-              <p>They sign in with this address and a code. Someone who already signs in with it for another family is the same person: they are added here too, under the name they have.</p>
+              <p>They sign in with this address and a code. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families.</p>
               <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
             </>
           )}
@@ -120,7 +121,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // A staff read of family data (spec §5): recorded before anything is shown, naming the app's family.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "roster.family.read", permission: "Roster.Read",
     targetType: "family", targetId: String(familyId), ip: ctx.ip });
-  const detailed = can(ctx.effective, "Parents.ReadWrite");
+  const links = can(ctx.effective, "Parents.ReadWrite");
+  const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   const signins = await familySignins(familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's
@@ -156,7 +158,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} families={families} edit={edit} cover={cover} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
-      <SignIns familyId={familyId} signins={signins} detailed={detailed}
+      <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians}
         addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it." : customer === null ? "This family has no customer in QuickBooks linked to it, so a guardian can't be added to it yet." : null} />
       <Freshness page={page} admin={admin} />
     </main>

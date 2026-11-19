@@ -132,6 +132,28 @@ describe("the audit page's filter for one family or student", () => {
     expect(await tagged(`parent:${PERSON}`)).toHaveLength(10);
   });
 
+  it("finds the guardians staff gave or ended for a family, and the people made for it, by its record, and nothing of another family's", async () => {
+    // Stage 3's slice 7b: a membership's rows target the guardian row, a person made by staff targets the person; the
+    // family is in their body. Rows the retired reconcile wrote named the family's customer.
+    const [ROW_A, ROW_B, PERSON] = ["7d1f0b2a-5555-4c3d-8e9f-000000000001", "7d1f0b2a-5555-4c3d-8e9f-000000000002", "7d1f0b2a-5555-4c3d-8e9f-000000000003"];
+    const tag = (t: string, after: Record<string, unknown>) => ({ after: { ...after, tag: t } });
+    await bodied("parent.create", "parent", PERSON, tag("made-for-rivera", { name: "Ana", email: "ana@example.com", familyId: rivera }));
+    await bodied("parent.access.granted", "guardian", ROW_A, tag("granted-rivera", { parentId: PERSON, familyId: rivera, familyQboId: "10", status: "invited", addedBy: "staff" }));
+    await bodied("parent.access.ended", "guardian", ROW_A, tag("ended-rivera", { parentId: PERSON, familyId: rivera, familyQboId: "10", reason: "removed" }));
+    await bodied("parent.access.ended", "guardian", ROW_B, tag("old-ended-rivera", { parentId: PERSON, familyQboId: "10", reason: "not_in_quickbooks" }));
+    await bodied("parent.access.granted", "guardian", ROW_B, tag("granted-chen", { parentId: PERSON, familyId: chen, familyQboId: "20", status: "invited" }));
+    // A person made with no family named in its body, and a block, are nobody's family's rows.
+    await bodied("parent.create", "parent", PERSON, tag("made-for-nobody", { name: "Ana", email: "ana@example.com" }));
+    await bodied("parent.block", "parent", PERSON, tag("blocked", { blocked: true, familyId: rivera }));
+    const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+    const rivers = ["made-for-rivera", "granted-rivera", "ended-rivera", "old-ended-rivera"].sort();
+    expect(await tagged(`family:${rivera}`)).toEqual(rivers);
+    expect(await tagged(rivera)).toEqual(rivers);
+    expect(await tagged(`family:${chen}`)).toEqual(["granted-chen"]);
+    expect(await tagged(`student:${leo}`)).toEqual([]);
+  });
+
   it("finds a family's roster page reads written while the page was addressed by its customer, and those written since, by its record", async () => {
     // Before stage 3's third slice: the roster page read under the customer. Since: under the app's own family.
     await row("roster.family.read", "qbo_customer", "10");

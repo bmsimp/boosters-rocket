@@ -6,9 +6,13 @@ import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/gu
 import { familyRecordAt } from "@/lib/families/address";
 import { resendWelcome } from "@/lib/parents/welcome";
 
+// Seeing parents, their names, blocking and the welcome are Parents.ReadWrite's. Giving an address a family's sign-in,
+// or ending one, is Roster.Family.ReadWrite's (with the Roster.Read it brings): the permission that changes a family
+// (the lead's choice in stage 3's slice 7b; spec section 6). Each audit row records the permission used.
 const P = "Parents.ReadWrite" as const;
+const R = "Roster.Family.ReadWrite" as const;
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
-const op = (ctx: StaffCtx) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: P });
+const op = (ctx: StaffCtx, permission: typeof P | typeof R = P) => ({ actor: { door: "staff" as const, id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission });
 // A successful change re-renders the page, so a person's page records one more `parent.read`: by design, as the staff
 // member is shown the person again.
 const refresh = () => revalidatePath("/staff", "layout");
@@ -53,6 +57,9 @@ export const resendWelcomeAction = staffAction(P, async (ctx, parentId: string):
 // A family's guardians (stage 3's slice 7b), from a family's roster page or a person's page. Each id is the app's own
 // (a family record's, a guardian row's, a person's): one that isn't a uuid, or isn't there, gets the plain refusal.
 const NAME_FIELD_MAX = 200, EMAIL_FIELD_MAX = 320, NOTE_MAX = 2000;
+// A roster read holds the roster lock for its whole QuickBooks read: a write that can't have it within a few seconds
+// changes nothing and says so.
+const BUSY_WORDS = "The roster is being read from QuickBooks just now, so nothing was changed. Try again in a minute.";
 const NO_LINK_WORDS = "This family has no customer in QuickBooks linked to it, so a guardian can't be added to it yet.";
 const ADD_REFUSED = {
   invalid_name: "Give the guardian's name, up to 100 characters.",
@@ -62,13 +69,24 @@ const ADD_REFUSED = {
   no_link: NO_LINK_WORDS,
   blocked: "The person with this address is blocked. Unblock them on their page first.",
   already: "The person with this address is already one of this family's guardians.",
+  busy: BUSY_WORDS,
 } as const;
 
-export const addGuardianAction = staffAction(P, async (ctx, familyId: string, name: string, email: string): Promise<Done> => {
-  if (!personId(familyId) || !str(name, NAME_FIELD_MAX) || !str(email, EMAIL_FIELD_MAX)) return NOT_FROM_PAGE;
+/** An add that found the address held by a person already: nothing was written, and staff are asked whether it is them. */
+type AddDone = Done | { ok: false; errors: string[]; samePerson: string };
+const listed = (names: string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+
+// `samePerson`: null on a first press; on the press that answers "Is this the same person?", the id of the person the
+// page was shown. The library checks it again under the locks and asks again if the address belongs to anyone else now.
+export const addGuardianAction = staffAction(R, async (ctx, familyId: string, name: string, email: string, samePerson: string | null = null): Promise<AddDone> => {
+  if (!personId(familyId) || !str(name, NAME_FIELD_MAX) || !str(email, EMAIL_FIELD_MAX) || (samePerson !== null && !personId(samePerson))) return NOT_FROM_PAGE;
   const family = await familyRecordAt(familyId);
   if (!family) return NOT_FROM_PAGE;
-  const r = await addGuardian(family, { name, email }, op(ctx));
+  const r = await addGuardian(family, { name, email, samePerson }, op(ctx, R));
+  if (!r.ok && r.reason === "same_person") {
+    const where = r.person.families.length === 0 ? "who isn't a guardian of any family now" : `a guardian of ${listed(r.person.families)}`;
+    return { ok: false, samePerson: r.person.id, errors: [`This address already belongs to ${r.person.name}, ${where}. Nothing has been changed yet. If this is the same person, press "Yes, add them": they are added under the name they have. If not, check the address.`] };
+  }
   if (!r.ok) return { ok: false, errors: [ADD_REFUSED[r.reason]] };
   refresh();
   // Said of a person who held the address already, between their name and what follows it.
@@ -78,10 +96,11 @@ export const addGuardianAction = staffAction(P, async (ctx, familyId: string, na
     : `Added ${r.name}${known}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.` };
 });
 
-export const removeGuardianAction = staffAction(P, async (ctx, guardianId: string, note: string): Promise<Done> => {
+export const removeGuardianAction = staffAction(R, async (ctx, guardianId: string, note: string): Promise<Done> => {
   if (!personId(guardianId) || !str(note, NOTE_MAX)) return NOT_FROM_PAGE;
-  const r = await removeGuardian(guardianId, note, op(ctx));
+  const r = await removeGuardian(guardianId, note, op(ctx, R));
   if (!r.ok) {
+    if (r.reason === "busy") return { ok: false, errors: [BUSY_WORDS] };
     if (r.reason === "invalid_note") return { ok: false, errors: ["Say why, in a few words. Only staff see it."] };
     if (r.reason === "not_open") return { ok: true, message: "This guardian can't sign in to this family already." }; // nothing changed
     return NOT_FROM_PAGE;
@@ -96,11 +115,12 @@ const REINSTATE_REFUSED = {
   no_family: "This sign-in isn't in a family the portal holds, so it can't be brought back.",
   inactive: "This family is inactive in the portal, so nobody can sign in to it.",
   no_link: NO_LINK_WORDS.replace("a guardian can't be added to it yet", "this sign-in can't be brought back yet"),
+  busy: BUSY_WORDS,
 } as const;
 
-export const reinstateGuardianAction = staffAction(P, async (ctx, guardianId: string): Promise<Done> => {
+export const reinstateGuardianAction = staffAction(R, async (ctx, guardianId: string): Promise<Done> => {
   if (!personId(guardianId)) return NOT_FROM_PAGE;
-  const r = await reinstateGuardian(guardianId, op(ctx));
+  const r = await reinstateGuardian(guardianId, op(ctx, R));
   if (!r.ok) {
     if (r.reason === "not_found") return NOT_FROM_PAGE;
     if (r.reason === "already_open") return { ok: true, message: "This guardian's sign-in for this family is open already." }; // nothing changed

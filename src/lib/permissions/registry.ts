@@ -17,9 +17,9 @@ export const PERMISSIONS = [
   "Settings.QuickBooks.ReadWrite", // admin-only: connect QuickBooks and choose the membership shape; it reaches the club's books
   "Settings.Forms.ReadWrite",      // admin-only: connect the club's Documenso; its API token can read every signed form
   "Roster.Read",                   // see families, students and parents (or members) as QuickBooks lists them
-  "Roster.Family.ReadWrite",       // create, rename, move and make inactive families, students and parents (or members) in QuickBooks, and retry or give up a waiting write
+  "Roster.Family.ReadWrite",       // create, rename, move and make inactive families, students and parents (or members) in QuickBooks, retry or give up a waiting write, and add, remove and reinstate a family's guardians in the portal (giving or ending an address's sign-in for the family)
   "Settings.Parents.ReadWrite",    // admin-only: switch parent sign-ins and welcome emails on or off, and the active-students option
-  "Parents.ReadWrite",             // see every parent, add, remove and reinstate guardians, change a name, block and unblock, resend a welcome email
+  "Parents.ReadWrite",             // see every parent, change a parent's name, block and unblock a parent, resend a welcome email
   "Season.Steps.Read",             // see the seasons, their steps and the requirements in them
   "Season.Steps.ReadWrite",        // create and change seasons, steps and requirements, and choose the current season
   "Season.Progress.Read",          // see which families and students have met each requirement

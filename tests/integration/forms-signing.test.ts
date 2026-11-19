@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, qboCustomer, setting, signatureConsent, signatureRequest } from "@/lib/db/schema";
+import { auditLog, guardian, parent, qboCustomer, setting, signatureConsent, signatureRequest } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
+import { removeGuardian } from "@/lib/parents/guardians";
+import { blockPerson } from "@/lib/parents/people";
 import { loadMySeason } from "@/lib/seasons/my-season";
 import { CONSENT_VERSION } from "@/lib/forms/consent";
 import { findMyForm, loadMyForms } from "@/lib/forms/my-forms";
@@ -707,4 +709,39 @@ describe("a form is looked up within the session's family", () => {
     expect(await findMyForm(ctxB, opened)).toBeNull();
     expect(await findMyForm(ctx, opened)).toBeNull(); // nor is it family A's to open any more: the student is not theirs
   });
+});
+
+describe("a guardian removed or blocked while their form is being made", () => {
+  beforeEach(async () => { await resetDb(); stub.reset(); });
+  const staff = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000004", label: "reg@club.org" }, ip: "203.0.113.9", permission: "Roster.Family.ReadWrite" };
+
+  for (const how of ["removed", "blocked"] as const) {
+    it(`never gets the document when ${how} in the middle of the open: it is withdrawn, and a remaining guardian opens it afresh`, async () => {
+      const { ctx } = await scene({ signers: "any", roles: 2 });
+      const other = await secondGuardian();
+      const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+      expect((await agreeToSign(ctx, id, null)).ok).toBe(true);
+      const [row] = await db.select().from(guardian).where(and(eq(guardian.parentId, ctx.parentId), eq(guardian.familyId, ctx.familyId)));
+      // The document is made in Documenso and its spare signer deleted; before it is sent, staff remove or block them.
+      stub.beforeAnswer = { path: "/envelope/distribute", run: async () => {
+        expect(how === "removed" ? await removeGuardian(row!.id, "Custody order on file.", staff) : await blockPerson(ctx.parentId, "Custody order on file.", staff)).toMatchObject({ ok: true });
+      } };
+      const view = await open(ctx, id);
+      stub.beforeAnswer = null;
+      // The same words as any refusal, and no signing frame.
+      expect(view.step).toEqual({ kind: "unavailable" });
+      expect(stub.apiCalls("/envelope/use")).toHaveLength(1);
+      expect(stub.apiCalls("/envelope/delete")).toHaveLength(1);
+      expect(stub.documents()).toEqual([]); // withdrawn in Documenso: nobody had signed it
+      expect(await requestNow(id)).toMatchObject({ state: "not_opened", envelopeId: null, preparingAt: null, signers: [] });
+      expect(await audits("form.document.create")).toEqual([]);
+      // They can't open it again; the guardian who remains can, afresh, for themself.
+      expect((await open(ctx, id)).step).toEqual({ kind: "unavailable" });
+      expect(stub.apiCalls("/envelope/use")).toHaveLength(1);
+      const theirs = await agreeAndOpen(other, id);
+      expect(tokenIn(theirs)).toBe(stub.documentFor(id)!.recipients[0]!.token);
+      expect((await requestNow(id)).signers.map((s) => s.parentId)).toEqual([other.parentId]);
+      expect(stub.documentFor(id)!.recipients.map((r) => r.email)).toEqual([other.email]);
+    });
+  }
 });

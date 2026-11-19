@@ -154,6 +154,7 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/quickbooks/sandbox-check/run", names: "all", why: "the Admin's check of the portal's requests reads every customer and some families' invoices" },
   { module: "@/lib/quickbooks/sandbox-check/writes", names: "all", why: "the check's writes to QuickBooks, for an Intuit sandbox company only" },
   { module: "@/lib/families/in-step", names: "all", why: "it reads every family's customers, sign-ins and records to keep the app's own records and links in step" },
+  { module: "@/lib/parents/guardians", names: "all", why: "staff add, remove and reinstate guardians: it gives any address a sign-in for any family" },
 ];
 
 describe("every page guards itself", () => {

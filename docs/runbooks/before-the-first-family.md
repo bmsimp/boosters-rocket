@@ -521,8 +521,12 @@ work another. Any time before the pilot.
     was.
 19. The lead's choices, not the owner's (2026-11-19, stage 3's slice 7b): nobody can sign in until parent sign-ins
     are switched on, not even before they were first switched on (earlier, a sign-in seeded by hand worked until
-    then); adding, removing and reinstating a guardian and changing a person's name take the same permission as
-    blocking (`Parents.ReadWrite`); removing a guardian needs a note, kept for staff in the audit log; and a guardian
+    then); adding, removing and reinstating a guardian take the permission that changes a family
+    (`Roster.Family.ReadWrite`), since each gives or ends an address's view of a family (its invoices, its forms to
+    sign, a buy-out to confirm): anyone who can change families can give an address a parent's view of one, and every
+    such grant is audited with who made it; changing a person's name takes the same permission as blocking
+    (`Parents.ReadWrite`); an address that belongs to someone already is added only after staff are shown who that is
+    and say it is the same person; removing a guardian needs a note, kept for staff in the audit log; and a guardian
     can't be added to a family with no customer in QuickBooks linked to it until the portal's changes are sent on to
     QuickBooks.
 

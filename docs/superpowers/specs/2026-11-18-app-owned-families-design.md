@@ -214,6 +214,10 @@ screen and the differences. Nobody's sign-in changes because of what it reads.
   access to that family in the app at once, whatever the family owes; making their Parent record inactive in
   QuickBooks, refused while anyone owes, comes with the source move. *(Built in the app in stage 3's slice 7b, with
   add, reinstate and a change of name; the QuickBooks half waits for slice S9.)*
+- Adding, removing and reinstating a guardian take the permission that changes a family (`Roster.Family.ReadWrite`), not
+  the one that sees parents: anyone who can change families can give an address a parent's view of one (its invoices,
+  its forms, a buy-out to confirm), and every such grant is audited with who made it *(the lead's choice in stage 3's
+  slice 7b, for the owner to confirm)*.
 - The parent door is closed until an Admin switches sign-ins on (Open questions, 15: the switch is how an Admin says the
   club is ready), so a guardian staff add before then can't sign in until it is *(the lead's reading; stage 3's slice
   7b)*.

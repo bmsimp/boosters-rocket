@@ -62,9 +62,12 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   holds the roster as it takes everyone's rows, could meet these writes and the confirm alike, though nothing the
  *   portal runs reaches it until stage 4. So addGuardian() takes the address lock, then the row FOR UPDATE, then the
  *   roster lock, then makes the person if there is none, then takes their guardian row in the family FOR UPDATE;
- *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE, then the roster lock, then the guardian row FOR
- *   UPDATE, and removeGuardian() then ends sessions through closeMembership() (membership.ts: the guardian row, then
- *   the sessions);
+ *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE (no address lock: the address isn't changed or
+ *   claimed), then the roster lock, then the guardian row FOR UPDATE, and removeGuardian() then deletes the person's
+ *   unused requests, then codes, then ends sessions through closeMembership() (membership.ts). Each waits for the
+ *   roster lock at most three seconds, as the confirm does, and gives up changing nothing: a roster read holds it
+ *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
+ *   it (FOR KEY SHARE, below);
  * - setSignins(false) (switches.ts) takes FOR UPDATE, in id order, the row of every person it will touch (an owed
  *   welcome, an unused code, a session), then clears the owed welcomes, then deletes the unused codes, then the
  *   sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;

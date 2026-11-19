@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
+import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
-import { getPerson } from "@/lib/parents/directory";
+import { getPerson, type PersonFamily } from "@/lib/parents/directory";
 import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
@@ -26,6 +27,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "parent.read", permission: "Parents.ReadWrite",
     targetType: "parent", targetId: p.parentId, ip: ctx.ip });
   const canSignIn = !p.blocked && p.families.some((f) => f.kind === "can");
+  // Removing and reinstating give or end the person's sign-in for a family: Roster.Family.ReadWrite's, beside this page's own.
+  const changesGuardians = can(ctx.effective, "Roster.Family.ReadWrite");
   return (
     <main className="wrap single">
       <h1 className="page-title">{p.name}</h1>
@@ -41,7 +44,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null ? f.familyName
                 : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
               { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind)} words={f.words} /> },
-              { key: "change", header: "Change", quiet: true, cell: (f) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> },
+              ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
             ]} />
         )}
         <dl className="details">
