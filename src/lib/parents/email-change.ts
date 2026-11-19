@@ -368,8 +368,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   const finish = () => db.transaction(async (tx): Promise<"changed" | "taken" | null> => {
     // The person first, in the order ./sessions.ts gives (lockedPerson()): both addresses, then the person's row, then
     // what hangs on the person, their email change requests, sign-in codes and sessions, in that order. An ask, a
-    // block, the switches and the daily clean-up take the same rows in the same order, so none of them can wait on this
-    // one while it waits on them. The roster comes last: nothing that holds the roster lock waits for a person's row.
+    // block, the switches, the daily clean-up and the change-of-company clear take the same rows in the same order, so
+    // none of them can wait on this one while it waits on them. The roster comes last, and is waited for a few seconds
+    // at most: the clear (clearParentAccess()) holds the roster lock as it takes the people's rows, though nothing the
+    // portal runs reaches it until stage 4.
     for (const address of [oldEmail, newEmail].sort()) await lockEmail(tx, address);
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
     // A change this call found made, on a request already spent, was finished by the confirmation that spent it: a second

@@ -16,8 +16,12 @@ import { getParentSettings, putParentSettings, PARENTS_KEY } from "./settings";
  * different company is refused before the clear); stage 4 decides what a change of company still does to sign-ins.
  */
 export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
+  // The rows in the one order every change of a person's sign-in takes them (lockedPerson(), ./sessions.ts): every
+  // person's row first, FOR UPDATE in id order (each is touched below: its welcome is cleared, and its links, requests,
+  // codes and sessions go), then the guardian rows, then the requests, the codes and the sessions, in that order.
+  await tx.select({ id: parent.id }).from(parent).orderBy(parent.id).for("update");
   const open = await tx.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(ne(guardian.status, "disabled")).orderBy(guardian.id).for("update");
+    .where(ne(guardian.status, "disabled")).orderBy(guardian.id).for("update", { of: guardian });
 
   // A link that had already closed holds the old company's IDs too, so it is marked as well, so it is never taken for
   // one of the new company's. What it was before it closed stays.
@@ -27,12 +31,12 @@ export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toReal
     await tx.update(guardian).set({ status: "disabled", disabledReason: "company_changed", statusBeforeDisable: g.status as "invited" | "active", updatedAt: new Date() })
       .where(eq(guardian.id, g.id));
   }
-  // Every session, and every change of sign-in address below, names the app's own family it chose or was asked in:
-  // they go here, before clearAppRecords() removes the families (their restrict keys would stop it).
-  const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
-  const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
-  // A change of sign-in address names the record it would change: another company's customer now (email-change.ts).
+  // Every change of sign-in address, and every session below, names the app's own family it was asked in or chose:
+  // they go here, before clearAppRecords() removes the families (their restrict keys would stop it). A change of
+  // sign-in address also names the record it would change: another company's customer now (email-change.ts).
   await tx.delete(parentEmailChange);
+  const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
+  const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
   const welcomed = await tx.update(parent).set({ welcomedAt: null, updatedAt: new Date() }).where(isNotNull(parent.welcomedAt)).returning({ id: parent.id });
   await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null });
   const before = await getParentSettings(tx);
