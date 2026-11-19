@@ -18,7 +18,9 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
  * row is kept, with every byte, hash, consent, name and QuickBooks id as it was, marked as from an earlier company, cut
  * from the request it came from and from the app's family and student it named, in the same statement. From then on no
  * parent is shown it, the matrix leaves it out, and it is never matched to a family of the new company by a QuickBooks
- * id; staff find it in the archive on the staff Forms page.
+ * id; staff find it in the archive on the staff Forms page. Evidence kept with no company (its family had no
+ * QuickBooks link: migration 0036) goes the same way, archived and never deleted, since the families it names are
+ * removed here too; stage 4 rewrites this path so that families, and so their evidence, survive a change of company.
  */
 export async function clearFormRecords(tx: Tx, o: { fromRealmId: string | null; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
   // Every request is locked first: evidence being stored right now (storeEvidence() holds its request's row) commits
