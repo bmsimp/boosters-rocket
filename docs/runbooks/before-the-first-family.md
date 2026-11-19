@@ -418,8 +418,9 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    customer into the portal's own families by itself. On **Reconciliation**, **Customers with no family** lists the
    family customers of the real books; **Create a family from this** brings each in, with its students, linked to
    their customers. Bring in the pilot families this way, then add their guardians on each family's page, and check
-   each family's page shows its students and the Balances page its money. The reviewed import of every family at once
-   comes with stage 4 of the roadmap.
+   each family's page shows its students. Making a family reads none of its money: on **Balances** press **Read every
+   family now** (or wait for the next daily read), then check the Balances page shows each pilot family's money. The
+   reviewed import of every family at once comes with stage 4 of the roadmap.
    **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
 2. **Check the portal's requests against the real books.** Settings, QuickBooks, **Check the portal's requests**,
    **Run the check**. Against the real books it only reads.
