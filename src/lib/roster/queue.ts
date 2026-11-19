@@ -12,7 +12,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { afterStudentMoved, alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, isSavedFirst, itemLockFree, madeAfterGivingUp, owedBy, REFRESH_ASK_KEY, replaceRefusedCreates,
+import { followSentMove, alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, isSavedFirst, itemLockFree, madeAfterGivingUp, owedBy, REFRESH_ASK_KEY, replaceRefusedCreates,
   sendWrite, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
@@ -225,8 +225,7 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Fou
         if (own !== null && own !== qboId) return FAMILY_HAS_CUSTOMER;
       }
       if (w.op === "move") {
-        ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
-          { actor: WORKER_ACTOR, ip: null }));
+        tell = (await followSentMove(tx, w, `roster.write.found#${w.qboId}`, { actor: WORKER_ACTOR, ip: null }))?.tell ?? null;
       }
       // The link takes the version of the cache row it was found as, by the rule an answer's takes, only for a change the
       // portal sent (its answer was lost): one found made without a send (a make-inactive QuickBooks shows done already,

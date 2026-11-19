@@ -431,19 +431,30 @@ function auditAfter(w: RosterWrite, answer: Record<string, unknown>) {
  * (volunteerForMovedStudent, src/lib/volunteer/moved-student.ts: places on shifts still to come are given up, credit
  * stays with the family it was earned for), then its per-student buy-outs (buyoutsForMovedStudent, src/lib/buyouts/moved.ts:
  * an unpaid invoice queued to void, anything else flagged), then the audit row of the move's follow-up with their counts. The answer's
- * `tell` emails the guardians whose places were given up: call it after the transaction commits.
+ * `tell` emails the guardians whose places were given up: call it after the transaction commits. The move comes by the
+ * app's own records (stage 3's slice 9f), linked to QuickBooks or not, and is followed once, where the portal saves it.
  */
-export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fromFamilyQboId: string; toFamilyQboId: string; cause: string },
+export async function afterStudentMoved(tx: Tx, move: { studentId: AppStudentId; fromFamilyId: AppFamilyId; toFamilyId: AppFamilyId; cause: string },
   o: { actor: Actor; ip: string | null }): Promise<{ tell: () => Promise<unknown> }> {
-  const who = { studentQboId: move.studentQboId, fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId };
+  const who = { studentId: move.studentId, fromFamilyId: move.fromFamilyId, toFamilyId: move.toFamilyId };
   const forms = await formsForMovedStudent(tx, { ...who, actor: o.actor, ip: o.ip });
   const volunteer = await volunteerForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
   const buyouts = await buyoutsForMovedStudent(tx, who, { actor: o.actor, ip: o.ip });
-  await writeAudit({ actor: { door: "system", id: null, label: "roster" }, action: "roster.student.move.followed", targetType: "qbo_customer", targetId: move.studentQboId,
-    after: { fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId, cause: move.cause,
+  await writeAudit({ actor: { door: "system", id: null, label: "roster" }, action: "roster.student.move.followed", targetType: "student", targetId: String(move.studentId),
+    after: { studentId: String(move.studentId), fromFamilyId: String(move.fromFamilyId), toFamilyId: String(move.toFamilyId), cause: move.cause,
       formsMoved: forms.moved, formsReset: forms.reset, formsToWithdraw: forms.toWithdraw.length, placesGivenUp: volunteer.cancelled,
       buyoutsToVoid: buyouts.voiding, buyoutsFlagged: buyouts.flagged } }, tx);
   return { tell: volunteer.tell };
+}
+
+/**
+ * A move sent QuickBooks first, followed by the app's own records it names, through their links (until moveStudent()
+ * saves a move in the portal first). Nothing when the student or a family has no record.
+ */
+export async function followSentMove(tx: Tx, w: Extract<RosterWrite, { op: "move" }>, cause: string, o: { actor: Actor; ip: string | null }): Promise<{ tell: () => Promise<unknown> } | null> {
+  const [studentId, fromFamilyId, toFamilyId] = await Promise.all([studentLinkedTo(w.qboId, tx), familyLinkedTo(w.fromFamilyQboId, tx), familyLinkedTo(w.toFamilyQboId, tx)]);
+  if (studentId === null || fromFamilyId === null || toFamilyId === null) return null;
+  return afterStudentMoved(tx, { studentId, fromFamilyId, toFamilyId, cause }, o);
 }
 
 /**
@@ -640,7 +651,7 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
         await keepMadeOnGivenUp(tx, o.queueId!, resultQboId);
       } else if (ours && fits) {
         await upsertFromAnswer(tx, answer, await getShape(tx));
-        if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
+        if (w.op === "move") tell = (await followSentMove(tx, w, cause, o))?.tell ?? null;
         appRecord = await changeOwnRecord(tx, w, targetId, { realmId: o.realmId, linkedBy: o.linkedBy, studentId: o.filed?.studentId, familyId: o.filed?.familyId, syncedToken: answerToken });
         // A student saved first, now linked, leaves no refused create of theirs behind (stage 3's slice 9e).
         if (appRecord?.kind === "student" && "linked" in appRecord) {
@@ -796,7 +807,7 @@ async function recordFollows(w: Extract<RosterWrite, { op: "rename" | "deactivat
       const [c] = await tx.select({ parentQboId: qboCustomer.parentQboId }).from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
       const to = await familyLinkedTo(w.toFamilyQboId, tx);
       if (c?.parentQboId !== w.toFamilyQboId || to === null || before.kind !== "student" || before.familyId === String(to)) return null;
-      ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.record.follows#${w.qboId}` }, o));
+      tell = (await followSentMove(tx, w, `roster.record.follows#${w.qboId}`, o))?.tell ?? null;
     }
     const change = await changeOwnRecord(tx, w, w.qboId, { realmId, linkedBy: o.staffUserId, studentId: filed.studentId });
     if (!change) return null;

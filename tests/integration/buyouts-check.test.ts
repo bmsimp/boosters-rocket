@@ -219,8 +219,10 @@ describe("a student who moves in the portal (afterStudentMoved)", () => {
   async function move(by: string) {
     // The cache already says the student is under the other family when the follow-ups run (applyWritten), and the
     // student's own record with it.
+    // The follow-ups take the move by the app's own records (stage 3's slice 9f), read before the cache moves them.
+    const move = { studentId: await recordOfCustomer(S1, "student"), fromFamilyId: await recordOfCustomer(FAMILY, "family"), toFamilyId: await recordOfCustomer(CHENOWETH.family.qboId, "family") };
     await moveInCache([S1], CHENOWETH.family.qboId);
-    return db.transaction((tx) => afterStudentMoved(tx, { studentQboId: S1, fromFamilyQboId: FAMILY, toFamilyQboId: CHENOWETH.family.qboId, cause: "test" },
+    return db.transaction((tx) => afterStudentMoved(tx, { ...move, cause: "test" },
       { actor: { door: "staff", id: by, label: "registrar@club.org" }, ip: null }));
   }
 
