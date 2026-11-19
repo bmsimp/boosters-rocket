@@ -3,7 +3,7 @@
 // hasn't met it. A few go per wake, each claimed before it is sent (volunteer_reminder), so two wakes never send the
 // same email. Each email is about the guardian's own family alone: no other family is named, and no staff note shown.
 // Families and students are the app's own records (stage 2 of the app-owned families spec), as the season's are: the
-// roster is turned into them once (loadSeasonFamilies()), and a claim names the app's family.
+// families are the app's active ones, read once (loadSeasonFamilies()), and a claim names the app's family.
 import "server-only";
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
@@ -108,7 +108,7 @@ async function nudges(today: string, now: Date): Promise<{ sent: number; failed:
     .orderBy(asc(seasonStep.position), asc(requirement.position));
   if (rows.length === 0) return { sent: 0, failed: 0 };
   const families = await loadSeasonFamilies();
-  if (!families || families.length === 0) return { sent: 0, failed: 0 };
+  if (families.length === 0) return { sent: 0, failed: 0 };
   const covers = await everyCover(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id));
   const requirements = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []));
   const { facts } = await everyonesFacts(requirements, { amounts: "none", parentId: null });

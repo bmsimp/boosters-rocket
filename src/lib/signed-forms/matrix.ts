@@ -8,7 +8,7 @@ import { db } from "@/lib/db/client";
 import { requirement, season, seasonStep, signatureRequest, signedFormEvidence, type FormReminders, type FormSetting } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
 // The season and the requests both name the app's own families and students (stage 2 of the app-owned families spec):
-// the roster is turned into those records once, by loadSeasonFamilies().
+// the families are the app's active ones, read once, by loadSeasonFamilies().
 import type { AppFamilyId } from "@/lib/families/ids";
 import { everyCover, everyRecorded } from "@/lib/seasons/everyone";
 import { isCovered, type SubjectId } from "@/lib/seasons/progress";
@@ -33,8 +33,8 @@ export type Matrix = {
   allForms: MatrixForm[];
   /** The columns shown: one form when the filter names one, otherwise all. */
   forms: MatrixForm[];
-  /** Null when the roster can't be shown (no membership shape, or a cache read from another company). */
-  families: MatrixFamily[] | null;
+  /** The app's active families (loadSeasonFamilies()) that have a row to show under the filter. */
+  families: MatrixFamily[];
   /** The kept evidence the whole matrix leads to, whatever the filter: the page lists the rest of the company's apart. */
   shownEvidenceIds: string[];
 };
@@ -98,10 +98,10 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
     { kind: "family", id: String(f.id), name: f.name, familyId: String(f.id), familyName: f.name, cells: formRows.map((_, i) => cellFor(i, f.id, f.id, "family")) },
     ...f.students.map((st): MatrixRow => ({ kind: "student", id: String(st.id), name: st.name, familyId: String(f.id), familyName: f.name, cells: formRows.map((_, i) => cellFor(i, st.id, f.id, "student")) })),
   ];
-  const all = subjects?.map((f) => ({ id: String(f.id), name: f.name, rows: rowsOf(f) })) ?? null;
+  const all = subjects.map((f) => ({ id: String(f.id), name: f.name, rows: rowsOf(f) }));
 
   const allForms: MatrixForm[] = formRows.map((f, i) => {
-    const cells = (all ?? []).flatMap((fam) => fam.rows.map((r) => r.cells[i]!)).filter((c) => c.state !== "not_asked");
+    const cells = all.flatMap((fam) => fam.rows.map((r) => r.cells[i]!)).filter((c) => c.state !== "not_asked");
     return { id: f.row.id, title: f.row.title, stepName: f.stepName, appliesTo: f.row.appliesTo, required: f.row.required, dueOn: f.row.dueOn,
       setting: f.row.form ?? null, reminders: f.row.formReminders ?? null,
       counts: { signed: cells.filter((c) => c.state === "signed").length, needed: cells.filter((c) => c.state !== "waived").length, waived: cells.filter((c) => c.state === "waived").length } };
@@ -110,7 +110,7 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
   // The filter: one form's column, rows with a cell in one state, and families or students by name.
   const shownIndexes = allForms.map((f, i) => (filter.formId === null || f.id === filter.formId ? i : -1)).filter((i) => i >= 0);
   const needle = filter.search.toLowerCase();
-  const families = all === null ? null : all.map((fam) => {
+  const families = all.map((fam) => {
     const familyMatches = needle === "" || fam.name.toLowerCase().includes(needle);
     const rows = fam.rows
       .map((r) => ({ ...r, cells: shownIndexes.map((i) => r.cells[i]!) }))
@@ -125,6 +125,6 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
     const remindable = fam.rows.some((r) => r.cells.some((c, i) => formRows[i]!.row.form !== null && REMINDABLE_STATES.includes(c.state)));
     return { id: fam.id, name: fam.name, rows: kept, remindable };
   }).filter((fam) => fam.rows.length > 0);
-  const shownEvidenceIds = (all ?? []).flatMap((fam) => fam.rows.flatMap((r) => r.cells.flatMap((c) => (c.evidenceId ? [c.evidenceId] : []))));
+  const shownEvidenceIds = all.flatMap((fam) => fam.rows.flatMap((r) => r.cells.flatMap((c) => (c.evidenceId ? [c.evidenceId] : []))));
   return { season: s, allForms, forms: shownIndexes.map((i) => allForms[i]!), families, shownEvidenceIds };
 }

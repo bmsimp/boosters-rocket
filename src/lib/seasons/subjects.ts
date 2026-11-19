@@ -1,70 +1,66 @@
 // Staff only: this loads every family in the club. Never imported by parent code (tests/integration/page-guards.test.ts).
 import "server-only";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { db } from "@/lib/db/client";
+import { family, student } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { linksOfCustomers } from "@/lib/families/links";
-import { loadRosterPage } from "@/lib/roster/queries";
+import { recordNameWords } from "@/lib/families/words";
 import { getShape } from "@/lib/roster/shape";
 import { isCovered, type Requirement } from "./progress";
 
 /**
- * A family as the roster lists it, by QuickBooks id: what loadSeasonFamilies() turns into the app's own records, the
- * one place the season's, volunteering's and forms' staff pages and jobs read the roster through.
+ * A family as the season keeps it: the app's own record of the family and its students (stage 3 of the app-owned
+ * families spec), named as a page shows them. No QuickBooks id: a caller that needs a customer for something that is
+ * QuickBooks' own asks src/lib/families/links.ts at that point. A family's staff pages are addressed by `id`
+ * (seasonFamilyAt()).
  */
-export type FamilySubject = { qboId: string; name: string; students: { qboId: string; name: string }[] };
-
-/**
- * Every active family the roster shows, each with its active students: who a requirement can be asked of. In a club
- * whose members are their own families (the flat shape) nobody is a student. Null when the roster can't be shown
- * (no membership shape, or a cache read from another company): nothing is guessed.
- */
-export async function loadSubjects(): Promise<FamilySubject[] | null> {
-  const { roster } = await loadRosterPage();
-  if (!roster) return null;
-  if (roster.kind === "flat") return roster.members.filter((m) => m.active).map((m) => ({ qboId: m.qboId, name: m.displayName, students: [] }));
-  return roster.families.filter((f) => f.customer.active).map((f) => ({
-    qboId: f.customer.qboId, name: f.customer.displayName,
-    students: f.students.filter((s) => s.active).map((s) => ({ qboId: s.qboId, name: s.displayName })),
-  }));
-}
-
-/**
- * A family on the roster as the season keeps it: the app's own records of the family and its students (stage 2 of the
- * app-owned families spec), with the family customer the roster listed it by (`qboId`). A family's staff pages are
- * addressed by the app's id (seasonFamilyAt()).
- */
-export type SeasonFamily = { id: AppFamilyId; qboId: string; name: string; students: { id: AppStudentId; name: string }[] };
+export type SeasonFamily = { id: AppFamilyId; name: string; students: { id: AppStudentId; name: string }[] };
 /** One family or one student a requirement can be asked of, by the app's own id, with the family it belongs to (whose page `familyId` addresses). */
 export type SeasonSubject = ({ kind: "family"; id: AppFamilyId } | { kind: "student"; id: AppStudentId }) & {
   name: string; familyId: AppFamilyId; familyName: string;
 };
 
-/**
- * loadSubjects(), each family and student as its own app record, found through the link of its kind in the records'
- * company: the one place the season's staff pages and writes turn the roster into the app's ids. A family or student
- * with no record there (the records are kept in step with every roster read, so none should be) is left out, as if it
- * weren't on the roster. Null when the roster can't be shown.
- */
-export async function loadSeasonFamilies(): Promise<SeasonFamily[] | null> {
-  const families = await loadSubjects();
-  if (!families) return null;
-  const links = await linksOfCustomers({ families: families.map((f) => f.qboId), students: families.flatMap((f) => f.students.map((s) => s.qboId)) });
-  return families.flatMap((f) => {
-    const id = links.familyOfCustomer.get(f.qboId);
-    if (id === undefined) return [];
-    return [{ id, qboId: f.qboId, name: f.name, students: f.students.flatMap((s) => {
-      const sid = links.studentOfCustomer.get(s.qboId);
-      return sid === undefined ? [] : [{ id: sid, name: s.name }];
-    }) }];
-  });
+/** By name, ignoring case and accents, as the roster lists them; one record before another of the same name by its id, so the order is steady. */
+const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
+const byName = (a: { name: string; id: unknown }, b: { name: string; id: unknown }) => COLLATOR.compare(a.name, b.name) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+
+async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
+  const [families, students] = await Promise.all([
+    db.select({ id: family.id, name: family.name }).from(family).where(only === undefined ? eq(family.active, true) : and(eq(family.active, true), eq(family.id, only))),
+    // An active student is always in a family (student_active_in_family); only those of an active family are kept below.
+    db.select({ id: student.id, familyId: student.familyId, name: student.name }).from(student)
+      .where(and(eq(student.active, true), only === undefined ? isNotNull(student.familyId) : eq(student.familyId, only))),
+  ]);
+  const under = new Map<string, { id: AppStudentId; name: string }[]>();
+  for (const s of students) {
+    if (s.familyId === null) continue;
+    const key = String(s.familyId);
+    under.set(key, [...(under.get(key) ?? []), { id: s.id, name: recordNameWords(s.name, "student") }]);
+  }
+  return families.map((f) => ({ id: f.id, name: recordNameWords(f.name, "family") })).sort(byName)
+    .map((f) => ({ ...f, students: (under.get(String(f.id)) ?? []).sort(byName) }));
 }
 
 /**
- * The family a staff page's address names, by the app's own family id (checked by familyRecordAt() first): the one
- * place the season's and volunteer credit's family pages turn it into the family as the season keeps it. Null when it
- * isn't an active family on the roster (an inactive record, or one whose customer the roster no longer lists as a family).
+ * Every active family the app keeps, each with its active students: who a requirement can be asked of, the one place
+ * the season's, volunteering's and forms' staff pages and jobs, and the staff home, read the club's families through.
+ * Read from the app's own tables alone (`family`, and `student` by its `family_id`): no link, no membership shape and
+ * no QuickBooks connection is needed, so a family with no QuickBooks customer is here like any other, and the list
+ * stands while the shape is broken or QuickBooks is disconnected. While the records mirror the roster cache (every
+ * roster read and staff write keeps them in step) these are the roster's active families and the active students
+ * directly under each; in flat books a member is a family and nobody is a student. By name, as the roster lists them.
+ */
+export async function loadSeasonFamilies(): Promise<SeasonFamily[]> {
+  return activeFamilies();
+}
+
+/**
+ * The family a staff page's address names, by the app's own family id (checked by familyRecordAt() first), as the
+ * season keeps it: the one place the season's and volunteer credit's family pages find it. Null when the record isn't
+ * active.
  */
 export async function seasonFamilyAt(familyId: AppFamilyId): Promise<SeasonFamily | null> {
-  return (await loadSeasonFamilies())?.find((f) => f.id === familyId) ?? null;
+  return (await activeFamilies(familyId))[0] ?? null;
 }
 
 /** Everyone a requirement could be asked of: the families for a per-family one, the students for a per-student one. */
