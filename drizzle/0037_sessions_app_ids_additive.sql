@@ -9,7 +9,9 @@ CREATE INDEX "parent_email_change_family_ix" ON "parent_email_change" USING btre
 -- record, taken from the person's own guardian row in that family (guardian.family_id). Every open guardian row has
 -- that family while the roster names a company (0023's fill and every keep-in-step since give each one its family). An
 -- open row without one, then, could never be chosen again by its person, which is a lock-out, not a session to clear:
--- the migration stops here, and nothing is changed.
+-- the migration stops here, and nothing is changed. One row can come about by hand: scripts/seed-poc-guardian.mjs, on a
+-- proof of concept, inserts an open row with no family until the worker's next roster read gives it one; its runbook
+-- (docs/runbooks/poc-linuxdev.md, section 6) has that read done after seeding, before the tester signs in or an upgrade.
 DO $$
 DECLARE
   rows_missing bigint;
