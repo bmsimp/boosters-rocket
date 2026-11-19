@@ -1,9 +1,9 @@
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { guardian, parent, parentEmailChange } from "@/lib/db/schema";
+import { parent, parentEmailChange } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getParentSettings } from "./settings";
-import { endParentSessions, deleteUnusedSigninCodes } from "./sessions";
+import { endParentSessions, deleteUnusedSigninCodes, enterableGuardianRows } from "./sessions";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
 
 export type StaffOp = { actor: Actor; ip: string | null; permission?: string };
@@ -30,13 +30,16 @@ export async function blockPerson(parentId: string, rawReason: string, o: StaffO
   });
 }
 
-/** Puts back what blocking cleared: a person never welcomed, with an open link, is owed the welcome again when welcomes are on. */
+/**
+ * Puts back what blocking cleared: a person never welcomed, who can sign in by the gate's rule (a guardian row that
+ * counts, ./sessions.ts), is owed the welcome again when welcomes are on.
+ */
 export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok: true; changed: boolean } | { ok: false; reason: "not_found" }> {
   return db.transaction(async (tx) => {
     const [p] = await tx.select().from(parent).where(eq(parent.id, parentId)).for("update");
     if (!p) return { ok: false as const, reason: "not_found" as const };
     if (!p.blocked) return { ok: true as const, changed: false };
-    const open = (await tx.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, p.id), ne(guardian.status, "disabled"))).limit(1)).length > 0;
+    const open = (await enterableGuardianRows(p.id, tx)).length > 0;
     const owed = !p.welcomedAt && open && (await getParentSettings(tx)).welcome;
     await tx.update(parent).set({ blocked: false, blockedAt: null, blockedBy: null, blockedReason: null, ...(owed ? { welcomeOwed: true } : {}), updatedAt: new Date() }).where(eq(parent.id, p.id));
     await writeAudit({ actor: o.actor, action: "parent.unblock", permission: o.permission, targetType: "parent", targetId: p.id,
@@ -45,5 +48,5 @@ export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok:
   });
 }
 
-// Staff do not change a parent's address in the portal: a sign-in address lives in QuickBooks only (parents spec,
-// decision 6), and staff change it there. A parent changes their own through src/lib/parents/email-change.ts.
+// Staff do not change a parent's address in the portal yet (the app-owned families spec's open question 8 is a later
+// slice). A parent changes their own through src/lib/parents/email-change.ts.

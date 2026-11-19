@@ -15,22 +15,27 @@ vi.mock("@/lib/mail/senders", async () => {
 import { eq } from "drizzle-orm";
 import * as sendModule from "@/lib/mail/send";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, setting } from "@/lib/db/schema";
+import { auditLog, family, parent, setting, student } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
-import { setWelcome } from "@/lib/parents/switches";
+import { setSignins, setWelcome } from "@/lib/parents/switches";
 import { sendOwedWelcomes, resendWelcome, WELCOME_RETRY_MS } from "@/lib/parents/welcome";
-import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { seedParentSettings } from "../helpers/roster-cache";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { localhostCertificate } from "../helpers/tls";
 
 const admin = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: null, permission: "Settings.Parents.ReadWrite" };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
+/**
+ * A person with one guardian row, in an active family record of the app's own (seedGuardianInFamily(): rows of one
+ * `family` share it), so the row counts as the gate counts rows (src/lib/parents/sessions.ts).
+ */
 const person = async (name: string, o: { family?: string; welcomedAt?: Date | null; welcomeOwed?: boolean; blocked?: boolean; status?: "invited" | "active" | "disabled" } = {}) => {
   const p = await seedParent({ name, welcomedAt: o.welcomedAt ?? null, welcomeOwed: o.welcomeOwed ?? false, blocked: o.blocked ?? false });
-  await seedGuardian({ parentId: p.id, familyQboId: o.family ?? "10", status: o.status ?? "invited" });
-  return p;
+  const g = await seedGuardianInFamily({ parentId: p.id, familyQboId: o.family ?? "10", status: o.status ?? "invited" });
+  return { ...p, familyId: g.familyId! };
 };
+const owedNames = async () => (await db.select().from(parent)).filter((p) => p.welcomeOwed).map((p) => p.name).sort();
 
 let tls: { key: string; cert: string };
 let sink: MailSink;
@@ -202,5 +207,57 @@ describe("welcome emails", () => {
   it("the worker's wake sends owed welcomes even when QuickBooks isn't connected", async () => {
     await seedParentSettings({ welcome: true }); await person("Parent 1", { welcomeOwed: true });
     expect((await runDueJobs()).ran).toEqual([{ job: "parents.welcome", ok: true }]);
+  });
+
+  // The welcome counts the rows the gate counts (enterableGuardianRows(), src/lib/parents/sessions.ts): a person with no
+  // row that counts is marked by no switch, skipped by the worker and left owed, and refused a resend, the same way
+  // whatever the reason.
+  it("a person whose only family is inactive, or has no active student while that is asked, is not welcomed, and stays owed", async () => {
+    await seedParentSettings({ welcome: true });
+    const inactive = await person("Inactive Family", { family: "20", welcomeOwed: true });
+    await db.update(family).set({ active: false }).where(eq(family.id, inactive.familyId));
+    const noStudent = await person("No Student", { family: "30", welcomeOwed: true });
+    const withStudent = await person("With Student", { family: "40", welcomeOwed: true });
+    await db.insert(student).values({ familyId: withStudent.familyId, name: "Sam", active: true });
+    await db.insert(student).values({ familyId: noStudent.familyId, name: "Gone", active: false });
+    // With the setting off, a family's students don't matter: only the inactive family's person is skipped.
+    expect(await sendOwedWelcomes()).toEqual({ sent: 2, failed: 0 });
+    expect(sink.messages.map((m) => m.to[0]!).sort()).toEqual([noStudent.email, withStudent.email].sort());
+    expect(await owedNames()).toEqual(["Inactive Family"]);
+    // With it on, a family with no active student is skipped too, and its person stays owed.
+    sink.messages.length = 0;
+    await db.update(parent).set({ welcomeOwed: true, welcomedAt: null, welcomeTriedAt: null });
+    await seedParentSettings({ requireActiveStudents: true });
+    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
+    expect(sink.messages.map((m) => m.to[0]!)).toEqual([withStudent.email]);
+    expect(await owedNames()).toEqual(["Inactive Family", "No Student"]);
+    // A resend is refused them the same way as anyone with no family to sign in to.
+    const staff = { actor: { door: "staff" as const, id: null, label: "reg@club.org" }, ip: null, permission: "Parents.ReadWrite" };
+    expect(await resendWelcome(inactive.id, staff)).toEqual({ ok: false, reason: "no_access" });
+    expect(await resendWelcome(noStudent.id, staff)).toEqual({ ok: false, reason: "no_access" });
+    // Once the family has an active student, the welcome still owed goes at the next run.
+    await db.insert(student).values({ familyId: noStudent.familyId, name: "Back", active: true });
+    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
+    expect(await owedNames()).toEqual(["Inactive Family"]);
+  });
+
+  it("switching welcomes on, or sign-ins on with welcomes on, marks only people with a row that counts", async () => {
+    await seedParentSettings({ signin: false, everEnabled: true, requireActiveStudents: true });
+    const counts = await person("Counts", { family: "50" });
+    await db.insert(student).values({ familyId: counts.familyId, name: "Sam", active: true });
+    await person("No Student", { family: "60" });
+    const inactive = await person("Inactive Family", { family: "70" });
+    await db.update(family).set({ active: false }).where(eq(family.id, inactive.familyId));
+    expect(await setWelcome(true, admin)).toEqual({ ok: false, errors: ["Switch parent sign-ins on first."] });
+    // A stored value with welcomes on and sign-ins off is read as it is: switching sign-ins on owes the welcomes then.
+    await seedParentSettings({ welcome: true });
+    expect(await setSignins(true, admin)).toEqual({ ok: true });
+    expect(await owedNames()).toEqual(["Counts"]);
+    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: true, welcomeOwed: 1 });
+    await db.update(parent).set({ welcomeOwed: false });
+    await seedParentSettings({ welcome: false });
+    expect(await setWelcome(true, admin)).toEqual({ ok: true });
+    expect(await owedNames()).toEqual(["Counts"]);
+    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ welcome: true, owed: 1 });
   });
 });
