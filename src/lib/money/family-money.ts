@@ -8,13 +8,14 @@
 // (tests/integration/page-guards.test.ts).
 import { eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, qboConnection, qboCustomer, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
+import { familyMoney, qboConnection, qboCustomer, qboCustomerType, type CustomerCheck, type StoredInvoice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { customerOfFamily } from "@/lib/families/links";
 import { activeFamilyOf } from "@/lib/families/session-family";
 import { isQboId, qboCustomerById, qboInvoices, type QboGetOptions } from "@/lib/quickbooks/client";
 import { QboError } from "@/lib/quickbooks/endpoints";
+import { getShape, missingTypes } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { clubToday } from "@/lib/settings/club";
 import { currencyOf, toCents } from "./cents";
@@ -309,14 +310,24 @@ export async function loadFamilyMoney(familyId: AppFamilyId, o: { timeoutMs?: nu
   return { ...shown, today: await clubToday() };
 }
 
+/**
+ * Whether the membership shape can be trusted to say whose invoices are a family's: not when it names a customer type
+ * QuickBooks no longer has (the staff roster shows nothing then either). Before stage 3's fourth slice a page asked
+ * loadMyFamily() first, which went by the same rule; the family is the app's own record now, so money keeps it here.
+ */
+async function shapeHolds(): Promise<boolean> {
+  const [shape, types] = await Promise.all([getShape(), db.select({ qboId: qboCustomerType.qboId, name: qboCustomerType.name, active: qboCustomerType.active }).from(qboCustomerType)]);
+  return shape === null || missingTypes(shape, types).length === 0;
+}
+
 async function figuresToShow(familyId: AppFamilyId, o: { timeoutMs?: number }): Promise<Omit<FamilyMoney, "today">> {
   // The family's customer is found through its own link on each load, never carried from one to the next; the
   // customers whose invoices may show are those of that customer (mayShow checks every stored invoice against them).
   // A family with no active record has no figures to show (its name is still the cache's, as before); one with no link
   // has neither.
   const load = async () => {
-    const [active, familyQboId] = await Promise.all([activeFamilyOf(familyId), customerOfFamily(familyId)]);
-    if (familyQboId === null) return { shows: false, row: undefined, source: null, family: null, familyName: null };
+    const [active, familyQboId, holds] = await Promise.all([activeFamilyOf(familyId), customerOfFamily(familyId), shapeHolds()]);
+    if (familyQboId === null || !holds) return { shows: false, row: undefined, source: null, family: null, familyName: null };
     const [source, family] = await Promise.all([getRosterSource(), familyCustomers(familyQboId)]);
     const row = active === null ? undefined : await storedRow(familyId);
     return { shows: active !== null, row, source, family, familyName: family?.familyName ?? null };

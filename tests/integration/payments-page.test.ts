@@ -262,24 +262,27 @@ describe("the Payments page", () => {
     expect((await moneyRow(FAMILY))!.failedAt).toBeNull(); // the family's money was not even looked up
   });
 
-  it("shows no money while another company is connected than the one the roster cache came from, however fresh the figures", async () => {
+  it("shows no figures while another company is connected than the one the roster cache came from, however fresh they are", async () => {
     const r = await riverquills();
     stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" })];
     asParent(r.identity);
     expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>');
-    // An Admin connects a different company, and clearing the old company's cache has not happened yet.
+    // The family is the app's own record, so the page is the family's; its money is QuickBooks', read through the
+    // family's link, which answers nothing while another company is connected (clearing the old cache hasn't happened).
+    const NO_FIGURES = /INV-|\$\d|connect\.intuit\.com|\(deleted\)/i;
     await db.update(qboConnection).set({ realmId: "2222" });
     const asked = stub.calls.length;
     const html = await renderPage(PaymentsPage);
-    expect(html).toContain(NOT_SET_UP);
-    expect(html).not.toMatch(NO_MONEY);
+    expect(html).toContain(NOTHING);
+    expect(html).not.toMatch(NO_FIGURES);
     expect(stub.calls).toHaveLength(asked);
-    // And the same when the shape names a customer type QuickBooks no longer has.
+    // And the same when the shape names a customer type QuickBooks no longer has: whose invoices are whose can't be told.
     await db.update(qboConnection).set({ realmId: MONEY_REALM });
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" });
     const broken = await renderPage(PaymentsPage);
-    expect(broken).toContain(NOT_SET_UP);
-    expect(broken).not.toMatch(NO_MONEY);
+    expect(broken).toContain(NOTHING);
+    expect(broken).not.toMatch(NO_FIGURES);
+    expect(stub.calls).toHaveLength(asked);
   });
 
   it("flat shape: the member's own invoices", async () => {

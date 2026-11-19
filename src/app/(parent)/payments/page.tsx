@@ -10,8 +10,8 @@ export const metadata = { title: "Payments" };
 
 export default async function PaymentsPage() {
   const ctx = await requireParentPage("/payments");
-  // Money is shown only for a family the roster may show, the rule Home goes by (loadMyFamily): not for a family
-  // QuickBooks has made inactive, a roster cache from another company than the connected one, or a broken shape.
+  // Money is shown only for a family the portal may show, the rule Home goes by (loadMyFamily): not for a family whose
+  // own record is inactive. Whose figures may show, from which company and under which shape, is loadFamilyMoney()'s.
   const [family, club] = await Promise.all([loadMyFamily(ctx), getClubSettings()]);
   if (!family) {
     return (
