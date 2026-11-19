@@ -31,7 +31,6 @@ const SIGNIN_ACTIONS = ["parent.create", "parent.access.granted", "parent.access
 // moves or closes no sign-in and no record.
 describe("a roster refresh and the portal's sign-ins", () => {
   beforeEach(async () => { await resetDb(); stub.reset(); Object.assign(stub, fznCompany()); await seedConnected(stub); await saveShape(FZN_SHAPE, { actor: worker.actor, ip: null }); });
-  
   it("makes no person and no sign-in from QuickBooks' parents, with sign-ins on", async () => {
     await seedParentSettings(SIGNINS_ON);
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
