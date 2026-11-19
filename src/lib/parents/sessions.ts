@@ -1,7 +1,8 @@
 import { and, eq, gt, isNull, lte, ne, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { guardian, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
 import type { Actor } from "@/lib/audit/log";
+import type { AppFamilyId } from "@/lib/families/ids";
 
 export type GuardianRow = typeof guardian.$inferSelect;
 
@@ -70,6 +71,23 @@ export async function endFamilySessions(parentId: string, familyQboId: string, t
 export async function enabledGuardianRows(parentId: string, tx?: Tx): Promise<GuardianRow[]> {
   return (tx ?? db).select().from(guardian)
     .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"))).orderBy(guardian.familyQboId);
+}
+
+/** An open guardian row whose family the person may enter: it names an app family record, and that record is active. */
+export type EnterableRow = GuardianRow & { familyId: AppFamilyId };
+
+/**
+ * The person's open rows whose family the portal lets them into (app-owned families spec §6: a guardian signs in while
+ * they are an active guardian of an active family in the app): an open row (`status` not `disabled`) whose
+ * `family_id` names a family record that is active. A row with no family record, or one whose record is inactive, is
+ * not a family the person can enter: the chooser doesn't offer it, a session that chose it is sent back to choose, and
+ * a person with no row that counts is refused as one with no open row (src/lib/auth/resolve.ts). In the chooser's
+ * order, the order enabledGuardianRows() gives. The code request and check keep reading enabledGuardianRows().
+ */
+export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<EnterableRow[]> {
+  const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
+    .where(and(eq(guardian.parentId, parentId), ne(guardian.status, "disabled"), eq(family.active, true))).orderBy(guardian.familyQboId);
+  return rows.map((r) => ({ ...r.g, familyId: r.familyId }));
 }
 
 export async function deleteUnusedSigninCodes(parentId: string, tx: Tx): Promise<void> {

@@ -18,10 +18,10 @@ vi.mock("@/lib/audit/log", () => ({ writeAudit: vi.fn(async () => undefined) }))
 import { staffAction, parentAction, parentSessionAction, guardOf, AccessDenied } from "@/lib/guards";
 
 const STAFF = { door: "staff", staffUserId: "s1", name: "Pat", email: "pat@club.org" };
-const PARENT = { door: "parent", parentId: "p1", sessionId: "s1", guardianId: "g1", familyQboId: "123", name: "Ana", email: "ana@example.com", families: [{ guardianId: "g1", familyQboId: "123" }] };
+const PARENT = { door: "parent", parentId: "p1", sessionId: "s1", guardianId: "g1", familyId: "fam-123", name: "Ana", email: "ana@example.com", families: [{ guardianId: "g1", familyId: "fam-123" }] };
 
 // Signed in, with no family chosen yet (two families, or the chosen one went away).
-const CHOOSING = { status: "choose", parentId: "p1", sessionId: "s1", name: "Ana", families: [{ guardianId: "g1", familyQboId: "123" }, { guardianId: "g2", familyQboId: "456" }] };
+const CHOOSING = { status: "choose", parentId: "p1", sessionId: "s1", name: "Ana", families: [{ guardianId: "g1", familyId: "fam-123" }, { guardianId: "g2", familyId: "fam-456" }] };
 
 beforeEach(() => { ident.staff = null; ident.parent = null; ident.choosing = null; ident.perms = new Set(); ident.admin = false; });
 
@@ -46,11 +46,11 @@ describe("staffAction", () => {
 });
 
 describe("parentAction", () => {
-  const act = parentAction(async (ctx) => ctx.familyQboId);
+  const act = parentAction(async (ctx) => String(ctx.familyId));
 
   it("runs for a parent and scopes to their family", async () => {
     ident.parent = PARENT;
-    await expect(act()).resolves.toBe("123");
+    await expect(act()).resolves.toBe("fam-123");
   });
   it("refuses a staff session, even an admin's", async () => {
     ident.staff = STAFF; ident.admin = true;
