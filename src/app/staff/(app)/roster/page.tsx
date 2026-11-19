@@ -41,6 +41,9 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const withPage = !roster ? [] : roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId);
   const pageOf = (await linksOfCustomers({ families: withPage, students: [] })).familyOfCustomer;
   const named = (qboId: string | null, name: string) => { const at = qboId === null ? undefined : pageOf.get(qboId); return at ? <a href={familyPage(at)}>{name}</a> : name; };
+  // The rows are records, which are made only once the cache names its company (keepAppRecordsInStep()): a cache read
+  // before the portal recorded that (shown while QuickBooks is disconnected) lists customers the records don't hold yet.
+  const listedInCache = !roster ? 0 : roster.kind === "flat" ? roster.members.length : roster.families.length;
   const noun = roster?.kind === "flat" ? "member" : "family";
   const nouns = roster?.kind === "flat" ? "members" : "families";
   const columns: Column<Row>[] = [
@@ -74,7 +77,9 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
             <button className="btn btn-line">Find</button>
           </form>
           {rows.length === 0
-            ? <Notice tone="info">{typed ? <>No {noun} matches &quot;{typed}&quot;.</> : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</Notice>
+            ? <Notice tone="info">{typed ? <>No {noun} matches &quot;{typed}&quot;.</>
+                : listedInCache > 0 ? <>The roster lists {nouns}, but they haven&apos;t been read into the portal&apos;s own records yet. They are listed here after the next read from QuickBooks.</>
+                : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</Notice>
             : <DataTable caption={typed ? <>{rows.length} {rows.length === 1 ? noun : nouns} matching &quot;{typed}&quot;</> : <>Every {noun} on the roster, by name</>}
                 columns={columns} rows={rows} rowKey={(r) => String(r.id)} />}
         </section>

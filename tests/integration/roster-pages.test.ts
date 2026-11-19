@@ -35,6 +35,7 @@ import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { rowNamed } from "../helpers/table";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { addToCache, fam, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -268,6 +269,17 @@ describe("the roster pages", () => {
     await saveShape({ kind: "flat", memberTypeIds: ["5"] }, { actor: worker.actor, ip: null });
     await refreshRoster(worker);
     expect(await list()).toContain("QuickBooks lists no customers of the member types.");
+  });
+
+  it("says the families are listed after the next read when the cache names no company, so the portal has no records of them yet", async () => {
+    // A cache read before the portal recorded the roster's company, shown while QuickBooks is disconnected: the counts
+    // are QuickBooks' own, but the list is of the app's records, and none is made while the cache names no company.
+    await seedShape(); await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10")]); await seedRosterRead();
+    const html = await list();
+    expect(html).toContain("1 family");
+    expect(html).toContain("The roster lists families, but they haven&#x27;t been read into the portal&#x27;s own records yet. They are listed here after the next read from QuickBooks.");
+    expect(html).not.toContain("QuickBooks lists no customers of the family type.");
+    expect(html).not.toContain("Rivera Family</a>");
   });
 
   it("keeps No family matches for a search that finds nothing", async () => {
