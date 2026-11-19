@@ -20,7 +20,7 @@ import { buyoutTitleOf, loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoi
 import { BUYOUT_ITEM } from "../helpers/buyouts";
 import { resetDb } from "../helpers/db";
 import { ageMoney, CHENOWETH, connectCompany, invoiceQueries, moneyRow, RIVERA, stubInvoice as inv } from "../helpers/money";
-import { FAMILY_A, FAMILY_B, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, identityNow, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedShape } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
@@ -232,12 +232,16 @@ describe("the Payments page", () => {
     // QuickBooks is disconnected, and the roster cache says it came from another company than the stored figures. The
     // roster read of that company brings the app's records into step with it, so the family has a record linked there,
     // and the row is that record's: the page finds the row, and only the company it names keeps it off the page.
+    // The record linked in the earlier company is made inactive by that step, so the session is resolved again: it now
+    // names the record linked in 2222, as a real session would on its next read.
     await db.transaction((tx) => setRosterSource(tx, "2222"));
     await syncAppRecords();
     const there = await recordOfCustomer(RIVERA.family.qboId, "family");
     await db.update(familyMoney).set({ familyId: there });
     expect((await db.select().from(familyMoney)).map((m) => m.realmId)).toEqual([MONEY_REALM]);
-    asParent(r.identity);
+    const now = await identityNow(r.session.id);
+    expect(String(now.familyId)).toBe(String(there));
+    asParent(now);
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(NOTHING);
     expect(html).not.toContain(NOT_CONNECTED);
