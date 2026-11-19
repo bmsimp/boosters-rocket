@@ -73,20 +73,28 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(gone.id).not.toBe(kept.id);
   });
 
-  it("sign-in codes: used or expired ones go, but never one young enough to hold back the next send", async () => {
-    const people = await Promise.all(["a", "b", "c", "d", "e", "f"].map((n) => seedParent({ name: n })));
+  it("sign-in codes: an unused one goes once expired, a spent one once a code's life has passed since it was spent", async () => {
+    // A spent code is kept for a code's life after it was spent: the sign-in that spent it reads it again at its last
+    // check (signinStands()) and refuses when it is gone, which only a reset means to cause. And never one young enough
+    // to hold back the next send.
+    const people = await Promise.all(["a", "b", "c", "d", "e", "f", "g", "h", "i"].map((n) => seedParent({ name: n })));
     const code = async (i: number, v: { expiresAt: Date; createdAt: Date; usedAt?: Date }) =>
       (await db.insert(signinCode).values({ parentId: people[i]!.id, codeHash: `h${i}`, ...v }).returning({ id: signinCode.id }))[0]!.id;
     const expiredGone = await code(0, { createdAt: at(-CODE_TTL_MS - SEC), expiresAt: at(-SEC) });
     const expiresNow = await code(1, { createdAt: at(-CODE_TTL_MS), expiresAt: NOW });
     const secondLeft = await code(2, { createdAt: at(-CODE_TTL_MS + SEC), expiresAt: at(SEC) });
-    const usedOld = await code(3, { createdAt: at(-RESEND_AFTER_MS - SEC), expiresAt: at(CODE_TTL_MS - RESEND_AFTER_MS - SEC), usedAt: at(-SEC) });
+    // Spent a second ago, three minutes after it was made: the sign-in that spent it may not have made its last check yet.
+    const spentJustNow = await code(3, { createdAt: at(-3 * 60_000), expiresAt: at(CODE_TTL_MS - 3 * 60_000), usedAt: at(-SEC) });
     const usedYoung = await code(4, { createdAt: at(-RESEND_AFTER_MS + SEC), expiresAt: at(CODE_TTL_MS - RESEND_AFTER_MS + SEC), usedAt: at(-SEC) });
     const usedAtEdge = await code(5, { createdAt: at(-RESEND_AFTER_MS), expiresAt: at(CODE_TTL_MS - RESEND_AFTER_MS), usedAt: at(-SEC) });
+    const spentLongAgo = await code(6, { createdAt: at(-CODE_TTL_MS - 2 * SEC), expiresAt: at(-2 * SEC), usedAt: at(-CODE_TTL_MS - SEC) });
+    const spentALifeAgo = await code(7, { createdAt: at(-CODE_TTL_MS - 2 * SEC), expiresAt: at(-2 * SEC), usedAt: at(-CODE_TTL_MS) });
+    // Spent in its last seconds and expired since: still inside a code's life from when it was spent.
+    const spentThenExpired = await code(8, { createdAt: at(-CODE_TTL_MS - SEC), expiresAt: at(-SEC), usedAt: at(-2 * SEC) });
     expect(await clean()).toEqual({ ...NOTHING, signinCodes: 2 });
     const left = await ids(db.select({ id: signinCode.id }).from(signinCode));
-    expect(left).toEqual([expiresNow, secondLeft, usedYoung, usedAtEdge].sort());
-    expect(left).not.toContain(expiredGone); expect(left).not.toContain(usedOld);
+    expect(left).toEqual([expiresNow, secondLeft, spentJustNow, usedYoung, usedAtEdge, spentALifeAgo, spentThenExpired].sort());
+    expect(left).not.toContain(expiredGone); expect(left).not.toContain(spentLongAgo);
   });
 
   it("set-up and reset links: a used one goes, and one that expired a second ago; one with a second left stays", async () => {

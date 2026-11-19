@@ -154,7 +154,8 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
  * the lock an address change, a block or a password reset waits for (lockedPerson), and after the session is stored,
  * so there is no moment in which a session proved with a replaced address, or before a reset, can slip through. A
  * reset deletes the person's codes spent within a code's life (choosePasswordFromLink(), password-set.ts), so a code
- * spent before a reset that committed first is gone here. A change that committed first is seen here and the caller
+ * spent before a reset that committed first is gone here; the daily clean-up keeps a spent code until a code's life
+ * has passed since it was spent (cleanUp(), cleanup.ts), so it never takes one this soon. A change that committed first is seen here and the caller
  * removes the session; a change that comes later ends the person's sessions itself, and by then this one is stored
  * where it can see it.
  */

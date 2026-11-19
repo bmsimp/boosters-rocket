@@ -1,9 +1,9 @@
-import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
-import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
+import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
 
 export const CLEANUP_JOB = "cleanup.daily";
 /** Job history is kept this long. The newest run of each job, and its newest run that worked, are kept whatever their age. */
@@ -91,8 +91,10 @@ export function describeCleanup(c: CleanupCounts): string {
  *
  * - Sessions of both doors whose `expires_at` has passed. Better Auth already refuses them; a parent's session is
  *   renewed by use (sessions.ts), so one that has run out was not used for 90 days.
- * - Sign-in codes that are used or have expired, once they are older than the wait between two sends: until then the
- *   newest code, used or not, is what holds back the next one (signin-codes.ts).
+ * - Sign-in codes spent more than a code's life ago (CODE_TTL_MS), or never spent and expired, once they are older than
+ *   the wait between two sends: until then the newest code, used or not, is what holds back the next one, and until a
+ *   code's life has passed since it was spent, the sign-in that spent it reads it again at its last check
+ *   (signinStands(), signin-codes.ts), which a reset refuses by deleting it.
  * - A person's set-up and reset links (`parent_signin_token`) that are used or past their expiry: a link works once,
  *   and only before it expires.
  * - Remembered devices (`parent_device`) past their expiry: a device is remembered only until then, renewed by use.
@@ -121,7 +123,11 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   // and remembered devices (the sign-in release's, which hang on the person as a code does), then their sessions. So the
   // clean-up never waits on a person's change of address while that change waits on it.
   const requestGone = lt(parentEmailChange.expiresAt, now);
-  const codeGone = and(or(isNotNull(signinCode.usedAt), lt(signinCode.expiresAt, now)), lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)));
+  // A spent code stays for a code's life after it was spent: the code door's last check (signinStands()) reads it again,
+  // and refuses the sign-in when it is gone, as a reset (which deletes those spent within a code's life) means it to.
+  const codeGone = and(
+    or(lt(signinCode.usedAt, new Date(now.getTime() - CODE_TTL_MS)), and(isNull(signinCode.usedAt), lt(signinCode.expiresAt, now))),
+    lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)));
   const linkGone = or(isNotNull(parentSigninToken.usedAt), lt(parentSigninToken.expiresAt, now));
   const deviceGone = lt(parentDevice.expiresAt, now);
   const sessionGone = lt(parentAuthSession.expiresAt, now);
