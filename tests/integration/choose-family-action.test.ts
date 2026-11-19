@@ -17,6 +17,7 @@ import ChooseFamily from "@/app/choose-family/page";
 import { renderToStaticMarkup } from "react-dom/server";
 import { eq } from "drizzle-orm";
 import { guardian } from "@/lib/db/schema";
+import { recordNameWords } from "@/lib/families/words";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
 
@@ -42,6 +43,10 @@ describe("chooseFamilyAction", () => {
     expect(two.match(/<button class="btn"/g)).toHaveLength(2);
     // No family's QuickBooks id is on the page: each is named in words here (neither has a family record) and chosen by its row.
     expect(two).not.toMatch(/F1|F2|Family account/);
+    // Neither name is known, so the two buttons are told apart by their place in the list (React writes ' as &#x27;).
+    const unknown = recordNameWords(null, "family").replaceAll("'", "&#x27;");
+    expect(two).toContain(`>${unknown} (1)</button>`);
+    expect(two).toContain(`>${unknown} (2)</button>`);
     // The chosen family goes away and one is left: the parent is sent back here, with one family to choose.
     expect(await redirectOf(chooseFamilyAction(second.id))).toBe("/");
     expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBe("F2");
@@ -52,7 +57,7 @@ describe("chooseFamilyAction", () => {
     expect(one).toContain("Choose the family to look at.");
   });
 
-  it("refuses anything but a uuid, leaves the session's family alone and doesn't audit the value", async () => {
+  it("refuses anything but a uuid, leaves the session's family alone and records only a short string sent", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const first = await seedGuardian({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
     await post("/portal-code/send", { email: "ana@example.com" });
@@ -73,7 +78,10 @@ describe("chooseFamilyAction", () => {
     const refused = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused");
     expect(refused).toHaveLength(bad.length);
     for (const r of refused) expect(r).toMatchObject({ actorId: a.id, targetId: a.id, after: { reason: "family_not_enabled" } });
+    // A string of 1 to 64 characters is what the browser sent, and the refusal records it, as it did a family id before.
+    const sent = refused.map((r) => (r.after as { sent?: string }).sent).filter((s) => s !== undefined).sort();
+    expect(sent).toEqual(["F2", second.id.toUpperCase(), ` ${second.id}`].sort());
     const all = JSON.stringify(await db.select().from(auditLog));
-    for (const needle of ["obj-marker", "arr-marker", "4242424242", "xxxxxxxxxx", "F".repeat(65), second.id.toUpperCase()]) expect(all).not.toContain(needle);
+    for (const needle of ["obj-marker", "arr-marker", "4242424242", "xxxxxxxxxx", "F".repeat(65)]) expect(all).not.toContain(needle);
   });
 });

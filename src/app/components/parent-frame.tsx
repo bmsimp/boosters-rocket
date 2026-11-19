@@ -14,7 +14,7 @@ import { PARENT_NAV } from "./parent-nav";
 export async function ParentFrame({ who, children }: { who: Pick<ParentIdentity, "name" | "parentId" | "guardianId" | "families">; children: React.ReactNode }) {
   const many = who.families.length > 1;
   const mine = initials(who.name);
-  const [club, names] = await Promise.all([getClubSettings(), many ? myFamilyNames(who.parentId, [who.guardianId]) : null]);
+  const [club, names] = await Promise.all([getClubSettings(), many ? myFamilyNames(who.parentId, who.families.map((f) => f.guardianId)) : null]);
   return (
     <>
       {/* The link's name starts with the initials it shows, so a person who says what they see ("click ZQ") reaches it (WCAG 2.5.3). */}

@@ -8,7 +8,12 @@ import { db } from "@/lib/db/client";
 import { family, guardian } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 
-/** One query for every row asked about: guardian row id to the family's name in words. Another person's rows answer nothing. */
+/**
+ * One query for every row asked about: guardian row id to the family's name in words. Another person's rows answer
+ * nothing. Callers pass all of the person's families, in the order the chooser lists them, so that names that repeat
+ * (two families the portal knows no name for, or two of the same name) are told apart by their place in that list,
+ * "(1)", "(2)", and the frame's "Viewing" line reads as the chooser's button did.
+ */
 export async function myFamilyNames(parentId: string, guardianIds: readonly string[]): Promise<Map<string, string>> {
   const ids = [...new Set(guardianIds)];
   const rows = ids.length
@@ -16,5 +21,13 @@ export async function myFamilyNames(parentId: string, guardianIds: readonly stri
       .where(and(eq(guardian.parentId, parentId), inArray(guardian.id, ids)))
     : [];
   const found = new Map(rows.map((r) => [r.id, r.name]));
-  return new Map(ids.map((id) => [id, recordNameWords(found.get(id) ?? null, "family")]));
+  const words = ids.map((id) => recordNameWords(found.get(id) ?? null, "family"));
+  return new Map(ids.map((id, i) => [id, numberedIfRepeated(words, i)]));
+}
+
+/** The words at `i`, with their place among the same words when they appear more than once in the list. */
+function numberedIfRepeated(words: readonly string[], i: number): string {
+  const same = words.filter((w) => w === words[i]).length;
+  if (same < 2) return words[i]!;
+  return `${words[i]} (${words.slice(0, i + 1).filter((w) => w === words[i]).length})`;
 }

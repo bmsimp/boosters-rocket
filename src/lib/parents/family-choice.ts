@@ -52,15 +52,17 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
  * The chooser and **Switch family**, given one of the person's own guardian rows by its id: the chooser binds the row,
  * never a family's QuickBooks id. Refuses (and audits, with the id sent) a row that isn't one of the person's own
  * enabled rows, the same way whatever the reason. `guardianId: null` is an argument the caller couldn't use as a row's
- * id: refused the same way, and not recorded. The session is then given that row's family, as the sign-in gives it.
+ * id: refused the same way, with what was sent recorded as `sent` when the caller passes it (a short string only). The
+ * session is then given that row's family, as the sign-in gives it.
  */
-export async function chooseFamily(o: { sessionId: string; parentId: string; guardianId: string | null; ip: string | null }): Promise<boolean> {
+export async function chooseFamily(o: { sessionId: string; parentId: string; guardianId: string | null; sent?: string; ip: string | null }): Promise<boolean> {
   const [p] = await db.select().from(parent).where(eq(parent.id, o.parentId));
   if (!p) return false;
   const actor = parentActor(p);
   const row = o.guardianId === null ? undefined : (await enabledGuardianRows(o.parentId)).find((r) => r.id === o.guardianId);
   if (!row || p.blocked) {
-    const after = o.guardianId === null ? { reason: "family_not_enabled" } : { reason: "family_not_enabled", guardianId: o.guardianId };
+    const after = o.guardianId !== null ? { reason: "family_not_enabled", guardianId: o.guardianId }
+      : o.sent !== undefined ? { reason: "family_not_enabled", sent: o.sent } : { reason: "family_not_enabled" };
     await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after, ip: o.ip });
     return false;
   }
