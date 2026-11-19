@@ -57,7 +57,7 @@ export default async function PayInsteadPage({ params }: { params: Promise<{ req
             <>
               <h3>Changed your mind?</h3>
               <p>You can switch back to volunteering until the invoice is paid. The invoice is then cancelled, and nothing is owed for it.</p>
-              <SwitchBack act={switchBackAction.bind(null, v.requirementId, v.key)} />
+              <SwitchBack act={switchBackAction.bind(null, v.requirementId, v.key, v.subjectStamp)} />
             </>
           )}
           {b.state === "invoiced" && b.invoicePaid && <p className="help">It&apos;s paid, so it can&apos;t be switched back here. If something isn&apos;t right, the club&apos;s treasurer can sort it out.</p>}

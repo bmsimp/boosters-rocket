@@ -421,20 +421,23 @@ export async function confirmMyBuyout(ctx: ParentCtx, requirementId: unknown, ke
 
 /**
  * A guardian switches back to volunteering, before the buy-out's invoice is paid. The requirement and the key are found
- * within the session's family, and the buy-out is the family's own. The invoice is read live first: only one with
+ * within the session's family, and the buy-out is the family's own. The stamp the page was given (subjectStamp()) must
+ * name the subject the key names now: a key that has come to name another of the family's students since the page was
+ * drawn is refused with the reload words, and nothing is read or voided. The invoice is read live first: only one with
  * nothing paid on it (its balance is its total) is voided; a paid or part-paid one is the treasurer's to sort out, in
  * QuickBooks. The void goes on the write queue in one transaction with its audit row, and is tried once at once (it
  * reads the invoice again just before it is sent). A buy-out still being invoiced can't be switched back until the
  * create's outcome is known.
  */
-export async function switchMyBuyoutBack(ctx: ParentCtx, requirementId: unknown, key: unknown): Promise<Result> {
-  if (!isUuid(requirementId) || !isChoiceKey(key)) return no(BUYOUT_COPY.notFromPage);
+export async function switchMyBuyoutBack(ctx: ParentCtx, requirementId: unknown, key: unknown, stamp: unknown): Promise<Result> {
+  if (!isUuid(requirementId) || !isChoiceKey(key) || typeof stamp !== "string" || stamp.length === 0 || stamp.length > 64) return no(BUYOUT_COPY.notFromPage);
   const actor = parentActor({ id: ctx.parentId, email: ctx.email });
   const take = await takeRateLimit("buyout_parent", ctx.parentId);
   if (take === "first_refusal") await writeAudit({ actor, action: "volunteer.buyout.limit", targetType: "parent", targetId: ctx.parentId, after: { code: "rate_limited" }, ip: ctx.ip });
   if (take !== "taken") return no(BUYOUT_COPY.rateLimited);
   const t = await findMyBuyout(ctx, requirementId, key);
-  if (!t?.view.buyout) return no(t ? BUYOUT_COPY.nothingToSwitch : BUYOUT_COPY.notFromPage);
+  if (!t || t.view.subjectStamp !== stamp) return no(BUYOUT_COPY.notFromPage);
+  if (!t.view.buyout) return no(BUYOUT_COPY.nothingToSwitch);
   const [b] = await db.select().from(buyout).where(and(eq(buyout.familyId, t.familyId), eq(buyout.requirementId, t.requirement.id), forSubject(t),
     inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));
   if (!b) return no(BUYOUT_COPY.nothingToSwitch);

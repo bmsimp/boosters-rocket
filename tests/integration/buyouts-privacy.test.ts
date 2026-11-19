@@ -54,7 +54,7 @@ describe("family A can't reach family B's buy-outs", () => {
     const refusals = [
       // B's own requirement, with B's key: not asked of A at all.
       await confirmBuyoutAction(b.buyout!.requirementId, b.buyout!.key, bShared.stamp),
-      await switchBackAction(b.buyout!.requirementId, b.buyout!.key),
+      await switchBackAction(b.buyout!.requirementId, b.buyout!.key, bView.find((x) => x.requirementId === b.buyout!.requirementId)!.subjectStamp),
       // A requirement both families have, with the stamp B's page was given: the quote is A's to work out.
       await confirmBuyoutAction(shared, "family", bShared.stamp),
       // A's own requirement with a stale quote, and with a used one (A's buy-out is invoiced already).
@@ -63,11 +63,14 @@ describe("family A can't reach family B's buy-outs", () => {
       // Keys that aren't A's: B's QuickBooks ids, a student key A doesn't have.
       await confirmBuyoutAction(shared, FAMILY_B.family.qboId, bShared.stamp),
       await confirmBuyoutAction(shared, "s9", bShared.stamp),
-      await switchBackAction(shared, FAMILY_B.students[0]!.qboId),
+      await switchBackAction(shared, FAMILY_B.students[0]!.qboId, bShared.subjectStamp),
+      // A's own key on a requirement both have, with the switch-back stamp B's page was given.
+      await switchBackAction(shared, "family", bShared.subjectStamp),
     ];
     for (const r of refusals) expect(r.ok, JSON.stringify(r)).toBe(false);
     expect(refusals[0]).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
     expect(refusals[1]).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(refusals.at(-1)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
     expect(refusals[2]).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$40.00")] });
     expect(refusals[4]).toEqual({ ok: false, errors: [BUYOUT_COPY.already] });
     const said = JSON.stringify(refusals);
@@ -87,7 +90,8 @@ describe("family A can't reach family B's buy-outs", () => {
     const { a } = await seedTwoFamilies();
     await connectCompany(stub);
     const familyA = await recordOfCustomer(FAMILY_A.family.qboId, "family");
-    expect((await viewOf(a)).map((x) => x.requirementId)).toContain(a.buyout!.requirementId);
+    const shownBefore = await viewOf(a);
+    expect(shownBefore.map((x) => x.requirementId)).toContain(a.buyout!.requirementId);
     expect([...(await loadMyBuyoutInvoices(familyA)).keys()]).toEqual(["9174"]);
     // Made inactive some way the reconcile doesn't follow (a type changed in QuickBooks, say): the session still names its customer.
     await db.update(family).set({ active: false }).where(eq(family.id, familyA));
@@ -96,7 +100,8 @@ describe("family A can't reach family B's buy-outs", () => {
     expect(await loadMyBuyoutInvoices(familyA)).toEqual(new Map());
     asParent(a.identity);
     expect(await confirmBuyoutAction(a.buyout!.requirementId, a.buyout!.key, "any-stamp-0000000000")).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
-    expect(await switchBackAction(a.buyout!.requirementId, a.buyout!.key)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    const stamp = shownBefore.find((x) => x.requirementId === a.buyout!.requirementId && x.key === a.buyout!.key)!.subjectStamp;
+    expect(await switchBackAction(a.buyout!.requirementId, a.buyout!.key, stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
     const after = await everything();
     expect(after.buyouts).toEqual(before.buyouts);
     expect(after.queue).toEqual([]);
