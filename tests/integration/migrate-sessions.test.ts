@@ -67,8 +67,13 @@ const failureOf = async (run: Promise<unknown>) => {
   expect(failure).not.toBeNull();
   return `${failure!.message} ${failure!.cause instanceof Error ? failure!.cause.message : ""}`;
 };
-/** A row with the re-keyed columns left out: what must be the same before and after. */
-const kept = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).filter(([column]) => !RE_KEYED.has(column)));
+/**
+ * A row with the re-keyed columns left out: what must be the same before and after. Only the columns `before` had are
+ * compared: this file migrates to the newest, and a later migration may add a column of its own (0039 gives a session
+ * `strong_at`), which is no part of the re-key.
+ */
+const kept = (row: Record<string, unknown>, before: Record<string, unknown> = row) =>
+  Object.fromEntries(Object.entries(row).filter(([column]) => column in before && !RE_KEYED.has(column)));
 
 /** As 0022 held them: a person with their sign-in user, their guardian rows, sessions and requests. */
 async function person(pg: postgres.Sql, id: string, name: string) {
@@ -200,7 +205,10 @@ describe("migrations 0037 and 0038: a session and a pending email change name th
         for (const id of ["cedar-row-closed", "dee-family-unknown", "ash-choosing"]) expect(familyOf.get(id), id).toBeNull();
         const after = await company.q(async (pg) => [...await pg`SELECT * FROM parent_auth_session ORDER BY id COLLATE "C"`]);
         expect(after.map((s) => s.id)).toEqual(sessionsBefore.map((s) => s.id));
-        for (const s of after) expect(kept(s), String(s.id)).toEqual(kept(sessionsBefore.find((b) => b.id === s.id)!));
+        for (const s of after) {
+          const before = sessionsBefore.find((b) => b.id === s.id)!;
+          expect(kept(s, before), String(s.id)).toEqual(kept(before));
+        }
       });
 
       it("carries an email change from its own guardian row or its person's open row, deletes a live one it can't carry, and keeps a used or expired one with none", async () => {
@@ -212,7 +220,10 @@ describe("migrations 0037 and 0038: a session and a pending email change name th
         expect(rows.get(changes.usedElsewhere!)).toMatchObject({ family_id: null });
         expect(rows.get(changes.expiredNowhere!)).toMatchObject({ family_id: null });
         // Everything else of each request is kept exactly.
-        for (const [id, r] of rows) expect(kept(r), id).toEqual(kept(changesBefore.find((b) => b.id === id)!));
+        for (const [id, r] of rows) {
+          const before = changesBefore.find((b) => b.id === id)!;
+          expect(kept(r, before), id).toEqual(kept(before));
+        }
       });
 
       it("writes one audit row with the counts", async () => {
