@@ -11,7 +11,10 @@ export const PARENTS_KEY = "parents.settings";
  * guardian staff add before then can't sign in until it is. `requireActiveStudents` is read by the gate
  * (enterableGuardianRows(), ./sessions.ts). `level` is the club's sign-in level of the sign-in release (section 6 of
  * the app-owned families spec, "Signing in"; open questions 21 and 24): Standard or Strict. Nothing writes it or reads
- * it yet (slice SI-1): every value reads Standard, and every save keeps the level stored.
+ * it yet (slice SI-1): every value reads Standard, and every save keeps the level stored. No page names it; it is in
+ * the before and after of each `settings.parents.save` audit row, as stored, which the audit page shows as JSON. A save
+ * after a stored value that failed to parse stores the closed state, at Standard: harmless while nothing stores Strict,
+ * and SI-10, which first stores it, keeps a readable level through such a save or refuses it.
  */
 export const SIGNIN_LEVELS = ["standard", "strict"] as const;
 export type SigninLevel = (typeof SIGNIN_LEVELS)[number];

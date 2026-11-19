@@ -194,7 +194,10 @@ export const signinCode = pgTable("signin_code", {
  * A one-time link's token for a person, of the sign-in release (section 6 of the app-owned families spec, "Signing in"):
  * a set-up link, which chooses a first password, or a reset link, which chooses a new one. Only the keyed hash of the
  * token is stored (an HMAC, as a sign-in code's is), never the token. At most one unused token per person and purpose;
- * a token is spent by setting `used_at`. It goes with the person. The daily clean-up deletes one past its expiry or
+ * a token is spent by setting `used_at`. An unused token past its expiry still holds that place until the clean-up
+ * deletes it, so making a link first deletes or spends the person's unused link of that purpose, expired or not, under
+ * the person's lock and in the same transaction, as a new sign-in code replaces the old one (signin-codes.ts); an insert
+ * alone would fail on `parent_signin_token_one_live_uq`. It goes with the person. The daily clean-up deletes one past its expiry or
  * used. Nothing makes one yet (slice SI-1): the slice that first does adds these rows to everything that ends all of a
  * person's sign-in (blocking, sign-ins switched off, the change-of-company clear).
  */
