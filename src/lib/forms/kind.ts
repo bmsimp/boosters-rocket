@@ -19,7 +19,6 @@ import { STATE_WORDS, isMet, wordsFor } from "./states";
 const key = (requirementId: string, subject: unknown) => `${requirementId}|${String(subject)}`;
 
 export const formRule: AppKindRule = {
-  keyedBy: "app",
   standings: async ({ requirements, asked, viewing }) => {
     const standings = new Map<string, Standing>();
     const ids = requirements.map((r) => r.id);

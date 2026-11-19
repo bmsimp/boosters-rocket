@@ -11,11 +11,10 @@ import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
  * by the company the records were made from (the roster cache's company), read here and never taken from the caller,
  * so they keep answering while QuickBooks is disconnected, as parent pages keep working from the cache today; and each
  * answers nothing while QuickBooks is connected to a different company, so another company's link never answers.
- * Stage 2's areas read them: a parent's season finds the session's app family through familyLinkedTo(), and the season's
- * reads that cross into an area still keyed by QuickBooks ids translate through linksOf() and linksOfCustomers() (the
+ * Stage 2's areas read them: a parent's season finds the session's app family through familyLinkedTo(), and the code
+ * that crosses into what is still keyed by QuickBooks ids translates through linksOf() and linksOfCustomers() (the
  * boundaries are listed in AGENTS.md, Seasons). Each reads only the links it is asked for, so parent code may import
- * this module (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts). Every family's links are read only by
- * everyLink() in src/lib/seasons/everyone.ts, which is staff only.
+ * this module (PARENT_CODE_ELSEWHERE in tests/integration/page-guards.test.ts).
  */
 export async function recordsCompany(tx?: Tx): Promise<string | null> {
   const [source, connection] = await Promise.all([getRosterSource(tx), getConnection(tx)]);
@@ -79,9 +78,9 @@ async function linksWhere(which: SQL | "none", tx?: Tx): Promise<LinkMaps> {
     .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), or(isNotNull(accountingLink.familyId), isNotNull(accountingLink.studentId)), which)));
 }
 /** The columns linkMapsFrom() reads. */
-export const LINK_COLUMNS = { customerId: accountingLink.customerId, familyId: accountingLink.familyId, studentId: accountingLink.studentId };
+const LINK_COLUMNS = { customerId: accountingLink.customerId, familyId: accountingLink.familyId, studentId: accountingLink.studentId };
 /** Link rows as maps by kind, both ways. */
-export function linkMapsFrom(rows: readonly { customerId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null }[]): LinkMaps {
+function linkMapsFrom(rows: readonly { customerId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null }[]): LinkMaps {
   const out = noLinks();
   for (const r of rows) {
     if (r.familyId !== null) { out.customerOfFamily.set(r.familyId, r.customerId); out.familyOfCustomer.set(r.customerId, r.familyId); }
@@ -94,11 +93,7 @@ const anyOf = (...parts: (SQL | null)[]): SQL | "none" => {
   return given.length === 0 ? "none" : or(...given)!;
 };
 
-/**
- * The customers of these family and student records, in the records' company (as every lookup here reads it), with
- * the way back. Every record's links, for staff code that asks about everyone, are everyLink() in
- * src/lib/seasons/everyone.ts, a staff-only module.
- */
+/** The customers of these family and student records, in the records' company (as every lookup here reads it), with the way back. */
 export function linksOf(records: { families: readonly AppFamilyId[]; students: readonly AppStudentId[] }, tx?: Tx): Promise<LinkMaps> {
   return linksWhere(anyOf(records.families.length ? inArray(accountingLink.familyId, [...records.families]) : null,
     records.students.length ? inArray(accountingLink.studentId, [...records.students]) : null), tx);

@@ -13,7 +13,6 @@ import { confirmedAmounts } from "@/lib/volunteer/credit";
 import { buyoutsByRecord } from "@/lib/volunteer/bought";
 import { formRule } from "@/lib/forms/kind";
 import { withBuyout } from "@/lib/buyouts/rules";
-import { customerPairKey, type CustomerRecorded, type CustomerRequirement } from "./customer-keys";
 import type { Requirement, RequirementFields, Standing, SubjectId, SubjectsAsked } from "./progress";
 
 /** What `requirement_progress` holds for one requirement and one family or student, by the app's own id. */
@@ -41,47 +40,32 @@ type RuleBase = {
 };
 
 /**
- * A kind's rule asked by customer: one whose own records are still keyed by QuickBooks ids (payments; stage 2 of the
- * app-owned families spec), and the checklist with them. The families and students are the customers their
- * links name, and it answers by customerPairKey(). The season's reads translate on the way in and out (factsFrom() in
- * ./recorded.ts): a boundary AGENTS.md lists (Seasons), each going when its area moves.
+ * A kind's rule, asked by the app's own ids: since stage 2 of the app-owned families spec every kind's records, and the
+ * season's, name the app's families and students. Payments read figures still kept by the family's customer; their
+ * rule turns the records into customers itself (src/lib/money/payment-standings.ts).
  */
-export type CustomerKindRule = RuleBase & {
-  keyedBy?: "customer";
-  /**
-   * How things stand for these requirements (all of this kind) and these families or students, keyed by
-   * customerPairKey(). `subjectQboIds` is null when staff ask about everyone. `recorded` is what requirement_progress
-   * holds for them; a kind judged from its own records (invoices, signatures) reads those here instead. A pair left out
-   * stands as `nothingYet`. `viewing` is who is looking.
-   */
-  standings(ask: { requirements: readonly CustomerRequirement[]; subjectQboIds: readonly string[] | null; recorded: readonly CustomerRecorded[]; viewing: Viewing }): Promise<Map<string, Standing>>;
-};
-
-/** A kind's rule asked by the app's own ids: one whose own records name the app's families and students (volunteering, forms). */
 export type AppKindRule = RuleBase & {
-  keyedBy: "app";
   /**
    * How things stand for these requirements (all of this kind) and these families and students (`asked`; null when
-   * staff ask about everyone), keyed by pairKey(). `recorded` is what requirement_progress holds for them. A pair left
-   * out stands as `nothingYet`. `viewing` is who is looking.
+   * staff ask about everyone), keyed by pairKey(). `recorded` is what requirement_progress holds for them; a kind
+   * judged from its own records (invoices, signatures) reads those here instead. A pair left out stands as
+   * `nothingYet`. `viewing` is who is looking.
    */
   standings(ask: { requirements: readonly Requirement[]; asked: SubjectsAsked | null; recorded: readonly Recorded[]; viewing: Viewing }): Promise<Map<string, Standing>>;
 };
 
-export type KindRule = CustomerKindRule | AppKindRule;
-
-const checklist: CustomerKindRule = {
-  // Met when staff have ticked it off for the family or student.
-  standings: async ({ recorded }) => new Map(recorded.filter((r) => r.metAt !== null).map((r) => [customerPairKey(r.requirementId, r.subjectQboId), { met: true, words: "Done" }])),
+const checklist: AppKindRule = {
+  // Met when staff have ticked it off for the family or student: a tick is the season's own record of the app's own record.
+  standings: async ({ recorded }) => new Map(recorded.filter((r) => r.metAt !== null).map((r) => [pairKey(r.requirementId, r.subjectId), { met: true, words: "Done" }])),
   nothingYet: () => ({ met: false, words: "Not done yet" }),
   ticked: true,
 };
 
-const payment: CustomerKindRule = {
+const payment: AppKindRule = {
   // Met when invoices carrying its QuickBooks product or service exist for the family or student and none of them is
   // still open (src/lib/money/payment-rule.ts), judged from the figures QuickBooks last gave the family.
-  standings: async ({ requirements, subjectQboIds, viewing }) =>
-    new Map((await paymentStandings(requirements, subjectQboIds, viewing.amounts)).map((s) => [customerPairKey(s.requirementId, s.subjectQboId), s.standing])),
+  standings: async ({ requirements, asked, viewing }) =>
+    new Map((await paymentStandings(requirements, asked, viewing.amounts)).map((s) => [pairKey(s.requirementId, s.subjectId), s.standing])),
   nothingYet: () => NO_INVOICE_YET,
   ticked: false,
 };
@@ -96,7 +80,6 @@ const payment: CustomerKindRule = {
  * src/lib/buyouts/rules.ts). Credit counts as before alongside it. Nothing is ticked by hand: staff correct credit instead.
  */
 const volunteer: AppKindRule = {
-  keyedBy: "app",
   standings: async ({ requirements, asked }) => {
     const [signedUp, confirmed, bought] = await Promise.all([signedUpAmounts(requirements, asked, pairKey), confirmedAmounts(requirements, asked, pairKey),
       buyoutsByRecord(requirements, asked, pairKey)]);
@@ -111,8 +94,8 @@ const volunteer: AppKindRule = {
   ticked: false,
 };
 
-/** Each kind's rule; volunteering's and the form's are asked by the app's own ids, the others by customer (a boundary AGENTS.md lists, Seasons). */
-export const KIND_RULES: { [K in RequirementKind]: (K extends "volunteer" | "form" ? AppKindRule : CustomerKindRule) | null } = {
+/** Each kind's rule, each asked by the app's own ids. */
+export const KIND_RULES: Record<RequirementKind, AppKindRule | null> = {
   checklist,
   form: formRule,  // met when Documenso says the document is completed by the required guardians (§9; src/lib/forms/kind.ts)
   payment,
