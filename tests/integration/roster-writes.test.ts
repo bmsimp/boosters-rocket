@@ -882,6 +882,23 @@ describe("what QuickBooks shows of each record, read before anything is sent, an
     expect(await cached("10")).toMatchObject({ active: true });
   });
 
+  it("a stale answer on a later step whose read again can't be made: says Ana was made inactive and Leo wasn't changed, never that nothing was", async () => {
+    // Leo changed in QuickBooks as the portal sends his (a 5010), and QuickBooks can't be reached for the read after it.
+    stub.beforeUpdate = (c) => { if (c.Id === "12" && c.SyncToken === "0") { c.SyncToken = "1"; stub.dropApi = true; } };
+    const r = await inactivate("10", await stampFor("10"), op);
+    expect(r).toEqual({ changed: true, result: { ok: false, errors: ["Made inactive in QuickBooks: Ana Rivera.",
+      "QuickBooks couldn't be asked what Leo Rivera owes just now, so Leo Rivera wasn't changed. Try again in a few minutes.",
+      "Rivera Family is still active. Press “Make Rivera Family inactive” again to carry on with whoever is still active."] } });
+    expect(JSON.stringify(r)).not.toMatch(/nothing was changed/);
+    stub.dropApi = false; stub.beforeUpdate = null;
+    expect(sent().map((b) => [b.Id, b.SyncToken])).toEqual([["11", "0"], ["12", "0"]]); // never sent again unread
+    expect((await auditsOf("roster.family.deactivate"))[0]!.after).toEqual({ outcome: "stopped", code: "unreachable", made: ["11"], notMade: ["12", "10"] });
+    expect(await cached("11")).toMatchObject({ active: false });
+    expect(await cached("12")).toMatchObject({ active: true });
+    expect(await cached("10")).toMatchObject({ active: true });
+    expect(await queue()).toEqual([]);
+  });
+
   it("a balance read QuickBooks refuses outright says so, without asking to wait, and nothing is queued", async () => {
     stub.customers = stub.customers.filter((c) => c.Id !== "12"); // QuickBooks no longer answers for Leo: a 400
     expect(await offStudent("12")).toEqual({ ok: false, errors: [WRITE_COPY.balanceRefused] });

@@ -129,6 +129,39 @@ describe("a linked student made inactive by the record, with the link's own vers
     expect(await studentRow(leo)).toMatchObject({ active: false });
   });
 
+  /** A press whose send never reaches QuickBooks and gets no answer (QuickBooks didn't make it), with Leo changed in QuickBooks since his link was aligned. */
+  const lostUnmade = async () => {
+    inStub("12").SyncToken = "3"; // a treasurer's edit: the next roster read shows version 3, the link still holds 0
+    stub.onApiRequest = (c) => { if (c.method === "POST") stub.dropApi = true; };
+    expect(await offLeo()).toEqual({ ok: true, queued: true, message: WRITE_COPY.queued });
+    stub.onApiRequest = null; stub.dropApi = false;
+    const [item] = await items();
+    expect(item).toMatchObject({ state: "waiting", sent: true, studentId: leo, request: { op: "deactivate", role: "student", qboId: "12", syncToken: "0" } });
+    expect(inStub("12")).toMatchObject({ Active: true, SyncToken: "3" });
+    stub.calls.length = 0;
+    return item!;
+  };
+
+  it("a lost answer QuickBooks didn't make, with the link's version behind the cache: after the roster read it is settled by the field and sent once more with the version just read", async () => {
+    const item = await lostUnmade();
+    await runWriteQueue(later()); // reads the roster first, which shows Leo active at version 3
+    expect(bodies()).toEqual([{ Id: "12", SyncToken: "3", sparse: true, Active: false }]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "done" });
+    expect(inStub("12")).toMatchObject({ Active: false });
+    expect(await studentRow(leo)).toMatchObject({ active: false });
+    expect((await studentLink("12")).syncedToken).toBe("4");
+  });
+
+  it("the same with a balance arisen meanwhile: nothing sent, and the item is stuck with the balance's code", async () => {
+    const item = await lostUnmade();
+    stub.invoices = [balance("906", "12", 25)];
+    await runWriteQueue(later());
+    expect(posts()).toEqual([]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", lastCode: "open_balance" });
+    expect(inStub("12")).toMatchObject({ Active: true });
+    expect(await studentRow(leo)).toMatchObject({ active: true });
+  });
+
   it("a live read that shows no version: nothing sent, and the words say the answer couldn't be read, not what is owed", async () => {
     await db.update(accountingLink).set({ syncedToken: null, syncedAt: null }).where(and(eq(accountingLink.customerId, "12"), isNotNull(accountingLink.studentId)));
     delete inStub("12").SyncToken;

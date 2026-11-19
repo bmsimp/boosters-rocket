@@ -133,9 +133,10 @@ export type Owed = { ok: true; cents: number; currency: string; active: boolean;
 /**
  * A make-inactive the balance rule stops before anything is sent: its short code, the words for staff (`words`), and,
  * for a balance, the sentence that names who has it alone (`who`: the family action lists these, then says nobody was
- * made inactive), or, for a balance that couldn't be read, the same words.
+ * made inactive), or, for a balance that couldn't be read, the same words; and `alone`, what is true of that customer
+ * alone, for a step of the family action that stops after others went through (never "nothing was changed").
  */
-export type BalanceStop = { code: string; words: string; who: string };
+export type BalanceStop = { code: string; words: string; who: string; alone: string };
 /** The code of a make-inactive stopped, or a waiting one made stuck, because QuickBooks shows a credit on the account. */
 export const CREDIT_BALANCE = "credit_balance";
 /**
@@ -149,10 +150,11 @@ export const CREDIT_BALANCE = "credit_balance";
  * amount only with `showAmounts` (Finance.Balance.Read), and say what to do; slice 9h uses it for a guardian's removal.
  */
 export function balanceStops(owed: Owed, name: string, showAmounts: boolean): BalanceStop | null {
-  if (!owed.ok) { const words = unreadWords(owed.code); return { code: owed.code, words, who: words }; }
+  if (!owed.ok) { const words = unreadWords(owed.code); return { code: owed.code, words, who: words, alone: unreadWordsOf(owed.code, name) }; }
   if (owed.cents === 0) return null;
   const who = owesWords(name, owed, showAmounts);
-  return { code: owed.cents > 0 ? "open_balance" : CREDIT_BALANCE, words: `${who} They weren't made inactive. ${WRITE_COPY.balanceFix}`, who };
+  const words = `${who} They weren't made inactive. ${WRITE_COPY.balanceFix}`;
+  return { code: owed.cents > 0 ? "open_balance" : CREDIT_BALANCE, words, who, alone: words };
 }
 /**
  * What one customer owes now, read live from QuickBooks before it is made inactive (its own Balance, without the
@@ -187,6 +189,24 @@ function unreadWords(code: string): string {
   if (kind === "other_company") return WRITE_COPY.otherCompany;
   if (code === "bad_id") return WRITE_COPY.notSent;
   return kind === "retry" ? WRITE_COPY.balanceUnread : WRITE_COPY.balanceRefused;
+}
+/**
+ * unreadWords() for one customer of the family action, read again after others were made inactive: by the same code, it
+ * says that customer wasn't changed, never that nothing was.
+ */
+function unreadWordsOf(code: string, name: string): string {
+  if (code === "no_balance") return `QuickBooks didn't say what ${name} owes, so ${name} wasn't changed. Check the balance in QuickBooks, then try again.`;
+  const kind = classify(code).kind;
+  if (kind === "not_connected" || kind === "needs_admin" || kind === "other_company") return connectionWordsOf(kind, name);
+  if (code === "bad_id") return `${name} couldn't be sent to QuickBooks, so it wasn't changed.`;
+  return kind === "retry" ? `QuickBooks couldn't be asked what ${name} owes just now, so ${name} wasn't changed. Try again in a few minutes.`
+    : `QuickBooks wouldn't say what ${name} owes, so ${name} wasn't changed. Check the customer in QuickBooks; waiting won't change this answer.`;
+}
+/** The connection's own words (WRITE_COPY's), for one customer of the family action: that customer wasn't changed. */
+function connectionWordsOf(kind: "not_connected" | "needs_admin" | "other_company", name: string): string {
+  if (kind === "not_connected") return `QuickBooks isn't connected, so ${name} wasn't changed. An Admin can connect it under QuickBooks.`;
+  if (kind === "needs_admin") return `QuickBooks needs to be connected again, so ${name} wasn't changed. An Admin can do that under QuickBooks.`;
+  return `QuickBooks is connected to a different company from the one this roster was read from, so ${name} wasn't changed. An Admin can sort that out under QuickBooks.`;
 }
 
 const taken = (name: string, offer: string): WriteResult => ({ ok: false, offer,
@@ -950,8 +970,9 @@ type DeactivateHow = { mayWait: boolean; name: string; showAmounts: boolean; act
  * the balance was.
  */
 const unreadAnswer = (name: string): DeactivateTry => {
-  const words = `QuickBooks' answer about ${name} couldn't be read (it didn't say which version it holds), so nothing was changed. Try again in a few minutes.`;
-  return { is: "stopped", stop: { code: "bad_answer", words, who: words } };
+  const why = `QuickBooks' answer about ${name} couldn't be read (it didn't say which version it holds)`;
+  const words = `${why}, so nothing was changed. Try again in a few minutes.`;
+  return { is: "stopped", stop: { code: "bad_answer", words, who: words, alone: `${why}, so ${name} wasn't changed. Try again in a few minutes.` } };
 };
 
 /**
@@ -1301,9 +1322,7 @@ async function stepStopped(code: string, step: FamilyStep, realmId: string, o: W
         return { words: `The portal can't tell whether QuickBooks made ${name} inactive: its answer didn't arrive. The roster is read again within a few minutes to see, and the portal finishes it then without sending it twice.`, maybe: true, changed: true };
       }
       return { words: `QuickBooks couldn't take that just now, so ${name} wasn't changed. Try again in a few minutes.`, maybe: false, changed: false };
-    case "not_connected": return { words: `${name} wasn't changed. ${WRITE_COPY.notConnected}`, maybe: false, changed: false };
-    case "needs_admin": return { words: `${name} wasn't changed. ${WRITE_COPY.needsAdmin}`, maybe: false, changed: false };
-    case "other_company": return { words: `${name} wasn't changed. ${WRITE_COPY.otherCompany}`, maybe: false, changed: false };
+    case "not_connected": case "needs_admin": case "other_company": return { words: connectionWordsOf(failure.kind, name), maybe: false, changed: false };
     default:
       return { words: e.code === "bad_id" ? `${name} couldn't be sent to QuickBooks, so it wasn't changed.` : `QuickBooks wouldn't make ${name} inactive, so it wasn't changed. Check it in QuickBooks.`, maybe: false, changed: false };
   }
@@ -1478,7 +1497,8 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
         break;
       }
       case "stopped":
-        return stop(i, t.stop.code, { words: t.stop.words, maybe: false, changed: true });
+        // Said of this step alone: whoever was made inactive before it was (the lead's decision 1 for slice 9g's review).
+        return stop(i, t.stop.code, { words: t.stop.alone, maybe: false, changed: true });
       case "stale_again":
         return stop(i, "fault_5010", await stepStopped("fault_5010", { ...step, write: t.write }, p.realmId, o));
       case "failed":

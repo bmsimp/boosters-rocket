@@ -91,7 +91,8 @@ async function markDone(item: Item, how: "sent" | "found", resultQboId: string |
 /**
  * One try of one item. One that QuickBooks may already have made (`sent`) is first looked for in the cache, which a
  * refresh has read since its last try: there, it is done; an update whose record moved on otherwise is stuck, nothing
- * overwritten; otherwise it is sent again. What QuickBooks refuses now makes it stuck; what may still go through waits
+ * overwritten (but a rename or move saved first, and a linked make-inactive, settled by the field); otherwise it is sent
+ * again. What QuickBooks refuses now makes it stuck; what may still go through waits
  * for its next try, or is stuck once it is old or tried often (afterFailedTry).
  */
 async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise<Step> {
@@ -134,6 +135,10 @@ function savedStep(t: SavedTry): Step {
 async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt: Date | null): Promise<Step> {
   const saved = (readFirst: "moved_on" | null) => trySavedItem(item, w as Extract<RosterWrite, { op: "rename" | "create" | "move" }>,
     { by: "worker", readFirst, linkedBy: item.askedBy, actor: WORKER_ACTOR, ip: null, now }).then(savedStep);
+  // A linked make-inactive held as maybe sent whose cache row, still active, shows another version than it was sent with
+  // (the link's own, which no roster read moves on): settled by the field, the Active flag read live, as a rename or a
+  // move saved first is (the lead's decision 2 for slice 9g), and sent at most once more, with the version just read.
+  let byTheField = false;
   if (item.sent) {
     if (!refreshedAt || refreshedAt <= item.lastTriedAt) {
       // No roster read since the last try: leave it for the next wake, when one will have run.
@@ -147,7 +152,8 @@ async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt:
     // 3 for slices 9e and 9f): read live and compared with the item's before-value, it is kept refused when the name, or
     // the family QuickBooks has the student under, changed, and sent once otherwise.
     if (seen.is === "stuck" && seen.code === "moved_on" && (w.op === "rename" || w.op === "move") && isSavedFirst(item)) return saved("moved_on");
-    if (seen.is === "stuck") return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
+    byTheField = seen.is === "stuck" && seen.code === "moved_on" && isLinkedDeactivate(item);
+    if (seen.is === "stuck" && !byTheField) return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
     // A create QuickBooks answered with a customer, or one a read found made (`result_qbo_id`, kept when it was held or
     // its finish failed), that isn't there as sent now: QuickBooks made something, so it is never sent again, whatever
     // became of its finish. Staff look at it in QuickBooks.
@@ -158,8 +164,9 @@ async function tryRosterItem(item: Item, w: RosterWrite, now: Date, refreshedAt:
     // again first, by the one rule (balanceStops()). Any balance makes the item stuck (`open_balance`, or
     // `credit_balance` for a credit), and nothing is sent; one QuickBooks shows inactive already is found made. A read
     // that may go through later waits for the next try, as a send would; one that won't makes it stuck. A stale answer
-    // is settled by the Active flag (tryDeactivate(), stage 3's slice 9g), never simply stuck.
-    const t = await tryDeactivate(w, item.realmId, { mayWait: true, name: "", showAmounts: false, actor: WORKER_ACTOR, ip: null });
+    // is settled by the Active flag (tryDeactivate(), stage 3's slice 9g), never simply stuck. One settled by the field
+    // (`byTheField`) carries no version of its own, so it is sent with the one its read shows (`checked`).
+    const t = await tryDeactivate(byTheField ?{ ...w, syncToken: "" } : w, item.realmId, { mayWait: true, name: "", showAmounts: false, actor: WORKER_ACTOR, ip: null });
     switch (t.is) {
       case "inactive_there": return finishFound(item, w, w.qboId, now);
       case "stopped": {
