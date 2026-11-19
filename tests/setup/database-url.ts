@@ -108,7 +108,7 @@ export function adminDatabaseUrl(runUrl?: string): string {
  * scratch databases of these purposes that its tests made and left behind, and leaves alone one of the same name that
  * it did not make.
  */
-export const SCRATCH_PURPOSES = ["migrate_script", "migrate_parents", "migrate_seasons", "migrate_shifts", "migrate_forms", "migrate_buyouts", "migrate_money", "migrate_queue", "migrate_session", "migrate_guardian", "migrate_synced", "migrate_bare", "migrate_kept", "migrate_upgrade", "migrate_refused", "restore", "workers"] as const;
+export const SCRATCH_PURPOSES = ["migrate_script", "migrate_parents", "migrate_seasons", "migrate_shifts", "migrate_forms", "migrate_buyouts", "migrate_money", "migrate_queue", "migrate_session", "migrate_guardian", "migrate_synced", "migrate_moves", "migrate_bare", "migrate_kept", "migrate_upgrade", "migrate_refused", "restore", "workers"] as const;
 export type ScratchPurpose = (typeof SCRATCH_PURPOSES)[number];
 
 /**
