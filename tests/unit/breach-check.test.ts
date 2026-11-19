@@ -60,6 +60,11 @@ afterEach(() => {
   expect(logged).toEqual([]);
 });
 
+/** Each request the stub received, as the four things that must be exactly so. */
+const asked = () => received.map((r) => [r.method, r.url, r.headers["add-padding"], r.body]);
+/** What `n` checks must each have sent: one GET of the prefix with the padding header and no body, nothing else. */
+const rangeAsks = (n: number) => Array.from({ length: n }, () => ["GET", `/range/${PREFIX}`, "true", ""]);
+
 /** What leaves the server and what comes back must hold nothing of the password but the hash's first five characters. */
 function expectNothingOfThePassword(...things: unknown[]) {
   const text = JSON.stringify(things);
@@ -98,7 +103,7 @@ describe("the breach check", () => {
     // The service writes hashes in capitals; one in small letters is the same hash.
     answerWith(200, rangeOf([[SUFFIX.toLowerCase(), 2]]));
     expect(await checkBreach(PASSWORD)).toEqual({ outcome: "found" });
-    expect(received.map((r) => r.url)).toEqual([`/range/${PREFIX}`, `/range/${PREFIX}`, `/range/${PREFIX}`]);
+    expect(asked()).toEqual(rangeAsks(3));
     expectNothingOfThePassword(received);
   });
 
@@ -109,13 +114,14 @@ describe("the breach check", () => {
       expect(result, String(status)).toEqual({ outcome: "not_checked", why: "bad_answer" });
       expectNothingOfThePassword(result);
     }
-    expect(received).toHaveLength(5);
+    expect(asked()).toEqual(rangeAsks(5));
   });
 
   it("could not check when the service is too slow", async () => {
     answer = (_req, res) => { held.push(res); }; // never answers while the test runs
     const result = await checkBreach(PASSWORD, { timeoutMs: 200 });
     expect(result).toEqual({ outcome: "not_checked", why: "timeout" });
+    expect(asked()).toEqual(rangeAsks(1));
     expectNothingOfThePassword(result, received);
   });
 
@@ -130,7 +136,7 @@ describe("the breach check", () => {
     where.range = `${base}/range/`;
     answerWith(302, "", { location: `${base}/elsewhere/` });
     expect(await checkBreach(PASSWORD)).toEqual({ outcome: "not_checked", why: "unreachable" });
-    expect(received.map((r) => r.url)).toEqual([`/range/${PREFIX}`]);
+    expect(asked()).toEqual(rangeAsks(1));
   });
 
   it("could not check when the answer is not a range answer, and never reads a half-understood one as not found", async () => {
@@ -155,6 +161,6 @@ describe("the breach check", () => {
       expect(result, body.slice(0, 60)).toEqual({ outcome: "not_checked", why: "bad_answer" });
       expectNothingOfThePassword(result);
     }
-    expect(received).toHaveLength(odd.length);
+    expect(asked()).toEqual(rangeAsks(odd.length));
   });
 });
