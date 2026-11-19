@@ -189,6 +189,10 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.
   With this installation's own proxy it is `x-forwarded-for`.
+- **"Needs attention"**, with "Welcome emails are waiting because mail is failing: ...". The last welcome email (or
+  link to choose a password) the worker tried to send failed, so until one goes it tries one person a minute instead of
+  five, and the people counted wait their turn. Mend the mail first: the [Outgoing mail](#outgoing-mail) line, and
+  [outgoing mail](mail.md). The first welcome that goes clears it, and the rest go out five a minute again.
 
 ## Password breach check
 

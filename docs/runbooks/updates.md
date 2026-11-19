@@ -62,6 +62,25 @@ if you use this installation's proxy.
    ([Health page warnings](health-warnings.md) for any that doesn't).
 3. Open the portal as a parent would (a test family): Home, Payments, Forms.
 
+## The update that brings password sign-in
+
+Up to this release, parents signed in with a code the portal emailed them. From it, they sign in with their email
+address and a password they choose from a link the portal emails them (and on a phone or computer the portal doesn't
+know yet, a code too). After the update:
+
+1. Parents who are signed in now stay signed in. Everyone else needs a password, and nobody has one yet.
+2. Sign in as an Admin and open **Settings**, **Parent sign-ins**. With parent sign-ins and welcome emails both on
+   (welcome emails need sign-ins on first), the section **Passwords not chosen yet** counts everyone who can sign in and
+   has no password, and shows the email they will get. Press **Email a set-up link to everyone who can sign in and
+   hasn't chosen a password** once.
+3. Each person counted gets an email with a link to choose their password ("Choose your password for" the club). It
+   works once, for 7 days. Someone never welcomed gets the welcome instead, with the same kind of link.
+4. They go out five each time the worker wakes, and it wakes about once a minute: 300 people take about an hour, and
+   500 about an hour and 40 minutes. While mail is failing it tries one a minute; Health's parent sign-ins line says so.
+5. Meanwhile, and after a link runs out, a parent can always ask for a new link themselves at `/sign-in/password`
+   ("Set up or reset my password" on the sign-in page), at the Standard level every club has until a later release
+   offers Strict.
+
 ## When the start stops for a backup
 
 A new version often has changes to make to the portal's database. Before the `migrate` step makes them to a database

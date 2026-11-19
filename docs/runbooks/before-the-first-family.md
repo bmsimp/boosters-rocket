@@ -501,10 +501,13 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    password and has no link to choose one that still works. A pilot guardian of part 7 who chose a password isn't
    counted, and nor is one whose link from part 7 still works. Read the count, then **Email a set-up link to everyone
    who can sign in and hasn't chosen a password**.
-   **Pass:** the answer says how many are queued, and they go out a few each minute: someone welcomed before gets an
-   email saying the portal now signs parents in with a password, with the link; anyone never welcomed gets the welcome.
-   The section is gone once everyone queued has been emailed, and comes back only for someone whose link ran out (after
-   7 days) unused: press again for them when you choose. **If not:** Health's mail line says why sending failed.
+   The section shows the email it sends, beside the button.
+   **Pass:** the answer says how many are queued, and they go out a few each minute: someone welcomed before gets the
+   email "Choose your password for" the club, with the link; anyone never welcomed gets the welcome. The section goes
+   away as soon as you press, since everyone it counted is then waiting for their email, and it shows no progress: the
+   audit log's `parent.welcome.sent` rows are the emails that went. It comes back only for someone whose link ran out
+   (after 7 days) unused: press again for them when you choose. **If not:** Health's mail line says why sending failed,
+   and while it fails Health's parent sign-ins line says welcome emails are waiting.
 
 ## Choices to confirm
 

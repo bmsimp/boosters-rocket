@@ -6,6 +6,7 @@ import { SwitchButton } from "./forms";
 import { StateWords } from "@/app/components/state-words";
 import { BackToSettings } from "../back-to-settings";
 import { oweSetupMailsAction, setRequireStudentsAction } from "./actions";
+import { sampleChoosePassword } from "@/lib/parents/welcome";
 
 export const metadata = { title: "Parent sign-ins" };
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ const n = (count: number, one: string, many: string) => `${count} ${count === 1 
 export default async function ParentSettingsPage() {
   await requireStaffPage("Settings.Parents.ReadWrite");
   const [s, counts, students, missing, usable, closedEarlier, noPassword] = await Promise.all([getParentSettings(), signinCounts(), studentsEffect(), missingForSignins(), studentsRuleUsable(), closedForNoStudents(), setupMailsToOwe()]);
+  // The press's mail, as the worker writes it, for the Admin to read before pressing.
+  const sample = s.signin && s.welcome && noPassword > 0 ? await sampleChoosePassword("parent@example.org") : null;
   return (
     <main className="wrap single">
       <BackToSettings />
@@ -36,9 +39,12 @@ export default async function ParentSettingsPage() {
 
       {/* People welcomed before parents signed in with a password have none, and nothing else emails them a link
           (the sign-in release, slice SI-4). Shown only while an email can go and there is anyone to email. */}
-      {s.signin && s.welcome && noPassword > 0 && (
+      {sample && (
         <section className="box" aria-labelledby="ps-setup-h"><h2 id="ps-setup-h">Passwords not chosen yet</h2>
-          <p>{`${n(noPassword, "person", "people")} can sign in and ${noPassword === 1 ? "hasn't" : "haven't"} chosen a password, with no link to choose one that still works (someone emailed a link is counted again only once it runs out unused). Each can be emailed a link: anyone never welcomed gets the welcome, and anyone welcomed before gets an email saying the portal now signs parents in with a password. A phone or computer they are signed in on now stays signed in. They go out a few each minute.`}</p>
+          <p>{`${n(noPassword, "person", "people")} can sign in and ${noPassword === 1 ? "hasn't" : "haven't"} chosen a password, with no link to choose one that still works (someone emailed a link is counted again only once it runs out unused). Each can be emailed a link: anyone never welcomed gets the welcome, and anyone welcomed before gets the email below. A phone or computer they are signed in on now stays signed in. They go out a few each minute.`}</p>
+          <h3>The email to someone welcomed before</h3>
+          <p>Subject: {sample.subject}</p>
+          <pre className="email-sample">{sample.text}</pre>
           <SwitchButton label={`Email a set-up link to everyone who can sign in and hasn't chosen a password (${noPassword})`} pendingLabel="Queueing…" act={oweSetupMailsAction} />
         </section>
       )}

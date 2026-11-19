@@ -1,8 +1,9 @@
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun, requirement, season, seasonStep } from "@/lib/db/schema";
+import { auditLog, jobRun, parent, requirement, season, seasonStep } from "@/lib/db/schema";
 import { lastWake } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
+import { failedLast, readMark, WELCOME_MARK } from "@/lib/jobs/marks";
 import { connectionView } from "@/lib/quickbooks/connection";
 import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { QUICKBOOKS_USE, QUICKBOOKS_WRITE_ACTION } from "@/lib/quickbooks/what-it-does";
@@ -233,10 +234,20 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   const addressNote = !noAddresses ? null : env.CLIENT_IP_HEADER === "none"
     ? "Visitors' addresses aren't recorded, because CLIENT_IP_HEADER is none: the audit log shows no address, and sign-ins have no limit per address."
     : `The latest sign-ins have no address: the proxy in front of the portal doesn't send the header ${env.CLIENT_IP_HEADER}. Set CLIENT_IP_HEADER in the server's env file to the header it does send (.env.example lists them).`;
+  // Welcome emails waiting because mail is failing: the last welcome the worker tried to send failed, and while that is
+  // so it tries one person a wake, not five (sendOwedWelcomes(), src/lib/parents/welcome.ts; its mark, WELCOME_MARK).
+  const [welcomeMark, owedRows] = await Promise.all([readMark(WELCOME_MARK),
+    db.select({ id: parent.id }).from(parent).where(and(eq(parent.welcomeOwed, true), eq(parent.blocked, false)))]);
+  const owed = owedRows.length;
+  const welcomesNote = parents.signin && parents.welcome && failedLast(welcomeMark) && owed > 0
+    ? `Welcome emails are waiting because mail is failing: ${owed === 1 ? "1 person is" : `${owed} people are`} owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five.`
+    : null;
+  const headerMissing = addressNote !== null && env.CLIENT_IP_HEADER !== "none";
+  const parentsAttention = headerMissing || welcomesNote !== null;
   lines.push(parents.signin
-    ? addressNote && env.CLIENT_IP_HEADER !== "none"
-      ? { key: "parents", title: "Parent sign-ins", state: "attention", word: "Needs attention", says: "On. Parents sign in with their email and password, and on a device the portal doesn't know yet, a code sent to their email.", times: [], notes: [addressNote], fix: null }
-      : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with their email and password, and on a device the portal doesn't know yet, a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
+    ? { key: "parents", title: "Parent sign-ins", state: parentsAttention ? "attention" : "ok", word: parentsAttention ? "Needs attention" : "On",
+      says: "On. Parents sign in with their email and password, and on a device the portal doesn't know yet, a code sent to their email.", times: [],
+      notes: [addressNote, welcomesNote].filter((x): x is string => x !== null), fix: welcomesNote ? mailFix : null }
     : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
       says: "Off. No parent can sign in until an Admin switches them on." });
 

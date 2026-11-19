@@ -286,6 +286,12 @@ describe("the Parent sign-ins settings", () => {
     expect(html).toContain(section);
     expect(html).toContain("1 person can sign in and hasn't chosen a password, with no link to choose one that still works");
     expect(html).toContain("Email a set-up link to everyone who can sign in and hasn't chosen a password (1)");
+    // Beside the button, the mail it sends, as the worker writes it, with the welcome's sample link: no token's shape.
+    expect(html).toContain("Choose your password for ");
+    expect(html).toContain("with this email address and a password. To choose your password, open this link:");
+    expect(html).toContain("/sign-in/set-up/(a link made for each person)");
+    expect(html).not.toMatch(/\/sign-in\/set-up\/[A-Za-z0-9_-]{43}/);
+    expect(await db.select().from(parentSigninToken)).toEqual([]);
     revalidated.count = 0;
     expect(await oweSetupMailsAction()).toEqual({ ok: true, message: "1 person is queued for a link to choose a password. They go out a few each minute." });
     expect(revalidated.count).toBe(1);

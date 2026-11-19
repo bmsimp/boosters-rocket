@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
-  passwordSetupMessage, passwordResetMessage, signinChangedMessage } from "@/lib/mail/messages";
+  passwordSetupMessage, passwordResetMessage, choosePasswordMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
@@ -40,7 +40,7 @@ describe("mail messages", () => {
     expect(m.html).toContain("#5b2a86");
   });
   it("the welcome names the club and the address, says how to sign in, and gives the contact when there is one", () => {
-    for (const link of [null, { url: "https://portal.example.org/sign-in/set-up/AbC-123_xyz", life: "7 days", strict: false }]) {
+    for (const link of [null, { url: "https://portal.example.org/sign-in/set-up/AbC-123_xyz", life: "7 days", strict: false }, { earlier: true as const, strict: false }]) {
       const m = welcomeMessage({ clubName: "FZN Band Boosters", color: "#005102" }, "ana@example.com", { appUrl: "https://portal.example.org", contact: "webmaster@fznband.org", link });
       expect(m.to).toBe("ana@example.com");
       expect(m.subject).toBe("You can now sign in to FZN Band Boosters");
@@ -52,7 +52,8 @@ describe("mail messages", () => {
     }
   });
   it("the welcome holds no family details, with a link or without", () => {
-    for (const link of [null, { url: "https://p.example/sign-in/set-up/AbC-123_xyz", life: "7 days", strict: false }, { url: "https://p.example/sign-in/set-up/AbC-123_xyz", life: "7 days", strict: true }]) {
+    for (const link of [null, { url: "https://p.example/sign-in/set-up/AbC-123_xyz", life: "7 days", strict: false }, { url: "https://p.example/sign-in/set-up/AbC-123_xyz", life: "7 days", strict: true },
+      { earlier: true as const, strict: false }, { earlier: true as const, strict: true }]) {
       const m = welcomeMessage({ clubName: "C", color: "#005102" }, "a@example.com", { appUrl: "https://p.example", contact: null, link });
       expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|guardian|student/i); // the inline CSS property is not wording
     }
@@ -63,16 +64,18 @@ describe("mail messages", () => {
     const appUrl = "https://portal.example.org";
     const url = "https://portal.example.org/sign-in/set-up/AbC-123_xyz";
     const standard = { url, life: "7 days", strict: false }, strict = { url, life: "7 days", strict: true };
-    /** The sentences of the HTML part, as text: every paragraph, unescaped. */
+    /** The sentences of the HTML part, as text: every paragraph, unescaped, a link's paragraph as its address. */
     const htmlLines = (h: string) => [...h.matchAll(/<p style="margin:0 0 16px">([\s\S]*?)<\/p>/g)]
-      .map((m) => m[1]!.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
+      .map((m) => m[1]!.replace(/^<a href="([^"]*)">\1<\/a>$/, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"));
     const textLines = (t: string) => t.trim().split("\n\n");
     const messages = [
       ["the welcome at Standard", welcomeMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: standard })],
       ["the welcome at Strict", welcomeMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: strict })],
       ["the welcome with no link", welcomeMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: null })],
-      ["the changed sign-in at Standard", signinChangedMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: standard })],
-      ["the changed sign-in at Strict", signinChangedMessage(b, "ana@example.com", { appUrl, contact: null, link: strict })],
+      ["the mail to choose a password at Standard", choosePasswordMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: standard })],
+      ["the mail to choose a password at Strict", choosePasswordMessage(b, "ana@example.com", { appUrl, contact: null, link: strict })],
+      ["the welcome with the link sent earlier, at Standard", welcomeMessage(b, "ana@example.com", { appUrl, contact: "boosters@example.org", link: { earlier: true, strict: false } })],
+      ["the welcome with the link sent earlier, at Strict", welcomeMessage(b, "ana@example.com", { appUrl, contact: null, link: { earlier: true, strict: true } })],
     ] as const;
 
     it.each(messages)("%s: the text and the HTML hold the same sentences", (_name, m) => {
@@ -105,16 +108,35 @@ describe("mail messages", () => {
       expect(m.text).not.toContain("/sign-in/set-up/");
       expect(m.text.match(/https?:\/\/[^\s<"]+/g)).toEqual(["https://portal.example.org/sign-in"]);
     });
-    it("the mail for those welcomed before says what changed, that a device signed in now stays so, with its own subject", () => {
+    it("the mail for those welcomed before says how they sign in, true whenever they were welcomed, and that a device signed in now stays so", () => {
       const m = messages[3][1];
-      expect(m.subject).toBe("How you sign in to FZN <Band> Boosters has changed");
-      expect(m.text).toContain("now signs you in with a password, instead of a code alone");
+      expect(m.subject).toBe("Choose your password for FZN <Band> Boosters");
+      expect(m.text).toContain("You sign in to the FZN <Band> Boosters portal at https://portal.example.org with this email address and a password. To choose your password, open this link:");
+      // Nothing about a change, or a code: it goes to someone whose welcome's link ran out unused, too.
+      expect(m.text).not.toMatch(/changed|code/);
       expect(m.text.split("\n")).toContain(url);
       expect(m.text).toContain("The link works once, for 7 days.");
       expect(m.text).toContain("you can ask for a new one at https://portal.example.org/sign-in/password");
-      expect(m.text).toContain("If you're signed in to the portal on a phone or computer now, it stays signed in.");
+      expect(m.text).toContain("If you're signed in to the portal on a phone or computer now, it stays signed in, and you'll need your password the next time you sign in.");
       expect(m.text).toContain("Questions? Write to boosters@example.org.");
       expect(messages[4][1].text).not.toContain("Questions?");
+    });
+    it("a welcome to someone holding a link that still works carries no link, says it still works, and where to ask for another", () => {
+      const m = messages[5][1];
+      expect(m.subject).toBe("You can now sign in to FZN <Band> Boosters");
+      expect(m.text).toContain("You can now sign in to FZN <Band> Boosters at https://portal.example.org with this email address.");
+      expect(m.text).toContain("A link to choose your password was emailed to you earlier, and it still works.");
+      expect(m.text).toContain("If you can't find it, you can ask for a new one at https://portal.example.org/sign-in/password");
+      expect(m.text).not.toContain("/sign-in/set-up/");
+      expect(m.html).not.toMatch(/<a\b/);
+      const strictOne = messages[6][1];
+      expect(strictOne.text).toContain("If you can't find it, please ask the club to send you a new one.");
+      expect(strictOne.text).not.toContain("/sign-in/password");
+    });
+    it.each([messages[0], messages[1], messages[3], messages[4]])("%s: the link is alone on its line in the text, and an anchor of itself alone in its paragraph in the HTML", (_name, m) => {
+      expect(m.text.split("\n").filter((l) => l.includes(url))).toEqual([url]);
+      expect(m.html).toContain(`<p style="margin:0 0 16px"><a href="${url}">${url}</a></p>`);
+      expect(m.html.split(url)).toHaveLength(3); // the anchor's href and its text, and nowhere else
     });
   });
   it("puts the confirm link only in the confirm message, and none in the notice", () => {
@@ -155,7 +177,7 @@ describe("mail messages", () => {
       expect(m.to).toBe("ana@example.com");
       expect(m.subject).toBe(subject);
       expect(m.text.split("\n")).toContain(link);
-      expect(m.html).toContain(`<p style="margin:0 0 16px">${link}</p>`);
+      expect(m.html).toContain(`<p style="margin:0 0 16px"><a href="${link}">${link}</a></p>`);
       for (const part of [m.text, m.html]) expect(part).toContain(`The link works once, for ${life}.`);
     });
     it("says the club never asks for a password by email or phone, and what to do if the reader didn't ask", () => {

@@ -25,7 +25,7 @@ import { BACKUP_KEY } from "@/lib/health/backup";
 import { BUILD_VERSION } from "@/lib/health/version";
 import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
-import { BUYOUT_CHECK_MARK, markJob, readMark, REMINDERS_MARK } from "@/lib/jobs/marks";
+import { BUYOUT_CHECK_MARK, markJob, readMark, REMINDERS_MARK, WELCOME_MARK } from "@/lib/jobs/marks";
 import { BUYOUT_CHECK_LATE_MS } from "@/lib/health/job-lines";
 import { patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
@@ -33,7 +33,7 @@ import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
 import { BREACH_MARK, markBreachCheck, readBreachMark } from "@/lib/parents/breach-mark";
-import { resetDb, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { resetDb, seedParent, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -323,6 +323,24 @@ describe("the health page", () => {
       expect(chosen).toMatchObject({ state: "ok", word: "On" });
       expect(chosen.notes.join(" ")).toMatch(/addresses aren't recorded, because CLIENT_IP_HEADER is none/);
     } finally { env.CLIENT_IP_HEADER = setting; }
+  });
+
+  it("says when welcome emails are waiting because mail is failing, and stops once a welcome goes", async () => {
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    await seedParent({ name: "Owed One", welcomeOwed: true });
+    const parents = async () => line(await healthReport(NOW), "parents");
+    expect(await parents()).toMatchObject({ state: "ok", notes: [] });
+    // The worker's last welcome failed: while it is so, it tries one person a wake (sendOwedWelcomes()).
+    await markJob(WELCOME_MARK, { counts: { sent: 0, linkNotInPlace: 0 }, failed: 1 });
+    const waiting = await parents();
+    expect(waiting).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" } });
+    expect(waiting.notes).toEqual(["Welcome emails are waiting because mail is failing: 1 person is owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five."]);
+    // Nobody owed, or welcome emails off: nothing is waiting.
+    await seedParentSettings({ ...SIGNINS_ON, welcome: false });
+    expect(await parents()).toMatchObject({ state: "ok", notes: [] });
+    await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    await markJob(WELCOME_MARK, { counts: { sent: 1, linkNotInPlace: 0 }, failed: 0 });
+    expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
   });
 
   it("says how the password breach check stands: not used yet, working, and a failure the latest word, with why", async () => {

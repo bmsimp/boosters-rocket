@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { X509Certificate } from "node:crypto";
+import { X509Certificate, randomBytes } from "node:crypto";
+import { welcomeMessage } from "@/lib/mail/messages";
 import { jwtVerify } from "jose";
 import { generateCertificate } from "@/lib/auth/certificate-crypto";
 import { createGraphSender, clearGraphTokenCache } from "@/lib/mail/graph";
@@ -74,6 +75,19 @@ describe("Graph sender", () => {
     expect(sent.message.attachments).toEqual([{ "@odata.type": "#microsoft.graph.fileAttachment", name: "volunteer-shift.ics",
       contentType: "text/calendar; charset=utf-8; method=PUBLISH", contentBytes: Buffer.from(calendar, "utf8").toString("base64") }]);
     expect(sent.saveToSentItems).toBe(false);
+  });
+
+  // Graph sends the HTML alone (Exchange makes the plain part from it), so a link must be an anchor there: its text and
+  // its href both the whole address, alone in its paragraph (the sign-in release, slice SI-4).
+  it("sends a mail's link as an anchor of itself, once, in the HTML it sends", async () => {
+    reply = okGraph;
+    const { send } = await sender();
+    const token = randomBytes(32).toString("base64url");
+    const url = `https://portal.example.org/sign-in/set-up/${token}`;
+    await send(welcomeMessage({ clubName: "FZN Boosters", color: "#005102" }, "ana@example.com", { appUrl: "https://portal.example.org", contact: null, link: { url, life: "7 days", strict: false } }));
+    const content = JSON.parse(seen.find((s) => s.url.endsWith("/sendMail"))!.body).message.body.content as string;
+    expect(content.split(`<p style="margin:0 0 16px"><a href="${url}">${url}</a></p>`)).toHaveLength(2);
+    expect(content.split(token)).toHaveLength(3); // the anchor's href and its text, and nowhere else
   });
 
   it("reuses the token for the next message", async () => {

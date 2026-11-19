@@ -69,6 +69,21 @@ export async function seedCode(parentId: string, o: { code?: string; usedAt?: Da
 export const mailText = (raw: string): string =>
   raw.replace(/=\r?\n/g, "").replace(/=([0-9A-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 
+/**
+ * One part of a sink message (`sink.messages[i].raw`), its text or its HTML, decoded as the mailer encoded it
+ * (quoted-printable, base64 or as it is), with its own line breaks kept as they are in the message.
+ */
+export function mailPart(raw: string, kind: "plain" | "html"): string {
+  const at = raw.indexOf(`Content-Type: text/${kind}`);
+  if (at < 0) throw new Error(`the message has no text/${kind} part`);
+  const part = raw.slice(at);
+  const head = part.slice(0, part.indexOf("\r\n\r\n"));
+  const end = part.indexOf("\r\n--", head.length);
+  const body = part.slice(head.length + 4, end < 0 ? undefined : end);
+  if (/Content-Transfer-Encoding: base64/i.test(head)) return Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8");
+  return /Content-Transfer-Encoding: quoted-printable/i.test(head) ? mailText(body) : body;
+}
+
 /** The set-up tokens a sink message carries (its text and HTML parts both hold the link): each once. */
 export const setupTokensIn = (raw: string): string[] =>
   [...new Set([...mailText(raw).matchAll(/\/sign-in\/set-up\/([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g)].map((m) => m[1]!))];

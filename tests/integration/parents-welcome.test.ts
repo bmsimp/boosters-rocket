@@ -20,6 +20,7 @@ import { runDueJobs } from "@/lib/jobs/runner";
 import { blockPerson, unblockPerson } from "@/lib/parents/people";
 import * as linkDelivery from "@/lib/parents/link-delivery";
 import { removeGuardian } from "@/lib/parents/guardians";
+import { askForPasswordLink } from "@/lib/parents/password-request";
 import { hashLinkToken, holdSigninLink, linkVerdict } from "@/lib/parents/signin-links";
 import { oweSetupMails, setSignins, setupMailsToOwe, setWelcome, SETUP_MAILS_NEED_SWITCHES } from "@/lib/parents/switches";
 import { sendOwedWelcomes, resendWelcome, WELCOME_RETRY_MS } from "@/lib/parents/welcome";
@@ -162,15 +163,41 @@ describe("welcome emails", () => {
     expect(sink.messages).toEqual([]);
   });
 
-  it("a failed send is recorded, tried again only after 15 minutes, and holds nobody else up", async () => {
+  it("a failed send is recorded, ends the wake's batch, and is tried again only after 15 minutes", async () => {
     await seedParentSettings({ welcome: true });
-    const bad = await person("Bounce", { welcomeOwed: true }); await person("Fine", { welcomeOwed: true });
+    const bad = await person("Bounce", { welcomeOwed: true }); const fine = await person("Fine", { welcomeOwed: true });
     sink.rejectRecipient = bad.email; // the sink refuses this one address
-    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 1 });
+    expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 1 }); // the rest wait for the next wake
     expect((await audits("parent.welcome.failed"))[0]).toMatchObject({ targetId: bad.id });
-    expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 }); // too soon to retry
+    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 }); // the next one; Bounce is too soon to retry
+    expect(sink.messages.map((m) => m.to[0])).toEqual([fine.email]);
     sink.rejectRecipient = null;
     expect(await sendOwedWelcomes(new Date(Date.now() + WELCOME_RETRY_MS + 1000))).toEqual({ sent: 1, failed: 0 });
+  });
+
+  it("while mail is failing, a wake tries one person, not five, and the first that goes brings back the batch of five", async () => {
+    await seedParentSettings({ welcome: true });
+    for (let i = 1; i <= 10; i++) await person(`Parent ${i}`, { welcomeOwed: true });
+    const outage = { on: true };
+    const real = sendModule.sendMail;
+    const tried: string[] = [];
+    const spy = vi.spyOn(sendModule, "sendMail").mockImplementation(async (m, o) => {
+      tried.push(m.to);
+      return outage.on ? { ok: false as const, error: "The mail server didn't accept the message (421)." } : real(m, o);
+    });
+    try {
+      expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 1 }); // the first failure ends the batch
+      expect(tried).toHaveLength(1);
+      for (let wake = 2; wake <= 4; wake++) {
+        expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 1 });
+        expect(tried).toHaveLength(wake); // one person a wake
+      }
+      outage.on = false;
+      expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 }); // still one, and it goes
+      expect(await sendOwedWelcomes()).toEqual({ sent: 5, failed: 0 }); // the batch of five again
+      expect(tried).toHaveLength(10);
+    } finally { spy.mockRestore(); }
+    expect(await owedNames()).toHaveLength(4); // the four whose sends failed, tried again after their back-off
   });
 
   it("staff can resend to one person, which never needs the welcome switch", async () => {
@@ -335,17 +362,81 @@ describe("welcome emails", () => {
     }
   });
 
-  it("a failed send leaves the person owed, writes why the link wasn't put in place, and leaves the link they held working", async () => {
+  it("a failed send leaves the person owed, writes why the link wasn't put in place, and leaves no link from it", async () => {
     await seedParentSettings({ welcome: true });
     const p = await person("Bounce", { welcomeOwed: true });
-    const earlier = await mintLink(p.id, "setup", new Date(Date.now() - 2 * RESEND_WAIT));
     sink.rejectRecipient = p.email;
     expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 1 });
     expect(await owedNames()).toEqual(["Bounce"]);
     expect((await audits("parent.password.link_not_sent")).map((r) => r.after)).toEqual([{ purpose: "setup", reason: "mail_failed" }]);
     expect((await audits("parent.welcome.failed"))[0]!.after).toMatchObject({ to: p.email, mail: "welcome", link: "setup" });
-    expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: true });
-    expect((await linkRows(p.id)).map((l) => l.tokenHash)).toEqual([hashLinkToken("setup", earlier)]);
+    expect(await linkRows(p.id)).toEqual([]);
+  });
+
+  // No mail the portal sends by itself destroys a link that still works (the lead's decision after the second review).
+  it("a person who asked on the request page, reached by the worker more than a minute later, gets one welcome with no link, and the link they asked for still works", async () => {
+    await seedParentSettings({ welcome: true });
+    const p = await person("Asked First", { welcomeOwed: true });
+    await (await askForPasswordLink(p.email, null, new Date(Date.now() - 2 * RESEND_WAIT))).delivery;
+    expect(sink.messages).toHaveLength(1);
+    const asked = setupTokensIn(sink.messages[0]!.raw)[0]!;
+    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
+    expect(sink.messages).toHaveLength(2);
+    const welcome = sink.messages[1]!;
+    expect(welcome.to).toEqual([p.email]);
+    expect(setupTokensIn(welcome.raw)).toEqual([]);
+    expect(mailText(welcome.raw)).toContain("A link to choose your password was emailed to you earlier, and it still works.");
+    expect(await linkVerdict("setup", asked)).toMatchObject({ ok: true, link: { parentId: p.id } });
+    expect((await unspent(p.id)).map((l) => l.tokenHash)).toEqual([hashLinkToken("setup", asked)]);
+    expect((await audits("parent.welcome.sent")).map((r) => r.after)).toEqual([{ to: p.email, mail: "welcome", link: "earlier" }]);
+    expect(await owedNames()).toEqual([]);
+    // Welcomed once: the next wake sends nothing.
+    expect(await sendOwedWelcomes(new Date(Date.now() + WELCOME_RETRY_MS + 1000))).toEqual({ sent: 0, failed: 0 });
+  });
+
+  it("a welcome tried again after its first mail's link was put in place sends no second link", async () => {
+    await seedParentSettings({ welcome: true });
+    const p = await person("Parent 1", { welcomeOwed: true });
+    const real = linkDelivery.deliverHeldLink;
+    // The first try's mail goes and its link is put in place, then the process stops before the welcome is recorded.
+    const spy = vi.spyOn(linkDelivery, "deliverHeldLink").mockImplementationOnce(async (l, o) => { await real(l, o); throw new Error("the process stopped here"); });
+    try { await expect(sendOwedWelcomes()).rejects.toThrow("the process stopped here"); } finally { spy.mockRestore(); }
+    expect(await owedNames()).toEqual(["Parent 1"]);
+    const first = setupTokensIn(sink.messages[0]!.raw)[0]!;
+    expect(await sendOwedWelcomes(new Date(Date.now() + WELCOME_RETRY_MS + 1000))).toEqual({ sent: 1, failed: 0 });
+    expect(sink.messages).toHaveLength(2);
+    expect(setupTokensIn(sink.messages[1]!.raw)).toEqual([]);
+    expect(await linkVerdict("setup", first)).toMatchObject({ ok: true, link: { parentId: p.id } });
+    expect(await audits("parent.password.link_made")).toHaveLength(1);
+    expect((await audits("parent.welcome.sent")).map((r) => (r.after as { link: string }).link)).toEqual(["earlier"]);
+  });
+
+  it("a welcome's link is made at the person's turn, not the wake's start, so a resend just after it is held off", async () => {
+    await seedParentSettings({ welcome: true });
+    const p = await person("Parent 1", { welcomeOwed: true });
+    const wakeStarted = new Date(Date.now() - 5 * 60_000); // a long batch: this person's turn came five minutes in
+    expect(await sendOwedWelcomes(wakeStarted)).toEqual({ sent: 1, failed: 0 });
+    const [link] = await unspent(p.id);
+    expect(link!.createdAt.getTime()).toBeGreaterThan(Date.now() - RESEND_WAIT);
+    expect(link!.expiresAt.getTime()).toBeGreaterThan(Date.now() + 7 * 24 * 3_600_000 - RESEND_WAIT);
+    expect(await resendWelcome(p.id, STAFF)).toEqual({ ok: false, reason: "on_its_way" });
+    expect(sink.messages).toHaveLength(1);
+  });
+
+  it("a second Resend within a minute of the first is refused, and the link the first one mailed still works", async () => {
+    const p = await person("Ana Rivera", { welcomedAt: new Date("2026-01-01T00:00:00Z") });
+    expect(await resendWelcome(p.id, STAFF)).toEqual({ ok: true, link: "setup" });
+    const first = setupTokensIn(sink.messages[0]!.raw)[0]!;
+    expect(await resendWelcome(p.id, STAFF)).toEqual({ ok: false, reason: "on_its_way" });
+    // A slow send: the link was made more than a minute before the press, but its welcome went less than one ago.
+    await db.update(parentSigninToken).set({ createdAt: new Date(Date.now() - 2 * RESEND_WAIT) }).where(eq(parentSigninToken.parentId, p.id));
+    expect(await resendWelcome(p.id, STAFF)).toEqual({ ok: false, reason: "on_its_way" });
+    expect(sink.messages).toHaveLength(1);
+    expect(await linkVerdict("setup", first)).toMatchObject({ ok: true });
+    // A minute after the welcome went, a resend sends a fresh link, as staff mean it to.
+    await db.update(parent).set({ welcomedAt: new Date(Date.now() - 2 * RESEND_WAIT) }).where(eq(parent.id, p.id));
+    expect(await resendWelcome(p.id, STAFF)).toEqual({ ok: true, link: "setup" });
+    expect(await linkVerdict("setup", first)).toMatchObject({ ok: false, reason: "unknown" });
   });
 
   // An end of the person's sign-in while the welcome is on its way deletes the held link with the unused ones, and the
@@ -376,7 +467,7 @@ describe("welcome emails", () => {
 
   it("a resend gives a person with no password a fresh link, which replaces their unused one only once the mail has gone", async () => {
     const p = await person("Ana Rivera", { welcomedAt: new Date("2026-01-01T00:00:00Z") });
-    const earlier = await mintLink(p.id, "setup");
+    const earlier = await mintLink(p.id, "setup", new Date(Date.now() - 2 * RESEND_WAIT)); // past the resend wait
     const real = sendModule.sendMail;
     const seen: boolean[] = [];
     const spy = vi.spyOn(sendModule, "sendMail").mockImplementation(async (m, o) => {
@@ -397,7 +488,7 @@ describe("welcome emails", () => {
 
   it("a resend whose mail fails leaves the earlier link working and says so", async () => {
     const p = await person("Bounce");
-    const earlier = await mintLink(p.id, "setup");
+    const earlier = await mintLink(p.id, "setup", new Date(Date.now() - 2 * RESEND_WAIT)); // past the resend wait
     sink.rejectRecipient = p.email;
     expect(await resendWelcome(p.id, STAFF)).toEqual({ ok: false, reason: "mail_failed" });
     expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: true });
@@ -443,14 +534,14 @@ describe("welcome emails", () => {
     // The worker sends the mail for those welcomed before, and the welcome to those never welcomed, each with a link.
     expect(await sendOwedWelcomes()).toEqual({ sent: 3, failed: 0 });
     const textTo = (email: string) => mailText(sink.messages.find((m) => m.to[0] === email)!.raw);
-    expect(textTo(welcomedBefore.email)).toContain("now signs you in with a password, instead of a code alone");
-    expect(textTo(welcomedBefore.email)).toMatch(/Subject: How you sign in to .* has changed/);
+    expect(textTo(welcomedBefore.email)).toContain("with this email address and a password. To choose your password, open this link:");
+    expect(textTo(welcomedBefore.email)).toMatch(/Subject: Choose your password for /);
     expect(textTo(neverWelcomed.email)).toMatch(/Subject: You can now sign in to /);
     for (const p of [welcomedBefore, neverWelcomed]) {
       const token = setupTokensIn(sink.messages.find((m) => m.to[0] === p.email)!.raw)[0];
       expect(await linkVerdict("setup", token)).toMatchObject({ ok: true, link: { parentId: p.id } });
     }
-    expect((await audits("parent.welcome.sent")).find((r) => r.targetId === welcomedBefore.id)!.after).toMatchObject({ mail: "signin_changed", link: "setup" });
+    expect((await audits("parent.welcome.sent")).find((r) => r.targetId === welcomedBefore.id)!.after).toMatchObject({ mail: "choose_password", link: "setup" });
     expect(await owedNames()).toEqual([]);
   });
 
@@ -461,7 +552,7 @@ describe("welcome emails", () => {
     await seedPassword(p.authUserId, "a phrase chosen after the press");
     expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
     expect(sink.messages).toEqual([]);
-    expect((await audits("parent.welcome.skipped")).map((r) => [r.targetId, r.after])).toEqual([[p.id, { to: p.email, mail: "signin_changed", reason: "has_password" }]]);
+    expect((await audits("parent.welcome.skipped")).map((r) => [r.targetId, r.after])).toEqual([[p.id, { to: p.email, mail: "choose_password", reason: "has_password" }]]);
     expect(await owedNames()).toEqual([]);
     expect(await db.select().from(parentSigninToken)).toEqual([]);
   });
@@ -497,7 +588,7 @@ describe("welcome emails", () => {
     const asked = await mintLink(p.id, "setup", new Date(Date.now() - 2 * RESEND_WAIT));
     expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 0 });
     expect(sink.messages).toEqual([]);
-    expect((await audits("parent.welcome.skipped")).map((r) => [r.targetId, r.after])).toEqual([[p.id, { to: p.email, mail: "signin_changed", reason: "has_live_link" }]]);
+    expect((await audits("parent.welcome.skipped")).map((r) => [r.targetId, r.after])).toEqual([[p.id, { to: p.email, mail: "choose_password", reason: "has_live_link" }]]);
     expect(await owedNames()).toEqual([]);
     expect(await linkVerdict("setup", asked)).toMatchObject({ ok: true });
   });
@@ -597,11 +688,11 @@ describe("welcome emails", () => {
     expect(await oweSetupMails(admin)).toEqual({ ok: true, owed: 1 });
     sink.rejectRecipient = p.email;
     expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 1 });
-    expect((await audits("parent.welcome.failed"))[0]!.after).toMatchObject({ mail: "signin_changed", link: "setup" });
+    expect((await audits("parent.welcome.failed"))[0]!.after).toMatchObject({ mail: "choose_password", link: "setup" });
     expect(await owedNames()).toEqual(["Welcomed Before"]);
     sink.rejectRecipient = null;
     expect(await sendOwedWelcomes(new Date(Date.now() + WELCOME_RETRY_MS + 1000))).toEqual({ sent: 1, failed: 0 });
-    expect(mailText(sink.messages.filter((m) => m.to[0] === p.email).at(-1)!.raw)).toContain("now signs you in with a password, instead of a code alone");
+    expect(mailText(sink.messages.filter((m) => m.to[0] === p.email).at(-1)!.raw)).toMatch(/Subject: Choose your password for /);
     expect(await owedNames()).toEqual([]);
   });
 });

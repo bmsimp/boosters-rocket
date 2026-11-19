@@ -332,7 +332,9 @@ until parent sign-ins are switched on, however they came to be a guardian. Switc
    never been welcomed gets the welcome email, with a link to choose a password if they have none (it works once, for
    7 days). The testers this host welcomed before the sign-in release have no password and are not welcomed again by
    themselves: back on **Parent sign-ins**, **Email a set-up link to everyone who can sign in and hasn't chosen a
-   password** emails each of them a link, with words saying the portal now signs parents in with a password.
+   password** emails each of them a link to choose their password ("Choose your password for" the club). A tester who
+   already holds a set-up link that still works is welcomed with no new link: their welcome says the one emailed
+   earlier still works.
 
 Switching parent sign-ins **off** (step 1, **Switch parent sign-ins off**) signs every parent out at once, and also
 switches welcome emails off. Switching sign-ins on again does not switch welcomes back on: do step 2 again.

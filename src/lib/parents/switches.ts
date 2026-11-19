@@ -231,7 +231,7 @@ export const SETUP_MAILS_NEED_SWITCHES = "Switch parent sign-ins and welcome ema
  * release, slice SI-4). People welcomed before this release were told there was no password, have none, and are
  * welcomed again by nothing else. It marks owed (`parent.welcome_owed`) everyone setupMailOwedTo() names, and the
  * worker sends them in the welcome's batches under the same switches (sendOwedWelcomes(), ./welcome.ts): a person
- * welcomed before is sent the mail that says sign-in has changed, one never welcomed the welcome, each with a set-up
+ * welcomed before is sent the mail with a link to choose their password (choosePasswordMessage()), one never welcomed the welcome, each with a set-up
  * link. Nothing else owes a welcome to someone welcomed already, so "owed and welcomed before" is this press's mail;
  * and everything that clears an owed welcome clears it too (welcome emails or sign-ins switched off, a block, a change
  * of company). Under the parents' settings lock, as change() takes it, then the rows of the people it marks, in id order
