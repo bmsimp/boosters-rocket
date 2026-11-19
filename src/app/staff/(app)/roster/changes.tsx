@@ -70,9 +70,13 @@ export function CreateBox({ shape, rosterTag, memberTypes }: { shape: Membership
 
 type Edit = { rosterTag: string; versions: Map<string, string>; blocked: Set<string> };
 
-/** Rename and make inactive, for one record: offered only when the shape allows it and nothing is waiting for it. */
-function RecordChanges({ who, c, rename, deactivate, warning, edit, extra }: {
-  who: string; c: Cust; rename: boolean; deactivate: boolean; warning: string; edit: Edit; extra?: ReactNode;
+/**
+ * Rename and make inactive, for one record: offered only when the shape allows it and nothing is waiting for it. Making
+ * inactive is offered for a customer QuickBooks has inactive already when the portal's own record of it is still
+ * active (`follow`): it sends nothing, and makes the record match.
+ */
+function RecordChanges({ who, c, rename, deactivate, warning, edit, extra, follow = false }: {
+  who: string; c: Cust; rename: boolean; deactivate: boolean; warning: string; edit: Edit; extra?: ReactNode; follow?: boolean;
 }) {
   const version = edit.versions.get(c.qboId);
   if (version === undefined) return null;
@@ -82,6 +86,9 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra }: {
       {rename && <NameForm field="New name" label="Rename" pendingLabel="Renaming in QuickBooks…" initial={c.displayName} act={renameAction.bind(null, edit.rosterTag, c.qboId, version)} />}
       {extra}
       {deactivate && c.active && <DeactivateForm label={`Make ${c.displayName} inactive`} warning={warning} act={deactivateAction.bind(null, edit.rosterTag, c.qboId, version)} />}
+      {deactivate && !c.active && follow && <DeactivateForm label={`Make ${c.displayName} inactive in the portal`}
+        warning={`QuickBooks has ${c.displayName} inactive already, but the portal's own record is still active. This sends nothing to QuickBooks and makes the portal's record inactive too.`}
+        act={deactivateAction.bind(null, edit.rosterTag, c.qboId, version)} />}
     </details>
   );
 }
@@ -95,21 +102,36 @@ function FamilyInactive({ family, cover, edit }: { family: Cust; cover: { family
     return <Notice tone="info" live="none">A change to someone under {family.displayName} is waiting to reach QuickBooks, so the family can&apos;t be made inactive for now.</Notice>;
   }
   const shown: [string, string][] = [[cover.family.qboId, cover.family.syncToken], ...cover.under.map((u): [string, string] => [u.qboId, u.syncToken])];
-  return <FamilyInactiveForm familyName={family.displayName} names={cover.under.map((u) => u.name)}
-    act={familyInactiveAction.bind(null, edit.rosterTag, family.qboId, shown)} />;
+  return (
+    <>
+      {!family.active && <Notice tone="info" live="none">QuickBooks has {family.displayName} inactive already, but the portal&apos;s own family is still active. Making it inactive here sends nothing for it to QuickBooks, and makes the portal&apos;s family inactive too.</Notice>}
+      <FamilyInactiveForm familyName={family.displayName} names={cover.under.map((u) => u.name)}
+        act={familyInactiveAction.bind(null, edit.rosterTag, family.qboId, shown)} />
+    </>
+  );
 }
 
-/** Every change a family's page offers: the family itself, its students and its parents, as the shape allows. */
-export function FamilyChanges({ shape, family, families, edit, cover }: {
+/** A student of this family's record whom QuickBooks has under another family: in the roster's words. */
+export type Elsewhere = { name: string; customer: Cust; familyQboId: string; familyName: string };
+
+/**
+ * Every change a family's page offers: the family itself, its students and its parents, as the shape allows. Offered
+ * only for a family whose own record is active in the portal; a student whose record is inactive (`inactiveRecords`,
+ * by customer) is offered nothing that would send. A student whose record is this family's but whom QuickBooks has
+ * under another family (`elsewhere`) is offered the move to that family, which sends nothing and brings the record,
+ * with what follows a move, into line.
+ */
+export function FamilyChanges({ shape, family, families, edit, cover, inactiveRecords, elsewhere }: {
   shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; families: { qboId: string; name: string }[]; edit: Edit; cover: { family: Covered; under: Covered[] } | null;
+  inactiveRecords: Set<string>; elsewhere: Elsewhere[];
 }) {
   const { offered } = shapeOperations(shape);
   const f = family.customer;
-  const elsewhere = families.filter((x) => x.qboId !== f.qboId);
+  const others = families.filter((x) => x.qboId !== f.qboId);
   return (
     <section className="box" aria-labelledby="family-changes-h"><h2 id="family-changes-h">Change in QuickBooks</h2>
       <RecordChanges who="the family" c={f} rename={offered.has("rename_family")} deactivate={false} edit={edit} warning=""
-        extra={offered.has("deactivate_family") && f.active && cover ? <FamilyInactive family={f} cover={cover} edit={edit} /> : null} />
+        extra={offered.has("deactivate_family") && cover ? <FamilyInactive family={f} cover={cover} edit={edit} /> : null} />
       {f.active && offered.has("add_student") && (
         <details className="more"><summary>Add a student</summary>
           <NameForm field="The student's name, as QuickBooks will show it" label="Add the student" pendingLabel="Adding in QuickBooks…" act={addToFamilyAction.bind(null, edit.rosterTag, "student", f.qboId)} />
@@ -121,12 +143,23 @@ export function FamilyChanges({ shape, family, families, edit, cover }: {
           <ParentForm act={addToFamilyAction.bind(null, edit.rosterTag, "parent", f.qboId)} />
         </details>
       )}
-      {family.students.map((s) => (
-        <RecordChanges key={s.qboId} who="the student" c={s} rename={offered.has("rename_student")} deactivate={offered.has("deactivate_student")} edit={edit}
+      {family.students.filter((s) => !inactiveRecords.has(s.qboId)).map((s) => (
+        <RecordChanges key={s.qboId} who="the student" c={s} rename={offered.has("rename_student")} deactivate={offered.has("deactivate_student")} edit={edit} follow
           warning="The student is no longer counted in the family's season, and their invoices no longer show to the family. A student with an open balance in QuickBooks isn't made inactive until it is paid or written off."
-          extra={offered.has("move_student") && s.active && edit.versions.has(s.qboId) && elsewhere.length > 0
-            ? <MoveForm families={elsewhere} act={moveAction.bind(null, edit.rosterTag, s.qboId, edit.versions.get(s.qboId)!)} /> : null} />
+          extra={offered.has("move_student") && s.active && edit.versions.has(s.qboId) && others.length > 0
+            ? <MoveForm families={others} act={moveAction.bind(null, edit.rosterTag, s.qboId, edit.versions.get(s.qboId)!)} /> : null} />
       ))}
+      {offered.has("move_student") && elsewhere.map((s) => {
+        const version = edit.versions.get(s.customer.qboId);
+        if (version === undefined) return null;
+        if (edit.blocked.has(s.customer.qboId)) return <Notice key={s.customer.qboId} tone="info" live="none">A change to {s.name} is waiting to reach QuickBooks, so nothing else can be changed for now.</Notice>;
+        return (
+          <details key={s.customer.qboId} className="more"><summary>Change the student {s.name}</summary>
+            <p>QuickBooks has {s.name} under {s.familyName}, but the portal still holds them in this family. Moving them to {s.familyName} here sends nothing to QuickBooks: the portal&apos;s own record moves, and their forms, places on shifts still to come and buy-outs follow as they do for any move.</p>
+            <MoveForm families={[{ qboId: s.familyQboId, name: s.familyName }]} act={moveAction.bind(null, edit.rosterTag, s.customer.qboId, version)} />
+          </details>
+        );
+      })}
       {family.parents.map((p) => (
         <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
           warning="Their sign-in to the portal stays as it is: who can sign in is the portal's own list of the family's guardians. A parent with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
@@ -139,7 +172,7 @@ export function FamilyChanges({ shape, family, families, edit, cover }: {
 export function MemberChanges({ member, edit }: { member: Cust; edit: Edit }) {
   return (
     <section className="box" aria-labelledby="member-changes-h"><h2 id="member-changes-h">Change in QuickBooks</h2>
-      <RecordChanges who="the member" c={member} rename deactivate edit={edit} warning="They can no longer sign in to the portal. A member with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
+      <RecordChanges who="the member" c={member} rename deactivate edit={edit} follow warning="They can no longer sign in to the portal. A member with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
     </section>
   );
 }

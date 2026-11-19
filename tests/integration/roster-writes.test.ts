@@ -388,6 +388,59 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect(posts()).toEqual([]);
     });
 
+    it("a family QuickBooks made inactive itself: the action sends nothing and makes its record inactive, audited with before and after; pressed again, nothing more", async () => {
+      const rivera = await recordOfCustomer("10", "family");
+      for (const id of ["11", "12", "10"]) Object.assign(inStub(id), { Active: false, SyncToken: "1" });
+      expect((await refreshRoster(WORKER)).ok).toBe(true);
+      expect(await familyRow(rivera)).toMatchObject({ active: true }); // a read changes no record
+      const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
+      expect(r).toEqual({ changed: true, result: { ok: true, message: "Rivera Family is inactive in QuickBooks already, so nothing was sent. The portal's own family is inactive now too. The roster is being read again to show it." } });
+      expect(posts()).toEqual([]);
+      expect(await familyRow(rivera)).toMatchObject({ active: false });
+      const follows = await auditsOf("roster.record.follows");
+      expect(follows.map((a) => [a.targetId, a.before, a.after])).toEqual([["10", { kind: "family", familyId: String(rivera), name: "Rivera Family", active: true },
+        { op: "deactivate", role: "family", code: "already_inactive", appRecord: { kind: "family", familyId: String(rivera), set: { active: false } } }]]);
+      expect((await auditsOf("roster.family.deactivate"))[0]!.after).toMatchObject({ outcome: "done", code: "already_inactive", alreadyInactive: ["10"] });
+      expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: ["That family is inactive in QuickBooks already, so there was nothing to change."] });
+    });
+
+    it("a move QuickBooks has that the portal's record doesn't (given up on the queue, or made in QuickBooks): moving there sends nothing, and the record, forms and places follow; any other move waits for it", async () => {
+      const rivera = await recordOfCustomer("10", "family"), chen = await recordOfCustomer("20", "family"), leo = await recordOfCustomer("12", "student");
+      const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
+      const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
+      const requestId = await seedRequest({ requirementId, familyQboId: "10", subjectQboId: "12", state: "waiting", envelopeId: "envelope_leoapart" });
+      Object.assign(inStub("12"), { ParentRef: { value: "20" }, SyncToken: "1" });
+      expect((await refreshRoster(WORKER)).ok).toBe(true);
+      expect(await studentRow(leo)).toMatchObject({ familyId: rivera });
+      // Back to the family the portal holds him in, or anywhere else: refused, as the two disagree where he is.
+      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "10" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.elsewhere] });
+      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: true, message: WRITE_COPY.movedFollowed });
+      expect(posts()).toEqual([]);
+      expect(await studentRow(leo)).toMatchObject({ familyId: chen, active: true });
+      expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "20", state: "not_opened" });
+      expect((await auditsOf("roster.student.move.followed")).map((a) => (a.after as { cause: string }).cause)).toEqual(["roster.record.follows#12"]);
+      expect((await auditsOf("roster.record.follows")).map((a) => [a.before, a.after])).toEqual([[{ kind: "student", studentId: String(leo), name: "Leo Rivera", active: true, familyId: String(rivera) },
+        { op: "move", role: "student", code: "already_moved", appRecord: { kind: "student", studentId: String(leo), set: { familyId: String(chen) } } }]]);
+      // Asked again: nothing more to change.
+      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: ["The student is in that family already, so there was nothing to change."] });
+    });
+
+    it("nothing is sent for a family or student whose own record is inactive in the portal", async () => {
+      const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
+      await db.update(family).set({ active: false }).where(eq(family.id, rivera));
+      expect(await askRosterWrite({ op: "create", role: "student", name: "Rosa Rivera", familyQboId: "10", email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOursToAdd] });
+      expect(await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email: "luis@example.com", typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOursToAdd] });
+      expect(await askRosterWrite({ op: "rename", qboId: "10", syncToken: "0", name: "Rivera-Diaz Family" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect(await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana M. Rivera" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect((await askFamilyInactive("10", await shownFor("10"), tag, op)).result).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      await db.update(family).set({ active: true }).where(eq(family.id, rivera));
+      await db.update(student).set({ active: false }).where(eq(student.id, leo));
+      expect(await askRosterWrite({ op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
+      expect(posts()).toEqual([]);
+    });
+
     it("a family whose make-inactive stops part way keeps its record active, and the student made inactive is inactive", async () => {
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
       // The family's own write is the one QuickBooks turns away.

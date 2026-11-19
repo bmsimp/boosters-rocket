@@ -88,7 +88,8 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 ## Buy-out invoices
 
 The check of each volunteer buy-out's invoice that follows the daily read of every family's invoices: a paid one is
-marked paid, and one QuickBooks no longer shows, or shows on another customer, is flagged for the club.
+marked paid, and one QuickBooks no longer shows, or shows on another customer, or whose student QuickBooks no longer
+holds under the family, is flagged for the club.
 
 - **"Not running"** while QuickBooks isn't connected, and **"Not yet run"** before the first daily read: nothing to do.
 - **"The last check of the buy-out invoices stopped with an error."** The worker tries again a minute later. If it
@@ -97,8 +98,9 @@ marked paid, and one QuickBooks no longer shows, or shows on another customer, i
   didn't follow it: the worker isn't running, or stopped part way through its wake. See the worker line.
 - **"N buy-out invoices are flagged and waiting for the club."** Open **Reconciliation** (the line's link): each
   flagged buy-out names its family, requirement and amount. The treasurer looks in QuickBooks for an invoice whose
-  private note reads "Booster Rocket buy-out". The flag goes by itself once a later check finds the invoice where it
-  belongs.
+  private note reads "Booster Rocket buy-out". For a student QuickBooks holds under another family, or inactive, put
+  the student back in QuickBooks if that was a mistake, or void the invoice there and close the buy-out. The flag goes
+  by itself once a later check finds the invoice where it belongs, its student back under the family.
 
 ## Outgoing mail
 

@@ -21,7 +21,8 @@ import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import { resetDb } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { connectRoster, REALM, seedQueued, staffWith } from "../helpers/roster-writes";
+import { connectRoster, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
+import { refreshRoster } from "@/lib/roster/refresh";
 import { rowNamed } from "../helpers/table";
 import { recordOfCustomer } from "../helpers/app-records";
 
@@ -136,8 +137,24 @@ describe("making a family inactive from its page: one action, the amount of a ba
     expect(await familyInactiveAction(tag, "10", RIVERA_SHOWN)).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." });
     expect(revalidatedPaths()).toContain("/");
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
-    expect(html).toContain("It is inactive in QuickBooks");
+    expect(html).toContain("A family the portal keeps, linked to its customer in QuickBooks, which is inactive there.");
+    // The family's own record is inactive in the portal now: no form that would send anything for it is offered.
     expect(html).not.toContain("Make Rivera Family inactive");
+    for (const words of ["Change in QuickBooks", "Change the family Rivera Family", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Add a student"]) expect(html).not.toContain(words);
+  });
+
+  it("a family QuickBooks made inactive itself is offered the action, which sends nothing and makes its own record inactive", async () => {
+    for (const id of ["11", "12", "10"]) Object.assign(stub.customers.find((c) => c.Id === id)!, { Active: false, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    expect(html).toContain("Make Rivera Family inactive");
+    expect(html).toContain("QuickBooks has Rivera Family inactive already");
+    stub.calls.length = 0;
+    expect(await familyInactiveAction(tag, "10", [["10", "1"]])).toMatchObject({ ok: true, message: expect.stringContaining("Rivera Family is inactive in QuickBooks already, so nothing was sent.") });
+    expect(posts()).toEqual([]);
+    expect((await db.select().from(family).where(eq(family.id, await recordOfCustomer("10", "family"))))[0]).toMatchObject({ active: false });
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Make Rivera Family inactive");
   });
 
   it("a stop part way is made again on the pages too, so the list shown next is whoever is still active", async () => {
@@ -148,6 +165,37 @@ describe("making a family inactive from its page: one action, the amount of a ba
     expect(revalidatedPaths()).toContain("/");
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("Make Rivera Family inactive");
+  });
+});
+
+describe("a family's page brings the portal's own records into line with what QuickBooks has, sending nothing", () => {
+  beforeEach(async () => { asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"])); });
+
+  it("a student QuickBooks has inactive while their record is active: making them inactive in the portal is offered", async () => {
+    Object.assign(stub.customers.find((c) => c.Id === "12")!, { Active: false, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    expect(html).toContain("Make Leo Rivera inactive in the portal");
+    expect(await deactivateAction(tag, "12", "1")).toMatchObject({ ok: true });
+    expect(posts()).toEqual([]);
+    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ active: false });
+    // Once the record is inactive too, nothing that would send is offered for them.
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Change the student Leo Rivera");
+  });
+
+  it("a student QuickBooks has under another family: said so, and the move there is offered, which sends nothing", async () => {
+    Object.assign(stub.customers.find((c) => c.Id === "12")!, { ParentRef: { value: "20" }, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    const students = html.slice(html.indexOf('id="entry-students-h"'), html.indexOf('id="entry-parents-h"'));
+    expect(rowNamed(students, "Leo Rivera")).toEqual(["Leo Rivera", "Under Chen Family in QuickBooks"]);
+    expect(html).toContain("Change the student Leo Rivera");
+    expect(html).toContain("QuickBooks has Leo Rivera under Chen Family, but the portal still holds them in this family.");
+    expect(await moveAction(tag, "12", "1", "20")).toMatchObject({ ok: true });
+    expect(posts()).toEqual([]);
+    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ familyId: await recordOfCustomer("20", "family") });
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Change the student Leo Rivera");
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("20") } })).toContain("Change the student Leo Rivera");
   });
 });
 

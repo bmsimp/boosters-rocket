@@ -31,6 +31,15 @@ export const CLOSE_WORDS: Record<CloseWhy, string> = {
   paid_in_full: "The invoice is paid in full, but the buy-out was to be cancelled. If the family is owed the money back, refund it in QuickBooks. Closing it ends the buy-out here, and the family volunteers instead.",
 };
 
+/**
+ * A `student_moved` flag the daily check set by itself (./daily-check.ts, flagMovedAway()): on an invoiced buy-out, with
+ * no void ever tried (no code from one, and no void item). A move staff made, or a void, sets the flag with a void
+ * beside it. Only this flag is the check's to take off again, once the student is back under the family.
+ */
+export function movedAwayByTheCheck(f: { state: BuyoutState; flag: Flag | null; lastCode: string | null; items: readonly Pick<CloseItem, "op">[] }): boolean {
+  return f.state === "invoiced" && f.flag === "student_moved" && f.lastCode === null && !f.items.some((i) => i.op === "invoice_void");
+}
+
 const keep = (why: KeepWhy, words: string): CloseVerdict => ({ may: false, why, words });
 const close = (why: CloseWhy): CloseVerdict => ({ may: true, why, words: CLOSE_WORDS[why] });
 
@@ -66,7 +75,7 @@ export function closeVerdict(f: CloseFacts): CloseVerdict {
   }
   // Flagged by the daily check alone (no void was tried, so no code): the student is no longer under the family in
   // QuickBooks, and the check can't follow the invoice. Read again live by the close, as looks_gone is.
-  if (f.state === "invoiced" && f.flag === "student_moved" && f.lastCode === null && !f.items.some((i) => i.op === "invoice_void")) return close("moved_away");
+  if (movedAwayByTheCheck(f)) return close("moved_away");
   if (f.state === "stuck") {
     return keep("invoice_stands", open.length > 0
       ? "The invoice may still be owed in QuickBooks. Void it there if it shouldn't be billed, then use Try again now, above: the portal reads the invoice first and sees it voided."

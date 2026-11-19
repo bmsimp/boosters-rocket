@@ -13,7 +13,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { currencyOf, formatMoney, toCents } from "@/lib/money/cents";
 import { normalizeEmail } from "@/lib/email";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
+import { customerOfFamily, familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { formsForMovedStudent } from "@/lib/forms/moved";
@@ -79,6 +79,10 @@ export const WRITE_COPY = {
   notOurs: "That family isn't one of the portal's own active families, so nobody can be moved to it. Choose a family from the list on this page.",
   inactiveFollowed: "That is inactive in QuickBooks already, so nothing was sent. The portal's own record is inactive now too.",
   namedFollowed: "QuickBooks has that name already, so nothing was sent. The portal's own record has it now too.",
+  movedFollowed: "QuickBooks has the student in that family already, so nothing was sent. The portal's own record of them is there now too, with what follows a move: their forms, their places on shifts still to come and their buy-outs.",
+  inactiveHere: "That is inactive in the portal, so nothing was sent to QuickBooks.",
+  notOursToAdd: "That family isn't one of the portal's own active families, so nobody can be added to it.",
+  elsewhere: "QuickBooks has this student under another family than the portal does, so nothing was sent. On this page, move them to the family QuickBooks has them in first, which sends nothing and brings the portal's own record there; then move them on if they belong somewhere else.",
 } as const;
 
 /** A family is made inactive only with everyone under it: the refusal names the button as the family's page does. */
@@ -144,6 +148,7 @@ const taken = (name: string, offer: string): WriteResult => ({ ok: false, offer,
 const refuse = (error: string): WriteResult => ({ ok: false, errors: [error] });
 const ALREADY_INACTIVE = "That is inactive in QuickBooks already, so there was nothing to change.";
 const ALREADY_NAMED = "That is its name already, so there was nothing to change.";
+const ALREADY_THERE = "The student is in that family already, so there was nothing to change.";
 
 /** The roster cache as the checks read it: every customer, inactive ones too, with its version. */
 async function cacheRows(tx: Tx): Promise<(Cust & { syncToken: string })[]> {
@@ -174,11 +179,28 @@ async function namesTaken(tx: Tx, cache: Cust[], except: string | null): Promise
  * or about (a member's own, in flat books), and `studentId`, the student a rename, move or make-inactive is for. Each
  * is null where the records have none: a new family or member (made after QuickBooks answers), a parent's own customer
  * (a parent has no family or student record), or a customer with no record of that kind. What is sent is the write.
- * `already`: the cache shows QuickBooks has it so already (the record inactive there, or with that name), so nothing is
- * sent and the app's own record is made to match what staff asked (recordFollows()).
+ * `already`: the cache shows QuickBooks has it so already (the record inactive there, with that name, or the student
+ * under that family while the portal's own record is in another), so nothing is sent and the app's own record is made
+ * to match what staff asked (recordFollows()).
  */
 type Prepared = { ok: true; write: RosterWrite; realmId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null; tag: string; name: string | null;
-  already?: "inactive" | "named" } | { ok: false; result: WriteResult };
+  already?: Already } | { ok: false; result: WriteResult };
+type Already = "inactive" | "named" | "moved";
+
+/**
+ * Whether a record a write is filed under is inactive in the portal (the owner's decision for slice 9c: a write that
+ * would send something for a family or student whose app record is inactive is not offered, and is refused).
+ */
+async function inactiveRecord(tx: Tx, r: { familyId: AppFamilyId | null; studentId: AppStudentId | null }): Promise<boolean> {
+  const [f] = r.familyId === null ? [] : await tx.select({ active: family.active }).from(family).where(eq(family.id, r.familyId));
+  const [s] = r.studentId === null ? [] : await tx.select({ active: student.active }).from(student).where(eq(student.id, r.studentId));
+  return f?.active === false || s?.active === false;
+}
+/** Whether a family record is active in the portal: null when there is none. */
+async function familyActiveOf(tx: Tx, familyId: AppFamilyId | null): Promise<boolean | null> {
+  const [f] = familyId === null ? [] : await tx.select({ active: family.active }).from(family).where(eq(family.id, familyId));
+  return f ? f.active : null;
+}
 
 /**
  * The app's records a write is filed under, through links of the kind each names (src/lib/families/links.ts), in the
@@ -195,8 +217,9 @@ async function recordsOf(tx: Tx, write: RosterWrite, familyQboId: string | null)
 /**
  * Everything checked before anything is sent, under the roster lock (lockRosterAs): the page was shown this company's
  * roster, QuickBooks is connected to that company, the shape offers the change, every id is on the roster in the role
- * the change needs, nothing is waiting for the same record (nor for the family a new record or a move goes into), and the
- * name is free. Returns the write as it will be sent.
+ * the change needs, nothing is waiting for the same record (nor for the family a new record or a move goes into), the
+ * name is free, and no record the write is filed under is inactive in the portal (but for a change that sends nothing:
+ * a name or an inactive flag QuickBooks has already). Returns the write as it will be sent.
  */
 async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
   const no = (error: string): Prepared => ({ ok: false, result: refuse(error) });
@@ -211,8 +234,11 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
     const byId = new Map(cache.map((c) => [c.qboId, c]));
     const allowed = (op: RosterOperation) => offers(shape, op);
     // The app's records are found here, under the roster lock, from the same roster the write was checked against.
-    const done = async (write: RosterWrite, familyQboId: string | null, name: string | null = null, already?: "inactive" | "named"): Promise<Prepared> =>
-      ({ ok: true, write, realmId: source, ...(await recordsOf(tx, write, familyQboId)), tag: rosterTag, name, ...(already ? { already } : {}) });
+    const done = async (write: RosterWrite, familyQboId: string | null, name: string | null = null, already?: Already): Promise<Prepared> => {
+      const records = await recordsOf(tx, write, familyQboId);
+      if (already !== "inactive" && already !== "named" && (await inactiveRecord(tx, records))) return no(WRITE_COPY.inactiveHere);
+      return { ok: true, write, realmId: source, ...records, tag: rosterTag, name, ...(already ? { already } : {}) };
+    };
     // A change still waiting or stuck for this record: a family's too, before anyone is added to it or moved into it
     // (a waiting "make inactive" would land after them).
     const waitingFor = async (qboId: string) => (await tx.select({ id: writeQueue.id }).from(writeQueue)
@@ -229,6 +255,8 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
         if (!family || family.role !== "family") return no(WRITE_COPY.gone);
         if (!byId.get(ask.familyQboId!)!.active) return no("This family is inactive in QuickBooks, so nobody can be added to it.");
         if (await waitingFor(ask.familyQboId!)) return no(WRITE_COPY.waiting);
+        // Only into one of the app's own active families: the new student's record goes into it (changeOwnRecord()).
+        if ((await familyActiveOf(tx, await familyLinkedTo(ask.familyQboId!, tx))) !== true) return no(WRITE_COPY.notOursToAdd);
         familyQboId = ask.familyQboId;
       }
       let email: string | null = null;
@@ -265,7 +293,15 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       if (where.role !== "student" || !allowed("move_student")) return no(WRITE_COPY.notOffered);
       const to = roleIn(roster, ask.toFamilyQboId);
       if (!to || to.role !== "family") return no(WRITE_COPY.gone);
-      if (ask.toFamilyQboId === where.familyQboId) return no("The student is in that family already, so there was nothing to change.");
+      // The family the portal's own record of the student is in, by its customer: since stage 3's slice 9c it can differ
+      // from the one QuickBooks has them under (a move QuickBooks took that was given up on the queue, or one made in
+      // QuickBooks alone). Null when the student has no record, or its family no link.
+      const studentRecord = await studentLinkedTo(record.qboId, tx);
+      const [held] = studentRecord === null ? [] : await tx.select({ familyId: student.familyId }).from(student).where(eq(student.id, studentRecord));
+      const recordFrom = held?.familyId ? await customerOfFamily(held.familyId, tx) : null;
+      const apart = recordFrom !== null && recordFrom !== where.familyQboId;
+      if (ask.toFamilyQboId === where.familyQboId && !apart) return no(ALREADY_THERE);
+      if (ask.toFamilyQboId !== where.familyQboId && apart) return no(WRITE_COPY.elsewhere);
       if (!byId.get(ask.toFamilyQboId)!.active) return no("That family is inactive in QuickBooks, so nobody can be moved to it.");
       // Only into one of the app's own active families: since stage 3's slice 9c a family customer added in QuickBooks
       // has no record, and a move into it would leave the student's record, and their forms and places, in the old one.
@@ -273,6 +309,9 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       const [toFamily] = toRecord === null ? [] : await tx.select({ active: family.active }).from(family).where(eq(family.id, toRecord));
       if (!toFamily?.active) return no(WRITE_COPY.notOurs);
       if (await waitingFor(ask.toFamilyQboId)) return no(WRITE_COPY.waiting);
+      // QuickBooks has them in that family already, and the portal's own record is in another: nothing is sent, and the
+      // record follows, from the family the portal holds them in, with a move's follow-ups (recordFollows()).
+      if (apart) return done({ op: "move", role: "student", qboId: record.qboId, syncToken: ask.syncToken, fromFamilyQboId: recordFrom!, toFamilyQboId: ask.toFamilyQboId }, recordFrom, null, "moved");
       return done({ op: "move", role: "student", qboId: record.qboId, syncToken: ask.syncToken, fromFamilyQboId: where.familyQboId!, toFamilyQboId: ask.toFamilyQboId }, where.familyQboId);
     }
     if (!allowed(deactivateOf(where.role))) return no(WRITE_COPY.notOffered);
@@ -579,24 +618,52 @@ async function readAgain(qboId: string, realmId: string, o: { actor: Actor; ip: 
   });
 }
 
+/** The app's own record a write is about, as it is now, for the `before` of a follow's audit row: null when there is none. */
+async function recordNow(tx: Tx, w: Extract<RosterWrite, { op: "rename" | "deactivate" | "move" }>, studentId: AppStudentId | null) {
+  if (w.role === "family" || w.role === "member") {
+    const familyId = await familyLinkedTo(w.qboId, tx);
+    const [f] = familyId === null ? [] : await tx.select({ name: family.name, active: family.active }).from(family).where(eq(family.id, familyId));
+    return f ? { kind: "family" as const, familyId: String(familyId), name: f.name, active: f.active } : null;
+  }
+  if (w.role === "parent" || studentId === null) return null; // a student, or a customer the family action covers that has a student record
+  const [s] = await tx.select({ name: student.name, active: student.active, familyId: student.familyId }).from(student).where(eq(student.id, studentId));
+  return s ? { kind: "student" as const, studentId: String(studentId), name: s.name, active: s.active, familyId: s.familyId === null ? null : String(s.familyId) } : null;
+}
+
 /**
- * What staff asked for is in QuickBooks already (code `already_inactive`: the customer is inactive there; or
- * `already_named`: it has that name), so nothing is sent, and the app's own record is made to match what was asked,
+ * What staff asked for is in QuickBooks already (code `already_inactive`: the customer is inactive there;
+ * `already_named`: it has that name; or `already_moved`: QuickBooks has the student under the family asked for, and the
+ * portal's own record is in another), so nothing is sent, and the app's own record is made to match what was asked,
  * as the queue's found-done path makes it for a change it finds made (foundDone(), ./queue.ts), so the two paths agree:
- * changeOwnRecord() under the roster lock, audited (roster.record.follows) in the same transaction, the record filed
- * under `filed`. Null when the record was as asked already, there is none (a parent's), or the roster is another
- * company's now.
+ * changeOwnRecord() under the roster lock, a move's follow-ups first (afterStudentMoved(), from the family the portal
+ * held the student in), audited (roster.record.follows) with the record before and what changed, in the same
+ * transaction, the record filed under `filed`. Null when the record was as asked already, there is none (a parent's),
+ * the cache no longer shows a move as asked, or the roster is another company's now. The guardians whose places a
+ * moved student gave up are told after the commit.
  */
-async function recordFollows(w: Extract<RosterWrite, { op: "rename" | "deactivate" }>, filed: Filed, realmId: string, code: "already_inactive" | "already_named",
-  o: WriteOp & { staffUserId: string }): Promise<OwnRecordChange | null> {
-  return db.transaction(async (tx) => {
+async function recordFollows(w: Extract<RosterWrite, { op: "rename" | "deactivate" | "move" }>, filed: Filed, realmId: string,
+  code: "already_inactive" | "already_named" | "already_moved", o: WriteOp & { staffUserId: string }): Promise<OwnRecordChange | null> {
+  let tell: (() => Promise<unknown>) | null = null;
+  const appRecord = await db.transaction(async (tx) => {
     if (!(await lockRosterAs(tx, rosterTagOf(realmId)))) return null;
-    const appRecord = await changeOwnRecord(tx, w, w.qboId, { realmId, linkedBy: o.staffUserId, studentId: filed.studentId });
-    if (!appRecord) return null;
+    const before = await recordNow(tx, w, filed.studentId);
+    if (before === null) return null;
+    if (w.op === "move") {
+      // Still as the page's checks found it, under the lock: QuickBooks has the student in the family asked for, and the
+      // record is in another of the app's families.
+      const [c] = await tx.select({ parentQboId: qboCustomer.parentQboId }).from(qboCustomer).where(eq(qboCustomer.qboId, w.qboId));
+      const to = await familyLinkedTo(w.toFamilyQboId, tx);
+      if (c?.parentQboId !== w.toFamilyQboId || to === null || before.kind !== "student" || before.familyId === String(to)) return null;
+      ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.record.follows#${w.qboId}` }, o));
+    }
+    const change = await changeOwnRecord(tx, w, w.qboId, { realmId, linkedBy: o.staffUserId, studentId: filed.studentId });
+    if (!change) return null;
     await writeAudit({ actor: o.actor, action: "roster.record.follows", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: w.qboId,
-      after: { op: w.op, role: w.role, code, appRecord } }, tx);
-    return appRecord;
+      before, after: { op: w.op, role: w.role, code, appRecord: change } }, tx);
+    return change;
   });
+  if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
+  return appRecord;
 }
 
 /**
@@ -613,11 +680,13 @@ export async function askRosterWrite(ask: WriteAsk, rosterTag: string, o: WriteO
   if (!p.ok) return p.result;
   const target = p.write.op === "create" ? p.write.familyQboId : p.write.qboId;
   const filed: Filed = { familyId: p.familyId, studentId: p.studentId };
-  if (p.already && (p.write.op === "rename" || p.write.op === "deactivate")) {
+  if (p.already && p.write.op !== "create") {
     // The cache shows QuickBooks has it so already: nothing is sent; the app's own record takes what was asked.
-    const followed = await recordFollows(p.write, filed, p.realmId, p.already === "inactive" ? "already_inactive" : "already_named", o);
-    if (followed) return { ok: true, message: p.already === "inactive" ? WRITE_COPY.inactiveFollowed : WRITE_COPY.namedFollowed };
-    return refuse(p.already === "inactive" ? ALREADY_INACTIVE : ALREADY_NAMED);
+    const how = { inactive: ["already_inactive", WRITE_COPY.inactiveFollowed, ALREADY_INACTIVE], named: ["already_named", WRITE_COPY.namedFollowed, ALREADY_NAMED],
+      moved: ["already_moved", WRITE_COPY.movedFollowed, ALREADY_THERE] } as const;
+    const [code, followedWords, nothingWords] = how[p.already];
+    const followed = await recordFollows(p.write, filed, p.realmId, code, o);
+    return followed ? { ok: true, message: followedWords } : refuse(nothingWords);
   }
   if (p.write.op === "deactivate") {
     // Nobody with a balance is made inactive (the owner's decision of 2026-11-17): what they owe is read first, and
@@ -755,10 +824,12 @@ type PreparedFamily = { ok: true; realmId: string; familyName: string; steps: Fa
 
 /**
  * Everything checked before anything is sent, under the roster lock, as prepare() checks one write: the page was shown
- * this company's roster, QuickBooks is connected to it, the shape offers making a family inactive, the id is an active
- * family on the roster, nothing is waiting for it or anyone under it, and the list the page showed still holds everyone
- * active under it, each at the version shown (a list someone has since been added to is refused: staff confirm whom it
- * covers). Someone shown who is inactive now is passed over: that is how pressing it again carries on.
+ * this company's roster, QuickBooks is connected to it, the shape offers making a family inactive, the id is a family
+ * on the roster whose own record (if it has one) is active in the portal, nothing is waiting for it or anyone under it,
+ * and the list the page showed still holds everyone active under it, each at the version shown (a list someone has
+ * since been added to is refused: staff confirm whom it covers). Someone shown who is inactive now is passed over: that
+ * is how pressing it again carries on. A family QuickBooks has inactive already is refused only when its record is
+ * inactive too (or it has none): otherwise the action makes the record match, sending nothing for the family.
  */
 async function prepareFamily(familyQboId: string, shown: ReadonlyMap<string, string>, rosterTag: string): Promise<PreparedFamily> {
   const no = (error: string): PreparedFamily => ({ ok: false, result: refuse(error) });
@@ -774,7 +845,10 @@ async function prepareFamily(familyQboId: string, shown: ReadonlyMap<string, str
     const where = roleIn(roster, familyQboId);
     const family = cache.find((c) => c.qboId === familyQboId);
     if (!family || !where || where.role !== "family") return no(WRITE_COPY.gone);
-    if (!family.active) return no("That family is inactive in QuickBooks already, so there was nothing to change.");
+    const ownRecord = await familyLinkedTo(familyQboId, tx);
+    const ownActive = await familyActiveOf(tx, ownRecord);
+    if (ownActive === false && family.active) return no(WRITE_COPY.inactiveHere);
+    if (!family.active && ownActive !== true) return no("That family is inactive in QuickBooks already, so there was nothing to change.");
     const under = activeUnder(cache, familyQboId);
     for (const c of [family, ...under]) if (shown.get(c.qboId) !== c.syncToken) return no(WRITE_COPY.coverChanged);
     const ids = [familyQboId, ...under.map((u) => u.qboId)];
@@ -791,7 +865,6 @@ async function prepareFamily(familyQboId: string, shown: ReadonlyMap<string, str
     // A customer under the family is filed under its student record only when that record is this family's: since
     // slice 9c a student QuickBooks moved in keeps their record in the family the app holds them in, and making this
     // family inactive leaves it alone (changeOwnRecord() changes only the record a step is filed under).
-    const ownRecord = await familyLinkedTo(familyQboId, tx);
     const steps: FamilyStep[] = [];
     for (const [i, write] of writes.entries()) {
       const filed = await recordsOf(tx, write, familyQboId);
@@ -857,10 +930,12 @@ export type FamilyInactiveAnswer = { result: WriteResult; changed: boolean };
  * Makes a family inactive in QuickBooks, with every active customer under it, as staff confirmed on the family's page
  * (`shown`: each id the page listed, the family's too, with the version it showed). In this order:
  *   1. prepareFamily(): every check one write gets, for the family and everyone under it, under the roster lock;
- *   2. each of them read live from QuickBooks: when any of them owes anything, nothing is sent at all, and staff are
- *      told who (with the amount only for Finance.Balance.Read) and that it must be paid or written off first. The same
- *      read stops it before anything is sent when a version there is newer than the one the page showed, and passes
- *      over anyone it shows already inactive, whose app record is made inactive then (recordFollows());
+ *   2. each of them read live from QuickBooks: when any of them owes anything, nothing is sent and no record follows,
+ *      and staff are told who (with the amount only for Finance.Balance.Read) and that it must be paid or written off
+ *      first. The same read stops it before anything is sent when a version there is newer than the one the page
+ *      showed, and passes over anyone it shows already inactive, whose app record is made inactive then
+ *      (recordFollows()); when that is the family itself, nothing is sent for anyone, and once everyone it covers is
+ *      inactive there, making the records match is the whole of the action (a family made inactive in QuickBooks);
  *   3. each made inactive, deepest first and the family last, each through sendWrite() and applyWritten(): QuickBooks
  *      first, then the cache and the app's own record from its answer under the roster lock, with its audit row.
  *      The family's own last step is the one exception to carrying the version the page showed: the family is read
@@ -898,22 +973,29 @@ export async function askFamilyInactive(familyQboId: string, shown: ReadonlyArra
   }
   const alreadyInactive = [...already];
   if (already.size) await db.transaction((tx) => askForRosterRefresh(tx)); // the cache is behind QuickBooks: read it again
+  // Nothing at all is done while anyone owes: no write, and no record made to follow.
+  if (owing.length) {
+    await summary("refused", "open_balance", [], ids, { alreadyInactive });
+    return { result: { ok: false, errors: [...owing, `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] }, changed: already.size > 0 };
+  }
   // Whoever QuickBooks shows inactive already has their app record made inactive, as staff asked and as the queue
-  // makes it (recordFollows()): when the family itself is, and when the rest goes ahead. Nothing follows while anyone
-  // owes, since then nothing at all is done.
+  // makes it (recordFollows()): when the family itself is, and when the rest goes ahead.
   const follow = async () => {
     let n = 0;
     for (const step of p.steps) if (already.has(step.write.qboId) && (await recordFollows(step.write, step.filed, p.realmId, "already_inactive", o))) n++;
     return n;
   };
   if (already.has(familyQboId)) {
+    // QuickBooks has the family inactive already: nothing is sent for anyone. When everyone else is inactive there too,
+    // making the portal's own records match is the whole of what staff asked.
     const followed = await follow();
+    const stillActive = p.steps.filter((s) => !already.has(s.write.qboId)).map((s) => s.name);
+    if (followed && !stillActive.length) {
+      await summary("done", "already_inactive", [], [], { alreadyInactive });
+      return { result: { ok: true, message: `${p.familyName} is inactive in QuickBooks already, so nothing was sent. The portal's own family is inactive now too. The roster is being read again to show it.` }, changed: true };
+    }
     await summary("refused", "already_inactive", [], ids, { alreadyInactive });
-    return { result: refuse(`${p.familyName} is inactive in QuickBooks already, so nothing was sent.${followed ? " The portal's own records of whoever QuickBooks shows inactive are inactive now too." : ""} The roster is being read again to show it.`), changed: true };
-  }
-  if (owing.length) {
-    await summary("refused", "open_balance", [], ids, { alreadyInactive });
-    return { result: { ok: false, errors: [...owing, `Nobody was made inactive. ${WRITE_COPY.balanceFix}`] }, changed: already.size > 0 };
+    return { result: refuse(`${p.familyName} is inactive in QuickBooks already, so nothing was sent.${followed ? " The portal's own records of whoever QuickBooks shows inactive are inactive now too." : ""}${stillActive.length ? ` QuickBooks still shows ${listed(stillActive)} active under it: check them in QuickBooks.` : ""} The roster is being read again to show it.`), changed: true };
   }
   await follow();
 

@@ -175,7 +175,9 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
     const leo = await seedLeo();
     moveInQuickBooks(LEO, CHEN);
     await applyWritten({ op: "move", role: "student", qboId: LEO, syncToken: "0", fromFamilyQboId: RIVERA, toFamilyQboId: CHEN },
-      { Id: "13", DisplayName: "Someone Else", SyncToken: "1", ParentRef: { value: CHEN } }, { realmId: REALM, actor: WORKER.actor, ip: null, linkedBy: null });
+      { Id: "13", DisplayName: "Someone Else", SyncToken: "1", ParentRef: { value: CHEN } },
+      // Filed under the records the staff action's checks found (prepare()), as every real send is.
+      { realmId: REALM, actor: WORKER.actor, ip: null, linkedBy: null, filed: { familyId: await recordOfCustomer(RIVERA, "family"), studentId: await recordOfCustomer(LEO, "student") } });
     expect(await followed()).toEqual([]);
     expect((await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY)))).toHaveLength(1);
     expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA });
