@@ -5,6 +5,7 @@ import { parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, parentRoutes } from "./parent-routes";
 import { PARAMS } from "./parent-params";
 import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
+import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, type LinkPurpose } from "./signin-links";
 
 /**
  * Every page a parent sees, in every display mode, at a phone's width and a desktop's (step 6 of the roadmap; PRODUCT.md:
@@ -56,8 +57,12 @@ const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22
 const DECORATION = ".sets li::after";
 const summary = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
 
-/** A page to open: where, signed in as the seeded parent or not, and anything the device holds before it loads. */
-type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number };
+/**
+ * A page to open: where, signed in as the seeded parent or not, and anything the device holds before it loads. `link` is
+ * a set-up or reset link made for Zelda just before the page is opened (tests/e2e/signin-links.ts), its token added to
+ * the end of `address`; the links are removed after the run, so the seed is as it was.
+ */
+type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose };
 
 /** The parent pages, from disk. A dynamic one is opened with its `own` params: the seeded family's thing. */
 function parentTargets(): Target[] {
@@ -78,6 +83,11 @@ const BEFORE_SIGN_IN: Target[] = [
     deviceStore: { "booster.signin.code-step": JSON.stringify({ email: "zelda@example.com", sentAt: 0, next: null }) } },
   { label: "/choose-family", address: "/choose-family", signedIn: true },
   { label: "/refused", address: "/refused", signedIn: false },
+  // The pages a set-up or reset link opens: the form, with a live link (never submitted here), and the one message for a
+  // link that can't be used.
+  { label: "/sign-in/set-up/[token]", address: "/sign-in/set-up/", signedIn: false, link: "setup" },
+  { label: "/sign-in/reset/[token]", address: "/sign-in/reset/", signedIn: false, link: "reset" },
+  { label: "/sign-in/set-up/[token], a link that can't be used", address: `/sign-in/set-up/${NO_SUCH_LINK}`, signedIn: false },
   { label: "/offline.html", address: "/offline.html", signedIn: false },
   // An address with no page: a signed-in parent keeps the frame around it (src/app/not-found.tsx), anyone else gets it plain.
   { label: "not found, signed in", address: "/no-such-page", signedIn: true, status: 404 },
@@ -88,7 +98,7 @@ const TARGETS = [...parentTargets(), ...BEFORE_SIGN_IN];
 
 test.skip(({ viewport }) => (viewport?.width ?? 0) < 760, "one pass, in the desktop project, at its own widths: the phone project would repeat it");
 test.describe.configure({ timeout: 120_000 });
-test.afterAll(async () => { await sql.end(); });
+test.afterAll(async () => { await removeZeldaLinks(sql); await sql.end(); });
 // A run cut off in the gold pass leaves the club gold: put the seeded color back first.
 test.beforeAll(async () => {
   await sql`UPDATE setting SET value = jsonb_set(value, '{color}', to_jsonb(${SEEDED_COLOR}::text)) WHERE key = 'club' AND value->>'color' = ${GOLD}`;
@@ -108,8 +118,9 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
     }, target.deviceStore);
   }
   const page = await context.newPage();
-  const res = await page.goto(target.address);
-  expect(res?.status(), `${target.label} answered ${res?.status()} at ${target.address}: it can't be checked with the seeded data. `
+  const address = target.link ? `${target.address}${await mintZeldaLink(sql, target.link)}` : target.address;
+  const res = await page.goto(address);
+  expect(res?.status(), `${target.label} answered ${res?.status()} at ${address}: it can't be checked with the seeded data. `
     + `A dynamic parent page needs its ids in PARAMS (tests/e2e/parent-params.ts).`).toBe(target.status ?? 200);
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   return { page, close: () => context.close() };
