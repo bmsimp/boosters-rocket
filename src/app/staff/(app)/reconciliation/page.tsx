@@ -10,7 +10,8 @@ import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
-import { giveUpAction, tryAgainAction } from "../roster/write-actions";
+import { giveUpAction, linkMadeStudentAction, tryAgainAction } from "../roster/write-actions";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
 import { familyPage } from "@/app/staff/(app)/family-pages";
@@ -67,19 +68,26 @@ function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; ca
 /**
  * The creates staff gave up here that QuickBooks made all the same (stage 3's slice 9d, the lead's decision): a given-up
  * change stays given up, so nothing in the portal is linked to the customer QuickBooks made, and no second one is made
- * for the record. A family's or member's is brought in from Customers with no family; a student's is checked in
- * QuickBooks. Names are QuickBooks text, shown as text only.
+ * for the record. A family's or member's is brought in from Customers with no family; a student's sits under its
+ * family, so it is linked to the student here ("Link the student to it", for staff who may change families and link
+ * them to accounting). Names are QuickBooks text, shown as text only.
  */
-function MadeAfterGivingUp({ items, linking }: { items: GivenUpMadeView[]; linking: boolean }) {
+function MadeAfterGivingUp({ items, linking, canChange, rosterTag }: { items: GivenUpMadeView[]; linking: boolean; canChange: boolean; rosterTag: string }) {
   const bringIn = linking ? "Bring it in with “Create a family from this” under Customers with no family below"
     : "Someone who may link families to accounting can bring it in from Customers with no family on this page";
+  const student = (m: GivenUpMadeView) => {
+    const say = "A student customer that no student in the portal is linked to. If it is the student the portal saved first, link the two; if it isn't wanted, make it inactive in QuickBooks.";
+    if (m.studentId === null) return say;
+    if (!linking || !canChange || rosterTag === "none") return <>{say}<span className="when">Linking it takes the permissions to change families and to link them to accounting.</span></>;
+    return <>{say}<OneButton label="Link the student to it" pendingLabel="Linking…" act={linkMadeStudentAction.bind(null, rosterTag, m.queueId)} /></>;
+  };
   return (
     <section className="box" aria-labelledby="made-anyway-h"><h2 id="made-anyway-h">Made in QuickBooks after it was given up ({items.length})</h2>
       <p>These were given up here while QuickBooks may still have been making them, and QuickBooks did make them. Nothing in the portal is linked to them, and no second customer is made for them.</p>
       <DataTable caption="Each customer QuickBooks made for a change given up" captionHidden rows={items} rowKey={(m) => m.queueId} columns={[
         { key: "name", header: "In QuickBooks", rowHeader: true, cell: (m) => m.name },
         { key: "what", header: "What to do", cell: (m) => (m.role === "student"
-          ? "A student customer that no student in the portal is linked to: check it in QuickBooks, and make it inactive there if it isn't wanted."
+          ? student(m)
           : `A ${m.role} customer that no ${m.role} in the portal is linked to. ${bringIn}, then make the ${m.role} the portal saved first inactive on its page; if it isn't wanted, make it inactive in QuickBooks.`) },
         { key: "family", header: "Saved first", cell: (m) => (m.familyPage ? <Link href={familyPage(m.familyPage)}>Open the family</Link> : "None") },
       ]} />
@@ -97,6 +105,8 @@ function MadeAfterGivingUp({ items, linking }: { items: GivenUpMadeView[]; linki
 export default async function ReconciliationPage() {
   const ctx = await requireStaffPage("Roster.Read");
   const money = can(ctx.effective, "Finance.Balance.Read");
+  // Read before the roster, as every page that sends it does: a write refuses a page shown another company's roster.
+  const rosterTag = await currentRosterTag();
   const [writes, roster, balances, madeAnyway] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null),
     loadMadeAfterGivingUp()]);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
@@ -125,7 +135,7 @@ export default async function ReconciliationPage() {
         )}
       </section>
 
-      {madeAnyway.length > 0 && <MadeAfterGivingUp items={madeAnyway} linking={linking} />}
+      {madeAnyway.length > 0 && <MadeAfterGivingUp items={madeAnyway} linking={linking} canChange={canChange} rosterTag={rosterTag} />}
 
       <BuyoutsToLook showAmounts={money} canChange={canChange} />
 

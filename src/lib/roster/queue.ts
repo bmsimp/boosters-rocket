@@ -173,7 +173,15 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Fou
     const ours = await lockRosterAs(tx, rosterTagOf(item.realmId));
     const [now] = await tx.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, item.id)).for("update");
     if (now && now.state !== "waiting") {
-      if (w.op === "create") await tx.update(writeQueue).set({ resultQboId: qboId, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), isNull(writeQueue.resultQboId)));
+      // The customer it was found as is kept, and audited in the same transaction; an item that has one already changes nothing.
+      if (w.op === "create") {
+        const [kept] = await tx.update(writeQueue).set({ resultQboId: qboId, updatedAt: new Date() })
+          .where(and(eq(writeQueue.id, item.id), isNull(writeQueue.resultQboId))).returning({ id: writeQueue.id });
+        if (kept) {
+          await writeAudit({ actor: WORKER_ACTOR, action: "roster.write.found_after_giving_up", targetType: "write_queue", targetId: item.id,
+            before: { state: now.state }, after: { state: now.state, resultQboId: qboId, linked: false } }, tx);
+        }
+      }
       return "done";
     }
     if (ours) {
@@ -433,7 +441,7 @@ function givenUpNext(item: Item): string {
     return `The ${w.role} the portal saved first stays in the portal, unlinked. ${readFirst} (“Create a family from this” under Customers with no family brings it in); if it didn't, press “Create in QuickBooks and link” on the ${w.role}'s page.`;
   }
   if (w.role === "student" && item.studentId !== null) {
-    return `The student the portal saved first stays in the portal, unlinked. ${readFirst} (check it in QuickBooks); if it didn't, press “Create in QuickBooks and link” on their family's page.`;
+    return `The student the portal saved first stays in the portal, unlinked. ${readFirst} (“Link the student to it” there links the student to it); if it didn't, press “Create in QuickBooks and link” on their family's page.`;
   }
   return "If QuickBooks made the new customer, it has no record in the portal: look for it in QuickBooks.";
 }

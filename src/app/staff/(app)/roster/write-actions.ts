@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { addFamily, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
+import { addFamily, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, linkStudentMadeAfterGivingUp, type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
 import { giveUp, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
 import { NAME_MAX } from "@/lib/roster/names";
 
@@ -141,7 +141,18 @@ export const tryAgainAction = staffAction(P, async (ctx, itemId: string): Promis
   return r;
 });
 
-export const giveUpAction = staffAction(P, async (ctx, itemId: string, note: string): Promise<Done> => {
+/**
+ * "Link the student to it": a student's given-up create that QuickBooks made all the same, linked to that customer
+ * (linkStudentMadeAfterGivingUp()). Linking takes the linking permission as well, checked here with the page's Roster.Read.
+ */
+export const linkMadeStudentAction = staffAction(P, async (ctx, rosterTag: string, itemId: string): Promise<WriteResult> => {
+  if (!canRead(ctx) || !mayLink(ctx) || !tag(rosterTag) || !uuid(itemId)) return NOT_FROM_PAGE;
+  const r = await linkStudentMadeAfterGivingUp(itemId, rosterTag, op(ctx));
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+});
+
+export const giveUpAction =staffAction(P, async (ctx, itemId: string, note: string): Promise<Done> => {
   if (!canRead(ctx) || !uuid(itemId) || !str(note, NOTE_MAX * 4)) return NOT_FROM_PAGE;
   const r = await giveUp(itemId, note, op(ctx));
   if (r.ok) revalidatePath("/staff", "layout");

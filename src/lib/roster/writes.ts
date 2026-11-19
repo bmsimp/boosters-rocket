@@ -1251,6 +1251,45 @@ export async function madeAfterGivingUp(tx: Tx, filed?: { familyId: AppFamilyId 
   });
 }
 
+/**
+ * "Link the student to it", on the Reconciliation page: a student's create staff gave up that QuickBooks made all the
+ * same (madeAfterGivingUp()) is linked to that customer when staff say it is that student. A student customer sits
+ * under its family, so Customers with no family can't bring it in, and without this the only way left would make a
+ * second customer for the student. Nothing is sent to QuickBooks. Under the roster lock with the page's tag, it links
+ * only while the item is that given-up create, still filed under the student, the customer still active, of no student
+ * record, and directly under the customer the student's own family is linked to (the roster's tree), the student
+ * record active with no link. The link is `confirmed` by the staff member, and audited in the same transaction
+ * (`roster.student.linked_after_giving_up`); the item stays given up.
+ */
+export async function linkStudentMadeAfterGivingUp(rawQueueId: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
+  const no = (error: string): WriteResult => refuse(error);
+  if (!isUuid(rawQueueId)) return no(WRITE_COPY.gone);
+  return db.transaction(async (tx): Promise<WriteResult> => {
+    if (!(await lockRosterAs(tx, rosterTag))) return no(ROSTER_MOVED);
+    const [shape, source] = await Promise.all([getShape(tx), getRosterSource(tx)]);
+    if (!shape || source === null || (await connectedToAnotherCompany(tx))) return no(WRITE_COPY.noRoster);
+    const [item] = await tx.select().from(writeQueue).where(eq(writeQueue.id, rawQueueId.toLowerCase())).for("update");
+    const studentId = item?.studentId ?? null;
+    if (!item || studentId === null || item.state !== "given_up") return no(LINK_MADE_GONE);
+    const made = (await madeAfterGivingUp(tx, { studentId })).find((m) => m.queueId === item.id && m.role === "student");
+    if (!made) return no(LINK_MADE_GONE);
+    const [s] = await tx.select().from(student).where(eq(student.id, studentId)).for("update");
+    if (!s?.active) return no("That student is inactive in the portal, so nothing was linked.");
+    if ((await customerOfStudent(studentId, tx)) !== null) return no("That student is linked to QuickBooks already, so nothing was linked.");
+    const familyCustomer = s.familyId === null ? null : await customerOfFamily(s.familyId, tx);
+    const where = roleIn(buildRoster(shape, await cacheRows(tx)), made.customerQboId);
+    if (familyCustomer === null || where?.role !== "student" || where.familyQboId !== familyCustomer) {
+      return no(`QuickBooks doesn't have “${made.name}” as a student under the customer this student's family is linked to, so nothing was linked. Check it in QuickBooks.`);
+    }
+    const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: source, customerId: made.customerQboId, studentId, origin: "confirmed", linkedBy: o.staffUserId })
+      .returning({ id: accountingLink.id });
+    await writeAudit({ actor: o.actor, action: "roster.student.linked_after_giving_up", permission: o.permission, ip: o.ip, targetType: "student", targetId: String(studentId),
+      after: { studentId: String(studentId), familyId: String(s.familyId), customerQboId: made.customerQboId, queueId: item.id, linkId: link!.id } }, tx);
+    return { ok: true, message: `${recordNameWords(s.name, "student")} is linked to “${made.name}” in QuickBooks. Nothing was sent to QuickBooks.` };
+  });
+}
+const LINK_MADE_GONE = "That is no longer a customer QuickBooks made for a student after making it was given up, with nothing linked to it. Reload the page.";
+
 /** The names of the portal's own active families (members, in flat books), but `except`: a family's name must be none of them. */
 async function portalFamilyNames(tx: Tx, except: AppFamilyId | null): Promise<string[]> {
   const rows = await tx.select({ id: family.id, name: family.name }).from(family).where(eq(family.active, true));
