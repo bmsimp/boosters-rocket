@@ -277,8 +277,8 @@ describe("connecting a different company", () => {
   it("deletes every buy-out, counted in the audit row, and their queued writes with the queue", async () => {
     const { a } = await seedTwoFamilies();
     // Filed under the family's own record: the queue goes before the records, or the clear would be refused.
-    await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_void", buyoutId: "00000000-0000-4000-8000-000000000001", invoiceQboId: "9174", customerQboId: a.identity.familyQboId,
-      why: "switched_back" }, familyId: await recordOfCustomer(a.identity.familyQboId, "family"), sent: false, nextTryAt: new Date() });
+    await db.insert(writeQueue).values({ realmId: MONEY_REALM, request: { op: "invoice_void", buyoutId: "00000000-0000-4000-8000-000000000001", invoiceQboId: "9174", customerQboId: a.spec.family.qboId,
+      why: "switched_back" }, familyId: a.identity.familyId, sent: false, nextTryAt: new Date() });
     expect((await db.select().from(buyout)).length).toBe(2);
     expect(await clearRosterOfOtherCompany("2222", { actor: { door: "staff", id: null, label: "admin@club.org" }, ip: null })).toBe(true);
     expect(await db.select().from(buyout)).toEqual([]);

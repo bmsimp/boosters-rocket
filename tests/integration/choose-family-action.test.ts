@@ -19,7 +19,7 @@ import { eq } from "drizzle-orm";
 import { guardian } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 import { env } from "@/env";
-import { resetDb, seedParent, seedGuardian, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 
 async function post(path: string, body: unknown) {
   return (await getParentAuth()).handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
@@ -33,7 +33,7 @@ describe("chooseFamilyAction", () => {
 
   it("the chooser says 'more than one family' only when there is more than one to choose from", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    await seedGuardian({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
+    await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
     await post("/portal-code/send", { email: "ana@example.com" });
     await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
     const res = await post("/portal-code/verify", { email: "ana@example.com", code: /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]! });
@@ -41,7 +41,7 @@ describe("chooseFamilyAction", () => {
     const two = renderToStaticMarkup(await ChooseFamily());
     expect(two).toContain("more than one family");
     expect(two.match(/<button class="btn"/g)).toHaveLength(2);
-    // No family's QuickBooks id is on the page: each is named in words here (neither has a family record) and chosen by its row.
+    // No family's QuickBooks id is on the page: each is named in words here (neither family record has a name) and chosen by its row.
     expect(two).not.toMatch(/F1|F2|Family account/);
     // Neither name is known, so the two buttons are told apart by their place in the list (React writes ' as &#x27;).
     const unknown = recordNameWords(null, "family").replaceAll("'", "&#x27;");
@@ -59,7 +59,7 @@ describe("chooseFamilyAction", () => {
 
   it("refuses anything but a uuid, leaves the session's family alone and records only a short string sent", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const first = await seedGuardian({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
+    const first = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
     await post("/portal-code/send", { email: "ana@example.com" });
     await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
     const code = /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]!;
@@ -87,7 +87,7 @@ describe("chooseFamilyAction", () => {
 
   it("refuses the person's own row once it is closed, and one a change of company closed, naming the row and leaving the session's family", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
-    const first = await seedGuardian({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
+    const first = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
     // A row a change of company closed: another company's family, and no family record of the portal's (family_id null).
     const earlier = await seedGuardian({ parentId: a.id, familyQboId: "OLD-F", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     expect(earlier.familyId).toBeNull();

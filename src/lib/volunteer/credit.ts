@@ -144,13 +144,12 @@ export type MyCredit =
 
 /**
  * The family's own live credit, newest first, in a parent's words: each check-in (by the guardian or added by staff,
- * which a parent reads alike) and each credit for volunteering done outside the portal. The family is the session's,
- * found as the app's own active family through its link (sessionFamily(), src/lib/families/session-family.ts), and
- * nothing at all is shown without one. `students` are the family's own, as loadMyFamily() gave them, for the names;
- * `parentId` is the guardian looking, who reads "You".
+ * which a parent reads alike) and each credit for volunteering done outside the portal. The family is the session's
+ * (ctx.familyId), with its own active students for the names (sessionFamily(), src/lib/families/session-family.ts), and
+ * nothing at all is shown while its record is not active. `parentId` is the guardian looking, who reads "You".
  */
-export async function loadMyCredit(ctx: { familyQboId: string; parentId: string }, students: readonly { qboId: string; name: string }[]): Promise<MyCredit[]> {
-  const mine = await sessionFamily(ctx.familyQboId, students);
+export async function loadMyCredit(ctx: { familyId: AppFamilyId; parentId: string }): Promise<MyCredit[]> {
+  const mine = await sessionFamily(ctx.familyId);
   if (!mine) return [];
   const rows = await db.select({ c: volunteerCredit, s: volunteerSignup, shift: volunteerShift, event: volunteerEvent, title: requirement.title, unit: requirement.amountUnit })
     .from(volunteerCredit)

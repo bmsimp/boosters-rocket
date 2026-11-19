@@ -20,7 +20,7 @@ import { buyoutTitleOf, loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoi
 import { BUYOUT_ITEM } from "../helpers/buyouts";
 import { resetDb } from "../helpers/db";
 import { ageMoney, CHENOWETH, connectCompany, invoiceQueries, moneyRow, RIVERA, stubInvoice as inv } from "../helpers/money";
-import { FAMILY_A, FAMILY_B, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, identityNow, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedShape } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
@@ -232,7 +232,11 @@ describe("the Payments page", () => {
     const there = await recordOfCustomer(RIVERA.family.qboId, "family");
     await db.update(familyMoney).set({ familyId: there });
     expect((await db.select().from(familyMoney)).map((m) => m.realmId)).toEqual([MONEY_REALM]);
-    asParent(r.identity);
+    // The session as the gate resolves it now: the sync left the first company's record inactive and moved the
+    // guardian row to the record linked in this one.
+    const now = await identityNow(r.session.id);
+    expect(String(now.familyId)).toBe(String(there));
+    asParent(now);
     const html = await renderPage(PaymentsPage);
     expect(html).toContain(NOTHING);
     expect(html).not.toMatch(/INV-OTHER-COMPANY|\$42\.42|other-company/);
@@ -252,6 +256,7 @@ describe("the Payments page", () => {
     asParent(r.identity);
     expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>'); // stored, and fresh
     await db.update(qboCustomer).set({ active: false, displayName: "Riverquill Family (deleted)" }).where(eq(qboCustomer.qboId, FAMILY));
+    await syncAppRecords(); // as the roster read that found it inactive leaves the records
     const asked = stub.calls.length;
     const html = await renderPage(PaymentsPage);
     expect(html).toContain('<h1 class="page-title">Payments</h1>');
@@ -261,24 +266,27 @@ describe("the Payments page", () => {
     expect((await moneyRow(FAMILY))!.failedAt).toBeNull(); // the family's money was not even looked up
   });
 
-  it("shows no money while another company is connected than the one the roster cache came from, however fresh the figures", async () => {
+  it("shows no figures while another company is connected than the one the roster cache came from, however fresh they are", async () => {
     const r = await riverquills();
     stub.invoices = [inv("1", FAMILY, { InvoiceLink: "https://connect.intuit.com/t/one" })];
     asParent(r.identity);
     expect(await renderPage(PaymentsPage)).toContain('<div class="amt num">$85.00</div>');
-    // An Admin connects a different company, and clearing the old company's cache has not happened yet.
+    // The family is the app's own record, so the page is the family's; its money is QuickBooks', read through the
+    // family's link, which answers nothing while another company is connected (clearing the old cache hasn't happened).
+    const NO_FIGURES = /INV-|\$\d|connect\.intuit\.com|\(deleted\)/i;
     await db.update(qboConnection).set({ realmId: "2222" });
     const asked = stub.calls.length;
     const html = await renderPage(PaymentsPage);
-    expect(html).toContain(NOT_SET_UP);
-    expect(html).not.toMatch(NO_MONEY);
+    expect(html).toContain(NOTHING);
+    expect(html).not.toMatch(NO_FIGURES);
     expect(stub.calls).toHaveLength(asked);
-    // And the same when the shape names a customer type QuickBooks no longer has.
+    // And the same when the shape names a customer type QuickBooks no longer has: whose invoices are whose can't be told.
     await db.update(qboConnection).set({ realmId: MONEY_REALM });
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" });
     const broken = await renderPage(PaymentsPage);
-    expect(broken).toContain(NOT_SET_UP);
-    expect(broken).not.toMatch(NO_MONEY);
+    expect(broken).toContain(NOTHING);
+    expect(broken).not.toMatch(NO_FIGURES);
+    expect(stub.calls).toHaveLength(asked);
   });
 
   it("flat shape: the member's own invoices", async () => {
@@ -540,18 +548,19 @@ describe("a buy-out's invoice on Payments", () => {
 
   it("names a buy-out only on the customer the portal raised it on, and only in the company the roster came from", async () => {
     await withBuyoutInvoices();
-    const mine = await loadMyBuyoutInvoices(FAMILY_A.family.qboId);
+    const familyA = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    const mine = await loadMyBuyoutInvoices(familyA);
     expect([...mine.keys()]).toEqual(["9174"]);
     expect(buyoutTitleOf(mine, { qboId: "9174", customerQboId: FAMILY_A.family.qboId })).toBe("Concession stand shifts QA74");
     expect(buyoutTitleOf(mine, { qboId: "9174", customerQboId: FAMILY_A.students[0]!.qboId })).toBeNull();
     await db.transaction((tx) => setRosterSource(tx, "another-company"));
-    expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
+    expect(await loadMyBuyoutInvoices(familyA)).toEqual(new Map());
   });
 
   it("names it only while the buy-out is live: one staff closed after it was paid (refunded in QuickBooks) is an invoice like any other", async () => {
     const { a } = await withBuyoutInvoices();
     await db.update(buyout).set({ state: "voided", endReason: "closed_by_staff" }).where(eq(buyout.familyId, await recordOfCustomer(FAMILY_A.family.qboId, "family")));
-    expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
+    expect(await loadMyBuyoutInvoices(a.identity.familyId)).toEqual(new Map());
     asParent(a.identity);
     const html = text(await renderPage(PaymentsPage));
     expect(html).toContain("Invoice BUY-9174 Invoice date");

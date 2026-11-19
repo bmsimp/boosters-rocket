@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { asParent, asStaff, pageOutcome, renderPage, revalidatedPaths, signedOut } from "../helpers/signed-in";
-import { eq } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, signatureConsent, signatureRequest } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, signatureConsent, signatureRequest } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import ParentHome from "@/app/(parent)/page";
 import SeasonPage from "@/app/(parent)/season/page";
@@ -271,6 +271,8 @@ describe("signing a form on its page", () => {
     const b = await seedSignedInParent(FAMILY_B);
     const { qboCustomer } = await import("@/lib/db/schema");
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, FAMILY_B.family.qboId));
+    const { syncAppRecords } = await import("../helpers/app-records");
+    await syncAppRecords(); // as the roster read that found it inactive leaves the records
     asParent(b.identity);
     const html = await renderPage(FormsPage);
     expect(textOf(html)).toContain("Your family isn't set up here yet");
@@ -324,5 +326,22 @@ describe("a session whose family record is inactive", () => {
     expect(stub.apiCalls()).toEqual([]);
     expect(await snapshot()).toBe(before);
     expect(revalidatedPaths()).toEqual([]);
+  });
+});
+
+describe("a family with no link to QuickBooks", () => {
+  it("still sees its forms and opens them: the pages find the family and its students by their own records", async () => {
+    await resetDb(); stub.reset();
+    const { a, b } = await seedTwoFamilies();
+    asParent(a.identity);
+    const before = linksIn(await renderPage(FormsPage));
+    expect(before.length).toBeGreaterThan(0);
+    // The family's link and its students' links are gone (from stage 3 a family may have none).
+    const students = await Promise.all(FAMILY_A.students.map((s) => studentRecord(s.qboId)));
+    await db.delete(accountingLink).where(or(eq(accountingLink.familyId, a.identity.familyId), inArray(accountingLink.studentId, students)));
+    const html = await renderPage(FormsPage);
+    expect(linksIn(html)).toEqual(before);
+    for (const marker of b.markers) expect(html).not.toContain(marker);
+    expect(await formPage(a.forms!.ids.waiting)).not.toEqual({ notFound: true });
   });
 });

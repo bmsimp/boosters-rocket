@@ -30,7 +30,7 @@ import { resetDb, seedStaff, seedWorkingMail } from "../helpers/db";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestByCustomer, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedTwoFamilies, type SeededParent } from "../helpers/parent";
-import { addToCache, fam, moveInCache, par, seedParentSettings, stu } from "../helpers/roster-cache";
+import { addToCache, fam, moveInCache, par, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { subjectColumns, syncAppRecords } from "../helpers/app-records";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
 
@@ -538,7 +538,10 @@ describe("a different QuickBooks company connected", () => {
     expect((await audits("form.records.cleared"))[0]!.after).toMatchObject({ evidenceKeptAsEarlierCompany: 2 });
     expect(await db.select().from(formReminderClaim)).toEqual([]);
 
-    // The new company has a family with the same QuickBooks id as A, and a parent of it.
+    // The new company has a family with the same QuickBooks id as A, and a parent of it. The change of company took
+    // the membership shape with the cache: an Admin chooses it again, as a roster read of the new company needs, so
+    // the family has an active record there and its parent can sign in to it.
+    await seedShape();
     await addToCache([fam(FAMILY_A.family.qboId, "Newcomb Family"), par("NEW-P-1", "Nell Newcomb", FAMILY_A.family.qboId, "nell.newcomb@new.example"),
       stu(FAMILY_A.students[1]!.qboId, "Nico Newcomb", FAMILY_A.family.qboId)]);
     await seedParentSettings({ signin: true, everEnabled: true, welcome: true });

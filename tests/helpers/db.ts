@@ -1,11 +1,11 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { role, staffUser, roleAssignment, guardian, parent, parentAuthUser, parentAuthSession, authProvider, providerCertificate, setting, type GuardianStatus, type DisabledReason } from "@/lib/db/schema";
+import { role, staffUser, roleAssignment, family, guardian, parent, parentAuthUser, parentAuthSession, authProvider, providerCertificate, setting, type GuardianStatus, type DisabledReason } from "@/lib/db/schema";
 import { generateCertificate } from "@/lib/auth/certificate-crypto";
 import { isCertificateProvider, type CertificateProviderKey } from "@/lib/auth/certificates";
 import { secretBox } from "@/lib/crypto/secret-box";
 import { invalidateProviders, type ProviderKey } from "@/lib/auth/providers";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { mailConfigHash } from "@/lib/mail/config-hash";
 import type { StoredMailConfig } from "@/lib/mail/types";
 
@@ -158,6 +158,22 @@ export async function seedGuardian(o: {
     disabledReason: o.disabledReason ?? null, statusBeforeDisable: o.statusBeforeDisable ?? null, sourceQboId: o.sourceQboId ?? null,
   }).returning();
   return g!;
+}
+
+/**
+ * A guardian row (seedGuardian()) in an active family record of the app's own, with no link to QuickBooks: a family the
+ * gate lets its person into (an open row naming an active family record, src/lib/auth/resolve.ts), for the tests of the
+ * door that seed people by hand with no roster company. Rows of one `familyQboId` share one record, as the session's
+ * stored family id is matched to a row by it. A test with a roster company brings the records into step instead
+ * (syncAppRecords()), which would point these rows elsewhere.
+ */
+export async function seedGuardianInFamily(o: Parameters<typeof seedGuardian>[0]): Promise<GuardianRow> {
+  const [same] = await db.select({ familyId: guardian.familyId }).from(guardian)
+    .where(and(eq(guardian.familyQboId, o.familyQboId), isNotNull(guardian.familyId))).limit(1);
+  const familyId = same?.familyId ?? (await db.insert(family).values({ name: null, active: true }).returning({ id: family.id }))[0]!.id;
+  const g = await seedGuardian(o);
+  const [row] = await db.update(guardian).set({ familyId }).where(eq(guardian.id, g.id)).returning();
+  return row!;
 }
 
 /** A live parent session row, as Better Auth would store it. */

@@ -138,8 +138,10 @@ function markersOf(spec: ParentFamilySpec, identity: ParentIdentity, session: { 
  * that names the QuickBooks record it came from, and a session with the family chosen. The cache is marked as read from
  * MONEY_REALM unless it already names a company, as a roster read leaves it (and as seedFamilyMoney() does), so the
  * app's own records are made for the family in that company: the season finds the session's family through its link
- * (src/lib/seasons/my-season.ts). The identity returned is the one the portal itself resolves from that session, so a
- * fixture the portal would refuse fails here, not in the test.
+ * (src/lib/seasons/my-season.ts). The records are brought into step before the session is resolved, as the gate lets
+ * a parent in only through the row's active family record. The identity returned is the one the portal itself resolves
+ * from that session (it carries the app's family, `familyId`), so a fixture the portal would refuse fails here, not in
+ * the test.
  */
 export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Promise<SeededParent> {
   await markRosterCompany();
@@ -153,10 +155,11 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
   const person = await seedParent({ name: spec.parent.name, email: spec.parent.email, phone: spec.parent.phone, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: spec.family.qboId, status: "active", isPrimary: true, sourceQboId: spec.parent.qboId });
   const session = await seedParentSession(person.authUserId, { familyQboId: spec.family.qboId });
+  // The link and the session name the family: the app's own records follow, as the reconcile that made the link would.
+  // Before the session is resolved: the gate lets a parent into a family only through the row's active family record.
+  await syncAppRecords();
   const state = await resolveParentSession({ id: session.id, userId: person.authUserId, familyQboId: spec.family.qboId });
   if (state.status !== "ok") throw new Error(`seedSignedInParent: the portal would not sign ${spec.parent.name} in to ${spec.family.name} (session state "${state.status}")`);
-  // The link and the session name the family: the app's own records follow, as the reconcile that made the link would.
-  await syncAppRecords();
   return { identity: state.identity, spec, session, markers: markersOf(spec, state.identity, session) };
 }
 

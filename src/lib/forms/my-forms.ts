@@ -1,7 +1,7 @@
 // Privacy: the queries a parent's Forms pages read through, and the only ones. The family is the session's
-// (ctx.familyQboId) and nothing else: until stage 3 of the app-owned families spec the session holds the family's
-// QuickBooks id, and it is turned into the app's own active family once (activeFamilyOf(), the one definition of the
-// session's family), by which every request is read and written. A form is one the family's own current season asks of
+// (ctx.familyId, the app's own family record) and nothing else, and only while that record is active (activeFamilyOf(),
+// src/lib/families/session-family.ts); every request is read and written by it. No link to the accounting system is
+// needed. A form is one the family's own current season asks of
 // it or of a student under it (loadMySeason reads the session's family alone and gives each student's own record); a
 // request id from an address or an action is looked up within that family and then checked against those forms, so
 // another family's id finds nothing. It never imports the staff-only modules: tests/integration/page-guards.test.ts
@@ -47,9 +47,9 @@ const sameSubject = (a: SubjectId, b: SubjectId) => String(a) === String(b);
  * made for it.
  */
 export async function loadMyForms(ctx: ParentCtx, family: MyFamily): Promise<MyForms | null> {
-  const season = await loadMySeason(ctx, family.students);
+  const season = await loadMySeason(ctx);
   if (!season) return null;
-  const familyId = await activeFamilyOf(ctx.familyQboId);
+  const familyId = await activeFamilyOf(ctx.familyId);
   if (familyId === null) return null;
   const asked = formsAsked(season, family, familyId);
   const ready = (await getFormsConfig()) !== null;
@@ -94,13 +94,13 @@ export type MyForm = {
  */
 export async function findMyForm(ctx: ParentCtx, requestId: unknown): Promise<MyForm | null> {
   if (!isUuid(requestId)) return null;
-  const familyId = await activeFamilyOf(ctx.familyQboId);
+  const familyId = await activeFamilyOf(ctx.familyId);
   if (familyId === null) return null;
   const row = await requestOfFamily(requestId, familyId);
   if (!row) return null;
   const family = await loadMyFamily(ctx);
   if (!family) return null;
-  const season = await loadMySeason(ctx, family.students);
+  const season = await loadMySeason(ctx);
   if (!season) return null;
   const asked = formsAsked(season, family, familyId).find((a) => a.line.requirementId === row.requirementId && sameSubject(a.subject, subjectOfRequest(row)));
   if (!asked) return null;

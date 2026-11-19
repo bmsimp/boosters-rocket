@@ -23,7 +23,7 @@ export default async function ShiftPage({ params }: { params: Promise<{ id: stri
   if (!family) {
     return <main className="wrap single"><h1 className="page-title">Volunteer</h1><NotSetUpBox treasurerEmail={club.treasurerEmail} /></main>;
   }
-  const view = await loadShiftForMe(ctx, family, id);
+  const view = await loadShiftForMe(ctx, id);
   if (!view) notFound();
   const { event, shift } = view;
   return (

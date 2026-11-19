@@ -10,16 +10,20 @@ import ParentHome from "@/app/(parent)/page";
 import { resetDb, seedStaff } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { runReconcile } from "../helpers/reconcile";
+import { recordOfCustomer } from "../helpers/app-records";
 
 describe("the signed-in parent helpers", () => {
   beforeEach(resetDb);
 
   it("seeds a family the portal signs the parent in to, with the link pointing at its QuickBooks record", async () => {
     const ana = await seedSignedInParent();
-    expect(ana.identity).toMatchObject({ door: "parent", familyQboId: FAMILY_A.family.qboId, name: "Ansgar Alderquist", email: "ansgar.alderquist@family-a.example" });
-    expect(ana.identity.families).toEqual([{ guardianId: ana.identity.guardianId, familyQboId: FAMILY_A.family.qboId }]);
+    // The identity carries the app's own family, the record linked to the family's customer, and no QuickBooks id.
+    const familyId = await recordOfCustomer(FAMILY_A.family.qboId, "family");
+    expect(ana.identity).toMatchObject({ door: "parent", familyId, name: "Ansgar Alderquist", email: "ansgar.alderquist@family-a.example" });
+    expect(JSON.stringify(ana.identity)).not.toContain(FAMILY_A.family.qboId);
+    expect(ana.identity.families).toEqual([{ guardianId: ana.identity.guardianId, familyId }]);
     const [link] = await db.select().from(guardian).where(eq(guardian.id, ana.identity.guardianId));
-    expect(link).toMatchObject({ status: "active", isPrimary: true, sourceQboId: FAMILY_A.parent.qboId, parentId: ana.identity.parentId });
+    expect(link).toMatchObject({ status: "active", isPrimary: true, sourceQboId: FAMILY_A.parent.qboId, parentId: ana.identity.parentId, familyQboId: FAMILY_A.family.qboId, familyId });
     const [session] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, ana.identity.sessionId));
     expect(session).toMatchObject({ token: ana.session.token, familyQboId: FAMILY_A.family.qboId });
     const cached = await db.select().from(qboCustomer).where(eq(qboCustomer.parentQboId, FAMILY_A.family.qboId));
@@ -28,8 +32,8 @@ describe("the signed-in parent helpers", () => {
 
   it("seeds two families with nothing in common, and markers that can't be mistaken for each other", async () => {
     const { a, b } = await seedTwoFamilies();
-    expect(a.identity.familyQboId).toBe(FAMILY_A.family.qboId);
-    expect(b.identity.familyQboId).toBe(FAMILY_B.family.qboId);
+    expect(String(a.identity.familyId)).toBe(String(await recordOfCustomer(FAMILY_A.family.qboId, "family")));
+    expect(String(b.identity.familyId)).toBe(String(await recordOfCustomer(FAMILY_B.family.qboId, "family")));
     expect(a.identity.parentId).not.toBe(b.identity.parentId);
     expect(a.spec.students).toHaveLength(2);
     expect(b.spec.students).toHaveLength(2);
@@ -62,14 +66,14 @@ describe("the signed-in parent helpers", () => {
 
   it("runs a page and an action as the parent, with the family from the session", async () => {
     const { a, b } = await seedTwoFamilies();
-    const whoAmI = parentAction(async (ctx) => ({ family: ctx.familyQboId, ip: ctx.ip }));
+    const whoAmI = parentAction(async (ctx) => ({ family: String(ctx.familyId), ip: ctx.ip }));
     asParent(a.identity);
     expect(await renderPage(ParentHome)).toContain("Hi, Ansgar");
-    expect(await whoAmI()).toEqual({ family: FAMILY_A.family.qboId, ip: "203.0.113.50" });
+    expect(await whoAmI()).toEqual({ family: String(a.identity.familyId), ip: "203.0.113.50" });
     asParent(b.identity);
     fromIp("198.51.100.7");
     expect(await renderPage(ParentHome)).toContain("Hi, Bettina");
-    expect(await whoAmI()).toEqual({ family: FAMILY_B.family.qboId, ip: "198.51.100.7" });
+    expect(await whoAmI()).toEqual({ family: String(b.identity.familyId), ip: "198.51.100.7" });
   });
 
   it("starts every test signed out: the test before this one signed a parent in", async () => {

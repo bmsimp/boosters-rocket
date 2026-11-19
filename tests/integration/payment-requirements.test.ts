@@ -12,7 +12,6 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, familyMoney, qboItem, requirement, role, roleAssignment, roleRule, season } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
-import { loadMyFamily } from "@/lib/parents/my-family";
 import { runMoneyJob } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { currentRosterTag, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
@@ -132,7 +131,7 @@ describe("what a parent reads for a payment requirement", () => {
     expect(await setTicksAction(fall.requirementIds["Band fee"]!, await currentRosterTag(), [String(await recordOfCustomer(FAMILY, "family"))], true))
       .toEqual({ ok: false, errors: ["This kind of requirement isn't ticked off by hand."] });
     // The parent's own query agrees with the staff page.
-    const mine = await loadMySeason(rivera.identity, (await loadMyFamily({ ...rivera.identity, ip: null }))!.students);
+    const mine = await loadMySeason(rivera.identity);
     expect(mine!.steps[0]!.family.map((l) => [l.title, l.state])).toEqual([["Band fee", "done"], ["Trip deposit", "todo"]]);
   });
 });

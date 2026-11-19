@@ -9,9 +9,11 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { env } from "@/env";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, familyMoney, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, familyMoney, qboCustomer, qboCustomerType, setting, writeQueue } from "@/lib/db/schema";
 import { BUYOUT_COPY, confirmMyBuyout } from "@/lib/buyouts/writes";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
@@ -27,7 +29,9 @@ import { seedFamilyMoney, seedParentIn, type SeededParent } from "../helpers/par
 import { startQboStub, STUB_PAID_VOID_FAULT, type QboStub } from "../helpers/qbo-stub";
 import { BUYOUT_ITEM, buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedCheckIn, seedEvent, seedOutsideCredit, seedShift, seedSignup } from "../helpers/volunteer";
-import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
+import { addToCache, stu } from "../helpers/roster-cache";
+import { SHAPE_KEY } from "@/lib/roster/shape";
+import { recordOfCustomer, subjectColumns, syncAppRecords } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -38,15 +42,17 @@ const FAMILY = RIVERA.family.qboId, STUDENT = RIVERA.students[0]!.qboId;
 const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const invoicePosts = () => posts().filter((c) => c.path.endsWith("/invoice"));
 const ctxOf = (p: SeededParent) => ({ ...p.identity, ip: "203.0.113.50" });
-// As loadMyFamily() gives them; the buy-outs read a student by the customer only, so no app id is needed here.
-const family = { students: RIVERA.students.map((s) => ({ ...s, id: null })) };
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 /** The choice as the family's page shows it: its key and the stamp of its quote. */
 async function shown(p: SeededParent, requirementId: string, key = "family") {
-  const all = await loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, family);
+  const all = await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId });
   const one = all.find((b) => b.requirementId === requirementId && b.key === key);
   if (!one) throw new Error(`no buy-out choice ${key} for ${requirementId}`);
   return one;
+}
+/** Switching back as the page's form does: with the stamp of the subject the page shows (subjectStamp()). */
+async function switchBack(p: SeededParent, requirementId: string, key = "family") {
+  return switchBackAction(requirementId, key, (await shown(p, requirementId, key)).subjectStamp);
 }
 const later = (minutes: number) => new Date(Date.now() + minutes * 60_000);
 /** What the buy-out's and the queue's audit rows say, before and after, as one string. */
@@ -65,7 +71,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const choice = await shown(p, req);
     expect(choice.quote).toEqual({ ok: true, units: 2, unitCents: 2500, amountCents: 5000 });
     asParent(p.identity);
-    const r = await confirmBuyoutAction(req, "family", choice.stamp);
+    const r = await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp);
     expect(r).toEqual({ ok: true, message: BUYOUT_COPY.done("$50.00") });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ state: "invoiced", subjectQboId: FAMILY, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000, invoiceQboId: "5001" });
@@ -87,7 +93,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(money!.staleAt).not.toBeNull();
     // It does: the invoice is then among the family's open invoices, with its Pay link. The sandbox gave a link only to
     // an invoice carrying a bill-to email address (2026-11-17; the stub's quirks.linkNeedsEmail), and this one carries one.
-    const after = await loadFamilyMoney(FAMILY);
+    const after = await loadFamilyMoney(p.identity.familyId);
     expect(after.figures?.current).toBe(true);
     expect(after.figures?.open.map((i) => [i.qboId, i.totalCents, i.payLink ?? null])).toEqual([["5001", 5000, "https://connect.intuit.com/t/scs-v1-stub-5001"]]);
     // The address is in no audit row's before or after (the actor is the guardian, as on every row a parent's action writes).
@@ -104,13 +110,13 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
   it("bills a per-student requirement to the student's own customer, and says the student's key, never an id", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ appliesTo: "student", amount: 4, unit: "hours", unitCents: 1200 });
-    const all = await loadMyBuyouts({ familyQboId: FAMILY, parentId: p.identity.parentId }, family);
+    const all = await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId });
     expect(all.map((b) => b.key)).toEqual(["s1", "s2"]);
     expect(JSON.stringify(all)).not.toContain(STUDENT);
     const choice = all[0]!;
     expect(choice.who).toBe(RIVERA.students[0]!.name);
     asParent(p.identity);
-    expect((await confirmBuyoutAction(req, "s1", choice.stamp)).ok).toBe(true);
+    expect((await confirmBuyoutAction(req, "s1", choice.subjectStamp, choice.stamp)).ok).toBe(true);
     expect(JSON.parse(invoicePosts()[0]!.body).CustomerRef).toEqual({ value: STUDENT });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ subjectQboId: STUDENT, customerQboId: STUDENT, units: 4, amountCents: 4800 });
@@ -123,14 +129,72 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const before = await shown(p, req);
     await seedOutsideCredit({ familyQboId: FAMILY, requirementId: req, shifts: 1 });
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", before.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$50.00")] });
+    expect(await confirmBuyoutAction(req, "family", before.subjectStamp, before.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$50.00")] });
     expect(await buyoutsOf(FAMILY)).toEqual([]);
     expect(posts()).toEqual([]);
     const now = await shown(p, req);
-    expect((await confirmBuyoutAction(req, "family", now.stamp)).ok).toBe(true);
-    expect(await confirmBuyoutAction(req, "family", now.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.already] });
+    expect((await confirmBuyoutAction(req, "family", now.subjectStamp, now.stamp)).ok).toBe(true);
+    expect(await confirmBuyoutAction(req, "family", now.subjectStamp, now.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.already] });
     expect(invoicePosts()).toHaveLength(1);
     expect(await buyoutsOf(FAMILY)).toHaveLength(1);
+  });
+
+  it("refuses a quote stamped the old way, by the QuickBooks ids it billed, with the price-changed words, and a page drawn before the subject's stamp with the reload words, nothing queued", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ amount: 2, unitCents: 5000 });
+    const now = await shown(p, req);
+    // The stamp a page drawn before the session carried the app's family was given: it sealed the family's customer.
+    const old = createHmac("sha256", env.BETTER_AUTH_SECRET).update(`buyout-quote:${FAMILY}|${req}|${FAMILY}|${BUYOUT_ITEM}|5000|2|10000`).digest("base64url").slice(0, 22);
+    expect(old).not.toBe(now.stamp);
+    asParent(p.identity);
+    expect(await confirmBuyoutAction(req, "family", now.subjectStamp, old)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$100.00")] });
+    // A page drawn before the subject's stamp bound three values: its quote stamp arrives as the subject's, and no
+    // quote stamp comes at all. That is the reload words, said before any stamp is compared.
+    expect(await (confirmBuyoutAction as (...a: unknown[]) => Promise<unknown>)(req, "family", old)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("refuses a student's key that has come to name another student since the page was shown, never billing the wrong one", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ appliesTo: "student", amount: 2, unitCents: 5000 });
+    // Romilly's choice as her page showed it: the second of the family's students by name.
+    const romilly = await shown(p, req, "s2");
+    expect(romilly.who).toBe(RIVERA.students[1]!.name);
+    // A student joins the family whose name comes first: the keys now follow the new list, and "s2" names Rafferty.
+    await addToCache([stu("7019", "Abner Riverquill", FAMILY)]);
+    expect((await shown(p, req, "s2")).who).toBe(RIVERA.students[0]!.name);
+    asParent(p.identity);
+    // The subject is checked first: the reload words, never the price-changed ones for the student the key names now.
+    expect(await confirmBuyoutAction(req, "s2", romilly.subjectStamp, romilly.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("answers a confirm from a page whose key a sibling's rename has moved with the reload words, billing and queueing nothing", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ appliesTo: "student", amount: 2, unitCents: 5000 });
+    // Rafferty's choice as his page showed it: the first of the family's students by name.
+    const rafferty = await shown(p, req, "s1");
+    expect(rafferty.who).toBe(RIVERA.students[0]!.name);
+    // Romilly is renamed in QuickBooks so she sorts first; the roster read brings her record's name into step.
+    await db.update(qboCustomer).set({ displayName: "Abigail Riverquill" }).where(eq(qboCustomer.qboId, RIVERA.students[1]!.qboId));
+    await syncAppRecords();
+    const now = await shown(p, req, "s1");
+    expect(now.who).toBe("Abigail Riverquill");
+    expect(now.quote).toEqual(rafferty.quote); // the same price: only the subject differs
+    asParent(p.identity);
+    expect(await confirmBuyoutAction(req, "s1", rafferty.subjectStamp, rafferty.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect(posts()).toEqual([]);
+    // Rafferty's choice, from a page drawn now, still goes through, for him.
+    const again = await shown(p, req, "s2");
+    expect(again.who).toBe(RIVERA.students[0]!.name);
+    expect((await confirmBuyoutAction(req, "s2", again.subjectStamp, again.stamp)).ok).toBe(true);
+    expect(JSON.parse(invoicePosts()[0]!.body).CustomerRef).toEqual({ value: STUDENT });
   });
 
   it("refuses a price staff changed since the page was shown, a buy-out switched off, and a requirement already met", async () => {
@@ -140,12 +204,12 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     asParent(p.identity);
     const { requirement } = await import("@/lib/db/schema");
     await db.update(requirement).set({ buyoutUnitCents: 6000 }).where(eq(requirement.id, req));
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$120.00")] });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$120.00")] });
     await db.update(requirement).set({ buyoutUnitCents: null }).where(eq(requirement.id, req));
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
     await db.update(requirement).set({ buyoutUnitCents: 5000 }).where(eq(requirement.id, req));
     await seedOutsideCredit({ familyQboId: FAMILY, requirementId: req, shifts: 2 });
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
     expect(posts()).toEqual([]);
   });
 
@@ -153,9 +217,9 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ appliesTo: "student", title: "Concession shifts QR79" });
     // The student was the Chenoweth family's, who chose a buy-out for them; QuickBooks moved them since.
-    const stamp = (await shown(p, req, "s1")).stamp;
+    const before = await shown(p, req, "s1");
     await seedBuyout({ requirementId: req, familyQboId: "8010", subjectQboId: STUDENT, chosenBy: p.identity.parentId, invoiceQboId: "9977", unitCents: 4321, units: 1 });
-    const all = await loadMyBuyouts({ familyQboId: FAMILY, parentId: p.identity.parentId }, family);
+    const all = await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId });
     expect(all.map((b) => b.key)).toEqual(["s2"]);
     asParent(p.identity);
     const html = await renderPage(VolunteerPage);
@@ -163,7 +227,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const { pageOutcome } = await import("../helpers/signed-in");
     expect(await pageOutcome(PayInsteadPage, { params: { requirementId: req, choice: "s1" } })).toEqual({ notFound: true });
     // A confirm sent with a stamp from before is refused as not from the page, telling nothing of the other family.
-    const r = await confirmBuyoutAction(req, "s1", stamp);
+    const r = await confirmBuyoutAction(req, "s1", before.subjectStamp, before.stamp);
     expect(r).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
     expect(JSON.stringify(r)).not.toMatch(/43\.21|8010|9977/);
     expect(await buyoutsOf(FAMILY)).toEqual([]);
@@ -181,7 +245,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(now).toMatchObject({ standing: "Waived", met: true, may: "nothing", quote: { ok: false, why: "met" }, stamp: null });
     asParent(p.identity);
     expect(await renderPage(VolunteerPage)).not.toContain("Pay instead of volunteering ($100.00)");
-    expect(await confirmBuyoutAction(req, "family", before.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
+    expect(await confirmBuyoutAction(req, "family", before.subjectStamp, before.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
     expect(await buyoutsOf(FAMILY)).toEqual([]);
     expect(posts()).toEqual([]);
   });
@@ -189,10 +253,11 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
   it("is rate-limited per parent, and audits the first refusal once", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();
+    const { subjectStamp } = await shown(p, req);
     asParent(p.identity);
-    for (let i = 0; i < 10; i++) expect(await confirmBuyoutAction(req, "family", "a-stamp-that-is-wrong")).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$100.00")] });
-    expect(await confirmBuyoutAction(req, "family", "a-stamp-that-is-wrong")).toEqual({ ok: false, errors: [BUYOUT_COPY.rateLimited] });
-    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.rateLimited] });
+    for (let i = 0; i < 10; i++) expect(await confirmBuyoutAction(req, "family", subjectStamp, "a-stamp-that-is-wrong")).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$100.00")] });
+    expect(await confirmBuyoutAction(req, "family", subjectStamp, "a-stamp-that-is-wrong")).toEqual({ ok: false, errors: [BUYOUT_COPY.rateLimited] });
+    expect(await switchBack(p, req)).toEqual({ ok: false, errors: [BUYOUT_COPY.rateLimited] });
     expect(await audits("volunteer.buyout.limit")).toHaveLength(1);
     expect(posts()).toEqual([]);
   });
@@ -201,8 +266,10 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();
     asParent(p.identity);
-    for (const [id, key, stamp] of [["not-a-uuid", "family", "x"], [req, FAMILY, "x"], [req, "s99", "x"], [req, "family", ""], [req, "family", "x".repeat(65)], [req, { k: 1 }, "x"]] as unknown[][]) {
-      expect((await confirmBuyoutAction(id, key, stamp)).ok, JSON.stringify([id, key])).toBe(false);
+    const { subjectStamp } = await shown(p, req);
+    for (const [id, key, subject, stamp] of [["not-a-uuid", "family", subjectStamp, "x"], [req, FAMILY, subjectStamp, "x"], [req, "s99", subjectStamp, "x"], [req, "family", subjectStamp, ""],
+      [req, "family", subjectStamp, "x".repeat(65)], [req, { k: 1 }, subjectStamp, "x"], [req, "family", "", "x"], [req, "family", 7, "x"], [req, "family", "x".repeat(65), "x"]] as unknown[][]) {
+      expect((await confirmBuyoutAction(id, key, subject, stamp)).ok, JSON.stringify([id, key, subject])).toBe(false);
     }
     expect(await buyoutsOf(FAMILY)).toEqual([]);
     expect(posts()).toEqual([]);
@@ -214,7 +281,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const choice = await shown(p, req);
     stub.invoiceFault = "6000";
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ state: "refused", lastCode: "fault_6000", invoiceQboId: null });
     expect((await queueOf(b!.id)).map((i) => i.state)).toEqual(["given_up"]);
@@ -233,7 +300,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(other.identity.email).toBe("ottoline.riverquill@family-r.example");
     const choice = await shown({ ...p, identity: other.identity }, req);
     asParent(other.identity);
-    expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
+    expect((await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).ok).toBe(true);
     expect(billedTo()).toEqual(["ottoline.riverquill@family-r.example"]);
     expect(JSON.stringify(invoicePosts().map((c) => c.body))).not.toContain(RIVERA.parent.email);
     // The queued create carries that address alone, and the invoice QuickBooks made has it, with a Pay link.
@@ -248,7 +315,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const choice = await shown(p, req);
     stub.rateLimitNext = 1; // the try made at once is throttled: nothing is made, and the create waits on the queue
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.waiting("$100.00") });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.waiting("$100.00") });
     const [b] = await buyoutsOf(FAMILY);
     expect((await queueOf(b!.id))[0]).toMatchObject({ state: "waiting", sent: false, request: { op: "invoice_create", billEmail: RIVERA.parent.email } });
     expect(stub.invoices).toEqual([]);
@@ -277,7 +344,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     await seedFamilyMoney(RIVERA);
     const choice = await shown(p, req);
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.done("$100.00") });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.done("$100.00") });
     const { default: PaymentsPage } = await import("@/app/(parent)/payments/page");
     const payments = (await renderPage(PaymentsPage)).replaceAll("<!-- -->", "");
     expect(payments).toContain('href="https://connect.intuit.com/t/scs-v1-stub-5001"');
@@ -294,7 +361,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const choice = await shown(p, req);
     stub.invoiceFault = "2210"; // as the check saw QuickBooks answer for a field that isn't an address
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ state: "refused", lastCode: "fault_2210", invoiceQboId: null });
     expect((await queueOf(b!.id)).map((i) => i.state)).toEqual(["given_up"]);
@@ -312,7 +379,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const choice = await shown(p, req);
     // Longer than the portal sends (InvoiceCreate.billEmail: at most 100 characters).
     asParent({ ...p.identity, email: `${"r".repeat(95)}@family-r.example` });
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.refused] });
     expect(invoicePosts()).toEqual([]);
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ state: "refused", lastCode: "bad_email" });
@@ -327,7 +394,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     const { qboConnection } = await import("@/lib/db/schema");
     await db.update(qboConnection).set({ lastError: "Intuit no longer accepts this connection. Connect QuickBooks again. (invalid_grant)" });
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.cantNow] });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.cantNow] });
     expect(await buyoutsOf(FAMILY)).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
   });
@@ -340,7 +407,7 @@ describe("the write queue's share of a buy-out", () => {
     const choice = await shown(p, req);
     stub.loseInvoiceAnswer = true;
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.waiting("$100.00") });
+    expect(await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.waiting("$100.00") });
     await stub.idle();
     const [b] = await buyoutsOf(FAMILY);
     expect(b!.state).toBe("being_invoiced");
@@ -348,7 +415,7 @@ describe("the write queue's share of a buy-out", () => {
     expect(waiting).toMatchObject({ state: "waiting", sent: true, tries: 1 });
     // The page reads "being set up", and the guardian can't switch back until the outcome is known.
     expect((await shown(p, req)).standing).toBe("Buy-out being set up");
-    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.stillMaking] });
+    expect(await switchBack(p, req)).toEqual({ ok: false, errors: [BUYOUT_COPY.stillMaking] });
     stub.loseInvoiceAnswer = false;
     const r = await runWriteQueue(later(2));
     expect(r).toEqual({ ran: true, ok: true });
@@ -367,7 +434,7 @@ describe("the write queue's share of a buy-out", () => {
     const choice = await shown(p, req);
     stub.failNext = 1; // a 500 before anything is made: QuickBooks may have acted, as far as the portal can tell
     asParent(p.identity);
-    expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
+    expect((await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).ok).toBe(true);
     const [b] = await buyoutsOf(FAMILY);
     expect((await queueOf(b!.id))[0]).toMatchObject({ state: "waiting", sent: true, lastCode: "http_500" });
     await runWriteQueue(later(2));
@@ -388,7 +455,7 @@ describe("the write queue's share of a buy-out", () => {
       if (c.method === "POST" && c.path.endsWith("/invoice")) sentAsPosted = (await db.select().from(writeQueue))[0]!.sent;
     };
     asParent(p.identity);
-    expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
+    expect((await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).ok).toBe(true);
     expect(sentAsPosted).toBe(true);
   });
 
@@ -413,7 +480,7 @@ describe("the write queue's share of a buy-out", () => {
     const choice = await shown(p, req);
     stub.rateLimitNext = 100;
     asParent(p.identity);
-    expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
+    expect((await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).ok).toBe(true);
     const [b] = await buyoutsOf(FAMILY);
     expect((await queueOf(b!.id))[0]).toMatchObject({ state: "waiting", sent: false, lastCode: "http_429" });
     // Filed under the session's own family record, checked under the lock; what it sends names the customer billed only.
@@ -443,7 +510,7 @@ describe("one buy-out, one invoice, however many confirm at once", () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();
     const choice = await shown(p, req);
-    const results = await Promise.all(Array.from({ length: 5 }, () => confirmMyBuyout(ctxOf(p), family, req, "family", choice.stamp)));
+    const results = await Promise.all(Array.from({ length: 5 }, () => confirmMyBuyout(ctxOf(p), req, "family", choice.subjectStamp, choice.stamp)));
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(results.filter((r) => !r.ok).map((r) => !r.ok && r.errors)).toEqual(Array.from({ length: 4 }, () => [BUYOUT_COPY.already]));
     expect(await buyoutsOf(FAMILY)).toHaveLength(1);
@@ -459,7 +526,7 @@ describe("one buy-out, one invoice, however many confirm at once", () => {
     const choice = await shown(p, req);
     const theirs = await shown({ ...p, identity: other.identity }, req);
     expect(theirs.stamp).toBe(choice.stamp);
-    const results = await Promise.all([confirmMyBuyout(ctxOf(p), family, req, "family", choice.stamp), confirmMyBuyout({ ...other.identity, ip: null }, family, req, "family", theirs.stamp)]);
+    const results = await Promise.all([confirmMyBuyout(ctxOf(p), req, "family", choice.subjectStamp, choice.stamp), confirmMyBuyout({ ...other.identity, ip: null }, req, "family", theirs.subjectStamp, theirs.stamp)]);
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(await buyoutsOf(FAMILY)).toHaveLength(1);
     await stub.idle();
@@ -473,14 +540,14 @@ describe("switching back to volunteering before paying", () => {
     const req = await seedBuyoutRequirement();
     const choice = await shown(p, req);
     asParent(p.identity);
-    expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
+    expect((await confirmBuyoutAction(req, "family", choice.subjectStamp, choice.stamp)).ok).toBe(true);
     return { p, req };
   }
 
   it("voids the invoice when nothing is paid on it, read live first, and the requirement reads as volunteering again", async () => {
     const { p, req } = await invoiced();
     expect((await shown(p, req)).may).toBe("switch_back");
-    expect(await switchBackAction(req, "family")).toEqual({ ok: true, message: BUYOUT_COPY.switched });
+    expect(await switchBack(p, req)).toEqual({ ok: true, message: BUYOUT_COPY.switched });
     const voids = invoicePosts().filter((c) => c.query.get("operation") === "void");
     expect(voids).toHaveLength(1);
     expect(JSON.parse(voids[0]!.body)).toEqual({ Id: "5001", SyncToken: "0" });
@@ -493,19 +560,46 @@ describe("switching back to volunteering before paying", () => {
     expect(now).toMatchObject({ may: "choose", buyout: null, standing: "0 of 2 shifts done" });
   });
 
+  it("never voids a sibling's invoice from a page drawn before a student joined and moved the keys", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ appliesTo: "student", amount: 2, unitCents: 5000 });
+    const [rafferty, romilly] = [await shown(p, req, "s1"), await shown(p, req, "s2")];
+    expect([rafferty.who, romilly.who]).toEqual([RIVERA.students[0]!.name, RIVERA.students[1]!.name]);
+    asParent(p.identity);
+    expect((await confirmBuyoutAction(req, "s1", rafferty.subjectStamp, rafferty.stamp)).ok).toBe(true);
+    expect((await confirmBuyoutAction(req, "s2", romilly.subjectStamp, romilly.stamp)).ok).toBe(true);
+    // Romilly's page as it was drawn, ready to switch her back: "s2", and the stamp of her own record.
+    const romillyPage = await shown(p, req, "s2");
+    expect(romillyPage.may).toBe("switch_back");
+    // A student joins whose name comes first: "s2" now names Rafferty, whose invoice is unpaid too.
+    await addToCache([stu("7019", "Abner Riverquill", FAMILY)]);
+    expect((await shown(p, req, "s2")).who).toBe(RIVERA.students[0]!.name);
+    expect(await switchBackAction(req, "s2", romillyPage.subjectStamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    // Nothing was read live or voided, and both buy-outs stand as they were.
+    expect(invoicePosts().filter((c) => c.query.get("operation") === "void")).toEqual([]);
+    expect((await buyoutsOf(FAMILY)).map((b) => [b.subjectQboId, b.state]).sort()).toEqual([[RIVERA.students[0]!.qboId, "invoiced"], [RIVERA.students[1]!.qboId, "invoiced"]].sort());
+    expect(await audits("volunteer.buyout.switch_back")).toEqual([]);
+    // Romilly's page drawn now ("s3") switches her own back, and only hers.
+    const now = await shown(p, req, "s3");
+    expect(now.who).toBe(RIVERA.students[1]!.name);
+    expect(await switchBackAction(req, "s3", now.subjectStamp)).toEqual({ ok: true, message: BUYOUT_COPY.switched });
+    const ends = Object.fromEntries((await buyoutsOf(FAMILY)).map((b) => [b.subjectQboId, b.state]));
+    expect(ends).toEqual({ [RIVERA.students[0]!.qboId]: "invoiced", [RIVERA.students[1]!.qboId]: "voided" });
+  });
+
   it("never voids a paid or part-paid invoice: the treasurer sorts it out, in QuickBooks", async () => {
-    const { req } = await invoiced();
+    const { p, req } = await invoiced();
     stub.invoices[0]!.Balance = 40;
-    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.paidSome] });
+    expect(await switchBack(p, req)).toEqual({ ok: false, errors: [BUYOUT_COPY.paidSome] });
     expect(invoicePosts().filter((c) => c.query.get("operation") === "void")).toEqual([]);
     expect((await buyoutsOf(FAMILY))[0]!.state).toBe("invoiced");
   });
 
   it("keeps the invoice, and flags it, when a payment lands in QuickBooks as the void is sent", async () => {
-    const { req } = await invoiced();
+    const { p, req } = await invoiced();
     stub.beforeVoid = (inv) => { inv.Balance = 0; };
     // QuickBooks refused the void: the portal can't tell why, so the guardian is told the club will look, not that a payment was made.
-    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.clubLooks] });
+    expect(await switchBack(p, req)).toEqual({ ok: false, errors: [BUYOUT_COPY.clubLooks] });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ state: "invoiced", flag: "void_refused", lastCode: `fault_${STUB_PAID_VOID_FAULT}` });
     expect(stub.invoices[0]).toMatchObject({ TotalAmt: 100, Balance: 0 });
@@ -514,16 +608,16 @@ describe("switching back to volunteering before paying", () => {
   it("ends the buy-out as the guardian asked when the treasurer already voided the invoice in QuickBooks", async () => {
     const { p, req } = await invoiced();
     stub.invoices[0]!.TotalAmt = 0; stub.invoices[0]!.Balance = 0;
-    expect(await switchBackAction(req, "family")).toEqual({ ok: true, message: BUYOUT_COPY.switched });
+    expect(await switchBack(p, req)).toEqual({ ok: true, message: BUYOUT_COPY.switched });
     expect(invoicePosts().filter((c) => c.query.get("operation") === "void")).toEqual([]);
     expect((await buyoutsOf(FAMILY))[0]).toMatchObject({ state: "voided", endReason: "switched_back" });
     expect(await shown(p, req)).toMatchObject({ may: "choose", buyout: null });
   });
 
   it("never says a payment was made when the invoice is gone from QuickBooks, and changes nothing", async () => {
-    const { req } = await invoiced();
+    const { p, req } = await invoiced();
     stub.invoices.length = 0;
-    const r = await switchBackAction(req, "family");
+    const r = await switchBack(p, req);
     expect(r).toEqual({ ok: false, errors: [BUYOUT_COPY.invoiceGone] });
     expect(JSON.stringify(r)).not.toMatch(/payment/i);
     expect((await buyoutsOf(FAMILY))[0]).toMatchObject({ state: "invoiced", flag: null });
@@ -537,7 +631,7 @@ describe("switching back to volunteering before paying", () => {
     expect(page).not.toContain("Volunteer instead");
     expect(page).not.toContain("with a Pay button");
     expect(page).toContain("The club is looking at this invoice");
-    expect(await switchBackAction(req, "family")).toEqual({ ok: false, errors: [BUYOUT_COPY.clubLooks] });
+    expect(await switchBack(p, req)).toEqual({ ok: false, errors: [BUYOUT_COPY.clubLooks] });
   });
 
   it("tells the guardian they can sign up for shifts now, not once the invoice is cancelled", async () => {
@@ -553,13 +647,55 @@ describe("switching back to volunteering before paying", () => {
   it("goes through the queue when QuickBooks can't be reached for the void, and reads 'being cancelled' meanwhile", async () => {
     const { p, req } = await invoiced();
     stub.onApiRequest = (c) => { if (c.method === "POST") stub.dropApi = true; };
-    expect(await switchBackAction(req, "family")).toEqual({ ok: true, message: BUYOUT_COPY.switching });
+    expect(await switchBack(p, req)).toEqual({ ok: true, message: BUYOUT_COPY.switching });
     await stub.idle();
     stub.dropApi = false; stub.onApiRequest = null;
     expect((await shown(p, req)).standing).toBe("Buy-out being cancelled");
     await runWriteQueue(later(2));
     expect((await buyoutsOf(FAMILY))[0]).toMatchObject({ state: "voided", endReason: "switched_back" });
   });
+});
+
+describe("while the membership shape can't say whose customers are the family's (shapeHolds())", () => {
+  const BREAKS = [
+    ["the shape names a customer type QuickBooks no longer has", () => db.delete(qboCustomerType).where(eq(qboCustomerType.qboId, "S"))],
+    ["there is no shape", () => db.delete(setting).where(eq(setting.key, SHAPE_KEY))],
+  ] as const;
+  for (const [when, breakShape] of BREAKS) {
+    it(`offers nothing, confirms and switches back nothing, and still reads a live buy-out, when ${when}`, async () => {
+      const p = await buyoutFamily(stub);
+      const req = await seedBuyoutRequirement({ title: "Concession shifts QR81" });
+      const live = await seedBuyoutRequirement({ title: "Gate shifts QR82" });
+      await seedBuyout({ requirementId: live, familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9902" });
+      // The pages as they were drawn while the shape held: an offer, and a buy-out to switch back from.
+      const choice = await shown(p, req), standing = await shown(p, live);
+      expect(choice.may).toBe("choose");
+      expect(standing.may).toBe("switch_back");
+      await breakShape(); // the app's records are left as they are, and stay active
+      const before = { buyouts: await db.select().from(buyout).orderBy(buyout.id), queue: await db.select().from(writeQueue) };
+      expect(await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId })).toEqual([]);
+      asParent(p.identity);
+      const html = await renderPage(VolunteerPage);
+      expect(html).not.toContain('id="pay-h"');
+      expect(html).not.toContain("/volunteer/pay-instead/");
+      // The live buy-out is still read where the season says how the requirement stands.
+      const asked = html.split('id="asked-h"')[1]!.split('id="mine-h"')[0]!;
+      expect(asked).toContain("Gate shifts QR82");
+      expect(asked).toContain("Buy-out invoiced");
+      // The pay-instead page says the family isn't set up, as it did when loadMyFamily() went by the shape.
+      for (const [requirementId, key] of [[req, choice.key], [live, standing.key]] as [string, string][]) {
+        const page = await renderPage(PayInsteadPage, { params: { requirementId, choice: key } });
+        expect(page).toContain("Your family isn&#x27;t set up here yet");
+        expect(page).not.toContain("Confirm: invoice me");
+      }
+      expect(await confirmBuyoutAction(req, choice.key, choice.subjectStamp, choice.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notSetUp] });
+      expect(await switchBackAction(live, standing.key, standing.subjectStamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notSetUp] });
+      expect(await db.select().from(buyout).orderBy(buyout.id)).toEqual(before.buyouts);
+      expect(await db.select().from(writeQueue)).toEqual(before.queue);
+      expect(posts()).toEqual([]);
+      expect(await audits("volunteer.buyout.limit")).toEqual([]);
+    });
+  }
 });
 
 describe("how the requirement reads, on the parent's pages", () => {

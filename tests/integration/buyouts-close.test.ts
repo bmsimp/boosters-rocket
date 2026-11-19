@@ -45,13 +45,11 @@ const FAMILY = RIVERA.family.qboId;
 /** A family's staff pages are addressed by its app family record: the one this customer's family link names. */
 const pageId = async (customer: string = FAMILY) => String(await recordOfCustomer(customer, "family"));
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
-// As loadMyFamily() gives them; the buy-outs read a student by the customer only, so no app id is needed here.
-const family = { students: RIVERA.students.map((s) => ({ ...s, id: null })) };
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 const rowOf = async (id: string) => (await db.select().from(buyout).where(eq(buyout.id, id)))[0]!;
 const writer = () => staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);
 const standing = async (p: SeededParent, req: string) =>
-  (await loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, family)).find((b) => b.requirementId === req)!;
+  (await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId })).find((b) => b.requirementId === req)!;
 
 /** A queue item for a buy-out, as the write queue leaves one: filed under the family that chose it. */
 async function seedItem(b: { id: string; customerQboId: string; familyId: AppFamilyId }, o: { op?: "invoice_create" | "invoice_void"; state?: "waiting" | "stuck" | "done" | "given_up"; sent?: boolean } = {}) {
@@ -232,7 +230,7 @@ describe("after a close, the family can choose again", () => {
     expect(staffPage).toContain("0 of 2 shifts done");
 
     asParent(p.identity);
-    expect(await confirmBuyoutAction(req, "family", after.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.done("$100.00") });
+    expect(await confirmBuyoutAction(req, "family", after.subjectStamp, after.stamp)).toEqual({ ok: true, message: BUYOUT_COPY.done("$100.00") });
     const rows = await buyoutsOf(FAMILY);
     expect(rows.map((r) => r.state)).toEqual(["voided", "invoiced"]);
     expect(stub.invoices).toHaveLength(1);
