@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { guardian, parent, parentAuthSession } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { enterableGuardianRows, parentActor } from "./sessions";
+import { endParentSessions, enterableGuardianRows, parentActor } from "./sessions";
 
 /**
  * After a correct code: the person's invited rows become active (spec §2 Status changes), and with exactly one family
@@ -13,7 +13,10 @@ import { enterableGuardianRows, parentActor } from "./sessions";
  *
  * `sessionId` is the session just made for this sign-in (parent-code-plugin.ts): the family is entered on it. If that
  * session has been ended in the meantime (a block, a change of address, the person's last link closing), nobody
- * signed in: nothing is activated or audited as a sign-in, and `sessionEnded` says so.
+ * signed in: nothing is activated or audited as a sign-in, and `sessionEnded` says so. A person left with no family to
+ * enter since the code was checked (verifySigninCode() refuses one before) is refused here as the gate refuses them:
+ * nothing is activated, their sessions end, `signin.refused` `no_enabled_guardian` is audited, and `sessionEnded` says
+ * so, so the plugin answers "rejected" and sets no cookie.
  */
 export async function completeParentSignin(parentId: string, ip: string | null, sessionId?: string): Promise<{ familyQboId: string | null; sessionEnded?: true }> {
   const [p] = await db.select().from(parent).where(eq(parent.id, parentId));
@@ -27,6 +30,11 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
     const mine = await tx.select({ id: guardian.id, status: guardian.status }).from(guardian).where(eq(guardian.parentId, parentId)).orderBy(guardian.id).for("update");
     // A reconcile that held these rows has finished by now, and whatever it ended is ended.
     if (!(await sessionLives(tx))) return false;
+    if ((await enterableGuardianRows(parentId, tx)).length === 0) {
+      await endParentSessions(parentId, tx);
+      await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: parentId, after: { reason: "no_enabled_guardian" }, ip }, tx);
+      return false;
+    }
     const invited = mine.filter((g) => g.status === "invited").map((g) => g.id);
     if (!invited.length) return true;
     await tx.update(guardian).set({ status: "active", updatedAt: new Date() }).where(inArray(guardian.id, invited));

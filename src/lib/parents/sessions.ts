@@ -81,8 +81,10 @@ export type EnterableRow = GuardianRow & { familyId: AppFamilyId };
  * they are an active guardian of an active family in the app): an open row (`status` not `disabled`) whose
  * `family_id` names a family record that is active. A row with no family record, or one whose record is inactive, is
  * not a family the person can enter: the chooser doesn't offer it, a session that chose it is sent back to choose, and
- * a person with no row that counts is refused as one with no open row (src/lib/auth/resolve.ts). In the chooser's
- * order, the order enabledGuardianRows() gives. The code request and check keep reading enabledGuardianRows().
+ * a person with no row that counts is refused as one with no open row (src/lib/auth/resolve.ts): sent no code and
+ * refused at the code check (signin-codes.ts, `no_enabled_guardian`) and at the sign-in's end (completeParentSignin()).
+ * In the chooser's order, the order enabledGuardianRows() gives. The welcome email and endFamilySessions() keep going
+ * by every open row.
  */
 export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<EnterableRow[]> {
   const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))

@@ -17,9 +17,9 @@ vi.mock("@/lib/mail/senders", async () => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, setting, signinCode } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, setting, signinCode } from "@/lib/db/schema";
 import { requestSigninCode, verifySigninCode, signinStands, hashSigninCode, CODE_TTL_MS } from "@/lib/parents/signin-codes";
-import { resetDb, seedParent, seedGuardian, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { seedParentSettings } from "../helpers/roster-cache";
 
 const T0 = new Date("2026-11-10T12:00:00Z");
@@ -29,9 +29,13 @@ const codeOf = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((a) => a.action === action);
 async function send(email: string, now = T0, ip: string | null = IP) { const r = await requestSigninCode(email, ip, now); await r.delivery; }
 
-async function ana(o: { blocked?: boolean; status?: "invited" | "active" | "disabled" } = {}) {
+/** Ana with one row, in an active family of the app's own (the only kind of row a code is sent for), unless `family` says otherwise. */
+async function ana(o: { blocked?: boolean; status?: "invited" | "active" | "disabled"; family?: "active" | "inactive" | "none" } = {}) {
   const p = await seedParent({ name: "Ana", email: "ana@example.com", blocked: o.blocked });
-  await seedGuardian({ parentId: p.id, familyQboId: "F1", status: o.status ?? "active", disabledReason: o.status === "disabled" ? "removed" : null });
+  const row = { parentId: p.id, familyQboId: "F1", status: o.status ?? "active", disabledReason: o.status === "disabled" ? "removed" as const : null };
+  if (o.family === "none") { await seedGuardian(row); return p; }
+  const g = await seedGuardianInFamily(row);
+  if (o.family === "inactive") await db.update(family).set({ active: false }).where(eq(family.id, g.familyId!));
   return p;
 }
 
@@ -77,6 +81,10 @@ describe("requesting a code", () => {
     ["an unknown email", async (): Promise<void> => undefined, "unknown_email"],
     ["a blocked person", () => ana({ blocked: true }), "blocked"],
     ["a person whose rows are all disabled", () => ana({ status: "disabled" }), "no_enabled_guardian"],
+    // An open row is not enough: its family must be an active family record (app-owned families spec section 6).
+    ["a person whose only open row names an inactive family", () => ana({ family: "inactive" }), "no_enabled_guardian"],
+    ["a person whose only open row names no family record", () => ana({ family: "none" }), "no_enabled_guardian"],
+    ["an invited person whose only row names an inactive family", () => ana({ status: "invited", family: "inactive" }), "no_enabled_guardian"],
   ] as const)("sends nothing to %s and audits why", async (_, setup, reason) => {
     await setup();
     await send("ana@example.com");
@@ -140,7 +148,7 @@ describe("requesting a code", () => {
     const people = [];
     for (let i = 0; i < 40; i++) {
       const p = await seedParent({ name: `Parent ${i}`, email: `parent${i}@example.com` });
-      await seedGuardian({ parentId: p.id, familyQboId: `F${i}` });
+      await seedGuardianInFamily({ parentId: p.id, familyQboId: `F${i}` });
       people.push(p);
     }
     for (const [i, p] of people.entries()) await send(p.email, at(i * 1000), "198.51.100.77");
@@ -250,6 +258,18 @@ describe("checking a code", () => {
     expect(await db.select().from(signinCode)).toHaveLength(1); // removing a row leaves the code live; the final check is what refuses it
     expect(await verifySigninCode("ana@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: false, reason: "rejected" });
     expect((await audits("signin.refused"))[0]).toMatchObject({ targetType: "parent", targetId: p.id, after: { reason: "no_enabled_guardian" } });
+  });
+
+  it("refuses a right code once the family of the person's only open row went inactive after it was sent", async () => {
+    const p = await ana({ status: "invited" });
+    const [g] = await db.select().from(guardian).where(eq(guardian.parentId, p.id));
+    await send("ana@example.com");
+    await db.update(family).set({ active: false }).where(eq(family.id, g!.familyId!));
+    expect(await verifySigninCode("ana@example.com", codeOf(mail.outbox[0]!), IP, at(1000))).toEqual({ ok: false, reason: "rejected" });
+    expect((await audits("signin.refused"))[0]).toMatchObject({ targetType: "parent", targetId: p.id, after: { reason: "no_enabled_guardian" } });
+    // Refused before anything is activated: the row is as it was.
+    expect((await db.select().from(guardian))[0]).toMatchObject({ id: g!.id, status: "invited" });
+    expect(await audits("guardian.activate")).toEqual([]);
   });
 
   it("refuses a right code for a person blocked after it was sent", async () => {

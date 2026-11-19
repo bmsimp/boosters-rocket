@@ -428,7 +428,7 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     // A row the records were never brought into step for: it names no family record.
     const bare = await seedGuardian({ parentId: a.id, familyQboId: "F1" });
     const g2 = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
-    // The code is still sent and checked by today's rules (two open rows); the one family that counts is entered at once.
+    // The code is sent and checked because one row counts, and that one family is entered at once.
     const { body, cookie } = await signIn("ana@example.com");
     expect(body).toEqual({ ok: true, next: "/" });
     const s = await stateOf(cookie);
@@ -441,6 +441,37 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     expect(await db.select().from(parentAuthSession)).toEqual([]);
     expect(await refusedFor("no_enabled_guardian")).toHaveLength(1);
     expect((await db.select().from(guardian)).map((g) => [g.id, g.status]).sort()).toEqual([[bare.id, "active"], [g2.id, "active"]].sort());
+  });
+
+  it.each([
+    ["names an inactive family record", "inactive"],
+    ["names no family record", "none"],
+  ] as const)("a person whose only open row %s is sent no code and never signed in, as one with no open row", async (_, kind) => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g = kind === "none" ? await seedGuardian({ parentId: a.id, familyQboId: "F1", status: "invited" })
+      : await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    if (kind === "inactive") await makeInactive(g.familyId);
+    const res = await post("/portal-code/send", { email: "ana@example.com" });
+    expect([res.status, await res.text()]).toEqual([200, JSON.stringify({ ok: true })]);   // the same answer as for anyone
+    expect((await db.select().from(auditLog)).find((x) => x.action === "signin.code_refused")!.after).toEqual({ reason: "no_enabled_guardian" });
+    expect(outbox).toEqual([]);
+    // Nothing was activated, and nobody signed in.
+    expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "guardian.activate" || x.action === "signin")).toEqual([]);
+  });
+
+  it("a family that goes inactive between the code check and the sign-in's end: refused, nothing activated, no session left", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
+    const live = await seedParentSession(a.authUserId);   // the session the plugin has just made
+    await makeInactive(g.familyId);
+    // sessionEnded: the plugin answers "rejected" and sets no cookie (parent-code-plugin.ts).
+    expect(await completeParentSignin(a.id, IP, live.id)).toEqual({ familyQboId: null, sessionEnded: true });
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
+    const rows = await db.select().from(auditLog);
+    expect(rows.filter((x) => x.action === "guardian.activate" || x.action === "signin")).toEqual([]);
+    expect(rows.filter((x) => x.action === "signin.refused").map((x) => x.after)).toEqual([{ reason: "no_enabled_guardian" }]);
   });
 
   it("lets the same people into the same families as before in every ordinary state", async () => {
