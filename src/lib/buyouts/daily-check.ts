@@ -34,9 +34,27 @@ const NOT_RUN: BuyoutCheck = { ran: false, paid: 0, flagged: 0, voided: 0, unfla
  * marked behind since they were read (an invoice made or voided after the run read the family) are not judged. Nor is
  * a per-student one whose student QuickBooks holds under another family or inactive: the check voids nothing for a
  * move made in QuickBooks (stage 3's slice 9c), and the family's figures hold no invoice of that customer to judge it
- * by. What a buy-out bills still follows QuickBooks' tree (open question 14). A paid buy-out is not judged: stored figures keep paid
+ * by, so it is flagged once (`student_moved`, flagMovedAway()) for Reconciliation, where staff void it in QuickBooks
+ * and close it once a live read finds it voided or gone (./closing.ts). What a buy-out bills still follows QuickBooks'
+ * tree (open question 14). A paid buy-out is not judged: stored figures keep paid
  * invoices for 12 months only, so its invoice dropping out says nothing. `ran` is true when it followed a run.
  */
+/**
+ * Flags a per-student buy-out whose customer QuickBooks no longer holds active and directly under the family's, once
+ * (a row flagged so already, or by a void, is left as it is), audited in the same transaction. Nothing is sent or
+ * queued. Returns whether it flagged it.
+ */
+async function flagMovedAway(b: typeof buyout.$inferSelect, runId: number): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [marked] = await tx.update(buyout).set({ flag: "student_moved", flaggedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"), or(isNull(buyout.flag), inArray(buyout.flag, ["missing", "other_customer"])))).returning({ id: buyout.id });
+    if (!marked) return false;
+    await writeAudit({ actor: WORKER_ACTOR, action: "volunteer.buyout.flagged", targetType: "buyout", targetId: b.id, before: { flag: b.flag },
+      after: { flag: "student_moved", why: "not_under_the_family", ...buyoutRecords(b), requirementId: b.requirementId, invoiceQboId: b.invoiceQboId, amountCents: b.amountCents, runId } }, tx);
+    return true;
+  });
+}
+
 export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
   const [run] = await db.select().from(jobRun).where(and(eq(jobRun.job, MONEY_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
   if (!run) return NOT_RUN;
@@ -61,10 +79,15 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
     const c = customers.find((x) => x.qboId === b.customerQboId);
     const stillTheFamilys = Boolean(c?.active && c.parentQboId === familyQboId);
     // Billed to a customer QuickBooks no longer holds active and directly under the family's (moved, or made inactive,
-    // in QuickBooks): the family's figures don't hold that customer's invoices, so they say nothing about it, and it is
-    // left as it is. A move made in QuickBooks is no longer followed (stage 3's slice 9c): nothing is voided for it;
-    // stage 4 shows it as a difference. A move staff make voids it then (buyoutsForMovedStudent(), ./moved.ts).
-    if (perStudent && !stillTheFamilys) continue;
+    // in QuickBooks): the family's figures don't hold that customer's invoices, so they say nothing about it. A move
+    // made in QuickBooks is no longer followed (stage 3's slice 9c): nothing is voided for it (stage 4 shows it as a
+    // difference; a move staff make voids it then, buyoutsForMovedStudent(), ./moved.ts). It is flagged for staff once
+    // (`student_moved`), so Reconciliation lists it and its close can read the invoice live (./closing.ts, `moved_away`).
+    if (perStudent && !stillTheFamilys) {
+      if (b.flag !== null && b.flag !== "missing" && b.flag !== "other_customer") continue; // a void's or a move's flag stays
+      if (await flagMovedAway(b, run.id)) flagged++;
+      continue;
+    }
     const row = money.get(b.familyId);
     // Only a family this run read, from this company: older figures may be from before the invoice was made, and so
     // may figures marked behind since they were read.

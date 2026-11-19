@@ -26,6 +26,7 @@ import { MONEY_JOB } from "@/lib/money/run-keys";
 import FormsPage from "@/app/(parent)/forms/page";
 import FormPage from "@/app/(parent)/forms/[id]/page";
 import VolunteerPage from "@/app/(parent)/volunteer/page";
+import { findMySignedPdf } from "@/lib/forms/my-evidence";
 import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
 import { formSetting, requestByCustomer, seedConsent, seedEvidence, seedFormRequirement, seedRequest } from "../helpers/forms";
 import { identityNow } from "../helpers/parent";
@@ -236,7 +237,8 @@ describe("buy-outs of a student QuickBooks moved are voided by nothing; a move i
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     await moneyRun();
     expect(await checkBuyoutInvoices()).toMatchObject({ ran: true });
-    expect(await state(b.invoiced.id)).toMatchObject({ state: "invoiced", flag: null });
+    // Nothing voided for it: flagged for staff, so Reconciliation lists it.
+    expect(await state(b.invoiced.id)).toMatchObject({ state: "invoiced", flag: "student_moved" });
     expect(await voids()).toEqual([]);
 
     // Staff then move Leo in the portal: the move's one void, for the unpaid per-student one, and none for the paid one or the family's.
@@ -283,6 +285,35 @@ describe("what each family reads after a student QuickBooks moved", () => {
 
     asParent(await identityNow(mei.session.id));
     expect(await pageOutcome(FormPage, { params: { id: leo.signed } })).toEqual({ notFound: true });
+    expect(await renderPage(FormsPage)).not.toContain("Photo consent");
+    expect(mine(await renderPage(VolunteerPage))).not.toContain("Leo Rivera");
+  });
+
+  it("after a move staff made: the new family reads the signed form as signed, never the old family's guardian or the PDF they signed; the old family sees neither", async () => {
+    const company = fznCompany();
+    Object.assign(company.customers.find((c) => c.Id === "21")!, { PrimaryEmailAddr: { Address: "mei@example.com" } });
+    const anaRow = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+    const meiRow = await guardianBeforeTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
+    await connectRoster(stub, { company });
+    const ana = await signedInNow(anaRow);
+    const mei = await signedInNow(meiRow);
+    const leo = await seedLeo();
+    const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
+
+    const meiNow = await identityNow(mei.session.id);
+    asParent(meiNow);
+    const theirs = await renderPage(FormPage, { params: { id: leo.signed } });
+    expect(theirs).toContain("Photo consent");
+    expect(theirs).toContain("Signed");
+    expect(theirs).not.toContain("Ana Rivera");
+    expect(await renderPage(FormsPage)).not.toContain("Ana Rivera");
+    expect(await findMySignedPdf({ ...meiNow, ip: null }, leo.signed)).toBeNull();
+
+    const anaNow = await identityNow(ana.session.id);
+    asParent(anaNow);
+    for (const id of [leo.signed, leo.open]) expect(await pageOutcome(FormPage, { params: { id } })).toEqual({ notFound: true });
+    for (const id of [leo.signed, leo.open]) expect(await findMySignedPdf({ ...anaNow, ip: null }, id)).toBeNull();
     expect(await renderPage(FormsPage)).not.toContain("Photo consent");
     expect(mine(await renderPage(VolunteerPage))).not.toContain("Leo Rivera");
   });

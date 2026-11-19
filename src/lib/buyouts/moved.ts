@@ -1,8 +1,8 @@
 // What a buy-out does when staff move a student to another family in the portal (afterStudentMoved() in
 // src/lib/roster/writes.ts). A per-student buy-out was the old family's choice, billed to the student's own customer:
 // the new family must never be billed for it. A move made in QuickBooks is not followed (stage 3's slice 9c): neither a
-// refresh nor the daily check (./daily-check.ts) voids anything for it; the student stays where the app has them, and
-// stage 4 shows the move as a difference. The staff move names the move by QuickBooks ids; buy-outs name the app's own
+// refresh nor the daily check (./daily-check.ts) voids anything for it (the check flags it once, for Reconciliation);
+// the student stays where the app has them, and stage 4 shows the move as a difference. The staff move names the move by QuickBooks ids; buy-outs name the app's own
 // family and student (stage 2 of the app-owned families spec), so the move is turned into those records here, through
 // their links in the records' company, as volunteerForMovedStudent() does: a boundary AGENTS.md lists, until the order
 // of a staff write flips (stage 3's slice 9d).

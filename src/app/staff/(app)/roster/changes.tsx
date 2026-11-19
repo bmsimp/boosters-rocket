@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { MembershipShape } from "@/lib/roster/shape";
 import type { Cust, Family } from "@/lib/roster/model";
 import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/operations";
-import type { QueueView } from "@/lib/roster/queue";
+import { waitingWords, type QueueView } from "@/lib/roster/queue";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { DataTable } from "@/app/components/data-table";
@@ -40,10 +40,10 @@ export function Waiting({ items }: { items: QueueView[] }) {
   if (!items.length) return null;
   return (
     <section className="box" aria-labelledby="waiting-h"><h2 id="waiting-h">Waiting to reach QuickBooks</h2>
-      <p>These changes were asked for but QuickBooks hasn&apos;t taken them yet. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>.</p>
+      <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>.</p>
       <DataTable caption="Each change, and where it stands" captionHidden rows={items} rowKey={(i) => i.id} columns={[
         { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
-        { key: "state", header: "Where it stands", cell: (i) => (i.state === "stuck" ? "Stuck: it needs someone to look at it" : "Waiting to reach QuickBooks") },
+        { key: "state", header: "Where it stands", cell: (i) => waitingWords(i) },
         { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
       ]} />
     </section>

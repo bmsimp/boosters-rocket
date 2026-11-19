@@ -103,8 +103,11 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     }
     const cache = await db.select().from(qboCustomer);
     const seen = beforeResend(w, cache);
-    if (seen.is === "done") { await foundDone(item, w, seen.qboId); return "done"; }
+    if (seen.is === "done") return finishFound(item, w, seen.qboId, now);
     if (seen.is === "stuck") return settle(item, { state: "stuck", code: seen.code, sent: item.sent }, now);
+    // A create QuickBooks answered with a customer (`result_qbo_id`, kept when it was held) that isn't there as sent:
+    // QuickBooks made something, so it is never sent again. Staff look at it in QuickBooks.
+    if (w.op === "create" && item.resultQboId !== null) return settle(item, { state: "stuck", code: "made_unmatched", sent: true }, now);
   }
   if (w.op === "deactivate") {
     // Nobody with a balance is made inactive, here as when staff press it (src/lib/roster/writes.ts): what the customer
@@ -116,7 +119,7 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
       return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: owed.code, sent: item.sent }, now);
     }
     if (owed.cents > 0) return settle(item, { state: "stuck", code: "open_balance", sent: item.sent }, now);
-    if (!owed.active) { await foundDone(item, w, w.qboId); return "done"; }
+    if (!owed.active) return finishFound(item, w, w.qboId, now);
   }
   let answer: Record<string, unknown>;
   // The time of the send itself, not the wake's: the check before a later resend needs a refresh that began after it.
@@ -133,6 +136,7 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
     return settle(item, { ...next, code: e.code, sent: item.sent || failure.sent }, triedAt);
   }
   const { cached } = await applyWritten(w, answer, { realmId: item.realmId, actor: WORKER_ACTOR, ip: null, queueId: item.id, linkedBy: item.askedBy,
+    filed: { familyId: item.familyId, studentId: item.studentId },
     inside: (tx) => markDone(item, "sent", typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null, item.tries + 1, tx) });
   return cached ? "done" : "waiting";
 }
@@ -154,11 +158,26 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<voi
         ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
           { actor: WORKER_ACTOR, ip: null }));
       }
-      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy });
+      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId });
     }
     await markDone(item, "found", qboId, item.tries, tx, appRecord);
   });
   if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
+}
+
+/**
+ * foundDone(), with what follows when finishing it fails (a follow-up of a move, or the record's change, that throws):
+ * nothing of it is kept, and the item counts the try (`finish_failed`), waiting for a later one at the queue's gaps and
+ * stuck after as many tries or as long as any other (afterFailedTry()), so it shows on Reconciliation rather than
+ * waiting for good. QuickBooks has the change: nothing is sent for it.
+ */
+async function finishFound(item: Item, w: RosterWrite, qboId: string, now: Date): Promise<Step> {
+  try {
+    await foundDone(item, w, qboId);
+    return "done";
+  } catch {
+    return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "finish_failed", sent: item.sent }, now);
+  }
 }
 
 /**
@@ -207,7 +226,18 @@ export type QueueView = {
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null;
   /** The family record it is filed under, for the link to that family's page: null when it has none, or that record no link in the roster's company (no page). */
   familyId: AppFamilyId | null;
+  /**
+   * QuickBooks took it while staff waited, but the portal couldn't take it in then (`cache_failed`): it is on the queue
+   * only for the portal to finish on its side after its next read, sending nothing again (waitingWords()).
+   */
+  finishing: boolean;
 };
+
+/** Where a waiting or stuck item stands, in words, for the Reconciliation page and a family's page. */
+export function waitingWords(i: Pick<QueueView, "state" | "finishing">): string {
+  if (i.state === "stuck") return "Stuck: it needs someone to look at it";
+  return i.finishing ? "Done in QuickBooks: the portal finishes it on its side after its next read of QuickBooks" : "Waiting to reach QuickBooks";
+}
 
 /**
  * What a queued write was, in words, with the names the cache has for its ids. Names are QuickBooks text: shown as text
@@ -249,6 +279,7 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
     id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
     lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
     familyId: r.familyId !== null && links.customerOfFamily.has(r.familyId) ? r.familyId : null,
+    finishing: r.sent && r.lastCode === "cache_failed",
   }));
 }
 
@@ -304,5 +335,9 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
   if (isBuyoutWrite(item.request)) await tx.update(buyout).set({ state: "stuck", flag: "given_up", flaggedAt: new Date(), updatedAt: new Date() }).where(and(eq(buyout.id, item.request.buyoutId), inArray(buyout.state, ["being_invoiced", "being_voided", "stuck"])));
   await writeAudit({ actor: o.actor, action: "roster.write.given_up", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: id,
     before: { state: item.state, tries: item.tries, code: item.lastCode, op: item.request.op }, after: { state: "given_up", note } }, tx);
-  return { ok: true as const, message: "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it." };
+  // Since stage 3's slice 9c no roster read changes the app's own records: a roster change QuickBooks did make is in its
+  // copy of the roster after the next read, but the portal's own family or student keeps what it had.
+  return { ok: true as const, message: isBuyoutWrite(item.request)
+    ? "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it."
+    : "Given up. Nothing more will be sent for it. If QuickBooks did make the change, the roster's copy of QuickBooks shows it after its next read, but the portal's own family or student stays as it was." };
 }

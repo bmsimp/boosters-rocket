@@ -49,7 +49,7 @@ async function moneyRun(invoices: StoredInvoice[], o: { readAt?: Date } = {}) {
 }
 
 describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
-  it("marks a paid one paid, flags one QuickBooks no longer shows and one on another customer, voids nothing for a student QuickBooks moved, and audits each once", async () => {
+  it("marks a paid one paid, flags one QuickBooks no longer shows, one on another customer and one whose student QuickBooks moved (voiding nothing for it), and audits each once", async () => {
     const p = await buyoutFamily(stub);
     await seedSignedInParent(CHENOWETH);
     const by = p.identity.parentId;
@@ -70,22 +70,25 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     const theirFigures = { realmId: MONEY_REALM, readAt: new Date(), invoices: [stored("9905", S1)], totalCents: 10000, currency: "USD", staleAt: null };
     await db.insert(familyMoney).values({ familyId: await recordOfCustomer(CHENOWETH.family.qboId, "family"), ...theirFigures }).onConflictDoUpdate({ target: familyMoney.familyId, set: theirFigures });
 
-    expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 1, flagged: 2, voided: 0, unflagged: 0 });
+    expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 1, flagged: 3, voided: 0, unflagged: 0 });
     expect(await row(fine.id)).toMatchObject({ state: "invoiced", flag: null });
     expect(await row(paid.id)).toMatchObject({ state: "paid", flag: null });
     expect(await row(gone.id)).toMatchObject({ state: "invoiced", flag: "missing" });
     expect(await row(elsewhere.id)).toMatchObject({ state: "invoiced", flag: "other_customer" });
-    // A move made in QuickBooks is no longer followed: the buy-out stays as it is, unflagged, and nothing is queued.
-    expect(await row(moved.id)).toMatchObject({ state: "invoiced", flag: null });
+    // A move made in QuickBooks is no longer followed: nothing is voided or queued for it, but the buy-out is flagged
+    // for staff, so it is not left reading "Buy-out invoiced" with no way out.
+    expect(await row(moved.id)).toMatchObject({ state: "invoiced", flag: "student_moved" });
     expect(await queueOf(moved.id)).toEqual([]);
     expect(stub.apiCalls()).toEqual([]);
-    expect(await audits("volunteer.buyout.flagged")).toHaveLength(2);
+    expect(await audits("volunteer.buyout.flagged")).toHaveLength(3);
+    expect((await audits("volunteer.buyout.flagged")).find((a) => a.targetId === moved.id)!.after).toMatchObject({ flag: "student_moved", why: "not_under_the_family" });
     expect(await audits("volunteer.buyout.paid")).toHaveLength(1);
     expect(await audits("volunteer.buyout.moved")).toEqual([]);
-    // Shown on Reconciliation, with the family, the requirement and the amount.
+    // Shown on Reconciliation, with the family, the requirement and the amount; the moved one closes after a live read.
     const look = await loadBuyoutsToLook();
     expect(look.map((l) => [l.requirement, l.flag, l.amountCents, l.familyName])).toEqual(expect.arrayContaining([
-      ["Gone", "missing", 10000, RIVERA.family.name], ["Elsewhere", "other_customer", 10000, RIVERA.family.name]]));
+      ["Gone", "missing", 10000, RIVERA.family.name], ["Elsewhere", "other_customer", 10000, RIVERA.family.name], ["Moved", "student_moved", 10000, RIVERA.family.name]]));
+    expect(look.find((l) => l.requirement === "Moved")!.close).toMatchObject({ may: true, why: "moved_away" });
 
     // The worker has nothing of it to send.
     await runWriteQueue(later(1));
@@ -96,7 +99,7 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     expect((await checkBuyoutInvoices()).ran).toBe(false);
     await moneyRun([stored("9901", FAMILY), stored("9904", S2)]);
     expect(await checkBuyoutInvoices()).toEqual({ ran: true, paid: 0, flagged: 0, voided: 0, unflagged: 0 });
-    expect(await audits("volunteer.buyout.flagged")).toHaveLength(2);
+    expect(await audits("volunteer.buyout.flagged")).toHaveLength(3);
   });
 
   it("ends one voided in QuickBooks as voided, so the family is not left reading 'Buy-out invoiced' for good", async () => {

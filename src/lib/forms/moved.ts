@@ -36,7 +36,8 @@ export function movedStudentPlan(rows: readonly { id: string; state: SignatureRe
  * them too, for a caller that would rather withdraw them itself after the commit.
  *
  * The move comes by QuickBooks ids, as the staff move has it; a student or old family with no app record has no
- * requests. A staff move goes to a family the Families pages offer, which has its record. Should one ever have none,
+ * requests. A staff move goes only to one of the app's own active families (prepare() in src/lib/roster/writes.ts
+ * refuses any other, and the family's page offers no other), which has its record. Should one ever have none,
  * it can't be given a request: a complete one then stays where it is, and an unfinished one is still reset and its
  * document withdrawn, under the old family, where the new family's Forms page takes it over as it takes over any
  * request nothing was made for (loadMyForms()).

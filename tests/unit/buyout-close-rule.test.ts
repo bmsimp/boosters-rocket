@@ -49,6 +49,15 @@ describe("closing a buy-out (v1 spec §11.5)", () => {
     expect(why({ state: "stuck", flag: "missing", items: [create("done", true), voidItem("stuck", true)] })).toBe("close:looks_gone");
   });
 
+  it("is offered, read again live first, for one the daily check flagged because its student is no longer under the family in QuickBooks", () => {
+    // Flagged by the check alone: no void was tried, so there is no code and no void item.
+    expect(why({ state: "invoiced", flag: "student_moved" })).toBe("close:moved_away");
+    expect(CLOSE_WORDS.moved_away).toContain("Closing reads QuickBooks first");
+    // A void the portal tried for a move made in the portal says its own thing, as before.
+    expect(why({ state: "invoiced", flag: "student_moved", items: [create("done", true), voidItem("done", true)] })).toBe("keep:invoice_stands");
+    expect(why({ state: "invoiced", flag: "student_moved", lastCode: "paid" })).toBe("keep:part_paid");
+  });
+
   it("closes a paid one only as paid in full, whatever other flag the daily check left on it", () => {
     expect(why({ state: "paid", flag: "missing" })).toBe("keep:nothing_to_do");
     expect(why({ state: "paid", flag: "other_customer" })).toBe("keep:nothing_to_do");
