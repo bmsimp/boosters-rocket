@@ -71,10 +71,11 @@ export const addGuardianAction = staffAction(P, async (ctx, familyId: string, na
   const r = await addGuardian(family, { name, email }, op(ctx));
   if (!r.ok) return { ok: false, errors: [ADD_REFUSED[r.reason]] };
   refresh();
-  const who = r.person === "existing" ? `${r.name}, who already had a sign-in with this address (their name is unchanged),` : r.name;
+  // Said of a person who held the address already, between their name and what follows it.
+  const known = r.person === "existing" ? ", who already had a sign-in with this address (their name is unchanged)" : "";
   return { ok: true, message: r.outcome === "reinstated"
-    ? `${who} was a guardian of this family before: their sign-in for it is back. They sign in with this address and a code while parent sign-ins are on.`
-    : `Added ${who}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.` };
+    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and a code while parent sign-ins are on.`
+    : `Added ${r.name}${known}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.` };
 });
 
 export const removeGuardianAction = staffAction(P, async (ctx, guardianId: string, note: string): Promise<Done> => {
