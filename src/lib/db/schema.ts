@@ -477,7 +477,8 @@ export type RosterWrite =
    * portal's own name of the record before this change, which a stale answer's live read is compared with (a parent's,
    * and one sent before that slice: the cache's name). `syncToken` is the link's own version (empty when the link has
    * none, and then nothing is sent before a live read); `checked`, that it was sent with a version read live after the
-   * name read as the portal held it (or by "Send the portal's value"), so its answer aligns the link. Neither is sent.
+   * name read as the portal held it (or by "Send the portal's value", whose `was` is then the name its row showed, which
+   * a later try compares QuickBooks' with), so its answer aligns the link. Neither is sent.
    */
   | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string; checked?: true }
   | { op: "move"; role: "student"; qboId: string; syncToken: string; fromFamilyQboId: string; toFamilyQboId: string }

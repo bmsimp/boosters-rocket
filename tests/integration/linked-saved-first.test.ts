@@ -13,7 +13,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, qboCustomer, student, writeQueue } from "@/lib/db/schema";
 import { addStudentToLinked, askRosterWrite, BEING_SENT, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, MAKING_LOCK, NAME_DIFFERS, portalValueStamp, renameLinked,
-  sendPortalValue, SENDING_LOCK, WRITE_COPY } from "@/lib/roster/writes";
+  sendPortalValue, SENDING_LOCK, TAKEN_NAME_KEPT, WRITE_COPY } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, queueCounts, REFUSED_NOT_AGAIN, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { cleanUp } from "@/lib/jobs/cleanup";
@@ -186,6 +186,9 @@ describe("a rename saved first: what is refused before anything is saved, and wh
     stub.calls.length = 0;
     const r = await renameLinked({ kind: "family", recordId: String(rivera), name: "Rivera Home" }, tag, op);
     expect(r).toMatchObject({ ok: true, message: expect.stringContaining("QuickBooks has “Rivera Family” now.") });
+    // Nobody renamed it in QuickBooks: the words say the portal can't tell that from an earlier change of its own.
+    expect(r).toMatchObject({ message: expect.stringContaining("an earlier change from the portal never reached it") });
+    expect(r).not.toMatchObject({ message: expect.stringContaining("Someone changed the name") });
     expect(posts()).toEqual([]);
     expect(inStub("10").DisplayName).toBe("Rivera Family");
     expect((await familyRow(rivera)).name).toBe("Rivera Home");
@@ -359,5 +362,75 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
     expect(await queueItem(kept!.id)).toMatchObject({ state: "done" });
     const [rosa] = await studentNamed("Rosa Rivera");
     expect(await db.select().from(accountingLink).where(eq(accountingLink.studentId, rosa!.id))).toHaveLength(1);
+  });
+
+  it("Send the portal's value given up while it is on its way: QuickBooks makes the student, but nothing is linked and the item stays given up", async () => {
+    stub.updateFault = "6000";
+    await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op);
+    stub.updateFault = null;
+    const [kept] = await items();
+    // Staff give it up at the moment the create reaches QuickBooks.
+    stub.onApiRequest = async (call) => { if (call.method === "POST") { stub.onApiRequest = null; expect(await giveUp(kept!.id, "Not wanted.", op)).toMatchObject({ ok: true }); } };
+    expect(await sendPortalValue(kept!.id, "", portalValueStamp(kept!.id, ""), op)).toMatchObject({ ok: true, message: expect.stringContaining("given up") });
+    const made = stub.customers.find((c) => c.DisplayName === "Rosa Rivera")!;
+    const [rosa] = await studentNamed("Rosa Rivera");
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.studentId, rosa!.id))).toEqual([]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "given_up", resultQboId: String(made.Id) });
+    expect(await items()).toHaveLength(1);
+  });
+
+  it("Send the portal's value with a lost answer: the item itself waits, sent, and the worker sends it against the name the row showed", async () => {
+    inStub("12").DisplayName = "Leonardo Rivera"; inStub("12").SyncToken = "1";
+    await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    const [kept] = await items();
+    stub.updateServerFault = { status: 500, code: "10000" };
+    expect(await sendPortalValue(kept!.id, "Leonardo Rivera", portalValueStamp(kept!.id, "Leonardo Rivera"), op)).toMatchObject({ ok: true, queued: true });
+    stub.updateServerFault = null;
+    expect(await items()).toHaveLength(1);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "waiting", sent: true, request: { syncToken: "1", checked: true, was: "Leonardo Rivera", name: "Leon Rivera" } });
+    stub.calls.length = 0;
+    await runWriteQueue(later());
+    // QuickBooks didn't make it: sent again, with the version the press read, as the name still reads as staff were shown.
+    expect(bodies()).toEqual([{ Id: "12", SyncToken: "1", sparse: true, DisplayName: "Leon Rivera" }]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "done" });
+    expect(inStub("12").DisplayName).toBe("Leon Rivera");
+  });
+
+  it("Send the portal's value refused again: refused, as it was asked, with the new code; and a taken name isn't sent again", async () => {
+    inStub("12").DisplayName = "Leonardo Rivera"; inStub("12").SyncToken = "1";
+    await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    const [kept] = await items();
+    stub.updateFault = "6000";
+    expect(await sendPortalValue(kept!.id, "Leonardo Rivera", portalValueStamp(kept!.id, "Leonardo Rivera"), op)).toMatchObject({ ok: false });
+    stub.updateFault = null;
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "refused", lastCode: "fault_6000", sent: false, request: { syncToken: "0", was: "Leo Rivera" } });
+    expect((await loadOpenWrites())[0]).toMatchObject({ state: "refused", mayResend: true });
+
+    await db.update(writeQueue).set({ lastCode: "fault_6240" }).where(eq(writeQueue.id, kept!.id));
+    stub.calls.length = 0;
+    expect(await sendPortalValue(kept!.id, "Leonardo Rivera", portalValueStamp(kept!.id, "Leonardo Rivera"), op)).toEqual({ ok: false, errors: [TAKEN_NAME_KEPT] });
+    expect(posts()).toEqual([]);
+    expect((await loadOpenWrites())[0]).toMatchObject({ state: "refused", mayResend: false });
+  });
+
+  it("“Create in QuickBooks and link” that QuickBooks refuses again leaves the refused create kept", async () => {
+    stub.updateFault = "6000";
+    await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op);
+    const [kept] = await items();
+    expect((await createInQuickBooksAndLink(String(rivera), null, tag, op)).result).toMatchObject({ ok: false });
+    stub.updateFault = null;
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "refused" });
+    expect(await auditsOf("roster.write.replaced")).toEqual([]);
+  });
+
+  it("a make-inactive the worker finds QuickBooks has already, without sending it, leaves the link's version", async () => {
+    await seedQueued({ op: "deactivate", role: "student", qboId: "12", syncToken: "0" });
+    inStub("12").Active = false; inStub("12").SyncToken = "5";
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    stub.calls.length = 0;
+    await runWriteQueue(later());
+    expect(posts()).toEqual([]);
+    expect((await items())[0]).toMatchObject({ state: "done" });
+    expect((await linkOf("12", "student"))!.syncedToken).toBe("0");
   });
 });

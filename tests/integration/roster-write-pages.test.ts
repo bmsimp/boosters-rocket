@@ -602,6 +602,21 @@ describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)"
     expect(change).not.toContain("Try again now");
   });
 
+  it("offers no Send the portal's value where it can't go through: a name QuickBooks refused as taken, a customer QuickBooks has inactive; and says why", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    await seedQueued(RENAME, { state: "refused", code: "fault_6240", nextTryAt: null, familyQboId: "10" });
+    const taken = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(taken).not.toContain("Send the portal");
+    expect(taken).toContain("rename the record on its family&#x27;s page to a free name");
+    expect(taken).toContain("Give up");
+    await db.delete(writeQueue);
+    await refusedRename();
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "12"));
+    const inactive = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(inactive).not.toContain("Send the portal");
+    expect(inactive).toContain("QuickBooks has this customer inactive, and the portal never makes a customer active again");
+  });
+
   it("is listed on the family's page in words, with no buttons, and doesn't stop a change to the record", async () => {
     await refusedRename();
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
