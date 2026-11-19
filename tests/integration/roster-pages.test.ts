@@ -34,6 +34,7 @@ import { saveShape } from "@/lib/roster/shape";
 import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { rowNamed } from "../helpers/table";
+import { recordOfCustomer } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -42,7 +43,9 @@ afterAll(() => stub.close());
 const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const list = async (q?: string) => renderToStaticMarkup(await RosterPage({ searchParams: Promise.resolve(q ? { q } : {}) }));
-const entry = async (id: string) => renderToStaticMarkup(await RosterEntryPage({ params: Promise.resolve({ id }) }));
+/** A family's page is addressed by its app family record: the one this customer's family link names. */
+const idOf = async (customer: string) => String(await recordOfCustomer(customer, "family"));
+const entry = async (customer: string) => renderToStaticMarkup(await RosterEntryPage({ params: Promise.resolve({ id: await idOf(customer) }) }));
 const thrown = async (p: Promise<unknown>) => (await p.catch((e: { url?: string; notFound?: boolean }) => e)) as { url?: string; notFound?: boolean };
 
 describe("the roster pages", () => {
@@ -86,7 +89,8 @@ describe("the roster pages", () => {
     await ready();
     const html = await list();
     expect(html.indexOf("Chen Family")).toBeLessThan(html.indexOf("Rivera Family"));
-    expect(html).toContain('href="/staff/roster/10"');
+    expect(html).toContain(`href="/staff/roster/${await idOf("10")}"`);
+    expect(html).not.toContain('href="/staff/roster/10"'); // never by its customer
     // A row each: the family, its students and parents, and whether QuickBooks has it active.
     expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Active"]);
     expect(rowNamed(html, "Old Family")).toEqual(["Old Family", "0", "0", "Inactive"]);
@@ -118,6 +122,7 @@ describe("the roster pages", () => {
     expect(html).toContain("No student is listed under this family in QuickBooks.");
     expect(html).toContain("This student or parent isn&#x27;t directly under a family in QuickBooks.");
     expect(html).not.toContain('href="/staff/roster/50"'); // a stray student has no page
+    expect(html).toContain(`href="/staff/roster/${await idOf("20")}"`); // a family flagged links to its page, by its record
   });
 
   it("renders hostile names as text", async () => {
@@ -152,7 +157,7 @@ describe("the roster pages", () => {
     expect(row).toBe("Ana R. Email ana.portal@example.com Sign-in Can sign in (hasn&#x27;t yet)");
     expect((await audits("roster.family.read"))).toHaveLength(1);
     expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
-      targetType: "qbo_customer", targetId: "10", ip: "203.0.113.40" });
+      targetType: "family", targetId: await idOf("10"), ip: "203.0.113.40" });
   });
 
   it("a family's page leads to its money, season and volunteering credit for staff who may open each, and to none of them otherwise", async () => {
@@ -161,18 +166,22 @@ describe("the roster pages", () => {
     expect(links(await entry("10"))).toEqual([]);
     // Its buy-outs page is Roster.Read's, the roster page's own: the one link every reader of the page gets.
     const alone = await entry("10");
+    const at = await idOf("10");
     expect(alone).toContain("More about this family");
-    expect([...alone.matchAll(/href="(\/staff\/roster\/10\/[^"]+)"/g)].map((m) => m[1])).toEqual(["/staff/roster/10/buyouts"]);
+    expect([...alone.matchAll(/href="(\/staff\/roster\/[^"/]+\/[^"]+)"/g)].map((m) => m[1])).toEqual([`/staff/roster/${at}/buyouts`]);
     const [r] = await db.insert(role).values({ key: "more", name: "More" }).returning();
     await db.insert(roleRule).values(["Finance.Balance.Read", "Season.Progress.Read", "Volunteer.Credit.ReadWrite"].map((pattern) => ({ roleId: r!.id, kind: "include" as const, pattern })));
     await db.insert(roleAssignment).values({ roleId: r!.id, staffUserId: reader.id });
-    expect(links(await entry("10"))).toEqual(["/staff/balances/10", "/staff/seasons/progress/family/10", "/staff/volunteer/credit/10"]);
+    expect(links(await entry("10"))).toEqual([`/staff/balances/${at}`, `/staff/seasons/progress/family/${at}`, `/staff/volunteer/credit/${at}`]);
   });
 
-  it("is not found, and writes no audit row, for anything that isn't a family", async () => {
+  it("is not found, and writes no audit row or error, for anything that isn't a family record of the roster", async () => {
     await ready();
+    // A family's QuickBooks id (the old address), text that isn't a uuid, a student's record, a uuid that names nothing,
+    // and family records (made inactive, as 0023 made one) of a customer that isn't a family: a school, a parent.
     // "%E0%A4%A" is not valid percent-encoding: it must be a plain not-found, never an error page.
-    for (const id of ["30", "11", "nope", "10%27", "%E0%A4%A", "%"]) expect((await thrown(RosterEntryPage({ params: Promise.resolve({ id }) }))).notFound).toBe(true);
+    const ids = ["10", "nope", "10%27", "%E0%A4%A", "%", String(await recordOfCustomer("12", "student")), crypto.randomUUID(), await idOf("30"), await idOf("11")];
+    for (const id of ids) expect((await thrown(RosterEntryPage({ params: Promise.resolve({ id }) }))).notFound, id).toBe(true);
     expect(await audits("roster.family.read")).toEqual([]);
   });
 

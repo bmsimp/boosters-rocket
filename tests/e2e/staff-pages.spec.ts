@@ -2,31 +2,36 @@ import { test, expect, type Page } from "@playwright/test";
 import { staffSessionCookie } from "./staff-session";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
 import { parentRoutes } from "./parent-routes";
+import { familyPages } from "./family-records";
 
 // Every staff page, opened as the seeded Admin (scripts/seed-e2e.ts) on a phone and on a laptop. The pages are read from
 // disk (src/app/staff/(app)), so a new one fails here until it has a way in below. Each must fit its width without the
 // page scrolling sideways (a wide table scrolls inside its own region, or stacks), every control on it must have a name
 // a screen reader can say, and every link that stands alone on its line, every table's link and every disclosure's
 // summary must be a 44px tap target (AGENTS.md, UI: .link-line). Pages whose address holds an id the seed doesn't fix
-// are reached by the first link to one, from the page that lists them. Nothing here changes data.
-/** A page at its address, or reached from `from` by following the first link matching each of `links` in turn. */
-type Visit = { path: string } | { from: string; links: string[] };
+// are reached by the first link to one, from the page that lists them; a family's pages, addressed by the app's own
+// family record, by that record's id read from the seed (./family-records.ts). Nothing here changes data.
+/**
+ * A page at its address, a family's page at the address `family` gives for the customer the seed gave it, or reached
+ * from `from` by following the first link matching each of `links` in turn.
+ */
+type Visit = { path: string } | { family: (customerId: string) => Promise<string>; customer: string } | { from: string; links: string[] };
 const STAFF_DIR = "src/app/staff/(app)";
 const SEASON = 'main a[href^="/staff/seasons/"]:not([href^="/staff/seasons/progress"])';
 
 /** Every staff page on disk, by its route, with how it is opened. A static route with no entry is opened at its own address. */
 const VISITS: Record<string, Visit[]> = {
-  "/staff/roster/[id]": [{ path: "/staff/roster/E2E-10" }, { path: "/staff/roster/E2E-FAMILY" }],
+  "/staff/roster/[id]": [{ family: familyPages.roster, customer: "E2E-10" }, { family: familyPages.roster, customer: "E2E-FAMILY" }],
   "/staff/parents/[id]": [{ from: "/staff/parents", links: ['main a[href^="/staff/parents/"]'] }],
-  "/staff/roster/[id]/buyouts": [{ path: "/staff/roster/E2E-10/buyouts" }],
-  "/staff/balances/[familyId]": [{ path: "/staff/balances/E2E-FAMILY" }],
+  "/staff/roster/[id]/buyouts": [{ family: familyPages.buyouts, customer: "E2E-10" }],
+  "/staff/balances/[familyId]": [{ family: familyPages.balance, customer: "E2E-FAMILY" }],
   "/staff/seasons/[id]": [{ from: "/staff/seasons", links: [SEASON] }],
   "/staff/seasons/[id]/requirements/[requirementId]": [{ from: "/staff/seasons", links: [SEASON, 'main a[href*="/requirements/"]'] }],
   "/staff/seasons/progress/[requirementId]": [{ from: "/staff/seasons/progress", links: ['main a[href^="/staff/seasons/progress/"]:not([href*="/family/"])'] }],
-  "/staff/seasons/progress/family/[familyId]": [{ path: "/staff/seasons/progress/family/E2E-FAMILY" }],
+  "/staff/seasons/progress/family/[familyId]": [{ family: familyPages.progress, customer: "E2E-FAMILY" }],
   "/staff/volunteer/[id]": [{ path: `/staff/volunteer/${E2E_VOLUNTEER.event}` }],
   "/staff/volunteer/check-in/[shiftId]": [{ path: `/staff/volunteer/check-in/${E2E_VOLUNTEER.griddle}` }],
-  "/staff/volunteer/credit/[familyId]": [{ path: "/staff/volunteer/credit/E2E-FAMILY" }],
+  "/staff/volunteer/credit/[familyId]": [{ family: familyPages.credit, customer: "E2E-FAMILY" }],
   "/staff/forms/evidence/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/evidence/"]'] }],
   "/staff/forms/requests/[id]": [{ from: "/staff/forms", links: ['a[href^="/staff/forms/requests/"]'] }],
   // A set-up page shows one step at a time: each step is a page of its own.
@@ -41,10 +46,11 @@ const CONTROLS = "button|link|textbox|searchbox|checkbox|radio|combobox|listbox|
 const UNNAMED = new RegExp(`^\\s*- (${CONTROLS})(?: \\[[^\\]]*\\])*:?\\s*$`);
 
 async function open(page: Page, visit: Visit): Promise<string> {
-  if ("path" in visit) {
-    const res = await page.goto(visit.path);
-    expect(res?.status(), visit.path).toBe(200);
-    return visit.path;
+  if ("path" in visit || "family" in visit) {
+    const path = "path" in visit ? visit.path : await visit.family(visit.customer);
+    const res = await page.goto(path);
+    expect(res?.status(), path).toBe(200);
+    return path;
   }
   let at = visit.from;
   await page.goto(at);

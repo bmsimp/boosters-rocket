@@ -7,6 +7,8 @@ import { buildRoster, type Cust, type Family, type Roster } from "./model";
 import { needsAttention, type AttentionItem, type SignIn } from "./attention";
 import { ROSTER_JOB, getRosterSource } from "./source";
 import { loadDecision } from "@/lib/parents/reconcile";
+import { customerOfFamily } from "@/lib/families/links";
+import type { AppFamilyId } from "@/lib/families/ids";
 
 export type RosterPage = {
   connected: boolean; shape: MembershipShape | null; shapeWords: string | null; brokenTypes: string[]; roster: Roster | null;
@@ -78,6 +80,17 @@ export function entryFrom(page: RosterPage, qboId: string): RosterEntry | null {
   return family ? { kind: "family", family, signIns: mine } : null;
 }
 
-export async function rosterEntry(qboId: string): Promise<RosterEntry | null> {
-  return entryFrom(await loadRosterPage(), qboId);
+/**
+ * The roster entry a staff page's address names, by the app's own family id (stage 3 of the app-owned families spec;
+ * checked by familyRecordAt() first): the family record's customer, through its own link in the roster's company, as
+ * entryFrom() finds it in a page already loaded. Null when the record has no link there, or its customer isn't a family
+ * (a member, in flat books) of the roster, active or not: a record whose customer QuickBooks no longer lists as one.
+ */
+export async function familyEntry(page: RosterPage, familyId: AppFamilyId): Promise<RosterEntry | null> {
+  const qboId = await customerOfFamily(familyId);
+  return qboId === null ? null : entryFrom(page, qboId);
+}
+
+export async function rosterEntry(familyId: AppFamilyId): Promise<RosterEntry | null> {
+  return familyEntry(await loadRosterPage(), familyId);
 }

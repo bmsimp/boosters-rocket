@@ -4,7 +4,9 @@ import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
-import { loadRosterPage, entryFrom } from "@/lib/roster/queries";
+import { loadRosterPage, familyEntry } from "@/lib/roster/queries";
+import { familyRecordAt } from "@/lib/families/address";
+import type { AppFamilyId } from "@/lib/families/ids";
 import { familyCover, versionsOf } from "@/lib/roster/writes";
 import { loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
@@ -14,6 +16,7 @@ import { FamilyChanges, MemberChanges, Waiting, WhatChanges } from "../changes";
 import type { Cust } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
@@ -62,16 +65,15 @@ function SignIns({ signins, detailed }: { signins: FamilySignin[]; detailed: boo
  * The family's other staff pages, each for staff who may open it: the way from the roster to a family's money, its
  * season, its volunteering and its buy-outs, without going back to a list. Each of those pages records its own read.
  */
-function Elsewhere({ qboId, money, season, credit, buyouts }: { qboId: string; money: boolean; season: boolean; credit: boolean; buyouts: boolean }) {
+function Elsewhere({ familyId, money, season, credit, buyouts }: { familyId: AppFamilyId; money: boolean; season: boolean; credit: boolean; buyouts: boolean }) {
   if (!money && !season && !credit && !buyouts) return null;
-  const at = encodeURIComponent(qboId);
   return (
     <section className="box" aria-labelledby="entry-elsewhere-h"><h2 id="entry-elsewhere-h">More about this family</h2>
       <ul className="lines">
-        {money && <li><Link className="link-line" href={`/staff/balances/${at}`}>What it owes</Link></li>}
-        {season && <li><Link className="link-line" href={`/staff/seasons/progress/family/${at}`}>Where it stands this season</Link></li>}
-        {credit && <li><Link className="link-line" href={`/staff/volunteer/credit/${at}`}>Its volunteering credit</Link></li>}
-        {buyouts && <li><Link className="link-line" href={`/staff/roster/${at}/buyouts`}>Its volunteer buy-outs</Link></li>}
+        {money && <li><Link className="link-line" href={familyBalancePage(familyId)}>What it owes</Link></li>}
+        {season && <li><Link className="link-line" href={familyProgressPage(familyId)}>Where it stands this season</Link></li>}
+        {credit && <li><Link className="link-line" href={familyCreditPage(familyId)}>Its volunteering credit</Link></li>}
+        {buyouts && <li><Link className="link-line" href={familyBuyoutsPage(familyId)}>Its volunteer buy-outs</Link></li>}
       </ul>
     </section>
   );
@@ -80,21 +82,24 @@ function Elsewhere({ qboId, money, season, credit, buyouts }: { qboId: string; m
 export default async function RosterEntryPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireStaffPage("Roster.Read");
   const { id } = await params;
-  let qboId: string;
-  try { qboId = decodeURIComponent(id); } catch { notFound(); }
+  // The app's own family id (stage 3 of the app-owned families spec): anything that isn't a family record's answers 404.
+  const familyId = await familyRecordAt(id);
+  if (!familyId) notFound();
   // The tag first: the roster the page then shows is that company's or a later one, never an earlier one.
   const rosterTag = await currentRosterTag();
   const page = await loadRosterPage(); // one load, so the entry and the freshness notes describe the same snapshot
-  const entry = entryFrom(page, qboId);
+  // The family's customer, once, through its record's own link: what the roster cache, the sign-ins and the forms below are keyed by.
+  const entry = await familyEntry(page, familyId);
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
   if (!entry) notFound();
-  // A staff read of family data (spec §5): recorded before anything is shown.
+  const customer = entry.kind === "family" ? entry.family.customer : entry.member;
+  const qboId = customer.qboId;
+  // A staff read of family data (spec §5): recorded before anything is shown, naming the app's family.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "roster.family.read", permission: "Roster.Read",
-    targetType: "qbo_customer", targetId: qboId, ip: ctx.ip });
+    targetType: "family", targetId: String(familyId), ip: ctx.ip });
   const detailed = can(ctx.effective, "Parents.ReadWrite");
   const signins = await familySignins(qboId, { detailed });
-  const customer = entry.kind === "family" ? entry.family.customer : entry.member;
-  const waiting = await loadOpenWrites({ familyQboId: qboId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
+  const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's version.
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null;
   const records = entry.kind === "family" ? [entry.family.customer, ...entry.family.students, ...entry.family.parents] : [entry.member];
@@ -117,7 +122,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         <People id="entry-member-h" title="In QuickBooks" noun="Member" people={[entry.member]} contact empty="" />
       )}
       {/* Buy-outs for any family or member, active or not: one made inactive may still have one to close. */}
-      <Elsewhere qboId={customer.qboId} buyouts
+      <Elsewhere familyId={familyId} buyouts
         money={entry.kind === "family" && customer.active && can(ctx.effective, "Finance.Balance.Read")}
         season={entry.kind === "family" && customer.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && customer.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />

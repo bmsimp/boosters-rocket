@@ -3,14 +3,15 @@
 // row (before and after); a write that names families or students, or rests on them, takes the roster lock with the
 // page's roster tag first (lockRosterAs), so no refresh (which brings the app's records into step) or change of company
 // runs in between. Families and students are the app's own records (stage 2 of the app-owned families spec): the
-// roster is turned into them once, by loadSeasonFamilies(), and a family's page keeps its address by QuickBooks id,
-// turned into the app's family in one place (seasonFamilyAt()). Never imported by parent code
+// roster is turned into them once, by loadSeasonFamilies(), and a family's page is addressed by the app's family id,
+// found as the season keeps it in one place (seasonFamilyAt()). Never imported by parent code
 // (tests/integration/page-guards.test.ts).
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { parent, requirement, season, seasonStep, staffUser, volunteerCredit, volunteerEvent, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
+import type { AppFamilyId } from "@/lib/families/ids";
 import { isCovered, type SubjectId, type SubjectsAsked } from "@/lib/seasons/progress";
 import { loadFacts, toRequirement } from "@/lib/seasons/recorded";
 import { loadCovers } from "@/lib/seasons/season-rows";
@@ -182,8 +183,8 @@ export async function removeSignup(signupId: string, o: VolunteerOp, now: Date =
 
 /* ---- One family's credit, for staff ---- */
 
-/** `qboId` is only the address of the family's page, which still names the family by its QuickBooks id. */
-export type CreditFamilyRow = { qboId: string; name: string; credits: number };
+/** `id`: the app's own family, which its page's address names. */
+export type CreditFamilyRow = { id: AppFamilyId; name: string; credits: number };
 
 /** Every active family on the roster, with how many live credits it has, by name. Null when the roster can't be shown. A list like the roster's: not audited. */
 export async function creditFamilies(): Promise<CreditFamilyRow[] | null> {
@@ -192,7 +193,7 @@ export async function creditFamilies(): Promise<CreditFamilyRow[] | null> {
   const rows = await db.select({ familyId: volunteerCredit.familyId }).from(volunteerCredit).where(isNull(volunteerCredit.removedAt));
   const count = new Map<string, number>();
   for (const r of rows) count.set(String(r.familyId), (count.get(String(r.familyId)) ?? 0) + 1);
-  return families.map((f) => ({ qboId: f.qboId, name: f.name, credits: count.get(String(f.id)) ?? 0 })).sort((a, b) => a.name.localeCompare(b.name));
+  return families.map((f) => ({ id: f.id, name: f.name, credits: count.get(String(f.id)) ?? 0 })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export type StaffCreditLine = {
@@ -219,12 +220,13 @@ export type FamilyCreditDetail = {
 /**
  * One family's volunteer credit as staff see it: each credit, notes and all, with where the rule spent it; each
  * volunteer requirement of the current season asked of the family or its students, with how it stands; and the
- * credit staff removed, with why. The family comes by the QuickBooks id in its page's address and is turned into the
- * app's family once (seasonFamilyAt()). `rosterTag` is read before the roster, for the page's forms. The read is
- * audited, naming the app's family, before anything is returned. Null for a family the roster doesn't show now.
+ * credit staff removed, with why. The family is the app's record its page's address names (checked by
+ * familyRecordAt() first), found as the season keeps it (seasonFamilyAt()). `rosterTag` is read before the roster, for
+ * the page's forms. The read is audited, naming the app's family, before anything is returned. Null for a family the
+ * roster doesn't show now as an active family.
  */
-export async function familyCreditDetail(familyQboId: string, rosterTag: string, o: VolunteerOp): Promise<FamilyCreditDetail | null> {
-  const family = await seasonFamilyAt(familyQboId);
+export async function familyCreditDetail(familyId: AppFamilyId, rosterTag: string, o: VolunteerOp): Promise<FamilyCreditDetail | null> {
+  const family = await seasonFamilyAt(familyId);
   if (!family) return null;
   await writeAudit({ actor: o.actor, action: "volunteer.credit.family.read", permission: o.permission, targetType: "family", targetId: String(family.id), ip: o.ip });
   const asked: SubjectsAsked = { families: [family.id], students: family.students.map((s) => s.id) };

@@ -7,6 +7,9 @@ import { familyNames, familySignins, getPerson, listPeople } from "@/lib/parents
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 
+// The cache here names no company, so there are no app records: each membership's family (`familyId`) is null, and a
+// person's page links no family (the family's page is addressed by its record). tests/integration/parents-pages.test.ts
+// reads a roster with a company, where it links each one.
 describe("the people directory", () => {
   beforeEach(async () => { await resetDb(); await seedShape(); await seedParentSettings(SIGNINS_ON); });
   const ALL = [fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), par("12", "No Mail", "10", null),
@@ -18,7 +21,7 @@ describe("the people directory", () => {
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") });
     await db.insert(auditLog).values({ door: "parent", actorId: ana!.id, actorLabel: ana!.email, action: "signin", targetType: "parent", targetId: ana!.id, at: new Date("2026-11-05T12:00:00Z") });
     expect(await listPeople()).toEqual([{ parentId: ana!.id, name: "Ana Rivera", email: "ana@example.com", blocked: false,
-      families: [{ familyQboId: "10", familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" }],
+      families: [{ familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" }],
       lastSigninAt: "2026-11-05T12:00:00.000Z", welcomedAt: "2026-11-01T12:00:00.000Z" }]);
     expect((await listPeople("RIVERA")).length).toBe(1);
     expect((await listPeople("ana@ex")).length).toBe(1);
@@ -86,8 +89,8 @@ describe("the people directory", () => {
     const people = await listPeople("sam");
     expect(people).toHaveLength(1);
     expect(people[0]!.families).toEqual([
-      { familyQboId: "10", familyName: "Rivera Family", previousCompany: false, kind: "held", words: "Held: this address is also under Chen Family" },
-      { familyQboId: "20", familyName: "Chen Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
+      { familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "held", words: "Held: this address is also under Chen Family" },
+      { familyQboId: "20", familyId: null, familyName: "Chen Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
     ]);
   });
 
@@ -96,8 +99,8 @@ describe("the people directory", () => {
     const [ana] = await db.select().from(parent).where(eq(parent.email, "ana@example.com"));
     await seedGuardian({ parentId: ana!.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     expect((await getPerson(ana!.id))!.families).toEqual([
-      { familyQboId: "10", familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
-      { familyQboId: "20", familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected" },
+      { familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
+      { familyQboId: "20", familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected" },
     ]);
   });
 

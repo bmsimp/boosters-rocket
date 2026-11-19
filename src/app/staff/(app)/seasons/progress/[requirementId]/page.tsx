@@ -11,6 +11,7 @@ import { LocalTime } from "@/app/components/local-time";
 import { StateWords } from "@/app/components/state-words";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { familyProgressPage } from "@/app/staff/(app)/family-pages";
 import { OneButton, TextAction } from "../../forms";
 import { removeWaiverAction, setTicksAction, waiveAction } from "../../actions";
 
@@ -73,8 +74,8 @@ export default async function RequirementProgressPage({ params, searchParams }: 
               { key: "name", header: r.appliesTo === "family" ? "Family" : "Student", rowHeader: true, cell: (row) => row.name },
               ...(r.appliesTo === "student" ? [{ key: "family", header: "Family", cell: (row: ProgressRow) => row.familyName }] : []),
               { key: "state", header: "Where it stands", cell: (row) => <Standing row={row} /> },
-              // The family's QuickBooks id is the address; its name is only the link's words.
-              { key: "page", header: "The family's page", cell: (row) => <Link href={`/staff/seasons/progress/family/${encodeURIComponent(row.familyQboId)}?season=${season.id}`}>Everything asked of {row.familyName}</Link> },
+              // The family's app record is the address (family-pages.ts); its name is only the link's words.
+              { key: "page", header: "The family's page", cell: (row) => <Link href={familyProgressPage(row.familyId, season.id)}>Everything asked of {row.familyName}</Link> },
               ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (row: ProgressRow) => (
                 <div className="row-actions">
                   {ticked && (row.metAt

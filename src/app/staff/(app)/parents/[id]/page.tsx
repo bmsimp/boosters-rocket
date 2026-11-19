@@ -11,6 +11,7 @@ import { StateWords } from "@/app/components/state-words";
 import { NoteAction, OneButton } from "../forms";
 import { blockAction, unblockAction, resendWelcomeAction } from "../actions";
 import { accessState } from "../access-state";
+import { familyPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Parent" };
 export const dynamic = "force-dynamic";
@@ -36,8 +37,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <DataTable caption="Each family this person is linked to, and whether they can sign in to it" captionHidden
             rows={p.families} rowKey={(f) => `${f.previousCompany ? "old" : "now"}|${f.familyQboId}`} columns={[
               // A previous company's row carries that company's ID, which names some other family (or none) now.
-              { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany ? f.familyName
-                : <Link href={`/staff/roster/${encodeURIComponent(f.familyQboId)}`}>{f.familyName}</Link>) },
+              { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null ? f.familyName
+                : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
               { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind)} words={f.words} /> },
             ]} />
         )}

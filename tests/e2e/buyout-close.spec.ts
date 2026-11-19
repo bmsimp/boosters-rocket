@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
 import { E2E_BUYOUT } from "./buyout-seed";
+import { familyPages } from "./family-records";
 
 // Staff close a buy-out from Reconciliation (src/lib/buyouts/close.ts): the Rivera family's buy-out of its trailer
 // shifts, which QuickBooks refused (scripts/seed-e2e.ts, tests/e2e/buyout-seed.ts). Closing sends nothing to
@@ -25,7 +26,7 @@ test("staff close a refused buy-out from Reconciliation, saying why, and it is g
   if (before!.state === "refused") {
     await expect(ours()).toHaveCount(1);
     await expect(ours()).toContainText("QuickBooks refused the invoice, so nothing was billed");
-    await expect(ours().getByRole("link", { name: "Its buy-outs" })).toHaveAttribute("href", "/staff/roster/E2E-10/buyouts");
+    await expect(ours().getByRole("link", { name: "Its buy-outs" })).toHaveAttribute("href", await familyPages.buyouts("E2E-10"));
     await ours().getByRole("button", { name: "Close this buy-out" }).click();
     await expect(ours()).toContainText("Nothing is sent to QuickBooks.");
     // Asked first: without a reason nothing is closed.
@@ -47,7 +48,7 @@ test("staff close a refused buy-out from Reconciliation, saying why, and it is g
   expect((await sql`SELECT count(*)::int AS n FROM write_queue`)[0]!.n).toBe(queued[0]!.n);
 
   // The family's buy-outs page says how it ended.
-  await page.goto("/staff/roster/E2E-10/buyouts");
+  await page.goto(await familyPages.buyouts("E2E-10"));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Volunteer buy-outs");
   await expect(page.getByRole("row").filter({ hasText: "Rivera trailer shifts" })).toContainText("Closed by staff: nothing was sent to QuickBooks");
 });

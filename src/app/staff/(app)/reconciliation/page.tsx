@@ -4,6 +4,7 @@ import { can } from "@/lib/permissions/effective";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { loadOpenWrites, type QueueView } from "@/lib/roster/queue";
 import { loadBalances } from "@/lib/money/balances";
+import { linksOfCustomers } from "@/lib/families/links";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
@@ -11,6 +12,7 @@ import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, tryAgainAction } from "../roster/write-actions";
 import { BuyoutsToLook } from "./buyouts";
+import { familyPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Reconciliation" };
 export const dynamic = "force-dynamic";
@@ -39,7 +41,7 @@ function Writes({ items, caption, canChange }: { items: QueueView[]; caption: st
     { key: "tries", header: "Tries", cell: (i) => (
       <>{i.tries} {i.tries === 1 ? "time" : "times"}, last <LocalTime iso={i.lastTriedAt} />{i.state === "waiting" && i.nextTryAt ? <span className="when">Next try <LocalTime iso={i.nextTryAt} /></span> : null}</>) },
     { key: "last", header: "Last time", cell: (i) => { const words = codeWords(i.lastCode); return words ? `${words} (${i.lastCode})` : "No answer recorded"; } },
-    { key: "family", header: "Family", cell: (i) => (i.familyQboId ? <Link href={`/staff/roster/${encodeURIComponent(i.familyQboId)}`}>Open the family</Link> : "None") },
+    { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => (
       <div className="row-actions">
         <OneButton label="Try again now" pendingLabel="Asking…" act={tryAgainAction.bind(null, i.id)} />
@@ -63,7 +65,10 @@ export default async function ReconciliationPage() {
   const [writes, roster, balances] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null)]);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting");
-  const hasPage = new Set(!roster.roster ? [] : roster.roster.kind === "flat" ? roster.roster.members.map((m) => m.qboId) : roster.roster.families.map((f) => f.customer.qboId));
+  // The customers with a family page (the roster's families, or members in flat books), each by its family record, found
+  // through the family kind of link in one lookup for the list: a customer with none links nowhere.
+  const withPage = !roster.roster ? [] : roster.roster.kind === "flat" ? roster.roster.members.map((m) => m.qboId) : roster.roster.families.map((f) => f.customer.qboId);
+  const pageOf = (await linksOfCustomers({ families: withPage, students: [] })).familyOfCustomer;
   return (
     <main className="wrap single">
       <h1 className="page-title">Reconciliation</h1>
@@ -88,7 +93,7 @@ export default async function ReconciliationPage() {
           : roster.attention.length === 0 ? <Notice tone="done" live="none">Nothing: the roster is tidy.</Notice> : (
             <DataTable caption="What to tidy, for each customer" captionHidden rowKey={(a) => a.key} rows={roster.attention.map((a, i) => ({ ...a, key: `${a.rule}-${a.qboId ?? a.name}-${i}` }))}
               columns={[
-                { key: "name", header: "Customer", rowHeader: true, cell: (a) => (a.qboId && hasPage.has(a.qboId) ? <Link href={`/staff/roster/${encodeURIComponent(a.qboId)}`}>{a.name}</Link> : a.name) },
+                { key: "name", header: "Customer", rowHeader: true, cell: (a) => { const at = a.qboId === null ? undefined : pageOf.get(a.qboId); return at ? <Link href={familyPage(at)}>{a.name}</Link> : a.name; } },
                 { key: "detail", header: "What to tidy", cell: (a) => a.detail },
               ]} />
           )}

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
+import { familyPages } from "./family-records";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -161,11 +162,11 @@ test("a person's page: block needs a reason, block, then unblock; the visit is i
 });
 
 test("a family's roster page shows who can sign in and why someone can't; Needs attention lists the held item without the address", async ({ page }) => {
-  await page.goto("/staff/roster/E2E-40");
+  await page.goto(await familyPages.roster("E2E-40"));
   await expect(page.getByRole("heading", { name: "Portal sign-ins" })).toBeVisible();
   const signins = page.getByRole("region", { name: "Portal sign-ins" });
   await expect(signins.getByRole("row").filter({ hasText: "sam@example.com" })).toContainText("Held: this address is also under Lee Family");
-  await page.goto("/staff/roster/E2E-10");
+  await page.goto(await familyPages.roster("E2E-10"));
   await expect(page.getByRole("region", { name: "Portal sign-ins" }).getByRole("row").filter({ hasText: "ana@example.com" })).toContainText(/Can sign in/);
   await page.goto("/staff/roster");
   const attention = page.getByRole("region", { name: /^Needs attention/ });

@@ -3,6 +3,7 @@ import { requireStaffPage } from "@/lib/guards";
 import { creditFamilies } from "@/lib/volunteer/staff-credit";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { familyCreditPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Volunteer credit" };
 export const dynamic = "force-dynamic";
@@ -22,8 +23,8 @@ export default async function VolunteerCreditPage() {
       <section className="box" aria-labelledby="families-h"><h2 id="families-h">Families</h2>
         {families === null ? <Notice tone="warning" live="none">The roster can&apos;t be shown until QuickBooks is connected and the roster has been read.</Notice>
           : families.length === 0 ? <Notice tone="info" live="none">There are no active families on the roster.</Notice> : (
-            <DataTable caption="Every active family, by name, with its credit" captionHidden rows={families} rowKey={(f) => f.qboId} columns={[
-              { key: "name", header: "Family", rowHeader: true, cell: (f) => <Link href={`/staff/volunteer/credit/${encodeURIComponent(f.qboId)}`}>{f.name}</Link> },
+            <DataTable caption="Every active family, by name, with its credit" captionHidden rows={families} rowKey={(f) => String(f.id)} columns={[
+              { key: "name", header: "Family", rowHeader: true, cell: (f) => <Link href={familyCreditPage(f.id)}>{f.name}</Link> },
               { key: "credits", header: "Credits", numeric: true, cell: (f) => (f.credits === 0 ? "No credit yet" : `${f.credits} ${f.credits === 1 ? "credit" : "credits"}`) },
             ]} />
           )}

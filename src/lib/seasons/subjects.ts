@@ -29,15 +29,13 @@ export async function loadSubjects(): Promise<FamilySubject[] | null> {
 
 /**
  * A family on the roster as the season keeps it: the app's own records of the family and its students (stage 2 of the
- * app-owned families spec). `qboId` is only the address of the family's staff progress page, which still names the
- * family by its QuickBooks id (seasonFamilyAt()).
+ * app-owned families spec), with the family customer the roster listed it by (`qboId`). A family's staff pages are
+ * addressed by the app's id (seasonFamilyAt()).
  */
 export type SeasonFamily = { id: AppFamilyId; qboId: string; name: string; students: { id: AppStudentId; name: string }[] };
-/** One family or one student a requirement can be asked of, by the app's own id, with the family it belongs to. */
+/** One family or one student a requirement can be asked of, by the app's own id, with the family it belongs to (whose page `familyId` addresses). */
 export type SeasonSubject = ({ kind: "family"; id: AppFamilyId } | { kind: "student"; id: AppStudentId }) & {
   name: string; familyId: AppFamilyId; familyName: string;
-  /** The address of the family's staff progress page (seasonFamilyAt()). */
-  familyQboId: string;
 };
 
 /**
@@ -61,18 +59,19 @@ export async function loadSeasonFamilies(): Promise<SeasonFamily[] | null> {
 }
 
 /**
- * The family a staff page's address names, by its QuickBooks id (the address each page has today): the one place an
- * address is turned into the app's family. Null when it isn't an active family on the roster.
+ * The family a staff page's address names, by the app's own family id (checked by familyRecordAt() first): the one
+ * place the season's and volunteer credit's family pages turn it into the family as the season keeps it. Null when it
+ * isn't an active family on the roster (an inactive record, or one whose customer the roster no longer lists as a family).
  */
-export async function seasonFamilyAt(familyQboId: string): Promise<SeasonFamily | null> {
-  return (await loadSeasonFamilies())?.find((f) => f.qboId === familyQboId) ?? null;
+export async function seasonFamilyAt(familyId: AppFamilyId): Promise<SeasonFamily | null> {
+  return (await loadSeasonFamilies())?.find((f) => f.id === familyId) ?? null;
 }
 
 /** Everyone a requirement could be asked of: the families for a per-family one, the students for a per-student one. */
 export function candidatesFor(appliesTo: Requirement["appliesTo"], families: readonly SeasonFamily[]): SeasonSubject[] {
   return appliesTo === "family"
-    ? families.map((f): SeasonSubject => ({ kind: "family", id: f.id, name: f.name, familyId: f.id, familyName: f.name, familyQboId: f.qboId }))
-    : families.flatMap((f) => f.students.map((s): SeasonSubject => ({ kind: "student", id: s.id, name: s.name, familyId: f.id, familyName: f.name, familyQboId: f.qboId })));
+    ? families.map((f): SeasonSubject => ({ kind: "family", id: f.id, name: f.name, familyId: f.id, familyName: f.name }))
+    : families.flatMap((f) => f.students.map((s): SeasonSubject => ({ kind: "student", id: s.id, name: s.name, familyId: f.id, familyName: f.name })));
 }
 
 /** Those a requirement is asked of now: its candidates, less whoever a chosen list leaves out. */
