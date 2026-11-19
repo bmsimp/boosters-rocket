@@ -10,7 +10,7 @@ export const PERMISSIONS = [
   "Staff.Users.ReadWrite",      // admin-only: invite staff, assign roles, turn sign-in on or off
   "Settings.Club.Read",
   "Settings.Club.ReadWrite",
-  "Audit.Log.Read",             // admin-only: read and export the audit log; its rows hold staff-only notes (block reasons, held-address notes)
+  "Audit.Log.Read",             // admin-only: read and export the audit log; its rows hold staff-only notes (block reasons, waiver reasons, removed check-ins)
   "Admin.Health.Read",          // admin-only: the health page (the worker, QuickBooks, mail, backups, the portal's address)
   "Settings.SignIn.ReadWrite",  // admin-only: change how staff and parents sign in (sign-in settings)
   "Settings.Mail.ReadWrite",    // admin-only: change outgoing mail; whoever controls it can read parents' sign-in codes
@@ -18,8 +18,8 @@ export const PERMISSIONS = [
   "Settings.Forms.ReadWrite",      // admin-only: connect the club's Documenso; its API token can read every signed form
   "Roster.Read",                   // see families, students and parents (or members) as QuickBooks lists them
   "Roster.Family.ReadWrite",       // create, rename, move and make inactive families, students and parents (or members) in QuickBooks, and retry or give up a waiting write
-  "Settings.Parents.ReadWrite",    // admin-only: switch parent sign-ins and welcome emails on, and review company matches
-  "Parents.ReadWrite",             // decide held addresses, block and unblock a parent, resend a welcome email
+  "Settings.Parents.ReadWrite",    // admin-only: switch parent sign-ins and welcome emails on or off, and the active-students option
+  "Parents.ReadWrite",             // see every parent, block and unblock a parent, resend a welcome email
   "Season.Steps.Read",             // see the seasons, their steps and the requirements in them
   "Season.Steps.ReadWrite",        // create and change seasons, steps and requirements, and choose the current season
   "Season.Progress.Read",          // see which families and students have met each requirement

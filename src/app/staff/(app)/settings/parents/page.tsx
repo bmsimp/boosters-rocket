@@ -26,7 +26,7 @@ export default async function ParentSettingsPage() {
         <dl className="details">
           <dt>Parent sign-ins</dt><dd>{s.signin ? "On" : s.everEnabled ? "Switched off. Nobody can sign in." : "Not switched on yet"}</dd>
           <dt>Who can sign in</dt><dd>{s.signin ? `${n(counts.people, "person", "people")}, to ${n(counts.families, "family", "families")}` : "Nobody yet"}</dd>
-          <dt>Welcome emails</dt><dd>{s.welcome ? "On: each new person is emailed once" : "Off: nobody is emailed"}</dd>
+          <dt>Welcome emails</dt><dd>{s.welcome ? "On: everyone who could sign in when this was switched on is emailed once" : "Off: nobody is emailed"}</dd>
         </dl>
         {!s.signin && (missing.length > 0
           ? <Notice tone="warning" live="none">Before sign-ins can be switched on:<ul className="notice-list">{missing.map((m) => <li key={m}>{m}</li>)}</ul></Notice>

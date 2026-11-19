@@ -609,19 +609,6 @@ main.wrap.single > .notice { margin-top: var(--cell); max-width: 760px; }
 .today + .hint, .box > .state + .hint { margin-top: var(--s2); }
 .staff-home .box > .state { margin-top: var(--s3); }
 
-/* Parents: each address to review is one block between heavy rules: the address, who and where, then the decision,
-   its note and its two buttons ruled in together. */
-.review-items { list-style: none; padding: 0; margin-top: var(--s4); }
-.review-item { display: grid; gap: var(--s3); padding: var(--s4) 0; border-top: 2px solid var(--ink); }
-.review-item:last-child { padding-bottom: 0; }
-.review-address { font: 700 1.1875rem/1.45 var(--read); overflow-wrap: anywhere; }
-.review-item dl.details { margin-top: 0; }
-.review-families { list-style: none; padding: 0; display: grid; gap: var(--s1); }
-.review-families .state { grid-column: auto; }
-fieldset.decide { border: 1px solid var(--hair); padding: var(--s3) var(--s4) var(--s4); min-width: 0; display: grid; gap: var(--s3); }
-.decide legend { font: 700 1.0625rem var(--read); padding: 0 var(--s1); }
-.decide .row-actions { margin-top: 0; }
-
 /* The forms matrix keeps its wide table inside its box at 760px and up, and stacks like the other tables below. A cell
    for someone a form doesn't ask is empty on the wide table and says "Not asked" when the rows stack. */
 .matrix .t-group th .one-button { margin-top: var(--s2); }
@@ -715,11 +702,9 @@ details > summary { min-height: 44px; box-sizing: border-box; padding-block: 10p
 .cert-done { margin-top: var(--s2); }
 .cert-panel details.more { margin-top: 0; }
 
-/* The match review is a table (the Staff pages' table primitive) and takes the page's whole width. */
-main.wrap.single.matches-page > .box { max-width: none; }
 /* A set-up page's step names that are links (Parent sign-ins, QuickBooks) are each a 44px tap target, like any lone link. */
 .setup-progress a { display: inline-flex; align-items: center; min-height: 44px; }
-/* The welcome email as parents will read it (Parent sign-ins, step 3): its lines wrap inside the box, never past it. */
+/* The welcome email as parents will read it (Parent sign-ins, step 2): its lines wrap inside the box, never past it. */
 .email-sample { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; }
 /* Check the portal's requests: a result ("As expected", "Not as expected") keeps its words whole on one line, so its
    column is given the room; the columns of sentences beside it give way instead. */

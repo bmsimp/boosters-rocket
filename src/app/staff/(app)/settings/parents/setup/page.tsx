@@ -59,9 +59,9 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
       {step === "welcome" && sample && (
         <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Step 2: Welcome emails</h2>
           <Notice tone="info">{settings.welcome
-            ? "Welcome emails are on. Each new person is emailed once, when they first get access."
+            ? "Welcome emails are on. Everyone who could sign in when they were switched on is emailed once. Nobody is emailed later by themselves: a family that gets its first active student, or becomes active again, sends no welcome."
             : "Welcome emails are off. Nobody is emailed."}</Notice>
-          {!settings.welcome && <p><b>{n(counts.welcomeNow, "person", "people")} would be emailed now.</b> After that, each new person is emailed once. They go out a few each minute.</p>}
+          {!settings.welcome && <p><b>{n(counts.welcomeNow, "person", "people")} would be emailed now.</b> Someone who can only sign in later isn&apos;t emailed by themselves. They go out a few each minute.</p>}
           <h3>The email</h3>
           <p>Subject: {sample.subject}</p>
           <pre className="email-sample">{sample.text}</pre>
