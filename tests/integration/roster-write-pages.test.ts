@@ -313,7 +313,9 @@ describe("the Reconciliation page (Roster.Read)", () => {
     const attention = html.slice(start, html.indexOf("</section>", start));
     expect(attention).toContain("Stray Student");
     const links = [...attention.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]);
-    expect(links).toEqual([await idOf("20")]);
+    // Chen is listed once for each rule it meets, and every one of those rows links to the same record.
+    expect(links.length).toBeGreaterThan(0);
+    expect([...new Set(links)]).toEqual([await idOf("20")]);
     expect(attention).not.toContain('href="/staff/roster/20"');
     expect(attention).not.toContain('href="/staff/roster/50"');
   });
