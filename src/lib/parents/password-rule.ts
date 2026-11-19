@@ -1,0 +1,26 @@
+/**
+ * The rule a parent's password must meet (the sign-in release; open question 27 of the app-owned families spec): at
+ * least PASSWORD_MIN and at most PASSWORD_MAX characters, any characters at all. Nothing about symbols, digits, case or
+ * mixing them. Characters are counted as a person counts them, by code point, so an accented letter or an emoji is one;
+ * a password is never trimmed or changed, since a space is a character like any other.
+ *
+ * Pure, and nothing calls it yet (slice SI-1). It answers with a code a later page turns into words, and never logs,
+ * keeps or returns the password.
+ */
+export const PASSWORD_MIN = 12;
+export const PASSWORD_MAX = 128;
+
+/** Why a password can't be used; `not_text` is anything the browser sent that isn't a string. */
+export type PasswordProblem = "not_text" | "too_short" | "too_long";
+export type PasswordVerdict = { ok: true } | { ok: false; problem: PasswordProblem };
+
+/** Whether `password` meets the rule. It comes from the browser, whatever the type says, so anything is accepted and checked. */
+export function checkPasswordRule(password: unknown): PasswordVerdict {
+  if (typeof password !== "string") return { ok: false, problem: "not_text" };
+  // A code point is one or two UTF-16 units, so a string of more than twice the most is too long however it is made,
+  // and is turned away before it is split.
+  if (password.length > PASSWORD_MAX * 2) return { ok: false, problem: "too_long" };
+  const length = [...password].length;
+  if (length > PASSWORD_MAX) return { ok: false, problem: "too_long" };
+  return length < PASSWORD_MIN ? { ok: false, problem: "too_short" } : { ok: true };
+}
