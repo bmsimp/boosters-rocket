@@ -566,13 +566,12 @@ move was made and the newest record in each copy:
 
 ## 9. The test checklist
 
-Run these in order, in a private browser window, as they are listed: checks 4 to 6 sign a parent in, so they come after
-the checks that connect QuickBooks and read the roster, and keep their numbers. Record each outcome in section 11.
+Run these in order, in a private browser window, as they are listed: checks 4 to 7 need a parent who can sign in, so they
+come after the checks that connect QuickBooks and read the roster, and keep their numbers. Record each outcome in section 11.
 
 - [ ] 1. Visit https://portaltest.rhinoautomator.com: the portal's sign-in page shows directly. (Only if Cloudflare Access is set up, section 7 B, it first asks for an email code.)
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
-- [ ] 7. Parent two's address -> the same "If this email belongs to a family…" message, no email arrives, and the audit shows `signin.code_refused` with reason `unknown_email`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
   After a no-change redeploy, `previous` and `current` are the same image, so `--rollback` only exercises the mechanism; a real rollback test needs a real new commit.
 - [ ] 9. Confirm the app can't send as any other mailbox, two ways.
@@ -584,6 +583,7 @@ the checks that connect QuickBooks and read the roster, and keep their numbers. 
 - [ ] 4. Do this after check 12, once the roster has been read and a test parent added on a sandbox family's page (section 6). Parent: first switch parent sign-ins on (**Parent sign-ins** in the staff menu, **Set up**, step 1, **Switch parent sign-ins on**; it needs only the working mail of check 2, and until then no parent gets a code: the audit shows `signin.code_refused` with reason `signins_off`). Then at `/sign-in`, enter the test parent's email, get the code from `webmaster@fznband.org`, enter it -> parent home (with two families, the family chooser first).
 - [ ] 5. After check 4. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, `signin.code_sent`, parent `signin`, `guardian.activate`, `settings.club.save`, `settings.parents.save` (sign-ins switched on in check 4), `parent.create` and `parent.access.granted` (the test parent added in section 6), and from setup `settings.mail.save`, `settings.mail.test`, `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Check and switch** after **Replace certificate** retires the old one, and `certificate.discard` after **Discard replacement**). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
 - [ ] 6. After check 4. Sign out at both doors -> both `signout` entries appear.
+- [ ] 7. After check 4, with sign-ins on (before then every code request is refused as `signins_off`). Parent two's address -> the same "If this email belongs to a family…" message, no email arrives, and the audit shows `signin.code_refused` with reason `unknown_email`.
 - [ ] 13. The next day -> the QuickBooks page shows the worker checked in within the last few minutes and **Last renewed** is less than a day old; `docker logs booster-rocket-worker` shows `ran quickbooks.token_refresh: ok` and `ran roster.refresh: ok`.
 - [ ] 14. **Disconnect**, then set up again -> the roster says it is no longer current while disconnected, and is current again after reconnecting. The audit log has `quickbooks.disconnect` and a second `quickbooks.connect`.
 - [ ] 15. Waits for the mapping screen, as check 25 does (see "Switching companies" in section 5). When it ships: **Disconnect**, then connect a second sandbox company -> the old company's families are gone: **Roster** says "The membership shape hasn't been chosen yet." and the QuickBooks page shows the shape as "Not chosen yet." until it is chosen again in step 3. The audit log has `roster.cleared`.
