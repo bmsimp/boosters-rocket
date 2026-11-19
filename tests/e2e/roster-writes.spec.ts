@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import postgres from "postgres";
 import { staffSessionCookie } from "./staff-session";
+import { familyPages } from "./family-records";
 
 const sql = postgres(process.env.DATABASE_URL!);
 test.afterAll(async () => { await sql.end(); });
@@ -21,7 +22,7 @@ test.describe("staff", () => {
   test("add a student: a taken name is offered with a suffix, and the send is refused before it reaches QuickBooks", async ({ page }) => {
     const since = await mark();
     const [{ n: before }] = await sql`SELECT count(*)::int AS n FROM qbo_customer` as unknown as [{ n: number }];
-    await page.goto("/staff/roster/E2E-10");
+    await page.goto(await familyPages.roster("E2E-10"));
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Rivera Family");
     const changes = page.getByRole("region", { name: "Change in QuickBooks" });
     await changes.getByText("Add a student").click();
@@ -44,7 +45,7 @@ test.describe("staff", () => {
   });
 
   test("a family's page says what can be changed here and what is changed in QuickBooks", async ({ page }) => {
-    await page.goto("/staff/roster/E2E-40");
+    await page.goto(await familyPages.roster("E2E-40"));
     await expect(page.getByRole("region", { name: "Changing the roster" })).toContainText("Email addresses, phone numbers and mailing addresses are changed in QuickBooks");
     const waiting = page.getByRole("region", { name: "Waiting to reach QuickBooks" });
     await expect(waiting).toContainText("Rename the parent “Sam Okafor” to “Samuel Okafor”");
