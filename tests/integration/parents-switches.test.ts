@@ -3,9 +3,11 @@ import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
 import { auditLog, family, guardian, parent, parentAuthSession, parentAuthUser, qboConnection, setting, signinCode, student } from "@/lib/db/schema";
 import { getParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
-import { missingForSignins, peopleWithAccess, setRequireStudents, setSignins, setWelcome, signinCounts, studentsEffect } from "@/lib/parents/switches";
+import { missingForSignins, NO_STUDENTS_IN_SHAPE, peopleWithAccess, setRequireStudents, setSignins, setWelcome, signinCounts, studentsEffect } from "@/lib/parents/switches";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { resetDb, seedGuardian, seedGuardianInFamily, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
+import { storeShape } from "../helpers/roster-cache";
+import { saveShape } from "@/lib/roster/shape";
 
 const admin = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: "203.0.113.9", permission: "Settings.Parents.ReadWrite" };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
@@ -119,7 +121,7 @@ describe("the parent switches", () => {
   });
 
   it("a press that changes nothing does no work and records nothing", async () => {
-    await seedWorkingMail(); await seedAna();
+    await seedWorkingMail(); await seedAna(); await storeShape();
     await setSignins(true, admin);
     expect(await setSignins(true, admin)).toEqual({ ok: true });
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
@@ -135,7 +137,9 @@ describe("the parent switches", () => {
     const { ana, row } = await seedAna();
     await db.insert(student).values({ familyId: row.familyId!, name: "Leo", active: false });
     await setSignins(true, admin);
-    // No membership shape and no QuickBooks: the setting is read from the app's own students.
+    // The stored shape names students, so the setting can be switched on; no QuickBooks and no roster read: the gate
+    // reads it from the app's own students.
+    await storeShape();
     expect(await studentsEffect()).toEqual({ families: 1, people: 1 });
     expect(await signinCounts()).toEqual({ people: 1, families: 1, welcomeNow: 1 });
     const before = await rows();
@@ -149,6 +153,30 @@ describe("the parent switches", () => {
     expect(await signinCounts()).toEqual({ people: 1, families: 1, welcomeNow: 1 });
     expect(await studentsEffect()).toEqual({ families: 0, people: 0 });
     expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)))).toHaveLength(1);
+  });
+
+  // With no student type the app holds no active student, so the setting would keep every parent out: it is never
+  // switched on then, and a shape saved without one switches it off.
+  it("the active-students setting is refused while the shape names no students, and a shape saved without them switches it off", async () => {
+    await seedWorkingMail(); await seedAna(); await setSignins(true, admin);
+    for (const shape of [null, { kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }]) {
+      if (shape) await storeShape(shape);
+      expect(await setRequireStudents(true, admin)).toEqual({ ok: false, errors: [NO_STUDENTS_IN_SHAPE] });
+      expect((await getParentSettings()).requireActiveStudents).toBe(false);
+    }
+    expect((await audits("settings.parents.save")).filter((r) => (r.after as Record<string, unknown>).requireActiveStudents === true)).toEqual([]);
+    // Off always works, and on works once the shape names students.
+    expect(await setRequireStudents(false, admin)).toEqual({ ok: true });
+    await storeShape();
+    expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
+    // A shape with students keeps it; one without switches it off, on both audit rows.
+    await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S2", parentTypeId: "P" }, { actor: admin.actor, ip: null });
+    expect((await getParentSettings()).requireActiveStudents).toBe(true);
+    await saveShape({ kind: "flat", memberTypeIds: ["M"] }, { actor: admin.actor, ip: null });
+    expect(await getParentSettings()).toMatchObject({ signin: true, requireActiveStudents: false });
+    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ requireActiveStudents: false, cause: "settings.membership.save" });
+    expect((await audits("settings.membership.save")).at(-1)!.after).toMatchObject({ requireActiveStudentsSwitchedOff: true });
+    expect((await audits("settings.membership.save")).at(-2)!.after).not.toHaveProperty("requireActiveStudentsSwitchedOff");
   });
 
   it("counts the people who can sign in now by the gate's rule: never blocked, never of an inactive family", async () => {

@@ -22,7 +22,7 @@ import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
 // open row naming an active family record.
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
-import { seedParentSettings } from "../helpers/roster-cache";
+import { seedParentSettings, storeShape } from "../helpers/roster-cache";
 
 const IP = "203.0.113.30";
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
@@ -499,7 +499,8 @@ describe("the gate: a parent enters only an active family of the app's own (app-
 });
 
 describe("the gate: while the club asks for an active student, a family with none is not one to enter (open question 15)", () => {
-  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); });
+  // The setting is switched on only while the membership shape names students; the gate itself never reads the shape.
+  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await storeShape(); });
   const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null, permission: "Settings.Parents.ReadWrite" };
   const refusedFor = async (action: string, reason: string) =>
     (await db.select().from(auditLog)).filter((x) => x.action === action && (x.after as { reason?: string } | null)?.reason === reason);

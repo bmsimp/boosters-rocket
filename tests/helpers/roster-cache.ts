@@ -55,6 +55,15 @@ export async function seedShape(shape: MembershipShape = P_SHAPE): Promise<void>
   await syncAppRecords();
 }
 
+/**
+ * Stores the shape setting alone, bringing nothing into step: for a test of the door that seeds its families by hand
+ * with no roster company (seedGuardianInFamily()), where "Families with no active student" still needs a shape that
+ * names students to be switched on (setRequireStudents()).
+ */
+export async function storeShape(shape: MembershipShape = P_SHAPE): Promise<void> {
+  await db.insert(setting).values({ key: SHAPE_KEY, value: shape }).onConflictDoUpdate({ target: setting.key, set: { value: shape } });
+}
+
 export async function seedParentSettings(patch: Partial<ParentSettings>): Promise<void> {
   const value = { ...DEFAULT_PARENT_SETTINGS, ...(await getParentSettings()), ...patch };
   await db.insert(setting).values({ key: PARENTS_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value } });

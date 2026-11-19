@@ -3,6 +3,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { family, guardian, parent, parentAuthSession, signinCode, student } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { mailWorking } from "@/lib/mail/settings";
+import { getShape, shapeNamesStudents } from "@/lib/roster/shape";
 import type { StaffOp } from "./people";
 import { hasRowThatCounts } from "./sessions";
 import { getParentSettings, putParentSettings, PARENTS_KEY, type ParentSettings } from "./settings";
@@ -28,13 +29,13 @@ export type StudentsEffect = { families: number; people: number };
  * or waits for the roster.
  */
 async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx, next: ParentSettings, before: ParentSettings) => Promise<Record<string, unknown>>,
-  refuse?: (before: ParentSettings) => string[] | null): Promise<SwitchResult> {
+  refuse?: (before: ParentSettings, tx: Tx) => string[] | null | Promise<string[] | null>): Promise<SwitchResult> {
   return db.transaction(async (tx): Promise<SwitchResult> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
     const before = await getParentSettings(tx);
     const next = { ...before, ...patch };
     if ((Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
-    const errors = refuse?.(before);
+    const errors = await refuse?.(before, tx);
     if (errors) return { ok: false, errors };
     await putParentSettings(tx, next);
     const did = await work(tx, next, before);
@@ -84,14 +85,38 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
   return change({ signin: true, everEnabled: true }, o, async (tx, next) => (next.welcome ? { welcomeOwed: await oweWelcomes(tx, next) } : {}));
 }
 
+/** Why "Families with no active student" can't be switched on, when it can't. */
+export const NO_STUDENTS_IN_SHAPE = "The membership shape doesn't say which customers are students, so this can't be used.";
+
 /**
  * "Families with no active student": saved and audited, and nothing else. The gate reads it (enterableGuardianRows(),
  * ./sessions.ts) from the app's own student records, so a family with no active student stops counting at once, a
  * session already open in one is sent back on its next request, and switching it off lets them in again. No row is
- * closed or reopened.
+ * closed or reopened. It is switched on only while the membership shape names a student type (shapeNamesStudents()):
+ * with none the app holds no active student, and the setting would keep every parent out. That reads the stored shape,
+ * never QuickBooks, and decides only whether the switch may be pressed; a shape saved without students switches it off
+ * (saveShape()).
  */
 export async function setRequireStudents(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  return change({ requireActiveStudents: on }, o, async () => ({}));
+  // Read under the settings lock, which a shape save without students takes before it switches this off: whichever
+  // goes first, the other sees what it did.
+  return change({ requireActiveStudents: on }, o, async () => ({}),
+    async (_before, tx) => (on && !shapeNamesStudents(await getShape(tx)) ? [NO_STUDENTS_IN_SHAPE] : null));
+}
+
+/**
+ * How many guardian rows an earlier version of the portal closed for "Families with no active student"
+ * (`disabled_reason` `no_active_students`). Nothing reopens them now, whatever the setting or the family's students:
+ * the settings page says so, so its words hold for them too.
+ */
+export async function closedForNoStudents(): Promise<number> {
+  const rows = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.status, "disabled"), eq(guardian.disabledReason, "no_active_students")));
+  return rows.length;
+}
+
+/** Whether "Families with no active student" can be switched on now (setRequireStudents()). */
+export async function studentsRuleUsable(): Promise<boolean> {
+  return shapeNamesStudents(await getShape());
 }
 
 /** How many people can sign in now by the gate's rule (a row that counts) and are not blocked, whether or not the parent door is open. */

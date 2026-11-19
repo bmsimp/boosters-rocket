@@ -35,7 +35,7 @@ import StaffLayout from "@/app/staff/(app)/layout";
 import { SETTINGS_SECTIONS } from "@/app/staff/(app)/settings/sections";
 import { setSigninsAction, setWelcomeAction, setRequireStudentsAction } from "@/app/staff/(app)/settings/parents/actions";
 import { resetDb, seedGuardian, seedParent, seedStaff, seedWorkingMail } from "../helpers/db";
-import { seedCache, seedShape, fam, par, stu } from "../helpers/roster-cache";
+import { seedCache, seedShape, storeShape, fam, par, stu } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
 import { syncAppRecords } from "../helpers/app-records";
 
@@ -213,6 +213,23 @@ describe("the Parent sign-ins settings", () => {
     expect(await getParentSettings()).toMatchObject({ requireActiveStudents: true });
     expect(await db.select().from(guardian)).toEqual(before);
     expect(await view()).toContain("On: a family with no active student can&#x27;t sign in.");
+  });
+
+  it("the active-students option says it can't be used, and offers no button, while the shape names no students", async () => {
+    await ready(); await setSigninsAction(true);
+    await storeShape({ kind: "flat", memberTypeIds: ["F"] });
+    const html = await view();
+    expect(html).toContain("Off. The membership shape doesn&#x27;t say which customers are students, so this can&#x27;t be used.");
+    expect(html).not.toContain("Require an active student");
+    expect(await setRequireStudentsAction(true)).toEqual({ ok: false, errors: ["The membership shape doesn't say which customers are students, so this can't be used."] });
+  });
+
+  it("says that sign-ins an earlier version ended for no active student stay ended", async () => {
+    await ready();
+    expect(await view()).not.toContain("an earlier version of the portal ended for this");
+    const leo = await seedParent({ name: "Leo Closed", email: "leo.closed@example.com" });
+    await seedGuardian({ parentId: leo.id, familyQboId: "10", sourceQboId: "11", status: "disabled", disabledReason: "no_active_students" });
+    expect(await view()).toContain("1 sign-in an earlier version of the portal ended for this stays ended, whatever this is set to and whatever students the family has.");
   });
 
   it("the QuickBooks page warns before a disconnect when parents can sign in", async () => {
