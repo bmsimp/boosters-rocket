@@ -4,6 +4,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { family, student } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { linksOf } from "@/lib/families/links";
 import { recordNameWords } from "@/lib/families/words";
 import { getShape } from "@/lib/roster/shape";
 import { isCovered, type Requirement } from "./progress";
@@ -20,9 +21,24 @@ export type SeasonSubject = ({ kind: "family"; id: AppFamilyId } | { kind: "stud
   name: string; familyId: AppFamilyId; familyName: string;
 };
 
-/** By name, ignoring case and accents, as the roster lists them; one record before another of the same name by its id, so the order is steady. */
+/**
+ * By name, ignoring case and accents, as the roster lists them; two records whose names compare equal by their linked
+ * customers' QuickBooks ids, compared as numbers, as the roster and the Families pages break the tie (buildRoster(),
+ * rosterFamilies()), so the season's pages list such a pair in the same order; a record with no link before a linked
+ * one, as rosterFamilies() does, and the record's own id last, so the order is steady.
+ */
 const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
-const byName = (a: { name: string; id: unknown }, b: { name: string; id: unknown }) => COLLATOR.compare(a.name, b.name) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
+type Named = { id: unknown; name: string };
+const byRecord = (customerOf: (id: unknown) => string) => (a: Named, b: Named) =>
+  COLLATOR.compare(a.name, b.name) || numeric(customerOf(a.id), customerOf(b.id)) || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+
+/** The records of a list whose name another in it shares, as the collator compares names: only these need their customer to be ordered. */
+function tied<T extends Named>(rows: readonly T[]): T[] {
+  const sorted = [...rows].sort((a, b) => COLLATOR.compare(a.name, b.name));
+  const same = (i: number, r: T) => { const other = sorted[i]; return other !== undefined && COLLATOR.compare(other.name, r.name) === 0; };
+  return sorted.filter((r, i) => same(i - 1, r) || same(i + 1, r));
+}
 
 async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
   const [families, students] = await Promise.all([
@@ -37,8 +53,14 @@ async function activeFamilies(only?: AppFamilyId): Promise<SeasonFamily[]> {
     const key = String(s.familyId);
     under.set(key, [...(under.get(key) ?? []), { id: s.id, name: recordNameWords(s.name, "student") }]);
   }
-  return families.map((f) => ({ id: f.id, name: recordNameWords(f.name, "family") })).sort(byName)
-    .map((f) => ({ ...f, students: (under.get(String(f.id)) ?? []).sort(byName) }));
+  const named = families.map((f) => ({ id: f.id, name: recordNameWords(f.name, "family") }));
+  // Links are read only for the records whose names tie (none, mostly), and carry nothing out of here.
+  const tiedFamilies = tied(named).map((f) => f.id);
+  const tiedStudents = [...under.values()].flatMap((list) => tied(list).map((s) => s.id));
+  const links = tiedFamilies.length + tiedStudents.length === 0 ? null : await linksOf({ families: tiedFamilies, students: tiedStudents });
+  const familyOrder = byRecord((id) => links?.customerOfFamily.get(id as AppFamilyId) ?? "");
+  const studentOrder = byRecord((id) => links?.customerOfStudent.get(id as AppStudentId) ?? "");
+  return named.sort(familyOrder).map((f) => ({ ...f, students: (under.get(String(f.id)) ?? []).sort(studentOrder) }));
 }
 
 /**

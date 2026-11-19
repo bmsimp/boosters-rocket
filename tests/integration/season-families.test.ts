@@ -12,7 +12,7 @@ import { loadSeasonFamilies, seasonFamilyAt } from "@/lib/seasons/subjects";
 import { loadMatrix } from "@/lib/signed-forms/matrix";
 import { resetDb, seedStaff } from "../helpers/db";
 import { addToCache, fam, moveInCache, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { formSetting, seedFormRequirement } from "../helpers/forms";
 
@@ -81,6 +81,21 @@ describe("loadSeasonFamilies()", () => {
     ]);
   });
 
+  it("orders names that compare equal by their customers' QuickBooks ids as numbers, as the roster and the Families pages do", async () => {
+    // Different strings QuickBooks takes, which the order compares as equal (accents and case ignored): 9 before 100.
+    await addToCache([fam("100", "Jose Family"), stu("101", "sam jose", "100"), stu("19", "Sam José", "100"), fam("9", "José Family")]);
+    const ids = (await loadSeasonFamilies()).map((f) => f.id);
+    const [jose9, jose100] = [await recordOfCustomer("9", "family"), await recordOfCustomer("100", "family")];
+    expect(ids.filter((id) => id === jose9 || id === jose100)).toEqual([jose9, jose100]);
+    const roster = (await loadRosterPage()).roster!;
+    expect(roster.kind === "layered" && roster.families.map((f) => f.customer.qboId).filter((q) => q === "9" || q === "100")).toEqual(["9", "100"]);
+    expect((await seasonFamilyAt(jose100))!.students.map((s) => s.id))
+      .toEqual([await recordOfCustomer("19", "student"), await recordOfCustomer("101", "student")]);
+    // A record with no link comes before a linked one of the same name, as on the Families pages.
+    const handmade = await unlinked("JOSE FAMILY", []);
+    expect((await loadSeasonFamilies()).map((f) => f.id).filter((id) => id === jose9 || id === jose100 || id === handmade.id)).toEqual([handmade.id, jose9, jose100]);
+  });
+
   it("seasonFamilyAt(): an active family with its active students; nothing for an inactive one or no record", async () => {
     const rivera = await recordOfCustomer("10", "family");
     expect(await seasonFamilyAt(rivera)).toEqual({ id: rivera, name: "Rivera Family", students: [
@@ -117,6 +132,10 @@ describe("loadSeasonFamilies()", () => {
     const row = matrix.families.find((f) => f.id === String(hand.id))!.rows.find((r) => r.kind === "student")!;
     expect([row.name, row.cells[0]!.state]).toEqual(["Hal Handmade", "not_opened"]);
     expect(matrix.allForms[0]!.counts).toEqual({ signed: 0, needed: 4, waived: 0 });
+    // Until S9 the records only mirror QuickBooks: the next keep-in-step (any roster read or staff write) makes a
+    // record with no link inactive, and it leaves the lists. S9 stops that, and this changes with it.
+    await syncAppRecords();
+    expect((await loadSeasonFamilies()).map((f) => f.id)).not.toContain(hand.id);
   });
 
   it("doesn't go blank while the membership shape is broken or unsaved, as the roster pages do", async () => {
