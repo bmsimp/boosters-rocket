@@ -3,12 +3,15 @@
 // the new family must never be billed for it. A move made in QuickBooks and read by a refresh is not seen here: the
 // daily check (./daily-check.ts) finds the invoice's customer no longer the family's and puts its void on the queue
 // the same way; a refresh itself voids nothing (it runs a QuickBooks move's forms and volunteer follow-ups only,
-// src/lib/roster/refresh.ts).
+// src/lib/roster/refresh.ts). The roster names the move by QuickBooks ids; buy-outs name the app's own family and
+// student (stage 2 of the app-owned families spec), so the move is turned into those records here, through their links
+// in the records' company, as volunteerForMovedStudent() does: a boundary AGENTS.md lists, until stage 3.
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { buyout } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import { familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
 import { queueVoid } from "./writes";
 
 /**
@@ -17,19 +20,22 @@ import { queueVoid } from "./writes";
  * first and voids it only when nothing is paid on it; otherwise it is left and flagged for the treasurer), and it ends
  * as voided because the student moved; one still being invoiced is marked so its void follows as soon as the invoice
  * is made; a paid one, and one already being cancelled or stuck, is left as it is and flagged. A per-family buy-out is
- * untouched: the family is still the family.
+ * untouched: the family is still the family. A student or old family with no app record has no buy-outs.
  */
 export async function buyoutsForMovedStudent(tx: Tx, move: { studentQboId: string; fromFamilyQboId: string; toFamilyQboId: string }, o: { actor: Actor; ip: string | null }):
   Promise<{ voiding: number; flagged: number }> {
-  const rows = await tx.select().from(buyout).where(and(eq(buyout.familyQboId, move.fromFamilyQboId), eq(buyout.subjectQboId, move.studentQboId),
+  const [studentId, fromFamilyId] = await Promise.all([studentLinkedTo(move.studentQboId, tx), familyLinkedTo(move.fromFamilyQboId, tx)]);
+  if (studentId === null || fromFamilyId === null) return { voiding: 0, flagged: 0 };
+  const rows = await tx.select().from(buyout).where(and(eq(buyout.familyId, fromFamilyId), eq(buyout.studentId, studentId),
     inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"]))).for("update");
+  if (rows.length === 0) return { voiding: 0, flagged: 0 };
+  const toFamilyId = await familyLinkedTo(move.toFamilyQboId, tx);
   let voiding = 0, flagged = 0;
   for (const b of rows) {
-    if (b.subjectQboId === b.familyQboId) continue;
     if (b.state === "invoiced" && (await queueVoid(tx, b, "student_moved", { actor: o.actor, label: "student moved", nextTryAt: new Date(), ip: o.ip }))) { voiding++; continue; }
     await tx.update(buyout).set({ flag: "student_moved", flaggedAt: new Date(), updatedAt: new Date() }).where(eq(buyout.id, b.id));
     await writeAudit({ actor: o.actor, action: "volunteer.buyout.flagged", targetType: "buyout", targetId: b.id, ip: o.ip,
-      before: { state: b.state, flag: b.flag }, after: { flag: "student_moved", fromFamilyQboId: move.fromFamilyQboId, toFamilyQboId: move.toFamilyQboId } }, tx);
+      before: { state: b.state, flag: b.flag }, after: { flag: "student_moved", familyId: String(fromFamilyId), studentId: String(studentId), toFamilyId: toFamilyId === null ? null : String(toFamilyId) } }, tx);
     flagged++;
   }
   return { voiding, flagged };

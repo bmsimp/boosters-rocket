@@ -25,9 +25,9 @@ export async function BuyoutsToLook({ showAmounts, canChange = false }: { showAm
       {items.length === 0 ? <Notice tone="done" live="none">Nothing: every buy-out invoice is where QuickBooks says it should be, as last checked.</Notice> : (
         <DataTable caption="Volunteer buy-outs that need a look" captionHidden rowKey={(b) => b.id} rows={items}
           columns={[
-            { key: "family", header: "Family", rowHeader: true, cell: (b) => (
+            { key: "family", header: "Family", rowHeader: true, cell: (b) => (b.familyQboId === null ? <>{b.familyName ?? "A family no longer on the roster"}</> : (
               <><Link href={`/staff/roster/${encodeURIComponent(b.familyQboId)}`}>{b.familyName ?? "A family no longer on the roster"}</Link>
-                <span className="when"><Link href={`/staff/roster/${encodeURIComponent(b.familyQboId)}/buyouts`}>Its buy-outs</Link></span></>) },
+                <span className="when"><Link href={`/staff/roster/${encodeURIComponent(b.familyQboId)}/buyouts`}>Its buy-outs</Link></span></>)) },
             { key: "requirement", header: "Requirement", cell: (b) => <>{b.requirement}{b.subjectName ? `, for ${b.subjectName}` : ""}</> },
             ...(showAmounts ? [{ key: "amount", header: "Amount", numeric: true, cell: (b: (typeof items)[number]) => formatMoney(b.amountCents) }] : []),
             { key: "what", header: "What happened", cell: (b) => <>{b.words}{b.code ? ` (${b.code})` : ""}</> },

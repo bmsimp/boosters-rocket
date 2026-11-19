@@ -30,7 +30,7 @@ export function quoteBuyout(r: BuyoutTerms, confirmed: number): Quote {
   return { ok: true, units, unitCents, amountCents: units * unitCents };
 }
 
-/** A buy-out that still stands: at most one per requirement and subject (`buyout_live_uq`). A voided or refused one is history. */
+/** A buy-out that still stands: at most one per requirement and subject (`buyout_family_live_uq`, `buyout_student_live_uq`). A voided or refused one is history. */
 export const LIVE_STATES: readonly BuyoutState[] = ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"];
 export const isLive = (state: BuyoutState): boolean => LIVE_STATES.includes(state);
 

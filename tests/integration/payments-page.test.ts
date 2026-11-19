@@ -23,6 +23,7 @@ import { ageMoney, CHENOWETH, connectCompany, invoiceQueries, moneyRow, RIVERA, 
 import { FAMILY_A, FAMILY_B, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedShape } from "../helpers/roster-cache";
+import { recordOfCustomer } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -520,7 +521,7 @@ describe("a buy-out's invoice on Payments", () => {
 
   it("names it only while the buy-out is live: one staff closed after it was paid (refunded in QuickBooks) is an invoice like any other", async () => {
     const { a } = await withBuyoutInvoices();
-    await db.update(buyout).set({ state: "voided", endReason: "closed_by_staff" }).where(eq(buyout.familyQboId, FAMILY_A.family.qboId));
+    await db.update(buyout).set({ state: "voided", endReason: "closed_by_staff" }).where(eq(buyout.familyId, await recordOfCustomer(FAMILY_A.family.qboId, "family")));
     expect(await loadMyBuyoutInvoices(FAMILY_A.family.qboId)).toEqual(new Map());
     asParent(a.identity);
     const html = text(await renderPage(PaymentsPage));

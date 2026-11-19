@@ -366,7 +366,7 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/families/ids.ts",
   // The session's own family and students as the app's records, which volunteering's parent pages find them by.
   "src/lib/families/session-family.ts",
-  // Volunteering's boundary into buy-outs, still keyed by customer (stage 2 of the app-owned families spec).
+  // Whether a requirement's buy-out stands, as volunteering reads it, by the app's own records.
   "src/lib/volunteer/bought.ts",
   "src/lib/volunteer/my-volunteer.ts",
   "src/lib/volunteer/signed-up.ts",

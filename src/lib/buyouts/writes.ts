@@ -7,10 +7,13 @@
 // family's own from the roster cache, and nothing the browser sends names a customer, an item or an amount. It imports
 // no staff-only module (tests/integration/page-guards.test.ts scans this file).
 import "server-only";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, familyMoney, qboCustomer, requirement, writeQueue, type BuyoutState, type BuyoutWrite, type QueuedWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
+import type { AppStudentId } from "@/lib/families/ids";
+import { customerOfFamily } from "@/lib/families/links";
+import { activeFamilyOf, studentsStillIn } from "@/lib/families/session-family";
 import type { ParentCtx } from "@/lib/guards";
 import { formatMoney, toCents } from "@/lib/money/cents";
 import type { MyFamily } from "@/lib/parents/my-family";
@@ -25,6 +28,7 @@ import { getRosterSource } from "@/lib/roster/source";
 import { isUuid } from "@/lib/seasons/ids";
 import { ROSTER_BUSY, takePlace } from "@/lib/volunteer/my-volunteer";
 import { findMyBuyout, isChoiceKey } from "./my-buyouts";
+import { buyoutRecords } from "./standing";
 
 const SEND_TIMEOUT_MS = 10_000;
 const READ_TIMEOUT_MS = 8_000;
@@ -114,14 +118,25 @@ async function markMoneyStale(tx: Tx, familyQboId: string): Promise<void> {
 }
 
 /**
+ * The customer of the family that chose a buy-out, through the family record's link, in the records' company: the
+ * family's stored figures and the write queue are still kept by that customer (a boundary of stage 2 of the app-owned
+ * families spec, until the money slice). A per-family buy-out is billed to that customer itself, so it stands in when
+ * the link is gone. Null when neither says.
+ */
+async function familyCustomerOf(tx: Tx, b: Pick<Row, "familyId" | "studentId" | "customerQboId">): Promise<string | null> {
+  return (await customerOfFamily(b.familyId, tx)) ?? (b.studentId === null ? b.customerQboId : null);
+}
+
+/**
  * Every family whose figures may show this buy-out's invoice: the one that chose it, and for a per-student one the
  * family its student is under now in the roster cache (a student who moved takes their invoices with them).
  */
-export async function markBuyoutMoneyStale(tx: Tx, b: Pick<Row, "familyQboId" | "subjectQboId" | "customerQboId">): Promise<void> {
-  await markMoneyStale(tx, b.familyQboId);
-  if (b.subjectQboId === b.familyQboId) return;
+export async function markBuyoutMoneyStale(tx: Tx, b: Pick<Row, "familyId" | "studentId" | "customerQboId">): Promise<void> {
+  const chooser = await familyCustomerOf(tx, b);
+  if (chooser !== null) await markMoneyStale(tx, chooser);
+  if (b.studentId === null) return;
   const [now] = await tx.select({ parentQboId: qboCustomer.parentQboId }).from(qboCustomer).where(eq(qboCustomer.qboId, b.customerQboId));
-  if (now?.parentQboId && now.parentQboId !== b.familyQboId) await markMoneyStale(tx, now.parentQboId);
+  if (now?.parentQboId && now.parentQboId !== chooser) await markMoneyStale(tx, now.parentQboId);
 }
 
 /** The queue item finished: done, with what QuickBooks made or changed, audited as the queue audits its own. */
@@ -307,13 +322,16 @@ async function queueItem(tx: Tx, w: BuyoutWrite, o: { realmId: string; label: st
 /**
  * Puts the void of an invoiced buy-out on the queue, in the caller's transaction: the buy-out reads "being cancelled"
  * until it is voided. A student who moves (./moved.ts) and a guardian who switches back come here. Null when the
- * buy-out is no longer invoiced.
+ * buy-out is no longer invoiced, or when its family's customer can't be found (the queue item names it): nothing is
+ * queued and the buy-out is left as it is.
  */
 export async function queueVoid(tx: Tx, b: Row, why: "switched_back" | "student_moved", o: { actor: Actor; label: string | null; nextTryAt: Date; ip?: string | null }): Promise<Item | null> {
   if (!b.invoiceQboId) return null;
+  const familyQboId = await familyCustomerOf(tx, b);
+  if (familyQboId === null) return null;
   const [moving] = await tx.update(buyout).set({ state: "being_voided", updatedAt: new Date() }).where(and(eq(buyout.id, b.id), eq(buyout.state, "invoiced"))).returning({ id: buyout.id });
   if (!moving) return null;
-  const item = await queueItem(tx, { op: "invoice_void", buyoutId: b.id, invoiceQboId: b.invoiceQboId, customerQboId: b.customerQboId, familyQboId: b.familyQboId, why },
+  const item = await queueItem(tx, { op: "invoice_void", buyoutId: b.id, invoiceQboId: b.invoiceQboId, customerQboId: b.customerQboId, familyQboId, why },
     { realmId: b.realmId, label: o.label, nextTryAt: o.nextTryAt });
   await writeAudit({ actor: o.actor, action: why === "switched_back" ? "volunteer.buyout.switch_back" : "volunteer.buyout.moved", targetType: "buyout", targetId: b.id, ip: o.ip ?? null,
     before: { state: "invoiced", invoiceQboId: b.invoiceQboId, amountCents: b.amountCents }, after: { state: "being_voided", why, queueId: item.id } }, tx);
@@ -322,6 +340,9 @@ export async function queueVoid(tx: Tx, b: Row, why: "switched_back" | "student_
 
 /** Whether a Postgres error is a lock that wasn't free in time; Drizzle wraps the driver's error, so its cause is read too. */
 const codeOf = (e: unknown): unknown => (typeof e === "object" && e !== null ? (e as { code?: unknown }).code ?? codeOf((e as { cause?: unknown }).cause) : undefined);
+
+/** A buy-out for this subject: the family's own (no student), or this student's. */
+const forSubject = (t: { studentId: AppStudentId | null }) => (t.studentId === null ? isNull(buyout.studentId) : eq(buyout.studentId, t.studentId));
 
 /** Can a write go now: QuickBooks connected, not waiting for an Admin, and to the company the roster cache came from. */
 async function writable(tx: Tx, realmId: string): Promise<boolean> {
@@ -335,8 +356,10 @@ async function writable(tx: Tx, realmId: string): Promise<boolean> {
  * is worked out again; the stamp of the quote the page showed must match it, or nothing is done and the new amount is
  * said. In one transaction, holding the roster lock shared (no refresh or change of company runs between the checks and
  * the write): the requirement is read again, the customer billed is checked to be the family's own and active, the
- * buy-out is recorded as being invoiced (at most one stands per requirement and subject: `buyout_live_uq`, so two
- * confirms at once make one), the create is put on the write queue, and the choice is audited. The create is then tried
+ * family's record to be the session's and active and a student's record to be active and in it, the buy-out is
+ * recorded as being invoiced by those records (at most one stands per requirement and family, or requirement and
+ * student: `buyout_family_live_uq`, `buyout_student_live_uq`, so two confirms at once make one), the create is put on
+ * the write queue, and the choice is audited. The create is then tried
  * once at once, never waiting for the connection row; the worker's queue job does the rest.
  */
 export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "students"> | null, requirementId: unknown, key: unknown, stamp: unknown): Promise<Result> {
@@ -365,26 +388,31 @@ export async function confirmMyBuyout(ctx: ParentCtx, family: Pick<MyFamily, "st
       .where(and(eq(qboCustomer.qboId, t.customerQboId), eq(qboCustomer.active, true)));
     const ours = customer && (r.appliesTo === "family" ? customer.qboId === ctx.familyQboId : customer.parentQboId === ctx.familyQboId);
     if (!ours) return { r: no(BUYOUT_COPY.notFromPage) };
+    // Whose it is: the session's own family record, still active, and for a per-student requirement the student's own
+    // record, still active and in that family, as the page found them (sessionFamily()), read again under the lock.
+    if ((r.appliesTo === "family") !== (t.studentId === null) || (await activeFamilyOf(ctx.familyQboId, tx)) !== t.familyId) return { r: no(BUYOUT_COPY.notFromPage) };
+    if (t.studentId !== null && !(await studentsStillIn(t.familyId, [t.studentId], tx)).has(String(t.studentId))) return { r: no(BUYOUT_COPY.notFromPage) };
     const [row] = await tx.insert(buyout).values({
-      requirementId: r.id, familyQboId: ctx.familyQboId, subjectQboId: t.subjectQboId, customerQboId: t.customerQboId, itemQboId: r.itemQboId,
+      requirementId: r.id, familyId: t.familyId, studentId: t.studentId, customerQboId: t.customerQboId, itemQboId: r.itemQboId,
       unitCents: q.unitCents, units: q.units, amountCents: q.amountCents, state: "being_invoiced", realmId: t.realmId, chosenBy: ctx.parentId, chosenByLabel: ctx.email,
     }).onConflictDoNothing().returning();
     if (!row) {
       // Another confirm for the same requirement and subject was first (another guardian of the family, or a second
       // press). A live buy-out of another family's (a student who moved here in QuickBooks, still flagged there) is
       // never told: the guardian reads only that it can't be set up now.
-      const [ours] = await tx.select({ id: buyout.id }).from(buyout).where(and(eq(buyout.requirementId, r.id), eq(buyout.subjectQboId, t.subjectQboId),
-        eq(buyout.familyQboId, ctx.familyQboId), inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));
+      const [ours] = await tx.select({ id: buyout.id }).from(buyout).where(and(eq(buyout.requirementId, r.id), forSubject(t),
+        eq(buyout.familyId, t.familyId), inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));
       return { r: no(ours ? BUYOUT_COPY.already : BUYOUT_COPY.cantNow) };
     }
     // The invoice's bill-to address is the confirming guardian's own sign-in address, from their session (never from the
     // browser), kept with the queued create so every try sends the same one. It gives the invoice its Pay link; its
     // email status stays not set, so nothing is emailed. It goes into no audit row.
-    const item = await queueItem(tx, { op: "invoice_create", buyoutId: row.id, customerQboId: row.customerQboId, itemQboId: row.itemQboId, units: row.units, unitCents: row.unitCents, familyQboId: row.familyQboId,
+    // The queue keeps the family by its customer (the write queue moves to the app's ids in a later slice): the session's own.
+    const item = await queueItem(tx, { op: "invoice_create", buyoutId: row.id, customerQboId: row.customerQboId, itemQboId: row.itemQboId, units: row.units, unitCents: row.unitCents, familyQboId: ctx.familyQboId,
       billEmail: ctx.email },
       { realmId: row.realmId, label: ctx.email, nextTryAt: new Date(Date.now() + LEASE_MS) });
     await writeAudit({ actor, action: "volunteer.buyout.chosen", targetType: "buyout", targetId: row.id, ip: ctx.ip,
-      after: { state: "being_invoiced", requirementId: r.id, title: r.title, subjectQboId: row.subjectQboId, customerQboId: row.customerQboId, itemQboId: row.itemQboId,
+      after: { state: "being_invoiced", requirementId: r.id, title: r.title, ...buyoutRecords(row), customerQboId: row.customerQboId, itemQboId: row.itemQboId,
         units: row.units, unitCents: row.unitCents, amountCents: row.amountCents, queueId: item.id } }, tx);
     return { r: { ok: true, message: "" }, item };
   }).catch((e: unknown): { r: Result; item?: Item } => { if (codeOf(e) === "23505") return { r: no(BUYOUT_COPY.already) }; throw e; });
@@ -413,7 +441,7 @@ export async function switchMyBuyoutBack(ctx: ParentCtx, family: Pick<MyFamily, 
   if (take !== "taken") return no(BUYOUT_COPY.rateLimited);
   const t = await findMyBuyout(ctx, family, requirementId, key);
   if (!t?.view.buyout) return no(t ? BUYOUT_COPY.nothingToSwitch : BUYOUT_COPY.notFromPage);
-  const [b] = await db.select().from(buyout).where(and(eq(buyout.familyQboId, ctx.familyQboId), eq(buyout.requirementId, t.requirement.id), eq(buyout.subjectQboId, t.subjectQboId),
+  const [b] = await db.select().from(buyout).where(and(eq(buyout.familyId, t.familyId), eq(buyout.requirementId, t.requirement.id), forSubject(t),
     inArray(buyout.state, ["being_invoiced", "invoiced", "paid", "being_voided", "stuck"])));
   if (!b) return no(BUYOUT_COPY.nothingToSwitch);
   if (b.state === "being_invoiced") return no(BUYOUT_COPY.stillMaking);

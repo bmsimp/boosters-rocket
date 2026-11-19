@@ -27,7 +27,7 @@ import { seedFamilyMoney, seedParentIn, type SeededParent } from "../helpers/par
 import { startQboStub, STUB_PAID_VOID_FAULT, type QboStub } from "../helpers/qbo-stub";
 import { BUYOUT_ITEM, buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedCheckIn, seedEvent, seedOutsideCredit, seedShift, seedSignup } from "../helpers/volunteer";
-import { subjectColumns } from "../helpers/app-records";
+import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -68,6 +68,8 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(r).toEqual({ ok: true, message: BUYOUT_COPY.done("$50.00") });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ state: "invoiced", subjectQboId: FAMILY, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000, invoiceQboId: "5001" });
+    // It names the app's own family that chose it, and no student: the family is its subject.
+    expect(b).toMatchObject({ familyId: await recordOfCustomer(FAMILY, "family"), studentId: null });
     expect(invoicePosts()).toHaveLength(1);
     const sent = JSON.parse(invoicePosts()[0]!.body);
     // The bill-to address is the confirming guardian's own sign-in address (the owner's decision of 2026-11-17), and
@@ -91,7 +93,8 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(await buyoutAuditBodies()).not.toContain(RIVERA.parent.email);
     // Audited: the choice, with what was asked for, and the invoice made.
     const [chosen] = await audits("volunteer.buyout.chosen");
-    expect(chosen!.after).toMatchObject({ customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000 });
+    expect(chosen!.after).toMatchObject({ customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 2500, amountCents: 5000,
+      familyId: String(await recordOfCustomer(FAMILY, "family")), studentId: null });
     expect((await audits("volunteer.buyout.invoiced"))).toHaveLength(1);
     const [item] = await queueOf(b!.id);
     expect(item).toMatchObject({ state: "done", resultQboId: "5001" });
@@ -110,6 +113,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(JSON.parse(invoicePosts()[0]!.body).CustomerRef).toEqual({ value: STUDENT });
     const [b] = await buyoutsOf(FAMILY);
     expect(b).toMatchObject({ subjectQboId: STUDENT, customerQboId: STUDENT, units: 4, amountCents: 4800 });
+    expect(b).toMatchObject({ familyId: await recordOfCustomer(FAMILY, "family"), studentId: await recordOfCustomer(STUDENT, "student") });
   });
 
   it("refuses a stale quote with the new amount, and a used one, and sends nothing for either", async () => {

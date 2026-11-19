@@ -41,10 +41,12 @@ export default async function FamilyBuyoutsPage({ params }: { params: Promise<{ 
   if (qboId.length === 0 || qboId.length > ID_MAX) notFound();
   // The tag first: the buy-outs shown are that company's or a later one's, never an earlier one's.
   const rosterTag = await currentRosterTag();
-  const { familyName, buyouts } = await loadFamilyBuyouts(qboId);
+  const { familyId, familyName, buyouts } = await loadFamilyBuyouts(qboId);
   if (familyName === null && buyouts.length === 0) notFound();
+  // Naming the app's family (stage 2 of the app-owned families spec); its customer only for one the roster holds with no
+  // family record yet. Older rows name the customer, and the audit page's record filter finds both.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "volunteer.buyout.family.read", permission: "Roster.Read",
-    targetType: "qbo_customer", targetId: qboId, ip: ctx.ip });
+    ...(familyId === null ? { targetType: "qbo_customer", targetId: qboId } : { targetType: "family", targetId: String(familyId) }), ip: ctx.ip });
   const money = can(ctx.effective, "Finance.Balance.Read");
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   const columns: Column<FamilyBuyout>[] = [

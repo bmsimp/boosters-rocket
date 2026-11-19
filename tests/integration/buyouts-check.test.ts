@@ -10,11 +10,12 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, familyMoney, jobRun, qboCustomer, writeQueue, type StoredInvoice } from "@/lib/db/schema";
+import { auditLog, buyout, familyMoney, jobRun, writeQueue, type StoredInvoice } from "@/lib/db/schema";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
 import { buyoutFacts } from "@/lib/buyouts/standing";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
 import { MONEY_JOB } from "@/lib/money/run-keys";
+import { pairKey } from "@/lib/seasons/kinds";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { afterStudentMoved } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
@@ -23,6 +24,8 @@ import { CHENOWETH, RIVERA, stubInvoice } from "../helpers/money";
 import { MONEY_REALM, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { buyoutFamily, queueOf, seedBuyout, seedBuyoutRequirement, BUYOUT_ITEM } from "../helpers/buyouts";
+import { recordOfCustomer } from "../helpers/app-records";
+import { moveInCache } from "../helpers/roster-cache";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -58,7 +61,7 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
     const moved = await seedBuyout({ requirementId: perStudent, familyQboId: FAMILY, subjectQboId: S1, chosenBy: by, invoiceQboId: "9905" });
     stub.invoices.push(stubInvoice("9905", S1, { TotalAmt: 100, Balance: 100, SyncToken: "2" }));
     // The student was moved to another family in QuickBooks, and a refresh read it: the family's read no longer has their invoices.
-    await db.update(qboCustomer).set({ parentQboId: CHENOWETH.family.qboId }).where(eq(qboCustomer.qboId, S1));
+    await moveInCache([S1], CHENOWETH.family.qboId);
     await moneyRun([stored("9901", FAMILY), stored("9902", FAMILY, { balanceCents: 0 }), stored("9904", S2)]);
     // The new family's figures hold the moved student's invoice, open, as a money read would.
     const theirFigures = { realmId: MONEY_REALM, readAt: new Date(), invoices: [stored("9905", S1)], totalCents: 10000, currency: "USD", staleAt: null };
@@ -173,8 +176,9 @@ describe("the daily check of buy-out invoices (v1 spec §8.4)", () => {
 
 describe("a student who moves in the portal (afterStudentMoved)", () => {
   async function move(by: string) {
-    // The cache already says the student is under the other family when the follow-ups run (applyWritten).
-    await db.update(qboCustomer).set({ parentQboId: CHENOWETH.family.qboId }).where(eq(qboCustomer.qboId, S1));
+    // The cache already says the student is under the other family when the follow-ups run (applyWritten), and the
+    // student's own record with it.
+    await moveInCache([S1], CHENOWETH.family.qboId);
     return db.transaction((tx) => afterStudentMoved(tx, { studentQboId: S1, fromFamilyQboId: FAMILY, toFamilyQboId: CHENOWETH.family.qboId, cause: "test" },
       { actor: { door: "staff", id: by, label: "registrar@club.org" }, ip: null }));
   }
@@ -190,8 +194,9 @@ describe("a student who moves in the portal (afterStudentMoved)", () => {
     await move("00000000-0000-4000-8000-00000000aaaa");
     expect(await row(b.id)).toMatchObject({ state: "being_voided" });
     expect((await queueOf(b.id)).map((i) => [i.state, (i.request as { why?: string }).why])).toEqual([["waiting", "student_moved"]]);
-    // The new family's standing holds nothing of it.
-    expect(await buyoutFacts([req], [CHENOWETH.family.qboId, S1])).toEqual(new Map());
+    // The new family's standing holds nothing of it, asked by the new family's record and the student's.
+    const theirs = { families: [await recordOfCustomer(CHENOWETH.family.qboId, "family")], students: [await recordOfCustomer(S1, "student")] };
+    expect(await buyoutFacts([req], theirs, pairKey)).toEqual(new Map());
     await runWriteQueue(later(1));
     expect(await row(b.id)).toMatchObject({ state: "voided", endReason: "student_moved" });
     const voids = stub.apiCalls().filter((c) => c.method === "POST");
