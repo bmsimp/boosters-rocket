@@ -67,7 +67,7 @@ async function seedTheRelease(pg: postgres.Sql): Promise<Seeded> {
     ('membership.shape', ${pg.json({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: "P" })})`;
   await pg`INSERT INTO qbo_customer_type (qbo_id, name, active) VALUES ('F', 'Family', true), ('S', 'Student', true), ('P', 'Parent', true)`;
   await pg`INSERT INTO qbo_customer (qbo_id, display_name, active, parent_qbo_id, type_qbo_id, email, sync_token) VALUES
-    ('F1', 'Ash Family', true, null, 'F', null, '0'), ('S1', 'Ash Kid', true, 'F1', 'S', null, '0'), ('P1', 'Ash Parent', true, 'F1', 'P', 'ash@upgrade.example', '0'),
+    ('F1', 'Ash Family', true, null, 'F', null, '0'), ('S1', 'Ash Kid', true, 'F1', 'S', null, '4'), ('P1', 'Ash Parent', true, 'F1', 'P', 'ash@upgrade.example', '0'),
     ('F2', 'Birch Family', true, null, 'F', null, '0'), ('S2', 'Birch Kid', true, 'F2', 'S', null, '0'), ('P2', 'Birch Parent', true, 'F2', 'P', 'birch@upgrade.example', '0')`;
 
   // The guardians, each signed in to their family, and one with an email change waiting to be confirmed.
@@ -280,6 +280,14 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
       // The request is as it was written, its family's customer included (never sent, and read by nothing now).
       expect(queued).toMatchObject({ family_id: await recordOf("F1", "family"), student_id: null, request: { op: "invoice_void", invoiceQboId: "9001", familyQboId: "F1" } });
       expect(await q((pg) => pg`SELECT column_name FROM information_schema.columns WHERE table_name = 'write_queue' AND column_name = 'family_qbo_id'`)).toHaveLength(0);
+    });
+
+    it("starts each carried-over link aligned with its customer's version in the cache (0041), the queued void no reason to stop", async () => {
+      const [kid] = await q((pg) => pg`SELECT synced_token, synced_at FROM accounting_link WHERE customer_id = 'S1' AND student_id IS NOT NULL AND realm_id = ${REALM}`);
+      expect(kid!.synced_token).toBe("4");
+      expect(kid!.synced_at).not.toBeNull();
+      const [ash] = await q((pg) => pg`SELECT synced_token FROM accounting_link WHERE customer_id = 'F1' AND family_id IS NOT NULL AND realm_id = ${REALM}`);
+      expect(ash!.synced_token).toBe("0");
     });
   });
 

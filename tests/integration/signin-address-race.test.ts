@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
  * parent's own confirmed change of sign-in email (confirmMyEmailChange(), src/lib/parents/email-change.ts), the one way a
  * person's address changes since the reconcile went, run for real against the QuickBooks stub and held at the one
  * moment that matters: after it has written the new address and before it deletes the person's codes and ends their
- * sessions. A code request, or a code check, then runs against it for real, on its own database connection, and the
+ * sessions. A second step's code (since the sign-in release's slice SI-3b, sent only for a right password, to the
+ * person a pending step names), or a code check, then runs against it for real, on its own database connection, and the
  * change is let go once the other side is waiting on a lock.
  *
  * Before the fix each of these went wrong: the code was mailed to the old address and worked with the new one; with an
@@ -37,18 +38,18 @@ vi.mock("@/lib/parents/sessions", async (original) => {
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
-import { getParentAuth } from "@/lib/auth/parent-auth";
+import { auditLog, parent, parentAuthSession, parentAuthUser, signinCode } from "@/lib/db/schema";
 import { confirmMyEmailChange } from "@/lib/parents/email-change";
-import { requestSigninCode, verifySigninCode, hashSigninCode } from "@/lib/parents/signin-codes";
+import { sendSecondStepCode, verifySigninCode, hashSigninCode, type StepPerson } from "@/lib/parents/signin-codes";
 import { enterableGuardianRows } from "@/lib/parents/sessions";
-import { env } from "@/env";
 import { resetDb, seedWorkingMail } from "../helpers/db";
 import { seedContactFamilies } from "../helpers/contact";
 import { seedEmailChange } from "../helpers/email-change";
 import { RIVERA } from "../helpers/money";
 import type { SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { codeMailed, codeStep, ensurePassword, passwordStep } from "../helpers/parent-door";
+import { credentialRows } from "../helpers/signin-links";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -68,6 +69,14 @@ async function someoneWaitsForALock(): Promise<boolean> {
 }
 
 let r: SeededParent;
+/** The person a pending step proved with this address would name: Rosalind, the address, and her password as checked. */
+async function stepFor(email: string): Promise<StepPerson> {
+  const [u] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId));
+  const [cred] = await credentialRows(u!.id);
+  return { parentId: r.identity.parentId, email, password: { credentialId: cred!.id, credentialUpdatedAt: cred!.updatedAt } };
+}
+const send = async (email: string, now: Date) => (await sendSecondStepCode(await stepFor(email), IP, now)).delivery;
+const check = (email: string, code: string, now: Date) => verifySigninCode({ parentId: r.identity.parentId, email }, code, IP, now);
 /** The parent's own confirmed change, from OLD to NEW, written to QuickBooks and then to the portal. */
 async function confirmTheChange() {
   const { token } = await seedEmailChange({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId,
@@ -104,55 +113,54 @@ describe("a sign-in that meets a change of address", () => {
     ({ r } = await seedContactFamilies(stub));
     expect(await addressOf(r.identity.parentId)).toBe(OLD);
     expect(await enterableGuardianRows(r.identity.parentId)).toHaveLength(1);
+    await ensurePassword(OLD);
   });
 
   it("mails no code to an address that is being replaced", async () => {
     const change = await addressChangeUnderWay();
-    const asked = requestSigninCode(OLD, IP, T0);
+    const asked = send(OLD, T0);
     await change.finish();
-    await (await asked).delivery;
+    await asked;
     expect(outbox).toEqual([]);
     expect(await db.select().from(signinCode)).toEqual([]);
-    expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ actorId: null, actorLabel: OLD, after: { reason: "unknown_email" } });
+    expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ actorId: r.identity.parentId, actorLabel: OLD, after: { reason: "address_changed" } });
     expect(await addressOf(r.identity.parentId)).toBe(NEW);
-    // The new address is the one that works now.
-    await (await requestSigninCode(NEW, IP, new Date(T0.getTime() + 1000))).delivery;
+    // The new address is the one that works now (a sign-in proved with it).
+    await send(NEW, new Date(T0.getTime() + 1000));
     expect(outbox.map((m) => m.to)).toEqual([NEW]);
-    expect(await verifySigninCode(NEW, codeOf(outbox[0]!), IP, new Date(T0.getTime() + 2000))).toEqual({ ok: true, parentId: r.identity.parentId, codeId: expect.any(String) });
+    expect(await check(NEW, codeOf(outbox[0]!), new Date(T0.getTime() + 2000))).toEqual({ ok: true, codeId: expect.any(String) });
   }, 30_000);
 
   it("neither side is the loser of a deadlock when the person already holds an unused code", async () => {
     await db.insert(signinCode).values({ parentId: r.identity.parentId, codeHash: hashSigninCode(r.identity.parentId, "123456"),
       expiresAt: new Date(T0.getTime() + 60_000), createdAt: new Date(T0.getTime() - 120_000) });
     const change = await addressChangeUnderWay();
-    const asked = requestSigninCode(OLD, IP, T0);
+    const asked = send(OLD, T0);
     await change.finish();
-    await (await asked).delivery;               // resolves: the request was not ended by the database either
+    await asked;               // resolves: the request was not ended by the database either
     expect(outbox).toEqual([]);
     expect(await db.select().from(signinCode)).toEqual([]);   // the change deleted the earlier code, and no new one was stored
     expect(await addressOf(r.identity.parentId)).toBe(NEW);
   }, 30_000);
 
   it("a request that got in first is mailed to the address of that moment, and the change then ends its code", async () => {
-    await (await requestSigninCode(OLD, IP, T0)).delivery;
+    await send(OLD, T0);
     expect(outbox.map((m) => m.to)).toEqual([OLD]);
     expect(await confirmTheChange()).toMatchObject({ ok: true });
     const code = codeOf(outbox[0]!);
-    for (const address of [OLD, NEW]) expect(await verifySigninCode(address, code, IP, new Date(T0.getTime() + 1000))).toEqual({ ok: false, reason: "rejected" });
+    for (const address of [OLD, NEW]) expect(await check(address, code, new Date(T0.getTime() + 1000))).toMatchObject({ ok: false, reason: "rejected" });
   }, 30_000);
 
   it("makes no session from a code that was proved with the old address while the change was under way", async () => {
-    await (await requestSigninCode(OLD, IP, new Date())).delivery;
-    const code = codeOf(outbox[0]!);
+    // Her right password with the old address, at the door: the pending step, and the code mailed to the old address.
+    const { pending } = await passwordStep(OLD, { headers: { "cf-connecting-ip": IP } });
+    const code = await codeMailed(outbox, OLD, 0);
     await db.delete(parentAuthSession);   // the parent is signed out of the browser the code is checked in
     const change = await addressChangeUnderWay();
-    const auth = await getParentAuth();
-    const checking = auth.handler(new Request(`${env.APP_URL}/api/auth/parent/portal-code/verify`, {
-      method: "POST", body: JSON.stringify({ email: OLD, code }), headers: { "content-type": "application/json", origin: env.APP_URL, "cf-connecting-ip": IP },
-    }));
+    const checking = codeStep(code, pending, { headers: { "cf-connecting-ip": IP } });
     await change.finish();
-    const res = await checking;
-    expect(await res.json()).toEqual({ ok: false, error: "rejected" });
+    const { res, body } = await checking;
+    expect(body).toEqual({ ok: false, error: "rejected" });
     expect(res.headers.getSetCookie().some((c) => c.startsWith("br_parent.session_token=") && !/Max-Age=0/i.test(c))).toBe(false);
     expect(await db.select().from(parentAuthSession)).toEqual([]);
     expect((await audits("signin.refused")).at(-1)).toMatchObject({ actorId: r.identity.parentId, targetId: r.identity.parentId, after: { reason: "address_changed" }, ip: IP });

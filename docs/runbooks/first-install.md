@@ -19,7 +19,7 @@ a person can make before families use the portal.
    whoever looks after the club's domain to add the two names.
 3. Either something already in front of the machine that gives those names https (a proxy or tunnel of your own), or
    ports 80 and 443 of the machine reachable from the internet, so this installation's own proxy can get certificates.
-4. A mailbox the portal can send from (the parents' sign-in codes come from it): [outgoing mail](mail.md).
+4. A mailbox the portal can send from (the parents' password links and sign-in codes come from it): [outgoing mail](mail.md).
 5. An hour. Documenso's first start alone takes a few minutes.
 
 ## 1. Get the files

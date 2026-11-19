@@ -80,4 +80,12 @@ describe("the notice primitive", () => {
     const two = renderToStaticMarkup(h(ActionOutcome, { state: { ok: false, errors: ["One.", "Two."] } }));
     expect(two).toContain('<ul class="notice-list"><li>One.</li><li>Two.</li></ul>');
   });
+
+  it("says Done only for an answer with no status: a change saved first that is waiting is information, one held back or refused needs attention", () => {
+    const word = (status?: "waiting" | "attention") => renderToStaticMarkup(h(ActionOutcome, { state: { ok: true, message: "Saved.", ...(status ? { status } : {}) } }));
+    expect(word()).toContain(`<span class="notice-word">${TONE_WORDS.done}</span> Saved.`);
+    expect(word("waiting")).toContain(`<span class="notice-word">${TONE_WORDS.info}</span> Saved.`);
+    expect(word("attention")).toContain(`<span class="notice-word">${TONE_WORDS.warning}</span> Saved.`);
+    expect(word("attention")).not.toContain(TONE_WORDS.done);
+  });
 });

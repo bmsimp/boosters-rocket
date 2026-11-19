@@ -17,8 +17,8 @@ import { NOT_HERE } from "@/lib/roster/operations";
 import { MAKING_LOCK } from "@/lib/roster/writes";
 import { TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
 import { addGuardianAction, reinstateGuardianAction, removeGuardianAction } from "@/app/staff/(app)/parents/actions";
-import { addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction, renameAction,
-  renameHereAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
+import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction,
+  renameHereAction, renameLinkedAction, renameParentAction, sendPortalValueAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
@@ -39,13 +39,16 @@ const posts = () => stub.apiCalls().filter((c) => c.method === "POST");
 const idOf = async (customer: string) => String(await recordOfCustomer(customer, "family"));
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
 const RENAME = { op: "rename" as const, role: "student" as const, qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" };
+const SOME_UUID = "00000000-0000-4000-8000-000000000000";
 /** The Rivera family's list as its page binds it: the family, Ana and Leo, each at the version the stub's company starts at. */
 const RIVERA_SHOWN: [string, string][] = [["10", "0"], ["11", "0"], ["12", "0"]];
 const everyAction = (tag: string, itemId: string) => [
   () => createAction(tag, "family", "Patel Family"),
-  () => addToFamilyAction(tag, "student", "10", "Rosa Rivera"),
+  () => addStudentAction(tag, SOME_UUID, "Rosa Rivera"),
   () => addToFamilyAction(tag, "parent", "10", "Luis Rivera", "luis@example.com"),
-  () => renameAction(tag, "12", "0", "Leon Rivera"),
+  () => renameLinkedAction(tag, "student", SOME_UUID, "Leon Rivera"),
+  () => renameParentAction(tag, "21", "0", "Mei L. Chen"),
+  () => sendPortalValueAction(itemId, "", "stamp"),
   () => moveAction(tag, "12", "0", "20"),
   () => deactivateAction(tag, "12", "0"),
   () => familyInactiveAction(tag, "10", RIVERA_SHOWN),
@@ -87,11 +90,18 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
       () => createAction("", "family", "Rosa"),
       () => createAction(tag, "family", { toString: () => "Rosa" } as unknown as string),
       () => createAction(tag, "family", "x".repeat(5000)),
-      () => addToFamilyAction(tag, "student", "10", "Rosa", "rosa@example.com"),
-      () => addToFamilyAction(tag, "parent", "10", "Luis", null),
-      () => addToFamilyAction(tag, "family" as "student", "10", "Rosa"),
-      () => renameAction(tag, "12", "zero", "Leon"),
-      () => renameAction(tag, "x".repeat(65), "0", "Leon"),
+      // A student is no longer added by customer, and the parent's form takes an address.
+      () => addToFamilyAction(tag, "student" as "parent", "10", "Rosa", "rosa@example.com"),
+      () => addToFamilyAction(tag, "parent", "10", "Luis", null as unknown as string),
+      () => addStudentAction(tag, "10", "Rosa"),
+      () => addStudentAction(tag, SOME_UUID, 7 as unknown as string),
+      // A linked record's rename names it by its kind and app id, and sends no version.
+      () => renameLinkedAction(tag, "student", "12", "Leon"),
+      () => renameLinkedAction(tag, "parent" as "student", SOME_UUID, "Leon"),
+      () => renameParentAction(tag, "21", "zero", "Mei"),
+      () => renameParentAction(tag, "x".repeat(65), "0", "Mei"),
+      () => sendPortalValueAction("not-a-uuid", "", "stamp"),
+      () => sendPortalValueAction(SOME_UUID, 7 as unknown as string, "stamp"),
       () => moveAction(tag, "12", "0", 20 as unknown as string),
       () => deactivateAction(tag, ["12"] as unknown as string, "0"),
       () => familyInactiveAction(tag, "10", []),
@@ -109,13 +119,14 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
 
   it("send a change and show it everywhere: the pages are made again", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    expect(await renameAction(tag, "12", "0", "Leon Rivera")).toEqual({ ok: true, message: "Renamed in QuickBooks." });
+    const leo = String(await recordOfCustomer("12", "student"));
+    expect(await renameLinkedAction(tag, "student", leo, "Leon Rivera")).toEqual({ ok: true, message: "Renamed Leon Rivera in the portal and in QuickBooks." });
     expect(revalidatedPaths()).toContain("/");
     const [row] = await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, "12"));
     expect(row!.displayName).toBe("Leon Rivera");
-    // A refusal changes nothing, and nothing is made again.
+    // A refusal before anything is saved changes nothing, and nothing is made again.
     const before = revalidatedPaths().length;
-    expect(await renameAction(tag, "12", "1", "Ana Rivera")).toMatchObject({ ok: false, offer: "Ana Rivera (2)" });
+    expect(await renameLinkedAction(tag, "student", leo, "Ana Rivera")).toMatchObject({ ok: false, offer: "Ana Rivera (2)" });
     expect(revalidatedPaths().length).toBe(before);
   });
 });
@@ -567,5 +578,74 @@ describe("the Families list while QuickBooks is connected to another company", (
     expect(await renderPage(RosterPage)).toContain("Make a family</h2>");
     await db.update(qboConnection).set({ realmId: "9999" });
     expect(await renderPage(RosterPage)).not.toContain("Make a family</h2>");
+  });
+});
+
+describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)", () => {
+  const refusedRename = () => seedQueued(RENAME, { state: "refused", code: "fault_5010", nextTryAt: null, familyQboId: "10" });
+
+  it("is listed on Reconciliation under its own heading, in words, with Send the portal's value and Give up only for staff who may change families", async () => {
+    await refusedRename();
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    const read = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(read).toContain("Not in QuickBooks, kept in the portal (1)");
+    expect(read).toContain("Rename the student “Leo Rivera” to “Leon Rivera”");
+    // Who stopped it, in words: here the portal, which held it back over a name changed in QuickBooks.
+    expect(read).toContain("The portal held it back: someone changed the name in QuickBooks since the portal last sent it");
+    expect(read).toContain("Held back by the portal, as QuickBooks has something else");
+    expect(read).toContain("Why it didn&#x27;t go through");
+    expect(read).toContain("QuickBooks has “Leo Rivera” now.");
+    expect(read).not.toContain("fault_5010");
+    expect(read).not.toContain("Send the portal");
+    expect(read).not.toContain("Stuck (");
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const change = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(change).toContain("Send the portal&#x27;s value");
+    expect(change).toContain("Give up");
+    expect(change).not.toContain("Try again now");
+  });
+
+  it("offers no Send the portal's value where it can't go through: a name QuickBooks refused as taken, a customer QuickBooks has inactive; and says why", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    await seedQueued(RENAME, { state: "refused", code: "fault_6240", nextTryAt: null, familyQboId: "10" });
+    const taken = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(taken).not.toContain("Send the portal");
+    expect(taken).toContain("rename the record on its family&#x27;s page to a free name");
+    expect(taken).toContain("Give up");
+    await db.delete(writeQueue);
+    await refusedRename();
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "12"));
+    const inactive = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(inactive).not.toContain("Send the portal");
+    expect(inactive).toContain("QuickBooks has this customer inactive, and the portal never makes a customer active again");
+    // Drawn as a notice, never a bare paragraph.
+    expect(inactive).toMatch(/<div class="notice notice-info"><svg[\s\S]*?<\/svg><div class="notice-body"><span class="notice-word">Note<\/span> QuickBooks has this customer inactive/);
+    // A customer the roster doesn't hold at all is said as that, not as inactive.
+    await db.delete(qboCustomer).where(eq(qboCustomer.qboId, "12"));
+    const gone = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(gone).not.toContain("Send the portal");
+    expect(gone).toContain("This customer isn&#x27;t on the roster the portal last read from QuickBooks");
+    expect(gone).not.toContain("QuickBooks has this customer inactive");
+  });
+
+  it("is listed on the family's page in words, with no buttons, and doesn't stop a change to the record", async () => {
+    await refusedRename();
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    const kept = sectionOf(html, "refused-h");
+    expect(kept).toContain("Kept in the portal, not in QuickBooks");
+    expect(kept).toContain("Rename the student “Leo Rivera” to “Leon Rivera”");
+    expect(kept).not.toContain("Send the portal");
+    expect(html).not.toContain('id="waiting-h"');
+    expect(html).toContain("Change the student Leo Rivera");
+    expect(html).not.toContain("A change to Leo Rivera is waiting to reach QuickBooks");
+  });
+
+  it("the rename forms of a linked record send no version and start from the portal's own name; the student form adds by the family's record", async () => {
+    await db.update(student).set({ name: "Leo R. Rivera" }).where(eq(student.id, await recordOfCustomer("12", "student")));
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = sectionOf(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } }), "family-changes-h");
+    expect(html).toContain('value="Leo R. Rivera"');
+    expect(html).toContain("The student is saved in the portal first, then made in QuickBooks under the family.");
   });
 });

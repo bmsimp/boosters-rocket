@@ -33,7 +33,8 @@ const NOT_AUDITED: Record<string, string> = {
   // A session's own upkeep.
   "src/lib/parents/sessions.ts#renewParentSession": "a session's expiry pushed forward while the parent keeps using it; signing in, signing out and ending sessions are audited",
   // Rate-limit counts.
-  "src/lib/parents/rate-limit.ts#takeRateLimit": "rate-limit counts: one row per try, cleaned up when they expire (CLEANED_TABLES); a refusal is audited by its caller",
+  "src/lib/parents/rate-limit.ts#takeRateLimitPlace": "rate-limit counts: one row per try, cleaned up when they expire (CLEANED_TABLES); a refusal is audited by its caller",
+  "src/lib/parents/rate-limit.ts#giveBackRateLimit": "rate-limit counts: a right password's try gives its own row back (password-signin.ts), so only wrong tries stay counted; the sign-in it goes on to is audited",
   // Claims: a row held so that two requests or two runs never do one thing twice.
   "src/lib/forms/requests.ts#claim": "a claim: holds a request while an open makes its document (preparing_at); the open is audited",
   "src/lib/forms/requests.ts#release": "a claim: lets go of the hold above",

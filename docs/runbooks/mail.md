@@ -2,7 +2,7 @@
 
 Two things send mail, and each is set up on its own:
 
-- **The portal** sends parents their sign-in codes, welcome emails, reminders and signed copies of forms. It is set up
+- **The portal** sends parents their password links and sign-in codes, welcome emails, reminders and signed copies of forms. It is set up
   on the portal's setup page (Step 3) and later under **Settings**, **Outgoing mail**. Parents can't sign in until it
   works.
 - **Documenso** sends only its own account mail: the confirmation of the first account, password resets and

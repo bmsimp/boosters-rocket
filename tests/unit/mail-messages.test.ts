@@ -5,19 +5,36 @@ import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChan
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
 describe("mail messages", () => {
-  it("puts the code in the subject and body, says 10 minutes, and has no link", () => {
-    const m = signinCodeMessage(b, "ana@example.com", "482913");
+  const passwordPage = "https://portal.example.org/sign-in/password";
+  it("puts the code in the subject and body, says 10 minutes, and says what to do if the reader didn't just sign in", () => {
+    const m = signinCodeMessage(b, "ana@example.com", "482913", { passwordPage, minutes: 10 });
     expect(m.subject).toBe("Your FZN <Band> Boosters sign-in code: 482913");
     expect(m.to).toBe("ana@example.com");
     for (const part of [m.text, m.html]) {
       expect(part).toContain("482913");
       expect(part).toMatch(/expires in 10 minutes/);
-      expect(part).toMatch(/didn(?:'|&#39;)t ask for this code/);
-      expect(part).not.toMatch(/https?:\/\/|<a\b|<img\b/i);
+      // A code is sent only after the right password (the sign-in release, slice SI-3b), so it says so.
+      expect(part).toMatch(/your password was entered correctly/);
+      expect(part).toMatch(/didn(?:'|&#39;)t just sign in/);
+      expect(part).toMatch(/someone may know your password/);
+      expect(part).toMatch(/Set up or reset my password/);
+      // The one address it names is the page to set a new password; no image, and no link tag.
+      expect(part.match(/https?:\/\/[^\s<"]+/g)).toEqual([passwordPage]);
+      expect(part).not.toMatch(/<a\b|<img\b/i);
+    }
+  });
+  it("a code resent late in its pending step says the minutes it has left, never 10", () => {
+    // A code never outlives its pending step (sendSecondStepCode()), so its mail says what is left of it.
+    for (const [minutes, words] of [[4, "expires in 4 minutes"], [1, "expires in 1 minute."]] as const) {
+      const m = signinCodeMessage(b, "ana@example.com", "482913", { passwordPage, minutes });
+      for (const part of [m.text, m.html]) {
+        expect(part).toContain(words);
+        expect(part).not.toContain("10 minutes");
+      }
     }
   });
   it("escapes the club name in HTML and uses the club color", () => {
-    const m = signinCodeMessage(b, "ana@example.com", "482913");
+    const m = signinCodeMessage(b, "ana@example.com", "482913", { passwordPage, minutes: 10 });
     expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
     expect(m.html).not.toContain("<Band>");
     expect(m.html).toContain("#5b2a86");

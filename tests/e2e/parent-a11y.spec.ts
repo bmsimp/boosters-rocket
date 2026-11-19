@@ -5,7 +5,7 @@ import { parentSessionCookie } from "./parent-session";
 import { addressOf, isDynamic, parentRoutes } from "./parent-routes";
 import { PARAMS } from "./parent-params";
 import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
-import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, type LinkPurpose } from "./signin-links";
+import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, takeZeldaPassword, type LinkPurpose } from "./signin-links";
 
 /**
  * Every page a parent sees, in every display mode, at a phone's width and a desktop's (step 6 of the roadmap; PRODUCT.md:
@@ -73,14 +73,15 @@ function parentTargets(): Target[] {
 }
 
 /**
- * The pages a parent sees before the parent pages: the sign-in page (both its steps: the code step is the one the
- * device keeps while a code is live, src/app/sign-in/code-step.ts, so no code is sent), the family chooser (Zelda has
+ * The pages a parent sees before the parent pages: the sign-in page (both its steps: the password step as a visitor
+ * meets it, and the code step, the one the device keeps while a code is live, src/app/sign-in/code-step.ts, which since
+ * slice SI-3b holds no address; nothing is submitted, so no password is checked and no code sent), the family chooser (Zelda has
  * two families), the refusal, the page the service worker shows offline, and the page for an address with no page.
  */
 const BEFORE_SIGN_IN: Target[] = [
   { label: "/sign-in", address: "/sign-in", signedIn: false },
   { label: "/sign-in (code step)", address: "/sign-in", signedIn: false,
-    deviceStore: { "booster.signin.code-step": JSON.stringify({ email: "zelda@example.com", sentAt: 0, next: null }) } },
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null }) } },
   { label: "/choose-family", address: "/choose-family", signedIn: true },
   { label: "/refused", address: "/refused", signedIn: false },
   // The pages a set-up or reset link opens: the form, with a live link (never submitted here), and the one message for a
@@ -129,6 +130,9 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
     }, target.deviceStore);
   }
   const page = await context.newPage();
+  // A set-up link works only for a person with no password: the seed's of Zelda's is taken away for it, and put back
+  // after the spec (removeZeldaLinks()). A reset link works with it, or without.
+  if (target.link === "setup") await takeZeldaPassword(sql);
   const address = target.link ? `${target.address}${await mintZeldaLink(sql, target.link)}` : target.address;
   const res = await page.goto(address);
   expect(res?.status(), `${target.label} answered ${res?.status()} at ${address}: it can't be checked with the seeded data. `

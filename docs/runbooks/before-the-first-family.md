@@ -226,8 +226,12 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
 2. **The installed app's edges, on the iPhone,** in light and dark mode and turned sideways.
    **Pass:** the status bar is readable above the club bar, nothing sits under the notch, the bottom tabs sit above the
    home indicator, and the last line of Home scrolls clear of the tabs. **If not:** a screenshot.
-3. **Sign in from the installed app,** leaving it in the middle: ask for a code, switch to Mail, come back. Once more,
-   force-close the app before coming back.
+3. **Sign in from the installed app,** leaving it in the middle: type your email and password (a new app asks for a
+   code too), switch to Mail, come back. Once more, force-close the app before coming back. The portal asks for a code
+   only on a device it doesn't remember yet, and the app is remembered once it has signed in (step 2 signed it in), so
+   first make it a device the portal doesn't know: ask for a reset at **Set up or reset my password** on the sign-in
+   page and choose a new password from the link mailed to you (a reset forgets every remembered device and signs you
+   out everywhere), then sign in from the installed app. In a browser, a private window is a device it doesn't know.
    **Pass:** you are still on the code screen with the resend countdown, and the code signs you in.
    **If not:** note where you landed.
 4. **Stay signed in.** Open the installed app again more than 7 days after signing in.
@@ -278,7 +282,7 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     - **On an iPhone,** the camera offers the link when it sees the code. It opens in **Safari, not in the installed
       app**: on an iPhone only an app from the App Store can open its own links, and the portal added to the home
       screen is not one. If Safari has no session yet, the volunteer
-      signs in there with their email code once (Safari then remembers them, as the installed app does), and is brought
+      signs in there with their password and the emailed code once (Safari then remembers them, as the installed app does), and is brought
       back to the check-in page. They tap **Check me in**, and the page says so.
     - **On an Android phone,** the camera opens the link in Chrome, which may offer to open it in the installed app.
       Either way the volunteer lands on the check-in page, signed in or after signing in, and checks in.
@@ -469,7 +473,10 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    sign in, but only those you tell will know to. Scheduled reminders stay off while welcome emails are off;
    don't press **Remind now** on Signed forms during the pilot: it emails every guardian still to sign that form.
    **If not:** the step lists what is missing first (working mail).
-3. **Tell the pilot families** the portal's address and to sign in with their email. Ask each to, on their own phone:
+3. **Tell the pilot families** the portal's address and to sign in with their email and a password. Until the welcome
+   email carries a set-up link (the sign-in release's slice SI-4), nobody has a password yet: tell each family to start at **Set up or
+   reset my password** on the sign-in page (`/sign-in/password`), type their email, and choose a password from the
+   link mailed to them, which signs them in. Ask each to, on their own phone:
    look at Home and Payments, sign a form, sign up for a shift and check in at it, update their details, and try
    Display.
    **Pass:** each finishes without help (the product's first principle). **If not:** write each place they got stuck

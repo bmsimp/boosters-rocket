@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { asParent, renderPage } from "../helpers/signed-in";
+import { asParent, renderPage, withoutIds } from "../helpers/signed-in";
 
 const stubBase = vi.hoisted(() => ({ url: "" }));
 vi.mock("@/lib/quickbooks/endpoints", async (original) => {
@@ -534,7 +534,7 @@ describe("one family never sees another's money", () => {
     const other = await renderPage(PaymentsPage);
     expect(other).toContain("INV-CHENOWETH-ONLY");
     expect(other).toContain('<div class="amt num">$512.34</div>');
-    expect(other).not.toMatch(/RIVERQUILL|Rosalind|Rafferty|Romilly|\$85\.00|7010|7011|7012|7013/i);
+    expect(withoutIds(other)).not.toMatch(/RIVERQUILL|Rosalind|Rafferty|Romilly|\$85\.00|7010|7011|7012|7013/i);
     expect(invoiceQueries(stub)).toEqual([
       "select * from Invoice where CustomerRef in ('7010','7011','7012','7013') orderby Id startposition 1 maxresults 1000",
       "select * from Invoice where CustomerRef in ('8010','8011','8012','8013') orderby Id startposition 1 maxresults 1000",

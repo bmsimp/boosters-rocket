@@ -1,17 +1,20 @@
 import { test, expect } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
-import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, removeZeldaSessionsMadeHere } from "./signin-links";
+import { mintZeldaLink, NO_SUCH_LINK, removeZeldaDevicesMadeHere, removeZeldaLinks, removeZeldaSessionsMadeHere, takeZeldaPassword } from "./signin-links";
 
 /**
  * A set-up link in the browser (the sign-in release, slices SI-2 and SI-3a): opened, a password chosen and set, and,
  * the seed's club being at Standard, Zelda signed in: she has two families, so she lands on the chooser. The password
  * is long and random, so it passes the breach check whether the real service answers or can't be reached (both
- * outcomes are asserted against a stub in tests/integration/password-links.test.ts). Zelda's link, the password and
- * the session it signed her in with are removed after, so the seed is as it was for the next pass and the next spec.
+ * outcomes are asserted against a stub in tests/integration/password-links.test.ts). A set-up link works only for a
+ * person with no password, so the seed's password of Zelda's is taken away first (tests/e2e/signin-seed.ts). Zelda's
+ * link, the password it set, the session it signed her in with and the device it remembered are removed after, and the
+ * seed's password put back, so the seed is as it was for the next pass and the next spec.
  */
 const sql = postgres(process.env.DATABASE_URL!);
-test.afterEach(async () => { await removeZeldaLinks(sql); await removeZeldaSessionsMadeHere(sql); });
+test.beforeEach(async () => { await takeZeldaPassword(sql); });
+test.afterEach(async () => { await removeZeldaLinks(sql); await removeZeldaSessionsMadeHere(sql); await removeZeldaDevicesMadeHere(sql); });
 test.afterAll(async () => { await sql.end(); });
 /** Zelda's sessions still choosing a family: a sign-in into two families makes one. */
 const choosingSessions = async () => (await sql`SELECT count(*)::int AS n FROM parent_auth_session s JOIN parent_auth_user u ON u.id = s.user_id
@@ -35,6 +38,9 @@ test("a set-up link sets a password and signs the parent in, landing on the choo
   // Signed in: Zelda is a guardian of two families, so the portal sends her to choose one.
   await expect(page).toHaveURL(/\/choose-family$/);
   expect(await choosingSessions()).toBe(before + 1);
+  // The device the link was used on is remembered beside the seed's (slice SI-3b).
+  const [devices] = await sql`SELECT count(*)::int AS n FROM parent_device d JOIN parent p ON p.id = d.parent_id WHERE p.email = 'zelda@example.com'`;
+  expect(devices!.n).toBe(2);
   const [row] = await sql`SELECT count(*)::int AS n FROM parent_auth_account a JOIN parent_auth_user u ON u.id = a.user_id
     JOIN parent p ON p.id = u.parent_id WHERE p.email = 'zelda@example.com' AND a.provider_id = 'credential'`;
   expect(row!.n).toBe(1);

@@ -30,8 +30,8 @@ is the list of what a person must check first, in order.
 
 What it does:
 
-- Staff sign in with Microsoft or Google; parents sign in with a code the portal emails them, and
-  stay signed in for 90 days on their own phone.
+- Staff sign in with Microsoft or Google; parents sign in with their email and a password, and a code
+  the portal emails them on a device it doesn't know yet, and stay signed in for 90 days on their own phone.
 - Parent pages for Home, Forms, Payments, Volunteer and Family, installable as an app on iOS and
   Android, checked for WCAG 2.2 AA in every display mode.
 - Money: each family's open invoices and total with Pay buttons that open QuickBooks' own payment

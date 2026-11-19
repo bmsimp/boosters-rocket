@@ -3,15 +3,21 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
- * One way in (the sign-in release, slice SI-3a; AGENTS.md, "Sign-in release" and the checklist "Page or action before
- * sign-in"): a parent's sign-in is finished only by finishParentSignin() (src/lib/auth/parent-signin-finish.ts), which
- * makes the session, asks signinStands() and completeParentSignin(), and sets the cookie, in that order. Nothing else
- * under src/ makes a parent session, sets its cookie or calls Better Auth's own sign-in or sign-up, and only the parent
- * code plugin's endpoints call the finish. A new way in goes through the finish, never beside it.
+ * One way in (the sign-in release, slices SI-3a and SI-3b; AGENTS.md, "Sign-in release" and the checklist "Page or
+ * action before sign-in"): a parent's sign-in is finished only by finishParentSignin() (src/lib/auth/parent-signin-finish.ts),
+ * which makes the session, asks signinStands() and completeParentSignin(), records the strong sign-in (the device and
+ * strong_at), and sets the cookie, in that order. Nothing else under src/ makes a parent session, sets its cookie or
+ * calls Better Auth's own sign-in or sign-up, and only the parent code plugin's endpoints call the finish. The one other
+ * file that may set a cookie is the module of the pending step's and the device's cookies (parent-signin-step.ts), which
+ * never names the session's. A new way in goes through the finish, never beside it.
  */
 const root = path.resolve(__dirname, "../..");
 const FINISH = "src/lib/auth/parent-signin-finish.ts";
 const PLUGIN = "src/lib/auth/parent-code-plugin.ts";
+/** The pending step's and the remembered device's cookies (slice SI-3b): the one other file that may set a (signed) cookie. */
+const STEP = "src/lib/auth/parent-signin-step.ts";
+/** What only the finish and the step's module may do: set a cookie, signed or not. Everything else in MAKES_A_SESSION is the finish's alone. */
+const SETS_A_COOKIE = new Set(["setSignedCookie(", "setCookie("]);
 /** Where the Set-Cookie of a sign-in finished on the server is copied onto a server action's answer (an action has no endpoint of its own). */
 const COPY = "src/lib/auth/parent-link-signin.ts";
 /** The copy's pure part, which reads each cookie of a `Set-Cookie` header (tested on its own: session-cookie-copy.test.ts). */
@@ -55,9 +61,23 @@ describe("one way in", () => {
     for (const f of files) {
       if (f === FINISH) continue;
       const s = code(read(f));
-      for (const m of MAKES_A_SESSION) if (m.pattern.test(s)) found.push(`${f}: ${m.what}`);
+      for (const m of MAKES_A_SESSION) {
+        if (f === STEP && SETS_A_COOKIE.has(m.what)) continue;
+        if (m.pattern.test(s)) found.push(`${f}: ${m.what}`);
+      }
     }
     expect(found, `Only ${FINISH} may make a parent session or set its cookie (AGENTS.md, "Sign-in release"): a new way in calls the finish.`).toEqual([]);
+  });
+
+  it("the module of the pending step's and the device's cookies never names the session's", () => {
+    const s = code(read(STEP));
+    for (const name of ["session_token", "setSessionCookie", "createSession", "sessionToken", "deleteSession"]) {
+      expect(s, `${STEP} names ${name}: the session's cookie is the finish's alone`).not.toContain(name);
+    }
+    // It does set the two cookies it is for, so the allowance above is used, not just granted.
+    expect(s).toMatch(/\bsetSignedCookie\s*\(/);
+    expect(s).toMatch(/\.setCookie\s*\(/);
+    expect(SETS_A_COOKIE.size).toBe(MAKES_A_SESSION.filter((m) => SETS_A_COOKIE.has(m.what)).length);
   });
 
   it("the patterns catch each way of making a session or setting its cookie", () => {
@@ -77,8 +97,8 @@ describe("one way in", () => {
   it("the finish is called only by the parent code plugin's endpoints", () => {
     const callers = files.filter((f) => f !== FINISH && /\bfinishParentSignin\s*\(/.test(code(read(f))));
     expect(callers, `Only ${PLUGIN} may call finishParentSignin() (AGENTS.md, "Sign-in release").`).toEqual([PLUGIN]);
-    // The code door and the set-up link's server-only endpoint both finish through it.
-    expect(code(read(PLUGIN)).match(/\bfinishParentSignin\s*\(/g)).toHaveLength(2);
+    // The password on a remembered device, the password and code, and the set-up link's server-only endpoint all finish through it.
+    expect(code(read(PLUGIN)).match(/\bfinishParentSignin\s*\(/g)).toHaveLength(3);
   });
 
   it("a set-up link's sign-in is started only by the link's form action, and only the copy names the server-only endpoint", () => {
@@ -105,7 +125,7 @@ describe("one way in", () => {
     expect([...code(read(PARENT_AUTH)).matchAll(/\bplugins\s*:\s*\[([^\]]*)\]/g)].map((m) => m[1]!.trim())).toEqual(["parentCodePlugin()"]);
   });
 
-  it("the finish still makes the session, asks signinStands() and completeParentSignin(), and sets the cookie, in that order", () => {
+  it("the finish still makes the session, asks signinStands() and completeParentSignin(), records the strong sign-in, and sets the cookie, in that order", () => {
     const s = code(read(FINISH));
     const body = s.slice(s.indexOf("export async function finishParentSignin("));
     const at = (call: string) => {
@@ -113,7 +133,7 @@ describe("one way in", () => {
       expect(i, `${FINISH} no longer calls ${call}()`).toBeGreaterThan(-1);
       return i;
     };
-    const steps = ["findUserById", "createSession", "signinStands", "deleteSession", "completeParentSignin", "setSessionCookie", "landingPath"].map(at);
+    const steps = ["findUserById", "createSession", "signinStands", "deleteSession", "completeParentSignin", "recordStrongSignin", "setSessionCookie", "landingPath"].map(at);
     expect([...steps].sort((a, b) => a - b), `${FINISH}: the steps of a sign-in are out of order`).toEqual(steps);
     // The session is made with no family chosen, and the cookie with the long life the code door gives it.
     expect(body).toMatch(/createSession\(\s*user\.id,\s*false,\s*\{\s*familyId:\s*null\s*\}\s*\)/);
@@ -123,6 +143,8 @@ describe("one way in", () => {
     expect(body.slice(at("findUserById"), at("createSession"))).toMatch(/if\s*\(\s*!\s*user\s*\)\s*return\s+REFUSED\b/);
     expect(body.slice(at("createSession"), at("completeParentSignin"))).toMatch(/if\s*\(\s*!\s*\(\s*await\s+signinStands\s*\(/);
     expect(body.slice(at("deleteSession"), at("completeParentSignin"))).toMatch(/\breturn\s+REFUSED\b/);
-    expect(body.slice(at("completeParentSignin"), at("setSessionCookie"))).toMatch(/if\s*\(\s*sessionEnded\s*\)\s*return/);
+    expect(body.slice(at("completeParentSignin"), at("recordStrongSignin"))).toMatch(/if\s*\(\s*sessionEnded\s*\)\s*return/);
+    // A strong step that says no (a block, the session ended, the device gone) deletes the session and returns before the cookie.
+    expect(body.slice(at("recordStrongSignin"), at("setSessionCookie"))).toMatch(/if\s*\(\s*!\s*strong\.ok\s*\)\s*\{\s*await\s+ctx\.context\.internalAdapter\.deleteSession\([^)]*\);\s*return\s+REFUSED\b/);
   });
 });

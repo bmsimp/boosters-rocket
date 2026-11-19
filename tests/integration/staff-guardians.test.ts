@@ -32,7 +32,8 @@ import { getParentSettings, parentDoorClosed } from "@/lib/parents/settings";
 import { addGuardian, reinstateGuardian, removeGuardian } from "@/lib/parents/guardians";
 import { renamePerson } from "@/lib/parents/people";
 import { enterableGuardianRows, lockEmail } from "@/lib/parents/sessions";
-import { requestSigninCode } from "@/lib/parents/signin-codes";
+import { sendSecondStepCode } from "@/lib/parents/signin-codes";
+import { stepPersonFor } from "../helpers/parent-door";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { addGuardianAction, reinstateGuardianAction, removeGuardianAction, renamePersonAction } from "@/app/staff/(app)/parents/actions";
@@ -297,13 +298,14 @@ describe("staff manage a family's guardians", () => {
       expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
       expect(parentDoorClosed(await getParentSettings())).toBe(true);
       expect(await audits("settings.parents.save")).toEqual([]);
-      // Asking for a code is refused for them, and nothing is mailed; once sign-ins are on, the code goes.
+      // A code for them (the second step of a right password) is refused, and nothing is mailed; once sign-ins are on, the code goes.
       await seedWorkingMail();
-      await (await requestSigninCode("ana@example.com", "203.0.113.41")).delivery;
+      const step = await stepPersonFor("ana@example.com");
+      await (await sendSecondStepCode(step, "203.0.113.41")).delivery;
       expect((await audits("signin.code_refused")).map((r) => r.after)).toEqual([{ reason: "signins_off" }]);
       expect(outbox).toEqual([]);
       await seedParentSettings({ signin: true });
-      await (await requestSigninCode("ana@example.com", "203.0.113.41")).delivery;
+      await (await sendSecondStepCode(step, "203.0.113.41")).delivery;
       expect((await audits("signin.code_sent")).map((r) => r.targetId)).toEqual([ana.id]);
       expect(outbox.map((m) => m.to)).toEqual(["ana@example.com"]);
     });
@@ -371,9 +373,10 @@ describe("staff manage a family's guardians", () => {
         expect(revalidated.count).toBe(0);
         // A write waiting for the roster holds the person's row only for its wait: a code request for them, made while
         // the write waits, finishes once it gives up, with the roster still held.
+        const step = await stepPersonFor("ana@example.com");
         const removing = removeGuardian(row!.id, "Moved away.", staffOp, { rosterWaitMs: 1_000 });
         await untilALockIsAwaited();
-        const code = requestSigninCode("ana@example.com", "203.0.113.41").then((r) => r.delivery);
+        const code = sendSecondStepCode(step, "203.0.113.41").then((r) => r.delivery);
         expect(await removing).toEqual({ ok: false, reason: "busy" });
         await code;
         expect((await audits("signin.code_sent")).map((r) => r.targetId)).toEqual([ana.id]);

@@ -113,6 +113,10 @@ describe("migration 0023's fill makes what the import makes", () => {
     // record is the family's own, or the earlier company's.
     expect(byFunction.links.filter((l) => l.kind === "membership").map((l) => l.customer)).toEqual(["P-GONE", "P-SHARED", "P-SHARED", "P1", "P2"]);
     for (const l of byFunction.links) expect(l).toMatchObject({ system: "quickbooks", realmId: REALM, origin: "carried_over", linkedBy: null });
+    // Each link starts aligned with its customer's version in the cache, by the fill (0041's) as by the import (stage 3's
+    // slice 9e), so the comparison above holds the tokens too: a customer the cache holds has one, one it lacks none.
+    expect(byFunction.links.find((l) => l.customer === "F1")!.syncedToken).not.toBeNull();
+    expect(byFunction.links.find((l) => l.customer === "F-GONE")!.syncedToken).toBeNull();
     expect(byFunction.memberships.filter((m) => m.family === null)).toHaveLength(1); // the closed link of the earlier company
   });
 

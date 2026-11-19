@@ -4,7 +4,8 @@ import { rateLimitEvent } from "@/lib/db/schema";
 
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
-  | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip";
+  | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip" | "password_try_email" | "password_try_device"
+  | "password_try_ip";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -31,6 +32,19 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // stop only, for a room of parents on the school's one address; not applied with no address.
   password_ask_email: { max: 3, windowMs: WINDOW_MS },
   password_ask_ip: { max: 60, windowMs: WINDOW_MS },
+  // Signing in with a password (password-signin.ts; the sign-in release, slice SI-3b). 5 wrong tries per typed address
+  // in 15 minutes (open question 27), counted under a keyed hash of the address (never the address), whatever it names,
+  // so the answer and the count are the same for an address on file and one that isn't. A try takes its place before
+  // anything is read, so tries sent at once can't slip past, and a password that proves right gives its place back
+  // (giveBackRateLimit()), so only wrong and refused tries stay counted and a parent's own right password never uses
+  // one up. A try made on a device the portal remembers for the person the address names is counted against that
+  // device instead (`password_try_device`, keyed by the device's row, 5 wrong tries in 15 minutes, given back the same
+  // way), so a stranger who keeps the address's count full doesn't keep the parent out on their own device, and a
+  // stolen device cookie gets no more guesses than the address would. 180 per IP address, as code_check_ip, a flood
+  // stop only, for a room of parents signing in on the school's one address; not applied with no address.
+  password_try_email: { max: 5, windowMs: WINDOW_MS },
+  password_try_device: { max: 5, windowMs: WINDOW_MS },
+  password_try_ip: { max: 180, windowMs: WINDOW_MS },
   // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
   // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
   // from QuickBooks each time, so that is bounded too, well above what editing takes.
@@ -74,6 +88,14 @@ export type RateLimitTake = "taken" | "first_refusal" | "refused";
  * table), and the mark goes with it. The next full window has a new, unmarked oldest event.
  */
 export async function takeRateLimit(kind: RateLimitKind, subject: string, now = new Date()): Promise<RateLimitTake> {
+  return (await takeRateLimitPlace(kind, subject, now)).take;
+}
+
+/** A place taken in a window: the event's row, which giveBackRateLimit() can give back, or null when nothing was counted. */
+export type RateLimitPlace = { take: RateLimitTake; placeId: number | null };
+
+/** As takeRateLimit(), with the row of the event it counted, for a caller that may give the place back. */
+export async function takeRateLimitPlace(kind: RateLimitKind, subject: string, now = new Date()): Promise<RateLimitPlace> {
   const { max, windowMs } = RATE_LIMITS[kind];
   const since = new Date(now.getTime() - windowMs);
   return db.transaction(async (tx) => {
@@ -83,13 +105,23 @@ export async function takeRateLimit(kind: RateLimitKind, subject: string, now = 
     const live = and(scope, gt(rateLimitEvent.at, since));
     const [{ n }] = (await tx.select({ n: count() }).from(rateLimitEvent).where(live)) as [{ n: number }];
     if (n < max) {
-      await tx.insert(rateLimitEvent).values({ kind, subject, at: now });
-      return "taken";
+      const [row] = await tx.insert(rateLimitEvent).values({ kind, subject, at: now }).returning({ id: rateLimitEvent.id });
+      return { take: "taken" as const, placeId: row!.id };
     }
     const [oldest] = await tx.select({ id: rateLimitEvent.id, refusalAudited: rateLimitEvent.refusalAudited }).from(rateLimitEvent)
       .where(live).orderBy(asc(rateLimitEvent.at), asc(rateLimitEvent.id)).limit(1);
-    if (!oldest || oldest.refusalAudited) return "refused";
+    if (!oldest || oldest.refusalAudited) return { take: "refused" as const, placeId: null };
     await tx.update(rateLimitEvent).set({ refusalAudited: true }).where(eq(rateLimitEvent.id, oldest.id));
-    return "first_refusal";
+    return { take: "first_refusal" as const, placeId: null };
   });
+}
+
+/**
+ * Gives back a place takeRateLimitPlace() counted: its one row, by id, and nothing else, so the window is as if the
+ * event had never been counted (a right password's try, password-signin.ts). A row already gone (aged out, or cleaned
+ * up) is nothing to give back.
+ */
+export async function giveBackRateLimit(placeId: number | null): Promise<void> {
+  if (placeId === null) return;
+  await db.delete(rateLimitEvent).where(eq(rateLimitEvent.id, placeId));
 }
