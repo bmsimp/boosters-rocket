@@ -6,7 +6,8 @@ import { noSidewaysScroll, shot, staffMenuTo } from "./journey-helpers";
 import { familyPages } from "./family-records";
 
 // A staff member's working session, walked by what they would tap (docs/walkthrough.md): the seeded Admin goes from the
-// staff home through the grouped menu to the roster and one family, its money, the Parents list, a new season with a
+// staff home through the grouped menu to the roster and one family, its money, the Parents list, a guardian added to a
+// family and removed again, a new season with a
 // requirement of each kind, a tick and a waiver (and what the parent then reads), a volunteer event with a shift, its
 // sign-up list and check-in sheet, a correction to a family's credit, the signed-forms matrix and one form's evidence,
 // Balances, Reconciliation, the audit log and its export, Health and Settings. It runs at 390 wide in the phone pass
@@ -18,8 +19,15 @@ import { familyPages } from "./family-records";
 // What the walk makes is taken away again, so the season, volunteer and credit specs count what the seed holds.
 const sql = postgres(process.env.DATABASE_URL!);
 const SEASON = "Walk season (e2e)", EVENT = "Walk car wash (e2e)", NOTE = "Walk e2e: helped at the pit, by hand", WAIVER = "Walk e2e waiver: away all term";
+const GUARDIAN = { name: "Walk Guardian", email: "walk.guardian@example.com" };
 
 async function tidy() {
+  // The guardian the walk adds and removes: their row, then the person (their sign-in account goes with them).
+  for (const p of await sql`SELECT id FROM parent WHERE email = ${GUARDIAN.email}`) {
+    await sql`DELETE FROM parent_auth_session WHERE user_id IN (SELECT id FROM parent_auth_user WHERE parent_id = ${p.id as string})`;
+    await sql`DELETE FROM guardian WHERE parent_id = ${p.id as string}`;
+    await sql`DELETE FROM parent WHERE id = ${p.id as string}`;
+  }
   await sql`DELETE FROM volunteer_credit WHERE note = ${NOTE}`;
   const events = await sql`SELECT id FROM volunteer_event WHERE name = ${EVENT}`;
   for (const e of events) {
@@ -80,6 +88,30 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await expect(page.locator("main")).not.toContainText("To review");
     await noSidewaysScroll(page);
     await shot(page, "s04-parents");
+  });
+
+  await test.step("adds a guardian to a family, then removes them with a note only staff see", async () => {
+    const since = Number((await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`)[0]!.id);
+    await page.goto(await familyPages.roster("E2E-50"));
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Lee Family");
+    const signins = box(page, "Portal sign-ins");
+    await signins.getByLabel("Name", { exact: true }).fill(GUARDIAN.name);
+    await signins.getByLabel("Email address they sign in with").fill(GUARDIAN.email);
+    await signins.getByRole("button", { name: "Add guardian" }).click();
+    await expect(signins.getByText(`Added ${GUARDIAN.name}.`, { exact: false })).toBeVisible();
+    const row = signins.getByRole("row").filter({ hasText: GUARDIAN.email });
+    await expect(row).toContainText("Can sign in (hasn't yet)");
+    await noSidewaysScroll(page);
+    await shot(page, "s04b-guardian-added");
+    await row.locator("summary").click();
+    await row.getByLabel("Why? (staff only)").fill("Walk e2e: added by the walk");
+    await row.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(signins.getByRole("row").filter({ hasText: GUARDIAN.email })).toContainText("Can't sign in: removed by staff");
+    await expect(signins.getByRole("button", { name: `Reinstate ${GUARDIAN.name}` })).toBeVisible();
+    await expect(page.locator("main")).not.toContainText("Walk e2e: added by the walk");
+    const made = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.create', 'parent.access.granted', 'parent.access.ended') ORDER BY id`;
+    expect(made.map((r) => r.action).sort()).toEqual(["parent.access.ended", "parent.access.granted", "parent.create"]);
+    expect(made.find((r) => r.action === "parent.access.ended")!.after).toMatchObject({ reason: "removed", note: "Walk e2e: added by the walk" });
   });
 
   await test.step("sets up a season with a requirement of each kind", async () => {
