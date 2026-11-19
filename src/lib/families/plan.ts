@@ -10,8 +10,8 @@ import type { MembershipShape } from "@/lib/roster/shape";
  * - Each family of the roster (the family customers in layered books, the members in flat books) has a family record,
  *   and each student of the roster (a customer of the student type directly under one of those families) a student
  *   record in that family. Each is active when its own customer is.
- * - Every customer a record of the current company names as a family (`refs`: a guardian row's family, a session's, a
- *   waiting email change's) has a family record too, and every one named as a student a student record (none does
+ * - Every customer a record of the current company names as a family (`refs`: a guardian row's family, a session's, an
+ *   email change request's, used or not) has a family record too, and every one named as a student a student record (none does
  *   now, but the rule stands for any that may), whatever the roster holds it as: a record names a customer as the kind
  *   its column holds. One the roster doesn't hold as that kind is inactive. The records re-keyed since (the season's,
  *   volunteering's, form requests, buy-outs, the money cache and the write queue) are not among them: they name a record

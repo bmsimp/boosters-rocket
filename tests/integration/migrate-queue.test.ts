@@ -102,6 +102,9 @@ describe("migrations 0034 and 0035: the write queue names the app's own records 
       await item("rename-parent", { request: { op: "rename", role: "parent", qboId: "P1", syncToken: "0", name: "Ash Guardian", was: "Ash Parent" }, target: "P1", family: "F1", state: "given_up" });
       await item("rename-family", { request: { op: "rename", role: "family", qboId: "F2", syncToken: "0", name: "Birch Household", was: "Birch Family" }, target: "F2", family: "F2" });
       await item("deactivate-member", { request: { op: "deactivate", role: "member", qboId: "M1", syncToken: "0" }, target: "M1" });
+      // A family's own change that named no family (as a test seed or an older writer may have left it): found by its
+      // target, as refsQuery and 0023 read it.
+      await item("rename-family-unfiled", { request: { op: "rename", role: "family", qboId: "F1", syncToken: "0", name: "Ash Household", was: "Ash Family" }, target: "F1" });
       // A roster family changed as a student (its type changed in QuickBooks): 0023 made it a student record beside its
       // family record, and the item names that student record.
       await item("student-both", { request: { op: "rename", role: "student", qboId: "F2", syncToken: "0", name: "New", was: "Old" }, target: "F2", family: "F1" });
@@ -166,6 +169,8 @@ describe("migrations 0034 and 0035: the write queue names the app's own records 
       expect(of("rename-family")).toEqual({ family: f2, student: null });
       // A member's change, which named no family, is filed under the member's own family record.
       expect(of("deactivate-member")).toEqual({ family: m1, student: null });
+      // A family's own change that named no family is filed under that family, through its target.
+      expect(of("rename-family-unfiled")).toEqual({ family: f1, student: null });
       expect(of("invoice-create")).toEqual({ family: f1, student: null });
       expect(of("invoice-void")).toEqual({ family: f2, student: null });
       // A customer with a record of each kind: the kind the column holds, never the other.

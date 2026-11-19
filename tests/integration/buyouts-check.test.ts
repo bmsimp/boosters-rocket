@@ -252,13 +252,21 @@ describe("a student who moves in the portal (afterStudentMoved)", () => {
 describe("a void on the queue", () => {
   it("is always queued for an invoiced buy-out, filed under the buy-out's own family record, even once that record has no link", async () => {
     const p = await buyoutFamily(stub);
-    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement(), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "5001" });
-    // The family record's link is gone (before migration 0034 the item named the family's customer, and none was queued then).
+    // A per-student buy-out, billed to the student's own customer. Before migration 0034 the item named the family's
+    // customer, found through the family record's link: with that link gone there was none to name, so no void was
+    // queued and the callers flagged the buy-out instead. (A per-family one was queued even then: the customer it is
+    // billed to stood in for its family.)
+    const b = await seedBuyout({ requirementId: await seedBuyoutRequirement({ appliesTo: "student" }), familyQboId: FAMILY, subjectQboId: S1, chosenBy: p.identity.parentId, invoiceQboId: "5001" });
+    const f = await seedBuyout({ requirementId: await seedBuyoutRequirement({ title: "Family one" }), familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "5002" });
+    expect(b.studentId).not.toBeNull();
     await db.delete(accountingLink).where(eq(accountingLink.familyId, b.familyId));
-    const item = await db.transaction((tx) => queueVoid(tx, b, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) }));
-    expect(item).toMatchObject({ familyId: b.familyId, studentId: null, targetQboId: null, request: { op: "invoice_void", buyoutId: b.id, invoiceQboId: "5001", customerQboId: FAMILY } });
+    const item = await db.transaction((tx) => queueVoid(tx, b, "student_moved", { actor: WORKER_ACTOR, label: "student moved", nextTryAt: later(5) }));
+    expect(item).toMatchObject({ familyId: b.familyId, studentId: null, targetQboId: null, request: { op: "invoice_void", buyoutId: b.id, invoiceQboId: "5001", customerQboId: S1, why: "student_moved" } });
     expect(item!.request).not.toHaveProperty("familyQboId");
-    expect(await row(b.id)).toMatchObject({ state: "being_voided" });
+    expect(await row(b.id)).toMatchObject({ state: "being_voided", flag: null });
+    // A per-family buy-out the same way.
+    expect(await db.transaction((tx) => queueVoid(tx, f, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) })))
+      .toMatchObject({ familyId: f.familyId, request: { op: "invoice_void", buyoutId: f.id, customerQboId: FAMILY } });
     // Only a buy-out no longer invoiced comes back without one.
     expect(await db.transaction((tx) => queueVoid(tx, { ...b, state: "being_voided" }, "switched_back", { actor: WORKER_ACTOR, label: "a guardian", nextTryAt: later(5) }))).toBeNull();
     expect(await queueOf(b.id)).toHaveLength(1);

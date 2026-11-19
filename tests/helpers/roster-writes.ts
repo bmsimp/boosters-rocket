@@ -2,7 +2,7 @@
 // its roster read and its shape chosen, and staff members holding exactly the permissions a test names.
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, role, roleAssignment, roleRule, writeQueue, type RosterWrite } from "@/lib/db/schema";
+import { auditLog, qboCustomer, role, roleAssignment, roleRule, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape, type MembershipShape } from "@/lib/roster/shape";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
@@ -46,8 +46,9 @@ export const asOp = (staff: { id: string; email: string }) => ({ actor: { door: 
 
 /**
  * A queue item put straight into the table, as a staff write that QuickBooks didn't take would leave it. The family it
- * is filed under is given by customer (`familyQboId`; by default a create's family, or the family or member itself, as prepare() in
- * src/lib/roster/writes.ts files them), and a student's change names its student: each stored as the app's record of
+ * is filed under is given by customer (`familyQboId`; by default as prepare() in src/lib/roster/writes.ts files it: a
+ * create's family, the family or member itself, the family a student is moved from, and for any other change of a
+ * student or parent the family the cache holds it under, none for one under no family), and a student's change names its student: each stored as the app's record of
  * that kind (familyRecord(), studentRecord()), as the writer stores it. An item of a company other than the roster's
  * names no record, as migration 0034 leaves one.
  */
@@ -56,7 +57,11 @@ export async function seedQueued(w: RosterWrite, o: { sent?: boolean; state?: "w
   const now = new Date();
   const realmId = o.realmId ?? REALM;
   const ours = realmId === (await getRosterSource());
-  const familyQboId = o.familyQboId !== undefined ? o.familyQboId : w.op === "create" ? w.familyQboId : w.role === "member" || w.role === "family" ? w.qboId : null;
+  const familyQboId = o.familyQboId !== undefined ? o.familyQboId
+    : w.op === "create" ? w.familyQboId
+    : w.role === "member" || w.role === "family" ? w.qboId
+    : w.op === "move" ? w.fromFamilyQboId
+    : ours ? await familyInCache(w.qboId) : null;
   const familyId = ours && familyQboId !== null ? await familyRecord(familyQboId) : null;
   const studentId = ours && w.op !== "create" && w.role === "student" ? await studentRecord(w.qboId) : null;
   const [item] = await db.insert(writeQueue).values({
@@ -65,6 +70,12 @@ export async function seedQueued(w: RosterWrite, o: { sent?: boolean; state?: "w
     nextTryAt: o.nextTryAt === undefined ? now : o.nextTryAt, askedByLabel: "registrar@club.org", finishedAt: o.finishedAt ?? null,
   }).returning();
   return item!;
+}
+
+/** The customer the roster cache holds this one directly under, or null. */
+async function familyInCache(qboId: string): Promise<string | null> {
+  const [c] = await db.select({ parent: qboCustomer.parentQboId }).from(qboCustomer).where(eq(qboCustomer.qboId, qboId));
+  return c?.parent ?? null;
 }
 
 /** The customer of the family record a queue item is filed under, through its link, or null: how a test reads the item's family. */

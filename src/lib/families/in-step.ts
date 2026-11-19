@@ -25,7 +25,7 @@ const CHUNK = 500;
  * queue, migrations 0034 and 0035, whose items name the family they are filed under and the student they are for by
  * their records' ids: the customers they send stay QuickBooks', and the restrict keys keep the records), which name a
  * record by its id and keep it, inactive, for as long as they do. So what is read here is guardian rows, sessions and
- * pending email changes, each naming a family. Migration 0023 read the same in SQL, with those as they were;
+ * every email change request, used or not, until the clean-up removes it, each naming a family. Migration 0023 read the same in SQL, with those as they were;
  * tests/helpers/app-records-fill.ts leaves them out when it runs 0023's fill again on today's tables. Change the two
  * together.
  */

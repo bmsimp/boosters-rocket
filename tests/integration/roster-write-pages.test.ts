@@ -285,7 +285,11 @@ describe("the Reconciliation page (Roster.Read)", () => {
     asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
     const html = await renderPage(ReconciliationPage);
     // The rename, the move (filed under the family it moves from) and the void link to Rivera; nothing to Chen or the stray.
-    const links = [...html.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]).filter((id) => ["10", "20", "50"].includes(id!));
+    // Only the changes' section is read: the Needs attention list below it links families of its own (Chen has no student).
+    const start = html.indexOf('id="writes-h"');
+    expect(start).toBeGreaterThan(-1);
+    const writes = html.slice(start, html.indexOf("</section>", start));
+    const links = [...writes.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]).filter((id) => ["10", "20", "50"].includes(id!));
     expect(links).toEqual(["10", "10", "10"]);
     const rivera = await renderPage(RosterEntryPage, { params: { id: "10" } });
     for (const words of ["Rename the student “Leo Rivera” to “Leon Rivera”", "Move the student Leo Rivera from Rivera Family to Chen Family", "Void the volunteer buy-out invoice of Rivera Family"]) expect(rivera).toContain(words);
