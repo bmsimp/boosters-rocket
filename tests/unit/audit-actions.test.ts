@@ -29,7 +29,7 @@ describe("every audit action has words", () => {
 
   it("finds the actions in the source", () => {
     expect(written.size).toBeGreaterThan(60);
-    for (const known of ["parent.block", "roster.refresh", "parent.access.granted", "season.requirement.tick", "season.requirement.untick", "parent.contact.save", "audit.export"]) {
+    for (const known of ["parent.block", "roster.refresh", "parent.access.ended", "season.requirement.tick", "season.requirement.untick", "parent.contact.save", "audit.export"]) {
       expect([...written.keys()], known).toContain(known);
     }
   });
