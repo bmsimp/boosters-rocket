@@ -228,7 +228,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       let email: string | null = null;
       if (ask.role === "parent") {
         email = normalizeEmail(ask.email ?? "");
-        if (email === null || email.length > 100) return no("Enter the parent's own email address: they sign in to the portal with it.");
+        if (email === null || email.length > 100) return no("Enter the parent's own email address: it goes on their record in QuickBooks.");
       }
       const name = checkName(ask.name);
       if (!name.ok) return no(name.error);

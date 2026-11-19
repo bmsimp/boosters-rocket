@@ -128,7 +128,7 @@ export function FamilyChanges({ shape, family, families, edit, cover }: {
       ))}
       {family.parents.map((p) => (
         <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
-          warning="They can no longer sign in to the portal for this family. A parent with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
+          warning="Their sign-in to the portal stays as it is: who can sign in is the portal's own list of the family's guardians. A parent with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
       ))}
     </section>
   );

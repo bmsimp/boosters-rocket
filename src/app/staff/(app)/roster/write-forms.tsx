@@ -74,7 +74,7 @@ export function MemberForm({ types, act }: { types: { qboId: string; name: strin
   );
 }
 
-/** A new parent: their name, and their own email address, which they sign in with. */
+/** A new parent: their name, and their own email address, kept on their QuickBooks record (it gives them no sign-in). */
 export function ParentForm({ act }: { act: (name: string, email: string) => Promise<WriteResult> }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -87,7 +87,7 @@ export function ParentForm({ act }: { act: (name: string, email: string) => Prom
   return (
     <form onSubmit={noSubmit} className="stack">
       <label className="field"><span>The parent&apos;s name, as QuickBooks will show it</span><input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
-      <label className="field"><span>Their own email address (they sign in with it)</span><input type="email" maxLength={100} autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      <label className="field"><span>Their own email address</span><input type="email" maxLength={100} autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
       <Outcome state={state} pending={pending} onOffer={(offer) => { setName(offer); send(offer); }} />
       <button type="button" className="btn btn-line" disabled={pending} onClick={() => send(name)}>{pending ? "Adding in QuickBooks…" : "Add the parent"}</button>
     </form>
