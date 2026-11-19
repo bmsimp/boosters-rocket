@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
-import { auditLog, guardian, parent } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, student } from "@/lib/db/schema";
 import { familyNames, familySignins, getPerson, listPeople } from "@/lib/parents/directory";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
@@ -16,6 +16,8 @@ import { setRosterSource } from "@/lib/roster/source";
 const withCompany = () => db.transaction((tx) => setRosterSource(tx, "1111"));
 const signinsOf = async (customer: string) => familySignins(await recordOfCustomer(customer, "family"));
 const HELD_WORDS = "Can't sign in: the address was under more than one family, and held for staff to review";
+/** An open row with no family record, as every row is here while the cache names no company: the gate lets nobody in through it. */
+const NO_RECORD_WORDS = "Can't sign in now: the family isn't set up in the portal";
 
 describe("the people directory", () => {
   beforeEach(async () => { await resetDb(); await seedShape(); await seedParentSettings(SIGNINS_ON); });
@@ -38,7 +40,7 @@ describe("the people directory", () => {
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") }).where(eq(parent.id, ana.id));
     await db.insert(auditLog).values({ door: "parent", actorId: ana.id, actorLabel: ana.email, action: "signin", targetType: "parent", targetId: ana.id, at: new Date("2026-11-05T12:00:00Z") });
     expect((await listPeople("ana"))).toEqual([{ parentId: ana.id, name: "Ana Rivera", email: "ana@example.com", blocked: false,
-      families: [{ familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" }],
+      families: [{ familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS }],
       lastSigninAt: "2026-11-05T12:00:00.000Z", welcomedAt: "2026-11-01T12:00:00.000Z" }]);
     expect((await listPeople("RIVERA")).length).toBe(1);
     expect((await listPeople("ana@ex")).length).toBe(1);
@@ -69,6 +71,28 @@ describe("the people directory", () => {
     expect(await signinsOf("20")).toEqual([expect.objectContaining({ parentId: sam.id, kind: "cannot", words: HELD_WORDS })]);
   });
 
+  // The gate keeps a person out of a family that doesn't count, and closes no row for it: the words say so, from the
+  // app's own records, so staff read what the gate does (enterableGuardianRows()).
+  it("says an open row's family can't be entered now when it is inactive, or has no active student while that is asked", async () => {
+    await withCompany(); await seedCache(ALL);
+    const { ana } = await seedPeople();
+    const rivera = await recordOfCustomer("10", "family");
+    expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "can", words: "Can sign in (hasn't yet)" });
+    // No active student in the family: nothing changes until the Admin asks for one.
+    await seedParentSettings({ requireActiveStudents: true });
+    expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "cannot", words: "Can't sign in now: the family has no active students" });
+    expect((await getPerson(ana.id))!.families).toEqual([expect.objectContaining({ familyQboId: "10", kind: "cannot", words: "Can't sign in now: the family has no active students" })]);
+    await db.insert(student).values({ familyId: rivera, name: "Leo", active: true });
+    expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "can" });
+    // An inactive family record, whatever its students.
+    await db.update(family).set({ active: false }).where(eq(family.id, rivera));
+    expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "cannot", words: "Can't sign in now: the family is inactive" });
+    expect((await listPeople("ana"))[0]!.families).toEqual([expect.objectContaining({ kind: "cannot", words: "Can't sign in now: the family is inactive" })]);
+    // A closed row keeps its own reason's words.
+    expect((await signinsOf("10")).find((s) => s.parentId !== ana.id)).toMatchObject({ kind: "cannot", words: HELD_WORDS });
+    expect((await db.select().from(guardian).where(eq(guardian.parentId, ana.id))).map((g) => g.status)).toEqual(["invited"]);
+  });
+
   it("shows a blocked person as blocked, and a link made by hand as it stands", async () => {
     await seedParentSettings({ signin: false, everEnabled: false });
     await withCompany(); await seedCache(ALL);
@@ -91,7 +115,7 @@ describe("the people directory", () => {
     const { ana } = await seedPeople();
     await seedGuardian({ parentId: ana.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     expect((await getPerson(ana.id))!.families).toEqual([
-      { familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
+      { familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS },
       { familyQboId: "20", familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected" },
     ]);
   });

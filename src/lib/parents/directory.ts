@@ -2,7 +2,8 @@
 // `Parents.ReadWrite`, never behind `Roster.Read`. `familySignins` returns one family's own guardians, for its page.
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, qboCustomer, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, qboCustomer, student, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
+import { getParentSettings } from "./settings";
 import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
 
@@ -29,11 +30,42 @@ const WHY: Record<DisabledReason, string> = {
   removed: "removed by staff", held: "the address was under more than one family, and held for staff to review",
 };
 
-/** One person's standing in one family, in plain words (spec §4 The roster): the row's own status and closing reason. */
-export function accessWords(o: { status: GuardianStatus; reason: DisabledReason | null; blocked: boolean }): { kind: AccessKind; words: string } {
+/**
+ * Why an open row's family is not one its person can enter now, by the gate's rule (enterableGuardianRows(),
+ * ./sessions.ts): no family record, an inactive one, or none with an active student while the Admin asks for one.
+ * `counts` when it is one to enter. Nothing closes the row for any of these: the gate keeps its person out.
+ */
+export type FamilyStanding = "counts" | "no_record" | "inactive" | "no_students";
+const NOT_NOW: Record<Exclude<FamilyStanding, "counts">, string> = {
+  no_record: "the family isn't set up in the portal", inactive: "the family is inactive", no_students: "the family has no active students",
+};
+
+/**
+ * One person's standing in one family, in plain words (spec §4 The roster): the row's own status and closing reason,
+ * and for an open row whether its family counts at the gate now (`family`, counting when not given).
+ */
+export function accessWords(o: { status: GuardianStatus; reason: DisabledReason | null; blocked: boolean; family?: FamilyStanding }): { kind: AccessKind; words: string } {
   if (o.status === "disabled") return { kind: "cannot", words: o.reason ? `Can't sign in: ${WHY[o.reason]}` : "Can't sign in" };
   if (o.blocked) return { kind: "blocked", words: "Blocked" };
+  if (o.family && o.family !== "counts") return { kind: "cannot", words: `Can't sign in now: ${NOT_NOW[o.family]}` };
   return { kind: "can", words: o.status === "invited" ? "Can sign in (hasn't yet)" : "Can sign in" };
+}
+
+/** FamilyStanding of each family record named, read as the gate reads it, with the stored setting. */
+async function familyStandings(ids: (AppFamilyId | null)[]): Promise<(id: AppFamilyId | null) => FamilyStanding> {
+  const unique = [...new Set(ids.filter((id): id is AppFamilyId => id !== null))];
+  const [{ requireActiveStudents }, rows] = await Promise.all([getParentSettings(), unique.length
+    ? db.select({ id: family.id, active: family.active,
+      hasStudent: sql<boolean>`exists (select 1 from ${student} where ${student.familyId} = ${family.id} and ${student.active})` })
+      .from(family).where(inArray(family.id, unique))
+    : Promise.resolve([])]);
+  const found = new Map(rows.map((r) => [String(r.id), r]));
+  return (id) => {
+    const f = id === null ? undefined : found.get(String(id));
+    if (!f) return "no_record";
+    if (!f.active) return "inactive";
+    return requireActiveStudents && f.hasStudent !== true ? "no_students" : "counts";
+  };
 }
 
 /** Family names from the roster cache, for showing a family to staff. A parent's pages use myFamilyNames() (./my-family-names.ts). */
@@ -60,13 +92,13 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   ]);
   // A link from a previous company holds that company's family ID, which names some other family (or none) in the
   // connected one: it is never looked up in the cache.
-  const names = await familyNames(links.filter((l) => !oldCompany(l)).map((l) => l.familyQboId));
+  const [names, standing] = await Promise.all([familyNames(links.filter((l) => !oldCompany(l)).map((l) => l.familyQboId)), familyStandings(links.map((l) => l.familyId))]);
   const last = new Map(signins.map((s) => [s.id, s.at]));
   return persons.map((p) => ({
     parentId: p.id, name: p.name, email: p.email, blocked: p.blocked,
     families: links.filter((l) => l.parentId === p.id).sort((a, b) => Number(oldCompany(a)) - Number(oldCompany(b)) || numeric(a.familyQboId, b.familyQboId)).map((l) => ({
       familyQboId: l.familyQboId, familyId: oldCompany(l) ? null : l.familyId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!, previousCompany: oldCompany(l),
-      ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked }) })),
+      ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked, family: standing(l.familyId) }) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,
     blockedReason: p.blockedReason, blockedAt: p.blockedAt?.toISOString() ?? null, welcomeOwed: p.welcomeOwed,
   }));
@@ -87,13 +119,15 @@ export async function getPerson(parentId: string): Promise<PersonDetail | null> 
 /**
  * The **Portal sign-ins** box on a family's roster page: every guardian row whose membership is in the family's own
  * record (`guardian.family_id`), open or closed, with its person, in words. Nothing is worked out from QuickBooks: a
- * row is a sign-in the app holds, and the words are its own status and closing reason (accessWords()).
+ * row is a sign-in the app holds, and the words are its own status and closing reason, and for an open row whether the
+ * family is one to enter now by the gate's rule (accessWords(), familyStandings()).
  */
 export async function familySignins(familyId: AppFamilyId): Promise<FamilySignin[]> {
   // A link from a previous company is in no family's record (its family_id is null): it is not one of this family's sign-ins.
   const links = await db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
     .where(and(eq(guardian.familyId, familyId), sql`${guardian.disabledReason} is distinct from 'company_changed'`));
+  const standing = await familyStandings([familyId]);
   return links.map(({ g, p }): FamilySignin => ({ guardianId: g.id, parentId: p.id, name: p.name, email: p.email,
-    ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked }) }))
+    ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, family: standing(g.familyId) }) }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }) || a.email.localeCompare(b.email) || (a.guardianId < b.guardianId ? -1 : 1));
 }
