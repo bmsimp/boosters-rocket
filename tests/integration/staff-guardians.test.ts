@@ -409,7 +409,7 @@ describe("staff manage a family's guardians", () => {
       await removeGuardian(inRivera!.id, "Not hers.", staffOp);
       expect(await changes()).toEqual([["ana.old@example.com", "used"]]);
       expect(await codes()).toBe(1);
-      expect((await audits("parent.access.ended")).at(-1)!.after).toMatchObject({ requestsDeleted: 1 });
+      expect((await audits("parent.access.ended")).map((a) => a.after)).toContainEqual(expect.objectContaining({ familyId: String(rivera), requestsDeleted: 1 }));
       // Her last open row: an unused change asked in any family goes, and her unused code; a used one stays.
       await seedEmailChange({ parentId: ana.id, guardianId: inChen!.id, familyId: rivera, recordQboId: null, newEmail: "ana.elsewhere@example.com" });
       await removeGuardian(inChen!.id, "Moved away.", staffOp);
