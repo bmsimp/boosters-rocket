@@ -321,14 +321,7 @@ async function main() {
     await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_qbo_id, record_qbo_id, new_email, token_hash, expires_at, used_at)
             VALUES (${p!.id}, ${link!.id}, ${family}, ${record}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
   }
-  // Staff roster changes waiting to reach QuickBooks, for the Reconciliation page (tests/e2e/roster-writes.spec.ts): one
-  // waiting, one stuck. The worker never runs in this run, and their ids are not numbers, so nothing is ever sent.
   await sql`DELETE FROM write_queue`;
-  await sql`INSERT INTO write_queue (realm_id, request, target_qbo_id, family_qbo_id, state, sent, tries, last_code, last_tried_at, next_try_at, asked_by_label, created_at) VALUES
-          ('9130000000000001', ${sql.json({ op: "rename", role: "parent", qboId: "E2E-41", syncToken: "0", name: "Samuel Okafor", was: "Sam Okafor" })}, 'E2E-41', 'E2E-40',
-            'waiting', true, 2, 'timeout', now() - interval '3 minutes', now() + interval '2 minutes', 'e2e-admin@example.org', now() - interval '10 minutes'),
-          ('9130000000000001', ${sql.json({ op: "create", role: "student", name: "Pat Lee", typeQboId: "E2E-T3", familyQboId: "E2E-50", email: null })}, null, 'E2E-50',
-            'stuck', false, 8, 'http_429', now() - interval '1 hour', null, 'e2e-admin@example.org', now() - interval '20 hours')`;
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   // The app's own families, students and links for every family above (stage 1 of the app-owned families spec), as a
@@ -363,6 +356,14 @@ async function main() {
     await storeForms(tx, (customer) => recordOf("family", customer, "a form request"));
     await storeBuyouts(tx, (customer) => recordOf("family", customer, "a buy-out"));
     await storeMoney(tx, (customer) => recordOf("family", customer, "a family's stored figures"));
+    // Staff roster changes waiting to reach QuickBooks, for the Reconciliation page (tests/e2e/roster-writes.spec.ts):
+    // one waiting, one stuck, each filed under its family's record, as migration 0034 files them (a parent's change
+    // names no student). The worker never runs in this run, and their ids are not numbers, so nothing is ever sent.
+    await tx`INSERT INTO write_queue (realm_id, request, target_qbo_id, family_id, state, sent, tries, last_code, last_tried_at, next_try_at, asked_by_label, created_at) VALUES
+            ('9130000000000001', ${tx.json({ op: "rename", role: "parent", qboId: "E2E-41", syncToken: "0", name: "Samuel Okafor", was: "Sam Okafor" })}, 'E2E-41', ${await recordOf("family", "E2E-40", "a queued change")},
+              'waiting', true, 2, 'timeout', now() - interval '3 minutes', now() + interval '2 minutes', 'e2e-admin@example.org', now() - interval '10 minutes'),
+            ('9130000000000001', ${tx.json({ op: "create", role: "student", name: "Pat Lee", typeQboId: "E2E-T3", familyQboId: "E2E-50", email: null })}, null, ${await recordOf("family", "E2E-50", "a queued change")},
+              'stuck', false, 8, 'http_429', now() - interval '1 hour', null, 'e2e-admin@example.org', now() - interval '20 hours')`;
   });
   await sql.end();
 }

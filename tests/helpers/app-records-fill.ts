@@ -33,6 +33,11 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
   { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "buyout" WHERE "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0031_buyouts_app_ids_finish" },
   { line: `    UNION ALL SELECT b."subject_qbo_id", r."applies_to" FROM "buyout" b JOIN "requirement" r ON r."id" = b."requirement_id" WHERE b."realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0031_buyouts_app_ids_finish" },
   { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "family_money" WHERE "realm_id" IS NULL OR "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0033_family_money_app_ids_finish" },
+  // The write queue's items name the records they are filed under by id since 0034; their targets stay what is sent,
+  // and the target's read spans two lines of 0023, each taken out.
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "write_queue" WHERE "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0035_write_queue_app_ids_finish" },
+  { line: `    UNION ALL SELECT "target_qbo_id", CASE WHEN "request"->>'role' = 'student' THEN 'student' ELSE 'family' END FROM "write_queue"`, by: "0034_write_queue_app_ids_additive" },
+  { line: `      WHERE "realm_id" = (SELECT realm_id FROM app_fill_source) AND "request"->>'op' IN ('rename', 'move', 'deactivate') AND "request"->>'role' IN ('family', 'member', 'student')`, by: "0034_write_queue_app_ids_additive" },
 ];
 
 /**

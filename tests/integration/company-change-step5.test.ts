@@ -59,7 +59,11 @@ describe("connecting a different company after step 5", () => {
     await db.insert(formReminderRound).values({ requirementId: req!.requirementId, onDate: "2026-11-16" });
     const famA = await recordOfCustomer(a.spec.family.qboId, "family");
     await db.insert(volunteerReminder).values({ kind: "due_14", key: `${String(famA)}|2026-11-30|${a.identity.parentId}`, familyId: famA, triedAt: new Date(), outcome: "sent" });
-    await db.insert(writeQueue).values({ realmId: "1111", request: { op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, targetQboId: "12", state: "waiting", sent: false });
+    // A queued change filed under the app's own family and student (stage 3): the database would refuse to remove the
+    // records while it names them, so the clear deletes the queue first, and counts it.
+    const studentA = await recordOfCustomer(a.spec.students[0]!.qboId, "student");
+    await db.insert(writeQueue).values({ realmId: "1111", request: { op: "deactivate", role: "student", qboId: a.spec.students[0]!.qboId, syncToken: "0" }, targetQboId: a.spec.students[0]!.qboId,
+      familyId: famA, studentId: studentA, state: "waiting", sent: false });
     const before = {
       credit: (await db.select().from(volunteerCredit)).length, emails: (await db.select().from(parentEmailChange)).length,
       evidence: await db.select().from(signedFormEvidence), files: await db.select().from(signedFormFile),
@@ -93,6 +97,7 @@ describe("connecting a different company after step 5", () => {
     expect(await db.select().from(buyout)).toEqual([]);
     expect(await db.select().from(familyMoney)).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
+    expect((await db.select().from(auditLog).where(eq(auditLog.action, "roster.cleared")))[0]!.after).toMatchObject({ writesDeleted: 1 });
     expect(await db.select().from(parentEmailChange)).toEqual([]);
     expect(await db.select().from(signatureRequest)).toEqual([]);
     // Nothing of the earlier company's is left in the app's own records: no link, no family or student, and no sign-in

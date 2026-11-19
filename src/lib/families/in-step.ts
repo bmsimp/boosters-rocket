@@ -18,22 +18,22 @@ const CHUNK = 500;
  * app record, even when its number is a current family's. Left out on purpose: QuickBooks' own copies and the money
  * records' customers, items and invoices (they stay QuickBooks ids), a waiting email change's record, the held
  * addresses and the match review's families (retired, never re-keyed), and the audit log. Also left out: the records
- * stage 2 has re-keyed to the app's own ids (the season's chosen lists, ticks, waivers and reminder claims, migrations
+ * since re-keyed to the app's own ids (the season's chosen lists, ticks, waivers and reminder claims, migrations
  * 0024 and 0025; volunteering's sign-ups, credit and reminder claims, migrations 0026 and 0027; form requests and the
  * current company's signed-form evidence, migrations 0028 and 0029; buy-outs, migrations 0030 and 0031; the money
- * cache, migrations 0032 and 0033, a row of which is only ever written for a family that has a record), which name a
- * record by its id and keep it, inactive, for as long as they do. Migration 0023 read the same in SQL, with those as they were;
+ * cache, migrations 0032 and 0033, a row of which is only ever written for a family that has a record; and the write
+ * queue, migrations 0034 and 0035, whose items name the family they are filed under and the student they are for by
+ * their records' ids: the customers they send stay QuickBooks', and the restrict keys keep the records), which name a
+ * record by its id and keep it, inactive, for as long as they do. So what is read here is guardian rows, sessions and
+ * pending email changes, each naming a family. Migration 0023 read the same in SQL, with those as they were;
  * tests/helpers/app-records-fill.ts leaves them out when it runs 0023's fill again on today's tables. Change the two
  * together.
  */
-const refsQuery = (realmId: string) => sql`
+const refsQuery = () => sql`
   SELECT DISTINCT customer_id, kind FROM (
     SELECT family_qbo_id AS customer_id, 'family' AS kind FROM guardian WHERE disabled_reason IS DISTINCT FROM 'company_changed'
     UNION ALL SELECT family_qbo_id, 'family' FROM parent_email_change
     UNION ALL SELECT family_qbo_id, 'family' FROM parent_auth_session
-    UNION ALL SELECT family_qbo_id, 'family' FROM write_queue WHERE realm_id = ${realmId}
-    UNION ALL SELECT target_qbo_id, CASE WHEN request->>'role' = 'student' THEN 'student' ELSE 'family' END FROM write_queue
-      WHERE realm_id = ${realmId} AND request->>'op' IN ('rename', 'move', 'deactivate') AND request->>'role' IN ('family', 'member', 'student')
   ) refs WHERE customer_id IS NOT NULL`;
 
 /**
@@ -57,7 +57,7 @@ async function loadPlanInput(tx: Tx, realmId: string): Promise<Omit<PlanInput, "
     parentQboId: qboCustomer.parentQboId, typeQboId: qboCustomer.typeQboId }).from(qboCustomer);
   const guardians = await tx.select({ id: guardian.id, familyQboId: guardian.familyQboId, sourceQboId: guardian.sourceQboId,
     status: guardian.status, disabledReason: guardian.disabledReason }).from(guardian);
-  const refs: PlanRef[] = Array.from(await tx.execute<{ customer_id: string; kind: string }>(refsQuery(realmId)))
+  const refs: PlanRef[] = Array.from(await tx.execute<{ customer_id: string; kind: string }>(refsQuery()))
     .filter((r) => r.kind === "family" || r.kind === "student").map((r) => ({ customerId: r.customer_id, kind: r.kind as PlanRef["kind"] }));
   const hints = new Map(Array.from(await tx.execute<{ customer_id: string; name: string }>(hintsQuery(realmId))).map((h) => [h.customer_id, h.name]));
   return { shape, customers, refs, hints, guardians };
