@@ -82,7 +82,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     // Nothing else was sent: no send of the invoice by email, no other write.
     expect(posts()).toHaveLength(1);
     // The family's figures are behind QuickBooks now, so its next page load reads it.
-    const [money] = await db.select().from(familyMoney).where(eq(familyMoney.familyQboId, FAMILY));
+    const [money] = await db.select().from(familyMoney).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY, "family")));
     expect(money!.staleAt).not.toBeNull();
     // It does: the invoice is then among the family's open invoices, with its Pay link. The sandbox gave a link only to
     // an invoice carrying a bill-to email address (2026-11-17; the stub's quirks.linkNeedsEmail), and this one carries one.
@@ -565,7 +565,7 @@ describe("how the requirement reads, on the parent's pages", () => {
     await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9901" });
     asParent(p.identity);
     expect(await renderPage(VolunteerPage)).toContain("Buy-out invoiced");
-    await db.insert(familyMoney).values({ familyQboId: FAMILY, realmId: "9130000000000001", readAt: new Date(), totalCents: 0, currency: "USD",
+    await db.insert(familyMoney).values({ familyId: await recordOfCustomer(FAMILY, "family"), realmId: "9130000000000001", readAt: new Date(), totalCents: 0, currency: "USD",
       invoices: [{ qboId: "9901", number: "9901", customerQboId: FAMILY, forName: null, date: "2026-11-01", dueDate: null, totalCents: 10000, balanceCents: 0, currency: "USD", payLink: null, itemQboIds: [BUYOUT_ITEM] }] });
     const html = await renderPage(VolunteerPage);
     expect(html).toContain("Paid instead");

@@ -254,7 +254,7 @@ describe("a family's buy-outs page (Roster.Read)", () => {
       chosenBy: b.chosenBy, state: "voided", invoiceQboId: "5003" });
     await db.update(buyout).set({ endReason: "switched_back" }).where(eq(buyout.invoiceQboId, "5003"));
     // The family's figures as the daily read stored them: the invoiced one's invoice open, all of it still owed.
-    await db.insert(familyMoney).values({ familyQboId: FAMILY, realmId: MONEY_REALM, readAt: new Date(), totalCents: 7438, currency: "USD",
+    await db.insert(familyMoney).values({ familyId: await recordOfCustomer(FAMILY, "family"), realmId: MONEY_REALM, readAt: new Date(), totalCents: 7438, currency: "USD",
       invoices: [{ qboId: "5002", number: "1042", customerQboId: FAMILY, forName: null, date: null, dueDate: null, totalCents: 7438, balanceCents: 7438, currency: "USD", payLink: null, itemQboIds: ["4343"] }] });
 
     const reader = await staffWith("reader@club.org", ["Roster.Read"]);

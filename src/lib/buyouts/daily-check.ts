@@ -44,11 +44,11 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
   if ((seen?.value as { runId?: unknown } | undefined)?.runId === run.id) return NOT_RUN;
   const source = await getRosterSource();
   const rows = source === null ? [] : await db.select().from(buyout).where(and(eq(buyout.state, "invoiced"), eq(buyout.realmId, source)));
-  // The family that chose each buy-out is the app's record; its stored figures are still kept by its customer, found
-  // through the record's link (until the money slice), and the roster still says where a student is by QuickBooks ids
-  // (until stage 3), so a move is read as the cache has it: the invoice's customer no longer under the family's own.
-  const links = await linksOf({ families: [...new Set(rows.map((b) => b.familyId))], students: [] });
-  const money = await moneyRows([...new Set(links.customerOfFamily.values())]);
+  // The family that chose each buy-out is the app's record, and its stored figures are kept by that record; but the
+  // roster still says where a student is by QuickBooks ids (until stage 3), so a move is read as the cache has it, through
+  // the record's link: the invoice's customer no longer under the family's own.
+  const families = [...new Set(rows.map((b) => b.familyId))];
+  const [links, money] = await Promise.all([linksOf({ families, students: [] }), moneyRows(families)]);
   const customers = rows.length === 0 ? [] : await db.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId, active: qboCustomer.active }).from(qboCustomer)
     .where(inArray(qboCustomer.qboId, [...new Set(rows.map((b) => b.customerQboId))]));
   let paid = 0, flagged = 0, voided = 0, voiding = 0, unflagged = 0;
@@ -67,7 +67,7 @@ export async function checkBuyoutInvoices(): Promise<BuyoutCheck> {
       if (await db.transaction((tx) => queueVoid(tx, b, "student_moved", { actor: WORKER_ACTOR, label: "student moved", nextTryAt: new Date() }))) voiding++;
       continue;
     }
-    const row = money.get(familyQboId);
+    const row = money.get(b.familyId);
     // Only a family this run read, from this company: older figures may be from before the invoice was made, and so
     // may figures marked behind since they were read.
     if (!row?.readAt || !row.invoices || row.realmId !== source || row.readAt < run.startedAt || (row.staleAt && row.staleAt >= row.readAt)) continue;

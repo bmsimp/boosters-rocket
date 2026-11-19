@@ -344,11 +344,14 @@ export type CustomerCheck = {
 /**
  * What QuickBooks last said one family owes (v1 spec §8.2): one row per family. The read columns are replaced only by
  * a successful read and are all null until the first one; `failed_at` and `failed_code` record the latest try that
- * failed. Never a source of truth. The ids belong to the company in `realm_id`; a company change deletes every row,
- * and so does a change of membership shape, which changes whose invoices are a family's.
+ * failed. Never a source of truth. Keyed by the app's own family (`family_id`, a `restrict` foreign key; migrations
+ * 0032 and 0033 of stage 2 of the app-owned families spec): a row is only ever written for a family that has a record.
+ * What is inside stays QuickBooks': the invoices and the check each name the customer they are of, and those ids
+ * belong to the company in `realm_id`. A company change deletes every row (before the app's records it names), and so
+ * does a change of membership shape, which changes whose invoices are a family's.
  */
 export const familyMoney = pgTable("family_money", {
-  familyQboId: text("family_qbo_id").primaryKey(),
+  familyId: uuid("family_id").primaryKey().references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),
   realmId: text("realm_id"),                                         // the QuickBooks company the figures were read from
   readAt: timestamp("read_at", { withTimezone: true }),              // when the read that gave the figures first asked QuickBooks
   invoices: jsonb("invoices").$type<StoredInvoice[]>(),              // open invoices, then those paid in the last 12 months

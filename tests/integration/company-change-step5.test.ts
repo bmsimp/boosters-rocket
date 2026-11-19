@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  accountingLink, auditLog, buyout, family, formReminderClaim, formReminderRound, guardian, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
+  accountingLink, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, guardian, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
   signedFormCopy, signedFormEvidence, signedFormFile, student, volunteerCredit, requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
 import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
@@ -73,6 +73,9 @@ describe("connecting a different company after step 5", () => {
     expect(reqId).toBeTruthy();
     // A buy-out of each family, by the app's own family record (stage 2).
     expect((await db.select().from(buyout)).map((x) => String(x.familyId)).sort()).toEqual([String(famA), String(await recordOfCustomer(b.spec.family.qboId, "family"))].sort());
+    // Each family's stored figures, kept by the app's own family record (stage 2): the database would refuse to remove
+    // the record while they name it, so the clear removes them first.
+    expect((await db.select().from(familyMoney)).map((m) => String(m.familyId)).sort()).toEqual([String(famA), String(await recordOfCustomer(b.spec.family.qboId, "family"))].sort());
     // seedTwoFamilies() made the app's own records of both families, linked in this company.
     expect((await db.select().from(family)).length).toBeGreaterThanOrEqual(2);
     expect((await db.select().from(student)).length).toBeGreaterThanOrEqual(4);
@@ -88,6 +91,7 @@ describe("connecting a different company after step 5", () => {
     expect(await db.select().from(volunteerSignup)).toEqual([]);
     // Every buy-out (seedTwoFamilies() gives each family one): they name the app's own families, so they go before those.
     expect(await db.select().from(buyout)).toEqual([]);
+    expect(await db.select().from(familyMoney)).toEqual([]);
     expect(await db.select().from(writeQueue)).toEqual([]);
     expect(await db.select().from(parentEmailChange)).toEqual([]);
     expect(await db.select().from(signatureRequest)).toEqual([]);
@@ -146,6 +150,8 @@ describe("the seasons, volunteering and forms, from stage 2 until stage 4: a dif
     volunteerReminders: await db.select().from(volunteerReminder).orderBy(asc(volunteerReminder.id)),
     // Buy-outs (stage 2): every one, by the app's own family and student.
     buyouts: await db.select().from(buyout).orderBy(asc(buyout.id)),
+    // The money cache (stage 2): every family's stored figures, by the app's own family.
+    money: await db.select().from(familyMoney).orderBy(asc(familyMoney.familyId)),
     families: await db.select().from(family).orderBy(asc(family.id)),
     students: await db.select().from(student).orderBy(asc(student.id)),
     links: await db.select().from(accountingLink).orderBy(asc(accountingLink.id)),

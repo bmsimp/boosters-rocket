@@ -225,6 +225,20 @@
       "when": 1795044621380,
       "tag": "0031_buyouts_app_ids_finish",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795050502833,
+      "tag": "0032_family_money_app_ids_additive",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795050537274,
+      "tag": "0033_family_money_app_ids_finish",
+      "breakpoints": true
     }
   ]
 }

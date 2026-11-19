@@ -1,8 +1,8 @@
 // How payment requirements stand, read from the figures QuickBooks last gave each family (family_money), for the
 // payment entry of src/lib/seasons/kinds.ts. The rule is asked by the app's own families and students, as the season
-// keeps them; the figures are still kept by the family's QuickBooks customer (the money cache, re-keyed in its own
-// slice of stage 2), so figuresBySubject() below is the one place the records asked about become customers, through
-// their own links (src/lib/families/links.ts), and back. A parent's season passes its own family and students only, so
+// keeps them, and the figures are kept by the app's family; but whose invoices are a family's, and which are a
+// student's own, is still the roster cache's tree of customers, so figuresBySubject() below is the one place the
+// records asked about become customers, through their own links (src/lib/families/links.ts), and back. A parent's season passes its own family and students only, so
 // only that family's figures are read; staff pass null, for everyone. What may be shown follows the parent pages' own
 // rule (mayShow in ./stored.ts): never figures from another company, nor a row holding an invoice of a customer who is
 // no longer the family's, nor a row stored before the portal read which items its invoices carry. This folder is
@@ -48,15 +48,20 @@ async function figuresBySubject(asked: SubjectsAsked | null): Promise<Subject[]>
     const rows = await db.select({ qboId: qboCustomer.qboId, parentQboId: qboCustomer.parentQboId }).from(qboCustomer).where(inArray(qboCustomer.qboId, customers));
     familyQboIds = [...new Set(rows.flatMap((r) => [r.qboId, ...(r.parentQboId ? [r.parentQboId] : [])]))];
   }
-  const [families, rows, source] = await Promise.all([familiesCustomers(familyQboIds), moneyRows(familyQboIds), getRosterSource()]);
+  const [families, source] = await Promise.all([familiesCustomers(familyQboIds), getRosterSource()]);
   if (links === null) {
     const under = [...families].flatMap(([familyQboId, family]) => [...family.customers.keys()].filter((c) => c !== familyQboId));
     links = await linksOfCustomers({ families: [...families.keys()], students: under });
   }
+  // A family's row is its app family's, found through the family customer's own family link. Asked about a student
+  // alone, its family is not among the records asked about, so the families' links are read for the rows apart.
+  const rowOf = asked === null ? links : await linksOfCustomers({ families: [...families.keys()], students: [] });
+  const rows = await moneyRows([...new Set(rowOf.familyOfCustomer.values())]);
   // Asked about particular records, the maps hold those records' links alone, so a record nobody asked about is never answered for.
   const out: Subject[] = [];
   for (const [familyQboId, family] of families) {
-    const row = rows.get(familyQboId);
+    const familyRecord = rowOf.familyOfCustomer.get(familyQboId);
+    const row = familyRecord === undefined ? undefined : rows.get(familyRecord);
     if (!mayShow(row, source, family) || !knowsItems(row)) continue;
     const familyId = links.familyOfCustomer.get(familyQboId);
     if (familyId) out.push({ subjectId: familyId, whose: { appliesTo: "family" }, invoices: row.invoices, readAt: row.readAt });

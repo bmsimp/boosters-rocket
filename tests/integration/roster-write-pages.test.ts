@@ -23,6 +23,7 @@ import { seedSignedInParent } from "../helpers/parent";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { connectRoster, REALM, seedQueued, staffWith } from "../helpers/roster-writes";
 import { rowNamed } from "../helpers/table";
+import { recordOfCustomer } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -226,7 +227,7 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
 });
 
 describe("the Reconciliation page (Roster.Read)", () => {
-  const seedWorthALook = () => db.insert(familyMoney).values({ familyQboId: "10", realmId: REALM, readAt: new Date(), invoices: [], totalCents: 0, currency: "USD",
+  const seedWorthALook = async () => db.insert(familyMoney).values({ familyId: await recordOfCustomer("10", "family"), realmId: REALM, readAt: new Date(), invoices: [], totalCents: 0, currency: "USD",
     checkedAt: new Date(), customerChecks: [{ customerQboId: "12", name: "Leo Rivera", balanceCents: 5000, invoicesCents: 0, currency: "USD" }] });
 
   it("is refused without Roster.Read", async () => {

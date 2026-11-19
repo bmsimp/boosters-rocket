@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, familyMoney, guardian, setting, signedFormEvidence, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, setting, signedFormEvidence, student, writeQueue } from "@/lib/db/schema";
 import { setRosterSource } from "@/lib/roster/source";
 import type { MembershipShape } from "@/lib/roster/shape";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
@@ -45,14 +45,17 @@ const member = (qboId: string, displayName: string, o: Partial<CacheCustomer> = 
  * Records of the current company naming customers the cache doesn't hold, of each kind the function reads, one naming
  * a roster family as a student and a roster student as a family, and evidence of an earlier company. The season's
  * chosen lists, ticks and reminder claims, volunteering's sign-ups, credit and reminder claims, form requests and the
- * current company's signed-form evidence, and buy-outs, name the app's own records since stage 2 (migrations 0024 to 0031), so
+ * current company's signed-form evidence, buy-outs and the money cache, name the app's own records since stage 2 (migrations 0024 to 0033), so
  * they name no customer for the fill to make a record of, and are not among these (RE_KEYED_SINCE_0023). An earlier
  * company's evidence still names customers, and is never read.
  */
 async function seedRecordsNamingOthers() {
-  await db.insert(familyMoney).values({ familyQboId: "F-MONEY", realmId: null, failedAt: new Date(), failedCode: "timeout" });
-  // S1 is a student on the roster: a family's figures name it as a family.
-  await db.insert(familyMoney).values({ familyQboId: "S1", realmId: null, failedAt: new Date(), failedCode: "timeout" });
+  // A buy-out's queued void names its family's customer (the queue keeps it by customer until stage 3), and one names
+  // S1, a student on the roster, as its family. The money cache named customers too until migration 0033; it names the
+  // app's family now.
+  const voidFor = (family: string, n: number) => ({ realmId: REALM, request: { op: "invoice_void" as const, buyoutId: `00000000-0000-4000-8000-00000000f00${n}`, invoiceQboId: `900${n}`,
+    customerQboId: family, familyQboId: family, why: "switched_back" as const }, targetQboId: null, familyQboId: family, state: "waiting" as const, sent: false });
+  await db.insert(writeQueue).values([voidFor("F-QUEUE", 1), voidFor("S1", 2)]);
   await db.insert(writeQueue).values([
     { realmId: REALM, request: { op: "rename", role: "student", qboId: "S-QUEUE", syncToken: "0", name: "New", was: "Old" }, targetQboId: "S-QUEUE", familyQboId: "F1", state: "waiting", sent: false },
     { realmId: REALM, request: { op: "rename", role: "student", qboId: "S-GONE", syncToken: "0", name: "New", was: "Old" }, targetQboId: "S-GONE", familyQboId: "F1", state: "waiting", sent: false },
@@ -98,10 +101,10 @@ describe("migration 0023's fill makes what keepAppRecordsInStep() makes", () => 
     // And what that is, so the two can't agree by both making nothing.
     expect(byFunction.families).toEqual([
       { customer: "F-GONE", name: null, active: false },
-      { customer: "F-MONEY", name: null, active: false },
+      { customer: "F-QUEUE", name: null, active: false },
       { customer: "F1", name: "Ash Family", active: true },
       { customer: "F2", name: "Birch Family", active: false },
-      { customer: "S1", name: "Ash Kid", active: false },         // named as a family by a family's figures: its own inactive family record
+      { customer: "S1", name: "Ash Kid", active: false },         // named as a family by a queued void: its own inactive family record
       { customer: "S3", name: "Birch Kid", active: false },       // named as a family by a guardian row
       { customer: "X1", name: "Lincoln High", active: false },
     ]);

@@ -20,9 +20,9 @@ const CHUNK = 500;
  * addresses and the match review's families (retired, never re-keyed), and the audit log. Also left out: the records
  * stage 2 has re-keyed to the app's own ids (the season's chosen lists, ticks, waivers and reminder claims, migrations
  * 0024 and 0025; volunteering's sign-ups, credit and reminder claims, migrations 0026 and 0027; form requests and the
- * current company's signed-form evidence, migrations 0028 and 0029; buy-outs, migrations 0030 and 0031), which name a
- * record by its id and keep it,
- * inactive, for as long as they do. Migration 0023 read the same in SQL, with those as they were;
+ * current company's signed-form evidence, migrations 0028 and 0029; buy-outs, migrations 0030 and 0031; the money
+ * cache, migrations 0032 and 0033, a row of which is only ever written for a family that has a record), which name a
+ * record by its id and keep it, inactive, for as long as they do. Migration 0023 read the same in SQL, with those as they were;
  * tests/helpers/app-records-fill.ts leaves them out when it runs 0023's fill again on today's tables. Change the two
  * together.
  */
@@ -31,7 +31,6 @@ const refsQuery = (realmId: string) => sql`
     SELECT family_qbo_id AS customer_id, 'family' AS kind FROM guardian WHERE disabled_reason IS DISTINCT FROM 'company_changed'
     UNION ALL SELECT family_qbo_id, 'family' FROM parent_email_change
     UNION ALL SELECT family_qbo_id, 'family' FROM parent_auth_session
-    UNION ALL SELECT family_qbo_id, 'family' FROM family_money WHERE realm_id IS NULL OR realm_id = ${realmId}
     UNION ALL SELECT family_qbo_id, 'family' FROM write_queue WHERE realm_id = ${realmId}
     UNION ALL SELECT target_qbo_id, CASE WHEN request->>'role' = 'student' THEN 'student' ELSE 'family' END FROM write_queue
       WHERE realm_id = ${realmId} AND request->>'op' IN ('rename', 'move', 'deactivate') AND request->>'role' IN ('family', 'member', 'student')

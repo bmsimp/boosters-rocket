@@ -111,7 +111,10 @@ export async function seedFamilyMoney(spec: ParentFamilySpec, o: { readAt?: Date
   }));
   const row = { realmId: await getRosterSource(), readAt: o.readAt ?? new Date(), invoices, totalCents: owed(spec), currency: "USD",
     balanceWithJobsCents: o.balanceWithJobsCents === undefined ? owed(spec) : o.balanceWithJobsCents };
-  await db.insert(familyMoney).values({ familyQboId: spec.family.qboId, ...row }).onConflictDoUpdate({ target: familyMoney.familyQboId, set: row });
+  // Kept by the app's family, as the portal keeps it: the family customer's own record (an inactive one, with its link,
+  // for a customer the roster doesn't hold as a family yet, as migration 0023 made one).
+  const familyId = await recordOfCustomer(spec.family.qboId, "family");
+  await db.insert(familyMoney).values({ familyId, ...row }).onConflictDoUpdate({ target: familyMoney.familyId, set: row });
 }
 
 /** The strings that would give this family away. A step that gives families new data (invoices, forms) adds its markers here. */

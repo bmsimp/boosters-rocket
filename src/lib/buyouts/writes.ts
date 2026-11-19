@@ -11,8 +11,8 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { buyout, familyMoney, qboCustomer, requirement, writeQueue, type BuyoutState, type BuyoutWrite, type QueuedWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import type { AppStudentId } from "@/lib/families/ids";
-import { customerOfFamily } from "@/lib/families/links";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { customerOfFamily, familyLinkedTo } from "@/lib/families/links";
 import { activeFamilyOf, studentsStillIn } from "@/lib/families/session-family";
 import type { ParentCtx } from "@/lib/guards";
 import { formatMoney, toCents } from "@/lib/money/cents";
@@ -113,30 +113,33 @@ const sendOptions = (realmId: string, mayWait: boolean) => ({ realmId, mayWait, 
 const short = (code: string) => code.slice(0, 40);
 
 /** The family's stored figures are behind QuickBooks now: its next page load reads QuickBooks (src/lib/money/family-money.ts). */
-async function markMoneyStale(tx: Tx, familyQboId: string): Promise<void> {
-  await tx.update(familyMoney).set({ staleAt: new Date(), updatedAt: new Date() }).where(eq(familyMoney.familyQboId, familyQboId));
+async function markMoneyStale(tx: Tx, familyId: AppFamilyId): Promise<void> {
+  await tx.update(familyMoney).set({ staleAt: new Date(), updatedAt: new Date() }).where(eq(familyMoney.familyId, familyId));
 }
 
 /**
  * The customer of the family that chose a buy-out, through the family record's link, in the records' company: the
- * family's stored figures and the write queue are still kept by that customer (a boundary of stage 2 of the app-owned
- * families spec, until the money slice). A per-family buy-out is billed to that customer itself, so it stands in when
- * the link is gone. Null when neither says.
+ * write queue is still kept by that customer (a boundary of stage 2 of the app-owned families spec, until stage 3
+ * moves the queue with the session). A per-family buy-out is billed to that customer itself, so it stands in when the
+ * link is gone. Null when neither says.
  */
 async function familyCustomerOf(tx: Tx, b: Pick<Row, "familyId" | "studentId" | "customerQboId">): Promise<string | null> {
   return (await customerOfFamily(b.familyId, tx)) ?? (b.studentId === null ? b.customerQboId : null);
 }
 
 /**
- * Every family whose figures may show this buy-out's invoice: the one that chose it, and for a per-student one the
- * family its student is under now in the roster cache (a student who moved takes their invoices with them).
+ * Every family whose figures may show this buy-out's invoice: the one that chose it (its own record), and for a
+ * per-student one the family its student is under now in the roster cache, through that customer's family link (a
+ * student who moved takes their invoices with them, and a move QuickBooks made is followed here before the reconcile
+ * has caught up with it).
  */
 export async function markBuyoutMoneyStale(tx: Tx, b: Pick<Row, "familyId" | "studentId" | "customerQboId">): Promise<void> {
-  const chooser = await familyCustomerOf(tx, b);
-  if (chooser !== null) await markMoneyStale(tx, chooser);
+  await markMoneyStale(tx, b.familyId);
   if (b.studentId === null) return;
   const [now] = await tx.select({ parentQboId: qboCustomer.parentQboId }).from(qboCustomer).where(eq(qboCustomer.qboId, b.customerQboId));
-  if (now?.parentQboId && now.parentQboId !== chooser) await markMoneyStale(tx, now.parentQboId);
+  if (!now?.parentQboId) return;
+  const underNow = await familyLinkedTo(now.parentQboId, tx);
+  if (underNow !== null && underNow !== b.familyId) await markMoneyStale(tx, underNow);
 }
 
 /** The queue item finished: done, with what QuickBooks made or changed, audited as the queue audits its own. */

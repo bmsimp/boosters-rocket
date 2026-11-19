@@ -81,10 +81,14 @@ test("every customer the seed gives another family is searched for", async () =>
 
 test("every invoice the seed gives another family is searched for", async () => {
   // As above, for money: each invoice stored for a family other than the Quetzalcoatl family must be findable by its
-  // number and its amount, and by its pay link when it has one.
+  // number and its amount, and by its pay link when it has one. The figures are kept by the app's own family (stage 2
+  // of the app-owned families spec): another family's are those whose family isn't the one the Quetzalcoatl family's
+  // customer is linked to, named here by the customer their family's link names.
   type Stored = { number: string; totalCents: number; payLink: string | null };
-  const rows = await sql`SELECT family_qbo_id, invoices, total_cents FROM family_money WHERE family_qbo_id <> ${PARENT_SESSION_FAMILY}`;
-  const invoices = rows.flatMap((r) => (r.invoices as Stored[]).map((i) => ({ family: r.family_qbo_id as string, ...i })));
+  const family = sql`SELECT family_id FROM accounting_link WHERE customer_id = ${PARENT_SESSION_FAMILY} AND family_id IS NOT NULL`;
+  const rows = await sql`SELECT l.customer_id AS family_customer, m.invoices, m.total_cents FROM family_money m
+    LEFT JOIN accounting_link l ON l.family_id = m.family_id WHERE m.family_id NOT IN (${family})`;
+  const invoices = rows.flatMap((r) => (r.invoices as Stored[]).map((i) => ({ family: r.family_customer as string, ...i })));
   expect(invoices.length).toBeGreaterThanOrEqual(3);
   const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
   const searched = (value: string) => OTHER_FAMILIES.some((s) => value.includes(s));
@@ -111,6 +115,21 @@ test("every requirement and waiver the seed gives another family alone is search
   const unsearched = [...titles.map((r) => r.title as string), ...reasons.map((r) => r.waived_reason as string)].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)));
   expect(unsearched, `scripts/seed-e2e.ts gives another family these in the season, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
     + `would find them on a parent page: ${unsearched.join(", ")}. Add a recognizable part of each.`).toEqual([]);
+});
+
+test("every buy-out the seed gives another family is searched for", async () => {
+  // As above, for buy-outs: another family's must be findable by its id and by its requirement's title. Buy-outs name
+  // the app's own family (stage 2 of the app-owned families spec): another family's is one whose family isn't the one
+  // the Quetzalcoatl family's customer is linked to. Every state counts, so both passes of a run (the close spec ends
+  // the Rivera family's refused one, and Zelda's own choices are her family's) find the same rows.
+  const family = sql`SELECT family_id FROM accounting_link WHERE customer_id = ${PARENT_SESSION_FAMILY} AND family_id IS NOT NULL`;
+  const rows = await sql`SELECT b.id, b.state, r.title, l.customer_id AS family_customer FROM buyout b JOIN requirement r ON r.id = b.requirement_id
+    LEFT JOIN accounting_link l ON l.family_id = b.family_id WHERE b.family_id NOT IN (${family})`;
+  expect(rows.length).toBeGreaterThanOrEqual(1);
+  const unsearched = rows.flatMap((r) => [r.id as string, r.title as string].filter((v) => !OTHER_FAMILIES.some((s) => v.includes(s)))
+    .map((v) => `${v} (a buy-out of ${r.family_customer}, ${r.state})`));
+  expect(unsearched, `scripts/seed-e2e.ts gives another family these buy-outs, and nothing in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts) `
+    + `would find them on a parent page: ${unsearched.join(", ")}. Add its id and a recognizable part of its requirement's title.`).toEqual([]);
 });
 
 test("every volunteer sign-up the seed gives another family is searched for", async () => {

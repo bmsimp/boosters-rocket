@@ -151,10 +151,6 @@ async function main() {
   await sql`INSERT INTO setting (key, value) VALUES ('money.settings', ${sql.json({ freshSeconds: 7 * 86_400 })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await sql`DELETE FROM family_money`;
-  for (const f of families) {
-    await sql`INSERT INTO family_money (family_qbo_id, realm_id, read_at, invoices, total_cents, balance_with_jobs_cents, currency)
-            VALUES (${f.id}, '9130000000000001', now(), ${sql.json(f.invoices)}, ${f.total}, ${f.total}, 'USD')`;
-  }
   // The worker's last check of each customer's balance in QuickBooks (src/lib/money/sweep.ts): the second family's
   // student owes $50.00 more there than his open invoices, so staff see the family under "Worth a look"
   // (tests/e2e/balances.spec.ts). Its amount is in OTHER_FAMILIES (tests/e2e/parent-session.spec.ts).
@@ -163,7 +159,15 @@ async function main() {
     { customerQboId: "E2E-P2", name: "Zelda Quetzalcoatl", balanceCents: 0, invoicesCents: 0, currency: "USD" },
     { customerQboId: "E2E-S3", name: "Wolfgang Secondborn", balanceCents: 36247, invoicesCents: 31247, currency: "USD" },
   ];
-  await sql`UPDATE family_money SET checked_at = now(), customer_checks = ${sql.json(checks)} WHERE family_qbo_id = 'E2E-FAMILY-2'`;
+  // Each family's figures are kept by the app's own family (migration 0032): stored below, once 0023's fill has made
+  // the records, with the invoices and the check each naming their customers as before.
+  const storeMoney = async (tx: postgres.TransactionSql, familyOf: (customer: string) => Promise<string>) => {
+    for (const f of families) {
+      await tx`INSERT INTO family_money (family_id, realm_id, read_at, invoices, total_cents, balance_with_jobs_cents, currency)
+              VALUES (${await familyOf(f.id)}, '9130000000000001', now(), ${tx.json(f.invoices)}, ${f.total}, ${f.total}, 'USD')`;
+    }
+    await tx`UPDATE family_money SET checked_at = now(), customer_checks = ${tx.json(checks)} WHERE family_id = ${await familyOf("E2E-FAMILY-2")}`;
+  };
   await sql`DELETE FROM setting WHERE key = 'money.run'`;
   // The club's current season (v1 spec §10): four steps with no dates, so each family is on the first step it hasn't
   // finished. The Quetzalcoatl family has done Join; in Uniforms, Xochitl has been ticked off and Yaretzi has not
@@ -332,9 +336,9 @@ async function main() {
   // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
-  // The season's chosen lists, ticks and waivers, the volunteer sign-ups, the form requests and evidence and the buy-outs,
-  // by the app's own record of each customer, of the kind each names it as, in the roster's company: as migrations 0024,
-  // 0026, 0028 and 0030 store them. A customer with no such record stops the seed.
+  // The season's chosen lists, ticks and waivers, the volunteer sign-ups, the form requests and evidence, the buy-outs and
+  // each family's stored figures, by the app's own record of each customer, of the kind each names it as, in the roster's
+  // company: as migrations 0024, 0026, 0028, 0030 and 0032 store them. A customer with no such record stops the seed.
   await sql.begin(async (tx) => {
     const recordOf = async (kind: "family" | "student", customer: string, what: string): Promise<string> => {
       const [link] = kind === "family"
@@ -358,6 +362,7 @@ async function main() {
     }
     await storeForms(tx, (customer) => recordOf("family", customer, "a form request"));
     await storeBuyouts(tx, (customer) => recordOf("family", customer, "a buy-out"));
+    await storeMoney(tx, (customer) => recordOf("family", customer, "a family's stored figures"));
   });
   await sql.end();
 }

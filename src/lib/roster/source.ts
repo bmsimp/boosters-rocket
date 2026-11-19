@@ -46,7 +46,7 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
  * the app's own families and students, which a change of company would have to take away. It is kept whole for the
  * areas that have not moved yet (their part of tests/integration/company-change-step5.test.ts calls it directly), and
  * so the season, volunteer and form records go first: the database refuses to delete a family or student one still
- * names.
+ * names. The money cache (`family_money`) is kept by the app's family too, and goes before them as well.
  */
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
   const from = await getRosterSource(tx);
@@ -60,11 +60,12 @@ export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o
   // Every signature request, and the current company's evidence, names them too: the requests go, and the evidence is
   // kept, marked as the earlier company's and cut from its request and records (src/lib/forms/company-change.ts).
   await clearFormRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
+  // What each family was last seen to owe is kept by the app's own family, so it goes before the records too.
+  await tx.delete(familyMoney);
   // The app's own families, students and links, made from that company's customers (src/lib/families/).
   await clearAppRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   await tx.delete(qboCustomer);
   await tx.delete(qboCustomerType);
-  await tx.delete(familyMoney);
   await clearMoneyRecords(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   // The records the check of the portal's requests made in that company (src/lib/quickbooks/sandbox-check/).
   await clearCheckRecords(tx, { actor: o.actor, ip: o.ip });

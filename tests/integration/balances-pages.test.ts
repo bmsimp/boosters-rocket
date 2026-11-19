@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { asStaff, pageOutcome, renderPage, revalidatedPaths } from "../helpers/signed-in";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, role, roleAssignment, roleRule } from "@/lib/db/schema";
+import { auditLog, familyMoney, qboCustomer, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { formatMoney } from "@/lib/money/cents";
 import { ADMIN_ONLY, GRANTABLE } from "@/lib/permissions/registry";
@@ -14,6 +14,7 @@ import { FAMILY_A, FAMILY_B, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, stu } from "../helpers/roster-cache";
 import { startQboStub } from "../helpers/qbo-stub";
 import { connectCompany } from "../helpers/money";
+import { recordOfCustomer } from "../helpers/app-records";
 import { rowNamed, tableRows } from "../helpers/table";
 
 /**
@@ -76,7 +77,7 @@ describe("the Balances page", () => {
   });
 
   it("filters to the families that owe, and finds a family by its own name or a student's", async () => {
-    await db.update(familyMoney).set({ totalCents: 0, invoices: [] }).where(eq(familyMoney.familyQboId, FAMILY_B.family.qboId));
+    await db.update(familyMoney).set({ totalCents: 0, invoices: [] }).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY_B.family.qboId, "family")));
     const owing = textOf(await renderPage(BalancesPage, { searchParams: { owing: "1" } }));
     expect(owing).toContain(FAMILY_A.family.name);
     expect(owing).not.toContain(FAMILY_B.family.name);
@@ -98,7 +99,7 @@ describe("the Balances page", () => {
     await db.update(familyMoney).set({ checkedAt: new Date(), customerChecks: [
       { customerQboId: FAMILY_B.family.qboId, name: null, balanceCents: 824208 + 826410, invoicesCents: 824208 + 826410, currency: "USD" },
       { customerQboId: FAMILY_B.students[0]!.qboId, name: FAMILY_B.students[0]!.name, balanceCents: 12500, invoicesCents: 0, currency: "USD" },
-    ] }).where(eq(familyMoney.familyQboId, FAMILY_B.family.qboId));
+    ] }).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY_B.family.qboId, "family")));
     const html = await renderPage(BalancesPage);
     expect(textOf(html)).toContain(`Worth a look`);
     // One row per customer that differs, QuickBooks' balance beside what its open invoices add up to.
@@ -124,7 +125,9 @@ describe("the Balances page", () => {
 describe("one family's money", () => {
   it("audits the read before anything is shown, then shows the open invoices, the total and what was paid", async () => {
     const html = await renderPage(FamilyBalancePage, { params: { familyId: encodeURIComponent(FAMILY_A.family.qboId) } });
-    expect((await audits("money.family.read")).map((r) => [r.actorId, r.permission, r.targetType, r.targetId])).toEqual([[treasurer.id, "Finance.Balance.Read", "qbo_customer", FAMILY_A.family.qboId]]);
+    // It names the app's own family the address's customer is linked to.
+    expect((await audits("money.family.read")).map((r) => [r.actorId, r.permission, r.targetType, r.targetId]))
+      .toEqual([[treasurer.id, "Finance.Balance.Read", "family", String(await recordOfCustomer(FAMILY_A.family.qboId, "family"))]]);
     const text = textOf(html);
     expect(text).toContain("Invoice INV-ALDERQUIST-7101");
     expect(text).toContain(`Total ${owedBy(FAMILY_A)}`);
@@ -132,6 +135,14 @@ describe("one family's money", () => {
     expect(text).toContain(`With the invoices raised on ${[...FAMILY_A.students.map((s) => s.name), FAMILY_A.parent.name].sort().join(", ")}.`);
     // Nothing of the other family.
     for (const i of FAMILY_B.invoices!) expect(html).not.toContain(i.number);
+  });
+
+  it("names the customer in its audit row for a roster family with no family record yet, and shows it no figures", async () => {
+    // Written to the cache by hand, with no reconcile after it: the records have not caught up with it.
+    await db.insert(qboCustomer).values({ qboId: "QBO-NEW-9004", displayName: "New Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
+    const html = await renderPage(FamilyBalancePage, { params: { familyId: "QBO-NEW-9004" } });
+    expect((await audits("money.family.read")).map((r) => [r.targetType, r.targetId])).toEqual([["qbo_customer", "QBO-NEW-9004"]]);
+    expect(textOf(html)).toContain("Nothing has been read from QuickBooks for this family yet");
   });
 
   it("answers 404, and audits nothing, for an id that isn't an active family: a student's, an inactive family's, one that isn't there", async () => {
@@ -153,7 +164,7 @@ describe("one family's money", () => {
     await db.update(familyMoney).set({ checkedAt: new Date(), customerChecks: [
       { customerQboId: FAMILY_A.family.qboId, name: null, balanceCents: 1428316, invoicesCents: 1428316, currency: "USD" },
       { customerQboId: FAMILY_A.students[0]!.qboId, name: FAMILY_A.students[0]!.name, balanceCents: -2500, invoicesCents: 0, currency: "USD" },
-    ] }).where(eq(familyMoney.familyQboId, FAMILY_A.family.qboId));
+    ] }).where(eq(familyMoney.familyId, await recordOfCustomer(FAMILY_A.family.qboId, "family")));
     const text = textOf(await renderPage(FamilyBalancePage, { params: { familyId: FAMILY_A.family.qboId } }));
     expect(text).toContain(`The family itself The same ${formatMoney(1428316)}`);
     expect(text).toContain(`${FAMILY_A.students[0]!.name} Different: its open invoices add up to $0.00 -$25.00`);

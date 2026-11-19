@@ -112,7 +112,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 8.2.3 | A Pay button per invoice from `InvoiceLink`, https on an Intuit domain or no button | | Built | `src/lib/money/pay-link.ts`; `tests/unit/money-pay-link.test.ts`; `payments-page.test.ts` "checks a stored pay link again before showing it". Owner check: a real company's links |
 | 8.2.4 | Read live when the page loads, with a short cache, shown with an "as of" time | | Built | `payments-page.test.ts` "stale figures are read again from QuickBooks before the page shows them" and the as-of assertion in "fresh figures" |
 | 8.2.5 | QuickBooks unreachable: the last known figures, marked as not current | Pay switched off; the note never names an outage (AGENTS.md, Money) | Built | `payments-page.test.ts` "QuickBooks down, with figures stored", "figures that are not current because" |
-| 8.2.6 | Never another family's invoices; nothing in a request picks a customer | | Built | `payments-page.test.ts` "family A's page holds none of family B's invoices", "nothing in the request chooses the family" |
+| 8.2.6 | Never another family's invoices; nothing in a request picks a customer | The stored figures are kept by the app's own family since stage 2 of the app-owned families spec (migrations 0032 and 0033), found from the session's customer on each load; whose invoices a family sees is still the roster's tree (AGENTS.md, Money) | Built | `payments-page.test.ts` "family A's page holds none of family B's invoices", "nothing in the request chooses the family"; `family-money.test.ts` "a parent of a family whose record is inactive is shown no money"; `tests/integration/migrate-money.test.ts` |
 
 ### §8.3 Lessons from the CiviCRM extension
 
@@ -135,7 +135,7 @@ All of these go to QuickBooks first, and the cache follows QuickBooks' answer (`
 | 8.4.5 | Volunteer reminders and due-date nudges daily, plus the day-before reminder | | Built | `tests/integration/volunteer-reminders.test.ts` |
 | 8.4.6 | Buy-out invoice status with the nightly reconciliation | After each daily money run | Built | `tests/integration/buyouts-check.test.ts` "marks a paid one paid, flags one QuickBooks no longer shows" |
 | 8.4.7 | Expired email-change and session clean-up daily | Every table is cleaned or kept on purpose; Better Auth's verification rows added in this step | Built | `tests/integration/cleanup.test.ts` |
-| 8.4.8 | (new) Every family's invoices read daily by the worker | Added by step 4 (Money for staff); a family whose read keeps failing is passed over after three stopped runs (this step) | Built | `money-sweep.test.ts` "reads each family in turn", "stops at a family whose read keeps failing" |
+| 8.4.8 | (new) Every family's invoices read daily by the worker | Added by step 4 (Money for staff); a family whose read keeps failing is passed over after three stopped runs (this step); a roster family with no family record of the app's own is passed over as `no_record`, never stopping a run (stage 2) | Built | `money-sweep.test.ts` "reads each family in turn", "stops at a family whose read keeps failing", "passes over a roster family with no family record" |
 
 ## §9 Commitment forms and signatures
 
@@ -356,7 +356,7 @@ more of them; the roadmap's own Known gaps section is the current list.
 | Step 4 | Volunteer credit not allocated; sign-ups not rate-limited; cancelling an event or shift has no confirm | No longer true | Step 5 (`allocateCredit()`); `0731592`; `24bd468` |
 | Step 4 | A payment paid more than 12 months ago reads "No invoice yet"; the item list is read only on a press | Still true | `src/lib/money/invoices.ts`, `src/lib/money/items.ts` |
 | Step 4 | A student moved in QuickBooks leaves an opened form, and a place, behind | Still true for a move made in QuickBooks | `refreshRoster()` runs no `afterStudentMoved()` |
-| Step 4 | A family whose read always fails stalls the daily money run | No longer true | `e2442d6`; `money-sweep.test.ts` "stops at a family whose read keeps failing". Still true: a family passed over as not a family gets a failed-try stamp |
+| Step 4 | A family whose read always fails stalls the daily money run | No longer true | `e2442d6`; `money-sweep.test.ts` "stops at a family whose read keeps failing". A family passed over as not a family gets no failed-try stamp either: `8a17c5f`; `money-sweep.test.ts` "stamps no failed try on a family the cache stops holding as one" |
 | Step 4 | The Item list's inactive items have only met the stub | Still true | Sandbox check |
 | Step 4 | The test teardown drops scratch databases by name | Still true | `scratchDatabase()` in `tests/setup/database-url.ts` |
 | Step 4 | The installability browser test fails in a worktree with a long path | Still true | Windows path limit |
@@ -370,7 +370,7 @@ more of them; the roadmap's own Known gaps section is the current list.
 | Step 5 review | A queued move whose answer named another record runs no follow-ups | Still true | `src/lib/roster/queue.ts` |
 | Step 5 review | The copy for a guardian whose student moved goes only as an attachment | Still true | `src/lib/signed-forms/copies.ts` |
 | Step 5 review | Any guardian checks in another guardian's place; no check-in from inside the installed app | Still true | Owner's call |
-| Step 6 | No staff action closes a stuck, refused or flagged buy-out; no Health line for the check; no staff page of one family's buy-outs | Still true | `src/lib/buyouts/staff.ts` |
+| Step 6 | No staff action closes a stuck, refused or flagged buy-out; no Health line for the check; no staff page of one family's buy-outs | No longer true | `cb8ed77`, `aa35a66`: staff close one no unpaid invoice of stands, from Reconciliation and the family's buy-outs page (`src/lib/buyouts/close.ts`, `/staff/roster/[id]/buyouts`; `tests/integration/buyouts-close.test.ts`); `b259bfe`: the Health page's `buyout_check` line |
 | Step 6 | Copying a season drops the buy-out price; the move's follow-up row doesn't count buy-outs | No longer true | `aee9768`, `fea2769` |
 | Step 6 | The write queue clears the sent flag on a retry that sent nothing | No longer true | `7e3ba2b`; `roster-queue.test.ts` "stays one that may have been made when a resend after it sends nothing" |
 | Step 6 | The portal reaches Documenso at its public address | Still true | `src/lib/documenso/client.ts` |
