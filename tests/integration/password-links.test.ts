@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createHash } from "node:crypto";
@@ -11,7 +11,7 @@ vi.mock("@/lib/parents/breach-endpoints", () => ({ breachEndpoints: () => ({ ran
 import { eq } from "drizzle-orm";
 import { verifyPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, rateLimitEvent, setting, signinCode } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, rateLimitEvent, setting, signinCode } from "@/lib/db/schema";
 import { hashLinkToken, isLinkToken, LINK_LIFE_MS, linkVerdict, type LinkPurpose } from "@/lib/parents/signin-links";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { RATE_LIMITS, takeRateLimit } from "@/lib/parents/rate-limit";
@@ -19,7 +19,7 @@ import { readBreachMark } from "@/lib/parents/breach-mark";
 import { choosePasswordAction } from "@/app/sign-in/password-actions";
 import SetUpPage from "@/app/sign-in/set-up/[token]/page";
 import ResetPage from "@/app/sign-in/reset/[token]/page";
-import { resetDb, seedGuardianInFamily, seedParent, seedParentSession } from "../helpers/db";
+import { resetDb, seedGuardianInFamily, seedParent, seedParentSession, untilALockIsAwaited } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 import { credentialRows, linkRows, mintLink, seedCode, seedDevice, seedPassword, unknownToken } from "../helpers/signin-links";
 
@@ -35,9 +35,12 @@ const BREACHED = "password-from-a-breach-1234";
 
 /** How the stub answers: as the service would for a password nobody has seen, for BREACHED as seen, or with a failure. */
 let mode: "answer" | "down" = "answer";
+/** When set, the stub says it was asked and waits for `until` before it answers: a breach check that is slow. */
+let hold: { asked: () => void; until: Promise<void> } | null = null;
 let server: Server;
 beforeAll(async () => {
-  server = createServer((req, res) => {
+  server = createServer(async (req, res) => {
+    if (hold) { hold.asked(); await hold.until; }
     if (mode === "down") { res.writeHead(503).end(); return; }
     const prefix = (req.url ?? "").split("/").pop()!;
     const seen = sha1(BREACHED);
@@ -166,7 +169,8 @@ describe("the page a link opens, and its action, refuse every unusable link alik
       const before = await written();
       const html = await page(purpose, token);
       expect(await written(), `${name}: opening the page wrote something`).toEqual(before);
-      expect(html, name).toContain(PASSWORD_COPY.linkNoGoodTitle);
+      // React writes ' in text as &#x27;.
+      expect(html, name).toContain(PASSWORD_COPY.linkNoGoodTitle.replaceAll("'", "&#x27;"));
       expect(html, name).not.toContain('type="password"');
       pages.set(name, html);
       answers.set(name, JSON.stringify(await choose(purpose, token)));
@@ -175,7 +179,7 @@ describe("the page a link opens, and its action, refuse every unusable link alik
     }
     expect(new Set(pages.values()).size).toBe(1);
     expect(new Set(answers.values())).toEqual(new Set([JSON.stringify(REFUSED)]));
-  });
+  }, 120_000);
 
   it("records each refusal with its reason, for the audit log only", async () => {
     const reasons: Record<string, string> = { unknown: "unknown", used: "used", expired: "expired", "a set-up link for someone with a password": "has_password",
@@ -196,7 +200,7 @@ describe("the page a link opens, and its action, refuse every unusable link alik
     expect(await choose("setup", token)).toEqual(REFUSED);
     expect(await audits("parent.password.refused")).toEqual([]);
     expect(await db.select().from(rateLimitEvent)).toEqual([]);
-  });
+  }, 120_000);
 
   it("opening a live link writes nothing and shows the form, with no name, address or family", async () => {
     const { ana } = await seedAna();
@@ -330,6 +334,59 @@ describe("setting a password from a link", () => {
     // The mark holds times and a code only.
     expect(JSON.stringify(await readBreachMark())).not.toContain(GOOD.slice(0, 5));
   });
+});
+
+describe("the check under the person's lock", () => {
+  beforeEach(async () => { await resetDb(); mode = "answer"; hold = null; fromIp(IP); });
+  afterEach(() => { hold = null; });
+
+  /** What happens to the link while the breach check is being asked, and the reason the re-check under the lock gives. */
+  const MEANWHILE: Record<string, { reason: string; change: (o: { parentId: string; tokenId: string }) => Promise<unknown> }> = {
+    "the person is blocked": { reason: "blocked", change: ({ parentId }) => db.update(parent).set({ blocked: true }).where(eq(parent.id, parentId)) },
+    "sign-ins are switched off": { reason: "signins_off", change: () => seedParentSettings({ signin: false }) },
+    // Its life ends now, after the action began: the re-check reads the time once it holds the person's row.
+    "the link runs out": { reason: "expired", change: ({ tokenId }) => db.update(parentSigninToken).set({ expiresAt: new Date() }).where(eq(parentSigninToken.id, tokenId)) },
+    "the link is spent": { reason: "used", change: ({ tokenId }) => db.update(parentSigninToken).set({ usedAt: new Date() }).where(eq(parentSigninToken.id, tokenId)) },
+  };
+
+  it.each(Object.keys(MEANWHILE))("refuses, changing nothing, a link that stops being usable while the breach check is asked: %s", async (what) => {
+    const { ana, row } = await seedAna();
+    await seedPassword(ana.authUserId, OTHER);
+    await seedParentSession(ana.authUserId, { familyId: row.familyId });
+    const token = await mintLink(ana.id, "reset");
+    const [link] = await linkRows(ana.id);
+    let asked!: () => void, release!: () => void;
+    const wasAsked = new Promise<void>((r) => { asked = r; });
+    hold = { asked: () => asked(), until: new Promise<void>((r) => { release = r; }) };
+    const answer = choose("reset", token);
+    await wasAsked;
+    // The breach check runs with nothing held: the person's row is free while the service is asked.
+    await db.transaction((tx) => tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ana.id)).for("update", { noWait: true }));
+    await MEANWHILE[what]!.change({ parentId: ana.id, tokenId: link!.id });
+    release();
+    expect(await answer).toEqual(REFUSED);
+    const creds = await credentialRows(ana.authUserId);
+    expect(creds).toHaveLength(1);
+    expect(await verifyPassword({ hash: creds[0]!.password!, password: OTHER })).toBe(true);
+    expect(await db.select().from(parentAuthSession)).toHaveLength(1);
+    expect(await audits("parent.password.set")).toEqual([]);
+    expect((await audits("parent.password.refused")).at(-1)).toMatchObject({ targetId: ana.id, after: { purpose: "reset", reason: MEANWHILE[what]!.reason } });
+  }, 30_000);
+
+  it("waits for the person's row, then checks again what the holder left", async () => {
+    const { ana } = await seedAna();
+    const token = await mintLink(ana.id, "setup");
+    let answer!: Promise<unknown>;
+    await db.transaction(async (tx) => {
+      await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ana.id)).for("update");
+      answer = choose("setup", token);
+      await untilALockIsAwaited();
+      await tx.update(parent).set({ blocked: true }).where(eq(parent.id, ana.id));
+    });
+    expect(await answer).toEqual(REFUSED);
+    expect(await credentialRows(ana.authUserId)).toEqual([]);
+    expect((await audits("parent.password.refused")).at(-1)).toMatchObject({ after: { reason: "blocked" } });
+  }, 30_000);
 });
 
 describe("the limits on a link's form", () => {

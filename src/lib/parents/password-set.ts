@@ -57,7 +57,8 @@ const sent = (v: unknown): v is string => typeof v === "string" && v.length <= M
  *     answered as a refused link, uncounted and unrecorded;
  * (b) the limits, per IP address first (skipped when the address is unknown: every visitor would share one count) and
  *     then per link, counted under the token's hash, never the token;
- * (c) the link may be used (linkVerdict()), read without a lock;
+ * (c) the link may be used (linkVerdict()), read without a lock, and read over a limit too, its answer unused, so an
+ *     over-limit refusal makes the reads a refused link makes;
  * (d) the two passwords match, and meet the rule;
  * (e) the breach check: found is refused in words, not checked is taken and said so in the audit row;
  * (f) the hash;
@@ -74,12 +75,13 @@ export async function choosePasswordFromLink(raw: { purpose: unknown; token: unk
   const now = o.now ?? new Date();
   const ip = o.ip;
 
+  // Over a limit, the link is still read and its answer thrown away (c); only the audit row differs (one per full
+  // window, rate-limit.ts).
   const byIp: RateLimitTake = ip === null ? "taken" : await takeRateLimit("password_link_ip", ip, now);
-  if (byIp !== "taken") { await refuseOverLimit(byIp, purpose, ip, "ip"); return REFUSED; }
-  const byLink = await takeRateLimit("password_link_token", hashLinkToken(purpose, token), now);
-  if (byLink !== "taken") { await refuseOverLimit(byLink, purpose, ip, "token"); return REFUSED; }
-
+  const byLink: RateLimitTake = byIp === "taken" ? await takeRateLimit("password_link_token", hashLinkToken(purpose, token), now) : "refused";
   const verdict = await linkVerdict(purpose, token, { now });
+  if (byIp !== "taken") { await refuseOverLimit(byIp, purpose, ip, "ip"); return REFUSED; }
+  if (byLink !== "taken") { await refuseOverLimit(byLink, purpose, ip, "token"); return REFUSED; }
   if (!verdict.ok) { await refuse(purpose, verdict.reason, verdict.who, ip); return REFUSED; }
   const who = { id: verdict.link.parentId, email: verdict.link.email };
 
@@ -96,44 +98,60 @@ export async function choosePasswordFromLink(raw: { purpose: unknown; token: unk
   if (breach.outcome === "found") { await refuse(purpose, "breached", who, ip); return { ok: false, errors: [PASSWORD_COPY.breached] }; }
 
   const hash = await hashPassword(password);
-  const stored = await storePassword({ purpose, token, hash, breach, ip, now });
+  const stored = await storePassword({ purpose, token, hash, breach, ip, now: o.now });
   if (!stored.ok) { await refuse(purpose, stored.reason, stored.who, ip); return REFUSED; }
   return { ok: true, message: PASSWORD_COPY.set };
 }
 
 /**
  * The write, in one transaction with its audit row. The person's row is taken FOR UPDATE first, so two submits for one
- * person (the same link twice, or a set-up beside a reset) take turns; then what hangs on the person, in the order above
- * lockedPerson() (./sessions.ts). Under that lock the link is checked again (its row FOR UPDATE, still unused and
- * unexpired, still no password for a set-up, not blocked, a row that counts, the door open), and a refusal changes
- * nothing. Then: for a reset, the person's unused sign-in codes go (until the code stops being a way in by itself, a
- * reset that left one would leave a way in); the link is spent; the person's `credential` row is replaced, or made when
- * there is none, so a person never has two; and for a reset every remembered device is forgotten and every session
- * ended (open question 23). A set-up ends nothing. Audited `parent.password.set`, never with the password, its hash,
- * the token or its hash.
+ * person (the same link twice, or a set-up beside a reset) take turns. Under that lock the link is checked again (its
+ * row FOR UPDATE, still unused and unexpired, still no password for a set-up, not blocked, a row that counts, the door
+ * open), at the time the lock was had (a slow breach check or a wait for the person's row must not stretch a link's
+ * life), and a refusal changes nothing. The link's row is so taken right after the person's, ahead of the codes: the one
+ * step out of the order above lockedPerson() (./sessions.ts), which says why it is safe; the rest follows that order.
+ * Then: for a reset, the person's unused sign-in codes go (until the code stops being a way in by itself, a reset that
+ * left one would leave a way in); the link is spent; the person's `credential` row is replaced, or made when there is
+ * none, so a person never has two; and for a reset every remembered device is forgotten and every session ended (open
+ * question 23). A set-up ends nothing. Audited `parent.password.set`, never with the password, its hash, the token or
+ * its hash.
+ *
+ * The hash is a parameter of the write, and a failed query's error carries its parameters (drizzle's message names
+ * them), so a failure is thrown again as a short code with nothing of the query: a password's hash never reaches the
+ * server's log. `now` is for tests only; otherwise the time is read once the person's row is held.
  */
-async function storePassword(o: { purpose: LinkPurpose; token: string; hash: string; breach: Exclude<BreachCheck, { outcome: "found" }>; ip: string | null; now: Date }):
+async function storePassword(o: { purpose: LinkPurpose; token: string; hash: string; breach: Exclude<BreachCheck, { outcome: "found" }>; ip: string | null; now?: Date }):
+  Promise<{ ok: true } | { ok: false; reason: LinkRefusal; who: Who }> {
+  try {
+    return await writePassword(o);
+  } catch {
+    throw new Error("password_store_failed");
+  }
+}
+
+async function writePassword(o: { purpose: LinkPurpose; token: string; hash: string; breach: Exclude<BreachCheck, { outcome: "found" }>; ip: string | null; now?: Date }):
   Promise<{ ok: true } | { ok: false; reason: LinkRefusal; who: Who }> {
   return db.transaction(async (tx) => {
     const [named] = await tx.select({ parentId: parentSigninToken.parentId }).from(parentSigninToken)
       .where(and(eq(parentSigninToken.tokenHash, hashLinkToken(o.purpose, o.token)), eq(parentSigninToken.purpose, o.purpose)));
     if (!named) return { ok: false as const, reason: "unknown" as const, who: null };
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, named.parentId)).for("update");
-    const verdict = await linkVerdict(o.purpose, o.token, { now: o.now, tx, lock: true });
+    const now = o.now ?? new Date();
+    const verdict = await linkVerdict(o.purpose, o.token, { now, tx, lock: true });
     if (!verdict.ok) return { ok: false as const, reason: verdict.reason, who: verdict.who };
     const link = verdict.link;
     const reset = o.purpose === "reset";
 
     const codesDeleted = reset ? await deleteUnusedSigninCodes(link.parentId, tx) : 0;
-    await tx.update(parentSigninToken).set({ usedAt: o.now }).where(eq(parentSigninToken.id, link.tokenId));
+    await tx.update(parentSigninToken).set({ usedAt: now }).where(eq(parentSigninToken.id, link.tokenId));
     const [had] = await tx.select({ id: parentAuthAccount.id }).from(parentAuthAccount)
       .where(and(eq(parentAuthAccount.userId, link.authUserId), eq(parentAuthAccount.providerId, "credential"))).for("update");
     if (had) {
-      await tx.update(parentAuthAccount).set({ password: o.hash, updatedAt: o.now }).where(eq(parentAuthAccount.id, had.id));
+      await tx.update(parentAuthAccount).set({ password: o.hash, updatedAt: now }).where(eq(parentAuthAccount.id, had.id));
     } else {
       // As Better Auth's own sign-up links a credential account: the account id is the user's own id.
       await tx.insert(parentAuthAccount).values({ id: randomUUID(), accountId: link.authUserId, providerId: "credential", userId: link.authUserId,
-        password: o.hash, createdAt: o.now, updatedAt: o.now });
+        password: o.hash, createdAt: now, updatedAt: now });
     }
     const devicesForgotten = reset ? await forgetDevices(link.parentId, tx) : 0;
     const sessionsEnded = reset ? await endParentSessions(link.parentId, tx) : 0;
