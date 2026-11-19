@@ -1,10 +1,11 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { parent, parentEmailChange } from "@/lib/db/schema";
+import { parent, parentAuthUser, parentEmailChange } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getParentSettings } from "./settings";
 import { endParentSessions, deleteUnusedSigninCodes, enterableGuardianRows } from "./sessions";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
+import { personName } from "./guardians";
 
 export type StaffOp = { actor: Actor; ip: string | null; permission?: string };
 
@@ -45,6 +46,26 @@ export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok:
     await tx.update(parent).set({ blocked: false, blockedAt: null, blockedBy: null, blockedReason: null, ...(owed ? { welcomeOwed: true } : {}), updatedAt: new Date() }).where(eq(parent.id, p.id));
     await writeAudit({ actor: o.actor, action: "parent.unblock", permission: o.permission, targetType: "parent", targetId: p.id,
       before: { blocked: p.blocked, reason: p.blockedReason }, after: { blocked: false, ...(owed ? { welcomeOwed: true } : {}) }, ip: o.ip }, tx);
+    return { ok: true as const, changed: true };
+  });
+}
+
+/**
+ * Changes a person's name, in the app only (stage 3's slice 7b; sending it on to a Parent customer in QuickBooks is the
+ * source move's): `parent.name` and the sign-in account's name, which mirrors it, in one transaction under the person's
+ * row, audited `parent.name.changed` with before and after. The same name, once tidied, changes and records nothing.
+ */
+export async function renamePerson(parentId: string, rawName: string, o: StaffOp): Promise<{ ok: true; changed: boolean } | { ok: false; reason: "not_found" | "invalid" }> {
+  const name = personName(rawName);
+  if (name === null) return { ok: false, reason: "invalid" };
+  return db.transaction(async (tx) => {
+    const [p] = await tx.select().from(parent).where(eq(parent.id, parentId)).for("update");
+    if (!p) return { ok: false as const, reason: "not_found" as const };
+    if (p.name === name) return { ok: true as const, changed: false };
+    await tx.update(parent).set({ name, updatedAt: new Date() }).where(eq(parent.id, p.id));
+    await tx.update(parentAuthUser).set({ name, updatedAt: new Date() }).where(eq(parentAuthUser.parentId, p.id));
+    await writeAudit({ actor: o.actor, action: "parent.name.changed", permission: o.permission, targetType: "parent", targetId: p.id,
+      before: { name: p.name }, after: { name }, ip: o.ip }, tx);
     return { ok: true as const, changed: true };
   });
 }

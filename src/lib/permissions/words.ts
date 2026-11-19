@@ -20,7 +20,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Roster.Read": "See the roster: families, students and parents",
   "Roster.Family.ReadWrite": "Add, rename, move and make inactive families, students and parents in QuickBooks",
   "Settings.Parents.ReadWrite": "Switch parent sign-ins and welcome emails on or off",
-  "Parents.ReadWrite": "See every parent, block or unblock a parent, and resend a welcome email",
+  "Parents.ReadWrite": "See every parent, add or remove a family's guardians, change a parent's name, block or unblock a parent, and resend a welcome email",
   "Season.Steps.Read": "See the seasons, their steps and requirements",
   "Season.Steps.ReadWrite": "Set seasons up: steps, requirements and the current season",
   "Season.Progress.Read": "See which families have met each requirement",

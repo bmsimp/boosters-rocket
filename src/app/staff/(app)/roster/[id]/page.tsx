@@ -11,6 +11,9 @@ import { familyCover, versionsOf } from "@/lib/roster/writes";
 import { loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familySignins, type FamilySignin } from "@/lib/parents/directory";
+import { AddGuardianForm } from "@/app/staff/(app)/parents/forms";
+import { GuardianChange } from "@/app/staff/(app)/parents/guardian-change";
+import { addGuardianAction } from "@/app/staff/(app)/parents/actions";
 import { DisconnectedNotice, Freshness } from "../freshness";
 import { FamilyChanges, MemberChanges, Waiting, WhatChanges } from "../changes";
 import type { Cust, Family } from "@/lib/roster/model";
@@ -49,18 +52,34 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
   );
 }
 
-/** `detailed` is for staff with `Parents.ReadWrite`: only they get links to people. */
-function SignIns({ signins, detailed }: { signins: FamilySignin[]; detailed: boolean }) {
+/**
+ * `detailed` is for staff with `Parents.ReadWrite`: only they get links to people, and the ways to remove, reinstate
+ * and add a guardian (stage 3's slice 7b, in the portal only). `addable` says why a guardian can't be added now, or null
+ * when one can: the action checks it again, under the roster lock.
+ */
+function SignIns({ familyId, signins, detailed, addable }: { familyId: AppFamilyId; signins: FamilySignin[]; detailed: boolean; addable: string | null }) {
+  const columns: Column<FamilySignin>[] = [
+    { key: "name", header: "Person", rowHeader: true, cell: (s) => (detailed ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
+    { key: "email", header: "Email", cell: (s) => s.email },
+    { key: "words", header: "Sign-in", cell: (s) => s.words },
+    ...(detailed ? [{ key: "change", header: "Change", quiet: true, cell: (s: FamilySignin) => <GuardianChange name={s.name} guardianId={s.guardianId} open={s.open} reinstatable={s.reinstatable} /> }] : []),
+  ];
   return (
     <section className="box" aria-labelledby="entry-signins-h"><h2 id="entry-signins-h">Portal sign-ins</h2>
       <p>The family&apos;s guardians in the portal, and whether each can sign in.</p>
       {signins.length === 0 ? <Notice tone="info" live="none">Nobody can sign in for it yet.</Notice> : (
-        <DataTable caption="Each person, and whether they can sign in" captionHidden rows={signins}
-          rowKey={(s) => s.guardianId} columns={[
-            { key: "name", header: "Person", rowHeader: true, cell: (s) => (detailed ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
-            { key: "email", header: "Email", cell: (s) => s.email },
-            { key: "words", header: "Sign-in", cell: (s) => s.words },
-          ]} />
+        <DataTable caption="Each person, and whether they can sign in" captionHidden rows={signins} rowKey={(s) => s.guardianId} columns={columns} />
+      )}
+      {detailed && (
+        <>
+          <h3>Add a guardian</h3>
+          {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
+            <>
+              <p>They sign in with this address and a code. Someone who already signs in with it for another family is the same person: they are added here too, under the name they have.</p>
+              <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
+            </>
+          )}
+        </>
       )}
     </section>
   );
@@ -137,7 +156,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} families={families} edit={edit} cover={cover} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
-      <SignIns signins={signins} detailed={detailed} />
+      <SignIns familyId={familyId} signins={signins} detailed={detailed}
+        addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it." : customer === null ? "This family has no customer in QuickBooks linked to it, so a guardian can't be added to it yet." : null} />
       <Freshness page={page} admin={admin} />
     </main>
   );

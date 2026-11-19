@@ -52,7 +52,14 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   only then, in a savepoint, the roster lock and the app's records;
  * - requestMyEmailChange() takes the row FOR UPDATE, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
- *   sessions;
+ *   sessions; renamePerson() (people.ts) takes the row FOR UPDATE and touches nothing that hangs on it;
+ * - the staff writes of guardians.ts take the roster lock shared and then the parents' settings lock shared, before
+ *   anything of a person's (advisory locks no change of a person's takes after the person's row, but the email
+ *   confirm's roster step, which waits at most three seconds and then gives up its cache step: so a staff write that
+ *   holds the roster lock while it waits for that person's row is never a deadlock). Then addGuardian() takes the
+ *   address lock, then the row FOR UPDATE (or makes the person), then the person's guardian row in the family FOR
+ *   UPDATE; removeGuardian() and reinstateGuardian() take the row FOR UPDATE, then the guardian row FOR UPDATE, and
+ *   removeGuardian() then ends sessions through closeMembership() (membership.ts: the guardian row, then the sessions);
  * - setSignins(false) (switches.ts) takes FOR UPDATE, in id order, the row of every person it will touch (an owed
  *   welcome, an unused code, a session), then clears the owed welcomes, then deletes the unused codes, then the
  *   sessions; setWelcome() takes the rows whose welcome it changes the same way before it changes them;

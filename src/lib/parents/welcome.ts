@@ -36,7 +36,8 @@ async function claim(id: string, now: Date, counts: SQL): Promise<boolean> {
 const welcomesOn = async () => { const s = await getParentSettings(); return s.welcome && s.signin; };
 
 /**
- * Sends welcomes the switches or an unblock marked as owed (spec §2 Welcome emails). Called on every wake of the
+ * Sends welcomes the switches, an unblock, or a staff add or reinstate of a guardian (./guardians.ts, which owes one
+ * whether or not the row counts yet) marked as owed (spec §2 Welcome emails). Called on every wake of the
  * worker: at most five a wake, so a whole roster goes out over some minutes, not in one burst from the club's mailbox.
  * Each person is claimed before their email goes, so two overlapping runs never welcome the same person twice. A
  * person owed a welcome with no guardian row that counts (the gate's rule, enterableGuardianRows()) is skipped and

@@ -37,3 +37,38 @@ export function OneButton({ label, pendingLabel, act }: { label: string; pending
     </form>
   );
 }
+
+/**
+ * Add a guardian to a family: a name and an email address, sent to the action as typed (the server checks both). After
+ * an add the fields are emptied, so a second guardian can be typed in; after a refusal they stay as they were.
+ */
+export function AddGuardianForm({ act }: { act: (name: string, email: string) => Promise<Done> }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [state, run, pending] = useActionState(async () => {
+    const r = await safely(() => act(name, email), failed);
+    if (r.ok) { setName(""); setEmail(""); }
+    return r;
+  }, null);
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      <label className="field"><span>Name</span><input type="text" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <label className="field"><span>Email address they sign in with</span><input type="email" maxLength={320} autoComplete="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+      <Outcome state={state} />
+      <button type="button" className="btn" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Adding…" : "Add guardian"}</button>
+    </form>
+  );
+}
+
+/** A person's name, changed in the portal: the field starts from the name they have. */
+export function NameForm({ name: current, act }: { name: string; act: (name: string) => Promise<Done> }) {
+  const [name, setName] = useState(current);
+  const [state, run, pending] = useActionState(async () => safely(() => act(name), failed), null);
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      <label className="field"><span>Name</span><input type="text" maxLength={100} autoComplete="off" value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <Outcome state={state} />
+      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Saving…" : "Save name"}</button>
+    </form>
+  );
+}
