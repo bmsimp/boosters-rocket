@@ -1,11 +1,11 @@
 // What a buy-out does when staff move a student to another family in the portal (afterStudentMoved() in
 // src/lib/roster/writes.ts). A per-student buy-out was the old family's choice, billed to the student's own customer:
-// the new family must never be billed for it. A move made in QuickBooks and read by a refresh is not seen here: the
-// daily check (./daily-check.ts) finds the invoice's customer no longer the family's and puts its void on the queue
-// the same way; a refresh itself voids nothing (it runs a QuickBooks move's forms and volunteer follow-ups only,
-// src/lib/roster/refresh.ts). The roster names the move by QuickBooks ids; buy-outs name the app's own family and
-// student (stage 2 of the app-owned families spec), so the move is turned into those records here, through their links
-// in the records' company, as volunteerForMovedStudent() does: a boundary AGENTS.md lists, until stage 3.
+// the new family must never be billed for it. A move made in QuickBooks is not followed (stage 3's slice 9c): neither a
+// refresh nor the daily check (./daily-check.ts) voids anything for it (the check flags it once, for Reconciliation);
+// the student stays where the app has them, and stage 4 shows the move as a difference. The staff move names the move by QuickBooks ids; buy-outs name the app's own
+// family and student (stage 2 of the app-owned families spec), so the move is turned into those records here, through
+// their links in the records' company, as volunteerForMovedStudent() does: a boundary AGENTS.md lists, until the order
+// of a staff write flips (stage 3's slice 9e).
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";

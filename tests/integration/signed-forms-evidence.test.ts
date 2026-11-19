@@ -8,14 +8,15 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 } }));
 
 import { createHash } from "node:crypto";
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, guardian, parent, qboConnection, requirement, setting, signedFormCopy, signedFormEvidence, signedFormFile, signatureRequest } from "@/lib/db/schema";
 import { EVIDENCE_PER_WAKE, evidenceHealth, runEvidenceJob, storeEvidence } from "@/lib/signed-forms/evidence-job";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { healthReport } from "@/lib/health/report";
 import { SOURCE_KEY } from "@/lib/roster/source";
-import { resetDb, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { startDocumensoStub, type DocumensoStub } from "../helpers/documenso-stub";
 import { connectForms, formSetting, requestNow, seedConsent, seedFormRequirement, signedInStub } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, type SeededParent } from "../helpers/parent";
@@ -214,8 +215,8 @@ describe("evidence of a family or student with no QuickBooks link, and the one s
     const familyForm = await seedFormRequirement({ stepId: r!.stepId, title: "Code of conduct", appliesTo: "family", form: formSetting({ id: templateId }), position: 2 });
     return signedInStub(stub, { requirementId: familyForm, templateId, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.family.qboId, guardians: [guardianOf(a)] });
   };
-  // Made by hand: until the source move (stage 3, S9) the keep-in-step makes a record with no link inactive, so
-  // syncAppRecords() is never called after; the records are read before their links go.
+  // Made by hand: the import (syncAppRecords(), which nothing in the portal runs since stage 3's slice 9c) would make a
+  // record with no link inactive, so it is never called after; the records are read before their links go.
   const unlinkFamily = async (familyId: AppFamilyId) => { await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId)); };
   const unlinkStudent = async (studentId: AppStudentId) => { await db.delete(accountingLink).where(eq(accountingLink.studentId, studentId)); };
 
@@ -237,6 +238,31 @@ describe("evidence of a family or student with no QuickBooks link, and the one s
     const line = (await healthReport()).find((l) => l.key === "forms")!;
     expect(line.notes.join(" ")).not.toContain("can't be filed");
     expect(line.says).not.toContain("can't be filed");
+  });
+
+  it("keeps the link a staff write makes while the store waits for the roster lock: read under the lock, never missed", async () => {
+    const familyId = await familyRecord(FAMILY_A.family.qboId);
+    const { id } = await signedFamilyFormForA();
+    await unlinkFamily(familyId);
+    // A link write, as "Create in QuickBooks and link" makes one (stage 3's slice 9d): under the roster lock held
+    // exclusively. The store waits for it, then reads the link in its own transaction.
+    let commit!: () => void, locked!: () => void;
+    const held = new Promise<void>((resolve) => { commit = resolve; });
+    const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
+    const linking = db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+      locked();
+      await tx.insert(accountingLink).values({ system: "quickbooks", realmId: REALM, customerId: FAMILY_A.family.qboId, familyId, origin: "created" });
+      await held;
+    });
+    // The link's writer holds the lock before the store starts, so the lock the store waits for is that one.
+    await lockTaken;
+    const storing = runEvidenceJob();
+    await untilALockIsAwaited();
+    commit();
+    await linking;
+    expect(await storing).toMatchObject({ stored: 1, failed: 0 });
+    expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ requestId: id, realmId: REALM, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.family.qboId, familyId });
   });
 
   it("never fills in a kept copy when a link is made afterwards: the first copy stands", async () => {

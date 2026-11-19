@@ -26,7 +26,6 @@ import { takeEmailIntoCache } from "@/lib/roster/cache-email";
 import { fieldHasChange, fieldSignsIn, replaceAddressInField } from "./email-field";
 import { loadMyRecord, loadMyRecordForMyEmailChange, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
-import { appRecordsAudit, noAppRecordChanges } from "@/lib/families/changes";
 import { askForRosterRefresh } from "./refresh-ask";
 import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
@@ -251,9 +250,9 @@ class NotThisCompany extends Error {}
  * gives (lockedPerson()): both address locks, then the person's row, then the request is spent and their own address
  * changes (`parent.email` and their sign-in account's), then their other links go, then their unused sign-in codes,
  * then their sessions end, so the old address signs in nowhere from that moment. Only then, in a savepoint, the roster
- * lock (waiting a few seconds at most): the roster cache takes QuickBooks' answer and the app's own records are brought
- * into step, or, when the lock isn't free, the cache is left alone and the worker is asked to read the roster at its
- * next wake; the person's change stands either way. The change is audited with the address before and after. Nothing
+ * lock (waiting a few seconds at most): the roster cache takes QuickBooks' answer (and nothing else: the app's own
+ * records stand alone since stage 3's slice 9c), or, when the lock isn't free, the cache is left alone and the worker
+ * is asked to read the roster at its next wake; the person's change stands either way. The change is audited with the address before and after. Nothing
  * here opens, moves or closes a guardian row: the person keeps the families they had. Should another person have come
  * to hold the new address since the check above (two links to one address confirmed at once), the person keeps
  * theirs, the audit row says QuickBooks holds the new one, and the parent is told to ask the club: nothing is promised,
@@ -402,11 +401,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     // the cache is the company the change was written to (after a change of company the id names another customer).
     // QuickBooks holds the new address either way, so the cache takes it either way.
     let portal = "refresh_asked", code: string | null = answer ? null : "answer_unread";
-    let appRecords = noAppRecordChanges();
     if (answer) {
       const took = answer;
       try {
-        appRecords = await tx.transaction(async (sp) => {
+        await tx.transaction(async (sp) => {
           await sp.execute(sql.raw(`set local lock_timeout = '${lockWait}ms'`));
           await sp.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
           await sp.execute(sql`set local lock_timeout to default`);
@@ -420,8 +418,8 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     }
     if (portal !== "cached") await askForRosterRefresh(tx);
     await audit(tx, taken
-      ? { field: answer?.field ?? null, portal, ...(code ? { code } : {}), app: "address_taken", quickbooks: "holds_new_address", ...appRecordsAudit(appRecords) }
-      : { field: answer?.field ?? null, portal, ...(code ? { code } : {}), app: "changed", sessionsEnded, linksDeleted, devicesForgotten, ...appRecordsAudit(appRecords) });
+      ? { field: answer?.field ?? null, portal, ...(code ? { code } : {}), app: "address_taken", quickbooks: "holds_new_address" }
+      : { field: answer?.field ?? null, portal, ...(code ? { code } : {}), app: "changed", sessionsEnded, linksDeleted, devicesForgotten });
     return taken ? "taken" : "changed";
   });
 

@@ -230,7 +230,7 @@ describe("the Payments page", () => {
     const r = await seedSignedInParent(RIVERA);
     await seedFamilyMoney({ ...RIVERA, invoices: [{ number: "INV-OTHER-COMPANY", cents: 4242, payLink: "https://connect.intuit.com/t/other-company" }] });
     // QuickBooks is disconnected, and the roster cache says it came from another company than the stored figures. The
-    // roster read of that company brings the app's records into step with it, so the family has a record linked there,
+    // records imported from that company (as a stage 4 import would) give the family a record linked there,
     // and the row is that record's: the page finds the row, and only the company it names keeps it off the page.
     await db.transaction((tx) => setRosterSource(tx, "2222"));
     await syncAppRecords();

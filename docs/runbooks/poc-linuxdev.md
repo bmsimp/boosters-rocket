@@ -353,11 +353,13 @@ something QuickBooks held (an address under two families, an inactive record) st
 3. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
 
 The testers an earlier version seeded by hand on `POC-FAMILY-1` and `POC-FAMILY-2` (a script since removed) were
-never QuickBooks customers: a roster read gives their family a record of the portal's own, held as inactive, so they
-can't sign in. Add the testers again as above. Before deploying an update, read the roster (**Refresh now** on the
-staff roster page; reconnect QuickBooks first if it is disconnected): an update that finds an open guardian row with
-no family record, in a portal whose roster names a company, stops and changes nothing ("Migration 0037 stopped").
-Read the roster, then deploy again.
+never QuickBooks customers: a roster read by a version from before stage 3's slice 9c gives their family a record of
+the portal's own, held as inactive, so they can't sign in. Add the testers again as above. Before deploying an update
+that brings migration 0037, read the roster with the version the host runs now (**Refresh now** on the staff roster
+page; reconnect QuickBooks first if it is disconnected): that version's read still gives every open guardian row its
+family record, and an update that finds an open row with none, in a portal whose roster names a company, stops and
+changes nothing ("Migration 0037 stopped"). Read the roster, then deploy again. From stage 3's slice 9c on, a roster
+read gives no row a family and changes no record: a tester added on a family's page has their family from the start.
 
 Adding a guardian sends no welcome email unless welcome emails are on; otherwise tell the parent to go to `/sign-in`
 and ask for a code. Like every guardian's, the sign-in lets the tester in only while parent sign-ins are on, and
@@ -646,7 +648,7 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | The roster refresh fails with "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)" | A connection to another company was stored before the portal refused it | **Disconnect**, then connect the first company again |
 | The staff home says "QuickBooks needs attention" with "The roster hasn't been refreshed from QuickBooks in more than 2 days." | The worker isn't running | `docker ps`, then `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker` |
 | The staff home says "The QuickBooks connection couldn't be refreshed: Intuit no longer accepts this connection. Connect QuickBooks again." | The connection lapsed or was revoked at Intuit | Go through step 2 of the QuickBooks steps again |
-| The staff home says "The last roster refresh failed: The portal's own family and student records couldn't be brought up to date, so the roster was left as it was. (app_records_failed)" (the roster pages say the same after "The latest try failed:"; an older version said "The parent sign-ins couldn't be brought up to date ... (reconcile_failed)", which can't happen any more) | The step that keeps the portal's family records in step failed inside the refresh | The roster and the family records are as they were before the refresh, and nobody's sign-in changed. Read `docker logs booster-rocket-app` for a line like `[roster] app records failed { name: 'DrizzleQueryError', code: '23505', constraint: '...' }` (the error's class name, the database's SQLSTATE code and the constraint; never the message or an address) and report it |
+| The staff home says "The last roster refresh failed: The portal's own family and student records couldn't be brought up to date, so the roster was left as it was. (app_records_failed)" (or, older still, "The parent sign-ins couldn't be brought up to date ... (reconcile_failed)") | A version from before stage 3's slice 9c, whose refresh still kept the portal's family records in step, failed in that step | Neither can happen from slice 9c on: a refresh stores the customer list and changes no record or sign-in. Deploy the update; on an older version, read `docker logs booster-rocket-app` for a line like `[roster] app records failed { name: 'DrizzleQueryError', code: '23505', constraint: '...' }` (the error's class name, the database's SQLSTATE code and the constraint; never the message or an address) and report it |
 | `/sign-in` says "Parent sign-in isn't available yet." after parent sign-ins were switched off | Sign-ins are off, so nobody can sign in (the audit shows `signin.code_refused`, reason `signins_off`) | **Parent sign-ins** in the staff menu, **Change**, step 1: **Switch parent sign-ins on**. Welcome emails went off with them; switch them on again in step 2 if wanted |
 | `docker logs booster-rocket-worker` says "couldn't reach the app: HTTP 404" | The worker and the app have different `BETTER_AUTH_SECRET` values | Both read `.env.poc`: recreate both |
 | Only if Access is set up: Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 7 B steps 1-3; check spam |

@@ -9,19 +9,24 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, familyMoney, guardian, qboCustomer, student, writeQueue } from "@/lib/db/schema";
+import { auditLog, family, familyMoney, guardian, qboConnection, qboCustomer, student, writeQueue } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { NOT_HERE } from "@/lib/roster/operations";
-import { addToFamilyAction, createAction, deactivateAction, familyInactiveAction, giveUpAction, moveAction, renameAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
+import { MAKING_LOCK } from "@/lib/roster/writes";
+import { TRY_AGAIN_NEEDS_LINKING } from "@/lib/roster/queue";
+import { addGuardianAction, reinstateGuardianAction, removeGuardianAction } from "@/app/staff/(app)/parents/actions";
+import { addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction, renameAction,
+  renameHereAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
 import { resetDb } from "../helpers/db";
 import { seedSignedInParent } from "../helpers/parent";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
-import { connectRoster, REALM, seedQueued, staffWith } from "../helpers/roster-writes";
+import { connectRoster, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
+import { refreshRoster } from "@/lib/roster/refresh";
 import { rowNamed } from "../helpers/table";
 import { recordOfCustomer } from "../helpers/app-records";
 
@@ -136,8 +141,24 @@ describe("making a family inactive from its page: one action, the amount of a ba
     expect(await familyInactiveAction(tag, "10", RIVERA_SHOWN)).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." });
     expect(revalidatedPaths()).toContain("/");
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
-    expect(html).toContain("It is inactive in QuickBooks");
+    expect(html).toContain("A family the portal keeps, linked to its customer in QuickBooks, which is inactive there.");
+    // The family's own record is inactive in the portal now: no form that would send anything for it is offered.
     expect(html).not.toContain("Make Rivera Family inactive");
+    for (const words of ["Change in QuickBooks", "Change the family Rivera Family", "Change the student Leo Rivera", "Change the parent Ana Rivera", "Add a student"]) expect(html).not.toContain(words);
+  });
+
+  it("a family QuickBooks made inactive itself is offered the action, which sends nothing and makes its own record inactive", async () => {
+    for (const id of ["11", "12", "10"]) Object.assign(stub.customers.find((c) => c.Id === id)!, { Active: false, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    expect(html).toContain("Make Rivera Family inactive");
+    expect(html).toContain("QuickBooks has Rivera Family inactive already");
+    stub.calls.length = 0;
+    expect(await familyInactiveAction(tag, "10", [["10", "1"]])).toMatchObject({ ok: true, message: expect.stringContaining("Rivera Family is inactive in QuickBooks already, so nothing was sent.") });
+    expect(posts()).toEqual([]);
+    expect((await db.select().from(family).where(eq(family.id, await recordOfCustomer("10", "family"))))[0]).toMatchObject({ active: false });
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Make Rivera Family inactive");
   });
 
   it("a stop part way is made again on the pages too, so the list shown next is whoever is still active", async () => {
@@ -148,6 +169,55 @@ describe("making a family inactive from its page: one action, the amount of a ba
     expect(revalidatedPaths()).toContain("/");
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     expect(html).toContain("Make Rivera Family inactive");
+  });
+});
+
+describe("a family's page brings the portal's own records into line with what QuickBooks has, sending nothing", () => {
+  beforeEach(async () => { asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"])); });
+
+  it("a student QuickBooks has inactive while their record is active: making them inactive in the portal is offered", async () => {
+    Object.assign(stub.customers.find((c) => c.Id === "12")!, { Active: false, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    expect(html).toContain("Make Leo Rivera inactive in the portal");
+    expect(await deactivateAction(tag, "12", "1")).toMatchObject({ ok: true });
+    expect(posts()).toEqual([]);
+    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ active: false });
+    // Once the record is inactive too, nothing that would send is offered for them.
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Change the student Leo Rivera");
+  });
+
+  it("a student QuickBooks has under another family: said so, and the move there is offered, which sends nothing", async () => {
+    Object.assign(stub.customers.find((c) => c.Id === "12")!, { ParentRef: { value: "20" }, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    const students = html.slice(html.indexOf('id="entry-students-h"'), html.indexOf('id="entry-parents-h"'));
+    expect(rowNamed(students, "Leo Rivera")).toEqual(["Leo Rivera", "Under Chen Family in QuickBooks"]);
+    expect(html).toContain("Change the student Leo Rivera");
+    expect(html).toContain("QuickBooks has Leo Rivera under Chen Family, but the portal still holds them in this family.");
+    expect(await moveAction(tag, "12", "1", "20")).toMatchObject({ ok: true });
+    expect(posts()).toEqual([]);
+    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ familyId: await recordOfCustomer("20", "family") });
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Change the student Leo Rivera");
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("20") } })).toContain("Change the student Leo Rivera");
+  });
+
+  it("a student QuickBooks has under a family that isn't the app's: said so, and only moves to the app's own families are offered, which are sent", async () => {
+    // A family made in QuickBooks alone has no record since slice 9c.
+    stub.customers.push({ Id: "70", DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
+    Object.assign(stub.customers.find((c) => c.Id === "12")!, { ParentRef: { value: "70" }, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    const changes = html.slice(html.indexOf("Change the student Leo Rivera"));
+    expect(changes).toContain("QuickBooks has Leo Rivera under Okafor Family, which isn&#x27;t one of the portal&#x27;s own active families");
+    expect(html).not.toContain("but the portal still holds them in this family");
+    const moveTo = changes.slice(0, changes.indexOf("</select>"));
+    expect(moveTo).toContain('<option value="10">Rivera Family</option>');
+    expect(moveTo).toContain('<option value="20">Chen Family</option>');
+    expect(moveTo).not.toContain('value="70"');
+    expect(await moveAction(tag, "12", "1", "10")).toMatchObject({ ok: true });
+    expect(posts().length).toBe(1);
+    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ familyId: await recordOfCustomer("10", "family") });
   });
 });
 
@@ -162,21 +232,61 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     expect(html).toContain(NOT_HERE.contact);
   });
 
-  it("offers a Parent sub-customer its changes with no sign-in behind it, and a family with no QuickBooks customer no form", async () => {
+  it("offers a Parent sub-customer its changes with no sign-in behind it, and a family with no QuickBooks customer the portal's own changes alone (stage 3's slice 9d)", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     // Sign-ins are off, so nobody has one: the parents are QuickBooks' own customers, listed and changed as before.
     expect(await db.select().from(guardian)).toEqual([]);
     const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     for (const words of ["Ana Rivera", "ana@example.com", "Change the parent Ana Rivera"]) expect(rivera, words).toContain(words);
-    // A family made in the portal with no customer (none can be until families are made there): listed, opened, and
-    // offered no form, since every form sends QuickBooks ids.
+    // A linked family is offered no portal-only change, nor "Create in QuickBooks and link".
+    for (const words of ["Change in the portal", "Create in QuickBooks and link"]) expect(rivera, words).not.toContain(words);
+    // A family made in the portal with no customer: listed as not linked, opened, and offered the portal's own changes
+    // (no form that sends QuickBooks ids), its guardians' box, and the way to QuickBooks for whoever may link.
     const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
     await db.insert(student).values({ name: "Hal Handmade", active: true, familyId: hand!.id });
-    expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "1", "0", "No customer"]);
+    expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "1", "0", "Not linked: in the portal only"]);
     const html = await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } });
-    expect(html).toContain("A family the portal keeps, with no customer in QuickBooks.");
+    expect(html).toContain("A family the portal keeps, not linked to QuickBooks: it is in the portal only, and a change to it is saved here only.");
     expect(html).toContain("Hal Handmade");
-    for (const words of ["Change in QuickBooks", "Add a student", "Add a parent", "Make Handmade Family inactive"]) expect(html, words).not.toContain(words);
+    const portal = html.slice(html.indexOf('id="portal-changes-h"'), html.indexOf("</section>", html.indexOf('id="portal-changes-h"')));
+    for (const words of ["Change the family Handmade Family", "Add a student", "Change the student Hal Handmade"]) expect(portal, words).toContain(words);
+    for (const words of ["Change in QuickBooks", "Add a parent"]) expect(html, words).not.toContain(words);
+    expect(html).toContain("Add a guardian");
+    // Without the linking permission, "Create in QuickBooks and link" says who may press it, and offers no button.
+    const link = html.slice(html.indexOf('id="create-link-h"'), html.indexOf("</section>", html.indexOf('id="create-link-h"')));
+    expect(link).toContain("Someone who may link families to accounting can make it in QuickBooks and link it.");
+    expect(link).not.toContain("<button");
+    expect(posts()).toEqual([]);
+  });
+
+  it("shows the button \"Create in QuickBooks and link\" only to staff who may change families and link them; the action checks both", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    const button = (html: string) => html.slice(html.indexOf('id="create-link-h"'), html.indexOf("</section>", html.indexOf('id="create-link-h"'))).includes("Create in QuickBooks and link</button>");
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
+    expect(button(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } }))).toBe(true);
+    // The linking permission alone: the page offers no changes at all, and the action refuses it.
+    asStaff(await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
+    const linkerPage = await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } });
+    expect(linkerPage).not.toContain('id="create-link-h"');
+    await expect(createAndLinkAction(tag, String(hand!.id))).rejects.toBeInstanceOf(AccessDenied);
+    // Changing families alone: the action refuses it as not from the page.
+    asStaff(await staffWith("writer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(await createAndLinkAction(tag, String(hand!.id))).toEqual(NOT_FROM_PAGE);
+    expect(await createAndLinkAction(tag, "not-a-uuid")).toEqual(NOT_FROM_PAGE);
+    expect(posts()).toEqual([]);
+  });
+
+  it("the portal's own changes refuse what no page sends, and need Roster.Read beside Roster.Family.ReadWrite", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    asStaff(await staffWith("writer@club.org", ["Roster.Family.ReadWrite"]));
+    expect(await renameHereAction(tag, "family", String(hand!.id), "Hand Family")).toEqual(NOT_FROM_PAGE);
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    for (const act of [() => renameHereAction(tag, "family", "10", "Hand Family"), () => renameHereAction(tag, "parent" as "family", String(hand!.id), "Hand Family"),
+      () => addStudentHereAction(tag, String(hand!.id), 7 as unknown as string), () => deactivateHereAction(tag, "student", "x".repeat(36))]) {
+      expect(await act()).toEqual(NOT_FROM_PAGE);
+    }
+    expect(await renameHereAction(tag, "family", String(hand!.id), "Hand Family")).toEqual({ ok: true, message: "Renamed Hand Family in the portal." });
+    expect(revalidatedPaths()).toContain("/");
     expect(posts()).toEqual([]);
   });
 
@@ -222,7 +332,8 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
   it("a flat club makes a member, of the kind staff choose when there are several, and renames or makes one inactive", async () => {
     await resetDb(); stub.reset();
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2", "3"] } });
-    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    // The kind is asked only of staff whose new member is made in QuickBooks too: they may link families to accounting.
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
     const list = await renderPage(RosterPage);
     expect(list).toContain("Make a member");
     expect(list).toContain("<option value=\"2\">Parent</option>");
@@ -349,5 +460,112 @@ describe("the Reconciliation page (Roster.Read)", () => {
     expect(rowNamed(html, "Leo Rivera")).toEqual([expect.any(String), "Leo Rivera", "$50.00", "$0.00", expect.stringMatching(/UTC$/)]);
     expect(html).toContain(`href="/staff/balances/${await idOf("10")}"`);
     expect(html).not.toContain('href="/staff/balances/10"');
+  });
+});
+
+/* ---- Families by hand on the pages (stage 3's slice 9d) ---- */
+
+/** A family's own create, as addFamily() files it under the record saved first. */
+const HAND_CREATE = { op: "create" as const, role: "family" as const, name: "Handmade Family", typeQboId: "1", familyQboId: null, email: null };
+/** One section of a page, from its heading to the end of its section. */
+const sectionOf = (html: string, id: string) => { const at = html.indexOf(`id="${id}"`); return at < 0 ? "" : html.slice(at, html.indexOf("</section>", at)); };
+const escaped = (words: string) => words.replaceAll("'", "&#x27;");
+
+describe("a family with no link on the pages", () => {
+  it("is offered no link to what it owes or to its buy-outs, whose pages stand for no such family; a linked family is", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Finance.Balance.Read", "Season.Progress.Read", "Volunteer.Credit.ReadWrite"]));
+    const elsewhere = sectionOf(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } }), "entry-elsewhere-h");
+    expect(elsewhere).toContain("Where it stands this season");
+    for (const words of ["What it owes", "Its volunteer buy-outs"]) expect(elsewhere, words).not.toContain(words);
+    const rivera = sectionOf(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } }), "entry-elsewhere-h");
+    for (const words of ["What it owes", "Its volunteer buy-outs"]) expect(rivera, words).toContain(words);
+  });
+
+  it("whose own create waits: listed and described as being made, on Reconciliation in words with its page linked, and tried again only by someone who may link", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    await seedQueued(HAND_CREATE, { familyId: hand!.id, state: "stuck", code: "customer_has_family", sent: true, nextTryAt: null });
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "0", "0", "Not linked yet: being made in QuickBooks"]);
+    expect(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } })).toContain("A family the portal keeps, not linked to QuickBooks yet: its customer is being made there.");
+    const writes = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(writes).toContain("another family in the portal is linked to it already, so this family was left unlinked and nothing will be sent again");
+    expect(writes).toContain("(customer_has_family)");
+    expect(writes).toContain(`href="/staff/roster/${hand!.id}"`);
+    expect(writes).toContain(escaped(TRY_AGAIN_NEEDS_LINKING));
+    expect(writes).not.toContain("Try again now");
+    expect(writes).toContain("Give up");
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
+    const linking = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(linking).toContain("Try again now");
+    expect(linking).not.toContain(escaped(TRY_AGAIN_NEEDS_LINKING));
+  });
+
+  it("a student whose own create waits on the queue is offered no change on the family's page", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    const [hal, ivy] = await db.insert(student).values([{ name: "Hal Handmade", active: true, familyId: hand!.id }, { name: "Ivy Handmade", active: true, familyId: hand!.id }]).returning();
+    await db.insert(writeQueue).values({ realmId: REALM, request: { op: "create", role: "student", name: "Hal Handmade", typeQboId: "3", familyQboId: "10", email: null },
+      familyId: hand!.id, studentId: hal!.id, sent: true, tries: 1, lastCode: "timeout", nextTryAt: new Date(), askedByLabel: "registrar@club.org" });
+    expect(ivy).toBeDefined();
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const portal = sectionOf(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } }), "portal-changes-h");
+    expect(portal).toContain("Change the student Ivy Handmade");
+    expect(portal).not.toContain("Change the student Hal Handmade");
+  });
+
+  it("a create given up that QuickBooks made anyway is said on Reconciliation, pointing at Customers with no family and the family saved first", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    stub.customers.push({ Id: "77", SyncToken: "0", DisplayName: "Handmade Family", Active: true, CustomerTypeRef: { value: "1" } });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    await seedQueued(HAND_CREATE, { familyId: hand!.id, state: "given_up", sent: true, nextTryAt: null, lastTriedAt: new Date(Date.now() - 3_600_000) });
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
+    const html = await renderPage(ReconciliationPage);
+    const made = sectionOf(html, "made-anyway-h");
+    expect(made).toContain("Made in QuickBooks after it was given up (1)");
+    expect(made).toContain("Handmade Family");
+    expect(made).toContain("Customers with no family");
+    expect(made).toContain(`href="/staff/roster/${hand!.id}"`);
+    // The customer is offered there, to bring in.
+    expect(sectionOf(html, "no-family-h")).toContain("Handmade Family");
+    // With nothing of the kind, the section isn't drawn.
+    await db.delete(writeQueue);
+    expect(await renderPage(ReconciliationPage)).not.toContain('id="made-anyway-h"');
+  });
+});
+
+describe("a guardian added or reinstated while the family's create waits, is being sent, or its link can't be told", () => {
+  it("is refused in the words of each, changing nothing", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    expect(await addGuardianAction(String(hand!.id), "Hal Hand", "hal@example.com")).toMatchObject({ ok: true });
+    const [row] = await db.select().from(guardian).where(eq(guardian.familyId, hand!.id));
+    expect(await removeGuardianAction(row!.id, "Moved away.")).toMatchObject({ ok: true });
+    const errorsOf = async (p: Promise<unknown>) => ((await p) as { errors?: string[] }).errors;
+    const both = async () => [await errorsOf(addGuardianAction(String(hand!.id), "Ivy Hand", "ivy@example.com")), await errorsOf(reinstateGuardianAction(row!.id))];
+    // Its own create waiting on the queue.
+    const item = await seedQueued(HAND_CREATE, { familyId: hand!.id });
+    expect(await both()).toEqual([[expect.stringContaining("still waiting on the queue, so nobody can be added to it for now")],
+      [expect.stringContaining("still waiting on the queue, so this sign-in can't be brought back for now")]]);
+    await db.delete(writeQueue).where(eq(writeQueue.id, item.id));
+    // Being sent at this moment: its "being made" lock held, as a send holds it.
+    await db.transaction(async (hold) => {
+      await hold.execute(sql`select pg_advisory_xact_lock(${sql.raw(String(MAKING_LOCK))}, hashtext(${String(hand!.id)}::text))`);
+      expect(await both()).toEqual([[expect.stringContaining("being made in QuickBooks at this moment, so nobody can be added to it")],
+        [expect.stringContaining("being made in QuickBooks at this moment, so this sign-in can't be brought back just now")]]);
+    });
+    // QuickBooks connected to another company: the portal can't tell the family's link.
+    await db.update(qboConnection).set({ realmId: "9999" });
+    expect(await both()).toEqual([[expect.stringContaining("and nobody was added")], [expect.stringContaining("and this sign-in wasn't brought back")]]);
+    expect(await db.select().from(guardian).where(eq(guardian.familyId, hand!.id))).toEqual([expect.objectContaining({ id: row!.id, status: "disabled" })]);
+    expect(posts()).toEqual([]);
+  });
+});
+
+describe("the Families list while QuickBooks is connected to another company", () => {
+  it("offers no add form, as addFamily() refuses one then", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(await renderPage(RosterPage)).toContain("Make a family</h2>");
+    await db.update(qboConnection).set({ realmId: "9999" });
+    expect(await renderPage(RosterPage)).not.toContain("Make a family</h2>");
   });
 });

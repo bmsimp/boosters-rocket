@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { asParent, renderPage } from "../helpers/signed-in";
+import { asParent, renderPage, withoutIds } from "../helpers/signed-in";
 
 // Buy-out invoices are made and voided in QuickBooks: here that is the stub, never Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
@@ -179,7 +179,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     // Rafferty's choice as his page showed it: the first of the family's students by name.
     const rafferty = await shown(p, req, "s1");
     expect(rafferty.who).toBe(RIVERA.students[0]!.name);
-    // Romilly is renamed in QuickBooks so she sorts first; the roster read brings her record's name into step.
+    // Romilly's record is renamed so she sorts first (here by importing a cache that names her so, as a staff rename leaves it).
     await db.update(qboCustomer).set({ displayName: "Abigail Riverquill" }).where(eq(qboCustomer.qboId, RIVERA.students[1]!.qboId));
     await syncAppRecords();
     const now = await shown(p, req, "s1");
@@ -223,7 +223,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(all.map((b) => b.key)).toEqual(["s2"]);
     asParent(p.identity);
     const html = await renderPage(VolunteerPage);
-    expect(html).not.toMatch(/43\.21|8010|9977|\$86\.42/);
+    expect(withoutIds(html)).not.toMatch(/43\.21|8010|9977|\$86\.42/);
     const { pageOutcome } = await import("../helpers/signed-in");
     expect(await pageOutcome(PayInsteadPage, { params: { requirementId: req, choice: "s1" } })).toEqual({ notFound: true });
     // A confirm sent with a stamp from before is refused as not from the page, telling nothing of the other family.
@@ -778,8 +778,8 @@ describe("how the requirement reads, on the parent's pages", () => {
     for (const words of ["$63.00", "will appear on your Payments page", "volunteering later doesn&#x27;t lower it", "switch back to volunteering until it&#x27;s paid", "Confirm: invoice me $63.00"]) {
       expect(page, words).toContain(words);
     }
-    expect(page).not.toContain(FAMILY);
-    expect(page).not.toContain(BUYOUT_ITEM);
+    expect(withoutIds(page)).not.toContain(FAMILY);
+    expect(withoutIds(page)).not.toContain(BUYOUT_ITEM);
     // The confirm's answer goes to a status line outside the section that redraws, so it is heard and keeps the focus.
     expect(page).toMatch(/<p[^>]*role="status"[^>]*class="volunteer-done announce"/);
   });

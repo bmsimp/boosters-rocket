@@ -83,6 +83,12 @@ describe("a permission's own name is a pattern", () => {
     expect(expandRules({ include: ["Roster.*"], exclude: [] }, later).has("Roster.Family.ReadWrite" as never)).toBe(true);
   });
 
+  it("gives the linking permission by name to a custom role, as a treasurer's would hold it", () => {
+    expect(validateRules({ include: ["Accounting.Link.ReadWrite"], exclude: [] })).toEqual([]);
+    expect(expandRules({ include: ["Accounting.Link.ReadWrite"], exclude: [] })).toEqual(new Set(["Accounting.Link.ReadWrite"]));
+    expect(expandRules({ include: ["*"], exclude: [] }).has("Accounting.Link.ReadWrite")).toBe(true);
+  });
+
   it("can be excluded by name", () => {
     expect(validateRules({ include: ["*"], exclude: ["Roster.Read"] })).toEqual([]);
     expect(expandRules({ include: ["*"], exclude: ["Roster.Read"] }).has("Roster.Read")).toBe(false);

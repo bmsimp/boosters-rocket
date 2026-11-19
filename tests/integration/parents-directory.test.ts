@@ -40,7 +40,7 @@ describe("the people directory", () => {
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") }).where(eq(parent.id, ana.id));
     await db.insert(auditLog).values({ door: "parent", actorId: ana.id, actorLabel: ana.email, action: "signin", targetType: "parent", targetId: ana.id, at: new Date("2026-11-05T12:00:00Z") });
     expect((await listPeople("ana"))).toEqual([{ parentId: ana.id, name: "Ana Rivera", email: "ana@example.com", blocked: false,
-      families: [{ guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS, open: true, reinstatable: false }],
+      families: [{ guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, pageStands: false, kind: "cannot", words: NO_RECORD_WORDS, open: true, reinstatable: false }],
       lastSigninAt: "2026-11-05T12:00:00.000Z", welcomedAt: "2026-11-01T12:00:00.000Z" }]);
     expect((await listPeople("RIVERA")).length).toBe(1);
     expect((await listPeople("ana@ex")).length).toBe(1);
@@ -54,9 +54,28 @@ describe("the people directory", () => {
     await seedPeople();
     const [sam] = await listPeople("sam");
     expect(sam!.families).toEqual([
-      { guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: HELD_WORDS, open: false, reinstatable: true },
-      { guardianId: expect.any(String), familyQboId: "20", familyId: null, familyName: "Chen Family", previousCompany: false, kind: "cannot", words: HELD_WORDS, open: false, reinstatable: true },
+      { guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, pageStands: false, kind: "cannot", words: HELD_WORDS, open: false, reinstatable: true },
+      { guardianId: expect.any(String), familyQboId: "20", familyId: null, familyName: "Chen Family", previousCompany: false, pageStands: false, kind: "cannot", words: HELD_WORDS, open: false, reinstatable: true },
     ]);
+  });
+
+  it("names a row that names no customer (slice 9d) from its family record, listing it after the rows that name one", async () => {
+    await withCompany(); await seedCache(ALL);
+    const { ana } = await seedPeople();
+    // Two families staff added in the portal, with no link: one named, one whose name the portal never knew.
+    const [oak] = await db.insert(family).values({ name: "Oak Family", active: true }).returning({ id: family.id });
+    const [nameless] = await db.insert(family).values({ name: null, active: true }).returning({ id: family.id });
+    const rows = await db.insert(guardian).values([oak!, nameless!].map((f) => ({ parentId: ana.id, familyQboId: null, familyId: f.id, status: "invited" as const, sourceQboId: null }))).returning();
+    const [person] = await listPeople("ana");
+    expect(person!.families.map((f) => [f.familyQboId, f.familyName])).toEqual([["10", "Rivera Family"],
+      ...rows.sort((a, b) => (a.id < b.id ? -1 : 1)).map((r) => [null, r.familyId === oak!.id ? "Oak Family" : "A family whose name the portal doesn't know"])]);
+    expect(person!.families.at(-1)).toMatchObject({ previousCompany: false, open: true });
+    // Each family's page stands while its record is active, linked or not; one made inactive with no link has none to open.
+    expect(person!.families.map((f) => f.pageStands)).toEqual([true, true, true]);
+    await db.update(family).set({ active: false }).where(eq(family.id, oak!.id));
+    const after = (await listPeople("ana"))[0]!.families;
+    expect(after.filter((f) => f.familyId !== null && String(f.familyId) === String(oak!.id)).map((f) => f.pageStands)).toEqual([false]);
+    expect(after.filter((f) => f.familyId === null || String(f.familyId) !== String(oak!.id)).map((f) => f.pageStands)).toEqual([true, true]);
   });
 
   it("shows a family's guardian rows, open and closed, in words, and no row worked out from QuickBooks", async () => {
@@ -87,7 +106,8 @@ describe("the people directory", () => {
     // An inactive family record, whatever its students.
     await db.update(family).set({ active: false }).where(eq(family.id, rivera));
     expect((await signinsOf("10")).find((s) => s.parentId === ana.id)).toMatchObject({ kind: "cannot", words: "Can't sign in now: the family is inactive" });
-    expect((await listPeople("ana"))[0]!.families).toEqual([expect.objectContaining({ kind: "cannot", words: "Can't sign in now: the family is inactive" })]);
+    // Inactive but linked: its page still stands (the roster lists its customer), so it is still linked to.
+    expect((await listPeople("ana"))[0]!.families).toEqual([expect.objectContaining({ kind: "cannot", words: "Can't sign in now: the family is inactive", pageStands: true })]);
     // A closed row keeps its own reason's words.
     expect((await signinsOf("10")).find((s) => s.parentId !== ana.id)).toMatchObject({ kind: "cannot", words: HELD_WORDS });
     expect((await db.select().from(guardian).where(eq(guardian.parentId, ana.id))).map((g) => g.status)).toEqual(["invited"]);
@@ -98,7 +118,7 @@ describe("the people directory", () => {
     await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     const g = await seedGuardian({ parentId: p.id, familyQboId: "10" });
-    await syncAppRecords(); // the membership's family record, as the next roster read would set it
+    await syncAppRecords(); // the membership's family record, as the import sets it
     expect(await signinsOf("10")).toEqual([{ guardianId: g.id, parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked", open: true, reinstatable: false }]);
   });
 
@@ -115,8 +135,8 @@ describe("the people directory", () => {
     const { ana } = await seedPeople();
     await seedGuardian({ parentId: ana.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     expect((await getPerson(ana.id))!.families).toEqual([
-      { guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "cannot", words: NO_RECORD_WORDS, open: true, reinstatable: false },
-      { guardianId: expect.any(String), familyQboId: "20", familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected", open: false, reinstatable: false },
+      { guardianId: expect.any(String), familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, pageStands: false, kind: "cannot", words: NO_RECORD_WORDS, open: true, reinstatable: false },
+      { guardianId: expect.any(String), familyQboId: "20", familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, pageStands: false, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected", open: false, reinstatable: false },
     ]);
   });
 

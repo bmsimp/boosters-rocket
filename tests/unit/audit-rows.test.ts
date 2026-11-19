@@ -42,6 +42,9 @@ const NOT_AUDITED: Record<string, string> = {
   // Setup's and the connection's own progress, before the thing they lead to is done (and audited).
   "src/lib/setup/state.ts#updateSetupState": "which step of the first-run setup is showing; what the steps save (the first Admin, the keys) is audited",
   "src/lib/quickbooks/connection.ts#beginConnect": "the single-use state of a connection being started, before Intuit answers; the connection made (quickbooks.connect) is audited",
+  // The import of the app's records from the roster cache (src/lib/families/roster-import.ts#importInto) left this list
+  // in stage 3's slice 10: its one caller under src/, "Create a family from this" (src/lib/roster/no-family.ts), writes
+  // its audit row (accounting.family.from_customer) in the same transaction, so the scan covers it.
 };
 
 type Unit = { key: string; exported: boolean; takesTx: boolean; calls: Set<string>; callers: Set<string>; writes: string[] };

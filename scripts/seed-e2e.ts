@@ -322,8 +322,9 @@ async function main() {
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
   // The app's own families, students and links for every family above (stage 1 of the app-owned families spec), as a
-  // roster read leaves them: made by migration 0023's fill, which tests/integration/app-records-fill.test.ts proves makes
-  // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
+  // club's are since migration 0023: made by its fill, which tests/integration/app-records-fill.test.ts proves makes what
+  // the import makes (importRecordsFromRoster(); no roster read makes or changes one since stage 3's slice 9c). One
+  // connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
   // Zelda's guardian row in a family, with the app's family record the fill gave it: a session and a change of sign-in

@@ -6,6 +6,8 @@ import { auditLog, family, guardian, parent, qboCustomer, type DisabledReason, t
 import { hasActiveStudent, studentsRuleInForce } from "./sessions";
 import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
+import { linksOf } from "@/lib/families/links";
+import { recordNameWords } from "@/lib/families/words";
 
 export type AccessKind = "can" | "cannot" | "blocked";
 /**
@@ -18,9 +20,13 @@ export type FamilySignin = { guardianId: string; parentId: string; name: string;
  * `previousCompany`: the link was closed when a different QuickBooks company was connected. Its `familyQboId` is the
  * old company's, so a page shows the family name as text and never links it to, or looks it up in, the roster.
  * `familyId`: the membership's own app family (`guardian.family_id`), which the family's page is addressed by; null for
- * a previous company's link, which has none.
+ * a previous company's link, which has none. `familyQboId` is null for a membership made while its family had no link
+ * (stage 3's slice 9d): the family is named from its record. `pageStands`: the family's staff page stands for it (an
+ * active record, or one with a link), so it may be linked to; an inactive family with no link (made inactive in the
+ * portal) has no page.
  */
-export type PersonFamily = { guardianId: string; familyQboId: string; familyId: AppFamilyId | null; familyName: string; previousCompany: boolean; kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
+export type PersonFamily = { guardianId: string; familyQboId: string | null; familyId: AppFamilyId | null; familyName: string; previousCompany: boolean; pageStands: boolean;
+  kind: AccessKind; words: string; open: boolean; reinstatable: boolean };
 export type PersonRow = { parentId: string; name: string; email: string; blocked: boolean; families: PersonFamily[]; lastSigninAt: string | null; welcomedAt: string | null };
 export type PersonDetail = PersonRow & { blockedReason: string | null; blockedAt: string | null; welcomeOwed: boolean };
 /**
@@ -84,6 +90,13 @@ export async function familyNames(ids: string[]): Promise<Map<string, string>> {
 }
 
 const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
+/**
+ * A person's rows in the order the Parents pages list them: a previous company's last; then by the customer each names,
+ * as numbers; then the rows that name none (made while their family had no link), by row id.
+ */
+const byCustomerThenRow = (a: typeof guardian.$inferSelect, b: typeof guardian.$inferSelect) =>
+  Number(oldCompany(a)) - Number(oldCompany(b)) || Number(a.familyQboId === null) - Number(b.familyQboId === null)
+  || (a.familyQboId !== null && b.familyQboId !== null ? numeric(a.familyQboId, b.familyQboId) : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 /** The label for a link closed by a company change, in place of a family name. */
 export const PREVIOUS_COMPANY_FAMILY = "A family in the previous QuickBooks company";
 const oldCompany = (l: { disabledReason: DisabledReason | null }) => l.disabledReason === "company_changed";
@@ -101,13 +114,26 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
       .where(and(eq(auditLog.action, "signin"), eq(auditLog.door, "parent"), inArray(auditLog.targetId, ids))).groupBy(auditLog.targetId),
   ]);
   // A link from a previous company holds that company's family ID, which names some other family (or none) in the
-  // connected one: it is never looked up in the cache.
-  const [names, standing] = await Promise.all([familyNames(links.filter((l) => !oldCompany(l)).map((l) => l.familyQboId)), familyStandings(links.map((l) => l.familyId))]);
+  // connected one: it is never looked up in the cache. A row in a family record is named from the record, as the
+  // chooser names it; one with no record by the cache's name for its number, and one with neither in words.
+  const current = links.filter((l) => !oldCompany(l));
+  const recordIds = [...new Set(current.flatMap((l) => (l.familyId === null ? [] : [l.familyId])))];
+  const [names, records, standing, linked] = await Promise.all([
+    familyNames(current.flatMap((l) => (l.familyId === null && l.familyQboId !== null ? [l.familyQboId] : []))),
+    recordIds.length ? db.select({ id: family.id, name: family.name }).from(family).where(inArray(family.id, recordIds)) : Promise.resolve([]),
+    familyStandings(links.map((l) => l.familyId)), linksOf({ families: recordIds, students: [] })]);
+  // The family's page stands for an active record, linked or not, and for an inactive one through its link (as the
+  // queue's links to it are offered, loadOpenWrites()): an inactive family with no link has none to open.
+  const pageStands = (id: AppFamilyId | null) => id !== null && (!["inactive", "no_record"].includes(standing(id)) || linked.customerOfFamily.has(id));
+  const recordName = new Map(records.map((r) => [String(r.id), recordNameWords(r.name, "family")]));
+  const nameOf = (l: (typeof links)[number]) => (oldCompany(l) ? PREVIOUS_COMPANY_FAMILY
+    : (l.familyId !== null ? recordName.get(String(l.familyId)) : undefined) ?? (l.familyQboId !== null ? names.get(l.familyQboId) : undefined) ?? recordNameWords(null, "family"));
   const last = new Map(signins.map((s) => [s.id, s.at]));
   return persons.map((p) => ({
     parentId: p.id, name: p.name, email: p.email, blocked: p.blocked,
-    families: links.filter((l) => l.parentId === p.id).sort((a, b) => Number(oldCompany(a)) - Number(oldCompany(b)) || numeric(a.familyQboId, b.familyQboId)).map((l) => ({
-      guardianId: l.id, familyQboId: l.familyQboId, familyId: oldCompany(l) ? null : l.familyId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!, previousCompany: oldCompany(l),
+    families: links.filter((l) => l.parentId === p.id).sort(byCustomerThenRow).map((l) => ({
+      guardianId: l.id, familyQboId: l.familyQboId, familyId: oldCompany(l) ? null : l.familyId, familyName: nameOf(l), previousCompany: oldCompany(l),
+      pageStands: !oldCompany(l) && pageStands(l.familyId),
       ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked, family: standing(l.familyId) }), ...rowActions(l) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,
     blockedReason: p.blockedReason, blockedAt: p.blockedAt?.toISOString() ?? null, welcomeOwed: p.welcomeOwed,

@@ -31,11 +31,12 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Forms.Signature.Read": "See who has signed each form, and download signed forms",
   "Forms.Signature.ReadWrite": "Remind guardians to sign, and start an unfinished form again",
   "Volunteer.Credit.ReadWrite": "Add, remove and correct a family's volunteer credit",
+  "Accounting.Link.ReadWrite": "Link families to accounting: make a family in the portal from a QuickBooks customer no family is linked to",
 };
 
 /** The areas of the checklist, in the order the Roles page shows them. Each grantable permission is in exactly one. */
 export const PERMISSION_AREAS: { area: string; permissions: readonly Permission[] }[] = [
-  { area: "Families", permissions: ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite"] },
+  { area: "Families", permissions: ["Roster.Read", "Roster.Family.ReadWrite", "Parents.ReadWrite", "Accounting.Link.ReadWrite"] },
   { area: "Seasons", permissions: ["Season.Steps.Read", "Season.Steps.ReadWrite", "Season.Progress.Read", "Season.Progress.ReadWrite"] },
   { area: "Forms", permissions: ["Forms.Signature.Read", "Forms.Signature.ReadWrite"] },
   { area: "Volunteering", permissions: ["Volunteer.Event.Read", "Volunteer.Event.ReadWrite", "Volunteer.Credit.ReadWrite"] },
@@ -45,9 +46,10 @@ export const PERMISSION_AREAS: { area: string; permissions: readonly Permission[
 
 /**
  * A change whose "see" permission has another name: its pages and actions all need that one too, so the checklist
- * brings it (the roster's changes are made from the roster pages, behind Roster.Read).
+ * brings it (the roster's changes are made from the roster pages, behind Roster.Read; a family is made from a customer
+ * on Reconciliation, a Roster.Read page too).
  */
-const SEE_WITH: Partial<Record<Permission, Permission>> = { "Roster.Family.ReadWrite": "Roster.Read" };
+const SEE_WITH: Partial<Record<Permission, Permission>> = { "Roster.Family.ReadWrite": "Roster.Read", "Accounting.Link.ReadWrite": "Roster.Read" };
 
 /**
  * The permission a ticked one brings with it: a ReadWrite brings its Read (rules.ts gives X.Read to a role that names

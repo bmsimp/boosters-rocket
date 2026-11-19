@@ -27,6 +27,7 @@ export const CLOSE_COPY = {
   changed: "This buy-out has changed since the page was shown, so nothing was closed. Reload the page to see where it stands now.",
   busy: "The roster is being brought up to date from QuickBooks just now, so nothing was closed. Try again in a minute.",
   stands: "QuickBooks shows this invoice again, so nothing was closed: it may still be owed. The next daily check takes the flag off.",
+  standsMoved: "QuickBooks still shows this invoice with something on it, so nothing was closed: it may still be owed. Void it in QuickBooks first if it shouldn't be billed, then close it.",
   unreadable: "QuickBooks couldn't be read just now to check the invoice is gone, so nothing was closed. Try again in a minute.",
   done: "Closed. Nothing was sent to QuickBooks. The family can choose to pay instead again, or volunteer.",
 } as const;
@@ -42,13 +43,16 @@ export async function closeBuyout(id: string, shownTag: string, rosterTag: strin
   const note = rawNote.trim();
   if (!note) return no(CLOSE_COPY.noNote);
   if (note.length > NOTE_MAX) return no(CLOSE_COPY.tooLong);
-  // A "missing" flag from one money run's stored figures alone (looks_gone) is read again live, before the transaction
-  // (no request to QuickBooks is made holding the roster lock); the transaction then refuses if the buy-out changed since.
+  // A "missing" flag from one money run's stored figures alone (looks_gone), and a student the daily check found no
+  // longer under the family (moved_away), are read again live, before the transaction (no request to QuickBooks is
+  // made holding the roster lock); the transaction then refuses if the buy-out changed since.
   let readGone = false;
   const [seen] = await db.select().from(buyout).where(eq(buyout.id, id));
-  if (seen && closeTag(seen) === shownTag && verdictOf(seen, (await itemsOf([id])).get(id) ?? []).why === "looks_gone") {
+  const liveFirst = (why: string) => why === "looks_gone" || why === "moved_away";
+  const shownWhy = seen && closeTag(seen) === shownTag ? verdictOf(seen, (await itemsOf([id])).get(id) ?? []).why : null;
+  if (seen && shownWhy !== null && liveFirst(shownWhy)) {
     const live = await invoiceStandsLive(seen);
-    if (live !== "gone") return no(live === "stands" ? CLOSE_COPY.stands : CLOSE_COPY.unreadable);
+    if (live !== "gone") return no(live === "unreadable" ? CLOSE_COPY.unreadable : shownWhy === "moved_away" ? CLOSE_COPY.standsMoved : CLOSE_COPY.stands);
     readGone = true;
   }
   const done = await takePlace(async (tx): Promise<Done> => {
@@ -62,7 +66,7 @@ export async function closeBuyout(id: string, shownTag: string, rosterTag: strin
     if (!b) return no(CLOSE_COPY.gone);
     if (closeTag(b) !== shownTag) return no(CLOSE_COPY.changed);
     const verdict = verdictOf(b, items);
-    if (!verdict.may || (verdict.why === "looks_gone" && !readGone)) return no(CLOSE_COPY.changed, verdict.words);
+    if (!verdict.may || (liveFirst(verdict.why) && !readGone)) return no(CLOSE_COPY.changed, verdict.words);
     const given: string[] = [];
     for (const item of items.filter((i) => i.state === "stuck")) {
       const r = await giveUpIn(tx, item.id, note, o);

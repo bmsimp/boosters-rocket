@@ -2,7 +2,7 @@ import type { MembershipShape } from "@/lib/roster/shape";
 
 /**
  * What the app's own records should be, worked out from what the database holds (stage 1 of
- * docs/superpowers/specs/2026-11-18-app-owned-families-design.md). Pure: keepAppRecordsInStep() (./in-step.ts) loads
+ * docs/superpowers/specs/2026-11-18-app-owned-families-design.md). Pure: importRecordsFromRoster() (./roster-import.ts) loads
  * the inputs and makes the tables agree with the answer, and migration 0023 fills them by the same rules in SQL
  * (tests/integration/app-records-fill.test.ts proves the two agree). Every id here is a QuickBooks customer id of the
  * company the roster cache came from. A record is of one kind, family or student, and a customer may have one of each.
@@ -15,20 +15,21 @@ import type { MembershipShape } from "@/lib/roster/shape";
  *   but the rule stands for any that may), whatever the roster holds it as: a record names a customer as the kind its
  *   column holds. One the roster doesn't hold as that kind is inactive. The records re-keyed since (the season's,
  *   volunteering's, form requests, buy-outs, the money cache, the write queue, and parents' sessions and pending email
- *   changes) are not among them: they name a record by its id and keep it (./in-step.ts). A student the roster doesn't hold is planned in no family; keepAppRecordsInStep() keeps the
+ *   changes) are not among them: they name a record by its id and keep it (./roster-import.ts). A student the roster doesn't hold is planned in no family; importRecordsFromRoster() keeps the
  *   family such a student was last in, which a first fill (migration 0023) never knew.
  * - A record is named from the cache, else by the name it has already (`known`, by kind: the cache held it once), else
  *   from `hints` (a current-company kept form's). Otherwise it has no name: the portal never knew one.
  * - Each guardian row is in the family of its `family_qbo_id`, except one a change of company closed, whose ids are
- *   another company's: it is in none.
+ *   another company's: it is in none; and one that names no customer (a membership staff made while its family had no
+ *   link, stage 3's slice 9d), which keeps the family it has: the plan holds no membership for it.
  * - Each such guardian row whose sign-in came from a record of its own (a `source_qbo_id` that isn't the family's own
  *   customer), open or closed, is linked to that record.
  *
- * The answer lists what must exist. Records that exist and are not in it are kept, inactive (./in-step.ts): nothing
+ * The answer lists what must exist. Records that exist and are not in it are kept, inactive (./roster-import.ts): nothing
  * but a change of company deletes one.
  */
 export type PlanCustomer = { qboId: string; displayName: string; active: boolean; parentQboId: string | null; typeQboId: string | null };
-export type PlanGuardian = { id: string; familyQboId: string; sourceQboId: string | null; status: "invited" | "active" | "disabled"; disabledReason: string | null };
+export type PlanGuardian = { id: string; familyQboId: string | null; sourceQboId: string | null; status: "invited" | "active" | "disabled"; disabledReason: string | null };
 export type RecordKind = "family" | "student";
 export type PlanRef = { customerId: string; kind: RecordKind };
 export type PlanInput = {
@@ -46,7 +47,7 @@ export type Plan = {
   families: Map<string, PlannedFamily>;
   /** Student records by their customer. */
   students: Map<string, PlannedStudent>;
-  /** Each guardian row's family, by the family's customer: null for none. */
+  /** Each guardian row's family, by the family's customer: null for none. A row it doesn't hold keeps the family it has. */
   memberships: Map<string, string | null>;
   /** The customer each guardian row is linked to, for the rows that have a record of their own. */
   membershipLinks: Map<string, string>;
@@ -56,6 +57,8 @@ export const EMPTY_PLAN: Plan = { families: new Map(), students: new Map(), memb
 
 /** A link a change of company closed: its ids name nobody in this one. */
 const fromAnotherCompany = (g: PlanGuardian) => g.disabledReason === "company_changed";
+/** A row that names a customer of this company: every row but one a change of company closed and one made with no customer. */
+const namesOurCustomer = (g: PlanGuardian): g is PlanGuardian & { familyQboId: string } => !fromAnotherCompany(g) && g.familyQboId !== null;
 
 export function planAppRecords(i: PlanInput): Plan {
   const byId = new Map(i.customers.map((c) => [c.qboId, c]));
@@ -74,7 +77,7 @@ export function planAppRecords(i: PlanInput): Plan {
     }
   }
 
-  const refs: PlanRef[] = [...i.refs, ...i.guardians.filter((g) => !fromAnotherCompany(g)).map((g) => ({ customerId: g.familyQboId, kind: "family" as const }))];
+  const refs: PlanRef[] = [...i.refs, ...i.guardians.filter(namesOurCustomer).map((g) => ({ customerId: g.familyQboId, kind: "family" as const }))];
   const familyIds = new Set(rosterFamilies), studentIds = new Set(rosterStudents.keys());
   for (const r of refs) (r.kind === "family" ? familyIds : studentIds).add(r.customerId);
 
@@ -89,8 +92,24 @@ export function planAppRecords(i: PlanInput): Plan {
   const memberships = new Map<string, string | null>();
   const membershipLinks = new Map<string, string>();
   for (const g of i.guardians) {
-    memberships.set(g.id, fromAnotherCompany(g) ? null : g.familyQboId);
-    if (!fromAnotherCompany(g) && g.sourceQboId !== null && g.sourceQboId !== g.familyQboId) membershipLinks.set(g.id, g.sourceQboId);
+    if (fromAnotherCompany(g)) { memberships.set(g.id, null); continue; }
+    if (!namesOurCustomer(g)) continue; // no customer: it keeps its family, and has no record of its own to be linked to
+    memberships.set(g.id, g.familyQboId);
+    if (g.sourceQboId !== null && g.sourceQboId !== g.familyQboId) membershipLinks.set(g.id, g.sourceQboId);
   }
   return { families, students, memberships, membershipLinks };
+}
+
+/**
+ * The plan narrowed to one family customer: its family record and the student records of the customers the plan holds
+ * directly under it, by the same rules, and no membership (so no guardian row is pointed or linked). What "Create a
+ * family from this" makes (src/lib/roster/no-family.ts, through importRecordsFromRoster()'s `one`): one definition of
+ * which customers are a family's students and what each record is named, not a second copy. Empty when the plan has no
+ * family record of that customer.
+ */
+export function planForOneFamily(plan: Plan, familyCustomerId: string): Plan {
+  const f = plan.families.get(familyCustomerId);
+  if (f === undefined) return EMPTY_PLAN;
+  return { families: new Map([[familyCustomerId, f]]), students: new Map([...plan.students].filter(([, s]) => s.familyCustomerId === familyCustomerId)),
+    memberships: new Map(), membershipLinks: new Map() };
 }

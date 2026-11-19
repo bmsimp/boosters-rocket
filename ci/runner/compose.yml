@@ -1,0 +1,71 @@
+# A self-hosted GitHub Actions runner for this repository's CI, on a club's own machine (ci/runner/README.md).
+#
+# Two containers. br-ci-dind is the CI's own Docker daemon: every container a job starts (the Postgres service, the
+# image it builds and smoke-tests, the containers the tests start) runs inside it, never beside the machine's other
+# containers, so a name, a port or a prune in CI can't reach them. br-ci-runner is GitHub's runner; it shares the
+# daemon's network, so a job's published ports are its localhost, and reaches the daemon at 127.0.0.1:2375, which
+# nothing outside that network can. The work folder and /tmp are the same volumes at the same paths in both, so a
+# bind mount a job asks for finds the files. Nothing is published on the machine, and the machine's own Docker socket
+# is never mounted.
+#
+# Each container may use up to three cores, but at a quarter of the usual weight (cpu_shares 256 against 1024), so
+# whatever else runs on the machine wins whenever they compete. Memory is capped, swap included.
+name: br-ci
+
+services:
+  br-ci-dind:
+    image: docker:29.10.0-dind@sha256:4bbc7223f81db790097c6dea42fb93e05b8fead4f0431fbe6ccaba6e8473201c
+    container_name: br-ci-dind
+    hostname: br-ci-dind
+    privileged: true
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    # dockerd named first, so the image's entrypoint adds none of its own listeners (it would add 0.0.0.0:2375).
+    command: ["dockerd", "--host=tcp://127.0.0.1:2375", "--host=unix:///var/run/docker.sock", "--tls=false"]
+    networks: [br-ci-net]
+    volumes:
+      - br-ci-docker:/var/lib/docker
+      - br-ci-work:/home/runner/_work
+      - br-ci-tmp:/tmp
+    cpus: 3
+    cpu_shares: 256
+    mem_limit: 4g
+    memswap_limit: 4g
+
+  br-ci-runner:
+    build: .
+    image: br-ci-runner:local
+    container_name: br-ci-runner
+    depends_on: [br-ci-dind]
+    network_mode: "service:br-ci-dind"
+    init: true
+    restart: unless-stopped
+    environment:
+      DOCKER_HOST: tcp://127.0.0.1:2375
+      RUNNER_URL: ${RUNNER_URL:?set RUNNER_URL in .env beside this file, https://github.com/<owner>/<repository>}
+      RUNNER_NAME: ${RUNNER_NAME:-br-ci-1}
+      RUNNER_LABELS: ${RUNNER_LABELS:-self-hosted,br-ci}
+    volumes:
+      - br-ci-work:/home/runner/_work
+      - br-ci-tmp:/tmp
+      - br-ci-state:/state
+    shm_size: 1g
+    cpus: 3
+    cpu_shares: 256
+    mem_limit: 5g
+    memswap_limit: 5g
+
+networks:
+  br-ci-net:
+    name: br-ci-net
+
+volumes:
+  br-ci-docker:
+    name: br-ci-docker
+  br-ci-work:
+    name: br-ci-work
+  br-ci-tmp:
+    name: br-ci-tmp
+  br-ci-state:
+    name: br-ci-state

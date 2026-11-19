@@ -4,7 +4,7 @@
 // lists are then read only for that family and those students, and a requirement that covers none of them is dropped,
 // title and all (loadFamilyStanding in ./recorded.ts). No link to the accounting system is needed. It never imports the
 // staff-only modules (./setup.ts, ./subjects.ts, ./staff-progress.ts, src/lib/roster/queries.ts,
-// src/lib/families/in-step.ts): tests/integration/page-guards.test.ts scans this file.
+// src/lib/families/roster-import.ts): tests/integration/page-guards.test.ts scans this file.
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";

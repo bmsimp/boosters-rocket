@@ -8,9 +8,10 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 /**
  * Called inside clearRosterOfOtherCompanyLocked(), under the roster lock: the app's own records and their links were
  * made from the company that is no longer the cache's, and a link names that company's customers, so every one goes,
- * with the families and students and each guardian row's family. Until stage 4 nothing else remembers them: the next
- * roster read makes them again from the new company (keepAppRecordsInStep(), ./in-step.ts), in the transaction that
- * stores its cache. Audited with counts when there was anything to clear.
+ * with the families and students and each guardian row's family. Until stage 4 nothing else remembers them, and since
+ * stage 3's slice 9c nothing makes them again by itself: no roster read imports records (stage 4's import will;
+ * importRecordsFromRoster(), ./roster-import.ts, is kept for it). Nothing the portal runs reaches this until stage 4
+ * (a different company is refused). Audited with counts when there was anything to clear.
  */
 export async function clearAppRecords(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
   const memberships = (await tx.update(guardian).set({ familyId: null }).where(isNotNull(guardian.familyId)).returning({ id: guardian.id })).length;

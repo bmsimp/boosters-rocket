@@ -46,7 +46,7 @@ describe("what the roster pages load", () => {
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
     await seedGuardian({ parentId: ana.id, familyQboId: "POC-FAMILY-1" });
-    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
+    await syncAppRecords(); // the records imported from the read, each membership in its family record
     const page = await loadRosterPage();
     expect(page.shapeWords).toBe("Layered: families are Family, students are Student, parents are Parent.");
     if (page.roster?.kind !== "layered") throw new Error("expected layered");
@@ -114,7 +114,7 @@ describe("what the roster pages load", () => {
     await refreshRoster(worker);
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10" });
-    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
+    await syncAppRecords(); // the records imported from the read, each membership in its family record
     const entry = await entryOf("10");
     if (entry?.kind !== "family") throw new Error("expected a family");
     expect(entry.family.parents.map((p) => [p.displayName, p.email, p.phone])).toEqual([["Ana Rivera", "ana@example.com", "555-0101"]]);
@@ -136,7 +136,7 @@ describe("what the roster pages load", () => {
     await seedGuardian({ parentId: raul.id, familyQboId: "10" });
     await seedGuardian({ parentId: mei.id, familyQboId: "20" });
     await seedGuardian({ parentId: lost.id, familyQboId: "POC-FAMILY-1" });
-    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
+    await syncAppRecords(); // the records imported from the read, each membership in its family record
     const emails = async (id: string) => {
       const e = await entryOf(id);
       if (e?.kind !== "family") throw new Error("expected a family");
@@ -149,6 +149,7 @@ describe("what the roster pages load", () => {
   it("flat: a customer outside the member types has no page", async () => {
     await saveShape({ kind: "flat", memberTypeIds: ["2"] }, staffOp);
     await refreshRoster(worker);
+    await syncAppRecords(); // the records imported from the read, as 0023 made them: a read makes none
     expect(await entryOf("12")).toBeNull(); // Leo Rivera: a Student
     expect(await entryOf("30")).toBeNull();
   });
@@ -156,6 +157,7 @@ describe("what the roster pages load", () => {
   it("flat: finds a member", async () => {
     await saveShape({ kind: "flat", memberTypeIds: ["2"] }, staffOp);
     await refreshRoster(worker);
+    await syncAppRecords();
     expect(await entryOf("11")).toMatchObject({ kind: "member", family: { name: "Ana Rivera", active: true, customer: { displayName: "Ana Rivera", email: "ana@example.com" }, students: [], parents: [] } });
   });
 
@@ -164,7 +166,7 @@ describe("what the roster pages load", () => {
     await refreshRoster(worker);
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
-    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
+    await syncAppRecords(); // the records imported from the read, each membership in its family record
     const page = await loadRosterPage();
     const rivera = await recordOfCustomer("10", "family");
     expect(await familyEntry(page, rivera)).toMatchObject({ kind: "family", family: { name: "Rivera Family", customer: { displayName: "Rivera Family" } }, signIns: [{ email: "ana@example.com" }] });
@@ -174,12 +176,15 @@ describe("what the roster pages load", () => {
     await refreshRoster(worker);
     const flat = await loadRosterPage();
     expect(await familyEntry(flat, await recordOfCustomer("11", "family"))).toMatchObject({ kind: "member", family: { customer: { displayName: "Ana Rivera" } }, signIns: [] });
-    expect(await familyEntry(flat, rivera)).toBeNull(); // made inactive by the read, and not a member
+    // A shape changed later changes no record (stage 3's slice 9c): the Rivera family's record stays active, and its page
+    // shows it with no customer, since the flat roster lists none of its as a member.
+    expect(await familyEntry(flat, rivera)).toMatchObject({ kind: "member", family: { name: "Rivera Family", active: true, customer: null } });
   });
 
   it("rosterFamilies: the app's family records, each with what QuickBooks holds for its customer, in the roster's order", async () => {
     await saveShape(FZN_SHAPE, staffOp);
     await refreshRoster(worker);
+    await syncAppRecords();
     const page = await loadRosterPage();
     const shown = async () => (await rosterFamilies(page))!.map((f) => [f.name, f.active, f.customer?.qboId ?? null, f.students.map((s) => [s.name, s.customer?.qboId ?? null]), f.parents.map((p) => p.displayName)]);
     // An inactive family is listed as the roster lists its customer; the school, the stray and the untyped customer are QuickBooks' alone.
@@ -193,7 +198,7 @@ describe("what the roster pages load", () => {
     // A record a roster row names as a family (made inactive, as 0023 made one) whose customer isn't a family isn't listed.
     await recordOfCustomer("30", "family");
     expect(await shown()).toHaveLength(3);
-    // A family made in the portal with no QuickBooks customer (none can be until families are made there) is listed, with no customer.
+    // A family made in the portal with no QuickBooks customer (as staff add one since stage 3's slice 9d) is listed, with no customer.
     const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
     await db.insert(student).values({ name: "Hal Handmade", active: true, familyId: hand!.id });
     expect((await shown())[1]).toEqual(["Handmade Family", true, null, [["Hal Handmade", null]], []]);

@@ -123,7 +123,7 @@ describe("a place a student fills", () => {
     const familyId = await recordOfCustomer(FAMILY_A.family.qboId, "family");
     const asked = { families: [familyId], students: [] };
     expect((await signedUpAmounts([family], asked, key)).get(key(family.id, familyId))).toBe(1);
-    // Made inactive in QuickBooks, still under the family: the roster read that sees it brings the records into step.
+    // The student's record made inactive, still in the family (here by importing a cache that holds it so, as a staff make-inactive leaves it).
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, LEO!.qboId));
     await syncAppRecords();
     expect((await signedUpAmounts([family], asked, key)).has(key(family.id, familyId))).toBe(false);

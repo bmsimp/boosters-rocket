@@ -1,18 +1,17 @@
-// What volunteering does when a student moves to another family (afterStudentMoved() in src/lib/roster/writes.ts for a
-// move staff make, and the roster refresh for one made in QuickBooks). A place belongs to the family it was taken from:
-// the old family's places for that student on shifts still to start are given up, their guardians told; what the
-// student has already done stays with the family it was earned for, so a check-in keeps its credit there, and the new
-// family takes nothing over. The roster names the move by QuickBooks ids; sign-ups name the app's own family and
-// student (stage 2 of the app-owned families spec), so the move is turned into those records here, through their
-// links in the records' company: a boundary AGENTS.md lists, until stage 3 moves the roster to the app.
+// What volunteering does when staff move a student to another family in the portal (afterStudentMoved() in
+// src/lib/roster/writes.ts; since stage 3's slice 9c a move made in QuickBooks is no longer followed). A place belongs
+// to the family it was taken from: the old family's places for that student on shifts still to start are given up,
+// their guardians told; what the student has already done stays with the family it was earned for, so a check-in keeps
+// its credit there, and the new family takes nothing over. The staff move names the move by QuickBooks ids; sign-ups
+// name the app's own family and student (stage 2 of the app-owned families spec), so the move is turned into those
+// records here, through their links in the records' company: a boundary AGENTS.md lists, until the order of a staff
+// write flips (stage 3's slice 9e).
 import "server-only";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
-import { accountingLink, volunteerEvent, volunteerShift, volunteerSignup } from "@/lib/db/schema";
+import { volunteerEvent, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { QUICKBOOKS } from "@/lib/families/ids";
-import { familyLinkedTo, recordsCompany, studentLinkedTo } from "@/lib/families/links";
+import { familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
 import { getClubSettings } from "@/lib/settings/club";
 import { clockOf, shiftInstants } from "./clock";
 import { creditedSignups } from "./credit";
@@ -56,36 +55,4 @@ export async function volunteerForMovedStudent(tx: Tx, move: { studentQboId: str
     return { kind: "removed", signup: x, facts: factsOf(r.event, r.shift), why: "moved" };
   });
   return { cancelled: giving.length, tell: () => sendNotices(notices, { zone, actor, ip: o.ip ?? null, targetType: "student", targetId: String(studentId) }) };
-}
-
-const studentLink = alias(accountingLink, "student_link");
-const familyLink = alias(accountingLink, "family_link");
-
-/**
- * The students' places on shifts still to start held under another family than the one each is under now (`under`:
- * student to family, by QuickBooks id, studentsUnderFamilies() in src/lib/roster/moves.ts, from the roster a refresh is
- * about to store): the places a move's follow-up would give up, for a roster refresh to follow a move it didn't see in
- * one read. Each place's student and family are taken to the customers their links name, in the records' company. A
- * followed move leaves none: its places still to start are given up, and the places done stay with the family they
- * were earned for, which this leaves out.
- */
-export async function placesHeldElsewhere(tx: Tx, under: ReadonlyMap<string, string>, now: Date = new Date()): Promise<{ studentQboId: string; familyQboId: string }[]> {
-  if (under.size === 0) return [];
-  const realmId = await recordsCompany(tx);
-  if (realmId === null) return [];
-  const rows = (await tx.select({ s: volunteerSignup, shift: volunteerShift, event: volunteerEvent, studentQboId: studentLink.customerId, familyQboId: familyLink.customerId })
-    .from(volunteerSignup)
-    .innerJoin(volunteerShift, eq(volunteerShift.id, volunteerSignup.shiftId)).innerJoin(volunteerEvent, eq(volunteerEvent.id, volunteerShift.eventId))
-    .innerJoin(studentLink, and(eq(studentLink.studentId, volunteerSignup.studentId), eq(studentLink.system, QUICKBOOKS), eq(studentLink.realmId, realmId)))
-    .innerJoin(familyLink, and(eq(familyLink.familyId, volunteerSignup.familyId), eq(familyLink.system, QUICKBOOKS), eq(familyLink.realmId, realmId)))
-    .where(and(isNotNull(volunteerSignup.studentId), isNull(volunteerSignup.cancelledAt))))
-    .filter((r) => under.has(r.studentQboId) && under.get(r.studentQboId) !== r.familyQboId);
-  if (rows.length === 0) return [];
-  const zone = (await getClubSettings()).timeZone;
-  const credited = await creditedSignups(rows.map((r) => r.s.id), tx);
-  const ids = new Set(placesToGiveUp(rows.map((r) => ({ id: r.s.id, start: shiftInstants(r.event.onDate, r.shift.startsAt, r.shift.endsAt, zone).start,
-    cancelled: r.shift.cancelledAt !== null || r.event.cancelledAt !== null, checkedIn: credited.has(r.s.id) })), now));
-  const out = new Map<string, { studentQboId: string; familyQboId: string }>();
-  for (const r of rows) if (ids.has(r.s.id)) out.set(`${r.studentQboId}|${r.familyQboId}`, { studentQboId: r.studentQboId, familyQboId: r.familyQboId });
-  return [...out.values()];
 }

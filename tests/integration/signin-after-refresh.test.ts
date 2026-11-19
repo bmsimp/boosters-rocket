@@ -28,6 +28,7 @@ import { env } from "@/env";
 import { resetDb, seedGuardian, seedParent, seedWorkingMail } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
+import { syncAppRecords } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -68,14 +69,15 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     await seedWorkingMail(); await seedParentSettings(SIGNINS_ON);
   });
 
-  it("from the portal's own row to their family: refresh, code, session, and the family record the refresh keeps", async () => {
+  it("from the portal's own row to their family: refresh, code, session, and the family record migration 0023 made", async () => {
     const ana = await seedAna();
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    await syncAppRecords(); // the records, as 0023 made them from this roster: a read makes none (stage 3's slice 9c)
     // The refresh made nobody: Ana is the one person, as seeded, and QuickBooks' other records gave no one a sign-in.
     expect(await db.select().from(parent)).toHaveLength(1);
     const [link] = await db.select().from(guardian);
     expect(link).toMatchObject({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
-    // The refresh brought the app's records into step: her row names the family record of customer 10, which the gate enters.
+    // Her row names the family record of customer 10, which the gate enters.
     const familyId = link!.familyId;
     expect(familyId).not.toBeNull();
     expect(await db.select().from(parentAuthSession)).toEqual([]);
@@ -108,9 +110,10 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     expect(await pageRequest(cookieFrom(res))).toMatchObject({ status: "ok", identity: { familyId } });
   }, 30_000);
 
-  it("stays in when the refresh no longer finds her parent record, and is out once her family's record is inactive, with her row open", async () => {
+  it("stays in when the refresh no longer finds her parent record, or her family: the app's records stand alone", async () => {
     await seedAna();
     await refreshRoster(worker);
+    await syncAppRecords();
     const mail = await codeMailedTo("ana@example.com");
     const res = await post("/portal-code/verify", { email: "ana@example.com", code: codeIn(mail!) });
     const cookie = cookieFrom(res);
@@ -121,19 +124,20 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
     expect((await db.select().from(guardian))[0]).toMatchObject({ status: "active", disabledReason: null });
 
-    // The family itself leaves the roster: its record goes inactive, and the gate keeps her out of it.
+    // The family itself leaves the roster QuickBooks sends: since stage 3's slice 9c its record stays active, so she
+    // stays in (making a family inactive is a staff write, which changes its record too).
     stub.customers = stub.customers.filter((c) => c.Id !== "10" && c.Id !== "12");
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
-    expect(await pageRequest(cookie)).toEqual({ status: "none" });
-    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
     expect((await db.select().from(guardian))[0]).toMatchObject({ status: "active", disabledReason: null });
     await aMinutePasses();
-    expect(await codeMailedTo("ana@example.com")).toBeNull();
+    expect(await codeMailedTo("ana@example.com")).toMatchObject({ to: "ana@example.com" });
   }, 30_000);
 
   it("keeps signing in with the portal's address when QuickBooks changes the one on her record", async () => {
     const ana = await seedAna();
     await refreshRoster(worker);
+    await syncAppRecords();
     const first = await codeMailedTo("ana@example.com");
     const res = await post("/portal-code/verify", { email: "ana@example.com", code: codeIn(first!) });
     const cookie = cookieFrom(res);

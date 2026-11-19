@@ -15,6 +15,7 @@ import { runDueJobs } from "@/lib/jobs/runner";
 import { runMoneyAndItems } from "@/lib/jobs/money-job";
 import { askForMoneyRun, MONEY_JOB, moneyRunView, RUN_KEY, runMoneyJob, STOPS_AT_ONE_FAMILY } from "@/lib/money/sweep";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
+import { familyFromCustomer } from "@/lib/roster/no-family";
 import { resetDb, seedStaff } from "../helpers/db";
 import { connectCompany, familyRecordOf, invoiceQueries, moneyRow, stubInvoice as inv } from "../helpers/money";
 import { MONEY_REALM } from "../helpers/parent";
@@ -189,6 +190,27 @@ describe("the worker's read of every family", () => {
     const last = (await audits("money.read_all")).at(-1)!;
     expect(last.after).toEqual({ families: 4, read: 3, couldNotRead: 1, passedOverWithNoRecord: 1 });
     expect((await runs()).every((r) => r.outcome === "ok")).toBe(true);
+  });
+
+  it("reads a family made from a customer with no family at its next run, where the run before passed it over (stage 3's slice 10)", async () => {
+    await threeFamilies();
+    // A family customer added in QuickBooks after the portal's families were set up: the roster read stores it and
+    // makes no record (since slice 9c), written here to the cache by hand, as such a read leaves it.
+    await db.insert(qboCustomer).values({ qboId: "25", displayName: "Patel Family", active: true, parentQboId: null, typeQboId: "F", syncToken: "0" });
+    stub.customers.push(customer("25", 20));
+    stub.invoices.push(inv("4", "25", { TotalAmt: 20, Balance: 20 }));
+    expect(await runMoneyJob({ paceMs: 0 })).toEqual({ ran: true, finished: true, ok: true });
+    expect(invoiceQueries(stub).join(" ")).not.toContain("'25'");
+    expect((await audits("money.read_all")).at(-1)!.after).toEqual({ families: 4, read: 3, couldNotRead: 1, passedOverWithNoRecord: 1 });
+
+    const treasurer = await seedStaff({ email: "treasurer@club.org" });
+    expect(await familyFromCustomer("25", { actor: { door: "staff", id: treasurer.id, label: treasurer.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: treasurer.id, mayChangeFamilies: false }))
+      .toMatchObject({ ok: true });
+    expect(await runMoneyJob({ paceMs: 0, now: later(26 * HOUR) })).toEqual({ ran: true, finished: true, ok: true });
+    expect(invoiceQueries(stub).join(" ")).toContain("'25'");
+    expect((await audits("money.read_all")).at(-1)!.after).toEqual({ families: 4, read: 4, couldNotRead: 0 });
+    expect(await moneyRow("25")).toMatchObject({ totalCents: 2000, realmId: MONEY_REALM, failedCode: null });
+    expect((await moneyRow("25"))!.invoices!.map((i) => i.qboId)).toEqual(["4"]);
   });
 
   it("leaves the rest for the next wake when a wake's time is spent, and still writes one audit row for the run", async () => {

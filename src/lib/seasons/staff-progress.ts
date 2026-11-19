@@ -138,8 +138,8 @@ export type FamilyProgress = SeasonStanding & {
 /**
  * One family's standing through one season, in full: what a parent of the family sees, and the reason for each waiver.
  * The family is the app's record its page's address names, found as the season keeps it (seasonFamilyAt()). Null
- * when there is no such season, or when the family record isn't active (one whose customer QuickBooks has made
- * inactive or no longer lists as a family, while the records mirror the roster). Only that
+ * when there is no such season, or when the family record isn't active (one staff made inactive from the portal; since
+ * stage 3's slice 9c nothing done in QuickBooks changes it). Only that
  * family's records are read. The page that shows this audits the read.
  */
 export async function loadFamilyProgress(familyId: AppFamilyId, seasonId: string, amounts: "all" | "none"): Promise<FamilyProgress | null> {

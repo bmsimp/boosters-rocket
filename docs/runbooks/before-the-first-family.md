@@ -85,9 +85,11 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    has signed in, and open the file in Excel or Google Sheets.
    **Pass:** the accent shows as it should, and the columns read well. **If not:** note which program and what it
    showed.
-10. **Publish the first release.** Make the version in `package.json` the one you mean (it is `0.1.0`), then on GitHub,
-    **Releases**, draft a release with the tag `v<that version>` and publish it. The release workflow builds, checks
-    and pushes the image.
+10. **Publish the first release.** Make the version in `package.json` the one you mean (it is `0.1.0`), then run CI
+    on `main` by hand and wait for it to finish green: `gh workflow run ci.yml --ref main` (or on GitHub, **Actions**,
+    **ci**, **Run workflow**). CI runs on pull requests, not on pushes to `main`, and the release workflow publishes only
+    a commit CI has passed on. Then on GitHub, **Releases**, draft a release with the tag `v<that version>` and publish
+    it. The release workflow builds, checks and pushes the image.
     **Pass:** the workflow is green, and the repository's **Packages** shows `booster-rocket` with three tags: the
     version, the commit's first 12 characters and `stable`. If clubs are to pull it without signing in, open the
     package's settings and make it public. **If not:** the workflow's log; a tag that doesn't match `package.json`
@@ -179,11 +181,14 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    **Pass:** the change goes from Waiting to done on its own, and QuickBooks has it once, not twice.
    **If not:** note the change and what Reconciliation said; [Health page warnings](health-warnings.md#quickbooks) says
    what to do with a stuck one.
-9. **A student moved in QuickBooks itself.** Give a test student an unsigned form and a place on a shift still to come,
-   then in QuickBooks move the student under another test family, and press **Refresh** on the Roster page.
-   **Pass:** the new family's Forms page offers the student's form to sign; the old family's guardian gets "Your place
-   has been freed" for the shift; the audit log shows "What follows a student who moved to another family was
-   recorded" with the cause `roster.refresh#` and a number. **If not:** note what each family's pages show.
+9. **A student moved from the portal, then in QuickBooks itself.** Give a test student an unsigned form and a place on
+   a shift still to come, then move the student under another test family from their family's page in the portal.
+   **Pass:** QuickBooks shows the student under the new family; the new family's Forms page offers the student's form
+   to sign; the old family's guardian gets "Your place has been freed" for the shift; the audit log shows "What
+   follows a student who moved to another family was recorded" with the cause `roster.student.move#` and a number.
+   Then move the student back in QuickBooks itself and press **Refresh** on the Roster page: the portal still has them
+   in the new family (a change made in QuickBooks no longer changes the portal's families), and nobody is mailed.
+   **If not:** note what each family's pages show.
 10. **Closing a buy-out sends nothing.** With a refused or flagged buy-out on Reconciliation, choose **Close this
     buy-out**, give a reason and **Close it**; then open the family's **Its volunteer buy-outs** page.
     **Pass:** the page says how the buy-out ended, the family can choose again, and in QuickBooks no invoice was made,
@@ -200,6 +205,14 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
     who can see Balances), saying it must be paid or written off in QuickBooks first. Void the invoice in QuickBooks,
     confirm again: the student and the parent, then the family, are inactive in QuickBooks, and the family's parents
     can no longer sign in. **If not:** note what the page said and what QuickBooks shows for each.
+13. **A family added in the portal.** As an Admin (who may link families to accounting), on the Roster page use
+    **Make a family** for a test family. Then, signed in as a staff member whose role may change families but not link
+    them, make a second test family, give it a student on its page, and add a test guardian. Then, as the Admin, open
+    the second family's page and press **Create in QuickBooks and link**.
+    **Pass:** the first family is in QuickBooks once, and its Roster row says it is linked. The second says, when it
+    is made, that nothing was sent to QuickBooks; it is listed as not linked, QuickBooks doesn't have it, and its
+    guardian can sign in to it. After **Create in QuickBooks and link**, QuickBooks has the family once with the
+    student under it, and both rows say linked. **If not:** note what each page said and what QuickBooks shows.
 
 ## 3. Real phones
 
@@ -410,8 +423,17 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    mapping screen ships it would refuse the real books
    ([reconnecting QuickBooks, a different company](quickbooks-reconnect.md#connecting-a-different-company)). The
    proof-of-concept host stays on the sandbox; the club's installation is a fresh one ([first install](first-install.md)).
-   **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster lists the
-   club's families with the counts QuickBooks has. **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
+   **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
+   line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
+   customer into the portal's own families by itself. On **Reconciliation**, **Customers with no family** lists the
+   active family customers of the real books at the top level (under no other customer); a family that is inactive in
+   QuickBooks, or sits under another customer there, isn't offered, so make it active, or move it to the top level, in
+   QuickBooks first; **Create a family from this** brings each in, with its students, linked to
+   their customers. Bring in the pilot families this way, then add their guardians on each family's page, and check
+   each family's page shows its students. Making a family reads none of its money: on **Balances** press **Read every
+   family now** (or wait for the next daily read), then check the Balances page shows each pilot family's money. The
+   reviewed import of every family at once comes with stage 4 of the roadmap.
+   **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
 2. **Check the portal's requests against the real books.** Settings, QuickBooks, **Check the portal's requests**,
    **Run the check**. Against the real books it only reads.
    **Pass:** every reading row answers as the portal expects. **If not:** as in part 2; don't switch parent sign-ins on
@@ -485,8 +507,9 @@ work another. Any time before the pilot.
    and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); setup asks for the club before the first
    Admin; a role saved from the checklist no longer takes up new permissions by itself.
 7. A buy-out is billed in the company's home currency with no due date sent; credit earned after a buy-out still counts
-   toward the requirement but doesn't lower the invoice; the daily check voids, through the queue, a per-student
-   buy-out invoice whose student was moved in QuickBooks (rather than only flagging it).
+   toward the requirement but doesn't lower the invoice; a student moved in QuickBooks is no longer followed (stage 3's
+   slice 9c): their forms, places and per-student buy-out stay with the family the portal holds them in, and nothing is
+   voided, until staff move them from the portal, which voids an unpaid per-student invoice through the queue.
 8. Any guardian of a family can check in another guardian's own place ("Check everyone in").
 9. Checking in from inside the installed app: decided on 2026-11-16 (the roadmap): scanning the shift's code with the
    phone's camera stays the way, and on an iPhone that opens Safari. Native apps may come later.
@@ -504,12 +527,15 @@ work another. Any time before the pilot.
 14. Payment and checklist items are reminded 14 and 3 days before their due date, with no schedule of their own, and
     a payment's reminder says its amount only from figures read in the last few minutes, so most say "Not paid yet".
 15. Staff can make a customer inactive from the roster pages, but not active again: that was left out while building
-    because it widens what the portal changes in QuickBooks. Today a customer is made active again in QuickBooks
-    itself, and the next roster refresh brings it back.
-16. The lead's choice, not the owner's (2026-11-17): making a family inactive is never put on the write queue. When
-    QuickBooks can't be reached part way, it stops, says who was made inactive and who wasn't, asks for a roster
-    refresh where a write's answer was lost, and staff press it again later. One student or parent made inactive by
-    itself still waits on the queue as before.
+    because it widens what the portal changes in QuickBooks. A customer can be made active again in QuickBooks
+    itself, but the portal's own family or student stays inactive: no roster refresh changes the portal's families
+    and students any more. Taking such a change into the portal waits for the mapping screen's "Take QuickBooks'
+    into the app" (the roadmap's stage 4).
+16. The lead's choice, not the owner's (2026-11-17): making a family inactive is never put on the write queue to be
+    sent later. When QuickBooks can't be reached part way, it stops, says who was made inactive and who wasn't, and
+    staff press it again later. A step whose answer was lost asks for a roster refresh and waits on the queue only to
+    be looked for after it, so the portal's own record follows without anything being sent twice. One student or
+    parent made inactive by itself still waits on the queue as before.
 17. The lead's choice, not the owner's (2026-11-17): a credit (a negative balance) is left to QuickBooks. The portal's
     own check stops only an amount owed; whatever QuickBooks refuses is told in words.
 18. The lead's choice, not the owner's (2026-11-17): when a family is made inactive, its own last write is sent with

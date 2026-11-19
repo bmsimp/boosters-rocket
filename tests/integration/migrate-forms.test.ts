@@ -197,8 +197,8 @@ describe("migrations 0028 and 0029: forms name the app's own families and studen
         expect(of(`ash-student-${s}`), s).toMatchObject({ state: s, family: "F1", student: "S1", student_active: true, student_now_in: "F1" });
       }
       expect(of("birch-family")).toMatchObject({ family: "F2", student: null });
-      // Moved: the request stays the Ash family's and names the student's own record, which is in the Birch family now,
-      // for the next roster read to follow (requestsHeldElsewhere()).
+      // Moved: the request stays the Ash family's and names the student's own record, which is in the Birch family now.
+      // (Until stage 3's slice 9c the next roster read followed such a move; since then nothing does.)
       expect(of("moved")).toMatchObject({ family: "F1", student: "S3", student_active: true, student_now_in: "F2" });
       // Left the roster: an inactive record that was never under a family the cache held, as 0023 made it.
       expect(of("gone")).toMatchObject({ family: "F1", student: "S-GONE", student_active: false, student_now_in: null });

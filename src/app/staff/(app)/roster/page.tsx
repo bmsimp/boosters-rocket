@@ -1,7 +1,7 @@
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage, rosterFamilies } from "@/lib/roster/queries";
-import { linksOfCustomers } from "@/lib/families/links";
+import { connectedToAnotherCompany, linksOfCustomers } from "@/lib/families/links";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
 import { DataTable, type Column } from "@/app/components/data-table";
@@ -10,12 +10,19 @@ import { DisconnectedNotice, Freshness } from "./freshness";
 import { CreateBox, WhatChanges } from "./changes";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 import type { AppFamilyId } from "@/lib/families/ids";
+import { familiesBeingMade } from "@/lib/roster/writes";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
 
-/** `status`: the customer's own standing in QuickBooks; null for a family the roster lists no customer for. */
-type Row = { id: AppFamilyId; name: string; students: number | null; parents: number | null; status: boolean | null };
+/**
+ * `status`: the customer's own standing in QuickBooks; null for a family the roster lists no customer for. `linked`:
+ * the family has a link at all; `making`: it has none yet, and its own create is waiting on the queue (stage 3's slice 9d).
+ */
+type Row = { id: AppFamilyId; name: string; students: number | null; parents: number | null; status: boolean | null; linked: boolean; making: boolean };
+/** Whether a family is linked to QuickBooks, in words, and its customer's standing there when it is. */
+const linkWords = (r: Row) => (r.status !== null ? (r.status ? "Linked: active" : "Linked: inactive") : r.linked ? "Linked: not listed as a family now"
+  : r.making ? "Not linked yet: being made in QuickBooks" : "Not linked: in the portal only");
 
 export default async function RosterPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Roster.Read");
@@ -26,6 +33,11 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const rosterTag = await currentRosterTag();
   const page = await loadRosterPage();
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected;
+  // Adding a family is the portal's own (stage 3's slice 9d): offered wherever the list is, connected or not, and made
+  // in QuickBooks too only by staff who may link families to accounting while QuickBooks is connected.
+  // Not while QuickBooks is connected to another company than the roster's: addFamily() refuses then (WRITE_COPY.noRoster).
+  const mayAdd = can(ctx.effective, "Roster.Family.ReadWrite") && !(await connectedToAnotherCompany());
+  const goes = !can(ctx.effective, "Accounting.Link.ReadWrite") ? "no_permission" as const : page.connected ? "sends" as const : "not_connected" as const;
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
   const settings = admin ? <> <a href="/staff/settings/quickbooks">Open QuickBooks settings</a></> : " An Admin can do that under QuickBooks.";
   const matches = (name: string) => !q || name.toLowerCase().includes(q); // a plain substring: nothing typed is a pattern
@@ -34,15 +46,18 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   // The families are the app's own records (stage 3 of the app-owned families spec), each with what QuickBooks holds
   // for its customer, from the roster read above: every one has a page, addressed by its record.
   const families = roster ? await rosterFamilies(page) ?? [] : [];
+  const making = families.some((f) => !f.linked) ? await familiesBeingMade() : new Set<string>();
   const rows: Row[] = families.filter((f) => matches(f.name)).map((f) => ({ id: f.id, name: f.name,
-    students: roster?.kind === "flat" ? null : f.students.length, parents: roster?.kind === "flat" ? null : f.parents.length, status: f.customer?.active ?? null }));
+    students: roster?.kind === "flat" ? null : f.students.length, parents: roster?.kind === "flat" ? null : f.parents.length, status: f.customer?.active ?? null,
+    linked: f.linked, making: making.has(String(f.id)) }));
   // Needs attention names QuickBooks' customers: each family's (or member's) is linked to its page through the family
   // kind of link, for the whole list in one lookup; a customer with none has no page, and its name links nowhere.
   const withPage = !roster ? [] : roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId);
   const pageOf = (await linksOfCustomers({ families: withPage, students: [] })).familyOfCustomer;
   const named = (qboId: string | null, name: string) => { const at = qboId === null ? undefined : pageOf.get(qboId); return at ? <a href={familyPage(at)}>{name}</a> : name; };
-  // The rows are records, which are made only once the cache names its company (keepAppRecordsInStep()): a cache read
-  // before the portal recorded that (shown while QuickBooks is disconnected) lists customers the records don't hold yet.
+  // The rows are records, which no read of QuickBooks makes (stage 3's slice 9c): a customer added in QuickBooks, or a
+  // cache read before the portal recorded its company (shown while QuickBooks is disconnected), lists customers the
+  // records don't hold.
   const listedInCache = !roster ? 0 : roster.kind === "flat" ? roster.members.length : roster.families.length;
   const noun = roster?.kind === "flat" ? "member" : "family";
   const nouns = roster?.kind === "flat" ? "members" : "families";
@@ -52,12 +67,12 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
       { key: "students", header: "Students", numeric: true, cell: (r: Row) => r.students },
       { key: "parents", header: "Parents", numeric: true, cell: (r: Row) => r.parents },
     ]),
-    { key: "status", header: "In QuickBooks", cell: (r) => (r.status === null ? "No customer" : r.status ? "Active" : "Inactive") },
+    { key: "status", header: "In QuickBooks", cell: linkWords },
   ];
   return (
     <main className="wrap single">
       <h1 className="page-title">Roster</h1>
-      <p className="lede">The club&apos;s {roster?.kind === "flat" ? "members" : "families"} as QuickBooks lists them. This is a copy of what QuickBooks holds: a change made here is sent to QuickBooks first.</p>
+      <p className="lede">The club&apos;s {roster?.kind === "flat" ? "members" : "families"}, each beside its customer in QuickBooks where it is linked to one. A change to a linked {roster?.kind === "flat" ? "member" : "family"} is sent to QuickBooks first, then made here too; one with no link is changed here only; and a change made in QuickBooks doesn&apos;t change the portal&apos;s {roster?.kind === "flat" ? "members" : "families"}.</p>
 
       {!roster && (
         <Notice tone={page.brokenTypes.length ? "warning" : "info"} title="Nothing to show yet" titleId="roster-none-h">
@@ -78,14 +93,15 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
           </form>
           {rows.length === 0
             ? <Notice tone="info">{typed ? <>No {noun} matches &quot;{typed}&quot;.</>
-                : listedInCache > 0 ? <>The roster lists {nouns}, but they haven&apos;t been read into the portal&apos;s own records yet. They are listed here after the next read from QuickBooks.</>
+                : listedInCache > 0 ? <>QuickBooks lists {nouns}, but none of them is one of the portal&apos;s own {nouns}: a read of QuickBooks doesn&apos;t bring customers into the portal.</>
                 : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</Notice>
             : <DataTable caption={typed ? <>{rows.length} {rows.length === 1 ? noun : nouns} matching &quot;{typed}&quot;</> : <>Every {noun} on the roster, by name</>}
                 columns={columns} rows={rows} rowKey={(r) => String(r.id)} />}
         </section>
       )}
 
-      {roster && page.shape && canChange && <CreateBox shape={page.shape} rosterTag={rosterTag}
+      {/* Not while the cache names no company (read before the portal recorded it): addFamily() refuses there. */}
+      {roster && page.shape && mayAdd && rosterTag !== "none" && <CreateBox shape={page.shape} rosterTag={rosterTag} goes={goes}
         memberTypes={page.shape.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
       {roster && page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
 

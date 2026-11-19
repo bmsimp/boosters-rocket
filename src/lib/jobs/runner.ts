@@ -119,8 +119,8 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   // The Health page reads when it last followed a run, and what it did or that it failed (./marks.ts).
   try {
     const b = await checkBuyoutInvoices();
-    if (b.ran) await markJob(BUYOUT_CHECK_MARK, { counts: { paid: b.paid, flagged: b.flagged, voided: b.voided, voiding: b.voiding, unflagged: b.unflagged }, failed: 0 });
-    if (b.paid + b.flagged + b.voided + b.voiding + b.unflagged > 0) ran.push({ job: BUYOUT_CHECK_JOB, ok: true });
+    if (b.ran) await markJob(BUYOUT_CHECK_MARK, { counts: { paid: b.paid, flagged: b.flagged, voided: b.voided, unflagged: b.unflagged }, failed: 0 });
+    if (b.paid + b.flagged + b.voided + b.unflagged > 0) ran.push({ job: BUYOUT_CHECK_JOB, ok: true });
   } catch { await markJob(BUYOUT_CHECK_MARK, "threw"); ran.push({ job: BUYOUT_CHECK_JOB, ok: false }); }
   return { ran };
 }

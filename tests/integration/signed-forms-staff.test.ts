@@ -477,7 +477,7 @@ describe("a student moved to another family", () => {
   it("gives the new family nothing of who signed a form it brought along: no names, no download, no PDF", async () => {
     const s2 = FAMILY_A.students[1]!;
     await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: s2.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
-    await moveInCache([s2.qboId], FAMILY_B.family.qboId); // as a roster read leaves it: the app's records follow
+    await moveInCache([s2.qboId], FAMILY_B.family.qboId); // as a move staff make leaves it: the app's records follow
     const bCtx = { ...b.identity, ip: null };
     expect(await findMySignedPdf(bCtx, a.forms!.ids.complete)).toBeNull();
     expect(await mySignedDownloads(bCtx, [a.forms!.ids.complete])).toEqual(new Map());
