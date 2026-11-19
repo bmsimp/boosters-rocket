@@ -48,8 +48,8 @@ async function codeMailedTo(typed: string): Promise<(Msg & { pending: string }) 
   try { await vi.waitFor(() => expect(outbox.length).toBeGreaterThan(before), { timeout: 1500 }); } catch { return null; }
   return { ...outbox.at(-1)!, pending };
 }
-/** The code of that mail, posted with its pending step. */
-const check = async (m: Msg & { pending: string }) => (await codeStep(codeIn(m), m.pending, { headers: HEADERS })).res;
+/** The code of that mail, posted with its pending step: the response (its cookies) and the body codeStep() has read from it. */
+const check = (m: Msg & { pending: string }) => codeStep(codeIn(m), m.pending, { headers: HEADERS });
 const codeIn = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
 const pageRequest = async (cookie: string) => { fromBrowser(cookie, IP); return getParentState(); };
 const actions = async () => (await db.select().from(auditLog).orderBy(auditLog.id)).map((r) => r.action);
@@ -86,8 +86,8 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     // She types her address her own way and gets a code at the address the portal holds.
     const mail = await codeMailedTo("  ANA@example.COM ");
     expect(mail).toMatchObject({ to: "ana@example.com" });
-    const res = await check(mail!);
-    expect(await res.json()).toEqual({ ok: true, next: "/" });           // one family: straight in
+    const { res, body } = await check(mail!);
+    expect(body).toEqual({ ok: true, next: "/" });                       // one family: straight in
 
     // The next page request is hers, in the Rivera family, and the link is active.
     const state = await pageRequest(cookieFrom(res));
@@ -116,7 +116,7 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     await refreshRoster(worker);
     await syncAppRecords();
     const mail = await codeMailedTo("ana@example.com");
-    const res = await check(mail!);
+    const { res } = await check(mail!);
     const cookie = cookieFrom(res);
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
 
@@ -140,7 +140,7 @@ describe("a guardian the portal holds signs in beside the roster refresh", () =>
     await refreshRoster(worker);
     await syncAppRecords();
     const first = await codeMailedTo("ana@example.com");
-    const res = await check(first!);
+    const { res } = await check(first!);
     const cookie = cookieFrom(res);
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
 

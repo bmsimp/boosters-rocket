@@ -241,7 +241,7 @@ describe("setting a password from a link", () => {
   it("a set-up link inserts one credential row that verifies, spends the link, ends nothing and, at Standard, signs in", async () => {
     const { ana, row } = await seedAna();
     await seedParentSession(ana.authUserId, { familyId: row.familyId });
-    await seedDevice(ana.id);
+    const seeded = await seedDevice(ana.id);
     await seedCode(ana.id);
     const token = await mintLink(ana.id, "setup");
     // At Standard (the level a club has until an Admin chooses Strict) the set-up signs Ana in: one family, so home
@@ -252,9 +252,12 @@ describe("setting a password from a link", () => {
     expect(creds[0]).toMatchObject({ providerId: "credential", accountId: ana.authUserId, userId: ana.authUserId });
     expect(await verifyPassword({ hash: creds[0]!.password!, password: GOOD })).toBe(true);
     expect((await linkRows(ana.id))[0]!.usedAt).not.toBeNull();
-    // A set-up ends nothing: the session, the device and the code stay, beside the session it signed in with.
+    // A set-up ends nothing: the session, the device and the code stay, beside the session it signed in with and,
+    // since SI-3b, the device that sign-in remembered (tests/integration/password-link-signin.test.ts).
     expect(await db.select().from(parentAuthSession)).toHaveLength(2);
-    expect(await db.select().from(parentDevice)).toHaveLength(1);
+    const devices = await db.select().from(parentDevice);
+    expect(devices).toHaveLength(2);
+    expect(devices.map((d) => d.id)).toContain(seeded.id);
     expect(await db.select().from(signinCode)).toHaveLength(1);
     const [set] = await audits("parent.password.set");
     expect(set).toMatchObject({ door: "parent", actorId: ana.id, actorLabel: "ana@example.com", targetType: "parent", targetId: ana.id, ip: IP });
