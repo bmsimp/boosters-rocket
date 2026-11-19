@@ -25,7 +25,7 @@ import ParentLayout from "@/app/(parent)/layout";
 import NotFound from "@/app/not-found";
 import ChooseFamily from "@/app/choose-family/page";
 import { resetDb, seedGuardian, seedParent, seedParentSession } from "../helpers/db";
-import { FAMILY_A, FAMILY_B, identityNow, moneyMarkers, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, identityAfterChoosingAgain, identityNow, moneyMarkers, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -199,8 +199,9 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
     await seedConnected(stub, { realmId: REALM });
     const readAt = await seedRosterRead({ realmId: OTHER_REALM });
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
-    // The records were made again from that cache's company, and the gate finds the family through the row's record.
-    const now = await identityNow(a.session.id);
+    // The records were made again from that cache's company, so the record the session chose no longer counts: the
+    // gate sends it to choose again, and the family it may enter is the one the person's row names now.
+    const now = await identityAfterChoosingAgain(a.session.id);
     expect(await loadMyFamily(ctxOf(now))).toMatchObject({ name: "Alderquist Family", rosterReadAt: readAt.toISOString(), me: { name: "Ansgar Alderquist" } });
     expect((await loadRosterPage()).roster).not.toBeNull();
   });
