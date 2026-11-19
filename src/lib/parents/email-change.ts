@@ -389,8 +389,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   });
 
   // What the parent is told depends on the outcome alone: the new address can sign in to this family now, or not yet.
-  // The family the request was asked in, which liveRequest() matched to the session's own (ctx.familyId).
-  const inFamily = changed === true && (await enterableGuardianRows(ctx.parentId)).some((r) => r.familyId === row.familyId);
+  // The family the request was asked in, which liveRequest() matched to the session's own (ctx.familyId). A second press
+  // that found the change finished by the first is told as the first was.
+  const made = changed ?? ((await db.select({ email: parent.email }).from(parent).where(eq(parent.id, ctx.parentId)))[0]?.email === newEmail);
+  const inFamily = made && (await enterableGuardianRows(ctx.parentId)).some((r) => r.familyId === row.familyId);
   return { ok: true, message: inFamily ? EMAIL_COPY.done(newEmail) : EMAIL_COPY.finishing, signedOut: true };
 }
 
