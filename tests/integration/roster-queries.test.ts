@@ -198,7 +198,7 @@ describe("what the roster pages load", () => {
     // A record a roster row names as a family (made inactive, as 0023 made one) whose customer isn't a family isn't listed.
     await recordOfCustomer("30", "family");
     expect(await shown()).toHaveLength(3);
-    // A family made in the portal with no QuickBooks customer (none can be until families are made there) is listed, with no customer.
+    // A family made in the portal with no QuickBooks customer (as staff add one since stage 3's slice 9d) is listed, with no customer.
     const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
     await db.insert(student).values({ name: "Hal Handmade", active: true, familyId: hand!.id });
     expect((await shown())[1]).toEqual(["Handmade Family", true, null, [["Hal Handmade", null]], []]);
