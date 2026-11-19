@@ -60,13 +60,13 @@ const NAME_FIELD_MAX = 200, EMAIL_FIELD_MAX = 320, NOTE_MAX = 2000;
 // A roster read holds the roster lock for its whole QuickBooks read: a write that can't have it within a few seconds
 // changes nothing and says so.
 const BUSY_WORDS = "The roster is being read from QuickBooks just now, so nothing was changed. Try again in a minute.";
-const NO_LINK_WORDS = "This family has no customer in QuickBooks linked to it, so a guardian can't be added to it yet.";
+const WAITING_WORDS = "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
 const ADD_REFUSED = {
   invalid_name: "Give the guardian's name, up to 100 characters.",
   invalid_email: "That isn't an email address the portal can send a sign-in code to. Check it and try again.",
   no_family: NOT_FROM_PAGE.errors[0]!,
   inactive: "This family is inactive in the portal, so nobody can be added to it.",
-  no_link: NO_LINK_WORDS,
+  waiting: WAITING_WORDS,
   blocked: "The person with this address is blocked. Unblock them on their page first.",
   already: "The person with this address is already one of this family's guardians.",
   busy: BUSY_WORDS,
@@ -114,7 +114,8 @@ const REINSTATE_REFUSED = {
   blocked: "This person is blocked. Unblock them on their page first.",
   no_family: "This sign-in isn't in a family the portal holds, so it can't be brought back.",
   inactive: "This family is inactive in the portal, so nobody can sign in to it.",
-  no_link: NO_LINK_WORDS.replace("a guardian can't be added to it yet", "this sign-in can't be brought back yet"),
+  waiting: WAITING_WORDS.replace("nobody can be added to it for now", "this sign-in can't be brought back for now"),
+  other_customer: "This sign-in was made for a different customer in QuickBooks than this family's own, so it can't be brought back here.",
   busy: BUSY_WORDS,
 } as const;
 
