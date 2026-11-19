@@ -117,6 +117,7 @@ export function FamilyChanges({ shape, family, families, edit, cover }: {
       )}
       {f.active && offered.has("add_parent") && (
         <details className="more"><summary>Add a parent</summary>
+          <p className="hint">This adds their record in QuickBooks only: it gives them no sign-in to the portal. To let them sign in, add them under Portal sign-ins.</p>
           <ParentForm act={addToFamilyAction.bind(null, edit.rosterTag, "parent", f.qboId)} />
         </details>
       )}
