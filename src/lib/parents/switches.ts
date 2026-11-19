@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { family, guardian, parent, parentAuthSession, parentAuthUser, signinCode, student } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentSigninToken, signinCode, student } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { mailWorking } from "@/lib/mail/settings";
 import { getShape, shapeNamesStudents } from "@/lib/roster/shape";
@@ -85,14 +85,20 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
     // Welcome emails go off with sign-ins: switching sign-ins on again must never start emailing families by itself.
     return change({ signin: false, welcome: false }, o, async (tx, _next, before) => {
       // Everyone's rows first, in id order, then what hangs on them in the order ./sessions.ts gives: the owed welcomes
-      // (on the person's row), the unused codes, the sessions.
+      // (on the person's row), the unused codes, the unused set-up and reset links, the remembered devices, the
+      // sessions. Passwords stay: switching sign-ins on again lets the same people in the same way.
       await lockPeople(tx, or(eq(parent.welcomeOwed, true),
         inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(isNull(signinCode.usedAt))),
+        inArray(parent.id, tx.select({ id: parentSigninToken.parentId }).from(parentSigninToken).where(isNull(parentSigninToken.usedAt))),
+        inArray(parent.id, tx.select({ id: parentDevice.parentId }).from(parentDevice)),
         inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)))));
       const owed = await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true)).returning({ id: parent.id });
       const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
+      const links = await tx.delete(parentSigninToken).where(isNull(parentSigninToken.usedAt)).returning({ id: parentSigninToken.id });
+      const devices = await tx.delete(parentDevice).returning({ id: parentDevice.id });
       const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
-      return { sessionsEnded: ended.length, codesDeleted: codes.length, ...(before.welcome ? { welcomeSwitchedOff: true, owedCleared: owed.length } : {}) };
+      return { sessionsEnded: ended.length, codesDeleted: codes.length, linksDeleted: links.length, devicesForgotten: devices.length,
+        ...(before.welcome ? { welcomeSwitchedOff: true, owedCleared: owed.length } : {}) };
     });
   }
   if ((await getParentSettings()).signin) return { ok: true }; // already on: a stale press changes nothing
