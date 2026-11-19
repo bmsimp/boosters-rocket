@@ -1,14 +1,15 @@
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { qboCustomer, qboCustomerType, jobRun, guardian, parent } from "@/lib/db/schema";
+import { qboCustomer, qboCustomerType, jobRun, guardian, parent, family, student } from "@/lib/db/schema";
 import { connectionView, getConnection } from "@/lib/quickbooks/connection";
 import { getShape, missingTypes, describeShape, type MembershipShape, type TypeRow } from "./shape";
-import { buildRoster, type Cust, type Family, type Roster } from "./model";
+import { buildRoster, type Cust, type Roster } from "./model";
 import { needsAttention, type AttentionItem, type SignIn } from "./attention";
 import { ROSTER_JOB, getRosterSource } from "./source";
 import { loadDecision } from "@/lib/parents/reconcile";
-import { customerOfFamily } from "@/lib/families/links";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { linksOf } from "@/lib/families/links";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
+import { recordNameWords } from "@/lib/families/words";
 
 export type RosterPage = {
   connected: boolean; shape: MembershipShape | null; shapeWords: string | null; brokenTypes: string[]; roster: Roster | null;
@@ -24,9 +25,17 @@ const customers = async (): Promise<Cust[]> => (await db.select().from(qboCustom
   ({ qboId: c.qboId, displayName: c.displayName, active: c.active, parentQboId: c.parentQboId, typeQboId: c.typeQboId, email: c.email, phone: c.phone }));
 const types = async (): Promise<TypeRow[]> => (await db.select().from(qboCustomerType)).map((t) => ({ qboId: t.qboId, name: t.name, active: t.active }))
   .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
-/** The portal's family links, leaving out those from a previous company: their family IDs name other families here. */
-const signIns = async (): Promise<SignIn[]> => db.select({ guardianId: guardian.id, familyQboId: guardian.familyQboId, name: parent.name, email: parent.email, status: guardian.status })
-  .from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id)).where(sql`${guardian.disabledReason} is distinct from 'company_changed'`);
+/**
+ * Every portal sign-in by its membership's family (`guardian.family_id`), with the customer that family record is linked
+ * to, looked up for all of them at once. Those from a previous company are left out: they belong to no family here.
+ */
+async function signIns(): Promise<SignIn[]> {
+  const rows = await db.select({ guardianId: guardian.id, familyId: guardian.familyId, name: parent.name, email: parent.email, status: guardian.status })
+    .from(guardian).innerJoin(parent, eq(guardian.parentId, parent.id)).where(sql`${guardian.disabledReason} is distinct from 'company_changed'`);
+  const families = [...new Set(rows.flatMap((r) => (r.familyId === null ? [] : [r.familyId])))];
+  const links = await linksOf({ families, students: [] });
+  return rows.map((r) => ({ ...r, customerQboId: r.familyId === null ? null : links.customerOfFamily.get(r.familyId) ?? null }));
+}
 
 /**
  * Everything the roster pages and the settings view show. A broken shape gives no roster rather than a wrong one (spec §1
@@ -66,29 +75,81 @@ export async function previewShape(shape: MembershipShape): Promise<ShapePreview
     samples: { families: first(r.families.map((f) => f.customer)), students: first(students), parents: first(parents), members: [] } };
 }
 
-export type RosterEntry = { kind: "family"; family: Family; signIns: SignIn[] } | { kind: "member"; member: Cust; signIns: SignIn[] };
+/**
+ * A student as the app keeps it (`student`, by its `family_id`), with what QuickBooks holds for them: their customer
+ * through the student link, as the roster lists it under the family's customer (`customer`; null when it has no link,
+ * or the roster lists that customer elsewhere or not at all). Names are the record's (recordNameWords() when the
+ * portal knows none).
+ */
+export type RecordStudent = { id: AppStudentId; name: string; active: boolean; customer: Cust | null };
+/**
+ * A family as the app keeps it (`family`), with what QuickBooks holds for it: its customer through the family link, as
+ * the roster lists it as a family (a member, in flat books; `customer`, null when it has none, or the roster doesn't
+ * list that customer as one), its students, and the Parent sub-customers the roster lists under that customer
+ * (`parents`: QuickBooks' own, which have no record of their own; none without a customer). The write forms send
+ * QuickBooks ids and versions, so only what has a `customer` can be changed from the page.
+ */
+export type RecordFamily = { id: AppFamilyId; name: string; active: boolean; customer: Cust | null; students: RecordStudent[]; parents: Cust[] };
 
-/** One family (layered) or one member (flat) found in a page already loaded, with the portal sign-ins attached to its QuickBooks ID; null for anything else. */
-export function entryFrom(page: RosterPage, qboId: string): RosterEntry | null {
-  if (!page.roster) return null;
-  const mine = page.signIns.filter((s) => s.familyQboId === qboId);
-  if (page.roster.kind === "flat") {
-    const member = page.roster.members.find((m) => m.qboId === qboId);
-    return member ? { kind: "member", member, signIns: mine } : null;
+const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
+const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
+/** By name, as the roster has always listed them (case and accents ignored), then by QuickBooks ID as numbers, then by the record's own id. */
+const byName = (a: { id: unknown; name: string; customer: Cust | null }, b: { id: unknown; name: string; customer: Cust | null }) =>
+  COLLATOR.compare(a.name, b.name) || numeric(a.customer?.qboId ?? "", b.customer?.qboId ?? "") || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+
+/**
+ * The families the Families pages list, from the app's own records (stage 3 of the app-owned families spec): every
+ * active family record, and an inactive one where the roster lists its customer as a family (a member, in flat
+ * books), as the pages have always shown a family QuickBooks has made inactive; each with its student records, the
+ * active ones and an inactive one where the roster lists its customer under the family's. What only QuickBooks holds
+ * (each customer's id, version, type, active flag, email and phone, and the Parent sub-customers) is joined from the
+ * page's roster, read once with the page: three queries in all, whatever the number of families. Null when the page
+ * has no roster to show (no shape, a broken one, or another company's cache), as the pages show nothing then.
+ * `only` narrows it to one family, for that family's page.
+ */
+export async function rosterFamilies(page: RosterPage, only?: AppFamilyId): Promise<RecordFamily[] | null> {
+  const roster = page.roster;
+  if (!roster) return null;
+  const [families, students] = await Promise.all([
+    db.select({ id: family.id, name: family.name, active: family.active }).from(family).where(only === undefined ? undefined : eq(family.id, only)),
+    db.select({ id: student.id, familyId: student.familyId, name: student.name, active: student.active }).from(student)
+      .where(only === undefined ? isNotNull(student.familyId) : eq(student.familyId, only)),
+  ]);
+  const links = await linksOf({ families: families.map((f) => f.id), students: students.map((s) => s.id) });
+  // What the roster lists as a family, by customer: in flat books a member, with nobody under it.
+  const listed = new Map<string, { customer: Cust; students: Cust[]; parents: Cust[] }>(roster.kind === "flat"
+    ? roster.members.map((m) => [m.qboId, { customer: m, students: [], parents: [] }])
+    : roster.families.map((f) => [f.customer.qboId, f]));
+  const under = new Map<string, typeof students>();
+  for (const s of students) if (s.familyId !== null) under.set(String(s.familyId), [...(under.get(String(s.familyId)) ?? []), s]);
+  const out: RecordFamily[] = [];
+  for (const f of families) {
+    const customerId = links.customerOfFamily.get(f.id);
+    const there = customerId === undefined ? undefined : listed.get(customerId);
+    if (!f.active && !there) continue;
+    const mine = (under.get(String(f.id)) ?? []).flatMap((s): RecordStudent[] => {
+      const studentCustomer = links.customerOfStudent.get(s.id);
+      const customer = studentCustomer === undefined ? undefined : there?.students.find((c) => c.qboId === studentCustomer);
+      return !s.active && !customer ? [] : [{ id: s.id, name: recordNameWords(s.name, "student"), active: s.active, customer: customer ?? null }];
+    });
+    out.push({ id: f.id, name: recordNameWords(f.name, "family"), active: f.active, customer: there?.customer ?? null, students: mine.sort(byName), parents: there?.parents ?? [] });
   }
-  const family = page.roster.families.find((f) => f.customer.qboId === qboId);
-  return family ? { kind: "family", family, signIns: mine } : null;
+  return out.sort(byName);
 }
+
+/** One family's page: the family as rosterFamilies() lists it (`kind` "member" in flat books), with the sign-ins whose membership is in its record. */
+export type RosterEntry = { kind: "family" | "member"; family: RecordFamily; signIns: SignIn[] };
 
 /**
  * The roster entry a staff page's address names, by the app's own family id (stage 3 of the app-owned families spec;
- * checked by familyRecordAt() first): the family record's customer, through its own link in the roster's company, as
- * entryFrom() finds it in a page already loaded. Null when the record has no link there, or its customer isn't a family
- * (a member, in flat books) of the roster, active or not: a record whose customer QuickBooks no longer lists as one.
+ * checked by familyRecordAt() first), from a page already loaded: the family as the roster list shows it. Null when
+ * the list doesn't show it: an inactive record whose customer the roster doesn't list as a family (a member, in flat
+ * books), or a page with no roster.
  */
 export async function familyEntry(page: RosterPage, familyId: AppFamilyId): Promise<RosterEntry | null> {
-  const qboId = await customerOfFamily(familyId);
-  return qboId === null ? null : entryFrom(page, qboId);
+  const [found] = (await rosterFamilies(page, familyId)) ?? [];
+  if (!found || !page.roster) return null;
+  return { kind: page.roster.kind === "flat" ? "member" : "family", family: found, signIns: page.signIns.filter((s) => s.familyId === familyId) };
 }
 
 export async function rosterEntry(familyId: AppFamilyId): Promise<RosterEntry | null> {

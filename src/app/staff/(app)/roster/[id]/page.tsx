@@ -13,7 +13,7 @@ import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familySignins, type FamilySignin } from "@/lib/parents/directory";
 import { DisconnectedNotice, Freshness } from "../freshness";
 import { FamilyChanges, MemberChanges, Waiting, WhatChanges } from "../changes";
-import type { Cust } from "@/lib/roster/model";
+import type { Cust, Family } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressPage } from "@/app/staff/(app)/family-pages";
@@ -21,25 +21,30 @@ import { familyBalancePage, familyBuyoutsPage, familyCreditPage, familyProgressP
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
 
-const standing = (c: Cust) => (c.active ? "Active" : "Inactive");
+/** A customer's own standing in QuickBooks, or that there is none for a record. */
+const standing = (c: Cust | null) => (c === null ? "No customer" : c.active ? "Active" : "Inactive");
+
+/** One row of a people table: a record's name (a student's) or a customer's (a parent's, a member's), with what QuickBooks holds for them. */
+type Person = { key: string; name: string; customer: Cust | null };
+const ofCustomer = (c: Cust): Person => ({ key: c.qboId, name: c.displayName, customer: c });
 
 /**
- * The people QuickBooks lists under the family (or the member alone), as a table: a name per row, then what QuickBooks
- * holds for them. Names, emails and phones are QuickBooks text, shown as text only.
+ * The people under the family (or the member alone), as a table: a name per row, then what QuickBooks holds for them.
+ * Names, emails and phones are QuickBooks text, shown as text only.
  */
-function People({ id, title, noun, people, contact, empty }: { id: string; title: string; noun: string; people: Cust[]; contact: boolean; empty: string }) {
-  const columns: Column<Cust>[] = [
-    { key: "name", header: noun, rowHeader: true, cell: (p) => p.displayName },
+function People({ id, title, noun, people, contact, empty }: { id: string; title: string; noun: string; people: Person[]; contact: boolean; empty: string }) {
+  const columns: Column<Person>[] = [
+    { key: "name", header: noun, rowHeader: true, cell: (p) => p.name },
     ...(contact ? [
-      { key: "email", header: "Email", cell: (p: Cust) => p.email ?? "No email address" },
-      { key: "phone", header: "Phone", cell: (p: Cust) => p.phone ?? "No phone number" },
+      { key: "email", header: "Email", cell: (p: Person) => p.customer?.email ?? "No email address" },
+      { key: "phone", header: "Phone", cell: (p: Person) => p.customer?.phone ?? "No phone number" },
     ] : []),
-    { key: "status", header: "In QuickBooks", cell: standing },
+    { key: "status", header: "In QuickBooks", cell: (p) => standing(p.customer) },
   ];
   return (
     <section className="box" aria-labelledby={id}><h2 id={id}>{title}</h2>
       {people.length === 0 ? <Notice tone="info" live="none">{empty}</Notice>
-        : <DataTable caption={title} captionHidden columns={columns} rows={people} rowKey={(p) => p.qboId} />}
+        : <DataTable caption={title} captionHidden columns={columns} rows={people} rowKey={(p) => p.key} />}
     </section>
   );
 }
@@ -88,47 +93,49 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // The tag first: the roster the page then shows is that company's or a later one, never an earlier one.
   const rosterTag = await currentRosterTag();
   const page = await loadRosterPage(); // one load, so the entry and the freshness notes describe the same snapshot
-  // The family's customer, once, through its record's own link: what the roster cache, the sign-ins and the forms below are keyed by.
+  // The family as the app keeps it, with its students, and what QuickBooks holds for its customer from that same roster.
   const entry = await familyEntry(page, familyId);
   const admin = can(ctx.effective, "Settings.QuickBooks.ReadWrite");
   if (!entry) notFound();
-  const customer = entry.kind === "family" ? entry.family.customer : entry.member;
-  const qboId = customer.qboId;
+  const fam = entry.family, customer = fam.customer;
   // A staff read of family data (spec §5): recorded before anything is shown, naming the app's family.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "roster.family.read", permission: "Roster.Read",
     targetType: "family", targetId: String(familyId), ip: ctx.ip });
   const detailed = can(ctx.effective, "Parents.ReadWrite");
-  const signins = await familySignins(qboId, { detailed });
+  const signins = await familySignins(familyId, { detailed });
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
-  // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's version.
+  // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's
+  // version and sends QuickBooks ids, so a family the roster lists no customer for is offered none.
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null;
-  const records = entry.kind === "family" ? [entry.family.customer, ...entry.family.students, ...entry.family.parents] : [entry.member];
-  const edit = canChange ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)),
+  const inQuickBooks: Family | null = customer === null ? null
+    : { customer, students: fam.students.flatMap((s) => (s.customer ? [s.customer] : [])), parents: fam.parents };
+  const records = inQuickBooks ? [inQuickBooks.customer, ...inQuickBooks.students, ...inQuickBooks.parents] : [];
+  const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)),
     blocked: new Set(waiting.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
   // Who making the family inactive covers: everyone active under it in the cache, at any depth, with their versions.
-  const cover = edit && entry.kind === "family" ? await familyCover(qboId) : null;
+  const cover = edit && inQuickBooks && entry.kind === "family" ? await familyCover(inQuickBooks.customer.qboId) : null;
   const families = page.roster?.kind === "layered" ? page.roster.families.filter((f) => f.customer.active).map((f) => ({ qboId: f.customer.qboId, name: f.customer.displayName })) : [];
   return (
     <main className="wrap single">
-      <h1 className="page-title">{customer.displayName}</h1>
-      <p className="lede">{entry.kind === "family" ? "A family" : "A member"} as QuickBooks lists it{customer.active ? "" : ". It is inactive in QuickBooks"}. <Link href="/staff/roster">Back to the roster</Link></p>
+      <h1 className="page-title">{fam.name}</h1>
+      <p className="lede">{entry.kind === "family" ? "A family" : "A member"}{customer ? <> as QuickBooks lists it{customer.active ? "" : ". It is inactive in QuickBooks"}</> : " the portal keeps, with no customer in QuickBooks"}. <Link href="/staff/roster">Back to the roster</Link></p>
       <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>
-          <People id="entry-students-h" title="Students" noun="Student" people={entry.family.students} contact={false} empty="QuickBooks lists no students under this family." />
-          <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" people={entry.family.parents} contact empty="QuickBooks lists no parents under this family." />
+          <People id="entry-students-h" title="Students" noun="Student" people={fam.students.map((s) => ({ key: String(s.id), name: s.name, customer: s.customer }))} contact={false} empty="QuickBooks lists no students under this family." />
+          <People id="entry-parents-h" title="Parents in QuickBooks" noun="Parent" people={fam.parents.map(ofCustomer)} contact empty="QuickBooks lists no parents under this family." />
         </>
       ) : (
-        <People id="entry-member-h" title="In QuickBooks" noun="Member" people={[entry.member]} contact empty="" />
+        <People id="entry-member-h" title="In QuickBooks" noun="Member" people={customer ? [ofCustomer(customer)] : []} contact empty="QuickBooks lists no customer for this member." />
       )}
       {/* Buy-outs for any family or member, active or not: one made inactive may still have one to close. */}
       <Elsewhere familyId={familyId} buyouts
-        money={entry.kind === "family" && customer.active && can(ctx.effective, "Finance.Balance.Read")}
-        season={entry.kind === "family" && customer.active && can(ctx.effective, "Season.Progress.Read")}
-        credit={entry.kind === "family" && customer.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
+        money={entry.kind === "family" && fam.active && can(ctx.effective, "Finance.Balance.Read")}
+        season={entry.kind === "family" && fam.active && can(ctx.effective, "Season.Progress.Read")}
+        credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       <Waiting items={waiting} />
-      {edit && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={entry.family} families={families} edit={edit} cover={cover} />}
-      {edit && entry.kind === "member" && <MemberChanges member={entry.member} edit={edit} />}
+      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} families={families} edit={edit} cover={cover} />}
+      {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
       <SignIns signins={signins} detailed={detailed} />
       <Freshness page={page} admin={admin} />

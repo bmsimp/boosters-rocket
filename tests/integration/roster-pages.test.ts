@@ -34,7 +34,7 @@ import { saveShape } from "@/lib/roster/shape";
 import { resetDb, seedStaff, seedParent, seedGuardian } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { rowNamed } from "../helpers/table";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -145,6 +145,7 @@ describe("the roster pages", () => {
     await ready();
     const ana = await seedParent({ name: "Ana R.", email: "ana.portal@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10", status: "invited" });
+    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
     const html = await entry("10");
     expect(html).toContain("Rivera Family");
     expect(html).toContain("Leo Rivera");
@@ -240,6 +241,7 @@ describe("the roster pages", () => {
     await ready();
     const lost = await seedParent({ name: "Lost Person", email: "lost.person@example.com" });
     await seedGuardian({ parentId: lost.id, familyQboId: "NO-SUCH-ID" });
+    await syncAppRecords(); // each membership in its family record, as the next roster read would put it
     const html = await list();
     expect(html).toContain("Lost Person");
     expect(html).toContain("NO-SUCH-ID");

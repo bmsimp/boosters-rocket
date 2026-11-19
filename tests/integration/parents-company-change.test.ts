@@ -126,8 +126,8 @@ describe("connecting a different QuickBooks company", () => {
     await seedConnected(stub, { realmId: "2222" });
     await seedShape();
     await seedCache([fam("12", "Stranger Family"), par("13", "Someone Else", "12", "stranger@example.com")]);
-    expect(await familySignins("12", { detailed: true })).toEqual([]);
-    expect(await familySignins("20", { detailed: false })).toEqual([]);
+    expect(await familySignins(await recordOfCustomer("12", "family"), { detailed: true })).toEqual([]);
+    expect(await familySignins(await recordOfCustomer("20", "family"), { detailed: false })).toEqual([]); // a record the old links never name
     const page = await loadRosterPage();
     expect(page.roster).not.toBeNull();
     expect(page.attention.filter((a) => a.rule === "signin_unknown" || a.rule === "inactive_with_signin")).toEqual([]);

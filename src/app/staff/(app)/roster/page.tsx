@@ -1,6 +1,6 @@
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { loadRosterPage } from "@/lib/roster/queries";
+import { loadRosterPage, rosterFamilies } from "@/lib/roster/queries";
 import { linksOfCustomers } from "@/lib/families/links";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
@@ -9,11 +9,13 @@ import { Notice } from "@/app/components/notice";
 import { DisconnectedNotice, Freshness } from "./freshness";
 import { CreateBox, WhatChanges } from "./changes";
 import { familyPage } from "@/app/staff/(app)/family-pages";
+import type { AppFamilyId } from "@/lib/families/ids";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
 
-type Row = { id: string; name: string; students: number | null; parents: number | null; active: boolean };
+/** `status`: the customer's own standing in QuickBooks; null for a family the roster lists no customer for. */
+type Row = { id: AppFamilyId; name: string; students: number | null; parents: number | null; status: boolean | null };
 
 export default async function RosterPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Roster.Read");
@@ -29,24 +31,25 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
   const matches = (name: string) => !q || name.toLowerCase().includes(q); // a plain substring: nothing typed is a pattern
   const roster = page.lastOkAt ? page.roster : null; // a shape with no successful read has nothing real to list
   const unread = Boolean(page.roster && !page.lastOkAt);
-  const rows: Row[] = !roster ? [] : roster.kind === "flat"
-    ? roster.members.filter((m) => matches(m.displayName)).map((m) => ({ id: m.qboId, name: m.displayName, students: null, parents: null, active: m.active }))
-    : roster.families.filter((f) => matches(f.customer.displayName)).map((f) => ({ id: f.customer.qboId, name: f.customer.displayName,
-        students: f.students.length, parents: f.parents.length, active: f.customer.active }));
-  // Each family's (or member's) page is addressed by its app family record, found through the family kind of link for
-  // the whole list in one lookup: a customer with none has no page, and its name links nowhere.
+  // The families are the app's own records (stage 3 of the app-owned families spec), each with what QuickBooks holds
+  // for its customer, from the roster read above: every one has a page, addressed by its record.
+  const families = roster ? await rosterFamilies(page) ?? [] : [];
+  const rows: Row[] = families.filter((f) => matches(f.name)).map((f) => ({ id: f.id, name: f.name,
+    students: roster?.kind === "flat" ? null : f.students.length, parents: roster?.kind === "flat" ? null : f.parents.length, status: f.customer?.active ?? null }));
+  // Needs attention names QuickBooks' customers: each family's (or member's) is linked to its page through the family
+  // kind of link, for the whole list in one lookup; a customer with none has no page, and its name links nowhere.
   const withPage = !roster ? [] : roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId);
   const pageOf = (await linksOfCustomers({ families: withPage, students: [] })).familyOfCustomer;
   const named = (qboId: string | null, name: string) => { const at = qboId === null ? undefined : pageOf.get(qboId); return at ? <a href={familyPage(at)}>{name}</a> : name; };
   const noun = roster?.kind === "flat" ? "member" : "family";
   const nouns = roster?.kind === "flat" ? "members" : "families";
   const columns: Column<Row>[] = [
-    { key: "name", header: roster?.kind === "flat" ? "Member" : "Family", rowHeader: true, sorted: "ascending", cell: (r) => named(r.id, r.name) },
+    { key: "name", header: roster?.kind === "flat" ? "Member" : "Family", rowHeader: true, sorted: "ascending", cell: (r) => <a href={familyPage(r.id)}>{r.name}</a> },
     ...(roster?.kind === "flat" ? [] : [
       { key: "students", header: "Students", numeric: true, cell: (r: Row) => r.students },
       { key: "parents", header: "Parents", numeric: true, cell: (r: Row) => r.parents },
     ]),
-    { key: "status", header: "In QuickBooks", cell: (r) => (r.active ? "Active" : "Inactive") },
+    { key: "status", header: "In QuickBooks", cell: (r) => (r.status === null ? "No customer" : r.status ? "Active" : "Inactive") },
   ];
   return (
     <main className="wrap single">
@@ -73,7 +76,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
           {rows.length === 0
             ? <Notice tone="info">{typed ? <>No {noun} matches &quot;{typed}&quot;.</> : roster.kind === "flat" ? "QuickBooks lists no customers of the member types." : "QuickBooks lists no customers of the family type."}</Notice>
             : <DataTable caption={typed ? <>{rows.length} {rows.length === 1 ? noun : nouns} matching &quot;{typed}&quot;</> : <>Every {noun} on the roster, by name</>}
-                columns={columns} rows={rows} rowKey={(r) => r.id} />}
+                columns={columns} rows={rows} rowKey={(r) => String(r.id)} />}
         </section>
       )}
 

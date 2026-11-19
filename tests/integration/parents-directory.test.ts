@@ -1,15 +1,21 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
-import { auditLog, heldAddress, parent } from "@/lib/db/schema";
+import { auditLog, guardian, heldAddress, parent } from "@/lib/db/schema";
 import { runReconcile } from "../helpers/reconcile";
 import { familyNames, familySignins, getPerson, listPeople } from "@/lib/parents/directory";
 import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { setRosterSource } from "@/lib/roster/source";
 
 // The cache here names no company, so there are no app records: each membership's family (`familyId`) is null, and a
 // person's page links no family (the family's page is addressed by its record). tests/integration/parents-pages.test.ts
-// reads a roster with a company, where it links each one.
+// reads a roster with a company, where it links each one. A family's sign-ins are read by its own record
+// (`guardian.family_id`), so the tests of familySignins() read the roster from a company first (withCompany()).
+const withCompany = () => db.transaction((tx) => setRosterSource(tx, "1111"));
+const signinsOf = async (customer: string, o: { detailed: boolean }) => familySignins(await recordOfCustomer(customer, "family"), o);
+
 describe("the people directory", () => {
   beforeEach(async () => { await resetDb(); await seedShape(); await seedParentSettings(SIGNINS_ON); });
   const ALL = [fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), par("12", "No Mail", "10", null),
@@ -31,8 +37,8 @@ describe("the people directory", () => {
   });
 
   it("shows a family's sign-ins with reasons, and names the other family only when asked for detail", async () => {
-    await seedCache(ALL); await runReconcile({ cause: "test" });
-    const plain = await familySignins("10", { detailed: false });
+    await withCompany(); await seedCache(ALL); await runReconcile({ cause: "test" });
+    const plain = await signinsOf("10", { detailed: false });
     expect(plain.map((s) => `${s.name}: ${s.words}`)).toEqual([
       "Ana Rivera: Can sign in (hasn't yet)",
       "No Mail: Can't sign in: no email address in QuickBooks",
@@ -40,29 +46,30 @@ describe("the people directory", () => {
     ]);
     expect(JSON.stringify(plain)).not.toContain("Chen");
     expect(plain.find((s) => s.name === "No Mail")).toMatchObject({ parentId: null, email: null, kind: "cannot" });
-    const detailed = await familySignins("10", { detailed: true });
+    const detailed = await signinsOf("10", { detailed: true });
     expect(detailed.find((s) => s.name === "Shared Sam")!.words).toBe("Held: this address is also under Chen Family");
   });
 
   it("shows a blocked person as blocked, and a link made by hand as it stands before sign-ins are switched on", async () => {
     await seedParentSettings({ signin: false, everEnabled: false });
-    await seedCache(ALL);
+    await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     await seedGuardian({ parentId: p.id, familyQboId: "10" });
-    expect(await familySignins("10", { detailed: true })).toEqual([{ parentId: p.id, sourceQboId: null, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked" }]);
+    await syncAppRecords(); // the membership's family record, as the next roster read would set it
+    expect(await signinsOf("10", { detailed: true })).toEqual([{ parentId: p.id, sourceQboId: null, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked" }]);
   });
 
   it("keeps two same-named records with no address in one family apart by their QuickBooks source", async () => {
-    await seedCache([fam("10", "Rivera Family"), par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null)]);
+    await withCompany(); await seedCache([fam("10", "Rivera Family"), par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null)]);
     await runReconcile({ cause: "test" });
-    expect((await familySignins("10", { detailed: false })).map((s) => [s.sourceQboId, s.name, s.email])).toEqual([["14", "Pat Rivera", null], ["15", "Pat Rivera", null]]);
+    expect((await signinsOf("10", { detailed: false })).map((s) => [s.sourceQboId, s.name, s.email])).toEqual([["14", "Pat Rivera", null], ["15", "Pat Rivera", null]]);
   });
 
   it("lists two addresses on a family record with no parent type separately, one of them held", async () => {
-    await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
+    await withCompany(); await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
     await seedCache([fam("10", "Rivera Family", { email: "a@x.org; b@x.org" }), fam("20", "Chen Family", { email: "b@x.org" })]);
     await runReconcile({ cause: "test" });
-    const rows = await familySignins("10", { detailed: false });
+    const rows = await signinsOf("10", { detailed: false });
     expect(rows.map((s) => `${s.email}: ${s.words}`)).toEqual([
       "a@x.org: Can sign in (hasn't yet)",
       "b@x.org: Held: this address is also under another family",
@@ -70,12 +77,12 @@ describe("the people directory", () => {
   });
 
   it("shows a hand-made link that is closed as held exactly once", async () => {
-    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")]);
+    await withCompany(); await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")]);
     const p = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: p.id, familyQboId: "10" });
     await seedGuardian({ parentId: p.id, familyQboId: "20" });
     await runReconcile({ cause: "test" });
-    const rows = await familySignins("10", { detailed: false });
+    const rows = await signinsOf("10", { detailed: false });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ parentId: p.id, kind: "held" });
   });
@@ -102,6 +109,21 @@ describe("the people directory", () => {
       { familyQboId: "10", familyId: null, familyName: "Rivera Family", previousCompany: false, kind: "can", words: "Can sign in (hasn't yet)" },
       { familyQboId: "20", familyId: null, familyName: "A family in the previous QuickBooks company", previousCompany: true, kind: "cannot", words: "Can't sign in: a different QuickBooks company was connected" },
     ]);
+  });
+
+  it("reads a family's sign-ins by the membership's own family record, not by the QuickBooks ID the row was made with", async () => {
+    await seedParentSettings({ signin: false, everEnabled: false });
+    await withCompany(); await seedCache(ALL);
+    const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
+    const [g] = await db.insert(guardian).values({ parentId: p.id, familyQboId: "10", status: "invited" }).returning();
+    // Until a membership is in a family record it is in no family's box, as a row a change of company closed never is.
+    expect(await signinsOf("10", { detailed: false })).toEqual([]);
+    await syncAppRecords();
+    expect((await signinsOf("10", { detailed: false })).map((s) => s.email)).toEqual(["seeded@example.com"]);
+    // The row's family record is what counts: pointed at the Chen family's, it is in their box and no longer the Riveras'.
+    await db.update(guardian).set({ familyId: await recordOfCustomer("20", "family") }).where(eq(guardian.id, g!.id));
+    expect(await signinsOf("10", { detailed: false })).toEqual([]);
+    expect((await signinsOf("20", { detailed: false })).map((s) => s.email)).toEqual(["seeded@example.com"]);
   });
 
   it("gives family names from the roster, and a stand-in for an ID it doesn't know", async () => {
