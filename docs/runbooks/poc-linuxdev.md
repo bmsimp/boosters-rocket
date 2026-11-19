@@ -19,8 +19,8 @@ host's among them, are in [before the first family](before-the-first-family.md).
 
 This puts Booster Rocket on the Linux host `linuxdev` at https://portaltest.rhinoautomator.com, behind
 a Cloudflare tunnel (and, optionally, Cloudflare Access), so you can prove that staff sign-in (the band's Entra
-tenant or Google), parent sign-in (a 6-digit code the portal emails from
-`webmaster@fznband.org`) and the audit log work for real. It also proves that the portal can connect to a
+tenant or Google), parent sign-in (a password, with a 6-digit code the portal emails from
+`webmaster@fznband.org` as a second step on a device it doesn't remember) and the audit log work for real. It also proves that the portal can connect to a
 QuickBooks company (Intuit's sandbox, for this proof of concept), keep that connection alive with a worker, and show
 staff the club's families as QuickBooks lists them. It holds **test data
 only**; no real families use it.
