@@ -14,17 +14,14 @@ import type { AppStudentId } from "@/lib/families/ids";
 import { familyLinkedTo, linksOfCustomers } from "@/lib/families/links";
 import type { MyStudent } from "@/lib/parents/my-family";
 import { loadFamilyStanding } from "./recorded";
-import type { FamilyRoster, SeasonStanding, StepStanding, StudentStanding } from "./progress";
+import type { FamilyRoster, SeasonStanding } from "./progress";
 
 /**
- * A student's standing as a parent's pages read it, with the student's QuickBooks id beside the app's own: the Home
- * students box matches it to loadMyFamily()'s students, until stage 3 gives those the app's ids (AGENTS.md, Seasons).
- * The forms pages (src/lib/forms/my-forms.ts) find a form's request by the app's own id alone.
+ * The current season as a parent's pages read it. Each student is the app's own record (`id`), and nothing of a
+ * student's QuickBooks id is in it: the Home students box matches a standing to loadMyFamily()'s students by the app's
+ * id each of those carries, and the forms pages (src/lib/forms/my-forms.ts) find a form's request by it too.
  */
-export type MyStudentStanding = StudentStanding & { qboId: string };
-export type MyStepStanding = Omit<StepStanding, "students"> & { students: MyStudentStanding[] };
-export type MySeason = Omit<SeasonStanding, "steps"> & {
-  steps: MyStepStanding[];
+export type MySeason = SeasonStanding & {
   /** The current season's name, in the club's words. */
   name: string;
   /** The club's date the standing was worked out for (YYYY-MM-DD). */
@@ -41,7 +38,7 @@ export type MySeason = Omit<SeasonStanding, "steps"> & {
  * under ctx.familyQboId, whose own active student record is in the session's app family, are used, so nothing a
  * caller passes can bring in another family's student.
  */
-export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, students: readonly MyStudent[] | null): Promise<MySeason | null> {
+export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId" | "parentId">, students: readonly Pick<MyStudent, "qboId" | "name">[] | null): Promise<MySeason | null> {
   const [current] = await db.select({ id: season.id, name: season.name }).from(season).where(eq(season.isCurrent, true));
   if (!current) return null;
   // The session's family, as the app's own record: through its own family link, and only while that record is active.
@@ -58,12 +55,10 @@ export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId" | "parentI
   const records = recordIds.length === 0 ? [] : await db.select({ id: student.id }).from(student)
     .where(and(inArray(student.id, recordIds), eq(student.familyId, familyId), eq(student.active, true)));
   const theirs = new Set(records.map((r) => String(r.id)));
-  const qboIdOf = new Map<string, string>();
   const roster: { id: AppStudentId; name: string }[] = [];
   for (const s of students ?? []) {
     const id = links?.studentOfCustomer.get(s.qboId);
     if (id === undefined || !theirs.has(String(id))) continue;
-    qboIdOf.set(String(id), s.qboId);
     roster.push({ id, name: s.name });
   }
   const familyRoster: FamilyRoster = { familyId, students: roster };
@@ -71,6 +66,6 @@ export async function loadMySeason(ctx: Pick<ParentCtx, "familyQboId" | "parentI
   const { today, standing } = await loadFamilyStanding(current.id, familyRoster, { amounts: "fresh", parentId: ctx.parentId });
   return {
     name: current.name, today, currentIndex: standing.currentIndex, leftBefore: standing.leftBefore,
-    steps: standing.steps.map((step) => ({ ...step, students: step.students.map((s) => ({ ...s, qboId: qboIdOf.get(String(s.id))! })) })),
+    steps: standing.steps,
   };
 }

@@ -42,7 +42,8 @@ beforeEach(async () => { await resetDb(); stub.reset(); });
 
 const FAMILY = RIVERA.family.qboId;
 const NOT_FROM_PAGE = { ok: false, errors: ["That didn't go through. Reload the page and try again."] };
-const family = { students: RIVERA.students };
+// As loadMyFamily() gives them; the buy-outs read a student by the customer only, so no app id is needed here.
+const family = { students: RIVERA.students.map((s) => ({ ...s, id: null })) };
 const audits = async (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action));
 const rowOf = async (id: string) => (await db.select().from(buyout).where(eq(buyout.id, id)))[0]!;
 const writer = () => staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]);

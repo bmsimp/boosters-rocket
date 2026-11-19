@@ -30,7 +30,7 @@ beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; }
 afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
 
-const viewOf = (p: SeededParent, students: { qboId: string; name: string }[]) => loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, { students });
+const viewOf = (p: SeededParent, students: { qboId: string; name: string }[]) => loadMyBuyouts({ familyQboId: p.identity.familyQboId, parentId: p.identity.parentId }, { students: students.map((s) => ({ ...s, id: null })) });
 const everything = async () => ({ buyouts: await db.select().from(buyout).orderBy(buyout.id), queue: await db.select().from(writeQueue), audits: (await db.select().from(auditLog)).length });
 
 /**

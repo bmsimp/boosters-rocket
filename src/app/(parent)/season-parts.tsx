@@ -1,5 +1,5 @@
-import type { MySeason, MyStepStanding } from "@/lib/seasons/my-season";
-import { linesLeft, type Line } from "@/lib/seasons/progress";
+import type { MySeason } from "@/lib/seasons/my-season";
+import { linesLeft, type Line, type StepStanding } from "@/lib/seasons/progress";
 import { dueState } from "@/lib/money/due";
 import { CalendarDate } from "../components/calendar-date";
 import { StateWords } from "../components/state-words";
@@ -58,7 +58,7 @@ export function SeasonRuler({ season }: { season: MySeason }) {
                 <span className="visually-hidden">{isCurrent ? ", current set" : ticked ? ", done" : behind && !nothingAsked ? ", not finished" : ""}</span>
                 {isCurrent && step.students.length > 0 && (
                   <span className="on-set" aria-hidden="true">
-                    {step.students.map((s) => <i key={s.qboId} className={s.done ? "done" : undefined} title={s.done ? `${first(s.name)} is done` : `${first(s.name)} has more to do`}>{initial(s.name)}</i>)}
+                    {step.students.map((s) => <i key={String(s.id)} className={s.done ? "done" : undefined} title={s.done ? `${first(s.name)} is done` : `${first(s.name)} has more to do`}>{initial(s.name)}</i>)}
                   </span>
                 )}
               </li>
@@ -101,7 +101,7 @@ export function DoneCount({ lines }: { lines: Line[] }) {
 }
 
 /** The step Home shows: the current one, or null when the season has none to show. */
-export const currentStep = (season: MySeason | null): MyStepStanding | null =>
+export const currentStep = (season: MySeason | null): StepStanding | null =>
   season && season.currentIndex !== null ? season.steps[season.currentIndex] ?? null : null;
 
 /** True when the season asks anything at all of this family, in any step. */

@@ -24,6 +24,7 @@ import NotFound from "@/app/not-found";
 import { resetDb, seedGuardian } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, identityNow, moneyMarkers, seedFamilyMoney, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
+import { recordOfCustomer } from "../helpers/app-records";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 
 const REALM = "9130000000000001", OTHER_REALM = "9130000000000002";
@@ -45,7 +46,9 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     const readAt = await seedRosterRead();
     expect(await loadMyFamily(ctxOf(a.identity))).toEqual({
       name: "Alderquist Family",
-      students: [{ qboId: FAMILY_A.students[0]!.qboId, name: "Aurelio Alderquist" }, { qboId: FAMILY_A.students[1]!.qboId, name: "Azalea Alderquist" }],
+      // Each student with their own app record beside them, the id Home matches a standing by.
+      students: [{ qboId: FAMILY_A.students[0]!.qboId, id: await recordOfCustomer(FAMILY_A.students[0]!.qboId, "student"), name: "Aurelio Alderquist" },
+        { qboId: FAMILY_A.students[1]!.qboId, id: await recordOfCustomer(FAMILY_A.students[1]!.qboId, "student"), name: "Azalea Alderquist" }],
       me: { name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone, edits: "own" },
       rosterReadAt: readAt.toISOString(),
     });
@@ -99,7 +102,7 @@ describe("loadMyFamily: one family from the roster cache, for its own parent", (
     await addToCache([fam("NP-FAM", "Noparent Family", { email: "home@noparent.example, work@noparent.example", phone: "512-555-0199" }), stu("NP-S1", "Nico Noparent", "NP-FAM"),
       par("NP-P1", "Nora Noparent", "NP-FAM", "nora@noparent.example")]);
     const fromFamily = await seedParentIn({ familyQboId: "NP-FAM", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "NP-FAM" });
-    expect(await loadMyFamily(ctxOf(fromFamily.identity))).toEqual({ name: "Noparent Family", students: [{ qboId: "NP-S1", name: "Nico Noparent" }],
+    expect(await loadMyFamily(ctxOf(fromFamily.identity))).toEqual({ name: "Noparent Family", students: [{ qboId: "NP-S1", id: await recordOfCustomer("NP-S1", "student"), name: "Nico Noparent" }],
       me: { name: "Noparent Family", email: "home@noparent.example, work@noparent.example", phone: "512-555-0199", edits: "family" }, rosterReadAt: null });
     // A link that names a record the shape doesn't call a parent is not the person's own record.
     const stale = await seedParentIn({ familyQboId: "NP-FAM", name: "Nora Noparent", email: "nora@noparent.example", sourceQboId: "NP-P1" });

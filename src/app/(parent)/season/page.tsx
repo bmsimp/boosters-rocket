@@ -52,7 +52,7 @@ export default async function SeasonPage() {
                     <div className="family-reqs"><h3>Your family</h3><RequirementLines lines={step.family} today={season.today} /></div>
                   )}
                   {students.map((s) => (
-                    <div className="family-reqs" key={s.qboId}><h3>{s.name}</h3><RequirementLines lines={s.lines} today={season.today} /></div>
+                    <div className="family-reqs" key={String(s.id)}><h3>{s.name}</h3><RequirementLines lines={s.lines} today={season.today} /></div>
                   ))}
                 </section>
               );

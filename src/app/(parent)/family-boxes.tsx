@@ -14,17 +14,18 @@ import { DoneCount, RequirementLines, SeasonFoot, StepState, asksAnything, curre
  */
 export function StudentsBox({ students, season = null }: { students: MyStudent[]; season?: MySeason | null }) {
   const step = currentStep(season);
-  const standing = new Map((step?.students ?? []).map((s) => [s.qboId, s]));
+  // Matched by the student's own record, never by name (two students may share one) nor by a QuickBooks id.
+  const standing = new Map((step?.students ?? []).map((s) => [String(s.id), s]));
   return (
     <section className="box students-box" aria-labelledby="stu-h">
       <h2 id="stu-h">Your students</h2>
       {season && step && <p>{season.name} · {step.name}</p>}
       {students.length > 0 ? (
         <ul className="students">
-          {students.map((s) => {
-            const mine = step ? standing.get(s.qboId) : undefined;
+          {students.map((s, i) => {
+            const mine = step && s.id !== null ? standing.get(String(s.id)) : undefined;
             return (
-              <li key={s.qboId}>
+              <li key={s.id === null ? `no-record-${i}` : String(s.id)}>
                 <span className="who"><b>{s.name}</b></span>
                 {mine && step && (
                   <>
