@@ -356,10 +356,11 @@ that family.
    the same email and family prints "That person is already a guardian in that family." The same email with
    `--family POC-FAMILY-2` adds a second family to the same person.
    The seeded row has no family record of the portal's own until the roster is next read, and until then the tester
-   can't sign in to it. If QuickBooks is connected, read the roster now (**Refresh now** on the staff roster page)
-   before the tester signs in, and always before deploying an update: an update that finds an open guardian row with
-   no family record while a company is connected stops and changes nothing ("Migration 0037 stopped"). Read the
-   roster, then deploy again.
+   can't sign in to it. Once the portal has read a roster from a company (even if QuickBooks is disconnected now),
+   read the roster again (**Refresh now** on the staff roster page; reconnect QuickBooks first if it is
+   disconnected) before the tester signs in, and always before deploying an update: an update that finds an open
+   guardian row with no family record, in a portal whose roster names a company, stops and changes nothing
+   ("Migration 0037 stopped"). Read the roster, then deploy again.
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
 
 The seed script makes a sign-in by hand, for testing before parent sign-ins are switched on. It sends no welcome
