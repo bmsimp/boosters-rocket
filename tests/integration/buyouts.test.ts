@@ -13,7 +13,7 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { env } from "@/env";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, familyMoney, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, familyMoney, writeQueue } from "@/lib/db/schema";
 import { BUYOUT_COPY, confirmMyBuyout } from "@/lib/buyouts/writes";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
@@ -218,6 +218,29 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(await renderPage(VolunteerPage)).not.toContain("Pay instead of volunteering ($100.00)");
     expect(await confirmBuyoutAction(req, "family", before.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
     expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("offers a family with no link to the club's books nothing: no price on Volunteer, Not found at every address, and the confirm refuses", async () => {
+    const p = await buyoutFamily(stub);
+    const forFamily = await seedBuyoutRequirement({ amount: 2, unitCents: 5000, title: "Concession shifts QU81" });
+    const forStudent = await seedBuyoutRequirement({ appliesTo: "student", amount: 2, unitCents: 3100, title: "Pit crew shifts QU82" });
+    const stamps = { family: (await shown(p, forFamily)).stamp, s1: (await shown(p, forStudent, "s1")).stamp };
+    expect(stamps.family).not.toBeNull();
+    // From stage 3's later slices a family may have no link; here it is made by hand, and nothing brings it into step after.
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, p.identity.familyId));
+    expect(await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId })).toEqual([]);
+    asParent(p.identity);
+    const html = await renderPage(VolunteerPage);
+    expect(html).not.toMatch(/\/volunteer\/pay-instead\/|id="pay-h"|\$100\.00|\$62\.00|\$50\.00|\$31\.00/);
+    const { pageOutcome } = await import("../helpers/signed-in");
+    for (const params of [{ requirementId: forFamily, choice: "family" }, { requirementId: forStudent, choice: "s1" }, { requirementId: forStudent, choice: "s2" }]) {
+      expect(await pageOutcome(PayInsteadPage, { params }), JSON.stringify(params)).toEqual({ notFound: true });
+    }
+    expect(await confirmBuyoutAction(forFamily, "family", stamps.family)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await confirmBuyoutAction(forStudent, "s1", stamps.s1)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await db.select().from(buyout)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
     expect(posts()).toEqual([]);
   });
 
