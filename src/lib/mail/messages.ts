@@ -5,16 +5,24 @@ export type Brand = { clubName: string; color: string };
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const COLOR = /^#[0-9a-f]{6}$/i;
 
+/**
+ * A line of a mail: a sentence, or a link alone on its line (`{ link }`: a set-up, reset or confirm link). The plain
+ * text holds the link's address alone on its line, never wrapped; the HTML holds it as an anchor whose text is the whole
+ * address and whose href is the same address, escaped once, with nothing added, in a paragraph of its own.
+ */
+type Line = string | { link: string };
+const PARAGRAPH = `<p style="margin:0 0 16px">`;
+
 /** Simple HTML: a colored bar with the club name, then paragraphs. No images, no remote content. */
-function html(b: Brand, paragraphs: string[], big?: string): string {
+function html(b: Brand, paragraphs: Line[], big?: string): string {
   const color = COLOR.test(b.color) ? b.color : "#5b2a86";
-  const body = paragraphs.map((p) => `<p style="margin:0 0 16px">${esc(p)}</p>`).join("");
+  const body = paragraphs.map((p) => (typeof p === "string" ? `${PARAGRAPH}${esc(p)}</p>` : `${PARAGRAPH}<a href="${esc(p.link)}">${esc(p.link)}</a></p>`)).join("");
   const code = big ? `<p style="margin:0 0 16px;font-size:32px;letter-spacing:6px;font-weight:bold">${esc(big)}</p>` : "";
   return `<!doctype html><html><body style="margin:0;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a">`
     + `<div style="background:${color};color:#ffffff;padding:16px 24px;font-size:18px;font-weight:bold">${esc(b.clubName)}</div>`
     + `<div style="padding:24px">${code}${body}</div></body></html>`;
 }
-const text = (lines: string[]) => `${lines.join("\n\n")}\n`;
+const text = (lines: Line[]) => `${lines.map((l) => (typeof l === "string" ? l : l.link)).join("\n\n")}\n`;
 
 /**
  * The second step of a sign-in on a new device (the sign-in release, slice SI-3b): the code is sent only after the right
@@ -32,13 +40,68 @@ export function signinCodeMessage(b: Brand, to: string, code: string, o: { passw
   return { to, subject: `Your ${b.clubName} sign-in code: ${code}`, text: text(lines), html: html(b, lines, code) };
 }
 
-/** The welcome (parents spec §3). It holds no family details: the address alone decides what the person sees after signing in. */
-export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null }): MailMessage {
-  const lines = [
-    `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address. We'll email you a code each time, so there is no password.`,
+/**
+ * A set-up link as the welcome and the press's mail carry it (the sign-in release, slice SI-4): its address, how long it
+ * works in words (lifeWords() of LINK_LIFE_MS.setup), and whether the club is at Strict, where "Set up or reset my
+ * password" mails no set-up link (whichLinkToMail(), `strict_no_setup`), so the mail says to ask the club instead.
+ */
+export type SetupLinkWords = { url: string; life: string; strict: boolean };
+
+/** What to do once a set-up link has run out: ask for a new one on the request page (Standard), or ask the club (Strict). */
+const afterItRunsOut = (appUrl: string, link: SetupLinkWords) => (link.strict
+  ? "If the link runs out before you use it, please ask the club to send this email again."
+  : `If the link runs out before you use it, you can ask for a new one at ${appUrl}/sign-in/password`);
+
+/**
+ * A welcome to a person who holds a set-up link that still works (unused and not expired, whoever sent it): it carries
+ * no new link, since one would stop that one working, and says where to ask for another if they can't find it (the
+ * request page at Standard, the club at Strict).
+ */
+export type EarlierLinkWords = { earlier: true; strict: boolean };
+
+/**
+ * The welcome (parents spec §3; since the sign-in release's slice SI-4 it carries a set-up link). It holds no family
+ * details: the address alone decides what the person sees after signing in. `link` for a person with no password yet:
+ * a new link chooses one, on a line of its own, or (EarlierLinkWords) the one emailed to them earlier still works. Null
+ * for a person who has a password: no link, and where to sign in with it (`appUrl` and /sign-in, written out in full).
+ */
+export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null; link: SetupLinkWords | EarlierLinkWords | null }): MailMessage {
+  const lines: Line[] = [
+    ...(o.link === null ? [`You can now sign in to ${b.clubName} with this email address and your password, at ${o.appUrl}/sign-in`]
+      : "earlier" in o.link ? [
+        `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address.`,
+        "A link to choose your password was emailed to you earlier, and it still works.",
+        o.link.strict ? "If you can't find it, please ask the club to send you a new one." : `If you can't find it, you can ask for a new one at ${o.appUrl}/sign-in/password`,
+      ] : [
+        `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address. First, choose your password with this link:`,
+        { link: o.link.url },
+        `The link works once, for ${o.link.life}. After that, you sign in with this email address and the password you chose.`,
+        afterItRunsOut(o.appUrl, o.link),
+      ]),
+    NEVER_ASKS(b),
     ...(o.contact ? [`Questions? Write to ${o.contact}.`] : []),
   ];
   return { to, subject: `You can now sign in to ${b.clubName}`, text: text(lines), html: html(b, lines) };
+}
+
+/**
+ * The set-up link an Admin's press on the parents' settings page mails to a person the club welcomed before, who has
+ * no password (the sign-in release, slice SI-4): someone welcomed before the portal signed parents in with a password,
+ * or someone whose welcome's link ran out unused. True for both, it says how they sign in, that the link chooses their
+ * password, how long it works and what to do after, and that a device they are signed in on now stays signed in. Like
+ * the welcome, it names no family, student or other person.
+ */
+export function choosePasswordMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null; link: SetupLinkWords }): MailMessage {
+  const lines: Line[] = [
+    `You sign in to the ${b.clubName} portal at ${o.appUrl} with this email address and a password. To choose your password, open this link:`,
+    { link: o.link.url },
+    `The link works once, for ${o.link.life}.`,
+    afterItRunsOut(o.appUrl, o.link),
+    "If you're signed in to the portal on a phone or computer now, it stays signed in, and you'll need your password the next time you sign in.",
+    NEVER_ASKS(b),
+    ...(o.contact ? [`Questions? Write to ${o.contact}.`] : []),
+  ];
+  return { to, subject: `Choose your password for ${b.clubName}`, text: text(lines), html: html(b, lines) };
 }
 
 /**
@@ -46,9 +109,9 @@ export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contac
  * It says nothing about the person's family or anyone else, and nothing about whether the address is known already.
  */
 export function emailChangeConfirmMessage(b: Brand, to: string, o: { link: string }): MailMessage {
-  const lines = [
+  const lines: Line[] = [
     `Someone asked to use this address to sign in to ${b.clubName}. If it was you, open this link within 24 hours to confirm:`,
-    o.link,
+    { link: o.link },
     "You may be asked to sign in first. If you are, use the address you sign in with now, not this one: this one works once the change is confirmed.",
     "If it wasn't you, ignore this email and nothing changes.",
   ];
@@ -75,9 +138,9 @@ const DID_NOT_ASK = "If you didn't ask for this, you can ignore this email: noth
 
 /** A set-up link: the person has no password yet, and chooses one with it. */
 export function passwordSetupMessage(b: Brand, to: string, o: { link: string; life: string }): MailMessage {
-  const lines = [
+  const lines: Line[] = [
     `We got a request to set up a password for signing in to ${b.clubName} with this email address. To choose your password, open this link:`,
-    o.link,
+    { link: o.link },
     `The link works once, for ${o.life}.`,
     NEVER_ASKS(b),
     DID_NOT_ASK,
@@ -87,9 +150,9 @@ export function passwordSetupMessage(b: Brand, to: string, o: { link: string; li
 
 /** A reset link: the person has a password, and chooses a new one with it. */
 export function passwordResetMessage(b: Brand, to: string, o: { link: string; life: string }): MailMessage {
-  const lines = [
+  const lines: Line[] = [
     `We got a request to reset the password you use to sign in to ${b.clubName} with this email address. To choose a new password, open this link:`,
-    o.link,
+    { link: o.link },
     `The link works once, for ${o.life}. Until you use it, your password stays as it is.`,
     NEVER_ASKS(b),
     DID_NOT_ASK,

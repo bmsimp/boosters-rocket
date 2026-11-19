@@ -49,7 +49,7 @@ const everyAction = (tag: string, itemId: string) => [
   () => renameLinkedAction(tag, "student", SOME_UUID, "Leon Rivera"),
   () => renameParentAction(tag, "21", "0", "Mei L. Chen"),
   () => sendPortalValueAction(itemId, "", "stamp"),
-  () => moveAction(tag, "12", "0", "20"),
+  () => moveAction(tag, SOME_UUID, SOME_UUID),
   () => deactivateAction(tag, "12", "0"),
   () => familyInactiveAction(tag, "10", RIVERA_SHOWN),
   () => tryAgainAction(itemId),
@@ -102,7 +102,10 @@ describe("the roster write actions are staff actions on Roster.Family.ReadWrite,
       () => renameParentAction(tag, "x".repeat(65), "0", "Mei"),
       () => sendPortalValueAction("not-a-uuid", "", "stamp"),
       () => sendPortalValueAction(SOME_UUID, 7 as unknown as string, "stamp"),
-      () => moveAction(tag, "12", "0", 20 as unknown as string),
+      // A move names the student and the family by the app's ids, and sends no version and no QuickBooks id.
+      () => moveAction(tag, "12", SOME_UUID),
+      () => moveAction(tag, SOME_UUID, "20"),
+      () => moveAction(tag, SOME_UUID, 20 as unknown as string),
       () => deactivateAction(tag, ["12"] as unknown as string, "0"),
       () => familyInactiveAction(tag, "10", []),
       () => familyInactiveAction(tag, "10", "10:0" as unknown as [string, string][]),
@@ -198,37 +201,45 @@ describe("a family's page brings the portal's own records into line with what Qu
     expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Change the student Leo Rivera");
   });
 
-  it("a student QuickBooks has under another family: said so, and the move there is offered, which sends nothing", async () => {
+  it("a student QuickBooks has under another family: said so in words, and moved like any other; to that family, nothing is sent (slice 9f)", async () => {
     Object.assign(stub.customers.find((c) => c.Id === "12")!, { ParentRef: { value: "20" }, SyncToken: "1" });
     expect((await refreshRoster(WORKER)).ok).toBe(true);
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     const students = html.slice(html.indexOf('id="entry-students-h"'), html.indexOf('id="entry-parents-h"'));
     expect(rowNamed(students, "Leo Rivera")).toEqual(["Leo Rivera", "Under Chen Family in QuickBooks"]);
-    expect(html).toContain("Change the student Leo Rivera");
-    expect(html).toContain("QuickBooks has Leo Rivera under Chen Family, but the portal still holds them in this family.");
-    expect(await moveAction(tag, "12", "1", "20")).toMatchObject({ ok: true });
+    // No special form: the move offered is the ordinary one, to each of the portal's other active families by its app id.
+    const moves = html.slice(html.indexOf('id="move-students-h"'));
+    expect(moves).toContain("Move the student Leo Rivera");
+    expect(moves).toContain(`<option value="${await idOf("20")}">Chen Family</option>`);
+    expect(moves).not.toContain(`<option value="${await idOf("10")}">`);
+    expect(html).not.toContain("but the portal still holds them in this family");
+    expect(await moveAction(tag, String(await recordOfCustomer("12", "student")), await idOf("20"))).toMatchObject({ ok: true });
     expect(posts()).toEqual([]);
     expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ familyId: await recordOfCustomer("20", "family") });
-    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Change the student Leo Rivera");
-    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("20") } })).toContain("Change the student Leo Rivera");
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Move the student Leo Rivera");
+    expect(await renderPage(RosterEntryPage, { params: { id: await idOf("20") } })).toContain("Move the student Leo Rivera");
   });
 
-  it("a student QuickBooks has under a family that isn't the app's: said so, and only moves to the app's own families are offered, which are sent", async () => {
-    // A family made in QuickBooks alone has no record since slice 9c.
-    stub.customers.push({ Id: "70", DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
-    Object.assign(stub.customers.find((c) => c.Id === "12")!, { ParentRef: { value: "70" }, SyncToken: "1" });
-    expect((await refreshRoster(WORKER)).ok).toBe(true);
+  it("a student moved into a family with no customer in QuickBooks: saved, kept on Reconciliation, and both pages say whose invoices each family sees until QuickBooks has it", async () => {
+    const [okafor] = await db.insert(family).values({ name: "Okafor Family", active: true }).returning({ id: family.id });
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
-    const changes = html.slice(html.indexOf("Change the student Leo Rivera"));
-    expect(changes).toContain("QuickBooks has Leo Rivera under Okafor Family, which isn&#x27;t one of the portal&#x27;s own active families");
-    expect(html).not.toContain("but the portal still holds them in this family");
-    const moveTo = changes.slice(0, changes.indexOf("</select>"));
-    expect(moveTo).toContain('<option value="10">Rivera Family</option>');
-    expect(moveTo).toContain('<option value="20">Chen Family</option>');
-    expect(moveTo).not.toContain('value="70"');
-    expect(await moveAction(tag, "12", "1", "10")).toMatchObject({ ok: true });
-    expect(posts().length).toBe(1);
-    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ familyId: await recordOfCustomer("10", "family") });
+    expect(html.slice(html.indexOf('id="move-students-h"'))).toContain(`<option value="${okafor!.id}">Okafor Family</option>`);
+    expect(await moveAction(tag, String(await recordOfCustomer("12", "student")), String(okafor!.id))).toMatchObject({ ok: true, status: "attention" });
+    expect(posts()).toEqual([]);
+    const words = "Until QuickBooks has the move, Rivera Family still sees Leo Rivera&#x27;s invoices, and Okafor Family doesn&#x27;t.";
+    for (const id of [await idOf("10"), String(okafor!.id)]) {
+      const page = await renderPage(RosterEntryPage, { params: { id } });
+      const kept = page.slice(page.indexOf('id="refused-h"'));
+      expect(kept, id).toContain("Move the student Leo Rivera from Rivera Family to Okafor Family");
+      expect(kept, id).toContain(words);
+      expect(kept, id).toContain("the family the student was moved to has no customer in QuickBooks yet");
+    }
+    const recon = await renderPage(ReconciliationPage);
+    expect(recon).toContain("Not in QuickBooks, kept in the portal (1)");
+    expect(recon).toContain(words);
+    // Not offered while the family joined has no customer in QuickBooks: the row says to create it there first.
+    expect(recon).not.toContain("Send the portal&#x27;s value");
+    expect(recon).toContain("Create the family in QuickBooks first, with “Create in QuickBooks and link” on its page; the portal&#x27;s move can be sent from here after that.");
   });
 });
 

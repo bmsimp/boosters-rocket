@@ -400,6 +400,8 @@ const PARENT_CODE_ELSEWHERE = [
   // type. And the one finish of a sign-in, with the step that copies its cookie onto a link form's answer.
   "src/lib/parents/password-request.ts",
   "src/lib/parents/password-request-rule.ts",
+  // The delivery of a held link, which that page shares with the welcome (slice SI-4).
+  "src/lib/parents/link-delivery.ts",
   "src/lib/auth/parent-signin-finish.ts",
   "src/lib/auth/parent-link-signin.ts",
   "src/lib/auth/session-cookie-copy.ts",

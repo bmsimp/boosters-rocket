@@ -20,7 +20,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
 import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
-import { auditLog, guardian, jobRun, parent, role, roleAssignment, roleRule } from "@/lib/db/schema";
+import { auditLog, guardian, jobRun, parent, parentAuthUser, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 import { AccessDenied } from "@/lib/guards";
 import { loadRosterPage } from "@/lib/roster/queries";
@@ -35,6 +35,8 @@ import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { resetDb, seedGuardian, seedParent, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { rowNamed, tableRows } from "../helpers/table";
+import { seedPassword } from "../helpers/signin-links";
+import * as sendModule from "@/lib/mail/send";
 
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const thrown = async (p: Promise<unknown>) => (await p.catch((e: { url?: string; notFound?: boolean }) => e)) as { url?: string; notFound?: boolean };
@@ -105,10 +107,10 @@ describe("the staff pages for parents", () => {
   it("lists people and finds them, and says who can sign in is the portal's own", async () => {
     const html = await parentsPage();
     expect(html).toContain("Ana Rivera");
-    expect(html).toContain("Can sign in (hasn&#x27;t yet)");
+    expect(html).toContain("Hasn&#x27;t chosen a password yet");
     expect(html).toContain("a change made in QuickBooks no longer gives anyone a sign-in or ends one");
     expect(html).not.toContain("Email addresses are changed in QuickBooks");
-    expect(rowNamed(html, "Ana Rivera")).toEqual(["Ana Rivera", "ana@example.com", "Never", "Not sent yet", "Rivera Family: Can sign in (hasn't yet)"]);
+    expect(rowNamed(html, "Ana Rivera")).toEqual(["Ana Rivera", "ana@example.com", "Never", "Not sent yet", "Rivera Family: Hasn't chosen a password yet"]);
     expect(await parentsPage("zzz")).toContain("Nobody matches");
     const ana = await anaRow();
     await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") }).where(eq(parent.id, ana.id));
@@ -142,6 +144,10 @@ describe("the staff pages for parents", () => {
     // The family's page by its app record: the membership's own family.
     expect(html).toContain(`href="/staff/roster/${await recordOfCustomer("10", "family")}"`);
     expect(html).toContain("Resend welcome email");
+    // Since the sign-in release's slice SI-4: whether a password is chosen, and what the resend sends for this person.
+    expect(html).toContain("<dt>Password</dt><dd>Not chosen yet</dd>");
+    expect(html).toContain("with a new link to choose their password. The link works once, for 7 days");
+    expect(html).not.toContain("and a code");
     expect(html).toContain("Block");
     expect(html).not.toContain("followed by Refresh now on the roster");
     expect(await audits("parent.read")).toEqual([expect.objectContaining({ actorId: registrar.id, permission: "Parents.ReadWrite", targetType: "parent", targetId: ana.id })]);
@@ -167,7 +173,7 @@ describe("the staff pages for parents", () => {
   it("blocks with a reason and unblocks, through the actions", async () => {
     const ana = await anaRow();
     expect(await blockAction(ana.id, "  ")).toEqual({ ok: false, errors: ["Say why, in a few words. Only staff see it."] });
-    expect(await blockAction(ana.id, "Custody order on file.")).toEqual({ ok: true, message: "Blocked. They are signed out and can't get a code." });
+    expect(await blockAction(ana.id, "Custody order on file.")).toEqual({ ok: true, message: "Blocked. They are signed out, and can't sign in, get a sign-in code or use a password link." });
     const html = await personPage(ana.id);
     expect(html).toContain("Blocked");
     expect(html).toContain("Custody order on file.");
@@ -181,6 +187,22 @@ describe("the staff pages for parents", () => {
     expect(await blockAction("00000000-0000-4000-8000-00000000dead", "Custody order on file.")).toEqual({ ok: false, errors: ["That person isn't in the portal any more."] });
   });
 
+  it("with a password chosen, the pages say they can sign in, and the resend says to sign in with it", async () => {
+    const ana = await anaRow();
+    await seedPassword((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)))[0]!.id, "a phrase Ana chose some time ago");
+    expect(rowNamed(await parentsPage(), "Ana Rivera")!.at(-1)).toBe("Rivera Family: Can sign in (hasn't yet)");
+    const html = await personPage(ana.id);
+    expect(html).toContain("<dt>Password</dt><dd>Chosen</dd>");
+    expect(html).toContain("that they sign in with this address and the password they chose.");
+    expect(html).not.toContain("link to choose their password");
+  });
+
+  it("a person welcomed before who is owed the Admin's set-up mail reads as waiting for it", async () => {
+    const ana = await anaRow();
+    await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z"), welcomeOwed: true }).where(eq(parent.id, ana.id));
+    expect(await personPage(ana.id)).toContain(". An email with a link to choose a password is waiting to be sent");
+  });
+
   it("a resend is refused while parent sign-ins are switched off", async () => {
     const ana = await anaRow();
     await seedParentSettings({ signin: false });
@@ -190,17 +212,30 @@ describe("the staff pages for parents", () => {
     expect(html).not.toContain("Resend welcome email");
   });
 
+  it("a resend says in words whether it carried a link to choose a password, and never the link", async () => {
+    const ana = await anaRow();
+    // The mail is taken as handed over without sending it: the words are what is tested here.
+    const spy = vi.spyOn(sendModule, "sendMail").mockResolvedValue({ ok: true });
+    try {
+      const sent = await resendWelcomeAction(ana.id);
+      expect(sent).toEqual({ ok: true, message: "Sent, with a link to choose a password." });
+      expect(JSON.stringify(sent)).not.toContain("/sign-in/set-up/");
+      await seedPassword((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)))[0]!.id, "a phrase Ana chose some time ago");
+      expect(await resendWelcomeAction(ana.id)).toEqual({ ok: true, message: "Sent. They have a password, so it says to sign in with it." });
+    } finally { spy.mockRestore(); }
+  });
+
   it("a family's roster page lists the family's guardian rows, open and closed, in words; only Parents.ReadWrite gets links", async () => {
     const ana = await anaRow();
     const detailed = await familyPage("10");
     const box = detailed.slice(detailed.indexOf('id="entry-signins-h"'), detailed.indexOf("</section>", detailed.indexOf('id="entry-signins-h"')));
-    expect(box).toContain("Can sign in (hasn&#x27;t yet)");
+    expect(box).toContain("Hasn&#x27;t chosen a password yet");
     expect(box).toContain(HELD_WORDS.replaceAll("'", "&#x27;"));
     expect(box).not.toContain("Chen");
     expect(box).toContain(`href="/staff/parents/${ana.id}"`);
     as(reader);
     const plain = await familyPage("10");
-    expect(plain).toContain("Can sign in (hasn&#x27;t yet)");
+    expect(plain).toContain("Hasn&#x27;t chosen a password yet");
     expect(plain).not.toContain("Chen");
     expect(plain).not.toContain("/staff/parents/");
   });

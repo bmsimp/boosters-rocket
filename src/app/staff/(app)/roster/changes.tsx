@@ -3,21 +3,22 @@ import type { MembershipShape } from "@/lib/roster/shape";
 import type { Cust, Family } from "@/lib/roster/model";
 import { NOT_HERE, shapeOperations, type RosterOperation } from "@/lib/roster/operations";
 import { waitingWords, type QueueView } from "@/lib/roster/queue";
-import { keptRefusalWords } from "@/lib/roster/writes";
+import { keptWordsFor } from "@/lib/roster/writes";
 import { LocalTime } from "@/app/components/local-time";
 import { Notice } from "@/app/components/notice";
 import { DataTable } from "@/app/components/data-table";
 import type { Covered } from "@/lib/roster/writes";
 import { CreateAndLinkForm, DeactivateForm, FamilyInactiveForm, MemberForm, MoveForm, NameForm, ParentForm } from "./write-forms";
-import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, moveAction,
+import type { WriteResult } from "@/lib/roster/writes";
+import { addStudentAction, addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction,
   renameHereAction, renameLinkedAction, renameParentAction } from "./write-actions";
 
 /**
  * The roster's changes in QuickBooks, for staff who hold Roster.Family.ReadWrite with Roster.Read. Every form's action
- * has the page's roster tag and the record's id bound in: a rename of a linked family, member or student, and a new
- * student, the app's id (saved in the portal first, stage 3's slice 9e, and sent with the link's own version); a move,
- * a make-inactive and a parent's changes, the customer's id and the version the page was shown. Names are QuickBooks
- * text, or the portal's own, shown as text only.
+ * has the page's roster tag and the record's id bound in: a rename of a linked family, member or student, a new
+ * student and a move of a student, the app's ids (saved in the portal first, stage 3's slices 9e and 9f, and sent with
+ * the link's own version); a make-inactive and a parent's changes, the customer's id and the version the page was
+ * shown. Names are QuickBooks text, or the portal's own, shown as text only.
  */
 
 /** What can be changed here for this club, and why the rest can't, in words (src/lib/roster/operations.ts). */
@@ -31,8 +32,8 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
   const list = can.length > 1 ? `${can.slice(0, -1).join(", ")} and ${can.at(-1)}` : can[0] ?? "";
   return (
     <section className="box" aria-labelledby="changes-h"><h2 id="changes-h">Changing the roster</h2>
-      <p>{canChange ? <>From the portal you can {list}. For a family linked to QuickBooks, a rename or a new student is saved in the portal first and then sent to QuickBooks; if QuickBooks refuses it, the portal keeps it and the Reconciliation page lists it. A move, or making someone inactive, is sent to QuickBooks first, and the roster shows it once QuickBooks has it.</>
-        : <>Staff who may change the roster can {list} from the portal. For a family linked to QuickBooks, a rename or a new student is saved in the portal first; a move, or making someone inactive, is sent to QuickBooks first.</>}</p>
+      <p>{canChange ? <>From the portal you can {list}. For a family linked to QuickBooks, a rename, a new student or a move of a student is saved in the portal first and then sent to QuickBooks; if QuickBooks refuses it, the portal keeps it and the Reconciliation page lists it. What follows a move happens at once: a completed form goes with the student and an unfinished one starts again in the new family, their places on shifts still to come are given up and none of their places counts for the family they joined, the credit they earned stays with the family it was earned for, and an unpaid volunteer buy-out invoice of theirs is queued to be voided while a paid one is flagged for the club. Their invoices follow once QuickBooks has the move. Making someone inactive is sent to QuickBooks first, and the roster shows it once QuickBooks has it.</>
+        : <>Staff who may change the roster can {list} from the portal. For a family linked to QuickBooks, a rename, a new student or a move of a student is saved in the portal first; making someone inactive is sent to QuickBooks first.</>}</p>
       <p>{unlinked ? "This family has no customer in QuickBooks: a change to it is saved in the portal only."
         : "A new family is saved in the portal first, and made in QuickBooks too when the staff member who adds it may link families to accounting. A family with no customer in QuickBooks is changed in the portal only."}</p>
       {notOffered.map((n) => <p key={n.why}>{n.why}</p>)}
@@ -44,7 +45,8 @@ export function WhatChanges({ shape, canChange, unlinked = false }: { shape: Mem
 /**
  * The writes waiting or stuck for this family or member, and the changes saved in the portal first that QuickBooks
  * refused (stage 3's slice 9e), each under its own heading: shown to everyone who can see the page, with no buttons (the
- * Reconciliation page has them). A refused change blocks nothing here.
+ * Reconciliation page has them). A refused change blocks nothing here, but that a kept move holds back making either of
+ * its families inactive (MOVE_PENDING) until it is sent or given up.
  */
 export function Waiting({ items }: { items: QueueView[] }) {
   const open = items.filter((i) => i.state !== "refused"), refused = items.filter((i) => i.state === "refused");
@@ -54,7 +56,7 @@ export function Waiting({ items }: { items: QueueView[] }) {
         <section className="box" aria-labelledby="waiting-h"><h2 id="waiting-h">Waiting to reach QuickBooks</h2>
           <p>These changes were asked for and haven&apos;t been finished yet: most are waiting for QuickBooks to take them. Nothing else can be changed on the same record until they go through or are given up on the <a href="/staff/reconciliation">Reconciliation page</a>.</p>
           <DataTable caption="Each change, and where it stands" captionHidden rows={open} rowKey={(i) => i.id} columns={[
-            { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
+            { key: "change", header: "Change", rowHeader: true, cell: (i) => <>{i.words}{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
             { key: "state", header: "Where it stands", cell: (i) => waitingWords(i) },
             { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
           ]} />
@@ -62,10 +64,10 @@ export function Waiting({ items }: { items: QueueView[] }) {
       )}
       {refused.length > 0 && (
         <section className="box" aria-labelledby="refused-h"><h2 id="refused-h">Kept in the portal, not in QuickBooks</h2>
-          <p>These changes are saved in the portal, but they didn&apos;t go through to QuickBooks (QuickBooks refused them, the portal held them back as QuickBooks has something else, or they couldn&apos;t be sent), so QuickBooks still has something else. They don&apos;t stop other changes. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
+          <p>These changes are saved in the portal, but they didn&apos;t go through to QuickBooks (QuickBooks refused them, the portal held them back as QuickBooks has something else, or they couldn&apos;t be sent), so QuickBooks still has something else. They don&apos;t stop other changes, except that a student&apos;s move kept here stops either of its two families being made inactive until it is sent or given up. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
           <DataTable caption="Each change that didn't go through, and why" captionHidden rows={refused} rowKey={(i) => i.id} columns={[
-            { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
-            { key: "why", header: "Why", cell: (i) => keptRefusalWords(i.lastCode, i.holds) },
+            { key: "change", header: "Change", rowHeader: true, cell: (i) => <>{i.words}{i.moneyNote ? <span className="when">{i.moneyNote}</span> : null}</> },
+            { key: "why", header: "Why", cell: (i) => keptWordsFor(i.write, i.lastCode, i.holds) },
             { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },
           ]} />
         </section>
@@ -225,24 +227,46 @@ function FamilyInactive({ family, cover, edit }: { family: Cust; cover: { family
   );
 }
 
-/** A student of this family's record whom QuickBooks has under another family: in the roster's words. */
-export type Elsewhere = { name: string; customer: Cust; familyQboId: string; familyName: string };
+/** A student of the family's record a move is offered for (MoveStudents): the app's id, and why none is offered now (`blocked`). */
+export type MovableStudent = { id: string; name: string; blocked: string | null };
 
 /**
- * Every change a family's page offers: the family itself, its students and its parents, as the shape allows. Offered
- * only for a family whose own record is active in the portal; a student whose record is inactive (`inactiveRecords`,
- * by customer) is offered nothing that would send. A student whose record is this family's but whom QuickBooks has
- * under another family (`elsewhere`) is offered the move to that family, which sends nothing and brings the record,
- * with what follows a move, into line; when that family isn't one of `families` (the app's own active families, active
- * in QuickBooks), the record can't follow it there, and the move offered is one sent to QuickBooks, to one of them.
+ * Moving the family's students (stage 3's slice 9f), linked or not, to any other of the portal's own active families,
+ * linked or not (`families`, by the app's id), on a linked family's page and an unlinked one's alike. The move is saved
+ * in the portal first, with what follows it (the student's forms, places on shifts still to come and buy-outs), then
+ * sent to QuickBooks for a linked student; their invoices follow once QuickBooks has it (open question 14). Offered
+ * only to staff who may change families, where the shape offers a move, for an active family whose own create isn't
+ * waiting; a student whose own create, or another change, is waiting is offered none (`blocked`, in words). The action
+ * checks everything again.
  */
-export function FamilyChanges({ shape, family, families, edit, cover, inactiveRecords, elsewhere }: {
-  shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; families: { qboId: string; name: string }[]; edit: Edit; cover: { family: Covered; under: Covered[] } | null;
-  inactiveRecords: Set<string>; elsewhere: Elsewhere[];
+export function MoveStudents({ students, families, refusedHere, rosterTag, act }: { students: MovableStudent[]; families: { id: string; name: string }[]; refusedHere: string | null;
+  rosterTag: string; act: (rosterTag: string, studentId: string, toFamilyId: string) => Promise<WriteResult> }) {
+  if (students.length === 0) return null;
+  return (
+    <section className="box" aria-labelledby="move-students-h"><h2 id="move-students-h">Move a student</h2>
+      <p>A move is saved in the portal first, and what follows it happens at once, whatever QuickBooks then does with the move: a completed form goes with the student and an unfinished one starts again in the new family; their places on shifts still to come are given up, and none of their places counts for the family they joined, while the credit they earned stays with the family it was earned for; an unpaid volunteer buy-out invoice of theirs is queued to be voided, and any other buy-out of theirs (a paid one, say) is flagged for the club. For a student linked to QuickBooks the move is then sent there. Their invoices follow once QuickBooks has the move: until then the family QuickBooks has them under still sees them, and the family they joined doesn&apos;t. Where guardians may sign in only to a family with an active student, moving a family&apos;s last active student out keeps its guardians out until it has one again.</p>
+      {refusedHere !== null ? <Notice tone="info" live="none">{refusedHere}</Notice>
+        : families.length === 0 ? <Notice tone="info" live="none">There is no other family a student can be moved to just now: the portal has no other active family, or each has a change of its own waiting.</Notice> : students.map((s) => (
+        <details key={s.id} className="more"><summary>Move the student {s.name}</summary>
+          {s.blocked !== null ? <Notice tone="info" live="none">{s.blocked}</Notice> : <MoveForm families={families} act={act.bind(null, rosterTag, s.id)} />}
+        </details>
+      ))}
+    </section>
+  );
+}
+
+/**
+ * Every change a family's page offers in QuickBooks: the family itself, its students and its parents, as the shape
+ * allows. Offered only for a family whose own record is active in the portal; a student whose record is inactive
+ * (`inactiveRecords`, by customer) is offered nothing that would send. A move is MoveStudents' (slice 9f), for every
+ * student of the family's record, wherever QuickBooks has them (the page says where).
+ */
+export function FamilyChanges({ shape, family, edit, cover, inactiveRecords }: {
+  shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; edit: Edit; cover: { family: Covered; under: Covered[] } | null;
+  inactiveRecords: Set<string>;
 }) {
   const { offered } = shapeOperations(shape);
   const f = family.customer;
-  const others = families.filter((x) => x.qboId !== f.qboId);
   return (
     <section className="box" aria-labelledby="family-changes-h"><h2 id="family-changes-h">Change in QuickBooks</h2>
       <RecordChanges who="the family" c={f} rename={offered.has("rename_family")} deactivate={false} edit={edit} warning=""
@@ -261,31 +285,8 @@ export function FamilyChanges({ shape, family, families, edit, cover, inactiveRe
       )}
       {family.students.filter((s) => !inactiveRecords.has(s.qboId)).map((s) => (
         <RecordChanges key={s.qboId} who="the student" c={s} rename={offered.has("rename_student")} deactivate={offered.has("deactivate_student")} edit={edit} follow
-          warning="The student is no longer counted in the family's season, and their invoices no longer show to the family. A student with an open balance in QuickBooks isn't made inactive until it is paid or written off."
-          extra={offered.has("move_student") && s.active && edit.versions.has(s.qboId) && others.length > 0
-            ? <MoveForm families={others} act={moveAction.bind(null, edit.rosterTag, s.qboId, edit.versions.get(s.qboId)!)} /> : null} />
+          warning="The student is no longer counted in the family's season, and their invoices no longer show to the family. A student with an open balance in QuickBooks isn't made inactive until it is paid or written off." />
       ))}
-      {offered.has("move_student") && elsewhere.map((s) => {
-        const version = edit.versions.get(s.customer.qboId);
-        if (version === undefined) return null;
-        if (edit.blocked.has(s.customer.qboId)) return <Notice key={s.customer.qboId} tone="info" live="none">A change to {s.name} is waiting to reach QuickBooks, so nothing else can be changed for now.</Notice>;
-        // The family QuickBooks has them under isn't one of the portal's own active families (made in QuickBooks alone,
-        // or inactive there or here): the record can't follow them there, so the move offered is one sent to
-        // QuickBooks, to one of the portal's families, this one included (prepare() in src/lib/roster/writes.ts).
-        if (!families.some((x) => x.qboId === s.familyQboId)) return (
-          <details key={s.customer.qboId} className="more"><summary>Change the student {s.name}</summary>
-            <p>QuickBooks has {s.name} under {s.familyName}, which isn&apos;t one of the portal&apos;s own active families, so the portal&apos;s own record of them can&apos;t follow them there. Moving them here sends the move to QuickBooks: back to this family puts QuickBooks in line with the portal, and to another family their record, forms, places on shifts still to come and buy-outs go with them.</p>
-            {families.length > 0 ? <MoveForm families={families} act={moveAction.bind(null, edit.rosterTag, s.customer.qboId, version)} />
-              : <Notice tone="info" live="none">The portal has no active family to move them to.</Notice>}
-          </details>
-        );
-        return (
-          <details key={s.customer.qboId} className="more"><summary>Change the student {s.name}</summary>
-            <p>QuickBooks has {s.name} under {s.familyName}, but the portal still holds them in this family. Moving them to {s.familyName} here sends nothing to QuickBooks: the portal&apos;s own record moves, and their forms, places on shifts still to come and buy-outs follow as they do for any move.</p>
-            <MoveForm families={[{ qboId: s.familyQboId, name: s.familyName }]} act={moveAction.bind(null, edit.rosterTag, s.customer.qboId, version)} />
-          </details>
-        );
-      })}
       {family.parents.map((p) => (
         <RecordChanges key={p.qboId} who="the parent" c={p} rename={offered.has("rename_parent")} deactivate={offered.has("deactivate_parent")} edit={edit}
           warning="Their sign-in to the portal stays as it is: who can sign in is the portal's own list of the family's guardians. A parent with an open balance in QuickBooks isn't made inactive until it is paid or written off." />

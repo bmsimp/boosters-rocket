@@ -4,21 +4,22 @@
 // password already), and nobody else is sent anything. Server only.
 import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { parent, parentAuthAccount, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
+import { parent } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/setup/state";
 import { mailWorking } from "@/lib/mail/settings";
-import { currentBrand, sendMail } from "@/lib/mail/send";
+import { currentBrand } from "@/lib/mail/send";
 import { passwordResetMessage, passwordSetupMessage } from "@/lib/mail/messages";
 import { env } from "@/env";
 import { takeRateLimit, type RateLimitTake } from "./rate-limit";
 import { enterableGuardianRows, parentActor } from "./sessions";
 import { getParentSettings, parentDoorClosed, type ParentSettings } from "./settings";
 import { RESEND_AFTER_MS } from "./signin-codes";
-import { dropHeldLink, hashLinkToken, holdSigninLink, linkSentWithin, LINK_LIFE_MS, LINK_TOKEN_BYTES, putHeldLinkInPlace, type LinkPurpose } from "./signin-links";
+import { hashLinkToken, holdSigninLink, linkSentWithin, LINK_LIFE_MS, LINK_TOKEN_BYTES, type LinkPurpose } from "./signin-links";
 import { whichLinkToMail } from "./password-request-rule";
+import { deliverHeldLink, lifeWords, passwordLink, personBy, type HeldLink, type LinkPerson } from "./link-delivery";
 
 /** The most an address field may hold as sent: anything longer, or anything not a string, gets the answer and nothing else. */
 export const MOST_ASKED = 320;
@@ -54,17 +55,7 @@ const ANON: Actor = { door: "parent", id: null, label: null };
 const DONE: { delivery: Promise<void> } = { delivery: Promise.resolve() };
 
 type Who = { id: string; email: string };
-type Person = { id: string; email: string; blocked: boolean; authUserId: string | null; hasPassword: boolean };
-
-/** The person who holds the address, with their sign-in account and whether they have a password; in `tx` when given. */
-async function personBy(where: { email: string } | { id: string }, tx?: Tx): Promise<Person | null> {
-  const [row] = await (tx ?? db).select({
-    id: parent.id, email: parent.email, blocked: parent.blocked, authUserId: parentAuthUser.id,
-    hasPassword: sql<boolean>`exists (select 1 from ${parentAuthAccount} where ${parentAuthAccount.userId} = ${parentAuthUser.id} and ${parentAuthAccount.providerId} = 'credential')`,
-  }).from(parent).leftJoin(parentAuthUser, eq(parentAuthUser.parentId, parent.id))
-    .where("email" in where ? eq(parent.email, where.email) : eq(parent.id, where.id));
-  return row ? { ...row, hasPassword: row.hasPassword === true } : null;
-}
+type Person = LinkPerson;
 
 /** What the reads say: the link to mail, or why none. The order only decides which reason the audit row gives. */
 function decide(o: { email: string | null; person: Person | null; counts: boolean; settings: ParentSettings; mail: boolean }): { mail: LinkPurpose } | { reason: NotMailed } {
@@ -85,34 +76,6 @@ async function audit(who: Who | null, after: Record<string, unknown>, ip: string
   await writeAudit({ actor: who ? parentActor(who) : ANON, action: "parent.password.reset_asked", targetType: who ? "parent" : undefined,
     targetId: who?.id, after, ip }, tx);
 }
-
-/**
- * What became of a link held on its way, when it was not put in place: one `parent.password.link_not_sent` row, in the
- * transaction that makes that true. (Put in place, its row is `parent.password.link_made`, putHeldLinkInPlace().)
- */
-async function notSent(who: Who, purpose: LinkPurpose, reason: NotSent, ip: string | null, tx: Tx) {
-  await writeAudit({ actor: parentActor(who), action: "parent.password.link_not_sent", targetType: "parent", targetId: who.id,
-    after: { purpose, reason }, ip }, tx);
-}
-
-/** Postgres ended the transaction to break a deadlock (40P01), or for a serialization failure (40001): worth one more try. */
-function worthAnotherTry(e: unknown): boolean {
-  const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
-  const c = code(e) ?? code((e as { cause?: unknown } | null)?.cause);
-  return c === "40P01" || c === "40001";
-}
-
-/** A link's life in words, for its mail: "1 hour", "7 days". */
-export function lifeWords(ms: number): string {
-  const hours = Math.round(ms / 3_600_000);
-  if (hours < 24) return hours === 1 ? "1 hour" : `${hours} hours`;
-  const days = Math.round(hours / 24);
-  return days === 1 ? "1 day" : `${days} days`;
-}
-
-/** The address a link opens: the portal's own address and the link's page, built as the email change builds its link. */
-export const passwordLink = (purpose: LinkPurpose, token: string) =>
-  `${env.APP_URL.replace(/\/+$/, "")}/sign-in/${purpose === "setup" ? "set-up" : "reset"}/${token}`;
 
 /**
  * An ask, decided and stored; the mail goes out in `delivery`. The caller answers with the one sentence whatever
@@ -142,7 +105,7 @@ export const passwordLink = (purpose: LinkPurpose, token: string) =>
  * So every ask past (a) has exactly one `parent.password.reset_asked` row, written in the transaction that decided it.
  * Then the mail, to the address read under the lock and no other. What becomes of the held link is a second fact with
  * its own row, written in the transaction that makes it true: once the mail has been handed over the link is put in
- * place, replacing the earlier one (`parent.password.link_made`, putLinkInPlace()); otherwise it is removed and the
+ * place, replacing the earlier one (`parent.password.link_made`, deliverHeldLink(), ./link-delivery.ts); otherwise it is removed and the
  * earlier one left working (`parent.password.link_not_sent`, with its reason). An ask whose process stopped mid-way
  * keeps its `reset_asked` row with no row after it: that is its trace, and the held link is a spent one to the
  * clean-up. So an ask that never reached the person never takes a link from them. The token is in the mail's body
@@ -197,75 +160,28 @@ export async function askForPasswordLink(raw: unknown, ip: string | null, now = 
 
   // The person's earlier link keeps working until the new one is put in place, and that happens only once its mail has
   // been handed over: a send that fails, or a putting in place that fails (tried once more after a deadlock or a
-  // serialization failure), removes the held link instead, each with its own reason.
-  const delivery = (async () => {
-    const sent = await mailLink(held, ip).catch(() => false);
-    if (!sent) { await forgetUnsentLink(held, ip, "mail_failed"); return; }
-    try {
-      await putLinkInPlace(held, ip).catch((e: unknown) => { if (worthAnotherTry(e)) return putLinkInPlace(held, ip); throw e; });
-    } catch {
-      await forgetUnsentLink(held, ip, "not_put_in_place");
-    }
-  })().catch(() => undefined); // every outcome above is audited (mail.failed, and the rows below); nothing here may surface to the caller
+  // serialization failure), removes the held link instead, each with its own reason (deliverHeldLink(), link-delivery.ts).
+  const delivery = deliverHeldLink(held, { message: () => linkMessage(held), purpose: held.purpose === "setup" ? "password_setup" : "password_reset",
+    actor: parentActor(held.who), ip, check: (tx, live) => stillToMail(tx, live, held) }).then(() => undefined, () => undefined); // every outcome is audited; nothing here may surface to the caller
   return { delivery };
 }
 
-/** A held link on its way (holdSigninLink(), signin-links.ts): its token, which only its mail carries, and who it is for. */
-type Held = { linkId: string; purpose: LinkPurpose; token: string; to: string; who: Who };
-
-/** The link's mail, to the address read under the lock and no other. Whether it was handed over. */
-async function mailLink(l: Held, ip: string | null): Promise<boolean> {
+/** The link's mail, to the address read under the lock and no other. */
+async function linkMessage(l: HeldLink) {
   const brand = await currentBrand();
   const words = { link: passwordLink(l.purpose, l.token), life: lifeWords(LINK_LIFE_MS[l.purpose]) };
-  const message = l.purpose === "setup" ? passwordSetupMessage(brand, l.to, words) : passwordResetMessage(brand, l.to, words);
-  return (await sendMail(message, { purpose: l.purpose === "setup" ? "password_setup" : "password_reset", actor: parentActor(l.who), ip })).ok;
+  return l.purpose === "setup" ? passwordSetupMessage(brand, l.to, words) : passwordResetMessage(brand, l.to, words);
 }
 
 /**
- * A link whose mail was handed over, put in place (putHeldLinkInPlace()) once the person is checked again under their
- * lock, as before the mail: the address still the one mailed, and everything else that let it be sent. An end of the
- * person's sign-in meanwhile (blocking, a last membership closed, a change of address, sign-ins switched off) deleted
- * the held link with the unused ones (unspentLink, ./link-state.ts), so it stays gone even when the person is let in
- * again before the mail is handed over; a newer link made meanwhile (mintSigninLink()) deleted it too, and wins. Put in
- * place, its row is `parent.password.link_made`. When the check says no, the held link is removed and one
- * `parent.password.link_not_sent` row gives the reason (`changed_while_mailing` when the link to mail is now of the
- * other purpose); when the link is no longer held, nothing is removed and the row says `superseded` (a newer link
- * mintSigninLink() made replaced it) or `changed_while_mailing` (an end of the person's sign-in, or a password reset,
- * whatever the person asked for again since). Throws when the transaction fails.
+ * The check again under the person's lock, once the link's mail has been handed over, before it is put in place: as
+ * before the mail, the address still the one mailed, and everything else that let it be sent (decide()). When it says
+ * no, the reason is that check's; `changed_while_mailing` when the link to mail is now of the other purpose.
  */
-async function putLinkInPlace(l: Held, ip: string | null): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, l.who.id)).for("update");
-    const live = await personBy({ id: l.who.id }, tx);
-    const counts = live ? (await enterableGuardianRows(live.id, tx)).length > 0 : false;
-    const again = live && live.email === l.to
-      ? decide({ email: l.to, person: live, counts, settings: await getParentSettings(tx), mail: true })
-      : { reason: "unknown_email" as const };
-    const reason: NotSent | null = !("mail" in again) ? again.reason : again.mail !== l.purpose ? "changed_while_mailing" : null;
-    if (reason === null && live) {
-      const put = await putHeldLinkInPlace(tx, { linkId: l.linkId, parentId: live.id, purpose: l.purpose, actor: parentActor(live), ip });
-      if (put !== "put") await notSent(l.who, l.purpose, put === "superseded" ? "superseded" : "changed_while_mailing", ip, tx);
-      return;
-    }
-    await dropHeldLink(tx, l.linkId);
-    await notSent(l.who, l.purpose, reason ?? "changed_while_mailing", ip, tx);
-  });
-}
-
-/**
- * A link whose mail was not handed over (`mail_failed`), or was and whose putting in place then failed
- * (`not_put_in_place`): nobody may use it. Under the person's row, in the order above lockedPerson(), it looks first:
- * a link that is live after all (the putting in place committed and only its answer was lost) is left as it is, with no
- * row. Otherwise the held link is removed with one `parent.password.link_not_sent` row giving the reason. The person's
- * earlier link, if any, was never touched and still works.
- */
-async function forgetUnsentLink(l: Held, ip: string | null, reason: "mail_failed" | "not_put_in_place"): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, l.who.id)).for("update");
-    const [live] = await tx.select({ id: parentSigninToken.id }).from(parentSigninToken)
-      .where(and(eq(parentSigninToken.id, l.linkId), isNull(parentSigninToken.usedAt)));
-    if (live) return;
-    await dropHeldLink(tx, l.linkId);
-    await notSent(l.who, l.purpose, reason, ip, tx);
-  });
+async function stillToMail(tx: Tx, live: Person | null, l: HeldLink): Promise<NotSent | null> {
+  const counts = live ? (await enterableGuardianRows(live.id, tx)).length > 0 : false;
+  const again = live && live.email === l.to
+    ? decide({ email: l.to, person: live, counts, settings: await getParentSettings(tx), mail: true })
+    : { reason: "unknown_email" as const };
+  return !("mail" in again) ? again.reason : again.mail !== l.purpose ? "changed_while_mailing" : null;
 }

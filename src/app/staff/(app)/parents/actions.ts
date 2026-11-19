@@ -30,7 +30,7 @@ export const blockAction = staffAction(P, async (ctx, parentId: string, reason: 
   const r = await blockPerson(parentId, reason, op(ctx));
   if (!r.ok) return { ok: false, errors: [r.reason === "invalid" ? "Say why, in a few words. Only staff see it." : "That person isn't in the portal any more."] };
   refresh();
-  return { ok: true, message: "Blocked. They are signed out and can't get a code." };
+  return { ok: true, message: "Blocked. They are signed out, and can't sign in, get a sign-in code or use a password link." };
 });
 
 export const unblockAction = staffAction(P, async (ctx, parentId: string): Promise<Done> => {
@@ -44,14 +44,23 @@ export const unblockAction = staffAction(P, async (ctx, parentId: string): Promi
 
 const RESEND_FAILED = {
   not_found: "That person isn't in the portal any more.", blocked: "This person is blocked, so no email was sent.",
-  no_access: "This person can't sign in to any family right now, so no email was sent.", mail_failed: "The email couldn't be sent. Check outgoing mail under Mail.",
+  no_access: "This person can't sign in to any family right now, so no email was sent.",
+  on_its_way: "An email with a link to choose a password is on its way to this person, or went to them less than a minute ago, so no other was sent: a new one would stop that link working. If they still need one, try again in a minute.",
+  mail_failed: "The email couldn't be sent. Check outgoing mail under Mail.",
+  link_not_in_place: "The email went, but something changed for this person while it was on its way, so the link in it to choose a password won't work. Look at their page again before sending another.",
+} as const;
+// What the welcome carried, never the link itself.
+const RESENT = {
+  setup: "Sent, with a link to choose a password.",
+  none: "Sent. They have a password, so it says to sign in with it.",
+  not_in_place: "Sent. They chose a password while it was on its way, so they can sign in with it.",
 } as const;
 export const resendWelcomeAction = staffAction(P, async (ctx, parentId: string): Promise<Done> => {
   if (!personId(parentId)) return NOT_FROM_PAGE;
   const r = await resendWelcome(parentId, op(ctx));
   if (!r.ok) return { ok: false, errors: [RESEND_FAILED[r.reason]] };
   refresh();
-  return { ok: true, message: "Sent." };
+  return { ok: true, message: RESENT[r.link] };
 });
 
 // A family's guardians (stage 3's slice 7b), from a family's roster page or a person's page. Each id is the app's own
@@ -65,7 +74,7 @@ const MAKING_WORDS = "This family is being made in QuickBooks at this moment, so
 const OTHER_COMPANY_WORDS = "QuickBooks is connected to a different company from the one this roster was read from, so the portal can't tell which customer this family is linked to, and nobody was added. An Admin can sort that out under QuickBooks.";
 const ADD_REFUSED = {
   invalid_name: "Give the guardian's name, up to 100 characters.",
-  invalid_email: "That isn't an email address the portal can send a sign-in code to. Check it and try again.",
+  invalid_email: "That isn't an email address the portal can send sign-in emails to. Check it and try again.",
   no_family: NOT_FROM_PAGE.errors[0]!,
   inactive: "This family is inactive in the portal, so nobody can be added to it.",
   waiting: WAITING_WORDS,
@@ -96,8 +105,8 @@ export const addGuardianAction = staffAction(R, async (ctx, familyId: string, na
   // Said of a person who held the address already, between their name and what follows it.
   const known = r.person === "existing" ? ", who already had a sign-in with this address (their name is unchanged)" : "";
   return { ok: true, message: r.outcome === "reinstated"
-    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and a code while parent sign-ins are on.`
-    : `Added ${r.name}${known}. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on.` };
+    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on; if they haven't chosen one, Resend welcome email on their page sends them a link to choose it.`
+    : `Added ${r.name}${known}. They sign in with this address and a password while parent sign-ins are on. If they have never had a welcome email and welcome emails are on, they are sent one, with a link to choose a password if they have none.` };
 });
 
 export const removeGuardianAction = staffAction(R, async (ctx, guardianId: string, note: string): Promise<Done> => {

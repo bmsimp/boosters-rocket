@@ -71,6 +71,6 @@ export function createGraphSender(o: { tenantId: string; clientId: string; asser
     const code = typeof err.error?.code === "string" && /^[A-Za-z0-9_.]{1,80}$/.test(err.error.code) ? err.error.code : `HTTP ${res.status}`;
     throw new MailSendError(res.status === 403 || code === "ErrorAccessDenied"
       ? `Microsoft 365 refused to send as ${o.mailbox} (${code}). Check that mail was set up for this mailbox (the staff script's -SetUpMail part, or the steps by hand), and allow up to 2 hours after a change.`
-      : `Microsoft Graph didn't accept the message (${code}).`);
+      : `Microsoft Graph didn't accept the message (${code}).`, code === "ErrorInvalidRecipients");
   };
 }

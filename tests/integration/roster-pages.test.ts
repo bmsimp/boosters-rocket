@@ -162,7 +162,7 @@ describe("the roster pages", () => {
     // who isn't, is tests/integration/staff-guardians.test.ts's).
     const row = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
       .find((r) => r.includes("ana.portal@example.com"));
-    expect(row).toMatch(/^Ana R\. Email ana\.portal@example\.com Sign-in Can sign in \(hasn&#x27;t yet\) Remove Ana R\. /);
+    expect(row).toMatch(/^Ana R\. Email ana\.portal@example\.com Sign-in Hasn&#x27;t chosen a password yet Remove Ana R\. /);
     expect((await audits("roster.family.read"))).toHaveLength(1);
     expect((await audits("roster.family.read"))[0]).toMatchObject({ actorId: reader.id, actorLabel: "registrar@club.org", permission: "Roster.Read",
       targetType: "family", targetId: await idOf("10"), ip: "203.0.113.40" });

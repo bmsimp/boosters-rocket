@@ -140,7 +140,9 @@ describe("migration 0041: each link holds the version the portal last aligned wi
   it("goes through with every other kind on the queue: fills each link of the roster's company from the cache, and changes no other row", async () => {
     const held = await snapshot();
     const startedAt = Date.now();
-    await migrateWith(path.resolve("drizzle"));
+    // Up to 0041: 0042 (stage 3's slice 9f) refuses while a move is waiting or stuck, as PASSING's stuck move is; that
+    // refusal is 0042's own test's (migrate-moves-saved-first).
+    await migrateWith(migrationsUpTo(41));
     expect(await snapshot()).toEqual(held);
     const tokens = await q((pg) => pg`SELECT id, synced_token, synced_at FROM accounting_link`);
     const of = (key: string) => tokens.find((t) => t.id === ids[key])!;

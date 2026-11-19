@@ -102,7 +102,7 @@ describe("staff manage a family's guardians", () => {
   describe("adding", () => {
     it("makes the person, their sign-in account and an invited row naming the family record and its customer, in step, audited", async () => {
       const r = await addGuardianAction(String(rivera), "  Ana   Rivera ", " Ana@Example.COM ");
-      expect(r).toEqual({ ok: true, message: "Added Ana Rivera. They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on." });
+      expect(r).toEqual({ ok: true, message: "Added Ana Rivera. They sign in with this address and a password while parent sign-ins are on. If they have never had a welcome email and welcome emails are on, they are sent one, with a link to choose a password if they have none." });
       const ana = (await personOf("ana@example.com"))!;
       expect(ana).toMatchObject({ name: "Ana Rivera", blocked: false, welcomeOwed: false });
       expect(await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id))).toEqual([expect.objectContaining({ name: "Ana Rivera", email: "ana@example.com", emailVerified: true })]);
@@ -147,7 +147,7 @@ describe("staff manage a family's guardians", () => {
       expect(revalidated.count).toBe(0);
       // The second press carries the person as shown.
       expect(await addGuardianAction(String(rivera), "Someone Else", "ana@example.com", ana.id)).toEqual({ ok: true,
-        message: "Added Ana Rivera, who already had a sign-in with this address (their name is unchanged). They sign in with this address and a code while parent sign-ins are on, and are sent a welcome email if they have never had one and welcome emails are on." });
+        message: "Added Ana Rivera, who already had a sign-in with this address (their name is unchanged). They sign in with this address and a password while parent sign-ins are on. If they have never had a welcome email and welcome emails are on, they are sent one, with a link to choose a password if they have none." });
       expect((await personOf("ana@example.com"))!).toMatchObject({ name: "Ana Rivera", welcomeOwed: true });
       expect((await rowsOf(ana.id)).map((g) => [g.familyQboId, g.status])).toEqual([["10", "invited"], ["20", "active"]]);
       expect(await audits("parent.create")).toEqual([]);
@@ -179,7 +179,7 @@ describe("staff manage a family's guardians", () => {
       const refused = async (familyId: string, name: string, email: string) => ((await addGuardianAction(familyId, name, email)) as { errors: string[] }).errors;
       expect(await refused(String(rivera), "  ", "new@example.com")).toEqual(["Give the guardian's name, up to 100 characters."]);
       expect(await refused(String(rivera), "x".repeat(101), "new@example.com")).toEqual(["Give the guardian's name, up to 100 characters."]);
-      expect(await refused(String(rivera), "New Person", "not an address")).toEqual(["That isn't an email address the portal can send a sign-in code to. Check it and try again."]);
+      expect(await refused(String(rivera), "New Person", "not an address")).toEqual(["That isn't an email address the portal can send sign-in emails to. Check it and try again."]);
       expect(await refused(String(rivera), "Bea", "bea@example.com")).toEqual(["The person with this address is blocked. Unblock them on their page first."]);
       expect(await refused(String(await recordOfCustomer("30", "family")), "New Person", "new@example.com")).toEqual(["This family is inactive in the portal, so nobody can be added to it."]);
       // Already one of the family's guardians: said at once, with no question first.
@@ -234,7 +234,7 @@ describe("staff manage a family's guardians", () => {
       expect(await addGuardianAction(String(rivera), "Ana Rivera", "ana@example.com")).toMatchObject({ ok: false, samePerson: ana.id });
       expect((await rowsOf(ana.id))[0]).toMatchObject({ status: "disabled" });
       expect(await addGuardianAction(String(rivera), "Ana R.", "ana@example.com", ana.id)).toEqual({ ok: true,
-        message: "Ana Rivera, who already had a sign-in with this address (their name is unchanged), was a guardian of this family before: their sign-in for it is back. They sign in with this address and a code while parent sign-ins are on." });
+        message: "Ana Rivera, who already had a sign-in with this address (their name is unchanged), was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on; if they haven't chosen one, Resend welcome email on their page sends them a link to choose it." });
       expect(await rowsOf(ana.id)).toEqual([expect.objectContaining({ id: old.id, status: "active", disabledReason: null, statusBeforeDisable: null })]);
       expect((await audits("parent.access.granted"))[0]).toMatchObject({ targetId: old.id, permission: R, before: { status: "disabled", disabledReason: "not_in_quickbooks" },
         after: { parentId: ana.id, familyId: String(rivera), familyQboId: "10", status: "active", reinstated: true, addedBy: "staff", person: "existing", typedName: "Ana R." } });

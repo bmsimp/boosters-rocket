@@ -325,9 +325,16 @@ until parent sign-ins are switched on, however they came to be a guardian. Switc
 2. **Step 1: Parent sign-ins**: it says how many people could sign in, to how many families. **Switch parent sign-ins
    on**. The step then says "Parent sign-ins are on." with the same counts. No email is sent, and no guardian row is
    opened or closed.
-3. In a private window, sign in as a test parent at `/sign-in` with the code that arrives.
+3. In a private window, sign in as a test parent at `/sign-in` with their email and the password they chose, and on
+   a browser the portal doesn't know yet the code it then emails. A tester with no password chooses one first, from
+   the link in their welcome email or from **Set up or reset my password** on the sign-in page.
 4. **Next: welcome emails** (step 2), then **Switch welcome emails on**. Within a minute or two each guardian who has
-   never been welcomed gets the welcome email.
+   never been welcomed gets the welcome email, with a link to choose a password if they have none (it works once, for
+   7 days). The testers this host welcomed before the sign-in release have no password and are not welcomed again by
+   themselves: back on **Parent sign-ins**, **Email a set-up link to everyone who can sign in and hasn't chosen a
+   password** emails each of them a link to choose their password ("Choose your password for" the club). A tester who
+   already holds a set-up link that still works is welcomed with no new link: their welcome says the one emailed
+   earlier still works.
 
 Switching parent sign-ins **off** (step 1, **Switch parent sign-ins off**) signs every parent out at once, and also
 switches welcome emails off. Switching sign-ins on again does not switch welcomes back on: do step 2 again.
@@ -362,12 +369,14 @@ family record, and an update that finds an open row with none, in a portal whose
 changes nothing ("Migration 0037 stopped"). Read the roster, then deploy again. From stage 3's slice 9c on, a roster
 read gives no row a family and changes no record: a tester added on a family's page has their family from the start.
 
-Adding a guardian sends no welcome email unless welcome emails are on; otherwise tell the parent to go to `/sign-in`
-and ask for a code. Like every guardian's, the sign-in lets the tester in only while parent sign-ins are on, and
+Adding a guardian sends no welcome email unless welcome emails are on; otherwise tell the parent to go to
+`/sign-in/password` (**Set up or reset my password** on the sign-in page) for a link to choose a password, or send
+the welcome from their page under **Parents**. Like every guardian's, the sign-in lets the tester in only while parent sign-ins are on, and
 nothing in QuickBooks ends it. **Remove** beside them in the same box ends it, with a note only staff see.
 
 **Blocking a parent.** Choose **Parents** in the staff menu, open the person, enter a reason under
-**Why? (staff only)** and choose **Block**; **Unblock** on the same page gives back the same access. Both are in the
+**Why? (staff only)** and choose **Block**; **Unblock** on the same page lets them sign in again with their password (the browsers the portal remembered
+for them stay forgotten, so each asks for an emailed code again). Both are in the
 audit log (`parent.block`, `parent.unblock`), and blocking signs the person out at once.
 
 **Last resort, only if the staff pages are unavailable.** On linuxdev:
@@ -593,12 +602,12 @@ come after the checks that connect QuickBooks and read the roster, and keep thei
 - [ ] 16. Customer query order: in the sandbox's API explorer, or with a query in the style of the plan's check script (`q("...")`), run `select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000` and confirm it is accepted (HTTP 200, customers in `Id` order). The portal sends this query for every page of a roster read, so a club with more than 1000 customers loses none between pages.
 - [ ] 17. Inactive customer types: make one customer type inactive in the sandbox, run `select * from CustomerType`, and note whether the inactive type still appears in the list (record it in section 11).
 - [ ] 18. Parent sign-ins, **Set up**, **Step 1: Parent sign-ins** (section 5, "Parent sign-ins"): **Switch parent sign-ins off** first (they went on in check 4), so this check and the next walk the step from off -> it counts the guardians the portal holds (the test parents added in section 6 among them), whatever the sandbox's Parent customers are, and asks for nothing but working mail.
-- [ ] 19. **Switch parent sign-ins on** -> the step says "Parent sign-ins are on."; a test parent signs in at `/sign-in` with a code; the audit log has `settings.parents.save`, and no `parent.access.granted` or `parent.access.ended` since check 18 (switching sign-ins gives and ends no membership).
+- [ ] 19. **Switch parent sign-ins on** -> the step says "Parent sign-ins are on."; a test parent signs in at `/sign-in` with their email and password (and, on a browser the portal doesn't know, the emailed code); the audit log has `settings.parents.save`, and no `parent.access.granted` or `parent.access.ended` since check 18 (switching sign-ins gives and ends no membership).
 - [ ] 20. In the sandbox, put a test parent's address on a Parent customer under a second family, then **Refresh now** -> nothing changes for anyone: no "address to review", no staff email, and the test parent signs in to their own family as before.
 - [ ] 21. **Parents** in the staff menu -> it lists every person with their families and has no **To review**; a test parent added to two families (section 6) is offered both by name in the family chooser.
 - [ ] 22. Make a Parent customer inactive in the sandbox, then **Refresh now** -> nobody is signed out for it, and the audit log has no `parent.access.ended`. (A family the portal's records hold as inactive is kept out at the gate: its guardians can't enter it, and their rows stay open.)
-- [ ] 23. Open the person from **Parents**: **Block** with a reason in **Why? (staff only)** -> the box says Blocked with the reason, and their next code request gets the usual message and no email; **Unblock** -> they can sign in again. The audit log has `parent.read`, `parent.block` and `parent.unblock`.
-- [ ] 24. Step 2, **Switch welcome emails on** -> one welcome email arrives within two minutes, and `docker logs booster-rocket-worker` shows `ran parents.welcome: ok`.
+- [ ] 23. Open the person from **Parents**: **Block** with a reason in **Why? (staff only)** -> the box says Blocked with the reason, and their password is refused at `/sign-in` with the usual message and no email; **Unblock** -> they can sign in again. The audit log has `parent.read`, `parent.block` and `parent.unblock`.
+- [ ] 24. Step 2, **Switch welcome emails on** -> one welcome email arrives within two minutes, with a link to choose a password for a guardian who has none, and `docker logs booster-rocket-worker` shows `ran parents.welcome: ok`; the audit log has `parent.welcome.sent` with `link: "setup"` and `parent.password.link_made`, and no row holds the link. Then, for the testers welcomed before the sign-in release, **Parent sign-ins**, **Email a set-up link to everyone who can sign in and hasn't chosen a password** -> each gets "Choose your password for <club>" with a link, and the audit log has `parent.setup_mail.owed` with the count and a `parent.welcome.sent` with `mail: "choose_password"` and `link: "setup"` for each.
 - [ ] 25. Waits for the mapping screen: a second sandbox company is refused until then (see "Switching companies" in section 5). When it ships: **Disconnect**, then connect the second sandbox company -> the audit log has `parent.access.cleared`; **Parent sign-ins** shows sign-ins switched off and welcome emails off; what else a change of company does to sign-ins is stage 4's to decide. Today: **Disconnect**, then try to connect the second sandbox company -> step 2 says "That is a different QuickBooks company from the one the portal's families were read from, so it wasn't connected and nothing was changed."; connect the first one again, and Roster lists its families as before.
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it

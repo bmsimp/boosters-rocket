@@ -7,10 +7,10 @@ if you use this installation's proxy.
 ## 1. Before anything
 
 1. Sign in as staff and open **Reconciliation**. Under "Changes waiting to reach QuickBooks", clear every rename of a
-   family, member or student, and every new student, that is waiting or stuck there: press **Try again now** and wait
+   family, member or student, every new student, and every move of a student, that is waiting or stuck there: press **Try again now** and wait
    for it to go through, or **Give up**, which is the way for one that can't go through. An update that changes how
    those changes are sent refuses to start while one is there (part 3 says how that reads), and changes nothing. A
-   move, a change to make someone inactive, a parent's change, a new family, a volunteer buy-out's invoice, and a change
+   change to make someone inactive, a parent's change, a new family, a volunteer buy-out's invoice, and a change
    kept in the portal that QuickBooks didn't take can stay.
 2. Read the release's notes on the repository's **Releases** page, for every release since yours. A note that says
    "change your .env" means a new line to fill in: `.env.example` has it. A release that moves Postgres to a new major
@@ -54,13 +54,33 @@ if you use this installation's proxy.
    stopped, and changed nothing", and then a line starting "the database said:" with the reason and how many rows it
    is about. `docker compose logs db` shows the same reason as an `ERROR:` line. Every change of one update is made
    together or not at all, so when one stops, none of them is kept and the database is exactly as the version you
-   were running left it. One such change is yours to clear: "Migration 0041 stopped, and changed nothing: ... staff
-   change(s) to the roster are still waiting or stuck on the queue". Run the previous version again
+   were running left it. Two such changes are yours to clear: "Migration 0041 stopped, and changed nothing: ... staff
+   change(s) to the roster are still waiting or stuck on the queue", and "Migration 0042 stopped, and changed nothing:
+   ... staff move(s) of a student are still waiting or stuck on the queue". Run the previous version again
    ([Going back](#going-back)), clear them on **Reconciliation** as part 1 says, and update again. For any other,
    keep it as it is, report both logs' lines, and run the previous version until a fix comes.
 2. Sign in as an Admin and open **Health**: **Version** names the new version, and every line reads as it did before
    ([Health page warnings](health-warnings.md) for any that doesn't).
 3. Open the portal as a parent would (a test family): Home, Payments, Forms.
+
+## The update that brings password sign-in
+
+Up to this release, parents signed in with a code the portal emailed them. From it, they sign in with their email
+address and a password they choose from a link the portal emails them (and on a phone or computer the portal doesn't
+know yet, a code too). After the update:
+
+1. Parents who are signed in now stay signed in. Everyone else needs a password, and nobody has one yet.
+2. Sign in as an Admin and open **Settings**, **Parent sign-ins**. With parent sign-ins and welcome emails both on
+   (welcome emails need sign-ins on first), the section **Passwords not chosen yet** counts everyone who can sign in and
+   has no password, and shows the email they will get. Press **Email a set-up link to everyone who can sign in and
+   hasn't chosen a password** once.
+3. Each person counted gets an email with a link to choose their password ("Choose your password for" the club). It
+   works once, for 7 days. Someone never welcomed gets the welcome instead, with the same kind of link.
+4. They go out five each time the worker wakes, and it wakes about once a minute: 300 people take about an hour, and
+   500 about an hour and 40 minutes. While mail is failing it tries one a minute; Health's parent sign-ins line says so.
+5. Meanwhile, and after a link runs out, a parent can always ask for a new link themselves at `/sign-in/password`
+   ("Set up or reset my password" on the sign-in page), at the Standard level every club has until a later release
+   offers Strict.
 
 ## When the start stops for a backup
 

@@ -125,8 +125,8 @@ export function ParentForm({ act }: { act: (name: string, email: string) => Prom
   );
 }
 
-/** Another family for a student, chosen from the roster's active families. */
-export function MoveForm({ families, act }: { families: { qboId: string; name: string }[]; act: (toFamilyQboId: string) => Promise<WriteResult> }) {
+/** Another family for a student, chosen from the portal's own active families: the form sends the family's app id (stage 3's slice 9f). */
+export function MoveForm({ families, act }: { families: { id: string; name: string }[]; act: (toFamilyId: string) => Promise<WriteResult> }) {
   const [to, setTo] = useState("");
   const [state, run, pending] = useActionState(async () => safely(() => act(to), failed), null);
   return (
@@ -134,10 +134,10 @@ export function MoveForm({ families, act }: { families: { qboId: string; name: s
       <label className="field"><span>Move to</span>
         <select value={to} onChange={(e) => setTo(e.target.value)}>
           <option value="">Choose a family</option>
-          {families.map((f) => <option key={f.qboId} value={f.qboId}>{f.name}</option>)}
+          {families.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select></label>
       <Outcome state={state} pending={pending} />
-      <button type="button" className="btn btn-line" disabled={pending || to === ""} onClick={() => startTransition(() => run())}>{pending ? "Moving in QuickBooks…" : "Move"}</button>
+      <button type="button" className="btn btn-line" disabled={pending || to === ""} onClick={() => startTransition(() => run())}>{pending ? "Moving them in the portal…" : "Move"}</button>
     </form>
   );
 }

@@ -4,10 +4,10 @@ import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
-import { loadRosterPage, familyEntry, rosterFamilies, type RecordStudent } from "@/lib/roster/queries";
+import { loadRosterPage, familyEntry, type RecordStudent } from "@/lib/roster/queries";
 import { familyRecordAt } from "@/lib/families/address";
 import type { AppFamilyId } from "@/lib/families/ids";
-import { familyCover, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
+import { familyCover, moveTargets, studentsBeingMade, versionsOf } from "@/lib/roster/writes";
 import { loadOpenWrites } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familySignins, type FamilySignin } from "@/lib/parents/directory";
@@ -15,7 +15,8 @@ import { AddGuardianForm } from "@/app/staff/(app)/parents/forms";
 import { GuardianChange } from "@/app/staff/(app)/parents/guardian-change";
 import { addGuardianAction } from "@/app/staff/(app)/parents/actions";
 import { DisconnectedNotice, Freshness } from "../freshness";
-import { CreateInQuickBooks, FamilyChanges, MemberChanges, PortalChanges, Waiting, WhatChanges } from "../changes";
+import { CreateInQuickBooks, FamilyChanges, MemberChanges, MoveStudents, PortalChanges, Waiting, WhatChanges, type MovableStudent } from "../changes";
+import { moveAction } from "../write-actions";
 import { offers } from "@/lib/roster/operations";
 import type { Cust, Family } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
@@ -84,7 +85,7 @@ function SignIns({ familyId, signins, links, changes, addable }: { familyId: App
           <h3>Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
-              <p>They sign in with this address and a code. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families.</p>
+              <p>They sign in with this address and a password they choose from a link the portal emails them: the welcome email brings one while welcome emails are on, and Resend welcome email on their page, or Set up or reset my password on the sign-in page, sends one at any time. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families.</p>
               <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
             </>
           )}
@@ -145,7 +146,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // on a roster of the portal's company (changeInPortal() refuses one whose cache names none).
   const changesHere = can(ctx.effective, "Roster.Family.ReadWrite") && page.shape !== null && fam.active && !making && rosterTag !== "none";
   // A student whose own create is waiting or stuck on the queue is changed nowhere meanwhile, and not made again.
-  const beingMade = await studentsBeingMade(fam.students.filter((s) => s.active && !s.linked).map((s) => s.id));
+  const beingMade = await studentsBeingMade(fam.students.filter((s) => s.active).map((s) => s.id));
   const hereStudents = fam.students.filter((s) => s.active && !s.linked && !beingMade.has(String(s.id)));
   const studentType = page.shape?.kind === "layered" && page.shape.studentTypeId !== null;
   // "Create in QuickBooks and link": for an active family with no link, or with active students with none (where the
@@ -154,11 +155,10 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const toMake = !fam.linked || (studentType && hereStudents.length > 0 && customer !== null && customer.active);
   const inQuickBooks: Family | null = customer === null ? null
     : { customer, students: fam.students.flatMap((s) => (s.customer ? [s.customer] : [])), parents: fam.parents };
-  // Students whose record is inactive are offered nothing that would send; one QuickBooks has under another family is
-  // offered the move there, which sends nothing and brings the record into line.
+  // Students whose record is inactive are offered nothing that would send. One QuickBooks has under another family is
+  // moved like any other (stage 3's slice 9f): the page says where QuickBooks has them (studentStanding()).
   const inactiveRecords = new Set(fam.students.flatMap((s) => (!s.active && s.customer ? [s.customer.qboId] : [])));
-  const elsewhere = fam.students.flatMap((s) => (s.active && s.elsewhere ? [{ name: s.name, ...s.elsewhere }] : []));
-  const records = inQuickBooks ? [inQuickBooks.customer, ...inQuickBooks.students, ...inQuickBooks.parents, ...elsewhere.map((s) => s.customer)] : [];
+  const records = inQuickBooks ? [inQuickBooks.customer, ...inQuickBooks.students, ...inQuickBooks.parents] : [];
   // Each linked record by its customer, for the renames saved in the portal first (by the app's id, from the portal's own name).
   const linkedRecords = new Map<string, { kind: "family" | "student"; id: string; name: string }>(inQuickBooks ? [
     [inQuickBooks.customer.qboId, { kind: "family", id: String(familyId), name: fam.name }],
@@ -168,11 +168,17 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
     blocked: new Set(open.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
   // Who making the family inactive covers: everyone active under it in the cache, at any depth, with their versions.
   const cover = edit && inQuickBooks && entry.kind === "family" ? await familyCover(inQuickBooks.customer.qboId) : null;
-  // Where a student may be moved: the app's own active families whose customer is an active family on the roster, by the
-  // record's name. A family customer added in QuickBooks alone has no record since stage 3's slice 9c, and is not offered
-  // (the move refuses it too, prepare() in src/lib/roster/writes.ts).
-  const families = edit && page.roster?.kind === "layered" ? ((await rosterFamilies(page)) ?? [])
-    .flatMap((f) => (f.active && f.customer?.active ? [{ qboId: f.customer.qboId, name: f.name }] : [])) : [];
+  // Moving a student (stage 3's slice 9f): saved in the portal first, for each active student of the family, linked or
+  // not, to each of the portal's other active families, linked or not, by the app's ids: only the families a move can go
+  // to, by the rule moveStudent() checks (moveTargets()), and none while a move out of this family can't go through. Not
+  // while the family's own create waits, nor for a student whose own create, or another change, waits (moveStudent()
+  // refuses them too).
+  const moves = changesHere && page.shape !== null && entry.kind === "family" && offers(page.shape, "move_student");
+  const moveTo = moves ? await moveTargets(familyId) : { refusedHere: null, families: [] };
+  const movable: MovableStudent[] = moves ? fam.students.filter((s) => s.active).map((s) => ({ id: String(s.id), name: s.name,
+    blocked: beingMade.has(String(s.id)) ? "Making this student in QuickBooks is still waiting on the queue, so they can't be moved for now."
+      : open.some((w) => w.studentId !== null && String(w.studentId) === String(s.id)) || (s.customer !== null && open.some((w) => "qboId" in w.write && w.write.qboId === s.customer!.qboId))
+        ? `A change to ${s.name} is waiting to reach QuickBooks, so they can't be moved until it has gone through, or been given up on the Reconciliation page.` : null })) : [];
   return (
     <main className="wrap single">
       <h1 className="page-title">{fam.name}</h1>
@@ -197,7 +203,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         season={entry.kind === "family" && fam.active && can(ctx.effective, "Season.Progress.Read")}
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       <Waiting items={waiting} />
-      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} families={families} edit={edit} cover={cover} inactiveRecords={inactiveRecords} elsewhere={elsewhere} />}
+      {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} />}
+      {moves && <MoveStudents students={movable} families={moveTo.families} refusedHere={moveTo.refusedHere} rosterTag={rosterTag} act={moveAction} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {changesHere && page.shape && <PortalChanges familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
         addStudents={offers(page.shape, "add_student")} students={hereStudents.map((s) => ({ id: String(s.id), name: s.name }))} rosterTag={rosterTag} />}

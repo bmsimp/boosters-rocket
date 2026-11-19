@@ -100,6 +100,10 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - "Set up or reset my password" (askForPasswordLink(), password-request.ts) takes the row FOR UPDATE, reads the
  *   password unlocked, then holds the link (holdSigninLink()); after the send it takes the row FOR UPDATE again and
  *   puts the link in place (putHeldLinkInPlace(), which replaces the unused one), or removes it (dropHeldLink());
+ * - the welcome and Resend (welcome.ts, since slice SI-4) take the row FOR UPDATE, read the password unlocked, then
+ *   hold the link, as the request page does, and put it in place or remove it after the send the same way
+ *   (deliverHeldLink(), link-delivery.ts); the Admin's press (oweSetupMails(), switches.ts) takes the parents'
+ *   settings lock, then the rows it marks, in id order, as setWelcome() does;
  * - the second step's code (sendSecondStepCode(), signin-codes.ts, since slice SI-3b) calls this, then reads the
  *   password unlocked, before it touches a code; and a sign-in's strong step (recordStrongSignin(), devices.ts), after
  *   completeParentSignin(), calls this, then makes or renews the person's device, then stamps the session's
