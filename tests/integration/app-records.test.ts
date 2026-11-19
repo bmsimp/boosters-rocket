@@ -12,7 +12,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, parent, qboConnection, student } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { askRosterWrite, WRITE_COPY } from "@/lib/roster/writes";
+import { askRosterWrite, moveStudent, WRITE_COPY } from "@/lib/roster/writes";
 import { saveShape, ROSTER_LOCK } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
 import { importRecordsFromRoster } from "@/lib/families/roster-import";
@@ -181,7 +181,8 @@ describe("the records stand alone: what QuickBooks holds changes none of them (s
     expect((await audits("roster.customer.rename")).at(-1)!.after).toMatchObject({ appRecord: { kind: "student", studentId: leo, set: { name: "Leon Rivera" } } });
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
 
-    expect((await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).ok).toBe(true);
+    // A move is saved in the portal first since slice 9f, by the app's ids, and sent with the link's version.
+    expect((await moveStudent(leo!, (await recordIds())["family:20"]!, tag, op)).ok).toBe(true);
     expect(await studentOf("12")).toEqual({ customer: "12", name: "Leon Rivera", active: true, family: "20" });
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
 

@@ -12,7 +12,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, qboConnection, qboCustomer, student, writeQueue } from "@/lib/db/schema";
-import { addStudentToLinked, askRosterWrite, BEING_SENT, BEING_SENT_NOW, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, INACTIVE_THERE_CODE, MAKING_LOCK, NAME_DIFFERS,
+import { addStudentToLinked, askRosterWrite, BEING_SENT, BEING_SENT_NOW, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, INACTIVE_THERE_CODE, MAKING_LOCK, moveStudent, NAME_DIFFERS,
   portalValueStamp, renameLinked, sendPortalValue, SENDING_LOCK, TAKEN_NAME_KEPT, WRITE_COPY } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, queueCounts, REFUSED_NOT_AGAIN, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -158,11 +158,13 @@ describe("each link starts aligned, and only an answer to what the portal sent m
     expect((await linkOf("12", "student"))!.syncedToken).toBe("1");
   });
 
-  it("a move sent with a page version newer than the link's leaves the link's version", async () => {
+  it("a move saved first is sent with the link's version; a stale answer with QuickBooks still where the portal moved it from is sent once more, and the link takes that answer's (slice 9f)", async () => {
     inStub("12").SyncToken = "2";
-    await refreshRoster(WORKER);
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "2", toFamilyQboId: "20" }, tag, op)).toMatchObject({ ok: true });
-    expect((await linkOf("12", "student"))!.syncedToken).toBe("0");
+    expect(await moveStudent(leo, String(await recordOfCustomer("20", "family")), tag, op)).toMatchObject({ ok: true, message: "Moved Leo Rivera to Chen Family in the portal and in QuickBooks." });
+    expect(bodies()).toEqual([{ Id: "12", SyncToken: "0", sparse: true, ParentRef: { value: "20" }, Job: true, BillWithParent: true },
+      { Id: "12", SyncToken: "2", sparse: true, ParentRef: { value: "20" }, Job: true, BillWithParent: true }]);
+    expect((await linkOf("12", "student"))!.syncedToken).toBe("3");
+    expect((await auditsOf("roster.student.move"))[0]!.after).toMatchObject({ resent: "stale", fieldAsHeld: true, linkVersion: "3" });
   });
 
   it("a lost answer is queued as possibly made, and found after a roster read rather than sent again", async () => {
@@ -325,7 +327,7 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
     expect(posts()).toEqual([]);
     expect(await tryAgainNow(kept.id, op)).toEqual({ ok: false, errors: [REFUSED_NOT_AGAIN] });
     expect(await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op)).toMatchObject({ ok: true });
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toMatchObject({ ok: true });
+    expect(await moveStudent(leo, String(await recordOfCustomer("20", "family")), tag, op)).toMatchObject({ ok: true });
     // The later rename takes the refused one's place, and with it the name the portal and QuickBooks last agreed on
     // ("Rivera Family"), which QuickBooks still has: it is sent, with the link's own version.
     stub.calls.length = 0;
@@ -618,9 +620,10 @@ describe("only a send of the portal's own moves a link's version", () => {
     expect((await refreshRoster(WORKER)).ok).toBe(true);
     expect(await cached("12")).toMatchObject({ syncToken: "3", displayName: "Leonardo Rivera" });
     expect(await linkRows()).toEqual(before);
-    // A read-again: a move sent with a version QuickBooks has moved on from reads the record again into the cache.
+    // A read-again: a make-inactive sent with a version QuickBooks has moved on from reads the record again into the cache.
+    stub.quirks.balances = true; // a customer read by id carries its Balance, which a make-inactive reads first
     inStub("12").SyncToken = "9";
-    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "3", toFamilyQboId: "20" }, tag, op)).toMatchObject({ ok: false, errors: [WRITE_COPY.changed] });
+    expect(await askRosterWrite({ op: "deactivate", qboId: "12", syncToken: "3" }, tag, op)).toMatchObject({ ok: false, errors: [WRITE_COPY.changed] });
     expect(await cached("12")).toMatchObject({ syncToken: "9" });
     expect(await auditsOf("roster.customer.read_again")).toHaveLength(1);
     expect(await linkRows()).toEqual(before);

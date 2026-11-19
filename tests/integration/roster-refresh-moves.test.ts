@@ -18,7 +18,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { buyout, formWithdrawal, jobRun, parent, qboCustomer, setting, signatureConsent, signedFormEvidence, student, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
 import { refreshRoster } from "@/lib/roster/refresh";
-import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
+import { applyWritten, moveStudent, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { checkBuyoutInvoices } from "@/lib/buyouts/daily-check";
@@ -77,6 +77,9 @@ const signedInNow = async (g: { authUserId: string; familyQboId: string }) =>
   ({ session: await seedParentSession(g.authUserId, { familyQboId: g.familyQboId }) });
 const cached = async (qboId: string) => (await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, qboId)))[0];
 const followed = () => auditsOf("roster.student.move.followed");
+/** Leo moved to the Chen family as a family's page moves him (stage 3's slice 9f): saved in the portal first, by the app's ids. */
+const moveLeo = async (op: Parameters<typeof moveStudent>[3]) =>
+  moveStudent(String(await recordOfCustomer(LEO, "student")), String(await recordOfCustomer(CHEN, "family")), await currentRosterTag(), op);
 const signup = async (id: string) => (await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, id)))[0]!;
 const anaId = async () => (await db.select().from(parent).where(eq(parent.email, "ana@example.com")))[0]!.id;
 /** Leo's own record as the app holds it. */
@@ -150,8 +153,9 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
     const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     // Each guardian is told only once the move is committed.
     mail.atSend = async () => (await leoRecord()).familyId === (await recordOfCustomer(CHEN, "family"));
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.student.move#${LEO}`, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
+    expect(await moveLeo(op)).toMatchObject({ ok: true });
+    const leoId = String(await recordOfCustomer(LEO, "student"));
+    expect(await followed()).toEqual([expect.objectContaining({ targetId: leoId, after: expect.objectContaining({ cause: `roster.record.moved#${leoId}`, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
     // The open form starts again under the new family, its document queued for withdrawal; the signed one moves with its evidence.
     expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened", envelopeId: null, signers: [] });
     expect(await requestByCustomer(leo.signed)).toMatchObject({ familyQboId: CHEN, state: "complete" });
@@ -247,7 +251,7 @@ describe("buy-outs of a student QuickBooks moved are voided by nothing; a move i
     const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     moveInQuickBooks(LEO, RIVERA); // back where the app holds him, so the portal's move is offered
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: inStub(LEO).SyncToken as string, toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
+    expect(await moveLeo(op)).toMatchObject({ ok: true });
     expect(await voids()).toHaveLength(1);
     expect((await voids())[0]!.request).toMatchObject({ buyoutId: b.invoiced.id, why: "student_moved" });
     for (let i = 0; i < 2; i++) {
@@ -301,7 +305,7 @@ describe("what each family reads after a student QuickBooks moved", () => {
     const mei = await signedInNow(meiRow);
     const leo = await seedLeo();
     const op = asOp(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
-    expect(await askRosterWrite({ op: "move", qboId: LEO, syncToken: "0", toFamilyQboId: CHEN }, await currentRosterTag(), op)).toMatchObject({ ok: true });
+    expect(await moveLeo(op)).toMatchObject({ ok: true });
 
     const meiNow = await identityNow(mei.session.id);
     asParent(meiNow);

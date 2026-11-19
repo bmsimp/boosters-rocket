@@ -84,13 +84,13 @@ const MAY_ROSTER_LINK = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-action
 const ROSTER_ADD = "addFamily";
 const MAY_ROSTER_ADD = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 /**
- * The changes saved in the portal first (stage 3's slice 9e): a linked record's rename, a student added to a linked
- * family, and "Send the portal's value" for a change QuickBooks refused, each sent through the module's own send without
- * the staff ask. Each started only by the module itself and the one staff action. The one send of a rename (its send,
+ * The changes saved in the portal first (stage 3's slices 9e and 9f): a linked record's rename, a student added to a
+ * linked family, a student's move, and "Send the portal's value" for a change QuickBooks refused, each sent through the
+ * module's own send without the staff ask. Each started only by the module itself and the one staff action. The one send of a rename (its send,
  * and its one resend after a stale answer and a live read) is the module's own; a try of a change saved first, which
  * settles its queue item (at once, on a press or by the worker), is the module's and the queue's.
  */
-const SAVED_FIRST = ["renameLinked", "addStudentToLinked", "sendPortalValue"];
+const SAVED_FIRST = ["renameLinked", "addStudentToLinked", "moveStudent", "sendPortalValue"];
 const MAY_SAVED_FIRST = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 const RENAME_TRY = "tryRename";
 const MAY_RENAME_TRY = [ROSTER_WRITER];

@@ -481,7 +481,17 @@ export type RosterWrite =
    * a later try compares QuickBooks' with), so its answer aligns the link. Neither is sent.
    */
   | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string; checked?: true }
-  | { op: "move"; role: "student"; qboId: string; syncToken: string; fromFamilyQboId: string; toFamilyQboId: string }
+  /**
+   * A move of a linked student, saved in the portal first since stage 3's slice 9f (moveStudent()): `syncToken` is the
+   * student link's own version (empty when it has none, and then nothing is sent before a live read);
+   * `fromFamilyQboId`, the move's before-value, the customer of the family left (or, for a move that takes the place
+   * of a refused one, that one's), which a stale answer's live read is compared with (empty when there is none);
+   * `toFamilyQboId`, the customer of the family joined (empty while that family has no link: the item is kept refused
+   * until it has one). `fromFamilyId` and `toFamilyId` are the app's own families left and joined (none on a move
+   * queued before that slice); `checked`, that it was sent with a version read live after the parent read as the
+   * before-value, so its answer aligns the link. Only `Id`, `SyncToken` and `ParentRef` are sent.
+   */
+  | { op: "move"; role: "student"; qboId: string; syncToken: string; fromFamilyQboId: string; toFamilyQboId: string; fromFamilyId?: AppFamilyId; toFamilyId?: AppFamilyId; checked?: true }
   /**
    * `other`: a customer under a family that is neither its student nor its parent (a deeper sub-customer, or one of a
    * type the shape doesn't name), made inactive only as part of making its family inactive, which is never queued.
