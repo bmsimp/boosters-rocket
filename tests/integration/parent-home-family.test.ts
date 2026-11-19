@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { createElement } from "react";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parentAuthSession, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, parentAuthSession, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { resolveParentSession } from "@/lib/auth/resolve";
 import { recordNameWords } from "@/lib/families/words";
 import type { ParentIdentity } from "@/lib/auth/resolve";
@@ -35,6 +35,8 @@ const ctxOf = (identity: ParentIdentity): ParentCtx => ({ ...identity, ip: null 
 const A_STUDENTS = FAMILY_A.students.map((s) => s.name), B_STUDENTS = FAMILY_B.students.map((s) => s.name);
 const setTreasurer = (treasurerEmail: string) => db.insert(setting).values({ key: "club", value: { name: "Test Boosters", shortName: "TB", color: "#5b2a86", treasurerEmail } });
 const NOT_SET_UP = "set up here yet";
+/** What a family with no link to the club's books reads where its money would be (as React writes the apostrophe). */
+const NOT_CONNECTED = "The club hasn&#x27;t connected your payments to the portal yet.";
 /** A person whose one link names `familyQboId`, with a session that chose it, and the records brought into step: what the gate makes of them. */
 async function gateOf(familyQboId: string, email: string) {
   const person = await seedParent({ name: "Hand Made", email, welcomedAt: new Date() });
@@ -267,6 +269,23 @@ describe("Home", () => {
     expect(html).toContain(`<h2 id="money-h">Alderquist Family</h2><p class="help" role="status">We can&#x27;t show what you owe right now. Please check back in a little while.</p>`);
     expect(html).toContain("Your students");
     expect(html).toContain("Your details");
+    expect(html).not.toContain(NOT_CONNECTED); // a linked family never reads the unlinked family's words
+    expect(stub.apiCalls()).toEqual([]);
+  });
+
+  it("a family with no link to the club's books: the money box says the club hasn't connected its payments, and the rest of the page is as it was", async () => {
+    const a = await seedSignedInParent();
+    // From stage 3's later slices a family may have no link; here it is made by hand, and nothing brings it into step after.
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, a.identity.familyId));
+    asParent(a.identity);
+    const html = await renderPage(ParentHome);
+    expect(html).toContain(`<h2 id="money-h">What you owe</h2><p class="help" role="status">${NOT_CONNECTED} Until then, the treasurer can tell you what you owe.</p></section>`);
+    expect(html).not.toMatch(/INV-|\$\d|connect\.intuit\.com|See your payments|offline-note|We can&#x27;t show what you owe/);
+    // Everything else is the family's own records, as before.
+    expect(html).toContain("Hi, Ansgar</h1>");
+    expect(html).toContain("Your students");
+    for (const name of A_STUDENTS) expect(html).toContain(`<b>${name}</b>`);
+    expect(html).toContain("Your details");
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -284,6 +303,7 @@ describe("Home", () => {
     asParent(b.identity);
     html = await renderPage(ParentHome);
     expect(html).toContain("We can&#x27;t show what you owe right now.");
+    expect(html).not.toContain(NOT_CONNECTED);
     expect(html).not.toMatch(/INV-|\$\d/);
     for (const marker of moneyMarkers(FAMILY_B)) expect(html).not.toContain(marker);
     expect(stub.apiCalls()).toEqual([]);

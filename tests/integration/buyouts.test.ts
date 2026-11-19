@@ -13,7 +13,7 @@ import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { env } from "@/env";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, familyMoney, qboCustomer, qboCustomerType, setting, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, buyout, familyMoney, qboCustomer, qboCustomerType, setting, writeQueue } from "@/lib/db/schema";
 import { BUYOUT_COPY, confirmMyBuyout } from "@/lib/buyouts/writes";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
@@ -247,6 +247,29 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(await renderPage(VolunteerPage)).not.toContain("Pay instead of volunteering ($100.00)");
     expect(await confirmBuyoutAction(req, "family", before.subjectStamp, before.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.met] });
     expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("offers a family with no link to the club's books nothing: no price on Volunteer, Not found at every address, and the confirm refuses", async () => {
+    const p = await buyoutFamily(stub);
+    const forFamily = await seedBuyoutRequirement({ amount: 2, unitCents: 5000, title: "Concession shifts QU81" });
+    const forStudent = await seedBuyoutRequirement({ appliesTo: "student", amount: 2, unitCents: 3100, title: "Pit crew shifts QU82" });
+    const stamps = { family: await shown(p, forFamily), s1: await shown(p, forStudent, "s1") };
+    expect(stamps.family.stamp).not.toBeNull();
+    // From stage 3's later slices a family may have no link; here it is made by hand, and nothing brings it into step after.
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, p.identity.familyId));
+    expect(await loadMyBuyouts({ familyId: p.identity.familyId, parentId: p.identity.parentId })).toEqual([]);
+    asParent(p.identity);
+    const html = await renderPage(VolunteerPage);
+    expect(html).not.toMatch(/\/volunteer\/pay-instead\/|id="pay-h"|\$100\.00|\$62\.00|\$50\.00|\$31\.00/);
+    const { pageOutcome } = await import("../helpers/signed-in");
+    for (const params of [{ requirementId: forFamily, choice: "family" }, { requirementId: forStudent, choice: "s1" }, { requirementId: forStudent, choice: "s2" }]) {
+      expect(await pageOutcome(PayInsteadPage, { params }), JSON.stringify(params)).toEqual({ notFound: true });
+    }
+    expect(await confirmBuyoutAction(forFamily, "family", stamps.family.subjectStamp, stamps.family.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await confirmBuyoutAction(forStudent, "s1", stamps.s1.subjectStamp, stamps.s1.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.notFromPage] });
+    expect(await db.select().from(buyout)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
     expect(posts()).toEqual([]);
   });
 
@@ -712,6 +735,23 @@ describe("how the requirement reads, on the parent's pages", () => {
     const page = await renderPage(PayInsteadPage, { params: { requirementId: req, choice: "family" } });
     expect(page).toContain("Paid instead");
     expect(page).not.toContain("Volunteer instead");
+  });
+
+  // Today's reading, pinned so S9 meets it on purpose: until S9 a linked family can't lose its link, and S9 decides what
+  // a family with a live buy-out and no link reads. The requirement's words go by the buy-out (kept by the app's records),
+  // while the offer, the pay-instead page and the money all need the link, so only the words remain.
+  it("a family that loses its link with a buy-out invoiced still reads 'Buy-out invoiced', with no way to it from Volunteer (S9 decides)", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ title: "Concession shifts QR78" });
+    await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9902" });
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, p.identity.familyId));
+    asParent(p.identity);
+    const html = await renderPage(VolunteerPage);
+    expect(html).toContain("Buy-out invoiced");
+    expect(html).not.toMatch(/\/volunteer\/pay-instead\/|id="pay-h"/);
+    const { pageOutcome } = await import("../helpers/signed-in");
+    expect(await pageOutcome(PayInsteadPage, { params: { requirementId: req, choice: "family" } })).toEqual({ notFound: true });
+    expect(posts()).toEqual([]);
   });
 
   it("spends no credit on a requirement its paid buy-out has met: the credit counts toward the next one (v1 spec §11.4)", async () => {

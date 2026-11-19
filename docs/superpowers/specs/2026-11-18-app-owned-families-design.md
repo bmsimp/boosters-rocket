@@ -157,7 +157,11 @@ if the list changed)*.
 one family can be brought in later without a full import. **Differences** are listed here too (section 5).
 
 **An unlinked family** has everything except money: no invoices, no Pay button, no buy-out offer, and words saying the
-club hasn't connected their payments yet *(proposed: "The club hasn't connected your payments to the portal yet.")*.
+club hasn't connected their payments yet: "The club hasn't connected your payments to the portal yet." The owner
+decided on 2026-11-18, to the lead's recommendation that these words show from stage 3 (where a family can first have
+no link) rather than stage 4, "Go with your recommendations". The page adds one plain sentence after them: "Until
+then, the treasurer can tell you what you owe." They show only when the portal can tell the family has no link; a
+linked family whose figures can't be shown keeps the words it reads today.
 
 **The permission** is a new one a role such as treasurer can hold (Open questions, 1). Every link, unlink, import and
 alignment is audited (proposed rows: Appendix A).
@@ -356,7 +360,8 @@ reminders, the money cache.
 **Stage 4: the mapping screen.**
 - *Done:* the optional import, suggestions, bulk confirm, differences and align, customers with no family. A change of
   company clears links and the money cache; families are linked again on the screen.
-- *Users see:* the mapping screen, for holders of the linking permission; an unlinked family's money words.
+- *Users see:* the mapping screen, for holders of the linking permission. An unlinked family's money words show from
+  stage 3 (the owner's decision of 2026-11-18, section 4).
 - *Not half done:* the retired pieces leave in this stage or the one before, never while something still reads them.
 
 **Stage 5: the accounting interface.**

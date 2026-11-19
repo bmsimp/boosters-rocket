@@ -570,7 +570,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
         source.replace(BUYOUT_BILL_EMAIL.put, "billEmail: customer.email"),                      // looked up
         source.replace(BUYOUT_BILL_EMAIL.sent, "billEmail: b.chosenByLabel"),                    // looked up again at each try
         source.replace(`${BUYOUT_BILL_EMAIL.sent} }`, "billEmail: w.billEmail, BillEmail: { Address: w.billEmail } }"),
-        source.replace("  if (!t) return no(BUYOUT_COPY.notFromPage);", "  if (!t) return no(BUYOUT_COPY.notFromPage);\n  ctx.email = String(key);"), // the session's address replaced
+        source.replace("  if (!t || t.view.subjectStamp !== subject) return no(BUYOUT_COPY.notFromPage);", "  if (!t || t.view.subjectStamp !== subject) return no(BUYOUT_COPY.notFromPage);\n  ctx.email = String(key);"), // the session's address replaced
         `${source}\nexport async function alsoBill(item: Item) { return qboCreateInvoice({ ...item.request, billEmail: "anyone@example.org" } as never, { realmId: "1", mayWait: true }); }\n`,
       ];
       for (const s of refused) {
