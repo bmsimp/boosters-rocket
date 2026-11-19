@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, qboCustomer, setting, signatureConsent, signatureRequest } from "@/lib/db/schema";
+import { auditLog, formWithdrawal, guardian, parent, qboCustomer, setting, signatureConsent, signatureRequest } from "@/lib/db/schema";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
@@ -742,6 +742,35 @@ describe("a guardian removed or blocked while their form is being made", () => {
       expect(tokenIn(theirs)).toBe(stub.documentFor(id)!.recipients[0]!.token);
       expect((await requestNow(id)).signers.map((s) => s.parentId)).toEqual([other.parentId]);
       expect(stub.documentFor(id)!.recipients.map((r) => r.email)).toEqual([other.email]);
+    });
+
+    it(`never puts a guardian ${how} since back on a half-signed document the request lost track of: it is cancelled instead`, async () => {
+      const { ctx } = await scene({ signers: "every", roles: 2 });
+      const other = await secondGuardian();
+      const id = await requestIdFor(ctx, FAMILY_A.students[0]!.qboId);
+      tokenIn(await agreeAndOpen(ctx, id));
+      expect((await agreeToSign(other, id, null)).ok).toBe(true);
+      const document = stub.documentFor(id)!;
+      stub.sign(document.id, FAMILY_A.parent.email);
+      // The request lost track of the document (what an earlier version did on a 404), and then the guardian it still
+      // waits for is removed or blocked: nothing points at the document, so the removal has nothing to start again.
+      await db.update(signatureRequest).set({ state: "not_opened", envelopeId: null, envelopeStatus: null, signers: [] }).where(eq(signatureRequest.id, id));
+      const [row] = await db.select().from(guardian).where(and(eq(guardian.parentId, other.parentId), eq(guardian.familyId, other.familyId)));
+      expect(how === "removed" ? await removeGuardian(row!.id, "Custody order on file.", staff) : await blockPerson(other.parentId, "Custody order on file.", staff)).toMatchObject({ ok: true });
+
+      // The guardian who remains opens it: the left-behind document is found, and not taken up with the other on it.
+      const view = await open(ctx, id);
+      expect(view.step).toEqual({ kind: "unavailable" });
+      expect(await requestNow(id)).toMatchObject({ state: "not_opened", envelopeId: null, preparingAt: null, signers: [] });
+      expect(await audits("form.document.recover")).toEqual([]);
+      expect(stub.apiCalls("/envelope/use")).toHaveLength(1); // nothing new made
+      expect(stub.apiCalls("/envelope/delete")).toEqual([]); // it holds a signature: the worker cancels it
+      expect(await db.select({ envelopeId: formWithdrawal.envelopeId, anySigned: formWithdrawal.anySigned }).from(formWithdrawal))
+        .toEqual([{ envelopeId: document.id, anySigned: true }]);
+      const gone = (await audits("forms.request.signer_gone")).filter((a) => (a.after as { reason?: string } | null)?.reason === "gone_before_taken_up");
+      expect(gone).toHaveLength(1);
+      expect(gone[0]).toMatchObject({ door: "parent", actorId: ctx.parentId, targetId: id });
+      expect(gone[0]!.after).toMatchObject({ state: "not_opened", parentIds: [other.parentId], withdraw: "cancel" });
     });
   }
 });
