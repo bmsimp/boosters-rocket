@@ -130,6 +130,8 @@ describe("invariant 4: the public pages show no family data", () => {
     { file: "src/app/sign-in/page.tsx" },
     // With a return address that names one family's form: the page still says nothing about it.
     { file: "src/app/sign-in/page.tsx", props: { searchParams: { next: "/forms/00000000-0000-4000-8000-000000000000" } } },
+    // "Set up or reset my password" (slice SI-3a): no token and no session; opening it shows the one form.
+    { file: "src/app/sign-in/password/page.tsx" },
     { file: "src/app/staff/sign-in/page.tsx" },
     { file: "src/app/refused/page.tsx" },
     { file: "src/app/not-found.tsx" },

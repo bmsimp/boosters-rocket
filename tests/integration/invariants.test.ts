@@ -85,10 +85,11 @@ describe("every server action is guarded (spec §7, §12)", () => {
     }
   });
 
-  it("finds the one action taken before sign-in, guarded as such", async () => {
+  it("finds the actions taken before sign-in, guarded as such", async () => {
     expect(otherModules).toContain(BEFORE_SIGN_IN_FILE);
     const exported = await exportedFunctions(BEFORE_SIGN_IN_FILE);
-    expect(exported.map(([name]) => name)).toEqual(["choosePasswordAction"]);
+    // A link's form (slice SI-2), and the page that mails a set-up or reset link (slice SI-3a).
+    expect(exported.map(([name]) => name).sort()).toEqual(["askPasswordLinkAction", "choosePasswordAction"]);
     for (const [, value] of exported) expect(guardOf(value)?.door).toBe("before-sign-in");
   });
 });

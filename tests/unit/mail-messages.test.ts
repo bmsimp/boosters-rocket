@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage } from "@/lib/mail/messages";
+import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage,
+  passwordSetupMessage, passwordResetMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
@@ -60,5 +61,30 @@ describe("mail messages", () => {
       expect(m.html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &lt;b&gt;");
       expect(m.text).toContain(hostile);
     }
+  });
+
+  // The two links of "Set up or reset my password" (slice SI-3a; src/lib/parents/password-request.ts).
+  describe.each([
+    ["set-up", passwordSetupMessage, "https://portal.example.org/sign-in/set-up/AbC-123_xyz", "7 days", "Set up your FZN <Band> Boosters password"],
+    ["reset", passwordResetMessage, "https://portal.example.org/sign-in/reset/AbC-123_xyz", "1 hour", "Reset your FZN <Band> Boosters password"],
+  ] as const)("the %s link's mail", (_name, message, link, life, subject) => {
+    const m = message(b, "ana@example.com", { link, life });
+    it("goes to the address, with its subject, the link on a line of its own and how long it works", () => {
+      expect(m.to).toBe("ana@example.com");
+      expect(m.subject).toBe(subject);
+      expect(m.text.split("\n")).toContain(link);
+      expect(m.html).toContain(`<p style="margin:0 0 16px">${link}</p>`);
+      for (const part of [m.text, m.html]) expect(part).toContain(`The link works once, for ${life}.`);
+    });
+    it("says the club never asks for a password by email or phone, and what to do if the reader didn't ask", () => {
+      expect(m.text).toContain("FZN <Band> Boosters will never ask you for your password, by email or by phone.");
+      expect(m.text).toContain("If you didn't ask for this, you can ignore this email: nothing changes unless the link is used.");
+      expect(m.text).toContain("If these emails keep coming, please tell the club.");
+    });
+    it("names no family, student or other person, and escapes the club's name", () => {
+      expect(`${m.text}${m.html.replace(/font-family:/g, "")}`).not.toMatch(/family|student|guardian/i); // the inline CSS property is not wording
+      expect(m.html).toContain("FZN &lt;Band&gt; Boosters");
+      expect(m.html).not.toContain("<Band>");
+    });
   });
 });

@@ -3,6 +3,7 @@ import { beforeSignInAction } from "@/lib/guards";
 import { signInFromLink } from "@/lib/auth/parent-link-signin";
 import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { choosePasswordFromLink, type PasswordSetResult } from "@/lib/parents/password-set";
+import { askForPasswordLink } from "@/lib/parents/password-request";
 
 /**
  * The form of a set-up or reset link (./set-up/[token], ./reset/[token]): an action taken before signing in. No
@@ -22,3 +23,19 @@ export const choosePasswordAction = beforeSignInAction(async (ctx, purpose: unkn
   return next ? { ok: true, message: PASSWORD_COPY.signingIn, next } : { ok: true, message: r.message };
 });
 
+/**
+ * The page "Set up or reset my password" (./password): an action taken before signing in, whose guard is its limits
+ * and its one answer. It takes an email address, whatever the browser sends, and always answers with the same words,
+ * whatever the address and whatever happened, a failure included; askForPasswordLink() (src/lib/parents/
+ * password-request.ts) checks the argument, limits the asks per IP address and per address, and mails a set-up or reset
+ * link only to a person the portal may mail. The mail is not waited for.
+ */
+export const askPasswordLinkAction = beforeSignInAction(async (ctx, email: unknown): Promise<{ ok: true; message: string }> => {
+  try {
+    const { delivery } = await askForPasswordLink(email, ctx.ip);
+    void delivery;
+  } catch {
+    // Audited where it can be; the answer is the same either way.
+  }
+  return { ok: true, message: PASSWORD_COPY.askAnswer };
+});
