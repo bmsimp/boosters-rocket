@@ -21,7 +21,7 @@ function People({ people, typed }: { people: PersonRow[]; typed: string }) {
       { key: "welcome", header: "Welcome email", cell: (p) => (p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : "Not sent yet") },
       // Family names are text here, never links: a previous company's row carries that company's ID.
       { key: "families", header: "Families", cell: (p) => (p.families.length === 0 ? "No families"
-        : p.families.map((f, i) => <span key={`${f.previousCompany ? "old" : "now"}|${f.familyQboId}|${i}`} className="t-line">{f.familyName}: {f.words}</span>)) },
+        : p.families.map((f) => <span key={f.guardianId} className="t-line">{f.familyName}: {f.words}</span>)) },
     ]} />
   );
 }

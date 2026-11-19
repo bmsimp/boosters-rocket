@@ -3,9 +3,10 @@
 // the only module that may call the client's roster writes (tests/unit/quickbooks-writes.test.ts): the staff roster
 // actions and the write queue's job reach QuickBooks through it.
 import "server-only";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { accountingLink, family, qboCustomer, qboCustomerType, student, writeQueue, type RosterRole, type RosterWrite } from "@/lib/db/schema";
+import { accountingLink, family, jobRun, qboCustomer, qboCustomerType, student, writeQueue, type RosterRole, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { CUSTOMER_WRITES, NO_TOKEN, qboCreateCustomer, qboCustomerById, qboMoveCustomer, qboRenameCustomer, qboSetCustomerActive } from "@/lib/quickbooks/client";
@@ -13,19 +14,21 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { currencyOf, formatMoney, toCents } from "@/lib/money/cents";
 import { normalizeEmail } from "@/lib/email";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { customerOfFamily, familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
-import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
+import { connectedToAnotherCompany, customerOfFamily, customerOfStudent, familyLinkState, familyLinkedTo, linksOf, linksOfCustomers, studentLinkedTo } from "@/lib/families/links";
+import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "@/lib/families/ids";
+import { recordNameWords } from "@/lib/families/words";
+import { isUuid } from "@/lib/seasons/ids";
 import { askForRosterRefresh, ROSTER_ASK_KEY } from "@/lib/parents/refresh-ask";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 import { buyoutsForMovedStudent } from "@/lib/buyouts/moved";
-import { getShape, missingTypes, shapeTypeIds, type MembershipShape } from "./shape";
+import { getShape, missingTypes, shapeHolds, shapeTypeIds, type MembershipShape } from "./shape";
 import { buildRoster, type Cust, type Roster } from "./model";
-import { getRosterSource } from "./source";
+import { getRosterSource, ROSTER_JOB } from "./source";
 import { customerRow } from "./refresh";
 import { checkName, freeName, nameKey } from "./names";
 import { deactivateOf, offers, renameOf, typeForNew, type RosterOperation } from "./operations";
-import { classify, type CachedCustomer } from "./write-rules";
+import { beforeResend, classify, type CachedCustomer } from "./write-rules";
 
 /**
  * The setting that asks the worker for a roster refresh at its next wake: `{ at }`. One ask for the whole portal,
@@ -42,7 +45,12 @@ const BALANCE_READ_TIMEOUT_MS = 5_000;
 
 /** What staff asked for, as their page sent it: untrusted ids, each looked up in the roster cache under the roster lock. */
 export type WriteAsk =
-  | { op: "create"; role: RosterRole; name: string; familyQboId: string | null; email: string | null; typeQboId: string | null }
+  /**
+   * `familyId`: for a new family or member, the portal's own family record its customer is made for (stage 3's slice
+   * 9d: the record is saved first, addFamily()), which the write is filed under and linked to as QuickBooks answers. A
+   * family's or member's create without one is refused: none is made QuickBooks first any more.
+   */
+  | { op: "create"; role: RosterRole; name: string; familyQboId: string | null; email: string | null; typeQboId: string | null; familyId?: AppFamilyId }
   | { op: "rename"; qboId: string; syncToken: string; name: string }
   | { op: "move"; qboId: string; syncToken: string; toFamilyQboId: string }
   | { op: "deactivate"; qboId: string; syncToken: string };
@@ -53,8 +61,9 @@ export type WriteAsk =
  */
 export type CurrentRecord = { name: string; active: boolean; familyName: string | null };
 
+/** `unlinked`: done in the portal, but not (or not yet) in QuickBooks: the family stands there unlinked, and the words say why. */
 export type WriteResult =
-  | { ok: true; message: string; queued?: true }
+  | { ok: true; message: string; queued?: true; unlinked?: true }
   | { ok: false; errors: string[]; offer?: string; current?: CurrentRecord };
 
 export const WRITE_COPY = {
@@ -178,8 +187,10 @@ async function namesTaken(tx: Tx, cache: Cust[], except: string | null): Promise
 /**
  * A write ready to send, with the app's records a queue item for it is filed under: `familyId`, the family it is under
  * or about (a member's own, in flat books), and `studentId`, the student a rename, move or make-inactive is for. Each
- * is null where the records have none: a new family or member (made after QuickBooks answers), a parent's own customer
- * (a parent has no family or student record), or a customer with no record of that kind. What is sent is the write.
+ * is null where the records have none: a parent's own customer (a parent has no family or student record), or a
+ * customer with no record of that kind. A new family's or member's create is filed under the portal's record saved
+ * first (addFamily(), createInQuickBooksAndLink(): stage 3's slice 9d); only a create queued before that slice is filed
+ * under none. What is sent is the write.
  * `already`: the cache shows QuickBooks has it so already (the record inactive there, with that name, or the student
  * under that family while the portal's own record is in another), so nothing is sent and the app's own record is made
  * to match what staff asked (recordFollows()).
@@ -260,6 +271,19 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
         if ((await familyActiveOf(tx, await familyLinkedTo(ask.familyQboId!, tx))) !== true) return no(WRITE_COPY.notOursToAdd);
         familyQboId = ask.familyQboId;
       }
+      // A new family or member is the portal's own record first (stage 3's slice 9d, addFamily()): its customer is made
+      // for that record, which the write is filed under and linked to as QuickBooks answers (changeOwnRecord()).
+      let ownFamily: AppFamilyId | null = null;
+      if (ask.role === "family" || ask.role === "member") {
+        if (ask.familyId === undefined) return no(WRITE_COPY.notOffered);
+        const [own] = await tx.select({ active: family.active }).from(family).where(eq(family.id, ask.familyId));
+        if (!own) return no(WRITE_COPY.gone);
+        if (!own.active) return no(WRITE_COPY.inactiveHere);
+        if ((await customerOfFamily(ask.familyId, tx)) !== null) return no(LINKED_ALREADY);
+        // Queued only: this create runs while its sender holds the family's "being made" lock (whileMaking()).
+        if (await familyCreateQueued(tx, ask.familyId)) return no(WRITE_COPY.waiting);
+        ownFamily = ask.familyId;
+      }
       let email: string | null = null;
       if (ask.role === "parent") {
         email = normalizeEmail(ask.email ?? "");
@@ -269,7 +293,8 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       if (!name.ok) return no(name.error);
       const offer = freeName(name.name, await namesTaken(tx, cache, null));
       if (offer) return { ok: false, result: taken(name.name, offer) };
-      return done({ op: "create", role: ask.role, name: name.name, typeQboId, familyQboId, email }, familyQboId);
+      const ready = await done({ op: "create", role: ask.role, name: name.name, typeQboId, familyQboId, email }, familyQboId);
+      return ready.ok && ownFamily !== null ? { ...ready, familyId: ownFamily } : ready;
     }
 
     const record = byId.get(ask.qboId);
@@ -421,6 +446,9 @@ export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fr
 export type OwnRecordChange =
   | { kind: "family"; familyId: string; made: true; linkId: string }
   | { kind: "student"; studentId: string; familyId: string; made: true; linkId: string }
+  /** The portal's own record, saved before its customer was made (stage 3's slice 9d), linked to the new customer. */
+  | { kind: "family"; familyId: string; linked: true; linkId: string }
+  | { kind: "student"; studentId: string; linked: true; linkId: string }
   | { kind: "family"; familyId: string; set: { name?: string; active?: boolean } }
   | { kind: "student"; studentId: string; set: { name?: string; active?: boolean; familyId?: string } };
 
@@ -443,16 +471,28 @@ export type OwnRecordChange =
  * changed. It writes no audit row: its caller's row says what it returns.
  *
  * `studentId`, when given, is the student record a student's rename, move or make-inactive is filed under (Prepared,
- * a queue item's `student_id`), and the only one it changes (null: none). The family action files a customer under
+ * a queue item's `student_id`), and the only one it changes (null: none). For a create (stage 3's slice 9d) the record
+ * saved first is linked instead of one made: `familyId`, the family record a new family's or member's create is filed
+ * under (addFamily(), createInQuickBooksAndLink()), and `studentId`, the student record a student's create is filed
+ * under (createInQuickBooksAndLink()). Each is linked only while it has no link of its kind and the customer none
+ * either; it is never renamed or made active by it. A create filed under no record (queued before slice 9d, or a
+ * student added to a linked family) makes its record as before. The family action files a customer under
  * the family only when its record is that family's (prepareFamily()): since slice 9c a student QuickBooks moved into
  * a family keeps their record in the family the app holds them in, which making this one inactive must not touch.
  */
-export async function changeOwnRecord(tx: Tx, w: RosterWrite, customerId: string, o: { realmId: string; linkedBy: string | null; studentId?: AppStudentId | null }): Promise<OwnRecordChange | null> {
+export async function changeOwnRecord(tx: Tx, w: RosterWrite, customerId: string,
+  o: { realmId: string; linkedBy: string | null; studentId?: AppStudentId | null; familyId?: AppFamilyId | null }): Promise<OwnRecordChange | null> {
   if (w.role === "parent") return null;
   const now = new Date();
   if (w.op === "create") {
     if (w.role === "family" || w.role === "member") {
       if ((await familyLinkedTo(customerId, tx)) !== null) return null;
+      if (o.familyId) {
+        if ((await customerOfFamily(o.familyId, tx)) !== null) return null;
+        const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, familyId: o.familyId, origin: "created", linkedBy: o.linkedBy })
+          .returning({ id: accountingLink.id });
+        return { kind: "family", familyId: String(o.familyId), linked: true, linkId: link!.id };
+      }
       const [made] = await tx.insert(family).values({ name: w.name, active: true }).returning({ id: family.id });
       const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, familyId: made!.id, origin: "created", linkedBy: o.linkedBy })
         .returning({ id: accountingLink.id });
@@ -460,6 +500,12 @@ export async function changeOwnRecord(tx: Tx, w: RosterWrite, customerId: string
     }
     if (w.role !== "student" || w.familyQboId === null) return null;
     if ((await studentLinkedTo(customerId, tx)) !== null) return null;
+    if (o.studentId) {
+      if ((await customerOfStudent(o.studentId, tx)) !== null) return null;
+      const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: o.realmId, customerId, studentId: o.studentId, origin: "created", linkedBy: o.linkedBy })
+        .returning({ id: accountingLink.id });
+      return { kind: "student", studentId: String(o.studentId), linked: true, linkId: link!.id };
+    }
     const familyId = await familyLinkedTo(w.familyQboId, tx);
     if (familyId === null) return null;
     const [made] = await tx.insert(student).values({ familyId, name: w.name, active: true }).returning({ id: student.id });
@@ -514,9 +560,10 @@ async function holdForTheQueue(tx: Tx, w: RosterWrite, code: string, o: { realmI
   linkedBy: string | null; filed?: Filed; resultQboId?: string | null }): Promise<void> {
   const resultQboId = o.resultQboId ?? null;
   if (o.queueId) {
-    await tx.update(writeQueue).set({ sent: true, lastCode: code, tries: sql`${writeQueue.tries} + 1`, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000),
+    const [still] = await tx.update(writeQueue).set({ sent: true, lastCode: code, tries: sql`${writeQueue.tries} + 1`, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000),
       ...(resultQboId ? { resultQboId } : {}), updatedAt: new Date() })
-      .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting")));
+      .where(and(eq(writeQueue.id, o.queueId), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
+    if (!still) await keepMadeOnGivenUp(tx, o.queueId, resultQboId);
     return;
   }
   const [item] = await tx.insert(writeQueue).values({
@@ -525,6 +572,23 @@ async function holdForTheQueue(tx: Tx, w: RosterWrite, code: string, o: { realmI
   }).returning({ id: writeQueue.id });
   await writeAudit({ actor: o.actor, action: "roster.write.queued", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item!.id,
     after: { op: w.op, role: w.role, code: code.slice(0, 40), sent: true } }, tx);
+}
+
+/**
+ * A queue item staff gave up while a try of it was on its way to QuickBooks (the lead's decision in stage 3's slice 9d):
+ * it stays given up, whatever QuickBooks answered, and a create keeps the customer QuickBooks made for it
+ * (`result_qbo_id`), which the Reconciliation page names (madeAfterGivingUp()). Nothing is linked to that customer.
+ */
+async function keepMadeOnGivenUp(tx: Tx, queueId: string, resultQboId: string | null): Promise<void> {
+  if (!resultQboId) return;
+  await tx.update(writeQueue).set({ resultQboId, updatedAt: new Date() })
+    .where(and(eq(writeQueue.id, queueId), eq(writeQueue.state, "given_up"), isNull(writeQueue.resultQboId)));
+}
+
+/** Whether a queue item a try is for is no longer waiting (given up meanwhile), read FOR UPDATE so a give-up waits for this try's answer. */
+async function queuedNoLonger(tx: Tx, queueId: string): Promise<boolean> {
+  const [q] = await tx.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, queueId)).for("update");
+  return q !== undefined && q.state !== "waiting";
 }
 
 /**
@@ -555,10 +619,16 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       const fits = answerIsFor(w, answer);
       let refreshAsked = false;
       let appRecord: OwnRecordChange | null = null;
-      if (ours && fits) {
+      // A queued try whose item staff gave up while it was on its way stays given up: the cache takes QuickBooks' answer,
+      // but no record is made, linked or changed for it, and a create keeps the customer it made (keepMadeOnGivenUp()).
+      const givenUp = ours && o.queueId !== undefined && (await queuedNoLonger(tx, o.queueId));
+      if (ours && fits && givenUp) {
+        await upsertFromAnswer(tx, answer, await getShape(tx));
+        await keepMadeOnGivenUp(tx, o.queueId!, resultQboId);
+      } else if (ours && fits) {
         await upsertFromAnswer(tx, answer, await getShape(tx));
         if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
-        appRecord = await changeOwnRecord(tx, w, targetId, { realmId: o.realmId, linkedBy: o.linkedBy, studentId: o.filed?.studentId });
+        appRecord = await changeOwnRecord(tx, w, targetId, { realmId: o.realmId, linkedBy: o.linkedBy, studentId: o.filed?.studentId, familyId: o.filed?.familyId });
         if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
       } else if (ours) {
         // The answer wasn't the record asked about: the roster is read again rather than guessed at, and the queue finds
@@ -569,8 +639,8 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
       }
       await writeAudit({ actor: o.actor, action: AUDIT_ACTION[w.op], permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId,
         before: auditBefore(w, cached), after: { ...auditAfter(w, answer), ...(o.queueId ? { queueId: o.queueId } : {}), ...(refreshAsked ? { refreshAsked } : {}),
-          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}), ...(appRecord ? { appRecord } : {}) } }, tx);
-      if (o.inside && !held) await o.inside(tx);
+          ...(!ours ? { code: "company_changed" } : !fits ? { code: "answer_other" } : {}), ...(givenUp ? { queue: "given_up" } : {}), ...(appRecord ? { appRecord } : {}) } }, tx);
+      if (o.inside && !held && !givenUp) await o.inside(tx);
     });
   } catch {
     // QuickBooks made the change but the portal couldn't take it in (a deadlock, a follow-up that failed): nothing of
@@ -1058,4 +1128,583 @@ export async function askFamilyInactive(familyQboId: string, shown: ReadonlyArra
   const under = made.filter((s) => s.write.role !== "family").map((s) => s.name);
   const message = under.length ? `Made inactive in QuickBooks: ${listed(under)}, then ${p.familyName}.` : `Made ${p.familyName} inactive in QuickBooks.`;
   return { result: { ok: true, message: allShown ? message : `${message} The roster here shows it after its next read of QuickBooks, usually within a few minutes.` }, changed: true };
+}
+
+/* ---- Families by hand (stage 3's slice 9d of the app-owned families spec, section 4: "Staff add families, students and
+   guardians in the app. These start unlinked.") ----
+   A family or member staff add is the portal's own record first, saved in its own transaction with its audit row. It is
+   sent to QuickBooks only by someone who may link families to accounting (Accounting.Link.ReadWrite; the owner's
+   decision of 2026-11-18), while QuickBooks is connected to the roster's company and the membership shape holds: today's
+   create, through prepare() and sendWrite(), filed under the new record and linked to it as QuickBooks answers. A family
+   with no link is a full family in the portal: every change to it is saved here only (changeInPortal()), and "Create in
+   QuickBooks and link" (createInQuickBooksAndLink()) makes its customer, and its students', later. */
+
+const LINKED_ALREADY = "This family is linked to QuickBooks already, so nothing was made.";
+/** A family whose own create is waiting or stuck: nothing else is changed on it until it goes through or is given up. */
+export const FAMILY_WAITING = "Making this family in QuickBooks is still waiting on the queue, so nothing else can be changed on it for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
+/** A family a create of which is being sent to QuickBooks at this moment (whileMaking()): nothing else is changed on it until the answer is in. */
+export const FAMILY_SENDING = "This family is being made in QuickBooks at this moment, so nothing else can be changed on it. Try again in a minute.";
+const STUDENT_WAITING = "Making this student in QuickBooks is still waiting on the queue, so nothing else can be changed for them for now. Once it has gone through, or been given up on the Reconciliation page, try again.";
+const LINKED_HERE = "That is linked to QuickBooks, so it is changed there first: use the QuickBooks changes on this page.";
+const GIVEN_UP_MAYBE_MADE = "Making this in QuickBooks was given up on the Reconciliation page after a try QuickBooks may have taken. Once the roster has been read again (within a few minutes), the Reconciliation page says whether QuickBooks made it; if it didn't, press “Create in QuickBooks and link” again.";
+/** A family's create given up after QuickBooks made its customer (madeAfterGivingUp()): no second customer is made for it. */
+const madeAfterGivingUpWords = (name: string, noun: string) =>
+  `QuickBooks made the customer “${name}” for this ${noun} before making it was given up on the Reconciliation page, and no ${noun} in the portal is linked to it, so a second one wasn't made. If it is this ${noun}, bring it in with “Create a family from this” under Customers with no family on the Reconciliation page (that makes a ${noun} linked to it: add its guardians and students there, then make this one inactive here). If it isn't, make it inactive in QuickBooks, then press “Create in QuickBooks and link” again.`;
+const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
+const isFamilyCreate = sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' in ('family', 'member')`;
+const isStudentCreate = sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' = 'student'`;
+
+/** First key of the lock held while a family's create is being sent; the second is a hash of the family record's id. */
+export const MAKING_LOCK = 7461011;
+const makingLock = (familyId: AppFamilyId) => sql`${sql.raw(String(MAKING_LOCK))}, hashtext(${String(familyId)}::text)`;
+
+/**
+ * Runs `send` holding the family's "being made" lock, in a transaction of its own that holds nothing else, for as long
+ * as a create of the family's (its own, or its students' under "Create in QuickBooks and link") may be on its way to
+ * QuickBooks: from before addFamily() saves the record until the answer is taken in or the item is on the queue. Until
+ * then the family has no link and no queue item, so without it a rename, a make-inactive or a second "Create in
+ * QuickBooks and link" could slip in while QuickBooks is making the first customer, and make a second. Null, sending
+ * nothing, when someone else holds it (or a check holds it shared for a moment: familyCreateWaiting()).
+ */
+async function whileMaking<T>(familyId: AppFamilyId, send: () => Promise<T>): Promise<T | null> {
+  return db.transaction(async (hold) => {
+    const [lock] = (await hold.execute(sql`select pg_try_advisory_xact_lock(${makingLock(familyId)}) as locked`)) as unknown as { locked: boolean }[];
+    if (!lock?.locked) return null;
+    return send();
+  });
+}
+
+/** Whether a family's own create (a new family's or member's, filed under its record) is waiting or stuck on the queue. */
+async function familyCreateQueued(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
+  return (await tx.select({ id: writeQueue.id }).from(writeQueue)
+    .where(and(eq(writeQueue.familyId, familyId), inArray(writeQueue.state, ["waiting", "stuck"]), isFamilyCreate)).limit(1)).length > 0;
+}
+
+/**
+ * Whether a family's own create is waiting or stuck on the queue (`queued`: a new family's or member's, filed under its
+ * record, `write_queue.family_id`), or a create of the family's is being sent at this moment (`sending`: whileMaking()
+ * holds its lock); null when neither. A queued create has no target (it names no customer yet), so "one change waiting
+ * on a record" (waitingFor(), by `target_qbo_id`) can't see it. Either way nothing else is changed on that family
+ * meanwhile (changeInPortal(), and adding or reinstating a guardian, ../parents/guardians.ts). When it answers null, the
+ * caller's transaction holds the lock shared to its end, so no send starts before its change is committed.
+ */
+export async function familyCreateWaiting(tx: Tx, familyId: AppFamilyId): Promise<"queued" | "sending" | null> {
+  if (await familyCreateQueued(tx, familyId)) return "queued";
+  const [lock] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${makingLock(familyId)}) as locked`)) as unknown as { locked: boolean }[];
+  return lock?.locked ? null : "sending";
+}
+/** Whether a student's own create (filed under the student record, `write_queue.student_id`) is waiting or stuck on the queue. */
+async function studentCreateWaiting(tx: Tx, studentId: AppStudentId): Promise<boolean> {
+  return (await tx.select({ id: writeQueue.id }).from(writeQueue)
+    .where(and(eq(writeQueue.studentId, studentId), inArray(writeQueue.state, ["waiting", "stuck"]), isStudentCreate)).limit(1)).length > 0;
+}
+/**
+ * Whether a create filed under this record was given up after a try QuickBooks may have taken (`sent`), with no roster
+ * read started since that try: QuickBooks may have made it, and making it again waits until a read shows whether it did
+ * (its name is then taken there, and met by namesTaken()).
+ */
+async function givenUpMaybeMade(tx: Tx, filed: { familyId: AppFamilyId } | { studentId: AppStudentId }): Promise<boolean> {
+  const [given] = await tx.select({ lastTriedAt: writeQueue.lastTriedAt }).from(writeQueue)
+    .where(and("familyId" in filed ? and(eq(writeQueue.familyId, filed.familyId), isFamilyCreate) : and(eq(writeQueue.studentId, filed.studentId), isStudentCreate),
+      eq(writeQueue.state, "given_up"), eq(writeQueue.sent, true))).orderBy(desc(writeQueue.lastTriedAt)).limit(1);
+  if (!given) return false;
+  const [read] = await tx.select({ at: jobRun.startedAt }).from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1);
+  return !read || read.at <= given.lastTriedAt;
+}
+
+/** A create given up on the Reconciliation page that QuickBooks made all the same, with no record linked to its customer. */
+export type MadeAfterGivingUp = { queueId: string; role: "family" | "member" | "student"; name: string; customerQboId: string; familyId: AppFamilyId | null; studentId: AppStudentId | null };
+
+/**
+ * The creates of a family, member or student given up after a try QuickBooks may have taken (`sent`) whose customer the
+ * roster cache holds, active, with no record of its kind linked to it: the customer QuickBooks answered with or a read
+ * found it made as (`result_qbo_id`), else the one beforeResend() would find it as. Given up, such an item is never
+ * linked (the lead's decision in stage 3's slice 9d): the Reconciliation page says so, and "Create in QuickBooks and
+ * link" makes no second customer while it stands (prepareLink()). `filed`: only those filed under that record. None
+ * while the cache names no company or QuickBooks is connected to another (every link lookup answers nothing then).
+ * One per customer, the latest try first.
+ */
+export async function madeAfterGivingUp(tx: Tx, filed?: { familyId: AppFamilyId } | { studentId: AppStudentId }): Promise<MadeAfterGivingUp[]> {
+  const source = await getRosterSource(tx);
+  if (source === null || (await connectedToAnotherCompany(tx))) return [];
+  const which = filed === undefined ? sql`${writeQueue.request}->>'op' = 'create' and ${writeQueue.request}->>'role' in ('family', 'member', 'student')`
+    : "familyId" in filed ? and(eq(writeQueue.familyId, filed.familyId), isFamilyCreate) : and(eq(writeQueue.studentId, filed.studentId), isStudentCreate);
+  const rows = await tx.select().from(writeQueue).where(and(eq(writeQueue.state, "given_up"), eq(writeQueue.sent, true), eq(writeQueue.realmId, source), which))
+    .orderBy(desc(writeQueue.lastTriedAt), asc(writeQueue.id));
+  if (!rows.length) return [];
+  const cache = await cacheRows(tx);
+  const found: MadeAfterGivingUp[] = rows.flatMap((r) => {
+    const w = r.request as CreateWrite;
+    if (w.role !== "family" && w.role !== "member" && w.role !== "student") return [];
+    const seen = beforeResend(w, cache);
+    const c = (r.resultQboId !== null ? cache.find((x) => x.qboId === r.resultQboId) : undefined)
+      ?? (seen.is === "done" ? cache.find((x) => x.qboId === seen.qboId) : undefined);
+    return c?.active ? [{ queueId: r.id, role: w.role, name: c.displayName, customerQboId: c.qboId, familyId: r.familyId, studentId: r.studentId }] : [];
+  });
+  const isStudent = (m: MadeAfterGivingUp) => m.role === "student";
+  const links = await linksOfCustomers({ families: found.filter((m) => !isStudent(m)).map((m) => m.customerQboId), students: found.filter(isStudent).map((m) => m.customerQboId) }, tx);
+  const named = new Set<string>();
+  return found.filter((m) => {
+    if ((isStudent(m) ? links.studentOfCustomer : links.familyOfCustomer).has(m.customerQboId) || named.has(m.customerQboId)) return false;
+    named.add(m.customerQboId);
+    return true;
+  });
+}
+
+/**
+ * "Link the student to it", on the Reconciliation page: a student's create staff gave up that QuickBooks made all the
+ * same (madeAfterGivingUp()) is linked to that customer when staff say it is that student. A student customer sits
+ * under its family, so Customers with no family can't bring it in, and without this the only way left would make a
+ * second customer for the student. Nothing is sent to QuickBooks. Under the roster lock with the page's tag, it links
+ * only while the item is that given-up create, still filed under the student, the customer still active, of no student
+ * record, and directly under the customer the student's own family is linked to (the roster's tree), the student
+ * record active with no link. The link is `confirmed` by the staff member, and audited in the same transaction
+ * (`roster.student.linked_after_giving_up`); the item stays given up.
+ */
+export async function linkStudentMadeAfterGivingUp(rawQueueId: string, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
+  const no = (error: string): WriteResult => refuse(error);
+  if (!isUuid(rawQueueId)) return no(WRITE_COPY.gone);
+  return db.transaction(async (tx): Promise<WriteResult> => {
+    if (!(await lockRosterAs(tx, rosterTag))) return no(ROSTER_MOVED);
+    const [shape, source] = await Promise.all([getShape(tx), getRosterSource(tx)]);
+    if (!shape || source === null || (await connectedToAnotherCompany(tx))) return no(WRITE_COPY.noRoster);
+    const [item] = await tx.select().from(writeQueue).where(eq(writeQueue.id, rawQueueId.toLowerCase())).for("update");
+    const studentId = item?.studentId ?? null;
+    if (!item || studentId === null || item.state !== "given_up") return no(LINK_MADE_GONE);
+    const made = (await madeAfterGivingUp(tx, { studentId })).find((m) => m.queueId === item.id && m.role === "student");
+    if (!made) return no(LINK_MADE_GONE);
+    const [s] = await tx.select().from(student).where(eq(student.id, studentId)).for("update");
+    if (!s?.active) return no("That student is inactive in the portal, so nothing was linked.");
+    if ((await customerOfStudent(studentId, tx)) !== null) return no("That student is linked to QuickBooks already, so nothing was linked.");
+    const familyCustomer = s.familyId === null ? null : await customerOfFamily(s.familyId, tx);
+    const where = roleIn(buildRoster(shape, await cacheRows(tx)), made.customerQboId);
+    if (familyCustomer === null || where?.role !== "student" || where.familyQboId !== familyCustomer) {
+      return no(`QuickBooks doesn't have “${made.name}” as a student under the customer this student's family is linked to, so nothing was linked. Check it in QuickBooks.`);
+    }
+    const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: source, customerId: made.customerQboId, studentId, origin: "confirmed", linkedBy: o.staffUserId })
+      .returning({ id: accountingLink.id });
+    await writeAudit({ actor: o.actor, action: "roster.student.linked_after_giving_up", permission: o.permission, ip: o.ip, targetType: "student", targetId: String(studentId),
+      after: { studentId: String(studentId), familyId: String(s.familyId), customerQboId: made.customerQboId, queueId: item.id, linkId: link!.id } }, tx);
+    return { ok: true, message: `${recordNameWords(s.name, "student")} is linked to “${made.name}” in QuickBooks. Nothing was sent to QuickBooks.` };
+  });
+}
+const LINK_MADE_GONE = "That is no longer a customer QuickBooks made for a student after making it was given up, with nothing linked to it. Reload the page.";
+
+/** The names of the portal's own active families (members, in flat books), but `except`: a family's name must be none of them. */
+async function portalFamilyNames(tx: Tx, except: AppFamilyId | null): Promise<string[]> {
+  const rows = await tx.select({ id: family.id, name: family.name }).from(family).where(eq(family.active, true));
+  return rows.flatMap((r) => (r.name === null || (except !== null && String(r.id) === String(except)) ? [] : [r.name]));
+}
+const takenHere = (name: string, offer: string | null, noun: string): WriteResult => ({ ok: false, ...(offer ? { offer } : {}),
+  errors: [`Another ${noun} in the portal is called “${name}”, and every ${noun}'s name must be different.${offer ? ` You could use “${offer}” instead.` : ""}`] });
+const nameIn = (name: string, names: string[]) => names.some((n) => nameKey(n) === nameKey(name));
+
+/** Why QuickBooks didn't take a family's create, in a sentence that says nothing about the portal's own record. */
+function quickBooksWhy(error: string | undefined): string {
+  if (error === WRITE_COPY.notConnected) return "QuickBooks isn't connected. An Admin can connect it under QuickBooks.";
+  if (error === WRITE_COPY.needsAdmin) return "QuickBooks needs to be connected again. An Admin can do that under QuickBooks.";
+  if (error === WRITE_COPY.otherCompany) return "QuickBooks is connected to a different company from the one this roster was read from. An Admin can sort that out under QuickBooks.";
+  return "QuickBooks wouldn't take it. Check QuickBooks.";
+}
+
+/** A new family (layered books) or member (flat books), as the page sent it: `typeQboId`, the member type chosen, when the club has several. */
+export type AddFamilyAsk = { role: "family" | "member"; name: string; typeQboId: string | null };
+/** Why an added family wasn't sent to QuickBooks: the staff member may not link families, or QuickBooks isn't connected. */
+type NotSent = "no_permission" | "not_connected";
+
+/**
+ * Adds a family (layered books) or a member (flat books), the portal's own record first (stage 3's slice 9d, the lead's
+ * decision): under the roster lock, with the page's tag, on a page that has a roster (a membership shape that holds, of
+ * the roster's company), the name by checkName(), refused when another active family of the portal holds it (nameKey(),
+ * "Name (2)" offered by freeName()), and, when it will be sent, when QuickBooks' names hold it (namesTaken(): the cache
+ * and the waiting creates and renames), before anything is saved, so a name the portal can see is taken never leaves a
+ * family behind. The record is saved active, in its own transaction with its audit row (`roster.family.added`).
+ *
+ * Then, only when `mayLink` (the staff member holds Accounting.Link.ReadWrite) and QuickBooks is connected, today's
+ * create is sent (askRosterWrite(), with prepare()'s checks, which hold it to the roster's company and the shape, and
+ * the queue's rules), filed under the new record: taken, the record is linked to the new customer (`created` by the
+ * staff member); unreachable, it waits on the queue filed under the record, and the found-done path links it; refused,
+ * the family stays unlinked, and the answer says so at once, with a free name offered for a taken one (to rename it on
+ * its page, then press "Create in QuickBooks and link"). A staff member without the linking permission sends nothing
+ * (the owner's decision of 2026-11-18): the family stays unlinked until someone who holds it presses "Create in
+ * QuickBooks and link". An answer after the save is `ok`, with `unlinked` where QuickBooks doesn't have it: the family
+ * is saved, so its form never offers to send the add again.
+ */
+export async function addFamily(ask: AddFamilyAsk, rosterTag: string, o: WriteOp & { staffUserId: string; mayLink: boolean }): Promise<WriteResult> {
+  // The new record's id is chosen here, so its "being made" lock (whileMaking()) is held from before the record exists
+  // until its create is answered or queued: nobody can change the family while QuickBooks may be making its customer.
+  const id = asAppFamilyId(randomUUID());
+  return (await whileMaking(id, () => saveAndSend(id, ask, rosterTag, o))) ?? refuse(FAMILY_SENDING);
+}
+
+/** addFamily()'s save and send, holding the new record's "being made" lock; `id` is the record's id, chosen beforehand. */
+async function saveAndSend(id: AppFamilyId, ask: AddFamilyAsk, rosterTag: string, o: WriteOp & { staffUserId: string; mayLink: boolean }): Promise<WriteResult> {
+  const noun = ask.role === "member" ? "member" : "family";
+  type Saved = { ok: true; familyId: AppFamilyId; name: string; notSent: NotSent | null; typeQboId: string | null } | { ok: false; result: WriteResult };
+  const saved = await db.transaction(async (tx): Promise<Saved> => {
+    const no = (error: string): Saved => ({ ok: false, result: refuse(error) });
+    if (!(await lockRosterAs(tx, rosterTag))) return no(ROSTER_MOVED);
+    const [shape, source, conn, holds, other] = await Promise.all([getShape(tx), getRosterSource(tx), getConnection(tx), shapeHolds(tx), connectedToAnotherCompany(tx)]);
+    if (!shape || !holds || source === null || other) return no(WRITE_COPY.noRoster);
+    if ((shape.kind === "flat") !== (ask.role === "member") || !offers(shape, ask.role === "member" ? "create_member" : "create_family")) return no(WRITE_COPY.notOffered);
+    const name = checkName(ask.name);
+    if (!name.ok) return no(name.error);
+    const notSent: NotSent | null = !o.mayLink ? "no_permission" : !conn?.realmId || !conn.refreshTokenCiphertext ? "not_connected" : null;
+    const typeQboId = notSent === null ? typeForNew(shape, ask.role, ask.role === "member" ? ask.typeQboId : null) : null;
+    if (notSent === null && typeQboId === null) return no(ask.role === "member" ? "Choose which kind of member this is." : WRITE_COPY.notOffered);
+    const ours = await portalFamilyNames(tx, null);
+    const all = notSent === null ? [...ours, ...(await namesTaken(tx, await cacheRows(tx), null))] : ours;
+    const offer = freeName(name.name, all);
+    if (offer) return { ok: false, result: nameIn(name.name, ours) ? takenHere(name.name, offer, noun) : taken(name.name, offer) };
+    const [made] = await tx.insert(family).values({ id, name: name.name, active: true }).returning({ id: family.id });
+    await writeAudit({ actor: o.actor, action: "roster.family.added", permission: o.permission, ip: o.ip, targetType: "family", targetId: String(made!.id),
+      after: { familyId: String(made!.id), name: name.name, role: ask.role, quickbooks: notSent ?? "sending" } }, tx);
+    return { ok: true, familyId: made!.id, name: name.name, notSent, typeQboId };
+  });
+  if (!saved.ok) return saved.result;
+  const { name } = saved;
+  const press = "press “Create in QuickBooks and link” on its page";
+  if (saved.notSent === "no_permission") {
+    return { ok: true, unlinked: true, message: `${name} is saved in the portal, and nothing was sent to QuickBooks: making its customer there and linking the two takes the permission to link families to accounting. It is in the portal only until someone who holds that permission can ${press}.` };
+  }
+  if (saved.notSent === "not_connected") {
+    return { ok: true, unlinked: true, message: `${name} is saved in the portal. QuickBooks isn't connected, so it isn't in QuickBooks yet: once it is, ${press}.` };
+  }
+  const r = await askRosterWrite({ op: "create", role: ask.role, name, familyQboId: null, email: null, typeQboId: saved.typeQboId, familyId: saved.familyId }, rosterTag, o);
+  if (r.ok && r.queued) {
+    return { ok: true, queued: true, message: `${name} is saved in the portal. QuickBooks couldn't take it just now, so making it there is waiting to reach QuickBooks: the portal tries again in a minute, then less often, and links the ${noun} to it once QuickBooks has it. You'll find it on the Reconciliation page until then.` };
+  }
+  if (r.ok) {
+    return { ok: true, message: r.message === WRITE_COPY.doneNotShown ? `${name} is saved in the portal and made in QuickBooks. The portal links the two once it has read QuickBooks again, usually within a few minutes.`
+      : `${name} is saved in the portal, made in QuickBooks and linked to its new customer.` };
+  }
+  if (r.offer) {
+    return { ok: true, unlinked: true, message: `${name} is saved in the portal, but QuickBooks wouldn't make it: “${name}” is already a name in QuickBooks, and every name there must be different. Rename the ${noun} on its page, for instance to “${r.offer}”, then press “Create in QuickBooks and link” there.` };
+  }
+  return { ok: true, unlinked: true, message: `${name} is saved in the portal, but it isn't in QuickBooks: ${quickBooksWhy(r.errors[0])} Once that is sorted, ${press}.` };
+}
+
+/* ---- "Create in QuickBooks and link": a family with no link, and its students with none, made in QuickBooks and
+   linked one by one. Like making a family inactive it is never queued to be sent later: the staff member is waiting.
+   The first step that doesn't go through stops it; a step whose answer was lost is held on the queue as possibly made,
+   filed under its records, so the found-done path links it after the next roster read; pressing again carries on with
+   whatever is still unlinked. It sends nothing for a guardian (slice 9f). */
+
+type CreateWrite = Extract<RosterWrite, { op: "create" }>;
+type LinkPlan = {
+  ok: true; realmId: string; familyId: AppFamilyId; familyName: string; familyWrite: CreateWrite | null; familyCustomer: string | null;
+  students: { id: AppStudentId; name: string | null }[]; studentTypeId: string | null;
+  /** The names a new customer must not be (namesTaken(), read under the lock): each student's is held against them before it is sent. */
+  taken: string[];
+} | { ok: false; result: WriteResult };
+
+/**
+ * Everything checked before anything is sent, under the roster lock with the page's tag: QuickBooks connected to the
+ * roster's company, the shape holding, the family record active, nothing of its own waiting on the queue, no create of
+ * its own given up that QuickBooks made a customer for (madeAfterGivingUp(): a second would be made), and a create
+ * given up after a try QuickBooks may have taken only once a roster read has run since. With no family link: a name
+ * QuickBooks can take (checkName()) and doesn't hold already (namesTaken(), "Name (2)" offered for the family's page),
+ * and the type (the shape's family type, or the member type chosen, by typeForNew()). With one: its customer an active
+ * family on the roster. Then, only where the shape has a student type, the family's active students with no link and
+ * no create of their own waiting, by name as rosterFamilies() orders them, then by id.
+ */
+async function prepareLink(rawFamilyId: string, chosenType: string | null, rosterTag: string): Promise<LinkPlan> {
+  const no = (error: string): LinkPlan => ({ ok: false, result: refuse(error) });
+  if (!isUuid(rawFamilyId)) return no(WRITE_COPY.gone);
+  return db.transaction(async (tx): Promise<LinkPlan> => {
+    if (!(await lockRosterAs(tx, rosterTag))) return no(ROSTER_MOVED);
+    const [shape, source, conn, holds] = await Promise.all([getShape(tx), getRosterSource(tx), getConnection(tx), shapeHolds(tx)]);
+    if (!conn?.realmId || !conn.refreshTokenCiphertext) return no(WRITE_COPY.notConnected);
+    if (source === null || source !== conn.realmId) return no(WRITE_COPY.otherCompany);
+    if (!shape || !holds) return no(WRITE_COPY.noRoster);
+    const [f] = await tx.select().from(family).where(eq(family.id, asAppFamilyId(rawFamilyId.toLowerCase())));
+    if (!f) return no(WRITE_COPY.gone);
+    if (!f.active) return no(WRITE_COPY.inactiveHere);
+    // Queued only: this runs while createInQuickBooksAndLink() holds the family's "being made" lock (whileMaking()).
+    if (await familyCreateQueued(tx, f.id)) return no(FAMILY_WAITING);
+    const role = shape.kind === "flat" ? "member" as const : "family" as const;
+    const familyCustomer = await customerOfFamily(f.id, tx);
+    const cache = await cacheRows(tx);
+    const taken = await namesTaken(tx, cache, null);
+    let familyWrite: CreateWrite | null = null;
+    if (familyCustomer === null) {
+      // A given-up create QuickBooks made a customer for: no second one is made, and the words say where the first is.
+      const [made] = await madeAfterGivingUp(tx, { familyId: f.id });
+      if (made) return no(madeAfterGivingUpWords(made.name, role));
+      if (await givenUpMaybeMade(tx, { familyId: f.id })) return no(GIVEN_UP_MAYBE_MADE);
+      if (f.name === null) return no(`This ${role} has no name in the portal, so it can't be made in QuickBooks. Give it a name on this page first.`);
+      const name = checkName(f.name);
+      if (!name.ok) return no(`Its name can't be used in QuickBooks: ${name.error} Rename it on this page first.`);
+      const typeQboId = typeForNew(shape, role, role === "member" ? chosenType : null);
+      if (typeQboId === null) return no(role === "member" ? "Choose which kind of member this is." : WRITE_COPY.notOffered);
+      const offer = freeName(name.name, taken);
+      if (offer) return no(`“${name.name}” is already a name in QuickBooks, and every name there must be different. Rename the ${role} on this page, for instance to “${offer}”, then press “Create in QuickBooks and link” again.`);
+      familyWrite = { op: "create", role, name: name.name, typeQboId, familyQboId: null, email: null };
+    } else {
+      const c = cache.find((x) => x.qboId === familyCustomer);
+      const where = roleIn(buildRoster(shape, cache), familyCustomer);
+      if (!c?.active || !where || where.role !== role) {
+        return no(`The customer this ${role} is linked to isn't an active ${role} on the roster, so nobody can be made under it. Check it in QuickBooks.`);
+      }
+      // Nobody is added under a family customer with a change of its own waiting, as prepare() refuses an add.
+      const waiting = await tx.select({ id: writeQueue.id }).from(writeQueue)
+        .where(and(eq(writeQueue.targetQboId, familyCustomer), inArray(writeQueue.state, ["waiting", "stuck"]))).limit(1);
+      if (waiting.length) return no(WRITE_COPY.waiting);
+    }
+    let students: { id: AppStudentId; name: string | null }[] = [];
+    if (shape.kind === "layered" && shape.studentTypeId !== null) {
+      const rows = await tx.select({ id: student.id, name: student.name }).from(student).where(and(eq(student.familyId, f.id), eq(student.active, true)));
+      const links = await linksOf({ families: [], students: rows.map((r) => r.id) }, tx);
+      for (const r of rows) {
+        // A student whose given-up create QuickBooks made, or may have made, is not made again (the Reconciliation page lists those it made).
+        if (links.customerOfStudent.has(r.id) || (await studentCreateWaiting(tx, r.id)) || (await givenUpMaybeMade(tx, { studentId: r.id }))
+          || (await madeAfterGivingUp(tx, { studentId: r.id })).length > 0) continue;
+        students.push(r);
+      }
+      students = students.sort((a, b) => COLLATOR.compare(a.name ?? "", b.name ?? "") || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+    }
+    if (familyWrite === null && students.length === 0) return no("Everything in this family that can be made in QuickBooks is linked already, waiting to be, or was made there after making it was given up (the Reconciliation page lists those), so nothing was made.");
+    return { ok: true, realmId: source, familyId: f.id, familyName: recordNameWords(f.name, "family"), familyWrite, familyCustomer, students,
+      studentTypeId: shape.kind === "layered" ? shape.studentTypeId : null, taken };
+  });
+}
+
+type StepSent = { ok: true; cached: boolean; customerQboId: string | null } | { ok: false; code: string; words: string; maybe: boolean };
+
+/**
+ * One create of "Create in QuickBooks and link", sent at once (never queued to be sent later): QuickBooks first, then the
+ * cache and the link to the record it is filed under (applyWritten(), changeOwnRecord()), with its own
+ * `roster.customer.create` row. A lost answer is held on the queue as possibly made, filed under its records, and the
+ * roster read again (holdForTheQueue()), so the found-done path links it; anything else that didn't go through is said.
+ */
+async function sendCreateStep(write: CreateWrite, filed: Filed, said: string, realmId: string, o: WriteOp & { staffUserId: string }): Promise<StepSent> {
+  let answer: Record<string, unknown>;
+  try {
+    answer = await sendWrite(write, realmId, { mayWait: false });
+  } catch (e) {
+    if (!(e instanceof QboError)) throw e;
+    const failure = classify(e.code);
+    const stop = (words: string, maybe = false): StepSent => ({ ok: false, code: e.code, words, maybe });
+    switch (failure.kind) {
+      case "duplicate": {
+        const names = await db.transaction(async (tx) => namesTaken(tx, await cacheRows(tx), null));
+        const offer = freeName(write.name, [...names, write.name]);
+        return stop(`“${write.name}” is already a name in QuickBooks, and every name there must be different, so ${said} wasn't made there. Rename them on this page${offer ? `, for instance to “${offer}”` : ""}, then press “Create in QuickBooks and link” again.`);
+      }
+      case "retry":
+        if (failure.sent) {
+          await db.transaction(async (tx) => {
+            await askForRosterRefresh(tx);
+            await holdForTheQueue(tx, write, e.code, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed });
+          });
+          return stop(`The portal can't tell whether QuickBooks made ${said}: its answer didn't arrive. The roster is read again within a few minutes to see, and the portal links ${said} then, without making it twice.`, true);
+        }
+        return stop(`QuickBooks couldn't take that just now, so ${said} wasn't made there. Try again in a few minutes.`);
+      case "not_connected": return stop(`${said} wasn't made in QuickBooks. ${WRITE_COPY.notConnected}`);
+      case "needs_admin": return stop(`${said} wasn't made in QuickBooks. ${WRITE_COPY.needsAdmin}`);
+      case "other_company": return stop(`${said} wasn't made in QuickBooks. ${WRITE_COPY.otherCompany}`);
+      default: return stop(e.code === "bad_id" ? `${said} couldn't be sent to QuickBooks, so it wasn't made there.` : `QuickBooks wouldn't make ${said}, so it isn't there. Check QuickBooks.`);
+    }
+  }
+  const { cached } = await applyWritten(write, answer, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed });
+  return { ok: true, cached, customerQboId: typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null };
+}
+
+/** What "Create in QuickBooks and link" answers: the result to show, and whether anything may have changed (the pages are then made again). */
+export type LinkAnswer = { result: WriteResult; changed: boolean };
+
+/**
+ * "Create in QuickBooks and link", on the page of an active family with no link, or whose active students include one
+ * with none (stage 3's slice 9d): `familyId` and, in flat books with several member types, the member type chosen, both
+ * from the page and checked again under the roster lock (prepareLink()). In this order, each through sendWrite() and
+ * applyWritten() with its own `roster.customer.create` row: the family's customer (today's create body), linked to the
+ * record as QuickBooks answers; then, only where the shape has a student type, each active student with no link, one
+ * by one in name order, with today's student create body (under the family's customer, billed with it), each filed
+ * under the family and that student and linked to the existing record (changeOwnRecord() makes none). The first step
+ * that doesn't go through stops it (sendCreateStep()); the answer says what was made, what wasn't and why; pressing
+ * again carries on with what is still unlinked. One audit row (`roster.family.created_in_quickbooks`), targeting the
+ * app's family, says how it went. Nothing is sent for a guardian.
+ */
+export async function createInQuickBooksAndLink(familyId: string, typeQboId: string | null, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<LinkAnswer> {
+  if (!isUuid(familyId)) return { result: refuse(WRITE_COPY.gone), changed: false };
+  // Its "being made" lock is held for the whole run (whileMaking()): a second press, or any change to the family, is
+  // refused meanwhile rather than slipping in while QuickBooks may be making a customer.
+  return (await whileMaking(asAppFamilyId(familyId.toLowerCase()), () => createAndLinkHolding(familyId, typeQboId, rosterTag, o)))
+    ?? { result: refuse(FAMILY_SENDING), changed: false };
+}
+
+/** createInQuickBooksAndLink()'s run, holding the family's "being made" lock. */
+async function createAndLinkHolding(familyId: string, typeQboId: string | null, rosterTag: string, o: WriteOp & { staffUserId: string }): Promise<LinkAnswer> {
+  const p = await prepareLink(familyId, typeQboId, rosterTag);
+  if (!p.ok) return { result: p.result, changed: false };
+  type Step = { kind: "family" | "student"; id: string };
+  const made: (Step & { customerQboId: string | null; name: string })[] = [];
+  const studentWords = (s: { name: string | null }) => recordNameWords(s.name, "student");
+  const summary = (outcome: "done" | "stopped", stopped: (Step & { code: string; maybe: boolean }) | null, notMade: string[]) =>
+    writeAudit({ actor: o.actor, action: "roster.family.created_in_quickbooks", permission: o.permission, ip: o.ip, targetType: "family", targetId: String(p.familyId),
+      after: { outcome, made: made.map((m) => ({ kind: m.kind, id: m.id, customerQboId: m.customerQboId })), notMade,
+        ...(stopped ? { stoppedAt: { kind: stopped.kind, id: stopped.id }, code: stopped.code.slice(0, 40), ...(stopped.maybe ? { maybe: true } : {}) } : {}) } });
+  /** Stopped at `at`, with the students from `from` on not made (the one stopped at among them, unless it may have been made). */
+  const stop = async (at: Step, from: number, code: string, words: string, maybe: boolean): Promise<LinkAnswer> => {
+    // The one stopped at may have been made (`maybe`): it is in neither list, the audit row's nor the words'.
+    const later = p.students.slice(from).filter((s) => !(maybe && at.kind === "student" && String(s.id) === at.id));
+    const notMade = [...(at.kind === "family" && !maybe ? [String(p.familyId)] : []), ...later.map((s) => String(s.id))];
+    await summary("stopped", { ...at, code, maybe }, notMade);
+    const notYet = later.map(studentWords);
+    return { changed: made.length > 0 || maybe, result: { ok: false, errors: [
+      made.length ? `Made in QuickBooks and linked: ${listed(made.map((m) => m.name))}.` : "Nothing was made in QuickBooks.",
+      words,
+      ...(notYet.length ? [`Not made in QuickBooks yet: ${listed(notYet)}.`] : []),
+      maybe ? "Once the roster has been read again, press “Create in QuickBooks and link” again to carry on with whatever is still unlinked."
+        : "Press “Create in QuickBooks and link” again to carry on with whatever is still unlinked.",
+    ] } };
+  };
+
+  let familyCustomer = p.familyCustomer;
+  const sentNames: string[] = [];
+  if (p.familyWrite) {
+    const at: Step = { kind: "family", id: String(p.familyId) };
+    const sent = await sendCreateStep(p.familyWrite, { familyId: p.familyId, studentId: null }, p.familyName, p.realmId, o);
+    if (!sent.ok) return stop(at, 0, sent.code, sent.words, sent.maybe);
+    if (!sent.cached || sent.customerQboId === null) {
+      // QuickBooks made it, but the portal couldn't take it in at once: it is held for the queue, which links it after
+      // the next roster read. Its students wait for that.
+      return stop(at, 0, "not_linked_yet", `QuickBooks made ${p.familyName}, but the portal links the two only after its next read of QuickBooks, usually within a few minutes.`, true);
+    }
+    made.push({ ...at, customerQboId: sent.customerQboId, name: p.familyName });
+    sentNames.push(p.familyWrite.name);
+    familyCustomer = sent.customerQboId;
+  }
+  for (const [i, s] of p.students.entries()) {
+    const at: Step = { kind: "student", id: String(s.id) };
+    const said = studentWords(s);
+    const name = checkName(s.name ?? "");
+    if (!name.ok) return stop(at, i, "bad_name", `${said} can't be made in QuickBooks under that name: ${name.error} Rename the student on this page first.`, false);
+    // A name QuickBooks' names hold already (the cache, a waiting create or rename, or one this run just sent) is met
+    // here, as prepare() meets it for any add, rather than sent to be refused, or to take a waiting rename's name.
+    const offer = freeName(name.name, [...p.taken, ...sentNames]);
+    if (offer) return stop(at, i, "name_taken", `“${name.name}” is already a name in QuickBooks, and every name there must be different, so ${said} wasn't made there. Rename them on this page, for instance to “${offer}”, then press “Create in QuickBooks and link” again.`, false);
+    const write: CreateWrite = { op: "create", role: "student", name: name.name, typeQboId: p.studentTypeId!, familyQboId: familyCustomer!, email: null };
+    const sent = await sendCreateStep(write, { familyId: p.familyId, studentId: s.id }, said, p.realmId, o);
+    if (!sent.ok) return stop(at, i, sent.code, sent.words, sent.maybe);
+    if (!sent.cached) return stop(at, i, "not_linked_yet", `QuickBooks made ${said}, but the portal links the two only after its next read of QuickBooks, usually within a few minutes.`, true);
+    made.push({ ...at, customerQboId: sent.customerQboId, name: said });
+    sentNames.push(write.name);
+  }
+  await summary("done", null, []);
+  return { changed: true, result: { ok: true, message: `Made in QuickBooks and linked: ${listed(made.map((m) => m.name))}.` } };
+}
+
+/* ---- An unlinked family's own changes, saved in the portal only (stage 3's slice 9d; spec section 5: "A change to an
+   unlinked family stays in the app"; "An unlinked family has no balance to check") ---- */
+
+/**
+ * What staff change on a family with no link, or on a student with no link of their own (one a stopped "Create in
+ * QuickBooks and link" left in a linked family), as the page sent it: the app's ids, each a uuid. Moving such a student,
+ * or anyone into such a family, is not one of them (slice 9e).
+ */
+export type PortalChange =
+  | { op: "add_student"; familyId: string; name: string }
+  | { op: "rename_family"; familyId: string; name: string }
+  | { op: "deactivate_family"; familyId: string }
+  | { op: "rename_student"; studentId: string; name: string }
+  | { op: "deactivate_student"; studentId: string };
+
+const INACTIVE_HERE = "That is inactive in the portal, so nothing was changed.";
+
+/**
+ * A change to an unlinked family, or to a student with no link, saved in the portal only: nothing is sent to QuickBooks
+ * and no balance is read (an unlinked record has none to check). Under the roster lock with the page's tag, on a page
+ * that has a roster; every id from the page is looked up under the lock. Refused, changing nothing: a record that is
+ * linked (that path stays QuickBooks first, then the record), an inactive one, one whose own create is waiting or stuck
+ * on the queue (familyCreateWaiting()), a name checkName() refuses or another active family holds. Each is audited in
+ * the same transaction: `roster.student.added`, `roster.record.renamed`, `roster.record.made_inactive` (a family goes
+ * with its active students, none of which may be linked).
+ */
+export async function changeInPortal(ask: PortalChange, rosterTag: string, o: WriteOp): Promise<WriteResult> {
+  return db.transaction(async (tx): Promise<WriteResult> => {
+    if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
+    const [shape, source, holds, other] = await Promise.all([getShape(tx), getRosterSource(tx), shapeHolds(tx), connectedToAnotherCompany(tx)]);
+    if (!shape || !holds || source === null || other) return refuse(WRITE_COPY.noRoster);
+    const noun = shape.kind === "flat" ? "member" : "family";
+    const audit = (action: string, targetType: "family" | "student", targetId: string, before: Record<string, unknown> | null, after: Record<string, unknown>) =>
+      writeAudit({ actor: o.actor, action, permission: o.permission, ip: o.ip, targetType, targetId, before, after: { ...after, quickbooks: "not_sent" } }, tx);
+
+    if (ask.op === "add_student" || ask.op === "rename_family" || ask.op === "deactivate_family") {
+      if (!isUuid(ask.familyId)) return refuse(WRITE_COPY.gone);
+      const [f] = await tx.select().from(family).where(eq(family.id, asAppFamilyId(ask.familyId.toLowerCase()))).for("update");
+      if (!f) return refuse(WRITE_COPY.gone);
+      if (!f.active) return refuse(INACTIVE_HERE);
+      if ((await familyLinkState(f.id, tx)).state !== "none") return refuse(LINKED_HERE);
+      const making = await familyCreateWaiting(tx, f.id);
+      if (making) return refuse(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
+      const familyName = recordNameWords(f.name, "family");
+      if (ask.op === "add_student") {
+        if (!offers(shape, "add_student")) return refuse(WRITE_COPY.notOffered);
+        const name = checkName(ask.name);
+        if (!name.ok) return refuse(name.error);
+        const [made] = await tx.insert(student).values({ familyId: f.id, name: name.name, active: true }).returning({ id: student.id });
+        await audit("roster.student.added", "student", String(made!.id), null, { studentId: String(made!.id), familyId: String(f.id), name: name.name });
+        return { ok: true, message: `${name.name} is added to ${familyName} in the portal.` };
+      }
+      if (ask.op === "rename_family") {
+        const name = checkName(ask.name);
+        if (!name.ok) return refuse(name.error);
+        if (f.name === name.name) return refuse(ALREADY_NAMED);
+        const others = await portalFamilyNames(tx, f.id);
+        if (nameIn(name.name, others)) return takenHere(name.name, freeName(name.name, others), noun);
+        await tx.update(family).set({ name: name.name, updatedAt: new Date() }).where(eq(family.id, f.id));
+        await audit("roster.record.renamed", "family", String(f.id), { name: f.name }, { kind: "family", familyId: String(f.id), name: name.name });
+        return { ok: true, message: `Renamed ${name.name} in the portal.` };
+      }
+      // Made inactive with its active students: none of them may be linked (each of those is made inactive in QuickBooks first).
+      const under = await tx.select({ id: student.id }).from(student).where(and(eq(student.familyId, f.id), eq(student.active, true))).for("update");
+      const links = await linksOf({ families: [], students: under.map((s) => s.id) }, tx);
+      if (under.some((s) => links.customerOfStudent.has(s.id))) {
+        return refuse(`A student of ${familyName} is linked to QuickBooks: make them inactive there first, from this page, then make the ${noun} inactive.`);
+      }
+      for (const s of under) if (await studentCreateWaiting(tx, s.id)) return refuse(STUDENT_WAITING);
+      const now = new Date();
+      if (under.length) await tx.update(student).set({ active: false, updatedAt: now }).where(inArray(student.id, under.map((s) => s.id)));
+      await tx.update(family).set({ active: false, updatedAt: now }).where(eq(family.id, f.id));
+      await audit("roster.record.made_inactive", "family", String(f.id), { active: true }, { kind: "family", familyId: String(f.id), students: under.map((s) => String(s.id)) });
+      return { ok: true, message: under.length ? `Made ${familyName} inactive in the portal, with ${under.length === 1 ? "its student" : `its ${under.length} students`}.` : `Made ${familyName} inactive in the portal.` };
+    }
+
+    if (!isUuid(ask.studentId)) return refuse(WRITE_COPY.gone);
+    const [s] = await tx.select().from(student).where(eq(student.id, asAppStudentId(ask.studentId.toLowerCase()))).for("update");
+    if (!s || s.familyId === null) return refuse(WRITE_COPY.gone);
+    if (!s.active) return refuse(INACTIVE_HERE);
+    const [f] = await tx.select({ active: family.active }).from(family).where(eq(family.id, s.familyId));
+    if (!f?.active) return refuse(INACTIVE_HERE);
+    if ((await customerOfStudent(s.id, tx)) !== null) return refuse(LINKED_HERE);
+    const making = await familyCreateWaiting(tx, s.familyId);
+    if (making) return refuse(making === "sending" ? FAMILY_SENDING : FAMILY_WAITING);
+    if (await studentCreateWaiting(tx, s.id)) return refuse(STUDENT_WAITING);
+    if (ask.op === "rename_student") {
+      const name = checkName(ask.name);
+      if (!name.ok) return refuse(name.error);
+      if (s.name === name.name) return refuse(ALREADY_NAMED);
+      await tx.update(student).set({ name: name.name, updatedAt: new Date() }).where(eq(student.id, s.id));
+      await audit("roster.record.renamed", "student", String(s.id), { name: s.name }, { kind: "student", studentId: String(s.id), familyId: String(s.familyId), name: name.name });
+      return { ok: true, message: `Renamed ${name.name} in the portal.` };
+    }
+    await tx.update(student).set({ active: false, updatedAt: new Date() }).where(eq(student.id, s.id));
+    await audit("roster.record.made_inactive", "student", String(s.id), { active: true }, { kind: "student", studentId: String(s.id), familyId: String(s.familyId) });
+    return { ok: true, message: `Made ${recordNameWords(s.name, "student")} inactive in the portal.` };
+  });
+}
+
+/** The family records whose own create is waiting or stuck on the queue (familyCreateWaiting(), for many at once): for the Families list's words. */
+export async function familiesBeingMade(): Promise<Set<string>> {
+  const rows = await db.select({ familyId: writeQueue.familyId }).from(writeQueue).where(and(inArray(writeQueue.state, ["waiting", "stuck"]), isFamilyCreate));
+  return new Set(rows.flatMap((r) => (r.familyId === null ? [] : [String(r.familyId)])));
+}
+
+/** Those of these students whose own create is waiting or stuck on the queue (studentCreateWaiting(), for many at once): for a family's page. */
+export async function studentsBeingMade(studentIds: AppStudentId[]): Promise<Set<string>> {
+  if (!studentIds.length) return new Set();
+  const rows = await db.select({ studentId: writeQueue.studentId }).from(writeQueue)
+    .where(and(inArray(writeQueue.studentId, studentIds), inArray(writeQueue.state, ["waiting", "stuck"]), isStudentCreate));
+  return new Set(rows.flatMap((r) => (r.studentId === null ? [] : [String(r.studentId)])));
 }

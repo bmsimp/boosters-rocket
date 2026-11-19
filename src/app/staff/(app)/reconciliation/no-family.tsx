@@ -38,7 +38,8 @@ export async function CustomersWithNoFamily({ mayChangeFamilies }: { mayChangeFa
   }));
   return (
     <section className="box" aria-labelledby="no-family-h"><h2 id="no-family-h">Customers with no family{rows.length ? ` (${rows.length})` : ""}</h2>
-      <p>Customers QuickBooks lists as a family that no family in the portal is linked to: one added in QuickBooks since the portal&apos;s families were set up, say.
+      <p>The active customers QuickBooks lists as a family at the top level, under no other customer, that no family in the portal is linked to: one added in QuickBooks since the portal&apos;s families were set up, say.
+        A customer a family&apos;s waiting or stuck change on this page would be found as is left out until that change goes through or is given up. An inactive family customer isn&apos;t offered.
         Creating a family from one makes the family and its students in the portal, linked to their customers, so its invoices show to its guardians.
         {` It makes no guardian and gives nobody a sign-in: ${mayChangeFamilies ? "add its guardians" : "someone who may change families adds its guardians"} on the family's page, under Families. Nothing is sent to QuickBooks.`}</p>
       {list.state !== "listed" ? <Notice tone="warning" live="none">{WHY_NONE[list.state]}</Notice> : <NoFamilyRows rows={rows} />}

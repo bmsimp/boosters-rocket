@@ -8,7 +8,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { and, asc, count, eq, isNotNull, isNull, lte, min, or, sql } from "drizzle-orm";
-import { db } from "@/lib/db/client";
+import { db, type Tx } from "@/lib/db/client";
 import {
   family, formWithdrawal, requirement, season, seasonStep, signatureConsent, signatureRequest, signedFormEvidence, signedFormFile,
   type EvidenceConsent, type EvidenceOriginal, type EvidenceSigner,
@@ -19,6 +19,7 @@ import {
   type DocumensoConfig,
 } from "@/lib/documenso/client";
 import { getRosterSource } from "@/lib/roster/source";
+import { ROSTER_LOCK } from "@/lib/roster/shape";
 import { FORMS_WORKER, requestRecords, type FormsFailure } from "@/lib/forms/requests";
 import { customerOfFamily, customerOfStudent, recordsCompany } from "@/lib/families/links";
 import { readDocument } from "@/lib/forms/states";
@@ -72,8 +73,8 @@ async function fetchEvidence(config: DocumensoConfig, row: RequestRow): Promise<
  * no company at all (the roster names none: a club with no accounting system), and a record with no link is no reason
  * to wait.
  */
-async function linksReadable(): Promise<{ readable: false } | { readable: true; realmId: string | null }> {
-  const [source, company] = await Promise.all([getRosterSource(), recordsCompany()]);
+async function linksReadable(tx?: Tx): Promise<{ readable: false } | { readable: true; realmId: string | null }> {
+  const [source, company] = await Promise.all([getRosterSource(tx), recordsCompany(tx)]);
   if (source !== null && company !== source) return { readable: false };
   return { readable: true, realmId: source };
 }
@@ -86,21 +87,22 @@ type Names = { formTitle: string; seasonName: string | null; familyName: string 
  * the roster's company, which the evidence keeps as its own copies of whose form it was (family_qbo_id,
  * subject_qbo_id), each null when that record has no link; with them the company (realm_id), kept only with the
  * family's copy. A QuickBooks id is never kept without its company, so a family with no link keeps no copy at all,
- * whatever its student's link. Throws EvidenceNotStored("other_company") when the links can't be read, before the
- * lookups or after them (the connection changed while they ran).
+ * whatever its student's link. Read in the store's own transaction, which holds the roster lock shared (storeEvidence()):
+ * every write of a link holds it exclusively (a staff roster write's changeOwnRecord() under lockRosterAs(), "Create a
+ * family from this" and "Create in QuickBooks and link", the change of company's clear), so a link made at that moment
+ * is either in these copies or made after the evidence is kept, never missed or half-seen. Throws
+ * EvidenceNotStored("other_company") when the links can't be read.
  */
-async function namesOf(row: RequestRow): Promise<Names> {
-  const before = await linksReadable();
-  if (!before.readable) throw new EvidenceNotStored("other_company");
-  const [r] = await db.select({ title: requirement.title, seasonName: season.name }).from(requirement)
+async function namesOf(tx: Tx, row: RequestRow): Promise<Names> {
+  const links = await linksReadable(tx);
+  if (!links.readable) throw new EvidenceNotStored("other_company");
+  const [r] = await tx.select({ title: requirement.title, seasonName: season.name }).from(requirement)
     .innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId)).where(eq(requirement.id, row.requirementId));
-  const [mine] = await db.select({ name: family.name }).from(family).where(eq(family.id, row.familyId));
-  const familyQboId = before.realmId === null ? null : await customerOfFamily(row.familyId);
-  const subjectQboId = familyQboId === null ? null : row.studentId === null ? familyQboId : await customerOfStudent(row.studentId);
-  const after = await linksReadable();
-  if (!after.readable || after.realmId !== before.realmId) throw new EvidenceNotStored("other_company");
+  const [mine] = await tx.select({ name: family.name }).from(family).where(eq(family.id, row.familyId));
+  const familyQboId = links.realmId === null ? null : await customerOfFamily(row.familyId, tx);
+  const subjectQboId = familyQboId === null ? null : row.studentId === null ? familyQboId : await customerOfStudent(row.studentId, tx);
   return { formTitle: r?.title ?? "Form", seasonName: r?.seasonName ?? null, familyName: mine?.name ?? null, subjectKind: row.studentId === null ? "family" : "student",
-    realmId: familyQboId === null ? null : before.realmId, familyQboId, subjectQboId };
+    realmId: familyQboId === null ? null : links.realmId, familyQboId, subjectQboId };
 }
 
 const shown = (f: Pick<Fetched, "kind" | "position" | "sha256"> & { size: number }) => ({ kind: f.kind, position: f.position, sha256: f.sha256, size: f.size });
@@ -127,12 +129,15 @@ export class EvidenceNotStored extends Error {
  * page. The certificate and the audit log PDF are made afresh by Documenso at each download, so theirs are not compared.
  */
 export async function storeEvidence(row: RequestRow, got: Evidence, at: Date = new Date()): Promise<StoreOutcome> {
-  const names = await namesOf(row);
   const consents = await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, row.id)).orderBy(asc(signatureConsent.agreedAt));
-  // The company and the customers as they are now (namesOf() throws while the links can't be read; runEvidenceJob()
-  // checks that before fetching anything, and this is the last word). Null with no link: never filled in later.
-  const realmId = names.realmId;
   return db.transaction(async (tx): Promise<StoreOutcome> => {
+    // The roster lock, shared, before the request row: the order a move's follow-ups take (under the roster lock, then
+    // the requests), so the two never deadlock; and no link is written while it is held (namesOf()).
+    await tx.execute(sql`select pg_advisory_xact_lock_shared(${ROSTER_LOCK})`);
+    // The company and the customers as they are now (namesOf() throws while the links can't be read; runEvidenceJob()
+    // checks that before fetching anything, and this is the last word). Null with no link: never filled in later.
+    const names = await namesOf(tx, row);
+    const realmId = names.realmId;
     const [current] = await tx.select().from(signatureRequest).where(eq(signatureRequest.id, row.id)).for("update");
     if (!current || current.state !== "complete" || current.envelopeId !== row.envelopeId) return "gone";
     // Moved to another family while this was fetched: its names and customers are read again on the next try.

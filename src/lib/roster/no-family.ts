@@ -3,9 +3,9 @@
 // from this", the way in for one such customer at a time. Stage 4's mapping screen brings the reviewed import of many.
 // The list reads every customer of the roster cache, so this module is staff code only, never imported by a parent page
 // (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { qboCustomer } from "@/lib/db/schema";
+import { qboCustomer, writeQueue, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { connectedToAnotherCompany, familyLinkedTo, linksOfCustomers } from "@/lib/families/links";
 import { importRecordsFromRoster } from "@/lib/families/roster-import";
@@ -13,6 +13,7 @@ import { isQboId } from "@/lib/quickbooks/client";
 import { buildRoster, type Cust } from "./model";
 import { getShape, ROSTER_LOCK, shapeHolds } from "./shape";
 import { getRosterSource } from "./source";
+import { beforeResend } from "./write-rules";
 
 /**
  * One customer no family is linked to, as Reconciliation lists it: its name (QuickBooks text, shown as text only) and
@@ -34,7 +35,12 @@ export type NoFamilyList = { state: "listed"; customers: NoFamilyCustomer[] } | 
  * books, a member in flat books, as the roster lists them: buildRoster()), active in QuickBooks, not under another
  * customer, of the roster's own company (the cache holds no other), that have no family link in that company; by name,
  * as the roster lists them. The students under each are those the roster lists under it, active or not, which are the
- * ones the import makes records of (src/lib/families/plan.ts). Reads every customer: staff only.
+ * ones the import makes records of (src/lib/families/plan.ts). A customer a waiting or stuck family's create would be
+ * found as (beforeResend(): the same name, under nobody, of the same type) is left out too (stage 3's slice 9d): a
+ * waiting one is about to be linked to the family the portal saved first, so nobody makes a second family of it; a
+ * stuck one is tried only when staff ask, so its customer stays off the list until they try it again or give it up.
+ * A given-up one is never linked: its customer is listed (Reconciliation says why: madeAfterGivingUp()). Reads every
+ * customer: staff only.
  */
 export async function customersWithNoFamily(tx?: Tx): Promise<NoFamilyList> {
   if ((await getRosterSource(tx)) === null) return { state: "no_company" };
@@ -46,7 +52,12 @@ export async function customersWithNoFamily(tx?: Tx): Promise<NoFamilyList> {
   const roster = buildRoster(shape, customers);
   const listed: { customer: Cust; students: Cust[] }[] = roster.kind === "flat"
     ? roster.members.map((m) => ({ customer: m, students: [] })) : roster.families.map((f) => ({ customer: f.customer, students: f.students }));
-  const families = listed.filter((f) => f.customer.active && f.customer.parentQboId === null);
+  const creates = (await (tx ?? db).select({ request: writeQueue.request }).from(writeQueue)
+    .where(and(inArray(writeQueue.state, ["waiting", "stuck"]), sql`${writeQueue.request}->>'op' = 'create'`, sql`${writeQueue.request}->>'role' in ('family', 'member')`)))
+    .map((r) => r.request as RosterWrite);
+  const cached = customers.map((c) => ({ ...c, syncToken: "" }));
+  const aboutToBeLinked = new Set(creates.flatMap((w) => { const seen = beforeResend(w, cached); return seen.is === "done" ? [seen.qboId] : []; }));
+  const families = listed.filter((f) => f.customer.active && f.customer.parentQboId === null && !aboutToBeLinked.has(f.customer.qboId));
   const links = await linksOfCustomers({ families: families.map((f) => f.customer.qboId), students: families.flatMap((f) => f.students.map((s) => s.qboId)) }, tx);
   return {
     state: "listed",

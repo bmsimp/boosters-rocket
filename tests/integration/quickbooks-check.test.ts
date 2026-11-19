@@ -120,7 +120,7 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     expect(theirs).toHaveLength(4);
     expect(theirs.every((c) => !c.active && c.displayName.startsWith("Booster Rocket check"))).toBe(true);
     const links = await db.select().from(guardian);
-    expect(links.filter((g) => ids.includes(g.familyQboId) || ids.includes(g.sourceQboId ?? ""))).toEqual([]);
+    expect(links.filter((g) => ids.includes(g.familyQboId ?? "") || ids.includes(g.sourceQboId ?? ""))).toEqual([]);
   });
 
   it("checks pass links, empty answers and the list form without a write when the writes are off", async () => {

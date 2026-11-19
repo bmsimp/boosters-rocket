@@ -205,6 +205,14 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
     who can see Balances), saying it must be paid or written off in QuickBooks first. Void the invoice in QuickBooks,
     confirm again: the student and the parent, then the family, are inactive in QuickBooks, and the family's parents
     can no longer sign in. **If not:** note what the page said and what QuickBooks shows for each.
+13. **A family added in the portal.** As an Admin (who may link families to accounting), on the Roster page use
+    **Make a family** for a test family. Then, signed in as a staff member whose role may change families but not link
+    them, make a second test family, give it a student on its page, and add a test guardian. Then, as the Admin, open
+    the second family's page and press **Create in QuickBooks and link**.
+    **Pass:** the first family is in QuickBooks once, and its Roster row says it is linked. The second says, when it
+    is made, that nothing was sent to QuickBooks; it is listed as not linked, QuickBooks doesn't have it, and its
+    guardian can sign in to it. After **Create in QuickBooks and link**, QuickBooks has the family once with the
+    student under it, and both rows say linked. **If not:** note what each page said and what QuickBooks shows.
 
 ## 3. Real phones
 
@@ -418,7 +426,9 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
    line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
    customer into the portal's own families by itself. On **Reconciliation**, **Customers with no family** lists the
-   family customers of the real books; **Create a family from this** brings each in, with its students, linked to
+   active family customers of the real books at the top level (under no other customer); a family that is inactive in
+   QuickBooks, or sits under another customer there, isn't offered, so make it active, or move it to the top level, in
+   QuickBooks first; **Create a family from this** brings each in, with its students, linked to
    their customers. Bring in the pilot families this way, then add their guardians on each family's page, and check
    each family's page shows its students. Making a family reads none of its money: on **Balances** press **Read every
    family now** (or wait for the next daily read), then check the Balances page shows each pilot family's money. The

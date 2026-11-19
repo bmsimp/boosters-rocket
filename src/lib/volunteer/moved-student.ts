@@ -5,7 +5,7 @@
 // its credit there, and the new family takes nothing over. The staff move names the move by QuickBooks ids; sign-ups
 // name the app's own family and student (stage 2 of the app-owned families spec), so the move is turned into those
 // records here, through their links in the records' company: a boundary AGENTS.md lists, until the order of a staff
-// write flips (stage 3's slice 9d).
+// write flips (stage 3's slice 9e).
 import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";

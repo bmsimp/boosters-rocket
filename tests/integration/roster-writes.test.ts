@@ -12,7 +12,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, auditLog, family, guardian, parent, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { askFamilyInactive, askRosterWrite, familyCover, familyHereWords, REFRESH_ASK_KEY, WRITE_COPY } from "@/lib/roster/writes";
+import { addFamily, askFamilyInactive, askRosterWrite, familyCover, familyHereWords, REFRESH_ASK_KEY, WRITE_COPY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { NOT_HERE } from "@/lib/roster/operations";
@@ -55,6 +55,12 @@ const shownFor = async (familyQboId: string): Promise<[string, string][]> => {
   const c = (await familyCover(familyQboId))!;
   return [[c.family.qboId, c.family.syncToken], ...c.under.map((u): [string, string] => [u.qboId, u.syncToken])];
 };
+/**
+ * A family (layered books) or member (flat books) added as the Families list adds one (stage 3's slice 9d): the portal's
+ * own record first, then sent to QuickBooks, by a staff member who may link families to accounting.
+ */
+const add = (role: "family" | "member", name: string, typeQboId: string | null = null) => addFamily({ role, name, typeQboId }, tag, { ...op, mayLink: true });
+const familyNamed = async (name: string) => (await db.select().from(family).where(eq(family.name, name)))[0];
 /** An open invoice on a customer, for what it owes. */
 const owes = (Id: string, customer: string, amount: number) => ({ Id, SyncToken: "0", CustomerRef: { value: customer }, TotalAmt: amount, Balance: amount });
 
@@ -62,8 +68,8 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
   beforeEach(async () => { tag = await connectRoster(stub); });
 
   it("makes a family: a customer of the family type, and nothing else, then the family is on the roster", async () => {
-    const r = await askRosterWrite({ op: "create", role: "family", name: " Okafor  Family ", familyQboId: null, email: null, typeQboId: null }, tag, op);
-    expect(r).toEqual({ ok: true, message: expect.stringContaining("QuickBooks has it") });
+    const r = await add("family", " Okafor  Family ");
+    expect(r).toEqual({ ok: true, message: "Okafor Family is saved in the portal, made in QuickBooks and linked to its new customer." });
     expect(sent()).toEqual([{ DisplayName: "Okafor Family", CustomerTypeRef: { value: "1" } }]);
     const made = stub.customers.find((c) => c.DisplayName === "Okafor Family")!;
     expect(await cached(made.Id as string)).toMatchObject({ displayName: "Okafor Family", typeQboId: "1", parentQboId: null, active: true, syncToken: "0" });
@@ -234,13 +240,17 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
   describe("layered books", () => {
     beforeEach(async () => { tag = await connectRoster(stub); });
 
-    it("a new family: an active record named as sent, linked to the customer QuickBooks made, as created by the staff member who asked", async () => {
-      await askRosterWrite({ op: "create", role: "family", name: " Okafor  Family ", familyQboId: null, email: null, typeQboId: null }, tag, op);
+    it("a new family: the record saved first, active and named as sent, linked to the customer QuickBooks made, as created by the staff member who asked", async () => {
+      await add("family", " Okafor  Family ");
       const made = stub.customers.find((c) => c.DisplayName === "Okafor Family")!;
       const [link] = await linkOf(made.Id as string);
       expect(link).toMatchObject({ system: "quickbooks", realmId: REALM, origin: "created", linkedBy: op.staffUserId, studentId: null, guardianId: null });
       expect(await familyRow(link!.familyId)).toMatchObject({ name: "Okafor Family", active: true });
-      expect((await auditsOf("roster.customer.create"))[0]!.after).toMatchObject({ appRecord: { kind: "family", familyId: String(link!.familyId), made: true, linkId: link!.id } });
+      // One record: the one saved first (stage 3's slice 9d), with its own audit row, then linked.
+      expect(await db.select().from(family).where(eq(family.name, "Okafor Family"))).toHaveLength(1);
+      expect((await auditsOf("roster.family.added"))[0]).toMatchObject({ targetType: "family", targetId: String(link!.familyId), permission: "Roster.Family.ReadWrite",
+        after: { familyId: String(link!.familyId), name: "Okafor Family", role: "family", quickbooks: "sending" } });
+      expect((await auditsOf("roster.customer.create"))[0]!.after).toMatchObject({ appRecord: { kind: "family", familyId: String(link!.familyId), linked: true, linkId: link!.id } });
       // What an import of the roster would make of it is what the write made.
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
     });
@@ -491,7 +501,7 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
     beforeEach(async () => { tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2", "3"] } }); });
 
     it("a new member: an active family record and its link, as created by the staff member", async () => {
-      await askRosterWrite({ op: "create", role: "member", name: "Okafor Household", familyQboId: null, email: null, typeQboId: "3" }, tag, op);
+      await add("member", "Okafor Household", "3");
       const made = stub.customers.find((c) => c.DisplayName === "Okafor Household")!;
       const [link] = await linkOf(made.Id as string);
       expect(link).toMatchObject({ origin: "created", linkedBy: op.staffUserId, studentId: null });
@@ -786,13 +796,16 @@ describe("names: a taken one is answered with a free one to offer, never by fail
   beforeEach(async () => { tag = await connectRoster(stub); });
 
   it("a name any customer has, inactive ones and those outside the portal too, is offered with a suffix, and nothing is sent", async () => {
+    const families = (await db.select().from(family)).length;
     for (const [name, offer] of [["rivera family", "rivera family (2)"], ["Old Family", "Old Family (2)"], ["Lincoln High", "Lincoln High (2)"]]) {
-      const r = await askRosterWrite({ op: "create", role: "family", name: name!, familyQboId: null, email: null, typeQboId: null }, tag, op);
+      const r = await add("family", name!);
       expect(r).toEqual({ ok: false, offer, errors: [expect.stringContaining(`You could use “${offer}”`)] });
     }
     expect(posts()).toEqual([]);
+    // Nothing was saved either: a name the portal can see is taken never leaves a family behind.
+    expect(await db.select().from(family)).toHaveLength(families);
     // Staff accept the offer: it is sent as it was offered.
-    expect((await askRosterWrite({ op: "create", role: "family", name: "Old Family (2)", familyQboId: null, email: null, typeQboId: null }, tag, op)).ok).toBe(true);
+    expect((await add("family", "Old Family (2)")).ok).toBe(true);
     expect(sent()).toEqual([{ DisplayName: "Old Family (2)", CustomerTypeRef: { value: "1" } }]);
   });
 
@@ -809,10 +822,16 @@ describe("names: a taken one is answered with a free one to offer, never by fail
 
   it("a name QuickBooks still refuses as taken (a vendor or employee has it, 6240) is offered with the next suffix", async () => {
     stub.otherNames = ["Quinn Family"];
-    const r = await askRosterWrite({ op: "create", role: "family", name: "Quinn Family", familyQboId: null, email: null, typeQboId: null }, tag, op);
-    expect(r).toEqual({ ok: false, offer: "Quinn Family (2)", errors: [expect.stringContaining("Quinn Family (2)")] });
+    const r = await add("family", "Quinn Family");
+    // The family is saved in the portal first: it stays, unlinked, and the answer says so, offering the free name to
+    // rename it to before "Create in QuickBooks and link" (stage 3's slice 9d).
+    expect(r).toEqual({ ok: true, unlinked: true, message: expect.stringContaining("Rename the family on its page, for instance to “Quinn Family (2)”") });
+    expect(r).not.toHaveProperty("offer");
     expect(await queue()).toEqual([]);
     expect((await auditsOf("roster.write.refused"))[0]!.after).toMatchObject({ op: "create", code: "fault_6240" });
+    const quinn = await familyNamed("Quinn Family");
+    expect(quinn).toMatchObject({ active: true });
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.familyId, quinn!.id))).toEqual([]);
   });
 
   it("a name with a colon, a tab or a line break, or too long, is refused before anything is sent", async () => {
@@ -893,13 +912,14 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     stub.onApiRequest = (c) => { if (c.method === "POST") { stub.failNext = 1; stub.onApiRequest = null; } };
     expect((await askRosterWrite({ op: "deactivate", qboId: "21", syncToken: "0" }, tag, op))).toMatchObject({ ok: true, queued: true });
     stub.rateLimitNext = 1;
-    expect((await askRosterWrite({ op: "create", role: "family", name: "Patel Family", familyQboId: null, email: null, typeQboId: null }, tag, op))).toMatchObject({ ok: true, queued: true });
+    expect(await add("family", "Patel Family")).toMatchObject({ ok: true, queued: true });
     const items = await queue();
     expect(items.map((i) => [i.request.op, i.sent, i.lastCode])).toEqual([["rename", true, "unreachable"], ["deactivate", true, "http_500"], ["create", false, "http_429"]]);
     // Each filed under the app's records it is for: Leo and his family; Mei's family (a parent has no record of her own);
-    // nothing for a new family, whose record is made once QuickBooks answers.
+    // the new family's own record, saved first (stage 3's slice 9d).
     const [rivera, chen, leo] = [await recordOfCustomer("10", "family"), await recordOfCustomer("20", "family"), await recordOfCustomer("12", "student")];
-    expect(items.map((i) => [i.request.op, i.familyId, i.studentId])).toEqual([["rename", rivera, leo], ["deactivate", chen, null], ["create", null, null]]);
+    const patel = (await familyNamed("Patel Family"))!.id;
+    expect(items.map((i) => [i.request.op, i.familyId, i.studentId])).toEqual([["rename", rivera, leo], ["deactivate", chen, null], ["create", patel, null]]);
   });
 
   it("a connection row held elsewhere while the token needs renewing is busy: queued as not sent, and the staff member never waits for it", async () => {
@@ -988,13 +1008,13 @@ describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
 
   it("flat with several member types: a member is made with the type staff chose, and must be one", async () => {
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2", "3"] } });
-    expect(await askRosterWrite({ op: "create", role: "member", name: "Sky Lee", familyQboId: null, email: null, typeQboId: null }, tag, op))
-      .toEqual({ ok: false, errors: ["Choose which kind of member this is."] });
-    expect(await askRosterWrite({ op: "create", role: "member", name: "Sky Lee", familyQboId: null, email: null, typeQboId: "1" }, tag, op))
-      .toEqual({ ok: false, errors: ["Choose which kind of member this is."] });
-    expect((await askRosterWrite({ op: "create", role: "member", name: "Sky Lee", familyQboId: null, email: null, typeQboId: "3" }, tag, op)).ok).toBe(true);
+    expect(await add("member", "Sky Lee")).toEqual({ ok: false, errors: ["Choose which kind of member this is."] });
+    expect(await add("member", "Sky Lee", "1")).toEqual({ ok: false, errors: ["Choose which kind of member this is."] });
+    expect((await add("member", "Sky Lee", "3")).ok).toBe(true);
     expect(sent()).toEqual([{ DisplayName: "Sky Lee", CustomerTypeRef: { value: "3" } }]);
-    expect(await askRosterWrite({ op: "create", role: "family", name: "Lee Family", familyQboId: null, email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
+    expect(await add("family", "Lee Family")).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
+    // A family's or member's create is never sent QuickBooks first any more: only for the record saved first.
+    expect(await askRosterWrite({ op: "create", role: "member", name: "Lee Household", familyQboId: null, email: null, typeQboId: "3" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
     expect(await askRosterWrite({ op: "create", role: "student", name: "Kim", familyQboId: "11", email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
     // A member is renamed and made inactive like anyone.
     expect((await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana R. Rivera" }, tag, op)).ok).toBe(true);
@@ -1004,7 +1024,7 @@ describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
 
   it("flat with one member type: that type, without asking", async () => {
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2"] } });
-    expect((await askRosterWrite({ op: "create", role: "member", name: "Sky Lee", familyQboId: null, email: null, typeQboId: null }, tag, op)).ok).toBe(true);
+    expect((await add("member", "Sky Lee")).ok).toBe(true);
     expect(sent()).toEqual([{ DisplayName: "Sky Lee", CustomerTypeRef: { value: "2" } }]);
   });
 

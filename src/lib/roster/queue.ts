@@ -2,9 +2,9 @@
 // take later are tried again here by the worker, carefully: one that QuickBooks may already have made is never simply
 // sent again. Its rules are pure, in ./write-rules.ts; the send and what follows it are ./writes.ts's.
 import "server-only";
-import { and, asc, desc, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { buyout, jobRun, qboCustomer, setting, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
+import { buyout, family, jobRun, qboCustomer, setting, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
@@ -12,11 +12,11 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { afterStudentMoved, applyWritten, changeOwnRecord, owedBy, REFRESH_ASK_KEY, sendWrite, type OwnRecordChange } from "./writes";
+import { afterStudentMoved, applyWritten, changeOwnRecord, madeAfterGivingUp, owedBy, REFRESH_ASK_KEY, sendWrite, type MadeAfterGivingUp, type OwnRecordChange } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
-import { customerOfFamily, linksOf } from "@/lib/families/links";
+import { customerOfFamily, familyLinkedTo, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 
 export const WRITE_QUEUE_JOB = "roster.write_queue";
@@ -54,7 +54,8 @@ async function claim(id: string, now: Date): Promise<Item | null> {
 const short = (code: string) => code.slice(0, 40);
 
 /**
- * One state change of an item, with its audit row, in one transaction. A row a company change deleted is left gone.
+ * One state change of an item, with its audit row, in one transaction, only while it is still waiting: one staff gave
+ * up while its try was under way stays given up, whatever the try came to. A row a company change deleted is left gone.
  * `triedAt` is when this try sent the write (or looked for it): a refresh that started before it may not show it.
  * `resultQboId`: the customer a create was found made as, kept so that it is never sent again (tryItem()).
  */
@@ -62,7 +63,7 @@ async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string
   await db.transaction(async (tx) => {
     const [still] = await tx.update(writeQueue).set({ state: to.state, lastCode: short(to.code), sent: to.sent, tries: item.tries + 1, lastTriedAt: triedAt,
       nextTryAt: to.state === "waiting" ? to.nextTryAt! : null, ...(to.resultQboId ? { resultQboId: to.resultQboId } : {}), updatedAt: new Date() })
-      .where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
+      .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: WORKER_ACTOR, action: to.state === "stuck" ? "roster.write.stuck" : "roster.write.retry", targetType: "write_queue", targetId: item.id,
       before: { state: item.state, tries: item.tries, code: item.lastCode }, after: { state: to.state, tries: item.tries + 1, code: short(to.code), sent: to.sent } }, tx);
@@ -70,12 +71,12 @@ async function settle(item: Item, to: { state: "stuck" | "waiting"; code: string
   return to.state;
 }
 
-/** Marks an item done, audited, in the transaction given (or one of its own), with the app record a found change made or changed. */
+/** Marks an item done, audited, in the transaction given (or one of its own), with the app record a found change made or changed: only while it is still waiting (settle()). */
 async function markDone(item: Item, how: "sent" | "found", resultQboId: string | null, tries: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0],
   appRecord: OwnRecordChange | null = null): Promise<void> {
   const run = async (t: NonNullable<typeof tx>) => {
     const [still] = await t.update(writeQueue).set({ state: "done", resultQboId, tries, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
-      .where(eq(writeQueue.id, item.id)).returning({ id: writeQueue.id });
+      .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
     if (!still) return;
     await writeAudit({ actor: WORKER_ACTOR, action: "roster.write.done", targetType: "write_queue", targetId: item.id,
       before: { state: item.state, tries: item.tries }, after: { state: "done", how, tries, ...(resultQboId ? { resultQboId } : {}), ...(appRecord ? { appRecord } : {}) } }, t);
@@ -100,7 +101,7 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
   if (item.sent) {
     if (!refreshedAt || refreshedAt <= item.lastTriedAt) {
       // No roster read since the last try: leave it for the next wake, when one will have run.
-      await db.update(writeQueue).set({ nextTryAt: now, updatedAt: new Date() }).where(eq(writeQueue.id, item.id));
+      await db.update(writeQueue).set({ nextTryAt: now, updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting")));
       return "skipped";
     }
     const cache = await db.select().from(qboCustomer);
@@ -127,6 +128,15 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
   let answer: Record<string, unknown>;
   // The time of the send itself, not the wake's: the check before a later resend needs a refresh that began after it.
   const triedAt = new Date();
+  // A create is marked as maybe sent, at the time of this send, before it goes (as a buy-out's is): staff who give the
+  // item up while it is on its way leave it `sent`, so "Create in QuickBooks and link" waits for a roster read that shows
+  // whether QuickBooks made it (givenUpMaybeMade() in ./writes.ts) rather than taking it for one that never left. One
+  // given up before this point is not sent. A failure that surely sent nothing puts `sent` back as it was.
+  if (w.op === "create") {
+    const [still] = await db.update(writeQueue).set({ sent: true, lastTriedAt: triedAt, updatedAt: new Date() })
+      .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
+    if (!still) return "skipped";
+  }
   try {
     answer = await sendWrite(w, item.realmId, { mayWait: true });
   } catch (e) {
@@ -152,20 +162,49 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
  * roster lock while the cache is still the item's company; the guardians whose places were given up are told after
  * the commit. `qboId` is the customer it was found as: the one a create made.
  */
-async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<void> {
+type Found = "done" | typeof CUSTOMER_HAS_FAMILY | typeof FAMILY_HAS_CUSTOMER;
+async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Found> {
   let tell: (() => Promise<unknown>) | null = null;
-  await db.transaction(async (tx) => {
+  const how = await db.transaction(async (tx): Promise<Found> => {
     let appRecord: OwnRecordChange | null = null;
-    if (await lockRosterAs(tx, rosterTagOf(item.realmId))) {
+    // Given up while this look was under way: it stays given up, nothing linked, and a create keeps the customer it was
+    // found as, for the Reconciliation page (madeAfterGivingUp()). Read FOR UPDATE, so a give-up waits for this look.
+    // The roster lock first, then the item, in the order applyWritten() takes them.
+    const ours = await lockRosterAs(tx, rosterTagOf(item.realmId));
+    const [now] = await tx.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, item.id)).for("update");
+    if (now && now.state !== "waiting") {
+      // The customer it was found as is kept, and audited in the same transaction; an item that has one already changes nothing.
+      if (w.op === "create") {
+        const [kept] = await tx.update(writeQueue).set({ resultQboId: qboId, updatedAt: new Date() })
+          .where(and(eq(writeQueue.id, item.id), isNull(writeQueue.resultQboId))).returning({ id: writeQueue.id });
+        if (kept) {
+          await writeAudit({ actor: WORKER_ACTOR, action: "roster.write.found_after_giving_up", targetType: "write_queue", targetId: item.id,
+            before: { state: now.state }, after: { state: now.state, resultQboId: qboId, linked: false } }, tx);
+        }
+      }
+      return "done";
+    }
+    if (ours) {
+      // A family's own create (stage 3's slice 9d), found made as a customer another family is linked to already (made
+      // a family of on Reconciliation meanwhile, say), or with its own family linked to another customer meanwhile: no
+      // second link is made, on either side, and the item is left for staff.
+      if (w.op === "create" && (w.role === "family" || w.role === "member") && item.familyId !== null) {
+        const holder = await familyLinkedTo(qboId, tx);
+        if (holder !== null && String(holder) !== String(item.familyId)) return CUSTOMER_HAS_FAMILY;
+        const own = await customerOfFamily(item.familyId, tx);
+        if (own !== null && own !== qboId) return FAMILY_HAS_CUSTOMER;
+      }
       if (w.op === "move") {
         ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
           { actor: WORKER_ACTOR, ip: null }));
       }
-      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId });
+      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId, familyId: item.familyId });
     }
     await markDone(item, "found", qboId, item.tries, tx, appRecord);
+    return "done";
   });
   if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
+  return how;
 }
 
 /**
@@ -177,13 +216,21 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<voi
  * leads to its being sent again.
  */
 async function finishFound(item: Item, w: RosterWrite, qboId: string, now: Date): Promise<Step> {
+  let how: Found;
   try {
-    await foundDone(item, w, qboId);
-    return "done";
+    how = await foundDone(item, w, qboId);
   } catch {
     return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "finish_failed", sent: item.sent, ...(w.op === "create" ? { resultQboId: qboId } : {}) }, now);
   }
+  // QuickBooks made it, and another family is linked to that customer, or this family to another customer: stuck with
+  // its own code, never sent again (`result_qbo_id` keeps the customer), for staff to look at on Reconciliation.
+  if (how !== "done") return settle(item, { state: "stuck", code: how, sent: true, resultQboId: qboId }, now);
+  return "done";
 }
+/** The code of a family's create found made as a customer another family is linked to already (finishFound()). */
+export const CUSTOMER_HAS_FAMILY = "customer_has_family";
+/** The code of a family's create found made while the family it is filed under was linked to another customer meanwhile (finishFound()). */
+export const FAMILY_HAS_CUSTOMER = "family_has_customer";
 
 /**
  * The worker's share of the queue at one wake: a roster refresh first when one was asked for (a family made inactive)
@@ -223,13 +270,13 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
 
 /**
  * An item as the Reconciliation page and a family's page show it. `familyId` is the family record the item is filed
- * under, for the link to that family's page (addressed by the record's own id); null when it is filed under none (a new
- * family or member) or the record has no link in the roster's company.
+ * under, for the link to that family's page (addressed by the record's own id); null when it is filed under none (a
+ * create queued before slice 9d) or that page can't stand (an inactive record with no link).
  */
 export type QueueView = {
   id: string; state: "waiting" | "stuck"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null;
-  /** The family record it is filed under, for the link to that family's page: null when it has none, or that record no link in the roster's company (no page). */
+  /** The family record it is filed under, for the link to that family's page: null when it has none, or that record has no page (inactive, with no link). */
   familyId: AppFamilyId | null;
   /**
    * QuickBooks took it, but the portal couldn't take it in then: its transaction failed (`cache_failed`), QuickBooks
@@ -284,13 +331,32 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
   if (!rows.length) return [];
   const names = new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)).map((c) => [c.qboId, c.name]));
   const families = [...new Set(rows.map((r) => r.familyId).filter((f): f is AppFamilyId => f !== null))];
-  const links = await linksOf({ families, students: [] });
+  // A family's page stands for an active record, linked or not (stage 3's slice 9d), and for an inactive one the roster
+  // still lists through its link: an item is linked to its record's page whenever that page may stand.
+  const [links, active] = await Promise.all([linksOf({ families, students: [] }),
+    families.length ? db.select({ id: family.id }).from(family).where(and(inArray(family.id, families), eq(family.active, true))) : Promise.resolve([])]);
+  const withPage = new Set([...active.map((f) => String(f.id)), ...[...links.customerOfFamily.keys()].map(String)]);
   return rows.map((r) => ({
     id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
     lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
-    familyId: r.familyId !== null && links.customerOfFamily.has(r.familyId) ? r.familyId : null,
+    familyId: r.familyId !== null && withPage.has(String(r.familyId)) ? r.familyId : null,
     finishing: r.sent && r.lastCode !== null && FINISHING_CODES.has(r.lastCode),
   }));
+}
+
+/**
+ * The creates staff gave up that QuickBooks made all the same, each with no record linked to its customer
+ * (madeAfterGivingUp(), ./writes.ts), for the Reconciliation page to say so. `familyPage` is the family record it was
+ * filed under, for the link to that family's page, only while that record is active (its page stands).
+ */
+export type GivenUpMadeView = MadeAfterGivingUp & { familyPage: AppFamilyId | null };
+export async function loadMadeAfterGivingUp(): Promise<GivenUpMadeView[]> {
+  return db.transaction(async (tx) => {
+    const made = await madeAfterGivingUp(tx);
+    const families = [...new Set(made.flatMap((m) => (m.familyId === null ? [] : [m.familyId])))];
+    const active = new Set((families.length ? await tx.select({ id: family.id }).from(family).where(and(inArray(family.id, families), eq(family.active, true))) : []).map((f) => String(f.id)));
+    return made.map((m) => ({ ...m, familyPage: m.familyId !== null && active.has(String(m.familyId)) ? m.familyId : null }));
+  });
 }
 
 /** How many items are waiting, and how many are stuck, for the Health page. */
@@ -302,15 +368,23 @@ export async function queueCounts(): Promise<{ waiting: number; stuck: number }>
 export type QueueOp = { actor: Actor; ip: string | null; permission: string };
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const GONE: Done = { ok: false, errors: ["That is no longer waiting: it went through, or was given up. Reload the page."] };
+/** Why "Try again now" isn't offered on a family's create to a staff member who may not link families to accounting. */
+export const TRY_AGAIN_NEEDS_LINKING = "Trying this again makes the family in QuickBooks and links it to the portal's family, which takes the permission to link families to accounting. Someone who holds it can try it again.";
+/** A family's or member's create: trying it again makes a family's customer in QuickBooks and links it (tryAgainNow()). */
+export const isFamilyCreateItem = (w: QueuedWrite) => w.op === "create" && (w.role === "family" || w.role === "member");
 
 /**
  * "Try again now": a waiting or stuck item is tried at the worker's next wake, within a minute. A stuck one gets one more
  * try: if that fails too, it is stuck again. The worker does the try, so a staff member never waits on QuickBooks here.
+ * A family's or member's create (isFamilyCreateItem()) makes its customer in QuickBooks and links a family to it, so
+ * only a staff member who may link families to accounting (`mayLink`, Accounting.Link.ReadWrite: the lead's decision in
+ * stage 3's slice 9d) may ask for it, checked here under the item's row lock, as the page offers it.
  */
-export async function tryAgainNow(id: string, o: QueueOp): Promise<Done> {
+export async function tryAgainNow(id: string, o: QueueOp & { mayLink?: boolean }): Promise<Done> {
   return db.transaction(async (tx) => {
     const [item] = await tx.select().from(writeQueue).where(and(eq(writeQueue.id, id), inArray(writeQueue.state, ["waiting", "stuck"]))).for("update");
     if (!item) return GONE;
+    if (isFamilyCreateItem(item.request) && !o.mayLink) return { ok: false as const, errors: [TRY_AGAIN_NEEDS_LINKING] };
     const now = new Date();
     // A buy-out write whose first try, made at once for the guardian, may still be under way: trying it again now could
     // send it twice. It is the worker's once that try's hold runs out.
@@ -349,13 +423,32 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
   // copy of the roster after the next read, but the portal's own family or student keeps what it had, until staff bring
   // it into line from the family's page (a move or a make-inactive QuickBooks has already sends nothing there).
   return { ok: true as const, message: isBuyoutWrite(item.request) ? "Given up. Nothing more will be sent for it; if QuickBooks did make the change, the next roster refresh shows it."
-    : `Given up. Nothing more will be sent for it. If QuickBooks did make the change, the roster's copy of QuickBooks shows it after its next read, but the portal's own family or student stays as it was. ${GIVEN_UP_NEXT[item.request.op] ?? ""}`.trim() };
+    : `Given up. Nothing more will be sent for it. If QuickBooks did make the change, the roster's copy of QuickBooks shows it after its next read, but the portal's own family or student stays as it was. ${givenUpNext(item)}`.trim() };
 }
 
-/** What staff can do once a roster change QuickBooks may have made is given up, by what it was. */
+/**
+ * What staff can do next once a create is given up, by what it was made for: a family or member, or a student, the
+ * portal saved first (filed under its record: stage 3's slice 9d) stays in the portal unlinked; any other new customer
+ * (a student added to a linked family, a parent, a create queued before slice 9d) has no record in the portal.
+ */
+function givenUpNext(item: Item): string {
+  const w = item.request;
+  if (w.op !== "create") return GIVEN_UP_NEXT[w.op] ?? "";
+  // Given up, it is never linked, even when QuickBooks made it (the lead's decision in stage 3's slice 9d): after the
+  // next roster read this page lists a customer it made (madeAfterGivingUp()), and no second one is made for it.
+  const readFirst = "After the next roster read, this page says whether QuickBooks made its customer anyway: if it did, nothing is linked to it, and a second one isn't made";
+  if ((w.role === "family" || w.role === "member") && item.familyId !== null) {
+    return `The ${w.role} the portal saved first stays in the portal, unlinked. ${readFirst} (“Create a family from this” under Customers with no family brings it in); if it didn't, press “Create in QuickBooks and link” on the ${w.role}'s page.`;
+  }
+  if (w.role === "student" && item.studentId !== null) {
+    return `The student the portal saved first stays in the portal, unlinked. ${readFirst} (“Link the student to it” there links the student to it); if it didn't, press “Create in QuickBooks and link” on their family's page.`;
+  }
+  return "If QuickBooks made the new customer, it has no record in the portal: look for it in QuickBooks.";
+}
+
+/** What staff can do once a roster change QuickBooks may have made is given up, by what it was (a create: givenUpNext()). */
 const GIVEN_UP_NEXT: Partial<Record<QueuedWrite["op"], string>> = {
   move: "To bring the portal's own record into line, open the family's page and move the student to the family QuickBooks has them in: nothing is sent, and the record, forms and places follow. If that family isn't one of the portal's own, the page offers a move to one that is instead, which is sent to QuickBooks.",
   deactivate: "To bring the portal's own record into line, open the family's page and make them inactive there: nothing is sent when QuickBooks has them inactive already.",
   rename: "To bring the portal's own record into line, rename it on the family's page to the name QuickBooks has: nothing is sent.",
-  create: "A new customer QuickBooks made has no record in the portal: look for it in QuickBooks.",
 };

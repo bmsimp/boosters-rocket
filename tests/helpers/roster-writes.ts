@@ -71,7 +71,7 @@ export const asOp = (staff: { id: string; email: string }) => ({ actor: { door: 
  * names no record, as migration 0034 leaves one.
  */
 export async function seedQueued(w: RosterWrite, o: { sent?: boolean; state?: "waiting" | "stuck" | "done" | "given_up"; tries?: number; createdAt?: Date; lastTriedAt?: Date;
-  nextTryAt?: Date | null; familyQboId?: string | null; code?: string; finishedAt?: Date | null; realmId?: string } = {}) {
+  nextTryAt?: Date | null; familyQboId?: string | null; code?: string; finishedAt?: Date | null; realmId?: string; familyId?: AppFamilyId } = {}) {
   const now = new Date();
   const realmId = o.realmId ?? REALM;
   const ours = realmId === (await getRosterSource());
@@ -80,7 +80,8 @@ export async function seedQueued(w: RosterWrite, o: { sent?: boolean; state?: "w
     : w.role === "member" || w.role === "family" ? w.qboId
     : w.op === "move" ? w.fromFamilyQboId
     : ours ? await familyInCache(w.qboId) : null;
-  const familyId = ours && familyQboId !== null ? await familyRecord(familyQboId) : null;
+  // `familyId`: the record itself, for a family's create filed under the record saved first (stage 3's slice 9d).
+  const familyId = o.familyId ?? (ours && familyQboId !== null ? await familyRecord(familyQboId) : null);
   const studentId = ours && w.op !== "create" && w.role === "student" ? await studentRecord(w.qboId) : null;
   const [item] = await db.insert(writeQueue).values({
     realmId, request: w, targetQboId: w.op === "create" ? null : w.qboId, familyId, studentId,

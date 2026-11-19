@@ -66,7 +66,7 @@ describe("Needs attention", () => {
     const [unknown] = needsAttention(buildRoster(layered, tidy), layered, [noRecord]);
     expect(unknown).toEqual({ rule: "signin_unknown", qboId: null, name: "P", detail: "This portal sign-in isn't attached to any family the portal keeps." });
     expect(rules(tidy, layered, [{ ...noRecord, status: "disabled" }])).toEqual([]);
-    // A family the app keeps with no QuickBooks customer (none exists until families are made in the portal) is nothing to tidy in QuickBooks.
+    // A family the app keeps with no QuickBooks customer (as staff add one since stage 3's slice 9d) is nothing to tidy in QuickBooks.
     expect(rules(tidy, layered, [{ ...signIn("10"), customerQboId: null }])).toEqual([]);
   });
   // Nobody can enter an inactive family (the gate), and nothing closes its rows any more, so its open sign-ins ask

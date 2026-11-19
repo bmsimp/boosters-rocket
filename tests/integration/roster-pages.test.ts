@@ -96,9 +96,9 @@ describe("the roster pages", () => {
     expect(html.indexOf("Chen Family")).toBeLessThan(html.indexOf("Rivera Family"));
     expect(html).toContain(`href="/staff/roster/${await idOf("10")}"`);
     expect(html).not.toContain('href="/staff/roster/10"'); // never by its customer
-    // A row each: the family, its students and parents, and whether QuickBooks has it active.
-    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Active"]);
-    expect(rowNamed(html, "Old Family")).toEqual(["Old Family", "0", "0", "Inactive"]);
+    // A row each: the family, its students and parents, and whether it is linked to QuickBooks and active there (stage 3's slice 9d).
+    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Linked: active"]);
+    expect(rowNamed(html, "Old Family")).toEqual(["Old Family", "0", "0", "Linked: inactive"]);
     expect(html).not.toContain("Lincoln High");
     expect(html).not.toContain("ana@example.com"); // contact details are on the family's own page
     expect(html).toContain("3 families, 1 student, 2 parents; 2 customers outside the portal");
@@ -109,7 +109,7 @@ describe("the roster pages", () => {
     const html = await list("RIVER");
     expect(html).toContain("Rivera Family");
     expect(rowNamed(html, "Chen Family")).toEqual(["Chen Family", expect.any(String)]); // only in Needs attention, which is not filtered
-    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Active"]);
+    expect(rowNamed(html, "Rivera Family")).toEqual(["Rivera Family", "1", "1", "Linked: active"]);
     expect(await list("%")).toContain("No family matches");
     expect(await list("_")).toContain("No family matches"); // not a one-character wildcard
     expect(await list("Rivera' or '1'='1")).toContain("No family matches");

@@ -50,8 +50,8 @@ that has read a sandbox's customers refuses the club's real books
    **Save this shape**.
 7. Open **Roster** in the staff menu: its counts line has the counts QuickBooks has. Its families are the portal's
    own: a read of QuickBooks brings no customer into them, so a fresh installation lists none at first. Open
-   **Reconciliation**: **Customers with no family** lists each family customer QuickBooks has that no family in the
-   portal is linked to, and **Create a family from this** brings one in, with its students, linked to their customers
+   **Reconciliation**: **Customers with no family** lists each active family customer QuickBooks has at the top level
+   (under no other customer) that no family in the portal is linked to (an inactive one isn't offered), and **Create a family from this** brings one in, with its students, linked to their customers
    (it sends nothing to QuickBooks and gives nobody a sign-in). The reviewed import of every family at once comes with
    stage 4 of the roadmap. **Health** says QuickBooks is "Connected" and names the company as a sandbox.
 8. Check the portal's requests: **Settings**, **QuickBooks**, **Check the portal's requests**, **Run the check**. In a
