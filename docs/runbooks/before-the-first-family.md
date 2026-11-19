@@ -203,6 +203,14 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
     who can see Balances), saying it must be paid or written off in QuickBooks first. Void the invoice in QuickBooks,
     confirm again: the student and the parent, then the family, are inactive in QuickBooks, and the family's parents
     can no longer sign in. **If not:** note what the page said and what QuickBooks shows for each.
+13. **A family added in the portal.** As an Admin (who may link families to accounting), on the Roster page use
+    **Make a family** for a test family. Then, signed in as a staff member whose role may change families but not link
+    them, make a second test family, give it a student on its page, and add a test guardian. Then, as the Admin, open
+    the second family's page and press **Create in QuickBooks and link**.
+    **Pass:** the first family is in QuickBooks once, and its Roster row says it is linked. The second says, when it
+    is made, that nothing was sent to QuickBooks; it is listed as not linked, QuickBooks doesn't have it, and its
+    guardian can sign in to it. After **Create in QuickBooks and link**, QuickBooks has the family once with the
+    student under it, and both rows say linked. **If not:** note what each page said and what QuickBooks shows.
 
 ## 3. Real phones
 

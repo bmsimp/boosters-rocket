@@ -153,7 +153,9 @@ APP_COMMIT="$(git rev-parse --short HEAD)" docker compose -f compose.yml -f comp
    their customers in QuickBooks (an Admin can do it, and so can anyone given "Link families to accounting"). Then add
    its guardians on its page, under **Families** (an Admin can, and so can anyone whose role may give or end a
    guardian's sign-in for a family; "Link families to accounting" alone can't). The reviewed import of every family at once comes with stage 4 of
-   the roadmap.
+   the roadmap. A family that isn't in QuickBooks yet is added under **Families** with **Make a family**: it is made in
+   QuickBooks too, and linked, when the person adding it may link families to accounting; otherwise it is in the portal
+   only until someone who may presses **Create in QuickBooks and link** on its page.
 4. Before any family signs in: [before the first family](before-the-first-family.md), the checks only a person can
    make, from real phones to a pilot with a few families.
 

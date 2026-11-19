@@ -121,7 +121,10 @@ just manually maintain membership. we still want to tie the portal and the accou
   guardians, using the customer types as today. An admin reviews the list before anything is saved. Families made
   this way are linked from the start. *(Proposed:)* an address under two families becomes one guardian in both, shown
   in the review. Flat books: Open questions, 4.
-- **By hand.** Staff add families, students and guardians in the app. These start unlinked.
+- **By hand.** Staff add families, students and guardians in the app. These start unlinked. The owner decided on
+  2026-11-18 that a family added by a staff member who doesn't hold the linking permission sends nothing to
+  QuickBooks: it stays unlinked until someone who holds it presses "Create in QuickBooks and link" on the family's
+  page; one added by a holder while QuickBooks is connected is created there too and linked (open question 19).
 
 After either, staff maintain families in the app; the import is not run again. A club already running starts from
 the links stage 1 carries over (Open questions, 2).
