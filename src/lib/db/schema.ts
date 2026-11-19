@@ -233,8 +233,10 @@ export const parentSigninToken = pgTable("parent_signin_token", {
 
 /**
  * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
- * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
- * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-3b will); since slice SI-2
+ * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`: since slice SI-3b
+ * at a password sign-in on the device; renewal while its session is in use is slice SI-5's). It goes with the person.
+ * The daily clean-up deletes one past its expiry. Made since slice SI-3b by a sign-in that proved a password and a
+ * second step, or a set-up link (recordStrongSignin(), src/lib/parents/devices.ts); since slice SI-2
  * blocking, sign-ins switched off, the change-of-company clear, a password reset, a confirmed change of sign-in email
  * and closing a person's last open membership delete them (src/lib/parents/sessions.ts).
  */

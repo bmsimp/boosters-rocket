@@ -49,7 +49,7 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * person's row (`parent`), then what hangs on the person, in this order: their email change requests, their sign-in
  * codes, their set-up and reset links (`parent_signin_token`), their password (the `credential` row of
  * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
- * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet. Everything that ends all of a
+ * release's slice SI-2 (mintSigninLink(), signin-links.ts); devices since SI-3b (recordStrongSignin(), devices.ts). Everything that ends all of a
  * person's sign-in deletes their unused links, a held one on its way included (unspentLink, ./link-state.ts) and forgets their devices, in that
  * place, and keeps their password: blocking, sign-ins switched off, the change-of-company clear, a confirmed change of
  * sign-in email, and closing a person's last open membership (closeMembership(), membership.ts; the lead's choice 10 of
@@ -99,7 +99,11 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   what the sign-in spent: the code, or a set-up link's row and the `credential` row the set wrote;
  * - "Set up or reset my password" (askForPasswordLink(), password-request.ts) takes the row FOR UPDATE, reads the
  *   password unlocked, then holds the link (holdSigninLink()); after the send it takes the row FOR UPDATE again and
- *   puts the link in place (putHeldLinkInPlace(), which replaces the unused one), or removes it (dropHeldLink()).
+ *   puts the link in place (putHeldLinkInPlace(), which replaces the unused one), or removes it (dropHeldLink());
+ * - the second step's code (sendSecondStepCode(), signin-codes.ts, since slice SI-3b) calls this, then reads the
+ *   password unlocked, before it touches a code; and a sign-in's strong step (recordStrongSignin(), devices.ts), after
+ *   completeParentSignin(), calls this, then makes or renews the person's device, then stamps the session's
+ *   `strong_at`: the person's row, their devices, their sessions.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

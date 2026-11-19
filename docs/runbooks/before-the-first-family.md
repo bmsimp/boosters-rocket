@@ -226,8 +226,8 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
 2. **The installed app's edges, on the iPhone,** in light and dark mode and turned sideways.
    **Pass:** the status bar is readable above the club bar, nothing sits under the notch, the bottom tabs sit above the
    home indicator, and the last line of Home scrolls clear of the tabs. **If not:** a screenshot.
-3. **Sign in from the installed app,** leaving it in the middle: ask for a code, switch to Mail, come back. Once more,
-   force-close the app before coming back.
+3. **Sign in from the installed app,** leaving it in the middle: type your email and password (a new app asks for a
+   code too), switch to Mail, come back. Once more, force-close the app before coming back.
    **Pass:** you are still on the code screen with the resend countdown, and the code signs you in.
    **If not:** note where you landed.
 4. **Stay signed in.** Open the installed app again more than 7 days after signing in.
@@ -278,7 +278,7 @@ Club, **Change**): until it is set the portal uses UTC, so dates and shift times
     - **On an iPhone,** the camera offers the link when it sees the code. It opens in **Safari, not in the installed
       app**: on an iPhone only an app from the App Store can open its own links, and the portal added to the home
       screen is not one. If Safari has no session yet, the volunteer
-      signs in there with their email code once (Safari then remembers them, as the installed app does), and is brought
+      signs in there with their password and the emailed code once (Safari then remembers them, as the installed app does), and is brought
       back to the check-in page. They tap **Check me in**, and the page says so.
     - **On an Android phone,** the camera opens the link in Chrome, which may offer to open it in the installed app.
       Either way the volunteer lands on the check-in page, signed in or after signing in, and checks in.

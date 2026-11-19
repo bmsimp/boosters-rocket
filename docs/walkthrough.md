@@ -15,7 +15,7 @@ open one is also in `docs/ui-backlog.md`). "Both" means 390 and 1440.
 
 | What | Where | How it runs |
 |---|---|---|
-| A parent's whole visit: the emailed code, choosing a family, Home, a signed form and its download, Payments, two shift sign-ups cancelled again, checking in, a buy-out and a switch back (both refused before anything is sent), their details, the display, the manifest and its icons, signing out | `tests/e2e/journey-parent.spec.ts` | In every browser run, both passes |
+| A parent's whole visit: the password and the emailed code (since the sign-in release's slice SI-3b), choosing a family, Home, a signed form and its download, Payments, two shift sign-ups cancelled again, checking in, a buy-out and a switch back (both refused before anything is sent), their details, the display, the manifest and its icons, signing out | `tests/e2e/journey-parent.spec.ts` | In every browser run, both passes |
 | A staff member's session: the staff home, the grouped menu, the roster and a family, its money, Parents, a new season with a requirement of each kind, a waiver the parent reads only as "Waived", a volunteer event with a shift and its check-in sheet, a credit correction, the signed-forms matrix and one evidence page, Balances, Reconciliation, the audit log and its export, Health and Settings | `tests/e2e/journey-staff.spec.ts` | In every browser run, both passes; what it makes is taken away again |
 | Their shared steps (the emailed code, the staff menu, no sideways scroll) | `tests/e2e/journey-helpers.ts` | |
 | Pictures of each step, for a walk like this one | `WALK_SHOTS=<a folder outside the repository>` set when running either spec | Only when set; an ordinary run writes nothing |

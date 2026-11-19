@@ -50,18 +50,25 @@ on staff pages too (both were "For later" in the section below).
   database's Forms settings pointed at it and its test template attached to the seeded Medical release. The browser
   test run never does this: its seed leaves forms unset, so it can't reach a Documenso.
 
-### 1. Signing in with an emailed code (`/sign-in`, `/choose-family`)
+### 1. Signing in with a password and an emailed code (`/sign-in`, `/choose-family`)
 
-- Tab order: Email, Send code, "Board and staff sign in here". On the code step: the code field, Sign in,
-  Resend code (waiting, so skipped), Use a different email, then the staff link. The chooser: each family, then
-  Sign out. Every stop has a ring in every mode (3px club text, 4px in high contrast, Highlight in forced colors).
-- Enter in the Email field sends the code; the code step's status ("If this email belongs to a family in the club,
-  we've sent a 6-digit code…") is announced and the focus is in the code field. A wrong code is announced as an
-  alert and the focus stays in the field. The right one goes to the chooser, then Home.
+Since the sign-in release's slice SI-3b. `tests/e2e/keyboard-journeys.spec.ts` walks it by keyboard on every run;
+the hand walk below was made on the code door before it and has not been made again on the password form.
+
+- Tab order: Email, Password, Sign in, "Set up or reset my password", "Board and staff sign in here". On the code
+  step (a device the portal doesn't remember): the code field, Sign in, Resend code (waiting, so skipped), Start
+  again, then the same two links. The chooser: each family, then Sign out. Every stop has a ring in every mode (3px
+  club text, 4px in high contrast, Highlight in forced colors).
+- Enter on Sign in checks the password. A refusal is announced as an alert ("That email and password didn't work…"
+  with a link to "Set up or reset my password") and the focus stays where it was. A right password on a new device
+  moves to the code step: its status ("To finish signing in on this device, enter the 6-digit code we've emailed
+  you…") is announced and the focus is in the code field. A wrong code is announced as an alert and the focus stays
+  in the field. The right one goes to the chooser, then Home. On a device the portal remembers, the password alone
+  goes to the chooser.
 - **Found and fixed:** "Board and staff sign in here" was a 207 by 21px target standing alone on its line (now 44px
   tall, `.link-line`). Send code and Sign in were disabled while busy, which drops the focus when pressed from the
   button: they are now `aria-disabled` while busy, and each step focuses its own field when the form moves to it
-  (also after "Use a different email" and after Resend).
+  (also after "Use a different email", now "Start again", and after Resend).
 - Left as it is: a page load (the chooser, Home) starts the focus at the top of the page, as every full page load does.
 
 ### 2. Home to Payments and a Pay link (`/`, `/payments`)
