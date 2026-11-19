@@ -14,7 +14,8 @@ import { dropScratchDatabase, makeScratchDatabase } from "../setup/worker-databa
  * (node_modules/drizzle-orm/pg-core/dialect.js), and scripts/migrate.mjs calls migrate() once, as this file does. Each
  * migration's own test runs it on a database brought to the one before it; here the whole of 0023 to the newest goes at
  * once, over a database seeded as that release would hold it, with every kind of row a later migration re-keys. Then a
- * second database, the same but for one buy-out of another company (0023 makes no record for it, and 0030 refuses it),
+ * second database, the same but for one buy-out of another company (0030 refuses it whatever records exist: 0023 gives a
+ * record to every customer a row of the roster's company names, so only another company's row can reach a refusal),
  * shows that a refusal anywhere leaves the database exactly at 0022: the portal keeps running the release it had.
  */
 // Making or dropping a database waits for Postgres to write out what every database on the server has changed: that
@@ -275,7 +276,7 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
     });
   });
 
-  describe("a database the release holds, with one row no migration can give a record", () => {
+  describe("a database the release holds, with one row of another company that a migration refuses", () => {
     const q = on(REFUSED.url);
     let applied = 0;
 
@@ -284,8 +285,10 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
       await migrateAsTheImage(REFUSED.url, migrationsUpTo(22));
       await q(async (pg) => {
         const ids = await seedTheRelease(pg);
-        // A buy-out of another company: 0023 makes no record for it (it reads only the roster's company), and 0030
-        // refuses it rather than guess.
+        // A buy-out of another company. F2 is on the roster, so 0023 gives it a family record and link in the roster's
+        // company; 0030 fills a buy-out only through a link of its own company, and refuses this one rather than guess.
+        // That is the only kind of row that can stop the run: 0023 gives a record to every customer a row of the
+        // roster's company names, so no row of that company is left without one.
         await pg`INSERT INTO buyout (requirement_id, family_qbo_id, subject_qbo_id, customer_qbo_id, item_qbo_id, unit_cents, units, amount_cents, state, invoice_qbo_id,
             invoice_sync_token, realm_id, chosen_by, chosen_by_label)
           VALUES (${ids.buyFamily!}, 'F2', 'F2', 'F2', '4343', 5000, 2, 10000, 'invoiced', '9100', '3', ${OTHER_REALM}, ${BIRCH}, 'birch@upgrade.example')`;
