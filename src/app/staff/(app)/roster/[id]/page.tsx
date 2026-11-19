@@ -169,10 +169,12 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // Who making the family inactive covers: everyone active under it in the cache, at any depth, with their versions.
   const cover = edit && inQuickBooks && entry.kind === "family" ? await familyCover(inQuickBooks.customer.qboId) : null;
   // Moving a student (stage 3's slice 9f): saved in the portal first, for each active student of the family, linked or
-  // not, to each of the portal's other active families, linked or not, by the app's ids. Not while the family's own
-  // create waits, nor for a student whose own create, or another change, waits (moveStudent() refuses them too).
+  // not, to each of the portal's other active families, linked or not, by the app's ids: only the families a move can go
+  // to, by the rule moveStudent() checks (moveTargets()), and none while a move out of this family can't go through. Not
+  // while the family's own create waits, nor for a student whose own create, or another change, waits (moveStudent()
+  // refuses them too).
   const moves = changesHere && page.shape !== null && entry.kind === "family" && offers(page.shape, "move_student");
-  const moveTo = moves ? (await moveTargets()).filter((f) => f.id !== String(familyId)) : [];
+  const moveTo = moves ? await moveTargets(familyId) : { refusedHere: null, families: [] };
   const movable: MovableStudent[] = moves ? fam.students.filter((s) => s.active).map((s) => ({ id: String(s.id), name: s.name,
     blocked: beingMade.has(String(s.id)) ? "Making this student in QuickBooks is still waiting on the queue, so they can't be moved for now."
       : open.some((w) => w.studentId !== null && String(w.studentId) === String(s.id)) || (s.customer !== null && open.some((w) => "qboId" in w.write && w.write.qboId === s.customer!.qboId))
@@ -202,7 +204,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
         credit={entry.kind === "family" && fam.active && can(ctx.effective, "Volunteer.Credit.ReadWrite")} />
       <Waiting items={waiting} />
       {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} edit={edit} cover={cover} inactiveRecords={inactiveRecords} />}
-      {moves && <MoveStudents students={movable} families={moveTo} rosterTag={rosterTag} act={moveAction} />}
+      {moves && <MoveStudents students={movable} families={moveTo.families} refusedHere={moveTo.refusedHere} rosterTag={rosterTag} act={moveAction} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
       {changesHere && page.shape && <PortalChanges familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
         addStudents={offers(page.shape, "add_student")} students={hereStudents.map((s) => ({ id: String(s.id), name: s.name }))} rosterTag={rosterTag} />}

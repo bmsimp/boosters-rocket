@@ -12,7 +12,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, isSavedFirst, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyWords, owedBy, REFRESH_ASK_KEY,
+import { alignAfterWrite, applyWritten, BEING_SENT_NOW, changeOwnRecord, isSavedFirst, itemLockFree, madeAfterGivingUp, markMoveMoneyStale, moveMoneyNotes, owedBy, REFRESH_ASK_KEY,
   replaceRefusedCreates, sendWrite, trySavedItem, whileItemHeld, whoStopped, type MadeAfterGivingUp, type OwnRecordChange, type SavedTry } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
@@ -317,8 +317,9 @@ export type QueueView = {
   /** The student record it is for (a rename, a move, a make-inactive, a student's create), or null. */
   studentId: AppStudentId | null;
   /**
-   * For a move that hasn't reached QuickBooks (waiting, stuck or kept refused): whose invoices each family sees
-   * meanwhile, in words (open question 14: they follow once QuickBooks takes the move). Null for anything else.
+   * For a move that hasn't reached the portal's copy of QuickBooks (waiting, stuck or kept refused): whose invoices each
+   * family sees meanwhile, by where the cache has the student now, in words (moveMoneyNotes(), ./writes.ts; open
+   * question 14: they follow once QuickBooks takes the move). Null for anything else, and where nobody sees them.
    */
   moneyNote: string | null;
   /**
@@ -343,15 +344,14 @@ export type QueueView = {
   /**
    * Whether "Send the portal's value" can go through for a refused item, as the cache shows it, and why not
    * (`notOffered`): a rename QuickBooks refused as a taken name (`taken`: a later rename takes its place, and is sent),
-   * one of a customer the cache has inactive (`inactive`: the portal never makes one active again), or one of a
-   * customer the cache doesn't hold at all (`not_on_roster`). The press checks it all again.
+   * one of a customer the cache has inactive (`inactive`: the portal never makes one active again), one of a
+   * customer the cache doesn't hold at all (`not_on_roster`), or a move into a family that has no customer in
+   * QuickBooks yet (`create_family_first`: the press would be refused until the family is made there and linked). The
+   * press checks it all again.
    */
   mayResend: boolean;
-  notOffered: "taken" | "inactive" | "not_on_roster" | null;
+  notOffered: "taken" | "inactive" | "not_on_roster" | "create_family_first" | null;
 };
-
-/** A move's money words, for one that hasn't reached QuickBooks (moveMoneyWords(), ./writes.ts). */
-const moneyNoteOf = (student: string, from: string, to: string) => moveMoneyWords(student, from, to);
 
 /** The codes of an item QuickBooks took that the portal still has to finish on its side (QueueView.finishing). */
 const FINISHING_CODES = new Set(["cache_failed", "answer_other", "finish_failed"]);
@@ -435,20 +435,30 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
   const refusedStudents = [...new Set(rows.flatMap((r) => (r.state === "refused" && r.request.op === "create" && r.studentId !== null ? [r.studentId] : [])))];
   const studentName = new Map((refusedStudents.length ? await db.select({ id: student.id, name: student.name }).from(student).where(inArray(student.id, refusedStudents)) : [])
     .map((s) => [String(s.id), s.name ?? ""]));
+  const finishingOf = (r: (typeof rows)[number]) => r.state !== "refused" && r.sent && r.lastCode !== null && FINISHING_CODES.has(r.lastCode);
+  const moveName = (record: AppFamilyId | undefined, customer: string) => (record !== undefined ? familyNames.get(String(record)) : undefined) ?? (customer ? names.get(customer) : undefined);
+  // Whose invoices each family sees meanwhile, by where the cache has each student now: the one function moveStudent()'s answer uses too.
+  const moveRows = rows.filter((r) => r.request.op === "move");
+  const notes = await moveMoneyNotes(moveRows.map((r) => {
+    const w = r.request as Extract<QueuedWrite, { op: "move" }>;
+    return { studentQboId: w.qboId, student: names.get(w.qboId) ?? "the student", toFamilyId: w.toFamilyId, to: moveName(w.toFamilyId, w.toFamilyQboId) ?? "the family joined", finishing: finishingOf(r) };
+  }));
+  const noteOf = new Map(moveRows.map((r, i) => [r.id, notes[i] ?? null]));
+  // A refused move into a family with no customer in QuickBooks can't be sent until that family is made there.
+  const joined = [...new Set(moveRows.flatMap((r) => { const w = r.request as Extract<QueuedWrite, { op: "move" }>; return r.state === "refused" && w.toFamilyId !== undefined ? [w.toFamilyId] : []; }))];
+  const joinedLinked = joined.length ? (await linksOf({ families: joined, students: [] })).customerOfFamily : new Map<AppFamilyId, string>();
   return rows.map((r) => {
     const refused = r.state === "refused";
     const request: QueuedWrite = refused && r.request.op === "create" && r.studentId !== null ? { ...r.request, name: studentName.get(String(r.studentId)) ?? r.request.name } : r.request;
     const notOffered: QueueView["notOffered"] = !refused || (request.op !== "rename" && request.op !== "move") ? null : request.op === "rename" && r.lastCode === "fault_6240" ? "taken"
-      : !names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) ? "inactive" : null;
-    const moveName = (record: AppFamilyId | undefined, customer: string) => (record !== undefined ? familyNames.get(String(record)) : undefined) ?? (customer ? names.get(customer) : undefined);
-    const moneyNote = request.op !== "move" ? null : moneyNoteOf(names.get(request.qboId) ?? "the student",
-      moveName(request.fromFamilyId, request.fromFamilyQboId) ?? "the family left", moveName(request.toFamilyId, request.toFamilyQboId) ?? "the family joined");
+      : !names.has(request.qboId) ? "not_on_roster" : !activeHere.has(request.qboId) ? "inactive"
+        : request.op === "move" && request.toFamilyId !== undefined && !joinedLinked.has(request.toFamilyId) ? "create_family_first" : null;
     return {
       id: r.id, state: r.state as QueueView["state"], write: request, words: describeWrite(request, names, { showAmounts: o.showAmounts, familyNames }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
       lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
       familyId: r.familyId !== null && withPage.has(String(r.familyId)) ? r.familyId : null,
-      studentId: r.studentId, moneyNote,
-      finishing: !refused && r.sent && r.lastCode !== null && FINISHING_CODES.has(r.lastCode),
+      studentId: r.studentId, moneyNote: noteOf.get(r.id) ?? null,
+      finishing: finishingOf(r),
       holds: !refused ? null : request.op === "rename" ? names.get(request.qboId) ?? null : request.op === "move" ? placeOf(request.qboId) : null,
       shown: !refused ? "" : request.op === "rename" ? names.get(request.qboId) ?? "" : request.op === "create" ? request.name : request.op === "move" ? parentOf.get(request.qboId) ?? "" : "",
       mayResend: refused && notOffered === null,
@@ -544,7 +554,7 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
   // A rename saved in the portal first (stage 3's slice 9e) left the portal holding the new name already: renaming it
   // back to QuickBooks' name would undo the portal's value, which a change that didn't get through never does.
   if (item.request.op === "move" && isSavedFirst(item)) {
-    return { ok: true as const, message: `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to. ${MOVE_FOLLOWED_STAYS} QuickBooks has the move only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, QuickBooks keeps them where it has them, and until it has the move the family they left still sees their invoices. ${GIVEN_UP_NEXT.move}` };
+    return { ok: true as const, message: `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to. ${MOVE_FOLLOWED_STAYS} QuickBooks has the move only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, QuickBooks keeps them where it has them, and until it has the move the family QuickBooks has them under still sees their invoices. ${GIVEN_UP_NEXT.move}` };
   }
   if (item.request.op === "rename" && isSavedFirst(item)) {
     return { ok: true as const, message: "Given up. Nothing more will be sent for it. The portal keeps the name it saved. QuickBooks has it only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, the two names differ, and a later rename on the record's family's page is checked against QuickBooks' name first: while they differ it is held back and listed on this page, where “Send the portal's value” sends it. Or rename it in QuickBooks." };
@@ -582,7 +592,7 @@ function givenUpNext(item: Item): string {
  */
 function refusedGivenUpWords(item: Item): string {
   const w = item.request;
-  if (w.op === "move") return `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to, and QuickBooks keeps them where it has them: until QuickBooks has the move, the family they left still sees their invoices. ${MOVE_FOLLOWED_STAYS} ${GIVEN_UP_NEXT.move}`;
+  if (w.op === "move") return `Given up. Nothing more will be sent for it. The portal keeps the student in the family it moved them to, and QuickBooks keeps them where it has them: until QuickBooks has the move, the family QuickBooks has them under still sees their invoices. ${MOVE_FOLLOWED_STAYS} ${GIVEN_UP_NEXT.move}`;
   if (w.op === "create") return "Given up. Nothing more will be sent for it. The student the portal saved first stays in the portal, unlinked: to make them in QuickBooks later, press “Create in QuickBooks and link” on their family's page.";
   return "Given up. Nothing more will be sent for it. The portal keeps its own name, and QuickBooks keeps the one it has. A later rename on the record's family's page is checked against QuickBooks' name first: while the two differ it is held back and listed on this page, where “Send the portal's value” sends it. Or rename it in QuickBooks.";
 }
@@ -590,7 +600,7 @@ function refusedGivenUpWords(item: Item): string {
 export const REFUSED_NOT_AGAIN = "This change didn't go through and is kept in the portal, so it isn't tried again by itself: use “Send the portal's value” to send it again on purpose, or “Give up”.";
 
 /** A move given up undoes none of its follow-ups, which ran when the portal saved it (slice 9f): said, so staff know a buy-out invoice is voided all the same. */
-const MOVE_FOLLOWED_STAYS = "What followed the move when the portal saved it stays as it is: their unfinished forms started again, their places to come given up, and any unpaid volunteer buy-out invoice of theirs voided.";
+const MOVE_FOLLOWED_STAYS = "What followed the move when the portal saved it stays as it is: their unfinished forms started again, their places to come given up, any unpaid volunteer buy-out invoice of theirs queued to be voided and any other buy-out of theirs flagged for the club.";
 
 /** What staff can do once a roster change QuickBooks may have made is given up, by what it was (a create: givenUpNext()). */
 const GIVEN_UP_NEXT: Partial<Record<QueuedWrite["op"], string>> = {

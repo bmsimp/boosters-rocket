@@ -40,8 +40,9 @@ import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith,
 
 /**
  * A move is followed only when staff make it in the portal (afterStudentMoved(), src/lib/roster/writes.ts): the
- * student's forms, volunteer places and buy-outs, once, in the move's own transaction (or the queue's, when QuickBooks
- * took it and the portal found it made later), the guardians told after the commit. Since stage 3's slice 9c a roster
+ * student's forms, volunteer places and buy-outs, once, in the transaction moveStudent() saves the move in (stage 3's
+ * slice 9f), the guardians told after the commit; neither QuickBooks' answer nor the queue finding the move made runs
+ * them again. Since stage 3's slice 9c a roster
  * refresh follows nothing: a student moved, renamed or made inactive in QuickBooks keeps their record, forms, places
  * and buy-outs where the app has them, and the daily buy-out check voids nothing for it (stage 4 shows such a change
  * as a difference).

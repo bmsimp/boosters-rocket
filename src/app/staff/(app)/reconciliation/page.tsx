@@ -71,6 +71,7 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
   taken: TAKEN_NAME_KEPT,
   inactive: "QuickBooks has this customer inactive, and the portal never makes a customer active again, so the portal's value isn't sent: give it up here, or make the customer active in QuickBooks first.",
   not_on_roster: "This customer isn't on the roster the portal last read from QuickBooks, so the portal's value isn't sent: look for the customer in QuickBooks, then give this up here.",
+  create_family_first: "The family the student was moved to has no customer in QuickBooks yet, so there is nowhere to put them there. Create the family in QuickBooks first, with “Create in QuickBooks and link” on its page; the portal's move can be sent from here after that.",
 };
 
 /**
@@ -90,7 +91,8 @@ function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean 
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
       // Offered only where it can go through: a name QuickBooks refused as taken is renamed on the family's page instead
       // (which takes its place, and is sent), a customer QuickBooks has inactive is never made active again by the
-      // portal, and one the roster doesn't hold isn't sent to. The press is bound to what the row shows (QueueView.shown).
+      // portal, one the roster doesn't hold isn't sent to, and a move into a family with no customer in QuickBooks waits
+      // for that family to be made there. The press is bound to what the row shows (QueueView.shown).
       const instead = i.mayResend || i.notOffered === null ? null : NOT_OFFERED[i.notOffered];
       return (
         <div className="row-actions">

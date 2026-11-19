@@ -12,8 +12,8 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, qboConnection, qboCustomer, student, writeQueue } from "@/lib/db/schema";
-import { addStudentToLinked, askRosterWrite, BEING_SENT, BEING_SENT_NOW, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, INACTIVE_THERE_CODE, MAKING_LOCK, moveStudent, NAME_DIFFERS,
-  portalValueStamp, renameLinked, sendPortalValue, SENDING_LOCK, TAKEN_NAME_KEPT, WRITE_COPY } from "@/lib/roster/writes";
+import { addStudentToLinked, askRosterWrite, BEING_SENT_NOW, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, INACTIVE_THERE_CODE, MAKING_LOCK, moveStudent, NAME_DIFFERS,
+  portalValueStamp, renameLinked, sendPortalValue, SENDING_LOCK, STUDENT_BEING_CHANGED, TAKEN_NAME_KEPT, WRITE_COPY } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, queueCounts, REFUSED_NOT_AGAIN, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { cleanUp } from "@/lib/jobs/cleanup";
@@ -229,7 +229,7 @@ describe("a rename saved first: what is refused before anything is saved, and wh
 
   it("a rename while another change to the record is being sent is refused in words, and nothing is saved or sent", async () => {
     const r = await holding(SENDING_LOCK, leo, () => renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op));
-    expect(r).toEqual({ ok: false, errors: [BEING_SENT] });
+    expect(r).toEqual({ ok: false, errors: [STUDENT_BEING_CHANGED] });
     expect(posts()).toEqual([]);
     expect(await studentNamed("Leon Rivera")).toEqual([]);
   });

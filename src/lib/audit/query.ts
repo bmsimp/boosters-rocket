@@ -194,6 +194,28 @@ function parentRowsOf(r: RecordNames): SQL | undefined {
 }
 
 /**
+ * A student's move names both its families in its body, not its target (the student, or before slice 9f the student's
+ * customer): the portal's save (`roster.record.moved`: the family left as `before.familyId` and `after.fromFamilyId`,
+ * the family joined as `after.familyId`) and its follow-ups (`roster.student.move.followed`: `fromFamilyId` and
+ * `toFamilyId` since, the customers `fromFamilyQboId` and `toFamilyQboId` before), and its send to QuickBooks
+ * (`roster.student.move`, whose target is the student's customer: where the cache had them before, `before.familyQboId`,
+ * and where QuickBooks' answer has them, `after.familyQboId`). A search for either family finds them; a search for the
+ * student finds them by their target. Nothing of a student's here.
+ */
+function moveRowsOf(r: RecordNames): SQL | undefined {
+  if (r.kind === "student") return undefined;
+  // The key is one of those written here, never a value from the address: written into the query as a text literal.
+  type Key = "familyId" | "fromFamilyId" | "toFamilyId" | "fromFamilyQboId" | "toFamilyQboId" | "familyQboId";
+  const said = (side: "before" | "after", key: Key) => sql`(${side === "before" ? auditLog.before : auditLog.after}) ->> ${sql.raw(`'${key}'`)}`;
+  return or(
+    and(eq(auditLog.action, "roster.record.moved"), or(eq(said("before", "familyId"), r.id), eq(said("after", "familyId"), r.id), eq(said("after", "fromFamilyId"), r.id))),
+    and(eq(auditLog.action, "roster.student.move.followed"), or(eq(said("after", "fromFamilyId"), r.id), eq(said("after", "toFamilyId"), r.id),
+      ...(r.families.length ? [inArray(said("after", "fromFamilyQboId"), r.families), inArray(said("after", "toFamilyQboId"), r.families)] : []))),
+    ...(r.families.length ? [and(eq(auditLog.action, "roster.student.move"), or(inArray(said("before", "familyQboId"), r.families), inArray(said("after", "familyQboId"), r.families)))] : []),
+  );
+}
+
+/**
  * The rows a family or student record's older names find:a row naming one of its customers under a target type that
  * names a customer of that kind (CUSTOMER_TARGET_TYPES), and a tick's or waiver's row, whose target is
  * "<requirement>:<subject>", naming the customer (before the seasons moved) or the record (since).
@@ -204,6 +226,7 @@ function recordsOlderNames(r: RecordNames): SQL | undefined {
     formRowsOf(r),
     buyoutRowsOf(r),
     parentRowsOf(r),
+    moveRowsOf(r),
     ...(r.families.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.family]), inArray(auditLog.targetId, r.families))] : []),
     ...(r.students.length ? [and(inArray(auditLog.targetType, [...CUSTOMER_TARGET_TYPES.student]), inArray(auditLog.targetId, r.students))] : []),
     and(eq(auditLog.targetType, "requirement_progress"), or(...keys.map((k) => sql`${auditLog.targetId} like ${endsWithKey(k)} escape '\\'`))),

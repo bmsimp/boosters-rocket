@@ -237,7 +237,9 @@ describe("a family's page brings the portal's own records into line with what Qu
     const recon = await renderPage(ReconciliationPage);
     expect(recon).toContain("Not in QuickBooks, kept in the portal (1)");
     expect(recon).toContain(words);
-    expect(recon).toContain("Send the portal&#x27;s value");
+    // Not offered while the family joined has no customer in QuickBooks: the row says to create it there first.
+    expect(recon).not.toContain("Send the portal&#x27;s value");
+    expect(recon).toContain("Create the family in QuickBooks first, with “Create in QuickBooks and link” on its page; the portal&#x27;s move can be sent from here after that.");
   });
 });
 
