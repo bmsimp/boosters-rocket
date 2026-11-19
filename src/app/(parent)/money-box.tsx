@@ -103,8 +103,12 @@ export function MoneySection({ money, more = false, buyouts }: { money: FamilyMo
       <h2 id="money-h">{money.familyName ?? "What you owe"}</h2>
       {money.figures
         ? <Figures f={money.figures} today={money.today} buyouts={buyouts} />
-        : <p className="help" role="status">We can&apos;t show what you owe right now. Please check back in a little while.</p>}
-      {more && <div className="box-foot"><Link className="btn btn-line" href="/payments">See your payments</Link></div>}
+        : money.notConnected
+          // A family with no link to the club's books: no figures, no Pay, and no reason given beyond the plain fact.
+          // The way to Payments is left off, since it would show only these words again.
+          ? <p className="help" role="status">The club hasn&apos;t connected your payments to the portal yet. Until then, the treasurer can tell you what you owe.</p>
+          : <p className="help" role="status">We can&apos;t show what you owe right now. Please check back in a little while.</p>}
+      {more && !money.notConnected && <div className="box-foot"><Link className="btn btn-line" href="/payments">See your payments</Link></div>}
     </section>
   );
 }
