@@ -17,6 +17,8 @@ test("a set-up link sets a password, and says so", async ({ page }) => {
   const token = await mintZeldaLink(sql, "setup");
   const res = await page.goto(`/sign-in/set-up/${token}`);
   expect(res?.headers()["cache-control"]).toContain("no-store");
+  // The token is in the address: the answer itself says to send no referrer, before any of the page's own requests.
+  expect(res?.headers()["referrer-policy"]).toBe("no-referrer");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Choose a password");
   // Nothing of the person or family is on the page.
   for (const text of ["Zelda", "zelda@example.com", "Quetzalcoatl", "E2E-FAMILY"]) expect(await page.content()).not.toContain(text);
@@ -40,6 +42,7 @@ test("a link that names nothing says it can't be used, and is sent no-store", as
     const res = await page.goto(path);
     expect(res?.status(), path).toBe(200);
     expect(res?.headers()["cache-control"], path).toContain("no-store");
+    expect(res?.headers()["referrer-policy"], path).toBe("no-referrer");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("This link can't be used");
     await expect(page.getByRole("link", { name: "Go to sign in" })).toHaveAttribute("href", "/sign-in");
     await expect(page.locator('input[type="password"]')).toHaveCount(0);

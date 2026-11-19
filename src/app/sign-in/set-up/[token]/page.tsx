@@ -1,9 +1,9 @@
 import { PasswordLinkPage } from "../../password-link-page";
 
-// The token is in the address, so the page asks the browser not to send it on as a referrer to anything it links to.
-// The root layout's metadata is async, so Next.js streams this tag into the body: the head's own requests (styles,
-// scripts, fonts, icons) go before it lands, all to this site, which may log the address with the token. The site's
-// header (strict-origin-when-cross-origin, next.config.ts) already keeps the path from every other site.
+// The token is in the address, so it must never be sent on as a referrer. The answer's own header says so
+// (`Referrer-Policy: no-referrer`, next.config.ts), so even the head's first requests (styles, scripts, fonts, icons),
+// which go before this tag lands (the root layout's metadata is async, so Next.js streams it into the body), carry no
+// address; the tag says the same to anything the page links to.
 export const metadata = { title: "Choose a password", referrer: "no-referrer" as const };
 // Each open looks the link up again (a link is spent, or runs out, between one open and the next), and is sent no-store.
 export const dynamic = "force-dynamic";
