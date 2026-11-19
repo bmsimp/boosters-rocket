@@ -587,4 +587,28 @@ describe("the one write: a customer's phone and billing address", () => {
     const other = await fetch(`${stub.base}/v3/company/${REALM}/invoice`, { method: "POST", headers: { authorization: "Bearer at-seed" }, body: "{}" });
     expect(other.status).toBe(400);
   });
+
+  it("the stub drops a slow request it was reset under: it never takes the next test's switches or changes its records", async () => {
+    await seedConnected(stub);
+    stub.customers = [ana()];
+    stub.apiDelayMs = 500;
+    const giveUp = new AbortController();
+    const sent = codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, { ...TO, signal: giveUp.signal }));
+    await expect.poll(() => stub.apiCalls().length).toBe(1); // it is in the stub, waiting out its delay
+    giveUp.abort();
+    expect(await sent).toBe("timeout");
+    // What beforeEach does, then what the next test does.
+    stub.reset(); stub.accessTokens.add("at-seed");
+    stub.customers = [ana()];
+    stub.rateLimitNext = 1; stub.failNext = 1;
+    await stub.idle(); // the slow request has woken and ended
+    expect(stub.rateLimitNext).toBe(1);
+    expect(stub.failNext).toBe(1);
+    expect(stub.customers).toEqual([ana()]);
+    expect(stub.calls).toHaveLength(0);
+    expect(stub.peakApi).toBe(0);
+    // The switch is there for the request it was set for.
+    expect(await codeOf(qboUpdateCustomerContact("11", "3", { phone: "512-555-0199" }, TO))).toBe("http_429");
+    expect(stub.peakApi).toBe(1);
+  });
 });

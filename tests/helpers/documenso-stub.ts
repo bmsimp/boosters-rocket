@@ -121,7 +121,7 @@ function matches(query: string, value: string | null): boolean {
 }
 
 export async function startDocumensoStub(): Promise<DocumensoStub> {
-  let nextRecipient = 100, nextField = 1000;
+  let nextRecipient = 100, nextField = 1000, generation = 0;
   const stub = { token: `api_${randomBytes(12).toString("hex")}`, calls: [], envelopes: new Map(), sealing: "auto", sealWhenAsked: true, sealAsks: 0, healthy: true,
     failNext: 0, rateLimitNext: 0, drop: false, delayMs: 0, failPathOnce: null, beforeAnswer: null,
     breakDownloadOnce: null, sealedSize: 2048, auditEntries: 12, alterSealed: new Set<string>() } as unknown as DocumensoStub;
@@ -187,6 +187,7 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
   };
   stub.apiCalls = (path) => stub.calls.filter((c) => c.path.startsWith("/api/v2") && (path === undefined || c.path === `/api/v2${path}`));
   stub.reset = () => {
+    generation++;
     stub.calls.length = 0; stub.envelopes.clear(); stub.sealing = "auto"; stub.sealWhenAsked = true; stub.sealAsks = 0; stub.healthy = true;
     stub.failNext = 0; stub.rateLimitNext = 0; stub.drop = false; stub.delayMs = 0; stub.failPathOnce = null; stub.beforeAnswer = null;
     stub.breakDownloadOnce = null; stub.sealedSize = 2048; stub.auditEntries = 12; stub.alterSealed.clear(); renders = 0;
@@ -204,9 +205,14 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
   let renders = 0;
 
   const server: Server = createServer((req, res) => {
+    // As in the QuickBooks stub: a request that arrived before a reset() is dropped after any wait, unanswered, so it
+    // never reaches the next test's switches, documents or calls.
+    const born = generation;
+    const stale = () => { if (born === generation) return false; req.socket.destroy(); return true; };
     let raw = "";
     req.on("data", (c) => (raw += c));
     req.on("end", async () => {
+      if (stale()) return;
       const url = new URL(req.url!, "http://stub");
       let body: unknown = null;
       try { body = req.method === "POST" ? payloadOf(req.headers["content-type"] ?? "", raw) : null; } catch { body = null; }
@@ -214,6 +220,7 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
       stub.calls.push(call);
       if (stub.drop) { req.socket.destroy(); return; }
       if (stub.delayMs) await new Promise((r) => setTimeout(r, stub.delayMs));
+      if (stale()) return;
       const send = (status: number, json: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(json)); };
       const refused = (status = 400, message = "Bad request") => send(status, { ...STACK, message });
 
@@ -225,6 +232,7 @@ export async function startDocumensoStub(): Promise<DocumensoStub> {
       const path = url.pathname.slice("/api/v2".length);
       if (stub.failPathOnce === path) { stub.failPathOnce = null; return refused(500, "Internal error"); }
       if (stub.beforeAnswer?.path === path) await stub.beforeAnswer.run();
+      if (stale()) return;
       const input = (body ?? {}) as Record<string, unknown>;
 
       if (req.method === "GET" && path === "/envelope") {

@@ -99,7 +99,8 @@ export type QboStub = {
   tokenCalls(): StubCall[]; apiCalls(): StubCall[]; reset(): void; close(): Promise<void>;
   /**
    * Resolves once every request the stub has received has been answered, or dropped, and its delay is over: for a test
-   * that left a slow request running (the portal gave up on it) and must not let it reach the next test's switches.
+   * that left a slow request running (the portal gave up on it) and waits for it to reach this test's switches. A request
+   * still waiting when reset() runs is dropped after its wait, unanswered, and never reaches the next test's.
    */
   idle(): Promise<void>;
 };
@@ -158,6 +159,10 @@ function withoutEmpty(value: unknown): unknown {
 /** Intuit's token and revoke endpoints and the QuickBooks query API, enough for the portal's real client to talk to. */
 export async function startQboStub(): Promise<QboStub> {
   let issued = 0, queries = 0, answering = 0, open = 0;
+  // reset() starts a new generation. A request remembers the one it arrived in and, after every wait in its handler, is
+  // dropped (its socket destroyed) if a reset came in between: a slow request a test gave up on never reaches the next
+  // test's switches, records, calls or counts. Within one generation nothing changes.
+  let generation = 0;
   const waitingForIdle: (() => void)[] = [];
   const settle = (answer: () => Promise<unknown>) => {
     open++;
@@ -169,9 +174,13 @@ export async function startQboStub(): Promise<QboStub> {
     invoiceFault: null, loseInvoiceAnswer: false, beforeVoid: null, quirks: defaultQuirks(),
     failToken: null, failQueryFrom: null, nullQueryBody: false, failRevoke: false, revokeDelayMs: 0, tokenDelayMs: 0, queryDelayMs: 0, companyInfoDelayMs: 0, refreshExpiresIn: 8_640_000 } as unknown as QboStub;
   const server: Server = createServer((req, res) => {
+    const born = generation;
+    // True, with the connection closed unanswered, when the stub was reset since this request arrived.
+    const stale = () => { if (born === generation) return false; req.socket.destroy(); return true; };
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => settle(async () => {
+      if (stale()) return;
       const url = new URL(req.url!, "http://stub");
       const call: StubCall = { method: req.method!, path: url.pathname, query: url.searchParams, auth: req.headers.authorization ?? "", body };
       stub.calls.push(call);
@@ -184,6 +193,7 @@ export async function startQboStub(): Promise<QboStub> {
       if (url.pathname === "/token") {
         if (stub.dropToken) { req.socket.destroy(); return; }
         if (stub.tokenDelayMs) await new Promise((r) => setTimeout(r, stub.tokenDelayMs));
+        if (stale()) return;
         const form = new URLSearchParams(body);
         if (!hasAppKeys) return json(401, { error: "invalid_client" });
         if (stub.failToken) return json(400, { error: stub.failToken, error_description: "a description the portal must never store" });
@@ -199,6 +209,7 @@ export async function startQboStub(): Promise<QboStub> {
       if (url.pathname === "/revoke") {
         if (!hasAppKeys) return json(401, { error: "invalid_client" });
         if (stub.revokeDelayMs) await new Promise((r) => setTimeout(r, stub.revokeDelayMs));
+        if (stale()) return;
         if (stub.failRevoke) return json(500, { error: "a revoke answer the portal must never store" });
         let token: unknown;
         try { token = (JSON.parse(body) as { token?: unknown }).token; } catch { return json(400, {}); }
@@ -207,11 +218,14 @@ export async function startQboStub(): Promise<QboStub> {
       }
       if (!url.pathname.startsWith("/v3/company/")) return json(404, {});
       await stub.onApiRequest?.(call);
+      if (stale()) return;
       if (stub.dropApi) { req.socket.destroy(); return; }
       if (!stub.accessTokens.has(call.auth.replace(/^Bearer /, ""))) return json(401, { fault: { error: [{ code: "3200" }] } });
       answering++; stub.peakApi = Math.max(stub.peakApi, answering);
-      res.once("close", () => { answering--; });
+      // reset() sets the count back to 0, so a request of an earlier generation no longer counts down.
+      res.once("close", () => { if (born === generation) answering--; });
       if (stub.apiDelayMs) await new Promise((r) => setTimeout(r, stub.apiDelayMs));
+      if (stale()) return;
       if (stub.rateLimitNext > 0) { stub.rateLimitNext--; return json(429, { Fault: { Error: [{ Message: "a throttling message the portal must never store" }] } }); }
       if (stub.failNext > 0) { stub.failNext--; return json(500, { Fault: { Error: [{ Message: "a message the portal must never store" }] } }); }
       if (call.method === "POST" && /\/invoice$/.test(url.pathname)) {
@@ -323,11 +337,13 @@ export async function startQboStub(): Promise<QboStub> {
       }
       if (url.pathname.includes("/companyinfo/")) {
         if (stub.companyInfoDelayMs) await new Promise((r) => setTimeout(r, stub.companyInfoDelayMs));
+        if (stale()) return;
         return json(200, { CompanyInfo: { CompanyName: stub.companyName } });
       }
       if (url.pathname.endsWith("/query")) {
         queries++;
         if (stub.queryDelayMs) await new Promise((r) => setTimeout(r, stub.queryDelayMs));
+        if (stale()) return;
         if (stub.failQueryFrom !== null && queries >= stub.failQueryFrom) return json(500, { Fault: { Error: [{ Message: "a message the portal must never store" }] } });
         if (stub.nullQueryBody) return json(200, null);
         const q = url.searchParams.get("query") ?? "";
@@ -374,6 +390,7 @@ export async function startQboStub(): Promise<QboStub> {
   stub.apiCalls = () => stub.calls.filter((c) => c.path.startsWith("/v3/"));
   stub.idle = () => (open === 0 ? Promise.resolve() : new Promise<void>((r) => waitingForIdle.push(r)));
   stub.reset = () => {
+    generation++; answering = 0;
     stub.otherNames = []; stub.inactiveTakesChildren = false; stub.updateFault = null; stub.beforeUpdate = null; stub.loseUpdateAnswer = false; stub.updateServerFault = null; stub.dropApi = false; stub.dropToken = false; stub.onApiRequest = null;
     stub.invoiceFault = null; stub.loseInvoiceAnswer = false; stub.beforeVoid = null; stub.quirks = defaultQuirks();
     issued = 0; queries = 0; stub.calls.length = 0; stub.customers = []; stub.types = []; stub.companyName = "Stub Boosters";
