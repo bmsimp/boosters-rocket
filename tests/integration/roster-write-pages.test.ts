@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, qboCustomer, writeQueue } from "@/lib/db/schema";
+import { auditLog, family, familyMoney, guardian, qboCustomer, student, writeQueue } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { NOT_HERE } from "@/lib/roster/operations";
 import { addToFamilyAction, createAction, deactivateAction, familyInactiveAction, giveUpAction, moveAction, renameAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
@@ -160,6 +160,24 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
       expect(html, words).toContain(words.replaceAll("'", "&#x27;"));
     }
     expect(html).toContain(NOT_HERE.contact);
+  });
+
+  it("offers a Parent sub-customer its changes with no sign-in behind it, and a family with no QuickBooks customer no form", async () => {
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    // Sign-ins are off, so nobody has one: the parents are QuickBooks' own customers, listed and changed as before.
+    expect(await db.select().from(guardian)).toEqual([]);
+    const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    for (const words of ["Ana Rivera", "ana@example.com", "Change the parent Ana Rivera"]) expect(rivera, words).toContain(words);
+    // A family made in the portal with no customer (none can be until families are made there): listed, opened, and
+    // offered no form, since every form sends QuickBooks ids.
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    await db.insert(student).values({ name: "Hal Handmade", active: true, familyId: hand!.id });
+    expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "1", "0", "No customer"]);
+    const html = await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } });
+    expect(html).toContain("A family the portal keeps, with no customer in QuickBooks.");
+    expect(html).toContain("Hal Handmade");
+    for (const words of ["Change in QuickBooks", "Add a student", "Add a parent", "Make Handmade Family inactive"]) expect(html, words).not.toContain(words);
+    expect(posts()).toEqual([]);
   });
 
   it("with Roster.Read alone: what can be changed, and by whom, but no form", async () => {

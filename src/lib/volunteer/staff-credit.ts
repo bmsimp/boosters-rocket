@@ -3,7 +3,7 @@
 // row (before and after); a write that names families or students, or rests on them, takes the roster lock with the
 // page's roster tag first (lockRosterAs), so no refresh (which brings the app's records into step) or change of company
 // runs in between. Families and students are the app's own records (stage 2 of the app-owned families spec): the
-// roster is turned into them once, by loadSeasonFamilies(), and a family's page is addressed by the app's family id,
+// families are the app's active ones, read once, by loadSeasonFamilies(), and a family's page is addressed by the app's family id,
 // found as the season keeps it in one place (seasonFamilyAt()). Never imported by parent code
 // (tests/integration/page-guards.test.ts).
 import "server-only";
@@ -78,7 +78,7 @@ export async function addMissedCheckIn(signupId: string, rosterTag: string, o: V
     const when = shiftInstants(event.onDate, shift.startsAt, shift.endsAt, zone);
     if (when.start.getTime() > now.getTime()) return refuse("This shift hasn't started yet. A missed check-in can be added once it has.");
     const families = await loadSeasonFamilies();
-    if (!families?.some((f) => f.id === s.familyId)) return refuse("This sign-up's family isn't on the roster now, so it can't be credited.");
+    if (!families.some((f) => f.id === s.familyId)) return refuse("This sign-up's family isn't on the roster now, so it can't be credited.");
     const [live] = await tx.select({ id: volunteerCredit.id }).from(volunteerCredit).where(and(eq(volunteerCredit.signupId, s.id), isNull(volunteerCredit.removedAt)));
     if (live) return refuse("This person is checked in already.");
     const minutes = shiftMinutes(when);
@@ -127,7 +127,7 @@ export async function addOutsideCredit(input: OutsideInput, rosterTag: string, o
   return db.transaction(async (tx) => {
     if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
     const families = await loadSeasonFamilies();
-    const family = families?.find((f) => String(f.id) === input.familyId);
+    const family = families.find((f) => String(f.id) === input.familyId);
     if (!family) return refuse("That family isn't on the roster now. Reload the page.");
     const [row] = await tx.select().from(requirement).where(and(eq(requirement.id, input.requirementId), eq(requirement.kind, "volunteer")));
     if (!row) return refuse("That requirement isn't there any more, or isn't a volunteering one. Reload the page.");
@@ -186,10 +186,9 @@ export async function removeSignup(signupId: string, o: VolunteerOp, now: Date =
 /** `id`: the app's own family, which its page's address names. */
 export type CreditFamilyRow = { id: AppFamilyId; name: string; credits: number };
 
-/** Every active family on the roster, with how many live credits it has, by name. Null when the roster can't be shown. A list like the roster's: not audited. */
-export async function creditFamilies(): Promise<CreditFamilyRow[] | null> {
+/** Every active family the app keeps (loadSeasonFamilies()), with how many live credits it has, by name. A list like the roster's: not audited. */
+export async function creditFamilies(): Promise<CreditFamilyRow[]> {
   const families = await loadSeasonFamilies();
-  if (!families) return null;
   const rows = await db.select({ familyId: volunteerCredit.familyId }).from(volunteerCredit).where(isNull(volunteerCredit.removedAt));
   const count = new Map<string, number>();
   for (const r of rows) count.set(String(r.familyId), (count.get(String(r.familyId)) ?? 0) + 1);

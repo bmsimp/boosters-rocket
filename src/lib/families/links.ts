@@ -5,6 +5,9 @@ import { getConnection } from "@/lib/quickbooks/connection";
 import { getRosterSource } from "@/lib/roster/source";
 import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
 
+/** Connected (a company named) to a company other than the roster cache's: one meaning, for both readers below. */
+const otherCompany = (source: string | null, connected: string | null | undefined) => source !== null && !!connected && connected !== source;
+
 /**
  * Lookups through a link, one record of one kind at a time (stage 1 of the app-owned families spec). A customer may
  * have a family record and a student record, so each lookup asks for a kind and reads only that kind's link. Each goes
@@ -18,9 +21,19 @@ import { QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
  */
 export async function recordsCompany(tx?: Tx): Promise<string | null> {
   const [source, connection] = await Promise.all([getRosterSource(tx), getConnection(tx)]);
-  if (source === null) return null;
-  if (connection?.realmId && connection.realmId !== source) return null;
+  if (source === null || otherCompany(source, connection?.realmId)) return null;
   return source;
+}
+
+/**
+ * True while QuickBooks is connected to a company other than the one the records were made from (the roster cache's):
+ * the one state in which recordsCompany() answers null although the records name a company. Nothing the portal runs
+ * makes it since stage 2 (a connect and a refresh of another company are both refused), but a database can still be in
+ * it from before, until an Admin disconnects.
+ */
+export async function connectedToAnotherCompany(tx?: Tx): Promise<boolean> {
+  const [source, connection] = await Promise.all([getRosterSource(tx), getConnection(tx)]);
+  return otherCompany(source, connection?.realmId);
 }
 
 async function linkOf(customerId: string, kind: "family" | "student", tx?: Tx) {

@@ -9,7 +9,6 @@ import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { listItems, itemsReadAt, requirementItem } from "@/lib/money/items";
 import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
-import { Notice } from "@/app/components/notice";
 import { dateWords, shiftTimeWords } from "@/lib/volunteer/clock";
 import { shiftsCountingToward } from "@/lib/volunteer/setup";
 import { CoverageForm, OneButton, RequirementForm } from "../../../forms";
@@ -33,7 +32,7 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
   // The tag first: a change of company before the roster is read leaves it the older one, and the save is refused.
   const rosterTag = await currentRosterTag();
   const families = await loadSeasonFamilies();
-  const candidates = families ? candidatesFor(r.appliesTo, families) : [];
+  const candidates = candidatesFor(r.appliesTo, families);
   // The chosen list names the app's own families or students; the page and the form carry their ids as text.
   const chosen = new Set(r.coveredIds.map(String));
   const onRoster = new Set(candidates.map((c) => String(c.id)));
@@ -86,13 +85,12 @@ export default async function RequirementPage({ params }: { params: Promise<{ id
           <ul className="lines">{candidates.filter((c) => chosen.has(String(c.id))).map((c) => (
             <li key={String(c.id)}><div><span className="what">{c.name}</span>{r.appliesTo === "student" && <span className="when">{c.familyName}</span>}</div></li>))}</ul>
         )}
-        {canChange && (families === null
-          ? <Notice tone="warning">The roster can&apos;t be shown right now, so a list can&apos;t be chosen. Check QuickBooks under Roster.</Notice>
-          : <details className="more"><summary>Change who it is asked of</summary>
-              <CoverageForm covers={r.covers} chosen={[...chosen].filter((id) => onRoster.has(id))} noun={noun}
-                candidates={candidates.map((c) => ({ id: String(c.id), label: r.appliesTo === "student" ? `${c.name} (${c.familyName})` : c.name }))}
-                save={setCoverageAction.bind(null, r.id, rosterTag)} />
-            </details>)}
+        {canChange && (
+          <details className="more"><summary>Change who it is asked of</summary>
+            <CoverageForm covers={r.covers} chosen={[...chosen].filter((id) => onRoster.has(id))} noun={noun}
+              candidates={candidates.map((c) => ({ id: String(c.id), label: r.appliesTo === "student" ? `${c.name} (${c.familyName})` : c.name }))}
+              save={setCoverageAction.bind(null, r.id, rosterTag)} />
+          </details>)}
       </section>
 
       {r.kind === "volunteer" && (
