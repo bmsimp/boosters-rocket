@@ -40,10 +40,31 @@ const ANON: Actor = { door: "parent", id: null, label: null };
 /**
  * A hash of a random password nobody knows, made once per process: an address with no person, or a person with no
  * password, is checked against it, so the time of a refusal doesn't tell an address on file from one that isn't (as
- * Better Auth's own sign-in route hashes a password for an unknown address).
+ * Better Auth's own sign-in route hashes a password for an unknown address). It is begun when this module loads, so
+ * no try waits for the hash to be made: the first refusal after a restart costs one check, as every other does.
  */
-let dummy: Promise<string> | null = null;
-const dummyHash = () => (dummy ??= hashPassword(randomBytes(32).toString("base64url")));
+const DUMMY_HASH: Promise<string> = hashPassword(randomBytes(32).toString("base64url"));
+DUMMY_HASH.catch(() => undefined); // never an unhandled rejection at load; a try that awaits it still meets the failure
+
+/**
+ * The most password checks (scrypt, about 16 MB each) run at once in this process; the rest wait their turn. With the
+ * visitor's address unknown the per-IP limit is skipped (takeIpLimit()), so a flood of tries for made-up addresses is
+ * held only by each address's own count: this keeps such a flood from taking the server's memory and every core. It
+ * queues every try alike, a parent's too, so it tells nothing about an address.
+ */
+const MOST_CHECKS_AT_ONCE = 4;
+let checking = 0;
+const waitingToCheck: (() => void)[] = [];
+async function inTurn<T>(work: () => Promise<T>): Promise<T> {
+  if (checking < MOST_CHECKS_AT_ONCE) checking++;
+  else await new Promise<void>((go) => waitingToCheck.push(go)); // the one finishing hands its place over
+  try {
+    return await work();
+  } finally {
+    const nextOne = waitingToCheck.shift();
+    if (nextOne) nextOne(); else checking--;
+  }
+}
 
 /** Why a password signs nobody in, for the audit row only. */
 export type PasswordRefusal = "rate_limited" | "not_an_address" | "signins_off" | "unknown_email" | "no_sign_in_account" | "no_password"
@@ -119,7 +140,8 @@ export async function checkPasswordSignin(rawEmail: unknown, password: unknown, 
   const [settings, person] = await Promise.all([getParentSettings(), personWithPassword(email)]);
   const counts = (await enterableGuardianRows(person?.id ?? NOBODY)).length > 0;
   const hash = person?.authUserId && person.hash ? person.hash : null;
-  const right = await verifyPassword({ hash: hash ?? await dummyHash(), password }).catch(() => false) && hash !== null;
+  const against = hash ?? await DUMMY_HASH;
+  const right = await inTurn(() => verifyPassword({ hash: against, password })).catch(() => false) && hash !== null;
 
   const who = person ? { id: person.id, email: person.email } : null;
   const step = secondStepFor({ level: settings.level, hasSecondFactor: false }); // SI-6 (the app) and SI-7 (passkeys) give hasSecondFactor its value
