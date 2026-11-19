@@ -9,7 +9,8 @@
 # Either way only its owner (and superusers) may connect to it, as on a new installation.
 # The backup is first loaded into a database of its own beside the one you name. Only when all of it has loaded does
 # it take that name, so a restore that fails leaves the database you named exactly as it was.
-# Stop the portal (or Documenso) before replacing the database it is using: a database that is in use is refused.
+# Stop the portal (or Documenso) before replacing the database it is using: a database that is in use (a program is
+# connected to it; Postgres's own background work doesn't count) is refused.
 #
 # A database is not all there is to bring back. The portal needs the env file it had when the backup was taken (its
 # SETTINGS_ENCRYPTION_KEY), and Documenso its signing certificate (the .p12 file) and passphrase: keep them somewhere
@@ -94,13 +95,29 @@ fi
 
 exists="$(ask "select count(*) from pg_database where datname = '$DB'")"
 tables=0
+# Who is using the database: client sessions only, never the one asking. Postgres lists its own workers under the
+# database's name too (an autovacuum worker analysing a database that was just loaded, say), and ends them itself when
+# the database is dropped or renamed, so they are no reason to refuse.
+IN_USE="select count(*) from pg_stat_activity where datname = '$DB' and backend_type = 'client backend' and pid <> pg_backend_pid()"
 if [ "$exists" != "0" ]; then
-  tables="$(pg psql "${CONN[@]}" -d "$DB" -v ON_ERROR_STOP=1 -Atqc "select count(*) from pg_tables where schemaname not in ('pg_catalog', 'information_schema')")" \
+  # One connection to the database says both what it holds and who else is in it. A second connection asked just after
+  # the first could count the first: a psql that has finished has closed its end, but its server process can still be
+  # listed for a moment while it exits.
+  looked="$(pg psql "${CONN[@]}" -d "$DB" -v ON_ERROR_STOP=1 -Atqc "select (select count(*) from pg_tables where schemaname not in ('pg_catalog', 'information_schema')), ($IN_USE)")" \
     || die 3 "The database $DB couldn't be looked at. Nothing was changed."
+  tables="${looked%%|*}" in_use="${looked#*|}"
   if [ "$tables" != "0" ] && [ -z "$REPLACE" ]; then
     die 2 "The database $DB already holds $tables tables. Nothing was changed. To replace everything in it with this backup, run the same command again with --replace at the end."
   fi
-  in_use="$(ask "select count(*) from pg_stat_activity where datname = '$DB' and pid <> pg_backend_pid()")"
+  # A session that has just ended (the portal stopped a moment ago, or the look above) can likewise still be listed
+  # while its process exits. It is given about two seconds to be gone, asked again from outside the database every
+  # fifth of a second, before the database is called in use; one that is really connected is still there after them.
+  tries=0
+  while [ "$in_use" != "0" ] && [ "$tries" -lt 10 ]; do
+    sleep 0.2
+    in_use="$(ask "$IN_USE")"
+    tries=$((tries + 1))
+  done
   if [ "$in_use" != "0" ]; then
     die 2 "The database $DB is in use ($in_use connections). Stop the portal first (its app and worker), or Documenso if it is Documenso's, then run this again. Nothing was changed."
   fi
