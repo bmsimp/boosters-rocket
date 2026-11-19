@@ -2,6 +2,9 @@
 // (src/lib/parents/email-change.ts). It changes the cache and brings the app's own records into step after it, as
 // every change of the cache does (keepAppRecordsInStep()); it decides nothing about who may sign in. The caller holds
 // the roster lock and owns the transaction, and puts what the records' step changed on its own audit row.
+// Parent-reachable: the parent's confirm (email-change.ts, parent code) calls it, and the staff-only import scan
+// (tests/integration/page-guards.test.ts) does not read this file. It may import in-step.ts, which returns counts
+// only, and no other staff-only module (AGENTS.md, Privacy): never a reader of every family.
 import { eq } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { qboCustomer } from "@/lib/db/schema";
