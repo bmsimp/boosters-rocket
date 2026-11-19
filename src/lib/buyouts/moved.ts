@@ -5,7 +5,7 @@
 // the student stays where the app has them, and stage 4 shows the move as a difference. The staff move names the move by QuickBooks ids; buy-outs name the app's own
 // family and student (stage 2 of the app-owned families spec), so the move is turned into those records here, through
 // their links in the records' company, as volunteerForMovedStudent() does: a boundary AGENTS.md lists, until the order
-// of a staff write flips (stage 3's slice 9d).
+// of a staff write flips (stage 3's slice 9e).
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";

@@ -7,7 +7,7 @@
 // family's consents taken away. Requests and evidence name the app's own family and student (stage 2 of the app-owned
 // families spec); the staff move names the move by QuickBooks ids, so the move is turned into those records here,
 // through their links in the records' company: a boundary AGENTS.md lists, until the order of a staff write flips
-// (stage 3's slice 9d). Kept evidence changes only in the app family it names: its own copies of the QuickBooks ids stay
+// (stage 3's slice 9e). Kept evidence changes only in the app family it names: its own copies of the QuickBooks ids stay
 // as they were stored. Imports no staff-only module (tests/integration/page-guards.test.ts).
 import "server-only";
 import { and, eq, isNotNull } from "drizzle-orm";
