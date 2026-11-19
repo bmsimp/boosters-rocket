@@ -37,7 +37,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       <p className="lede">{p.email}. <Link href="/staff/parents">Back to Parents</Link></p>
 
       <section className="box" aria-labelledby="pf-h"><h2 id="pf-h">Families</h2>
-        <StateWords state={p.blocked ? "waived" : canSignIn ? "done" : "todo"}
+        <StateWords state={p.blocked ? "waived" : canSignIn && p.hasPassword ? "done" : "todo"}
           words={p.blocked ? "Blocked: can't sign in to any family" : canSignIn ? (p.hasPassword ? "Can sign in" : "Can sign in once they choose a password") : "Can't sign in to any family right now"} />
         {p.families.length === 0 ? <p>This person isn&apos;t linked to any family.</p> : (
           <DataTable caption="Each family this person is linked to, and whether they can sign in to it" captionHidden
@@ -46,7 +46,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               // made inactive in the portal with no link has no page to open (stage 3's slice 9d).
               { key: "family", header: "Family", rowHeader: true, cell: (f) => (f.previousCompany || f.familyId === null || !f.pageStands ? f.familyName
                 : <Link href={familyPage(f.familyId)}>{f.familyName}</Link>) },
-              { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind)} words={f.words} /> },
+              { key: "access", header: "Sign-in", cell: (f) => <StateWords state={accessState(f.kind, p.hasPassword)} words={f.words} /> },
               ...(changesGuardians ? [{ key: "change", header: "Change", quiet: true, cell: (f: PersonFamily) => <GuardianChange name={f.familyName} guardianId={f.guardianId} open={f.open} reinstatable={f.reinstatable} /> }] : []),
             ]} />
         )}
@@ -77,7 +77,9 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         {p.blocked ? (
           <>
             <Notice tone="warning" live="none">Blocked{p.blockedAt ? <> <LocalTime iso={p.blockedAt} /></> : null}. Reason: {p.blockedReason ?? "none recorded"}</Notice>
-            <p>Unblocking lets them sign in again with the password they had, to each family whose sign-in is still open. The phones and computers the portal remembered for them stay forgotten, and a link they had before the block no longer works.</p>
+            <p>{p.hasPassword
+              ? "Unblocking lets them sign in again with the password they had, to each family whose sign-in is still open. The phones and computers the portal remembered for them stay forgotten, and a link they had before the block no longer works."
+              : "Unblocking lets them sign in again to each family whose sign-in is still open, once they choose a password: they haven't chosen one, and a link they had before the block no longer works, so send them the welcome again (Resend welcome email) once they are unblocked. The phones and computers the portal remembered for them stay forgotten."}</p>
             <OneButton label="Unblock" pendingLabel="Unblocking…" act={unblockAction.bind(null, p.parentId)} />
           </>
         ) : (

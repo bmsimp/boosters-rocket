@@ -84,7 +84,7 @@ function SignIns({ familyId, signins, links, changes, addable }: { familyId: App
           <h3>Add a guardian</h3>
           {addable !== null ? <Notice tone="info" live="none">{addable}</Notice> : (
             <>
-              <p>They sign in with this address and a password they choose from a link the portal emails them. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families.</p>
+              <p>They sign in with this address and a password they choose from a link the portal emails them: the welcome email brings one while welcome emails are on, and Resend welcome email on their page, or Set up or reset my password on the sign-in page, sends one at any time. If the address already belongs to someone in the portal, you are shown who it is and asked whether this is the same person before anything changes: one address is one person, who may be a guardian of several families.</p>
               <AddGuardianForm act={addGuardianAction.bind(null, String(familyId))} />
             </>
           )}
