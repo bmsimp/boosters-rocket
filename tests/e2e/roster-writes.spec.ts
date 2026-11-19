@@ -9,9 +9,10 @@ test.afterAll(async () => { await sql.end(); });
 // Staff changes to the roster in QuickBooks (roadmap step 5). This run's QuickBooks connection holds made-up tokens,
 // and no seeded customer or customer type has an id that is digits (scripts/seed-e2e.ts; tests/e2e/family-details.spec.ts
 // checks it), so every change here is refused by the client before anything is sent: the browser shows the forms, the
-// name offered when one is taken, and the refusal. Sending and the cache that follows are covered against the stub in
-// vitest (tests/integration/roster-writes.test.ts), as is a flat-shaped club. Nothing here changes the roster, so both
-// passes of the run (phone, then desktop) find the seed as it was.
+// name offered when one is taken, and the refusal. A student added to a linked family is saved in the portal first
+// (stage 3's slice 9e), so its refusal is kept on Reconciliation; the test removes both after, so both passes of the
+// run (phone, then desktop) find the seed as it was. Sending and the cache that follows are covered against the stub
+// in vitest (tests/integration/roster-writes.test.ts, linked-saved-first.test.ts), as is a flat-shaped club.
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), `${page.url()} scrolls sideways`).toBe(false);
 const mark = async () => Number((await sql`SELECT coalesce(max(id), 0) AS id FROM audit_log`)[0]!.id);
@@ -19,7 +20,7 @@ const mark = async () => Number((await sql`SELECT coalesce(max(id), 0) AS id FRO
 test.describe("staff", () => {
   test.beforeEach(async ({ context }) => { await context.addCookies([staffSessionCookie()]); });
 
-  test("add a student: a taken name is offered with a suffix, and the send is refused before it reaches QuickBooks", async ({ page }) => {
+  test("add a student: a taken name is offered with a suffix; the student is saved in the portal first, and QuickBooks' refusal is kept on Reconciliation", async ({ page }) => {
     const since = await mark();
     const [{ n: before }] = await sql`SELECT count(*)::int AS n FROM qbo_customer` as unknown as [{ n: number }];
     await page.goto(await familyPages.roster("E2E-10"));
@@ -34,14 +35,30 @@ test.describe("staff", () => {
     await expect(offer).toBeVisible();
     await noSidewaysScroll(page);
     await offer.click();
-    await expect(changes.getByText("That couldn't be sent to QuickBooks, so nothing was changed.")).toBeVisible();
-    await expect(changes.getByLabel("The student's name, as QuickBooks will show it")).toHaveValue("Leo Rivera (2)");
-    // Refused by the client for its ids, and audited; nothing reached the roster or the queue.
-    const refused = await sql`SELECT after FROM audit_log WHERE id > ${since} AND action = 'roster.write.refused'`;
-    expect(refused.map((r) => r.after)).toEqual([{ op: "create", role: "student", code: "bad_id" }]);
+    // Saved in the portal first (stage 3's slice 9e); the client refuses the send for its ids, and the refusal is kept.
+    await expect(changes.getByText("Leo Rivera (2) is added to Rivera Family in the portal, but QuickBooks wouldn't make them", { exact: false })).toBeVisible();
+    const kept = await sql`SELECT after FROM audit_log WHERE id > ${since} AND action = 'roster.write.kept_refused'`;
+    expect(kept.map((r) => r.after)).toEqual([{ op: "create", role: "student", code: "bad_id", state: "refused" }]);
     const [{ n: after }] = await sql`SELECT count(*)::int AS n FROM qbo_customer` as unknown as [{ n: number }];
     expect(after).toBe(before);
-    expect(await sql`SELECT id FROM write_queue WHERE request->>'name' = 'Leo Rivera (2)'`).toHaveLength(0);
+    const items = await sql`SELECT id, state, student_id FROM write_queue WHERE request->>'name' = 'Leo Rivera (2)'`;
+    expect(items.map((i) => i.state)).toEqual(["refused"]);
+    try {
+      // On Reconciliation under its own heading, with what can be done about it.
+      await page.goto("/staff/reconciliation");
+      const writes = page.getByRole("region", { name: "Changes waiting to reach QuickBooks" });
+      await expect(writes.getByRole("heading", { name: "Refused by QuickBooks, kept in the portal (1)" })).toBeVisible();
+      const row = writes.getByRole("row").filter({ hasText: "Add the student “Leo Rivera (2)” to Rivera Family" });
+      await expect(row).toContainText("It couldn't be sent to QuickBooks");
+      await expect(row.getByRole("button", { name: "Send the portal's value" })).toBeVisible();
+      await noSidewaysScroll(page);
+    } finally {
+      // Left as the seed was, for the other pass: the kept refusal goes, and the student saved first with it.
+      for (const i of items) {
+        await sql`DELETE FROM write_queue WHERE id = ${i.id}`;
+        if (i.student_id) await sql`DELETE FROM student WHERE id = ${i.student_id}`;
+      }
+    }
   });
 
   test("a family's page says what can be changed here and what is changed in QuickBooks", async ({ page }) => {

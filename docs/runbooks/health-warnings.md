@@ -65,6 +65,14 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     Rocket buy-out" on that family or student. The **Volunteer buy-outs** list on the same page shows each buy-out
     that needs a look (an invoice QuickBooks no longer shows, one on another customer, a student who moved, one
     QuickBooks refused); the treasurer sorts those out in QuickBooks.
+  - "N changes are kept in the portal that QuickBooks refused": a rename, or a student added to a family, was saved
+    in the portal and sent, and QuickBooks refused it (most often because someone changed the name in QuickBooks
+    since the portal last sent it, or the name is taken there). The portal keeps its own value; QuickBooks keeps what
+    it has. Open **Reconciliation** (the line's link): each change is under "Refused by QuickBooks, kept in the portal",
+    with why and what QuickBooks has now. Decide which is right: **Send the portal's value** to put the portal's in
+    QuickBooks (it reads QuickBooks first, and sends nothing if the name there changed again since the page was
+    shown), or **Give up** to leave QuickBooks as it is. Renaming the record again on its family's page also takes the
+    place of the refused change.
   - That some of the portal's requests "didn't answer as the portal expects", the last time an Admin ran **Check the
     portal's requests** (the line's link; Settings, QuickBooks). QuickBooks answered one of the portal's requests in a
     way the portal wasn't written for. Open the page: each such row says what it found and what it means for the club.

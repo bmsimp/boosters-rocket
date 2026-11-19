@@ -1,6 +1,6 @@
 // Staff add, remove and reinstate a family's guardians, in the app only (stage 3's slice 7b of the app-owned families
 // spec, section 6: "Staff add a guardian to a family with a name and email"). Nothing is sent to QuickBooks: a
-// guardian's Parent customer, or their address in a family's email field, arrives with stage 3's slice 9f. Staff
+// guardian's Parent customer, or their address in a family's email field, arrives with stage 3's slice 9g. Staff
 // only: called from src/app/staff/(app)/parents/actions.ts behind `Roster.Family.ReadWrite` (the lead's choice: giving
 // an address a family's sign-in goes with the permission that changes a family); never from parent code, which may not
 // import it (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts): it gives any address access to any family.
@@ -246,7 +246,7 @@ export type RemoveGuardianResult = { ok: true; sessionsEnded: number } | { ok: f
  * row all their unused requests and codes; that family's sessions end, every session once it was the last open row;
  * the family's unfinished forms still waiting for their signature start again; and `parent.access.ended` keeps staff's
  * note. Access ends at once whatever the guardian owes (the owner's decision of 2026-11-18); their Parent record in
- * QuickBooks is made inactive, under the balance rule, only once stage 3's slice 9f sends it. A row already closed
+ * QuickBooks is made inactive, under the balance rule, only once stage 3's slice 9g sends it. A row already closed
  * is refused, and so is a roster read holding its lock past the wait.
  */
 export async function removeGuardian(guardianId: string, rawNote: string, o: StaffOp, w: Waits = {}): Promise<RemoveGuardianResult> {

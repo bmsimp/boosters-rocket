@@ -580,3 +580,46 @@ describe("the Families list while QuickBooks is connected to another company", (
     expect(await renderPage(RosterPage)).not.toContain("Make a family</h2>");
   });
 });
+
+describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)", () => {
+  const refusedRename = () => seedQueued(RENAME, { state: "refused", code: "fault_5010", nextTryAt: null, familyQboId: "10" });
+
+  it("is listed on Reconciliation under its own heading, in words, with Send the portal's value and Give up only for staff who may change families", async () => {
+    await refusedRename();
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    const read = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(read).toContain("Refused by QuickBooks, kept in the portal (1)");
+    expect(read).toContain("Rename the student “Leo Rivera” to “Leon Rivera”");
+    expect(read).toContain("Someone changed the name in QuickBooks since the portal last sent it");
+    expect(read).toContain("QuickBooks has “Leo Rivera” now.");
+    expect(read).not.toContain("fault_5010");
+    expect(read).not.toContain("Send the portal");
+    expect(read).not.toContain("Stuck (");
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const change = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(change).toContain("Send the portal&#x27;s value");
+    expect(change).toContain("Give up");
+    expect(change).not.toContain("Try again now");
+  });
+
+  it("is listed on the family's page in words, with no buttons, and doesn't stop a change to the record", async () => {
+    await refusedRename();
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    const kept = sectionOf(html, "refused-h");
+    expect(kept).toContain("Kept in the portal, refused by QuickBooks");
+    expect(kept).toContain("Rename the student “Leo Rivera” to “Leon Rivera”");
+    expect(kept).not.toContain("Send the portal");
+    expect(html).not.toContain('id="waiting-h"');
+    expect(html).toContain("Change the student Leo Rivera");
+    expect(html).not.toContain("A change to Leo Rivera is waiting to reach QuickBooks");
+  });
+
+  it("the rename forms of a linked record send no version and start from the portal's own name; the student form adds by the family's record", async () => {
+    await db.update(student).set({ name: "Leo R. Rivera" }).where(eq(student.id, await recordOfCustomer("12", "student")));
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    const html = sectionOf(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } }), "family-changes-h");
+    expect(html).toContain('value="Leo R. Rivera"');
+    expect(html).toContain("The student is saved in the portal first, then made in QuickBooks under the family.");
+  });
+});

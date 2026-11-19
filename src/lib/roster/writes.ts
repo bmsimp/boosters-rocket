@@ -1327,8 +1327,10 @@ export async function linkStudentMadeAfterGivingUp(rawQueueId: string, rosterTag
     if (familyCustomer === null || where?.role !== "student" || where.familyQboId !== familyCustomer) {
       return no(`QuickBooks doesn't have “${made.name}” as a student under the customer this student's family is linked to, so nothing was linked. Check it in QuickBooks.`);
     }
-    const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: source, customerId: made.customerQboId, studentId, origin: "confirmed", linkedBy: o.staffUserId })
-      .returning({ id: accountingLink.id });
+    // The link starts aligned with the version the cache holds for the customer staff confirmed (stage 3's slice 9e).
+    const [row] = await tx.select({ syncToken: qboCustomer.syncToken }).from(qboCustomer).where(eq(qboCustomer.qboId, made.customerQboId));
+    const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: source, customerId: made.customerQboId, studentId, origin: "confirmed", linkedBy: o.staffUserId,
+      ...(row ? { syncedToken: row.syncToken, syncedAt: new Date() } : {}) }).returning({ id: accountingLink.id });
     await writeAudit({ actor: o.actor, action: "roster.student.linked_after_giving_up", permission: o.permission, ip: o.ip, targetType: "student", targetId: String(studentId),
       after: { studentId: String(studentId), familyId: String(s.familyId), customerQboId: made.customerQboId, queueId: item.id, linkId: link!.id } }, tx);
     return { ok: true, message: `${recordNameWords(s.name, "student")} is linked to “${made.name}” in QuickBooks. Nothing was sent to QuickBooks.` };
@@ -1434,7 +1436,7 @@ async function saveAndSend(id: AppFamilyId, ask: AddFamilyAsk, rosterTag: string
    linked one by one. Like making a family inactive it is never queued to be sent later: the staff member is waiting.
    The first step that doesn't go through stops it; a step whose answer was lost is held on the queue as possibly made,
    filed under its records, so the found-done path links it after the next roster read; pressing again carries on with
-   whatever is still unlinked. It sends nothing for a guardian (slice 9f). */
+   whatever is still unlinked. It sends nothing for a guardian (slice 9g). */
 
 type CreateWrite = Extract<RosterWrite, { op: "create" }>;
 type LinkPlan = {
@@ -1651,7 +1653,7 @@ async function createAndLinkHolding(familyId: string, typeQboId: string | null, 
 /**
  * What staff change on a family with no link, or on a student with no link of their own (one a stopped "Create in
  * QuickBooks and link" left in a linked family), as the page sent it: the app's ids, each a uuid. Moving such a student,
- * or anyone into such a family, is not one of them (slice 9e).
+ * or anyone into such a family, is not one of them (slice 9f).
  */
 export type PortalChange =
   | { op: "add_student"; familyId: string; name: string }

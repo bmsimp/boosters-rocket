@@ -6,11 +6,16 @@ if you use this installation's proxy.
 
 ## 1. Before anything
 
-1. Read the release's notes on the repository's **Releases** page, for every release since yours. A note that says
+1. Sign in as staff and open **Reconciliation**. Under "Changes waiting to reach QuickBooks", clear every staff change
+   to the roster that is waiting or stuck there (a new family, student or parent, a rename or a move): press
+   **Try again now** and wait for it to go through, or **Give up**. An update that changes how those changes are sent
+   refuses to start while one is there (part 3 says how that reads), and changes nothing. A volunteer buy-out's
+   invoice, a change to make someone inactive, and a change QuickBooks refused that the portal kept can stay.
+2. Read the release's notes on the repository's **Releases** page, for every release since yours. A note that says
    "change your .env" means a new line to fill in: `.env.example` has it. A release that moves Postgres to a new major
    version says so: follow [Moving to a new major version of Postgres](#moving-to-a-new-major-version-of-postgres)
    instead of part 2.
-2. Back up both databases: `docker compose run --rm backup --now`. Note the time in the file names it prints: it is the
+3. Back up both databases: `docker compose run --rm backup --now`. Note the time in the file names it prints: it is the
    way back. The start in part 2 checks for it: see [When the start stops for a backup](#when-the-start-stops-for-a-backup).
 
 ## 2a. With the published image
@@ -48,8 +53,10 @@ if you use this installation's proxy.
    stopped, and changed nothing", and then a line starting "the database said:" with the reason and how many rows it
    is about. `docker compose logs db` shows the same reason as an `ERROR:` line. Every change of one update is made
    together or not at all, so when one stops, none of them is kept and the database is exactly as the version you
-   were running left it. Keep it as it is, report both logs' lines, and run the previous version until a fix comes
-   ([Going back](#going-back)).
+   were running left it. One such change is yours to clear: "Migration 0041 stopped, and changed nothing: ... staff
+   change(s) to the roster are still waiting or stuck on the queue". Run the previous version again
+   ([Going back](#going-back)), clear them on **Reconciliation** as part 1 says, and update again. For any other,
+   keep it as it is, report both logs' lines, and run the previous version until a fix comes.
 2. Sign in as an Admin and open **Health**: **Version** names the new version, and every line reads as it did before
    ([Health page warnings](health-warnings.md) for any that doesn't).
 3. Open the portal as a parent would (a test family): Home, Payments, Forms.
