@@ -310,40 +310,28 @@ connection (`ran quickbooks.token_refresh: ok`).
 Moving to the band's real books later means the app's **Production** keys, **Production** in step 1, and Intuit's app
 assessment first.
 
-### Parent sign-ins from QuickBooks
+### Parent sign-ins
 
-Once an Admin switches it on, a parent who is a Parent customer in QuickBooks can sign in with the address on that
-record and a code; nobody seeds them by hand. Do this after the QuickBooks steps above.
+Since stage 3 of the app-owned families work (slice 7a), who can sign in is the portal's own list of each family's
+guardians: a Parent customer in QuickBooks gives nobody a sign-in, and a change in QuickBooks ends none. The guardians
+are the ones the portal already holds (on this host, the test parents seeded in section 6, and anyone the earlier
+version gave a sign-in from QuickBooks, who keeps it); staff adding a guardian in the portal is the next slice.
+Switching on needs only working mail.
 
-1. **Before you deploy, back up the database.** The deploy runs migration 0009, which changes the parent tables.
-   On linuxdev:
-   ```bash
-   cd ~/booster-rocket
-   docker compose -f docker-compose.poc.yml --env-file .env.poc exec -T db pg_dump -U booster -d booster > ~/booster-rocket-before-parents-from-quickbooks.sql
-   ```
-   As before, the file goes in your home folder, not the checkout. The restore steps are in section 4,
-   "Upgrading" (step 5), with this file name in place of the one there. Then deploy (section 8).
-2. In the sandbox company, give the Parent customer `Test Parent` an email address you can read.
-3. Choose **Roster** in the staff menu, then **Refresh now**.
-4. Choose **Parent sign-ins** in the staff menu (Admins only), then **Set up**.
-5. Read **Step 1: What would happen**. The test sign-ins seeded by hand on `POC-FAMILY-1` (section 6) are listed
-   under **Sign-ins that would end**: QuickBooks doesn't list them, so they stop working when sign-ins are switched
-   on. The counts should match the sandbox.
-6. **Next: parent sign-ins**, then **Switch parent sign-ins on**. The step then says "Parent sign-ins are on." with
-   how many people can sign in. No email is sent.
-7. In a private window, sign in as that parent at `/sign-in` with the code that arrives.
-8. **Next: welcome emails** (step 3), then **Switch welcome emails on**. Within a minute or two the parent gets the
-   welcome email.
+1. Choose **Parent sign-ins** in the staff menu (Admins only), then **Set up**.
+2. **Step 1: Parent sign-ins**: it says how many people could sign in, to how many families. **Switch parent sign-ins
+   on**. The step then says "Parent sign-ins are on." with the same counts. No email is sent, and no guardian row is
+   opened or closed.
+3. In a private window, sign in as a test parent at `/sign-in` with the code that arrives.
+4. **Next: welcome emails** (step 2), then **Switch welcome emails on**. Within a minute or two each guardian who has
+   never been welcomed gets the welcome email.
 
-Switching parent sign-ins **off** (step 2, **Switch parent sign-ins off**) signs every parent out at once, and also
-switches welcome emails off. Switching sign-ins on again does not switch welcomes back on: do step 3 again.
+Switching parent sign-ins **off** (step 1, **Switch parent sign-ins off**) signs every parent out at once, and also
+switches welcome emails off. Switching sign-ins on again does not switch welcomes back on: do step 2 again.
 
-**Parents** in the staff menu (needs the Parents permission; Admin has it) lists addresses to review and every
-person, with block and unblock on each person's page. Names and addresses are changed in QuickBooks, followed by
-**Refresh now**.
-
-A sign-in made by hand that staff removed before this version is opened again if QuickBooks lists that parent under
-that family.
+**Parents** in the staff menu (needs the Parents permission; Admin has it) lists every person and each family they
+belong to, with block, unblock and resend welcome on each person's page. A sign-in that an earlier version closed for
+something QuickBooks held (an address under two families, an inactive record) stays closed, with its reason in words.
 
 ## 6. Test parents
 
@@ -363,10 +351,8 @@ that family.
    ("Migration 0037 stopped"). Read the roster, then deploy again.
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
 
-The seed script makes a sign-in by hand, for testing before parent sign-ins are switched on. It sends no welcome
-email; tell the parent to go to `/sign-in` and ask for a code. Once parent sign-ins are switched on, sign-ins come
-from QuickBooks, and a hand-made one that QuickBooks doesn't list stops working (section 5, "Parent sign-ins from
-QuickBooks").
+The seed script makes a sign-in by hand, for testing. It sends no welcome email; tell the parent to go to `/sign-in`
+and ask for a code. It keeps working once parent sign-ins are switched on: nothing in QuickBooks ends it.
 
 **Blocking a parent.** Choose **Parents** in the staff menu, open the person, enter a reason under
 **Why? (staff only)** and choose **Block**; **Unblock** on the same page gives back the same access. Both are in the
@@ -593,13 +579,13 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 15. Waits for the mapping screen, as check 25 does (see "Switching companies" in section 5). When it ships: **Disconnect**, then connect a second sandbox company -> the old company's families are gone: **Roster** says "The membership shape hasn't been chosen yet." and the QuickBooks page shows the shape as "Not chosen yet." until it is chosen again in step 3. The audit log has `roster.cleared`.
 - [ ] 16. Customer query order: in the sandbox's API explorer, or with a query in the style of the plan's check script (`q("...")`), run `select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000` and confirm it is accepted (HTTP 200, customers in `Id` order). The portal sends this query for every page of a roster read, so a club with more than 1000 customers loses none between pages.
 - [ ] 17. Inactive customer types: make one customer type inactive in the sandbox, run `select * from CustomerType`, and note whether the inactive type still appears in the list (record it in section 11).
-- [ ] 18. Parent sign-ins, **Set up**, **Step 1: What would happen** (section 5, "Parent sign-ins from QuickBooks") -> the hand-seeded sign-ins on `POC-FAMILY-1` are listed under **Sign-ins that would end**, and the numbers match the sandbox.
-- [ ] 19. **Switch parent sign-ins on** -> the step says "Parent sign-ins are on."; the sandbox parent signs in at `/sign-in` with a code; the audit log has `settings.parents.save` and `parent.access.granted`, with `cause` in its details.
-- [ ] 20. In the sandbox, put the same address on a Parent customer under a second family, then **Refresh now** -> the staff home says "1 address to review", neither family can be signed in to with that address, and one staff email arrives (within a few minutes: the worker sends it).
-- [ ] 21. **Parents** in the staff menu, under **To review**: type a note in **How do you know? (staff only)** and choose **Same person** -> signing in with that address, the family chooser offers both families by name.
-- [ ] 22. Make that Parent customer inactive in the sandbox, then **Refresh now** -> the parent is signed out of that family, and the audit log has `parent.access.ended` with reason `inactive`.
+- [ ] 18. Parent sign-ins, **Set up**, **Step 1: Parent sign-ins** (section 5, "Parent sign-ins") -> it counts the guardians the portal holds (the hand-seeded ones on `POC-FAMILY-1` among them), whatever the sandbox's Parent customers are, and asks for nothing but working mail.
+- [ ] 19. **Switch parent sign-ins on** -> the step says "Parent sign-ins are on."; a seeded test parent signs in at `/sign-in` with a code; the audit log has `settings.parents.save` and no `parent.access.granted` or `parent.access.ended`.
+- [ ] 20. In the sandbox, put a test parent's address on a Parent customer under a second family, then **Refresh now** -> nothing changes for anyone: no "address to review", no staff email, and the test parent signs in to their own family as before.
+- [ ] 21. **Parents** in the staff menu -> it lists every person with their families and has no **To review**; a test parent seeded in two families (`--family POC-FAMILY-2`) is offered both by name in the family chooser.
+- [ ] 22. Make a Parent customer inactive in the sandbox, then **Refresh now** -> nobody is signed out for it, and the audit log has no `parent.access.ended`. (A family the portal's records hold as inactive is kept out at the gate: its guardians can't enter it, and their rows stay open.)
 - [ ] 23. Open the person from **Parents**: **Block** with a reason in **Why? (staff only)** -> the box says Blocked with the reason, and their next code request gets the usual message and no email; **Unblock** -> they can sign in again. The audit log has `parent.read`, `parent.block` and `parent.unblock`.
-- [ ] 24. Step 3, **Switch welcome emails on** -> one welcome email arrives within two minutes, and `docker logs booster-rocket-worker` shows `ran parents.welcome: ok`.
+- [ ] 24. Step 2, **Switch welcome emails on** -> one welcome email arrives within two minutes, and `docker logs booster-rocket-worker` shows `ran parents.welcome: ok`.
 - [ ] 25. Waits for the mapping screen: a second sandbox company is refused until then (see "Switching companies" in section 5). When it ships: **Disconnect**, then connect the second sandbox company -> the audit log has `parent.access.cleared`; **Parent sign-ins** shows sign-ins switched off and welcome emails off, and a box for the previous QuickBooks company. **Review matches** appears there once the new company's roster is read and a membership shape is chosen (the second sandbox company has no customer types, so this part may not be possible there). Today: **Disconnect**, then try to connect the second sandbox company -> step 2 says "That is a different QuickBooks company from the one the portal's families were read from, so it wasn't connected and nothing was changed."; connect the first one again, and Roster lists its families as before.
 
 **Reading the audit log:** sign in as staff at `/staff/sign-in` (setup signs you in the first time) and choose **Audit** in the top menu (it
@@ -618,9 +604,9 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The person's links to their families are all closed | Before parent sign-ins are switched on: seed the test parent again (section 6). After they are switched on, the fix is in QuickBooks: the Parent customer exists, is active, has one email address and sits under an active family. Then **Refresh now** on the Roster. The reason a person can't sign in is shown on their page under **Parents**, and in the family's **Portal sign-ins** box. Don't re-enable a link with SQL once sign-ins are on: the next reconcile closes it again, and the SQL bypasses the audit log |
-| A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Before parent sign-ins are switched on: seed them (section 6). After they are switched on, the fix is in QuickBooks: the Parent customer exists, is active, has one email address and sits under an active family. Then **Refresh now** on the Roster. The reason a person can't sign in is shown on their page under **Parents**, and in the family's **Portal sign-ins** box. Addresses are matched trimmed and lowercased |
-| `signin.code_refused`, reason `no_enabled_guardian` | All of the person's links to their families are closed | As in the first row: before sign-ins are on, the seed script (section 6); after, fix the record in QuickBooks and **Refresh now** |
+| `signin.refused`, reason `no_enabled_guardian` (after the code was accepted) | The person has no guardian row that counts: every row is closed, or names no family record, or a family that is inactive (or has no active student while "Families with no active student" is on) | Seed the test parent again (section 6), and read the roster so the row has its family record. The reason a closed row can't sign in is shown on the person's page under **Parents**, and in the family's **Portal sign-ins** box. Don't re-enable a link with SQL: it bypasses the audit log |
+| A parent never gets a code; audit `signin.code_refused`, reason `unknown_email` | No person has that email | Seed them (section 6): an address in QuickBooks gives nobody a sign-in. Addresses are matched trimmed and lowercased |
+| `signin.code_refused`, reason `no_enabled_guardian` | The person has no guardian row that counts | As in the first row |
 | `signin.code_refused`, reason `rate_limited` | Details `limit` says which limit: `resend`, a new code asked for within 60 seconds of the last one; `email`, 3 codes to one address; `ip`, 60 code requests from one IP; `check_ip`, 180 code checks from one IP (the parent sees "Too many tries. Wait a few minutes and request a new code."). The last three count 15 minutes back. For `email`, `ip` and `check_ip`, a full window is recorded once: the first refused request writes the row, and later ones in the same window write nothing | `resend`: wait 60 seconds. The others: wait up to 15 minutes, until the oldest request in the window is 15 minutes old |
 | The sign-in page says "We couldn't reach the portal just then. Please try again in a moment." and there's no audit row | More than 20 code requests, or 20 code checks, from one IP in a minute: the portal turns them away before they are counted or recorded | Wait a minute |
 | `signin.code_refused`, reason `mail_failed`, with `detail: "mail_not_working"`, and no `mail.failed` row | Mail isn't set up, or its settings haven't had a successful test email since they were saved, so nothing was sent | **Mail** in the staff menu (Admins only): **Send test email** |
@@ -650,8 +636,8 @@ docker compose -f docker-compose.poc.yml --env-file .env.poc exec db psql -U boo
 | The roster refresh fails with "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect QuickBooks, then connect the company the roster was read from. (roster_company)" | A connection to another company was stored before the portal refused it | **Disconnect**, then connect the first company again |
 | The staff home says "QuickBooks needs attention" with "The roster hasn't been refreshed from QuickBooks in more than 2 days." | The worker isn't running | `docker ps`, then `docker compose -f docker-compose.poc.yml --env-file .env.poc up -d worker` |
 | The staff home says "The QuickBooks connection couldn't be refreshed: Intuit no longer accepts this connection. Connect QuickBooks again." | The connection lapsed or was revoked at Intuit | Go through step 2 of the QuickBooks steps again |
-| The staff home says "The last roster refresh failed: The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)" (the roster pages say the same after "The latest try failed:") | The step that works out who can sign in failed inside the refresh | The roster and who can sign in are as they were before the refresh. Read `docker logs booster-rocket-app` for a line like `[roster] reconcile failed { name: 'DrizzleQueryError', code: '23505', constraint: 'parent_email_uq' }` (the error's class name, the database's SQLSTATE code and the constraint; never the message or an address) and report it |
-| `/sign-in` says "Parent sign-in isn't available yet." after parent sign-ins were switched off | Sign-ins are off, so nobody can sign in (the audit shows `signin.code_refused`, reason `signins_off`) | **Parent sign-ins** in the staff menu, **Change**, step 2: **Switch parent sign-ins on**. Welcome emails went off with them; switch them on again in step 3 if wanted |
+| The staff home says "The last roster refresh failed: The portal's own family and student records couldn't be brought up to date, so the roster was left as it was. (app_records_failed)" (the roster pages say the same after "The latest try failed:"; an older version said "The parent sign-ins couldn't be brought up to date ... (reconcile_failed)", which can't happen any more) | The step that keeps the portal's family records in step failed inside the refresh | The roster and the family records are as they were before the refresh, and nobody's sign-in changed. Read `docker logs booster-rocket-app` for a line like `[roster] app records failed { name: 'DrizzleQueryError', code: '23505', constraint: '...' }` (the error's class name, the database's SQLSTATE code and the constraint; never the message or an address) and report it |
+| `/sign-in` says "Parent sign-in isn't available yet." after parent sign-ins were switched off | Sign-ins are off, so nobody can sign in (the audit shows `signin.code_refused`, reason `signins_off`) | **Parent sign-ins** in the staff menu, **Change**, step 1: **Switch parent sign-ins on**. Welcome emails went off with them; switch them on again in step 2 if wanted |
 | `docker logs booster-rocket-worker` says "couldn't reach the app: HTTP 404" | The worker and the app have different `BETTER_AUTH_SECRET` values | Both read `.env.poc`: recreate both |
 | Only if Access is set up: Cloudflare never emails a code | The email is not in the Allow policy, or One-time PIN is not enabled on the application | Section 7 B steps 1-3; check spam |
 

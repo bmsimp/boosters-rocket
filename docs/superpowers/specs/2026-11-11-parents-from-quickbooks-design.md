@@ -4,6 +4,7 @@
 merged and deployed to the linuxdev proof of concept on 2026-11-12 (commit `82e4639`). Parent sign-ins are still
 switched off there, and the runbook's checks 18-25 have not been run (docs/runbooks/before-the-first-family.md, part 1).
 **Changed since:** step 5 of the roadmap changes its "What staff cannot do here": staff now create, rename, move and make inactive in QuickBooks from the roster pages.
+**Changed since** (2026-11-19, stage 3 slice 7a of `2026-11-18-app-owned-families-design.md`): sign-ins no longer come from QuickBooks. The reconcile's sign-in half (§1, §2), the held-address review and its notice, the clean-up preview and its dry run (§3), the match review and the previous-company snapshot (§6) and the roster flags they made are gone; a guardian row is the app's own and counts at the gate while it is open, in an active family record and, under the setting, a family with an active student; the switches need only working mail; the parent's email confirm changes the person's address itself. Read the app-owned families spec for what stands.
 **Builds on:** parent email-code sign-in (`2026-11-10-parent-email-code-sign-in-design.md`) and the QuickBooks
 connection and roster (`2026-11-10-quickbooks-connection-and-roster-design.md`).
 **Roadmap:** the first half of Plan 3. The second half (anything that writes to QuickBooks) is a separate
