@@ -182,6 +182,10 @@ describe("the parent switches", () => {
       await saveShape(shape, { actor: admin.actor, ip: null });
       expect(await getParentSettings()).toMatchObject({ signin: true, requireActiveStudents: true });
       expect(await studentsRuleInForce()).toBe(false);
+      // Pressing "on" again (a stale page) is refused as when it is off, never told it is saved while not in force,
+      // and changes and records nothing.
+      expect(await setRequireStudents(true, admin)).toEqual({ ok: false, errors: [NO_STUDENTS_IN_SHAPE] });
+      expect(await getParentSettings()).toMatchObject({ requireActiveStudents: true });
     }
     await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: "P" }, { actor: admin.actor, ip: null });
     expect(await studentsRuleInForce()).toBe(true);

@@ -24,8 +24,8 @@ export type StudentsEffect = { families: number; people: number };
 
 /**
  * One settings change: lock, write, do the work the change needs, and audit it with what happened (spec §7). A patch
- * that changes nothing (a stale press) does nothing and records nothing. `refuse`, checked under the lock, can stop
- * the change with its reasons before anything is written. The lock is the settings' own: nothing a switch does reads
+ * that changes nothing (a stale press) does nothing and records nothing. `refuse`, checked under the lock and before
+ * that, can stop the change with its reasons before anything is written, a stale press included. The lock is the settings' own: nothing a switch does reads
  * or waits for the roster.
  */
 async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx, next: ParentSettings, before: ParentSettings) => Promise<Record<string, unknown>>,
@@ -34,9 +34,11 @@ async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx,
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
     const before = await getParentSettings(tx);
     const next = { ...before, ...patch };
-    if ((Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
+    // Refused before a patch that changes nothing is answered: a value stored already is refused for the same reason
+    // as one that isn't (the students rule stored on beside a shape that names no students is not in force).
     const errors = await refuse?.(before, tx);
     if (errors) return { ok: false, errors };
+    if ((Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
     await putParentSettings(tx, next);
     const did = await work(tx, next, before);
     await writeAudit({ actor: o.actor, action: "settings.parents.save", permission: o.permission, targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
