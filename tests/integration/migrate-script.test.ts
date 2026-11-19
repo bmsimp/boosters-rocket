@@ -36,6 +36,28 @@ describe("scripts/migrate.mjs", { timeout: 30_000 }, () => {
     expect(out).toContain("migrated");
   });
 
+  it("prints the database's own reason when a migration stops, not only the statement", () => {
+    // The migrations as they are, and one more that refuses with a reason and counts, as the re-key migrations do.
+    const folder = mkdtempSync(path.join(tmpdir(), "br-migrate-refuses-"));
+    try {
+      const dir = path.join(folder, "drizzle");
+      cpSync(path.resolve("drizzle"), dir, { recursive: true });
+      const file = path.join(dir, "meta", "_journal.json");
+      const j = JSON.parse(readFileSync(file, "utf8")) as { entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[] };
+      const last = j.entries.at(-1)!;
+      j.entries.push({ idx: last.idx + 1, version: last.version, when: last.when + 1, tag: "9999_refuses", breakpoints: true });
+      writeFileSync(file, JSON.stringify(j));
+      writeFileSync(path.join(dir, "9999_refuses.sql"), "DO $$ BEGIN RAISE EXCEPTION 'Migration 9999 stopped, and changed nothing: 3 rows in a table with no record'; END $$;\n");
+      const r = spawnSync("node", ["scripts/migrate.mjs"], { env: { ...process.env, DATABASE_URL: FRESH_URL, MIGRATIONS_DIR: dir }, encoding: "utf8" });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("migration failed: Failed query");
+      expect(r.stderr).toContain("\nthe database said: Migration 9999 stopped, and changed nothing: 3 rows in a table with no record\n");
+      expect(r.stdout).not.toContain("migrated");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("exits non-zero when the database can't be reached", () => {
     const r = spawnSync("node", ["scripts/migrate.mjs"], { env: { ...process.env, DATABASE_URL: "postgres://nobody:nope@localhost:1/none" }, encoding: "utf8" });
     expect(r.status).toBe(1);

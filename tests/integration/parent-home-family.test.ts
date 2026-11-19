@@ -12,7 +12,8 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { createElement } from "react";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { auditLog, guardian, parentAuthSession, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { recordNameWords } from "@/lib/families/words";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -21,10 +22,11 @@ import ParentHome from "@/app/(parent)/page";
 import FamilyPage from "@/app/(parent)/family/page";
 import ParentLayout from "@/app/(parent)/layout";
 import NotFound from "@/app/not-found";
+import ChooseFamily from "@/app/choose-family/page";
 import { resetDb, seedGuardian } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, identityNow, moneyMarkers, seedFamilyMoney, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
 
 const REALM = "9130000000000001", OTHER_REALM = "9130000000000002";
@@ -463,6 +465,28 @@ describe("Family", () => {
     for (const page of [html, await renderPage(ParentHome), await renderPage(ParentLayout, { children: createElement("main", null, "the page") })]) {
       expect(page).not.toMatch(/Cedarholm|Cosima|CEDAR-/);
     }
+  });
+
+  it("names a family the portal has no name for, among two such, with the same numbered words on the Viewing line as on its chooser button", async () => {
+    const a = await seedSignedInParent();
+    // Two more families, neither on the roster: their records have no name. They sort after the Alderquist family's
+    // customer, so the chooser lists them second and third.
+    for (const familyQboId of ["ZZ-UNNAMED-1", "ZZ-UNNAMED-2"]) await seedGuardian({ parentId: a.identity.parentId, familyQboId, status: "active" });
+    await syncAppRecords();
+    await db.update(parentAuthSession).set({ familyQboId: "ZZ-UNNAMED-2" }).where(eq(parentAuthSession.id, a.session.id));
+    const who = await identityNow(a.session.id);
+    expect(who.families.map((f) => f.familyQboId)).toEqual([FAMILY_A.family.qboId, "ZZ-UNNAMED-1", "ZZ-UNNAMED-2"]);
+    asParent(who);
+    const unknown = recordNameWords(null, "family").replaceAll("'", "&#x27;");
+    const chooser = await renderPage(ChooseFamily);
+    expect(chooser).toContain(">Alderquist Family</button>");
+    expect(chooser).toContain(`>${unknown} (1)</button>`);
+    // The family being viewed is the third: its button is marked current, and reads "(2)".
+    expect(chooser).toContain(`aria-current="true">${unknown} (2)</button>`);
+    const frame = await renderPage(ParentLayout, { children: createElement("main", null, "the page") });
+    expect(frame).toContain(`Viewing ${unknown} (2). `);
+    expect(frame).not.toContain(`${unknown} (1)`);
+    expect(frame).not.toMatch(/ZZ-UNNAMED/);
   });
 });
 

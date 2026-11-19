@@ -9,10 +9,12 @@ import { family, guardian } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 
 /**
- * One query for every row asked about: guardian row id to the family's name in words. Another person's rows answer
- * nothing. Callers pass all of the person's families, in the order the chooser lists them, so that names that repeat
- * (two families the portal knows no name for, or two of the same name) are told apart by their place in that list,
- * "(1)", "(2)", and the frame's "Viewing" line reads as the chooser's button did.
+ * One query for every row asked about: guardian row id to the family's name in words. An id that is not one of this
+ * person's rows answers nothing: it gets no entry, and does not count toward the numbering. Callers pass all of the
+ * person's families, in the order the chooser lists them, so that names that repeat (two families the portal knows no
+ * name for, or two of the same name) are told apart by their place in that list, "(1)", "(2)", and the frame's
+ * "Viewing" line reads as the chooser's button did. A number is raised past any label that is already another family's
+ * own words (a family named "Ash (1)" beside two named "Ash"), so no two of the person's families read alike.
  */
 export async function myFamilyNames(parentId: string, guardianIds: readonly string[]): Promise<Map<string, string>> {
   const ids = [...new Set(guardianIds)];
@@ -21,13 +23,26 @@ export async function myFamilyNames(parentId: string, guardianIds: readonly stri
       .where(and(eq(guardian.parentId, parentId), inArray(guardian.id, ids)))
     : [];
   const found = new Map(rows.map((r) => [r.id, r.name]));
-  const words = ids.map((id) => recordNameWords(found.get(id) ?? null, "family"));
-  return new Map(ids.map((id, i) => [id, numberedIfRepeated(words, i)]));
+  const mine = ids.filter((id) => found.has(id));
+  const labels = numberedWhereRepeated(mine.map((id) => recordNameWords(found.get(id) ?? null, "family")));
+  return new Map(mine.map((id, i) => [id, labels[i]!]));
 }
 
-/** The words at `i`, with their place among the same words when they appear more than once in the list. */
-function numberedIfRepeated(words: readonly string[], i: number): string {
-  const same = words.filter((w) => w === words[i]).length;
-  if (same < 2) return words[i]!;
-  return `${words[i]} (${words.slice(0, i + 1).filter((w) => w === words[i]).length})`;
+/**
+ * The words of each place in the list, those that appear more than once numbered by their order among the same words,
+ * each number raised until the label is no other place's words and no label given already.
+ */
+export function numberedWhereRepeated(words: readonly string[]): string[] {
+  const taken = new Set(words);
+  const counts = new Map<string, number>();
+  for (const w of words) counts.set(w, (counts.get(w) ?? 0) + 1);
+  const next = new Map<string, number>();
+  return words.map((w) => {
+    if (counts.get(w)! < 2) return w;
+    let n = next.get(w) ?? 0, label: string;
+    do { n += 1; label = `${w} (${n})`; } while (taken.has(label));
+    next.set(w, n);
+    taken.add(label);
+    return label;
+  });
 }
