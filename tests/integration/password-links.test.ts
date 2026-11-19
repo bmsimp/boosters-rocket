@@ -215,10 +215,12 @@ describe("the page a link opens, and its action, refuse every unusable link alik
       const html = await page(purpose, token);
       expect(await written()).toEqual(before);
       expect(html).toContain(purpose === "setup" ? PASSWORD_COPY.setupTitle : PASSWORD_COPY.resetTitle);
-      expect(html).toContain('autocomplete="new-password"');
+      // React's server render writes the prop's own name (`autoComplete=`); HTML reads attribute names in any case.
+      // Both boxes ask a password manager for a new password.
+      expect(html.match(/autocomplete="new-password"/gi)).toHaveLength(2);
       for (const secret of ["Zebrafish", "ana@example.com", "Quokka"]) expect(html, secret).not.toContain(secret);
       // No username is offered to a password manager.
-      expect(html).not.toContain('autocomplete="username"');
+      expect(html).not.toMatch(/autocomplete="username"/i);
     }
   });
 
