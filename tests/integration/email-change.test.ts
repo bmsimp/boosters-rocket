@@ -14,7 +14,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboConnection, qboCustomer, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { accountingLink, auditLog, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboConnection, qboCustomer, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
@@ -214,6 +214,9 @@ describe("the link's page", () => {
 describe("confirming: QuickBooks first, then the portal", () => {
   it("own Parent record: the one address is changed in QuickBooks, then the person, and the old address signs in nowhere", async () => {
     const { r, c } = await seedContactFamilies(stub);
+    // Each link as it starts, with the version the portal last aligned with (stage 3's slice 9e).
+    const linksBefore = await db.select().from(accountingLink).orderBy(asc(accountingLink.id));
+    expect(linksBefore.filter((l) => l.syncedToken !== null && l.syncedAt !== null).length).toBeGreaterThan(0);
     await aCode(r.identity.parentId);
     // A set-up and a reset link mailed to the old address, and a device remembered for it.
     await mintLink(r.identity.parentId, "setup");
@@ -271,6 +274,9 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect(records.memberships).toContainEqual({ guardianId: r.identity.guardianId, family: R_FAMILY });
     expect(records.links).toContainEqual(expect.objectContaining({ customer: R_PARENT, kind: "membership", guardianId: r.identity.guardianId }));
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
+    // Nor any link's version: the parent's own record is at version 1 in QuickBooks and the cache now, and every link,
+    // its own included, holds the version and the time it held before (only a staff send aligns a link).
+    expect(await db.select().from(accountingLink).orderBy(asc(accountingLink.id))).toEqual(linksBefore);
   });
 
   it("two presses of the button at once make one change, audited once", async () => {

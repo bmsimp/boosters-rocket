@@ -6,11 +6,12 @@ if you use this installation's proxy.
 
 ## 1. Before anything
 
-1. Sign in as staff and open **Reconciliation**. Under "Changes waiting to reach QuickBooks", clear every staff change
-   to the roster that is waiting or stuck there (a new family, student or parent, a rename or a move): press
-   **Try again now** and wait for it to go through, or **Give up**. An update that changes how those changes are sent
-   refuses to start while one is there (part 3 says how that reads), and changes nothing. A volunteer buy-out's
-   invoice, a change to make someone inactive, and a change QuickBooks refused that the portal kept can stay.
+1. Sign in as staff and open **Reconciliation**. Under "Changes waiting to reach QuickBooks", clear every rename of a
+   family, member or student, and every new student, that is waiting or stuck there: press **Try again now** and wait
+   for it to go through, or **Give up**, which is the way for one that can't go through. An update that changes how
+   those changes are sent refuses to start while one is there (part 3 says how that reads), and changes nothing. A
+   move, a change to make someone inactive, a parent's change, a new family, a volunteer buy-out's invoice, and a change
+   kept in the portal that QuickBooks didn't take can stay.
 2. Read the release's notes on the repository's **Releases** page, for every release since yours. A note that says
    "change your .env" means a new line to fill in: `.env.example` has it. A release that moves Postgres to a new major
    version says so: follow [Moving to a new major version of Postgres](#moving-to-a-new-major-version-of-postgres)

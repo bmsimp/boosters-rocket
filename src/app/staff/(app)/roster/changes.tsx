@@ -61,9 +61,9 @@ export function Waiting({ items }: { items: QueueView[] }) {
         </section>
       )}
       {refused.length > 0 && (
-        <section className="box" aria-labelledby="refused-h"><h2 id="refused-h">Kept in the portal, refused by QuickBooks</h2>
-          <p>These changes are saved in the portal, but QuickBooks refused them, so QuickBooks still has something else. They don&apos;t stop other changes. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
-          <DataTable caption="Each change QuickBooks refused, and why" captionHidden rows={refused} rowKey={(i) => i.id} columns={[
+        <section className="box" aria-labelledby="refused-h"><h2 id="refused-h">Kept in the portal, not in QuickBooks</h2>
+          <p>These changes are saved in the portal, but they didn&apos;t go through to QuickBooks (QuickBooks refused them, the portal held them back as QuickBooks has something else, or they couldn&apos;t be sent), so QuickBooks still has something else. They don&apos;t stop other changes. On the <a href="/staff/reconciliation">Reconciliation page</a>, someone who may change families can send the portal&apos;s value again or give it up.</p>
+          <DataTable caption="Each change that didn't go through, and why" captionHidden rows={refused} rowKey={(i) => i.id} columns={[
             { key: "change", header: "Change", rowHeader: true, cell: (i) => i.words },
             { key: "why", header: "Why", cell: (i) => keptRefusalWords(i.lastCode, i.holds) },
             { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? ` by ${i.askedBy}` : ""}</> },

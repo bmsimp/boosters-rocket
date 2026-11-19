@@ -9,7 +9,7 @@ import { Notice } from "@/app/components/notice";
 
 /** What a roster write answers (src/lib/roster/writes.ts): a free name to offer when the one asked for is taken, or the record as QuickBooks has it now. */
 export type WriteResult =
-  | { ok: true; message: string; queued?: true; unlinked?: true }
+  | { ok: true; message: string; queued?: true; unlinked?: true; status?: "waiting" | "attention" }
   | { ok: false; errors: string[]; offer?: string; current?: { name: string; active: boolean; familyName: string | null } };
 const failed: WriteResult = { ok: false, errors: [ACTION_FAILED] };
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
@@ -17,7 +17,11 @@ const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 function Outcome({ state, onOffer, pending }: { state: WriteResult | null; onOffer?: (name: string) => void; pending: boolean }) {
   if (!state) return null;
   // `unlinked`: saved in the portal, but not (or not yet) in QuickBooks: the words say why, and what to do next.
-  if (state.ok) return <Notice tone={state.unlinked ? "warning" : state.queued ? "info" : "done"}>{state.message}</Notice>;
+  // `status`, a change saved first: "Done" only when the portal and QuickBooks both hold it (ActionOutcome()'s rule).
+  if (state.ok) {
+    const tone = state.unlinked || state.status === "attention" ? "warning" : state.queued || state.status === "waiting" ? "info" : "done";
+    return <Notice tone={tone}>{state.message}</Notice>;
+  }
   return (
     <Notice tone="problem">
       {state.errors.length === 1 ? state.errors[0] : <ul className="notice-list">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}

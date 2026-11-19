@@ -132,7 +132,7 @@ describe("the health page", () => {
     for (const hidden of [conn!.clientId, conn!.realmId!, conn!.accessTokenCiphertext!, conn!.refreshTokenCiphertext!]) expect(html).not.toContain(hidden);
   });
 
-  it("says, as needing attention, how many changes the portal keeps that QuickBooks refused (stage 3's slice 9e), pointing at Reconciliation", async () => {
+  it("says, as needing attention, how many changes the portal keeps that QuickBooks didn't take (stage 3's slice 9e), pointing at Reconciliation", async () => {
     await admin();
     await seedConnected(stub);
     const refused = { realmId: "9130000000000001", state: "refused" as const, sent: false, lastCode: "fault_5010", nextTryAt: null, askedByLabel: "registrar@club.org" };
@@ -142,11 +142,11 @@ describe("the health page", () => {
     ]);
     const quickbooks = line(await healthReport(NOW), "quickbooks");
     expect(quickbooks.state).toBe("attention");
-    expect(quickbooks.notes).toContain("2 changes are kept in the portal that QuickBooks refused: the portal keeps its own value until someone sends it again or gives it up on the Reconciliation page.");
+    expect(quickbooks.notes).toContain("2 changes are kept in the portal that QuickBooks didn't take: the portal keeps its own value until someone sends it again or gives it up on the Reconciliation page.");
     // One reads as one, and the note on waiting and stuck changes isn't drawn for refused ones alone.
     await db.delete(writeQueue).where(eq(writeQueue.targetQboId, "12"));
     const one = line(await healthReport(NOW), "quickbooks");
-    expect(one.notes).toContain("1 change is kept in the portal that QuickBooks refused: the portal keeps its own value until someone sends it again or gives it up on the Reconciliation page.");
+    expect(one.notes).toContain("1 change is kept in the portal that QuickBooks didn't take: the portal keeps its own value until someone sends it again or gives it up on the Reconciliation page.");
     expect(one.notes.join(" ")).not.toContain("Changes waiting for QuickBooks");
   });
 

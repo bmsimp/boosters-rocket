@@ -86,13 +86,17 @@ const MAY_ROSTER_ADD = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions
 /**
  * The changes saved in the portal first (stage 3's slice 9e): a linked record's rename, a student added to a linked
  * family, and "Send the portal's value" for a change QuickBooks refused, each sent through the module's own send without
- * the staff ask. Each started only by the module itself and the one staff action. The one try of a rename (its send,
- * and its one resend after a stale answer and a live read) is the module's and the queue's.
+ * the staff ask. Each started only by the module itself and the one staff action. The one send of a rename (its send,
+ * and its one resend after a stale answer and a live read) is the module's own; a try of a change saved first, which
+ * settles its queue item (at once, on a press or by the worker), is the module's and the queue's.
  */
 const SAVED_FIRST = ["renameLinked", "addStudentToLinked", "sendPortalValue"];
 const MAY_SAVED_FIRST = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-actions.ts"];
 const RENAME_TRY = "tryRename";
-const MAY_RENAME_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
+const MAY_RENAME_TRY = [ROSTER_WRITER];
+/** One try of a change saved first, whoever makes it (at once, the press, the queue's worker), settling its own queue item. */
+const SAVED_TRY = "trySavedItem";
+const MAY_SAVED_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
 /** Which body each roster write sends. */
 const ROSTER_BODY = { qboCreateCustomer: "create", qboRenameCustomer: "rename", qboMoveCustomer: "reparent", qboSetCustomerActive: "active" } as const;
 /** The fields the roster writes' bodies can carry, in the order CUSTOMER_WRITES writes them. */
@@ -527,6 +531,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       expect(naming(ROSTER_ADD), `${ROSTER_ADD} sends a family's create to QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_ADD].sort());
       for (const name of SAVED_FIRST) expect(naming(name), `${name} sends a change saved in the portal first. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_FIRST].sort());
       expect(naming(RENAME_TRY), `${RENAME_TRY} sends a rename, and resends it once after a live read. A new caller is a decision for a slice brief.`).toEqual([...MAY_RENAME_TRY].sort());
+      expect(naming(SAVED_TRY), `${SAVED_TRY} sends a change saved first and settles its queue item. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_TRY].sort());
     });
 
     it("refuse a body that could carry another field", () => {

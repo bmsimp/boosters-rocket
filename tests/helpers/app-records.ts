@@ -83,7 +83,10 @@ export async function appRecordsByCustomer() {
   const memberships = (await db.select({ id: guardian.id, familyId: guardian.familyId }).from(guardian).orderBy(asc(guardian.id)))
     .map((g) => ({ guardianId: g.id, family: ofFamily(g.familyId) }));
   const linked = links.map((l) => ({ system: l.system, realmId: l.realmId, customer: l.customerId,
-    kind: l.familyId !== null ? "family" : l.studentId !== null ? "student" : "membership", guardianId: l.guardianId, origin: l.origin, linkedBy: l.linkedBy }))
+    kind: l.familyId !== null ? "family" : l.studentId !== null ? "student" : "membership", guardianId: l.guardianId, origin: l.origin, linkedBy: l.linkedBy,
+    // The version the portal last aligned with (stage 3's slice 9e): the fill and the import each start a link at its
+    // customer's cached version, so two runs that agree agree on it too. Its time differs run by run, so it is left out.
+    syncedToken: l.syncedToken }))
     .sort((a, b) => byText(a.customer, b.customer) || byText(a.kind, b.kind) || byText(a.guardianId, b.guardianId));
   return { families, students, memberships, links: linked };
 }

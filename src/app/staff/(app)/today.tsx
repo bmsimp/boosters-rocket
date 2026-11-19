@@ -21,6 +21,9 @@ export async function TodayBox({ writes, forms, shifts }: { writes: boolean; for
   const items: Item[] = [];
   if (queue && queue.stuck > 0) items.push({ key: "stuck", words: count(queue.stuck, "change stuck on its way to QuickBooks", "changes stuck on their way to QuickBooks"),
     detail: "The worker won't try again until someone asks, or gives up and makes the change in QuickBooks.", href: "/staff/reconciliation", link: "Open Reconciliation" });
+  // A change saved in the portal first that didn't go through (stage 3's slice 9e): kept, never tried again by itself.
+  if (queue && queue.refused > 0) items.push({ key: "refused", words: count(queue.refused, "change kept in the portal that QuickBooks didn't take", "changes kept in the portal that QuickBooks didn't take"),
+    detail: "Each waits for someone to send the portal's value again or give it up.", href: "/staff/reconciliation", link: "Open Reconciliation" });
   if (queue && queue.waiting > 0) items.push({ key: "waiting", words: count(queue.waiting, "change waiting to reach QuickBooks", "changes waiting to reach QuickBooks"),
     detail: "The worker tries again by itself, at longer and longer gaps.", href: "/staff/reconciliation", link: "Open Reconciliation" });
   if (chase && chase.dueSoon.forms > 0) items.push({ key: "due", words: `${count(chase.dueSoon.unsigned, "form", "forms")} still to sign, due within ${SOON_DAYS} days or already due`,

@@ -36,7 +36,7 @@ test.describe("staff", () => {
     await noSidewaysScroll(page);
     await offer.click();
     // Saved in the portal first (stage 3's slice 9e); the client refuses the send for its ids, and the refusal is kept.
-    await expect(changes.getByText("Leo Rivera (2) is added to Rivera Family in the portal, but QuickBooks wouldn't make them", { exact: false })).toBeVisible();
+    await expect(changes.getByText("Leo Rivera (2) is added to Rivera Family in the portal, but they aren't in QuickBooks", { exact: false })).toBeVisible();
     const kept = await sql`SELECT after FROM audit_log WHERE id > ${since} AND action = 'roster.write.kept_refused'`;
     expect(kept.map((r) => r.after)).toEqual([{ op: "create", role: "student", code: "bad_id", state: "refused" }]);
     const [{ n: after }] = await sql`SELECT count(*)::int AS n FROM qbo_customer` as unknown as [{ n: number }];
@@ -47,7 +47,7 @@ test.describe("staff", () => {
       // On Reconciliation under its own heading, with what can be done about it.
       await page.goto("/staff/reconciliation");
       const writes = page.getByRole("region", { name: "Changes waiting to reach QuickBooks" });
-      await expect(writes.getByRole("heading", { name: "Refused by QuickBooks, kept in the portal (1)" })).toBeVisible();
+      await expect(writes.getByRole("heading", { name: "Not in QuickBooks, kept in the portal (1)" })).toBeVisible();
       const row = writes.getByRole("row").filter({ hasText: "Add the student “Leo Rivera (2)” to Rivera Family" });
       await expect(row).toContainText("It couldn't be sent to QuickBooks");
       await expect(row.getByRole("button", { name: "Send the portal's value" })).toBeVisible();

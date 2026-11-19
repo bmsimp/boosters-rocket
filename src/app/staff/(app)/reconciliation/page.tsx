@@ -66,30 +66,36 @@ function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; ca
   return <DataTable caption={caption} captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
 }
 
+/** Why a refused rename isn't offered "Send the portal's value", by what the cache shows (QueueView.notOffered). */
+const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
+  taken: TAKEN_NAME_KEPT,
+  inactive: "QuickBooks has this customer inactive, and the portal never makes a customer active again, so the portal's name isn't sent: give it up here, or make the customer active in QuickBooks first.",
+  not_on_roster: "This customer isn't on the roster the portal last read from QuickBooks, so the portal's name isn't sent: look for the customer in QuickBooks, then give this up here.",
+};
+
 /**
- * The changes saved in the portal first that QuickBooks refused (stage 3's slice 9e), a row each: what, why in words
- * (never a code), what QuickBooks has now for a rename (the roster cache's name), who asked and when, the family's page,
- * and, for staff who may change families, "Send the portal's value" (bound to what the row showed, sealed so a value the
- * form sends back that isn't it is refused) and "Give up". A refused change is never tried again by itself.
+ * The changes saved in the portal first that didn't go through (stage 3's slice 9e), a row each: what, why in words
+ * saying who stopped it (QuickBooks, the portal holding it back, or the portal unable to send it; never a code), what
+ * QuickBooks has now for a rename (the roster cache's name), who asked and when, the family's page, and, for staff who
+ * may change families, "Send the portal's value" (bound to what the row showed, sealed so a value the form sends back
+ * that isn't it is refused) and "Give up". Such a change is never tried again by itself.
  */
-/** Why a refused rename of a customer QuickBooks has inactive isn't offered "Send the portal's value". */
-const INACTIVE_IN_QUICKBOOKS = "QuickBooks has this customer inactive, and the portal never makes a customer active again, so the portal's name isn't sent: give it up here, or make the customer active in QuickBooks first.";
 function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span></> },
-    { key: "why", header: "Why QuickBooks refused it", cell: (i) => keptRefusalWords(i.lastCode, i.holds) },
+    { key: "why", header: "Why it didn't go through", cell: (i) => keptRefusalWords(i.lastCode, i.holds) },
     { key: "asked", header: "Asked", cell: (i) => <><LocalTime iso={i.askedAt} />{i.askedBy ? <span className="when">by {i.askedBy}</span> : null}</> },
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
-      const shown = i.holds ?? "";
       // Offered only where it can go through: a name QuickBooks refused as taken is renamed on the family's page instead
-      // (which takes its place), and a customer QuickBooks has inactive is never made active again by the portal.
-      const instead = i.mayResend ? null : i.lastCode === "fault_6240" ? TAKEN_NAME_KEPT : INACTIVE_IN_QUICKBOOKS;
+      // (which takes its place, and is sent), a customer QuickBooks has inactive is never made active again by the
+      // portal, and one the roster doesn't hold isn't sent to. The press is bound to what the row shows (QueueView.shown).
+      const instead = i.mayResend || i.notOffered === null ? null : NOT_OFFERED[i.notOffered];
       return (
         <div className="row-actions">
           {instead === null
-            ? <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, shown, portalValueStamp(i.id, shown))} />
-            : <p className="hint">{instead}</p>}
+            ? <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, i.shown, portalValueStamp(i.id, i.shown))} />
+            : <Notice tone="info" live="none">{instead}</Notice>}
           <details className="more"><summary>Give up</summary>
             <p className="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>
             <TextAction field="Why? (kept in the audit log)" label="Give up" pendingLabel="Giving up…" maxLength={500} multiline act={giveUpAction.bind(null, i.id)} />
@@ -97,7 +103,7 @@ function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean 
         </div>);
     } }] : []),
   ];
-  return <DataTable caption="Changes QuickBooks refused, kept in the portal" captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
+  return <DataTable caption="Changes that didn't go through, kept in the portal" captionHidden columns={columns} rows={items} rowKey={(i) => i.id} />;
 }
 
 /**
@@ -164,8 +170,8 @@ export default async function ReconciliationPage() {
               one QuickBooks may already have made is first looked for in a fresh copy of the roster, so nothing is made twice or overwritten.
               One QuickBooks took that the portal couldn&apos;t take in at the time waits here too, until the portal finishes it on its side.
               A stuck change waits for you: try it again, or give it up and make it in QuickBooks.
-              A change saved in the portal first that QuickBooks refused is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.</p>
-            {refused.length > 0 && <><h3 className="table-head">Refused by QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} /></>}
+              A change saved in the portal first that didn&apos;t go through (QuickBooks refused it, the portal held it back as QuickBooks has something else, or it couldn&apos;t be sent) is kept in the portal: send the portal&apos;s value again on purpose, or give it up and leave QuickBooks as it is.</p>
+            {refused.length > 0 && <><h3 className="table-head">Not in QuickBooks, kept in the portal ({refused.length})</h3><Refused items={refused} canChange={canChange} /></>}
             {stuck.length > 0 && <><h3 className="table-head">Stuck ({stuck.length})</h3><Writes items={stuck} caption="Stuck changes" canChange={canChange} mayLink={linking} /></>}
             {waiting.length > 0 && <><h3 className="table-head">Waiting ({waiting.length})</h3><Writes items={waiting} caption="Changes waiting" canChange={canChange} mayLink={linking} /></>}
           </>

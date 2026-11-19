@@ -11,8 +11,10 @@ import { dropScratchDatabase, makeScratchDatabase } from "../setup/worker-databa
 /**
  * Migration 0041 (stage 3's slice 9e): `accounting_link` gains `synced_token` and `synced_at`, the customer's version the
  * portal last aligned with, filled for each link of the roster's company from the roster cache's `sync_token`. It
- * refuses, in words and with the count, changing nothing, while a roster write from before it (a create, a rename or a
- * move) is waiting or stuck on the queue; a buy-out's invoice write and a make-inactive don't count.
+ * refuses, in words and with the count, changing nothing, only while one of the changes the slice sends another way is
+ * waiting or stuck on the queue for the roster's company: a rename of a family, member or student, or a student's
+ * create. A move, a make-inactive, a Parent customer's change, a family's own create, a buy-out's invoice write, an
+ * item done, given up or kept refused, and another company's item don't count.
  */
 // Making or dropping a database waits for Postgres to write out what every database on the server has changed: that
 // has taken two minutes.
@@ -58,8 +60,21 @@ const snapshot = () => q(async (pg) => ({
   customers: [...await pg`SELECT * FROM qbo_customer ORDER BY qbo_id COLLATE "C"`],
   queue: [...await pg`SELECT * FROM write_queue ORDER BY id`],
 }));
-const queueItem = (state: string, request: Record<string, unknown>, target: string | null) =>
-  q(async (pg) => (await pg`INSERT INTO write_queue (realm_id, request, target_qbo_id, state, sent) VALUES ('R1', ${pg.json(request as never)}, ${target}, ${state}, false) RETURNING id`)[0]!.id as string);
+const queueItem = (state: string, request: Record<string, unknown>, target: string | null, realm = "R1") =>
+  q(async (pg) => (await pg`INSERT INTO write_queue (realm_id, request, target_qbo_id, state, sent) VALUES (${realm}, ${pg.json(request as never)}, ${target}, ${state}, false) RETURNING id`)[0]!.id as string);
+/** The items 0041 lets through, each a kind its refusal must not count; they stay on the queue through every test here. */
+const PASSING: [string, Record<string, unknown>, string | null, string?][] = [
+  ["waiting", { op: "invoice_void", buyoutId: "00000000-0000-4000-8000-000000000001", invoiceQboId: "9174", customerQboId: "C1", why: "switched_back" }, null],
+  ["waiting", { op: "deactivate", role: "student", qboId: "C2", syncToken: "3" }, "C2"],
+  ["stuck", { op: "move", role: "student", qboId: "C2", syncToken: "3", fromFamilyQboId: "C1", toFamilyQboId: "C9" }, "C2"],
+  ["waiting", { op: "rename", role: "parent", qboId: "C3", syncToken: "12", name: "Pat A. Ash", was: "Pat Ash" }, "C3"],
+  ["stuck", { op: "create", role: "parent", name: "Lee Ash", typeQboId: "T3", familyQboId: "C1", email: "lee@synced.example" }, null],
+  ["waiting", { op: "create", role: "family", name: "Elm Family", typeQboId: "T1", familyQboId: null, email: null }, null],
+  ["done", { op: "rename", role: "student", qboId: "C2", syncToken: "3", name: "Ari B. Ash", was: "Ari Ash" }, "C2"],
+  ["given_up", { op: "rename", role: "family", qboId: "C1", syncToken: "7", name: "Ash House", was: "Ash Family" }, "C1"],
+  ["refused", { op: "rename", role: "family", qboId: "C1", syncToken: "7", name: "Ash Home", was: "Ash Family" }, "C1"],
+  ["waiting", { op: "rename", role: "family", qboId: "C1", syncToken: "7", name: "Ash Elsewhere", was: "Ash Family" }, "C1", "R2"],
+];
 const removeItem = (id: string) => q((pg) => pg`DELETE FROM write_queue WHERE id = ${id}`);
 
 describe("migration 0041: each link holds the version the portal last aligned with", { timeout: 60_000 }, () => {
@@ -85,9 +100,8 @@ describe("migration 0041: each link holds the version the portal last aligned wi
       await link("birchLink", "R1", "C9", { family: ids.birch! });   // a customer the cache doesn't hold
       await link("cedarLink", "R2", "C1", { family: ids.cedar! });   // another company's link to a customer of the same number
     });
-    // Waiting for QuickBooks, and not a roster write from before 0041: a buy-out invoice's void and a make-inactive.
-    await queueItem("waiting", { op: "invoice_void", buyoutId: "00000000-0000-4000-8000-000000000001", invoiceQboId: "9174", customerQboId: "C1", why: "switched_back" }, null);
-    await queueItem("waiting", { op: "deactivate", role: "student", qboId: "C2", syncToken: "3" }, "C2");
+    // On the queue, and not a change 0041's refusal counts: each kind of PASSING, kept through every test here.
+    for (const [state, request, target, realm] of PASSING) await queueItem(state, request, target, realm);
   }, DATABASE_WORK);
 
   afterAll(async () => {
@@ -95,7 +109,7 @@ describe("migration 0041: each link holds the version the portal last aligned wi
     for (const folder of folders) rmSync(folder, { recursive: true, force: true });
   }, DATABASE_WORK);
 
-  it("refuses, changing nothing, while a create, a rename or a move is waiting or stuck, and says how many", async () => {
+  it("refuses, changing nothing, while a rename of a family, member or student or a student's create is waiting or stuck for the roster's company, and says how many", async () => {
     const held = await snapshot();
     const appliedBefore = await applied();
     const refusedWith = async (count: number) => {
@@ -107,8 +121,9 @@ describe("migration 0041: each link holds the version the portal last aligned wi
     };
     const each = [
       () => queueItem("waiting", { op: "rename", role: "family", qboId: "C1", syncToken: "7", name: "Ash Household", was: "Ash Family" }, "C1"),
-      () => queueItem("stuck", { op: "move", role: "student", qboId: "C2", syncToken: "3", fromFamilyQboId: "C1", toFamilyQboId: "C9" }, "C2"),
-      () => queueItem("waiting", { op: "create", role: "student", name: "Bo Ash", typeQboId: "T2", familyQboId: "C1", email: null }, null),
+      () => queueItem("stuck", { op: "rename", role: "member", qboId: "C1", syncToken: "7", name: "Ash Household", was: "Ash Family" }, "C1"),
+      () => queueItem("waiting", { op: "rename", role: "student", qboId: "C2", syncToken: "3", name: "Ari B. Ash", was: "Ari Ash" }, "C2"),
+      () => queueItem("stuck", { op: "create", role: "student", name: "Bo Ash", typeQboId: "T2", familyQboId: "C1", email: null }, null),
     ];
     for (const make of each) {
       const id = await make();
@@ -117,12 +132,12 @@ describe("migration 0041: each link holds the version the portal last aligned wi
     }
     const all = [];
     for (const make of each) all.push(await make());
-    await refusedWith(3);
+    await refusedWith(4);
     for (const id of all) await removeItem(id);
     expect(await snapshot()).toEqual(held);
   });
 
-  it("fills each link of the roster's company from the cache, and changes no other row", async () => {
+  it("goes through with every other kind on the queue: fills each link of the roster's company from the cache, and changes no other row", async () => {
     const held = await snapshot();
     const startedAt = Date.now();
     await migrateWith(path.resolve("drizzle"));
@@ -137,7 +152,7 @@ describe("migration 0041: each link holds the version the portal last aligned wi
       expect(of(key).synced_token).toBeNull();
       expect(of(key).synced_at).toBeNull();
     }
-    // The make-inactive and the buy-out's void are still waiting, as they were.
-    expect((await q((pg) => pg`SELECT state FROM write_queue`)).map((r) => r.state)).toEqual(["waiting", "waiting"]);
+    // Every item it let through is on the queue as it was (the snapshot above holds each row whole).
+    expect((await q((pg) => pg`SELECT state FROM write_queue`)).map((r) => r.state as string).sort()).toEqual(PASSING.map(([state]) => state).sort());
   });
 });

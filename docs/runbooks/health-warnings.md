@@ -65,15 +65,21 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     Rocket buy-out" on that family or student. The **Volunteer buy-outs** list on the same page shows each buy-out
     that needs a look (an invoice QuickBooks no longer shows, one on another customer, a student who moved, one
     QuickBooks refused); the treasurer sorts those out in QuickBooks.
-  - "N changes are kept in the portal that QuickBooks refused": a rename, or a student added to a family, was saved
-    in the portal and sent, and QuickBooks refused it (most often because someone changed the name in QuickBooks
-    since the portal last sent it, or the name is taken there). The portal keeps its own value; QuickBooks keeps what
-    it has. Open **Reconciliation** (the line's link): each change is under "Refused by QuickBooks, kept in the portal",
-    with why and what QuickBooks has now. Decide which is right: **Send the portal's value** to put the portal's in
-    QuickBooks (it reads QuickBooks first, and sends nothing if the name there changed again since the page was
-    shown), or **Give up** to leave QuickBooks as it is. Renaming the record again on its family's page also takes the
-    place of the refused change, and is the way out for a name QuickBooks refused as taken: such a row offers no
-    **Send the portal's value**, and nor does one whose customer QuickBooks has inactive.
+  - "N changes are kept in the portal that QuickBooks didn't take": a rename, or a student added to a family, was saved
+    in the portal, and didn't go through to QuickBooks. Each row says who stopped it: QuickBooks refused it (the name
+    is taken there, or it wouldn't take it), the portal held it back because QuickBooks has another name than the one
+    the two last agreed on (someone renamed it there, or an earlier change was given up) or has the customer inactive,
+    or the portal couldn't send it (QuickBooks wasn't connected, or needed an Admin to connect it again). The portal
+    keeps its own value; QuickBooks keeps what it has. Open **Reconciliation** (the line's link): each change is under
+    "Not in QuickBooks, kept in the portal", with why and what QuickBooks has now. Decide which is right: **Send the
+    portal's value** to put the portal's in QuickBooks (it reads QuickBooks first, and sends nothing if the name there
+    changed again since the page was shown), or **Give up** to leave QuickBooks as it is. Renaming the record again on
+    its family's page takes the place of the kept change and is compared with the same agreed name, so after a taken
+    name, or a change that couldn't be sent, that rename is sent (a taken name's row offers no **Send the portal's
+    value**: rename it to a free name instead); after a name someone changed in QuickBooks it is held back again until
+    someone presses **Send the portal's value**. Once a kept change is given up, a later rename is held back while the
+    portal's name before it and QuickBooks' differ, and listed here with **Send the portal's value**. A row whose
+    customer QuickBooks has inactive, or that isn't on the roster, offers no press: give it up.
   - That some of the portal's requests "didn't answer as the portal expects", the last time an Admin ran **Check the
     portal's requests** (the line's link; Settings, QuickBooks). QuickBooks answered one of the portal's requests in a
     way the portal wasn't written for. Open the page: each such row says what it found and what it means for the club.

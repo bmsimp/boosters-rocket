@@ -9,18 +9,18 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 });
 vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, family, qboCustomer, student, writeQueue } from "@/lib/db/schema";
-import { addStudentToLinked, askRosterWrite, BEING_SENT, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, MAKING_LOCK, NAME_DIFFERS, portalValueStamp, renameLinked,
-  sendPortalValue, SENDING_LOCK, TAKEN_NAME_KEPT, WRITE_COPY } from "@/lib/roster/writes";
+import { accountingLink, family, qboConnection, qboCustomer, student, writeQueue } from "@/lib/db/schema";
+import { addStudentToLinked, askRosterWrite, BEING_SENT, BEING_SENT_NOW, changeInPortal, createInQuickBooksAndLink, FAMILY_SENDING, INACTIVE_THERE_CODE, MAKING_LOCK, NAME_DIFFERS,
+  portalValueStamp, renameLinked, sendPortalValue, SENDING_LOCK, TAKEN_NAME_KEPT, WRITE_COPY } from "@/lib/roster/writes";
 import { giveUp, loadOpenWrites, queueCounts, REFUSED_NOT_AGAIN, runWriteQueue, tryAgainNow } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { cleanUp } from "@/lib/jobs/cleanup";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { saveShape } from "@/lib/roster/shape";
 import { resetDb } from "../helpers/db";
-import { startQboStub, type QboStub } from "../helpers/qbo-stub";
+import { FZN_SHAPE, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { asOp, auditsOf, connectRoster, queueItem, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
 import { recordOfCustomer } from "../helpers/app-records";
 
@@ -75,7 +75,10 @@ describe("each link starts aligned, and only an answer to what the portal sent m
     expect((await auditsOf("roster.record.renamed"))[0]).toMatchObject({ targetType: "family", targetId: String(rivera),
       before: { name: "Rivera Family" }, after: { name: "Rivera Household", quickbooks: "sending", customerQboId: "10" } });
     expect((await auditsOf("roster.customer.rename"))[0]!.after).toMatchObject({ name: "Rivera Household", linkVersion: "1" });
-    expect(await items()).toEqual([]);
+    // Saved with its queue item, which the at-once try settled: done, and nothing left waiting.
+    const [item] = await items();
+    expect(item).toMatchObject({ state: "done", familyId: rivera, studentId: null, tries: 1 });
+    expect((await auditsOf("roster.record.renamed"))[0]!.after).toMatchObject({ queueId: item!.id });
   });
 
   it("a treasurer's rename read by a roster read leaves the link's version; the next rename is read live, kept refused, and nothing is overwritten", async () => {
@@ -133,7 +136,7 @@ describe("each link starts aligned, and only an answer to what the portal sent m
 
   it("a second stale answer right after the live read waits as never sent, and the worker's try follows the same rule: one resend", async () => {
     stub.beforeUpdate = (c) => { c.SyncToken = String(Number(c.SyncToken ?? 0) + 1); }; // a change in QuickBooks at the moment of every send
-    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op)).toMatchObject({ ok: true, queued: true });
+    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op)).toMatchObject({ ok: true, status: "waiting" });
     expect(bodies().map((b) => b.SyncToken)).toEqual(["0", "1"]);
     const [item] = await items();
     expect(item).toMatchObject({ state: "waiting", sent: false, lastCode: "fault_5010", studentId: leo, request: { syncToken: "0", was: "Leo Rivera" } });
@@ -147,7 +150,7 @@ describe("each link starts aligned, and only an answer to what the portal sent m
 
   it("a queued rename's later try sends the version it was queued with", async () => {
     stub.rateLimitNext = 1;
-    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op)).toMatchObject({ ok: true, queued: true });
+    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op)).toMatchObject({ ok: true, status: "waiting" });
     expect((await items())[0]).toMatchObject({ state: "waiting", sent: false, request: { syncToken: "0" } });
     stub.calls.length = 0;
     await runWriteQueue(later());
@@ -164,7 +167,7 @@ describe("each link starts aligned, and only an answer to what the portal sent m
 
   it("a lost answer is queued as possibly made, and found after a roster read rather than sent again", async () => {
     stub.loseUpdateAnswer = true;
-    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op)).toMatchObject({ ok: true, queued: true });
+    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op)).toMatchObject({ ok: true, status: "waiting", message: expect.stringContaining("can't tell yet") });
     stub.loseUpdateAnswer = false;
     const [item] = await items();
     expect(item).toMatchObject({ state: "waiting", sent: true });
@@ -192,6 +195,10 @@ describe("a rename saved first: what is refused before anything is saved, and wh
     expect(posts()).toEqual([]);
     expect(inStub("10").DisplayName).toBe("Rivera Family");
     expect((await familyRow(rivera)).name).toBe("Rivera Home");
+    // Held back, and needing attention: listed with "Send the portal's value", which is what sends it now.
+    expect(r).toMatchObject({ status: "attention", message: expect.stringContaining("The portal held it back") });
+    expect((await items()).filter((i) => i.state === "refused")).toEqual([expect.objectContaining({ lastCode: NAME_DIFFERS, request: expect.objectContaining({ name: "Rivera Home", was: "Rivera Household" }) })]);
+    expect((await loadOpenWrites())[0]).toMatchObject({ state: "refused", lastCode: NAME_DIFFERS, holds: "Rivera Family", shown: "Rivera Family", mayResend: true, notOffered: null });
   });
 
   it("a name QuickBooks takes as another's (6240) is kept refused with a free one offered; one the cache shows is refused before anything is saved", async () => {
@@ -256,7 +263,7 @@ describe("a student added to a linked family is saved first", () => {
 
   it("unreachable: it waits on the queue filed under the family and the student, and the found-done path links the existing record", async () => {
     stub.loseUpdateAnswer = true;
-    expect(await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op)).toMatchObject({ ok: true, queued: true });
+    expect(await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op)).toMatchObject({ ok: true, status: "waiting" });
     stub.loseUpdateAnswer = false;
     const [rosa] = await studentNamed("Rosa Rivera");
     expect((await items())[0]).toMatchObject({ state: "waiting", sent: true, familyId: rivera, studentId: rosa!.id });
@@ -268,7 +275,11 @@ describe("a student added to a linked family is saved first", () => {
 
   it("refused: the student stays, active and unlinked, and the refused item says why; then “Create in QuickBooks and link” makes them and closes it", async () => {
     stub.updateFault = "6000";
-    expect(await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op)).toMatchObject({ ok: true, unlinked: true, message: expect.stringContaining("They stay in the portal, unlinked") });
+    // Saved, and not in QuickBooks: "Needs attention", never "Done", and the words say QuickBooks refused it.
+    const r = await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op);
+    expect(r).toMatchObject({ ok: true, status: "attention", message: expect.stringContaining("They stay in the portal, unlinked") });
+    expect(r).toMatchObject({ message: expect.stringContaining("QuickBooks refused it: QuickBooks wouldn't take it.") });
+    expect(r).not.toHaveProperty("unlinked");
     stub.updateFault = null;
     const [rosa] = await studentNamed("Rosa Rivera");
     expect(rosa).toMatchObject({ active: true });
@@ -315,12 +326,14 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
     expect(await tryAgainNow(kept.id, op)).toEqual({ ok: false, errors: [REFUSED_NOT_AGAIN] });
     expect(await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op)).toMatchObject({ ok: true });
     expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "0", toFamilyQboId: "20" }, tag, op)).toMatchObject({ ok: true });
-    // The later rename takes the refused one's place. The portal's name before it ("Rivera Household") isn't what
-    // QuickBooks holds, so it is read live first and kept refused in its turn: a standing difference is never sent over.
-    expect(await renameLinked({ kind: "family", recordId: String(rivera), name: "Rivera Home" }, tag, op)).toMatchObject({ ok: true, message: expect.stringContaining("QuickBooks refused the rename") });
-    expect(inStub("10").DisplayName).toBe("Rivera Family");
+    // The later rename takes the refused one's place, and with it the name the portal and QuickBooks last agreed on
+    // ("Rivera Family"), which QuickBooks still has: it is sent, with the link's own version.
+    stub.calls.length = 0;
+    expect(await renameLinked({ kind: "family", recordId: String(rivera), name: "Rivera Home" }, tag, op)).toEqual({ ok: true, message: "Renamed Rivera Home in the portal and in QuickBooks." });
+    expect(bodies()).toEqual([{ Id: "10", SyncToken: "0", sparse: true, DisplayName: "Rivera Home" }]);
+    expect(inStub("10").DisplayName).toBe("Rivera Home");
     expect(await queueItem(kept.id)).toMatchObject({ state: "given_up" });
-    expect((await items()).filter((i) => i.state === "refused")).toEqual([expect.objectContaining({ lastCode: NAME_DIFFERS, request: expect.objectContaining({ name: "Rivera Home", was: "Rivera Household" }) })]);
+    expect((await items()).filter((i) => i.state === "refused")).toEqual([]);
     expect((await auditsOf("roster.write.replaced"))[0]!.after).toMatchObject({ replacedBy: { op: "rename", name: "Rivera Home" } });
   });
 
@@ -358,7 +371,8 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
     await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op);
     stub.updateFault = null;
     const [kept] = await items();
-    expect(await sendPortalValue(kept!.id, "", portalValueStamp(kept!.id, ""), op)).toMatchObject({ ok: true });
+    expect((await loadOpenWrites())[0]).toMatchObject({ shown: "Rosa Rivera", mayResend: true });
+    expect(await sendPortalValue(kept!.id, "Rosa Rivera", portalValueStamp(kept!.id, "Rosa Rivera"), op)).toMatchObject({ ok: true });
     expect(await queueItem(kept!.id)).toMatchObject({ state: "done" });
     const [rosa] = await studentNamed("Rosa Rivera");
     expect(await db.select().from(accountingLink).where(eq(accountingLink.studentId, rosa!.id))).toHaveLength(1);
@@ -371,7 +385,7 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
     const [kept] = await items();
     // Staff give it up at the moment the create reaches QuickBooks.
     stub.onApiRequest = async (call) => { if (call.method === "POST") { stub.onApiRequest = null; expect(await giveUp(kept!.id, "Not wanted.", op)).toMatchObject({ ok: true }); } };
-    expect(await sendPortalValue(kept!.id, "", portalValueStamp(kept!.id, ""), op)).toMatchObject({ ok: true, message: expect.stringContaining("given up") });
+    expect(await sendPortalValue(kept!.id, "Rosa Rivera", portalValueStamp(kept!.id, "Rosa Rivera"), op)).toMatchObject({ ok: true, status: "attention", message: expect.stringContaining("given up") });
     const made = stub.customers.find((c) => c.DisplayName === "Rosa Rivera")!;
     const [rosa] = await studentNamed("Rosa Rivera");
     expect(await db.select().from(accountingLink).where(eq(accountingLink.studentId, rosa!.id))).toEqual([]);
@@ -379,18 +393,38 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
     expect(await items()).toHaveLength(1);
   });
 
-  it("Send the portal's value with a lost answer: the item itself waits, sent, and the worker sends it against the name the row showed", async () => {
+  it("Send the portal's value with a lost answer QuickBooks acted on: the item itself waits, sent, and the worker finds it made and sends nothing", async () => {
     inStub("12").DisplayName = "Leonardo Rivera"; inStub("12").SyncToken = "1";
     await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
     const [kept] = await items();
+    // The stub makes the change, then answers 500: QuickBooks took it, and the portal never heard.
     stub.updateServerFault = { status: 500, code: "10000" };
-    expect(await sendPortalValue(kept!.id, "Leonardo Rivera", portalValueStamp(kept!.id, "Leonardo Rivera"), op)).toMatchObject({ ok: true, queued: true });
+    expect(await sendPortalValue(kept!.id, "Leonardo Rivera", portalValueStamp(kept!.id, "Leonardo Rivera"), op)).toMatchObject({ ok: true, status: "waiting" });
     stub.updateServerFault = null;
+    expect(inStub("12").DisplayName).toBe("Leon Rivera");
     expect(await items()).toHaveLength(1);
     expect(await queueItem(kept!.id)).toMatchObject({ state: "waiting", sent: true, request: { syncToken: "1", checked: true, was: "Leonardo Rivera", name: "Leon Rivera" } });
     stub.calls.length = 0;
     await runWriteQueue(later());
-    // QuickBooks didn't make it: sent again, with the version the press read, as the name still reads as staff were shown.
+    // The worker's roster read shows the name in place: found made, nothing sent again.
+    expect(posts()).toEqual([]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "done" });
+    expect((await auditsOf("roster.write.done")).map((a) => a.after)).toContainEqual(expect.objectContaining({ how: "found" }));
+  });
+
+  it("Send the portal's value whose request never reached QuickBooks: the item waits, sent, and the worker sends it again against the name the row showed", async () => {
+    inStub("12").DisplayName = "Leonardo Rivera"; inStub("12").SyncToken = "1";
+    await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    const [kept] = await items();
+    // The press's send is dropped at QuickBooks' door, before anything is applied: the portal can't tell, and nothing was made.
+    stub.onApiRequest = (call) => { if (call.method === "POST") { stub.onApiRequest = null; stub.dropApi = true; } };
+    expect(await sendPortalValue(kept!.id, "Leonardo Rivera", portalValueStamp(kept!.id, "Leonardo Rivera"), op)).toMatchObject({ ok: true, status: "waiting" });
+    stub.dropApi = false;
+    expect(inStub("12")).toMatchObject({ DisplayName: "Leonardo Rivera", SyncToken: "1" });
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "waiting", sent: true, request: { syncToken: "1", checked: true, was: "Leonardo Rivera", name: "Leon Rivera" } });
+    stub.calls.length = 0;
+    await runWriteQueue(later());
+    // The roster read shows it isn't there and nothing moved on: sent again, with the version the press read.
     expect(bodies()).toEqual([{ Id: "12", SyncToken: "1", sparse: true, DisplayName: "Leon Rivera" }]);
     expect(await queueItem(kept!.id)).toMatchObject({ state: "done" });
     expect(inStub("12").DisplayName).toBe("Leon Rivera");
@@ -432,5 +466,163 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
     expect(posts()).toEqual([]);
     expect((await items())[0]).toMatchObject({ state: "done" });
     expect((await linkOf("12", "student"))!.syncedToken).toBe("0");
+  });
+});
+
+describe("nothing is saved without its queue item, and one sender at a time", () => {
+  it("a rename's item is on the queue before it is sent, so a stop leaves it waiting; while it is on its way Try again now and the worker send nothing", async () => {
+    const seen: { items?: (typeof writeQueue.$inferSelect)[]; again?: unknown } = {};
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      stub.onApiRequest = null;
+      seen.items = await items();
+      seen.again = await tryAgainNow(seen.items[0]!.id, op);
+      await runWriteQueue(later());
+    };
+    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op)).toEqual({ ok: true, message: "Renamed Leon Rivera in the portal and in QuickBooks." });
+    // At the moment the rename reached QuickBooks, the portal held its name and the change's own item: waiting, marked as
+    // maybe sent, filed under the student and the family, with the name it is compared with.
+    expect(seen.items).toEqual([expect.objectContaining({ state: "waiting", sent: true, tries: 0, studentId: leoId, familyId: rivera, targetQboId: "12",
+      request: expect.objectContaining({ op: "rename", name: "Leon Rivera", was: "Leo Rivera", syncToken: "0" }) })]);
+    expect(seen.again).toEqual({ ok: false, errors: [BEING_SENT_NOW] });
+    // The worker woke meanwhile and left it alone: one request reached QuickBooks, and the at-once try settled the item.
+    expect(posts()).toHaveLength(1);
+    expect(await items()).toEqual([expect.objectContaining({ state: "done", tries: 1 })]);
+    expect(await auditsOf("roster.write.again")).toEqual([]);
+  });
+
+  it("a student's create is on the queue, filed under the family and the new student, before it is sent, and Try again now waits for it", async () => {
+    const seen: { items?: (typeof writeQueue.$inferSelect)[]; students?: unknown[]; again?: unknown } = {};
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      stub.onApiRequest = null;
+      seen.items = await items();
+      seen.students = await studentNamed("Rosa Rivera");
+      seen.again = await tryAgainNow(seen.items[0]!.id, op);
+    };
+    expect(await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op)).toEqual({ ok: true, message: "Rosa Rivera is added to Rivera Family in the portal, made in QuickBooks and linked." });
+    const [rosa] = await studentNamed("Rosa Rivera");
+    expect(seen.students).toHaveLength(1);
+    expect(seen.items).toEqual([expect.objectContaining({ state: "waiting", sent: true, familyId: rivera, studentId: rosa!.id, request: expect.objectContaining({ op: "create", role: "student", name: "Rosa Rivera" }) })]);
+    expect(seen.again).toEqual({ ok: false, errors: [BEING_SENT_NOW] });
+    expect(await items()).toEqual([expect.objectContaining({ state: "done" })]);
+  });
+
+  it("Send the portal's value on its way: Try again now answers in words, the worker sends nothing, and the press settles its item", async () => {
+    inStub("12").DisplayName = "Leonardo Rivera"; inStub("12").SyncToken = "1";
+    await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    const [kept] = await items();
+    stub.calls.length = 0;
+    const seen: { again?: unknown } = {};
+    stub.onApiRequest = async (call) => {
+      if (call.method !== "POST") return;
+      stub.onApiRequest = null;
+      seen.again = await tryAgainNow(kept!.id, op);
+      await runWriteQueue(later());
+    };
+    expect(await sendPortalValue(kept!.id, "Leonardo Rivera", portalValueStamp(kept!.id, "Leonardo Rivera"), op)).toEqual({ ok: true, message: "Sent: QuickBooks has the portal's name now." });
+    expect(seen.again).toEqual({ ok: false, errors: [BEING_SENT_NOW] });
+    expect(bodies()).toEqual([{ Id: "12", SyncToken: "1", sparse: true, DisplayName: "Leon Rivera" }]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "done" });
+    expect((await linkOf("12", "student"))!.syncedToken).toBe("2");
+  });
+});
+
+describe("a later rename is compared with the name the portal and QuickBooks last agreed on", () => {
+  it("a name QuickBooks refused as taken, then a free one: the free one is sent", async () => {
+    stub.otherNames = ["Leon Rivera"];
+    const first = await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    expect(first).toMatchObject({ ok: true, status: "attention", message: expect.stringContaining("QuickBooks refused it: that name is already used in QuickBooks") });
+    expect(first).toMatchObject({ message: expect.stringContaining("which is sent to QuickBooks and takes the place of this change") });
+    stub.calls.length = 0;
+    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon R. Rivera" }, tag, op)).toEqual({ ok: true, message: "Renamed Leon R. Rivera in the portal and in QuickBooks." });
+    expect(bodies()).toEqual([{ Id: "12", SyncToken: "0", sparse: true, DisplayName: "Leon R. Rivera" }]);
+    expect((await items()).filter((i) => i.state === "refused")).toEqual([]);
+    expect((await auditsOf("roster.record.renamed"))[0]!.after).toMatchObject({ comparedWith: "Leo Rivera" });
+  });
+
+  it("a connection only an Admin could mend: kept, said as not sent; once mended, a later rename is sent", async () => {
+    await db.update(qboConnection).set({ lastError: "Intuit no longer accepts this connection. Connect QuickBooks again. (invalid_grant)" });
+    const first = await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    expect(first).toMatchObject({ ok: true, status: "attention", message: expect.stringContaining("It couldn't be sent to QuickBooks: QuickBooks needs to be connected again") });
+    expect(first).not.toMatchObject({ message: expect.stringContaining("QuickBooks refused") });
+    expect(posts()).toEqual([]);
+    expect((await items())[0]).toMatchObject({ state: "refused", lastCode: "needs_admin" });
+    expect((await loadOpenWrites())[0]!.words).toBe("Rename the student “Leo Rivera” to “Leon Rivera”");
+    await db.update(qboConnection).set({ lastError: null, lastErrorAt: null });
+    expect(await renameLinked({ kind: "student", recordId: leo, name: "Leon R. Rivera" }, tag, op)).toEqual({ ok: true, message: "Renamed Leon R. Rivera in the portal and in QuickBooks." });
+    expect(bodies()).toEqual([{ Id: "12", SyncToken: "0", sparse: true, DisplayName: "Leon R. Rivera" }]);
+    expect(inStub("12").DisplayName).toBe("Leon R. Rivera");
+  });
+
+  it("a name someone changed in QuickBooks: a later rename is still held, showing QuickBooks' name, until Send the portal's value", async () => {
+    inStub("12").DisplayName = "Leonardo Rivera"; inStub("12").SyncToken = "1";
+    await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    expect((await items())[0]).toMatchObject({ state: "refused", lastCode: "fault_5010" });
+    stub.calls.length = 0;
+    const r = await renameLinked({ kind: "student", recordId: leo, name: "Leon R. Rivera" }, tag, op);
+    expect(r).toMatchObject({ ok: true, status: "attention", message: expect.stringContaining("QuickBooks has “Leonardo Rivera” now.") });
+    expect(posts()).toEqual([]);
+    expect(inStub("12").DisplayName).toBe("Leonardo Rivera");
+    const refused = (await items()).filter((i) => i.state === "refused");
+    expect(refused).toEqual([expect.objectContaining({ lastCode: NAME_DIFFERS, request: expect.objectContaining({ name: "Leon R. Rivera", was: "Leo Rivera" }) })]);
+    expect((await loadOpenWrites())[0]).toMatchObject({ holds: "Leonardo Rivera", mayResend: true, notOffered: null });
+    expect(await sendPortalValue(refused[0]!.id, "Leonardo Rivera", portalValueStamp(refused[0]!.id, "Leonardo Rivera"), op)).toMatchObject({ ok: true });
+    expect(inStub("12").DisplayName).toBe("Leon R. Rivera");
+  });
+
+  it("QuickBooks has the customer inactive: nothing more is sent, kept with words that say so, and no Send is offered", async () => {
+    inStub("12").Active = false; inStub("12").SyncToken = "1";
+    const r = await renameLinked({ kind: "student", recordId: leo, name: "Leon Rivera" }, tag, op);
+    expect(r).toMatchObject({ ok: true, status: "attention", message: expect.stringContaining("QuickBooks has this customer inactive") });
+    // The one send met the stale answer; the live read showed it inactive, and nothing was sent after it.
+    expect(bodies()).toEqual([{ Id: "12", SyncToken: "0", sparse: true, DisplayName: "Leon Rivera" }]);
+    expect(inStub("12").DisplayName).toBe("Leo Rivera");
+    expect((await items())[0]).toMatchObject({ state: "refused", lastCode: INACTIVE_THERE_CODE });
+    expect((await loadOpenWrites())[0]).toMatchObject({ mayResend: false, notOffered: "inactive" });
+  });
+});
+
+describe("a refused student's create is shown, and sent, with the student's name in the portal now", () => {
+  it("renamed in the portal since: the row shows the new name; a press with the name shown before sends nothing; with the one shown now, it is sent", async () => {
+    stub.updateFault = "6000";
+    await addStudentToLinked(String(rivera), "Rosa Rivera", tag, op);
+    stub.updateFault = null;
+    const [kept] = await items();
+    const [rosa] = await studentNamed("Rosa Rivera");
+    await db.update(student).set({ name: "Rosalind Rivera" }).where(eq(student.id, rosa!.id));
+    expect((await loadOpenWrites())[0]).toMatchObject({ words: "Add the student “Rosalind Rivera” to Rivera Family", shown: "Rosalind Rivera", mayResend: true });
+    stub.calls.length = 0;
+    expect(await sendPortalValue(kept!.id, "Rosa Rivera", portalValueStamp(kept!.id, "Rosa Rivera"), op)).toEqual({ ok: false, errors: [expect.stringContaining("renamed in the portal since this page was shown")] });
+    expect(posts()).toEqual([]);
+    expect(await queueItem(kept!.id)).toMatchObject({ state: "refused" });
+    expect(await sendPortalValue(kept!.id, "Rosalind Rivera", portalValueStamp(kept!.id, "Rosalind Rivera"), op)).toMatchObject({ ok: true });
+    expect(bodies()).toEqual([expect.objectContaining({ DisplayName: "Rosalind Rivera", ParentRef: { value: "10" } })]);
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.studentId, rosa!.id))).toHaveLength(1);
+  });
+});
+
+describe("only a send of the portal's own moves a link's version", () => {
+  const linkRows = () => db.select().from(accountingLink).orderBy(asc(accountingLink.id));
+
+  it("a roster read, a read-again of one customer and a shape save each leave every link's synced_token and synced_at exactly as they were", async () => {
+    const before = await linkRows();
+    expect(before.length).toBeGreaterThan(0);
+    for (const l of before) expect(l.syncedToken !== null && l.syncedAt !== null, l.customerId).toBe(true);
+    // QuickBooks raises every customer's version (edits made there), and a roster read takes them into the cache.
+    for (const c of stub.customers) c.SyncToken = String(Number(c.SyncToken ?? 0) + 3);
+    inStub("12").DisplayName = "Leonardo Rivera";
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    expect(await cached("12")).toMatchObject({ syncToken: "3", displayName: "Leonardo Rivera" });
+    expect(await linkRows()).toEqual(before);
+    // A read-again: a move sent with a version QuickBooks has moved on from reads the record again into the cache.
+    inStub("12").SyncToken = "9";
+    expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "3", toFamilyQboId: "20" }, tag, op)).toMatchObject({ ok: false, errors: [WRITE_COPY.changed] });
+    expect(await cached("12")).toMatchObject({ syncToken: "9" });
+    expect(await auditsOf("roster.customer.read_again")).toHaveLength(1);
+    expect(await linkRows()).toEqual(before);
+    // A shape saved again.
+    await saveShape(FZN_SHAPE, { actor: WORKER.actor, ip: null });
+    expect(await linkRows()).toEqual(before);
   });
 });

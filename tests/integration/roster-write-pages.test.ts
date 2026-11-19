@@ -588,9 +588,12 @@ describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)"
     await refusedRename();
     asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
     const read = sectionOf(await renderPage(ReconciliationPage), "writes-h");
-    expect(read).toContain("Refused by QuickBooks, kept in the portal (1)");
+    expect(read).toContain("Not in QuickBooks, kept in the portal (1)");
     expect(read).toContain("Rename the student “Leo Rivera” to “Leon Rivera”");
-    expect(read).toContain("Someone changed the name in QuickBooks since the portal last sent it");
+    // Who stopped it, in words: here the portal, which held it back over a name changed in QuickBooks.
+    expect(read).toContain("The portal held it back: someone changed the name in QuickBooks since the portal last sent it");
+    expect(read).toContain("Held back by the portal, as QuickBooks has something else");
+    expect(read).toContain("Why it didn&#x27;t go through");
     expect(read).toContain("QuickBooks has “Leo Rivera” now.");
     expect(read).not.toContain("fault_5010");
     expect(read).not.toContain("Send the portal");
@@ -615,6 +618,14 @@ describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)"
     const inactive = sectionOf(await renderPage(ReconciliationPage), "writes-h");
     expect(inactive).not.toContain("Send the portal");
     expect(inactive).toContain("QuickBooks has this customer inactive, and the portal never makes a customer active again");
+    // Drawn as a notice, never a bare paragraph.
+    expect(inactive).toMatch(/<div class="notice notice-info"><svg[\s\S]*?<\/svg><div class="notice-body"><span class="notice-word">Note<\/span> QuickBooks has this customer inactive/);
+    // A customer the roster doesn't hold at all is said as that, not as inactive.
+    await db.delete(qboCustomer).where(eq(qboCustomer.qboId, "12"));
+    const gone = sectionOf(await renderPage(ReconciliationPage), "writes-h");
+    expect(gone).not.toContain("Send the portal");
+    expect(gone).toContain("This customer isn&#x27;t on the roster the portal last read from QuickBooks");
+    expect(gone).not.toContain("QuickBooks has this customer inactive");
   });
 
   it("is listed on the family's page in words, with no buttons, and doesn't stop a change to the record", async () => {
@@ -622,7 +633,7 @@ describe("a change QuickBooks refused that the portal kept (stage 3's slice 9e)"
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     const kept = sectionOf(html, "refused-h");
-    expect(kept).toContain("Kept in the portal, refused by QuickBooks");
+    expect(kept).toContain("Kept in the portal, not in QuickBooks");
     expect(kept).toContain("Rename the student “Leo Rivera” to “Leon Rivera”");
     expect(kept).not.toContain("Send the portal");
     expect(html).not.toContain('id="waiting-h"');
