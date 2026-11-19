@@ -92,8 +92,12 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - clearParentAccess() (company-change.ts), on a change of company, takes FOR UPDATE, in id order, every person's
  *   row, then the open guardian rows, then deletes every request, then the unused codes, then the unused links, then
  *   the devices, then the sessions;
- * - a code request calls this before it touches a code, and the code door's last check (signinStands(),
- *   signin-codes.ts) calls it and then reads the code it spent.
+ * - a code request calls this before it touches a code, and a sign-in's last check (signinStands(), signin-codes.ts,
+ *   run by the one finish of every sign-in, src/lib/auth/parent-signin-finish.ts) calls it and then reads, unlocked,
+ *   what the sign-in spent: the code, or a set-up link's row and the `credential` row the set wrote;
+ * - "Set up or reset my password" (askForPasswordLink(), password-request.ts) takes the row FOR UPDATE, reads the
+ *   password unlocked, then makes the link (mintSigninLink()); a send that fails takes the row FOR UPDATE again and
+ *   deletes the link it made.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

@@ -46,8 +46,9 @@ export const hashLinkToken = (purpose: LinkPurpose, token: string): string =>
  * or not (an unused one past its expiry still holds the place `parent_signin_token_one_live_uq` keeps until the daily
  * clean-up), and the new one is stored with its life from `now`. Audited `parent.password.link_made` in the same
  * transaction, with the purpose, its expiry and how many it replaced, never the token or its hash; the caller's own row
- * says why the link was made. Nothing in the portal calls this yet (slice SI-2): the welcome (SI-4), the page that asks
- * for a link (SI-3a) and the staff reset (SI-9) will. Throws for a person who doesn't exist.
+ * says why the link was made. Called since slice SI-3a by the page that asks for a link (askForPasswordLink(),
+ * password-request.ts, which writes `parent.password.reset_asked` in the same transaction); the welcome (SI-4) and the
+ * staff reset (SI-9) will call it too. Throws for a person who doesn't exist.
  */
 export async function mintSigninLink(tx: Tx, o: { parentId: string; purpose: LinkPurpose; actor: Actor; ip: string | null; now?: Date }): Promise<string> {
   const now = o.now ?? new Date();
