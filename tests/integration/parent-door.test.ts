@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 // the real Better Auth session read, the real re-check and the real renewal, with only the request itself made up.
 import { fromBrowser } from "../helpers/page-request";
 
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, family, guardian, parent, parentAuthSession, parentAuthUser } from "@/lib/db/schema";
 import { getParentAuth } from "@/lib/auth/parent-auth";
@@ -15,7 +15,7 @@ import { getParentState } from "@/lib/auth/identity";
 import { resolveParentSession } from "@/lib/auth/resolve";
 import { chooseFamily, completeParentSignin } from "@/lib/parents/family-choice";
 import { blockPerson } from "@/lib/parents/people";
-import { endParentSessions, enabledGuardianRows, renewParentSession } from "@/lib/parents/sessions";
+import { endParentSessions, renewParentSession } from "@/lib/parents/sessions";
 import { env } from "@/env";
 import type { AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
@@ -28,7 +28,8 @@ const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip:
 /** What the reconcile does when a family is no longer in the roster: the row is disabled, and the sessions end if it was the last. */
 async function dropRow(guardianId: string) {
   const [row] = await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.id, guardianId)).returning();
-  if ((await enabledGuardianRows(row!.parentId)).length === 0) await endParentSessions(row!.parentId);
+  const open = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, row!.parentId), ne(guardian.status, "disabled")));
+  if (open.length === 0) await endParentSessions(row!.parentId);
 }
 async function post(path: string, body: unknown, cookie?: string) {
   const auth = await getParentAuth();
