@@ -28,6 +28,8 @@ const staffModules = modules.filter((f) => f.startsWith("src/app/staff/"));
 const parentModules = modules.filter((f) => f.startsWith("src/app/(parent)/"));
 const setupModules = modules.filter((f) => f.startsWith("src/app/setup/"));
 const otherModules = modules.filter((f) => !staffModules.includes(f) && !parentModules.includes(f) && !setupModules.includes(f));
+/** The one file whose actions are taken before sign-in, with no session: the form of a set-up or reset link. */
+const BEFORE_SIGN_IN_FILE = "src/app/sign-in/password-actions.ts";
 
 const exportedFunctions = async (file: string) => {
   const mod = await import(path.join(root, file));
@@ -77,6 +79,16 @@ describe("every server action is guarded (spec §7, §12)", () => {
       const g = guardOf(value);
       expect(g, `${file} → ${name} is guarded by neither staffAction nor parentAction`).toBeDefined();
       if (g?.door === "staff") expect(g.permission, `${file} → ${name} declares no permission`).toBeTruthy();
+      // An action with no session at all (beforeSignInAction, src/lib/guards.ts) is allowed in this one file: its guard
+      // is the link it is given. A new one is a decision, with the checklist in AGENTS.md ("Page or action before sign-in").
+      if (g?.door === "before-sign-in") expect(file, `${file} → ${name} uses beforeSignInAction outside ${BEFORE_SIGN_IN_FILE}`).toBe(BEFORE_SIGN_IN_FILE);
     }
+  });
+
+  it("finds the one action taken before sign-in, guarded as such", async () => {
+    expect(otherModules).toContain(BEFORE_SIGN_IN_FILE);
+    const exported = await exportedFunctions(BEFORE_SIGN_IN_FILE);
+    expect(exported.map(([name]) => name)).toEqual(["choosePasswordAction"]);
+    for (const [, value] of exported) expect(guardOf(value)?.door).toBe("before-sign-in");
   });
 });

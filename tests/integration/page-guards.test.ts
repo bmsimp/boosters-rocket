@@ -88,6 +88,8 @@ function staffPageProblem(file: string, source = read(file)): string | null {
  */
 const OTHER_PAGES: Record<string, string> = {
   "src/app/sign-in/page.tsx": "Public: the parent sign-in form. Shows no family data (tests/e2e/public-pages.spec.ts).",
+  "src/app/sign-in/set-up/[token]/page.tsx": "No session: the set-up link in its address is the guard (linkVerdict(), src/lib/parents/signin-links.ts). Opening it writes nothing; it shows the form or one message, the same for every refusal, and nothing of a person or family. Its action (beforeSignInAction, src/app/sign-in/password-actions.ts) checks the link again under the person's lock (tests/integration/password-links.test.ts).",
+  "src/app/sign-in/reset/[token]/page.tsx": "No session: the reset link in its address is the guard, as the set-up page's (linkVerdict(), src/lib/parents/signin-links.ts). Opening it writes nothing; it shows the form or one message, the same for every refusal, and nothing of a person or family (tests/integration/password-links.test.ts).",
   "src/app/staff/sign-in/page.tsx": "Public: the staff sign-in buttons. Shows no family data (tests/e2e/public-pages.spec.ts).",
   "src/app/refused/page.tsx": "Public: one fixed message, the same whoever is refused and whatever the reason.",
   "src/app/choose-family/page.tsx": "Reads getParentState() itself and redirects to /sign-in without a session; it lists only the signed-in parent's own families (tests/integration/choose-family-action.test.ts).",
