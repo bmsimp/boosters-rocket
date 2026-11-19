@@ -9,7 +9,7 @@ BEGIN
     SELECT family_id, parent_id FROM guardian WHERE family_id IS NOT NULL GROUP BY family_id, parent_id HAVING count(*) > 1
   ) AS d;
   IF twice > 0 THEN
-    RAISE EXCEPTION 'Migration 0040 stopped: % person(s) have more than one guardian row in the same family record. Each person may be in a family once. Nothing was changed: close and merge the extra rows, then run the update again.', twice;
+    RAISE EXCEPTION 'Migration 0040 stopped: % family membership(s) are held by more than one guardian row (one person, two or more rows naming the same family record). Each person may be in a family once. Nothing was changed: close and merge the extra rows, then run the update again.', twice;
   END IF;
 END $$;--> statement-breakpoint
 ALTER TABLE "guardian" ALTER COLUMN "family_qbo_id" DROP NOT NULL;--> statement-breakpoint

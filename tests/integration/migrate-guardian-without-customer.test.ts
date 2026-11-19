@@ -85,7 +85,7 @@ describe("migration 0040: a guardian row may name no customer, and a person is i
     const held = await rows();
     const appliedBefore = await applied();
     const failure = await failureOf(migrateWith(path.resolve("drizzle")));
-    expect(saidBy(failure)).toMatch(/Migration 0040 stopped: 1 person\(s\) have more than one guardian row in the same family record/);
+    expect(saidBy(failure)).toMatch(/Migration 0040 stopped: 1 family membership\(s\) are held by more than one guardian row \(one person, two or more rows naming the same family record\)/);
     expect(await rows()).toEqual(held);
     expect(await nullable()).toBe("NO");
     expect(await indexes()).not.toContain("guardian_family_id_parent_uq");
