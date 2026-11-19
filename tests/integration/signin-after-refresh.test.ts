@@ -86,17 +86,18 @@ describe("a parent the roster refresh made signs in", () => {
     const state = await pageRequest(cookieFrom(res));
     expect(state).toMatchObject({ status: "ok", identity: { door: "parent", parentId: ana!.id, name: "Ana Rivera", email: "ana@example.com",
       familyId, guardianId: link!.id, families: [{ guardianId: link!.id, familyId }] } });
-    // The identity names the app's family alone, never the QuickBooks id the session still stores.
+    // The identity names the app's family alone, and so does the session: no QuickBooks id of the family is stored.
     expect(JSON.stringify(state)).not.toContain('"10"');
     expect((await db.select().from(guardian))[0]).toMatchObject({ status: "active", disabledReason: null });
     const [account] = await db.select().from(parentAuthUser);
     const [session] = await db.select().from(parentAuthSession);
-    expect(session).toMatchObject({ userId: account!.id, familyQboId: "10" });
+    expect(session).toMatchObject({ userId: account!.id, familyId });
+    expect(session).not.toHaveProperty("familyQboId");
     expect(account).toMatchObject({ parentId: ana!.id, email: "ana@example.com" });
     expect((await actions()).filter((a) => /^(parent\.create|parent\.access\.granted|signin|guardian\.activate)/.test(a)))
       .toEqual(["parent.create", "parent.access.granted", "signin.code_sent", "guardian.activate", "signin"]);
     const signedIn = (await db.select().from(auditLog)).find((r) => r.action === "signin");
-    expect(signedIn).toMatchObject({ door: "parent", actorId: ana!.id, targetId: ana!.id, after: { familyQboId: "10" }, ip: IP });
+    expect(signedIn).toMatchObject({ door: "parent", actorId: ana!.id, targetId: ana!.id, after: { familyId: String(familyId) }, ip: IP });
 
     // A second refresh that finds nothing changed leaves her signed in.
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });

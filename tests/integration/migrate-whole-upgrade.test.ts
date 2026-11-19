@@ -212,13 +212,19 @@ describe("the whole upgrade from the release at 0022, in one run of the migrator
       expect(row!.n).toBe(journalLength());
     });
 
-    it("gives each guardian row its family, and leaves the session and the pending email change by QuickBooks id (stage 3 moves them)", async () => {
+    it("gives each guardian row its family, and carries each session and the pending email change over to it (0037, 0038)", async () => {
       const guardians = await q((pg) => pg.unsafe(`SELECT t.family_qbo_id, ${customerOf("t.family_id", "family")} AS family FROM guardian t ORDER BY t.family_qbo_id COLLATE "C"`));
       expect(guardians.map((g) => [g.family_qbo_id, g.family])).toEqual([["F1", "F1"], ["F2", "F2"]]);
-      const sessions = await q((pg) => pg`SELECT family_qbo_id FROM parent_auth_session ORDER BY family_qbo_id COLLATE "C"`);
-      expect(sessions.map((s) => s.family_qbo_id)).toEqual(["F1", "F2"]);
-      const [change] = await q((pg) => pg`SELECT family_qbo_id, guardian_id FROM parent_email_change WHERE id = ${ids.emailChange!}`);
-      expect(change).toMatchObject({ family_qbo_id: "F1", guardian_id: ids["guardian-F1"] });
+      // Each session names the app's record of the family it chose, the one its person's row there names.
+      const sessions = await q((pg) => pg.unsafe(`SELECT t.id, ${customerOf("t.family_id", "family")} AS family FROM parent_auth_session t ORDER BY t.id COLLATE "C"`));
+      expect(sessions.map((s) => [s.id, s.family])).toEqual([[`session-${ASH}`, "F1"], [`session-${BIRCH}`, "F2"]].sort((a, b) => (a[0]! < b[0]! ? -1 : 1)));
+      const [change] = await q((pg) => pg`SELECT family_id, guardian_id, record_qbo_id FROM parent_email_change WHERE id = ${ids.emailChange!}`);
+      expect(change).toMatchObject({ family_id: await recordOf("F1", "family"), guardian_id: ids["guardian-F1"], record_qbo_id: "P1" });
+      // Neither keeps a QuickBooks family column.
+      const columns = await q((pg) => pg`SELECT table_name FROM information_schema.columns WHERE column_name = 'family_qbo_id' AND table_name IN ('parent_auth_session', 'parent_email_change')`);
+      expect(columns).toEqual([]);
+      const [carried] = await q((pg) => pg`SELECT after FROM audit_log WHERE action = 'parent.session.carried_over'`);
+      expect(carried!.after).toMatchObject({ sessionsCarried: 2, sessionsCleared: 0, emailChangesCarried: 1, emailChangesDeleted: 0, realmId: REALM });
     });
 
     it("re-keys the season: the chosen list, the ticks, the waiver with its reason, and the reminder claim", async () => {

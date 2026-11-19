@@ -39,9 +39,11 @@ const NOT_SET_UP = "set up here yet";
 async function gateOf(familyQboId: string, email: string) {
   const person = await seedParent({ name: "Hand Made", email, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId, status: "active" });
-  const session = await seedParentSession(person.authUserId, { familyQboId });
   await syncAppRecords();
-  return resolveParentSession({ id: session.id, userId: person.authUserId, familyQboId });
+  // The session stores the row's own family record, as the sign-in does; with no roster company there is none.
+  const [row] = await db.select({ familyId: guardian.familyId }).from(guardian).where(eq(guardian.parentId, person.id));
+  const session = await seedParentSession(person.authUserId, { familyId: row?.familyId ?? null });
+  return resolveParentSession({ id: session.id, userId: person.authUserId, familyId: row?.familyId ?? null });
 }
 
 // Nothing here reaches Intuit: the stub is what seedConnected() needs to write a connection row, and what a read of a
@@ -493,7 +495,7 @@ describe("Family", () => {
     await syncAppRecords();
     const unnamed = [await recordOfCustomer("ZZ-UNNAMED-1", "family"), await recordOfCustomer("ZZ-UNNAMED-2", "family")];
     await db.update(family).set({ active: true }).where(inArray(family.id, unnamed));
-    await db.update(parentAuthSession).set({ familyQboId: "ZZ-UNNAMED-2" }).where(eq(parentAuthSession.id, a.session.id));
+    await db.update(parentAuthSession).set({ familyId: unnamed[1]! }).where(eq(parentAuthSession.id, a.session.id));
     const who = await identityNow(a.session.id);
     expect(who.families.map((f) => String(f.familyId))).toEqual([String(a.identity.familyId), ...unnamed.map(String)]);
     expect(String(who.familyId)).toBe(String(unnamed[1]));

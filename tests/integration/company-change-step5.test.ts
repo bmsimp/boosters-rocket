@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  accountingLink, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, guardian, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
+  accountingLink, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, guardian, parentAuthSession, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
   signedFormCopy, signedFormEvidence, signedFormFile, student, volunteerCredit, requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
 import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
@@ -89,8 +89,15 @@ describe("connecting a different company after step 5", () => {
     expect((await db.select().from(student)).length).toBeGreaterThanOrEqual(4);
     expect((await db.select().from(accountingLink)).every((l) => l.realmId === "1111")).toBe(true);
     expect((await db.select().from(guardian)).every((g) => g.familyId !== null)).toBe(true);
+    // Each parent's session and pending change of sign-in address name the app's own family (stage 3's fifth slice):
+    // the database would refuse to remove the records while they do, so the clear's parent access part, which runs
+    // first, deletes them.
+    const familyIds = [String(a.identity.familyId), String(b.identity.familyId)].sort();
+    expect((await db.select().from(parentAuthSession)).map((s) => String(s.familyId)).sort()).toEqual(familyIds);
+    expect((await db.select().from(parentEmailChange)).map((e) => String(e.familyId)).sort()).toEqual(familyIds);
 
     expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
 
     expect(await db.select().from(formReminderClaim)).toEqual([]);
     expect(await db.select().from(formReminderRound)).toEqual([]);

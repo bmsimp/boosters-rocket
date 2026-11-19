@@ -29,9 +29,10 @@ export type CloseMembership = {
 
 /**
  * Closes one membership: the row becomes `disabled` with its reason and the status it had (`statusBeforeDisable`), the
- * person's sessions for that family end, and all their sessions when no open row is left; when the row was open, the
- * family's unfinished forms still waiting on them start again (formsForGoneSigner(), by the row's own `family_id`); and
- * `parent.access.ended` is written. In that order, in the caller's transaction, which must hold the row locked. Returns
+ * person's sessions that chose the row's family record end (none for a row that names no family record: no session can
+ * have chosen one, since the gate lets a session into a family only through its person's row naming it), and all their
+ * sessions when no open row is left; when the row was open, the family's unfinished forms still waiting on them start
+ * again (formsForGoneSigner(), by the row's own `family_id`); and `parent.access.ended` is written. In that order, in the caller's transaction, which must hold the row locked. Returns
  * whether it was open and how many sessions ended.
  */
 export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMembership): Promise<{ wasOpen: boolean; sessionsEnded: number }> {
@@ -42,7 +43,7 @@ export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMember
   await tx.update(guardian).set({ ...set, updatedAt: new Date() }).where(eq(guardian.id, row.id));
   // The caller's object is the row as it is now, so what it decides next (another close, the person's last open row) reads it.
   Object.assign(row, set);
-  let sessionsEnded = await endFamilySessions(row.parentId, row.familyQboId, tx);
+  let sessionsEnded = row.familyId === null ? 0 : await endFamilySessions(row.parentId, row.familyId, tx);
   const openElsewhere = o.stillOpenElsewhere ? o.stillOpenElsewhere()
     : (await tx.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, row.parentId), ne(guardian.status, "disabled"))).limit(1)).length > 0;
   if (!openElsewhere) sessionsEnded += await endParentSessions(row.parentId, tx);

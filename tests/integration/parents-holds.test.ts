@@ -53,7 +53,7 @@ describe("deciding a held address", () => {
   it("reversing a decision holds the address again and ends the access it gave", async () => {
     await decideHold("ana@example.com", "same_person", SHOWN, "Both hers.", staff);
     const [u] = await db.select().from(parentAuthUser);
-    await seedParentSession(u!.id, { familyQboId: "10" });
+    await seedParentSession(u!.id);
     expect(await reverseHold("ana@example.com", "She says the Chen record is wrong.", staff)).toEqual({ ok: true });
     expect(await openFamilies()).toEqual([]);
     expect(await db.select().from(parentAuthSession)).toEqual([]);

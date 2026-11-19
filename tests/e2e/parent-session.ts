@@ -1,7 +1,9 @@
 import { createHmac } from "node:crypto";
 
 /**
- * The cookie for the parent session scripts/seed-e2e.ts inserts: Zelda, with the family E2E-FAMILY chosen. Made the way
+ * The cookie for the parent session scripts/seed-e2e.ts inserts: Zelda, with the family E2E-FAMILY chosen (the session
+ * stores that customer's family record, the app's own id; PARENT_SESSION_FAMILY is the customer, for the specs' queries
+ * of QuickBooks-keyed rows). The cookie carries only the token. Made the way
  * tests/e2e/staff-session.ts makes the staff one, read from the installed libraries (better-auth 1.7.18, better-call 1.4.5):
  *  - the name is `<cookiePrefix>.session_token`; the parent instance sets cookiePrefix `br_parent` (src/lib/auth/parent-auth.ts),
  *    and APP_URL is plain http on localhost in the e2e run, so there is no `__Secure-` prefix;

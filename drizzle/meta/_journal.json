@@ -267,6 +267,13 @@
       "when": 1795070581386,
       "tag": "0037_sessions_app_ids_additive",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795070876721,
+      "tag": "0038_sessions_app_ids_finish",
+      "breakpoints": true
     }
   ]
 }

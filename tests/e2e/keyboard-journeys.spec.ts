@@ -341,10 +341,11 @@ test.describe("7. the email change, by keyboard", () => {
     else await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
     await sql`UPDATE guardian SET status = ${saved.link.status}, disabled_reason = ${saved.link.disabled_reason}, status_before_disable = ${saved.link.status_before_disable}
             WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
-    const [link] = await sql`SELECT id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
+    // The request names the family it was asked in by the app's record, the one Zelda's row in it names.
+    const [link] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
     await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND used_at IS NULL`;
-    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_qbo_id, record_qbo_id, new_email, token_hash, expires_at)
-            VALUES (${p.id}, ${link!.id}, ${PARENT_SESSION_FAMILY}, 'E2E-P1', ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
+    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at)
+            VALUES (${p.id}, ${link!.id}, ${link!.family_id}, 'E2E-P1', ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
   });
 
   test("asks for a link, a bad address keeps the focus in the field, and the refused confirmation keeps it on its button", async ({ context, page, baseURL }) => {

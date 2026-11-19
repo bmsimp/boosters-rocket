@@ -8,6 +8,9 @@ import { invalidateProviders, type ProviderKey } from "@/lib/auth/providers";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { mailConfigHash } from "@/lib/mail/config-hash";
 import type { StoredMailConfig } from "@/lib/mail/types";
+import type { AppFamilyId } from "@/lib/families/ids";
+import { getRosterSource } from "@/lib/roster/source";
+import { recordOfCustomer } from "./app-records";
 
 /**
  * How to empty the database, worked out once per process from the database itself (the schema doesn't change during a
@@ -176,11 +179,29 @@ export async function seedGuardianInFamily(o: Parameters<typeof seedGuardian>[0]
   return row!;
 }
 
-/** A live parent session row, as Better Auth would store it. */
-export async function seedParentSession(authUserId: string, o: { familyQboId?: string | null; expiresAt?: Date } = {}) {
+/**
+ * The app's own family a session in `familyQboId` stores, as migration 0037 carried one over: the family record of the
+ * person's own guardian row in that family, when it names one; else, while the roster names a company, that
+ * customer's family record (recordOfCustomer(), which a later step points the row at too). Throws when there is none,
+ * rather than store a session that names no family: a test of the door seeds its rows with seedGuardianInFamily().
+ */
+export async function familyOfSession(authUserId: string, familyQboId: string): Promise<AppFamilyId> {
+  const [row] = await db.select({ familyId: guardian.familyId }).from(guardian).innerJoin(parentAuthUser, eq(parentAuthUser.parentId, guardian.parentId))
+    .where(and(eq(parentAuthUser.id, authUserId), eq(guardian.familyQboId, familyQboId), isNotNull(guardian.familyId)));
+  if (row?.familyId) return row.familyId;
+  if ((await getRosterSource()) !== null) return recordOfCustomer(familyQboId, "family");
+  throw new Error(`seedParentSession: no family record for ${familyQboId}: the person has no row in it naming one and the roster names no company. Seed the row with seedGuardianInFamily(), or a roster company first.`);
+}
+
+/**
+ * A live parent session row, as Better Auth would store it. Its family is the app's own record (`familyId`), or the one
+ * a family's QuickBooks id comes to (familyOfSession()); neither, a session still choosing.
+ */
+export async function seedParentSession(authUserId: string, o: { familyQboId?: string | null; familyId?: AppFamilyId | null; expiresAt?: Date } = {}) {
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
-  await db.insert(parentAuthSession).values({ id, token, userId: authUserId, familyQboId: o.familyQboId ?? null,
+  const familyId = o.familyId ?? (o.familyQboId ? await familyOfSession(authUserId, o.familyQboId) : null);
+  await db.insert(parentAuthSession).values({ id, token, userId: authUserId, familyId,
     expiresAt: o.expiresAt ?? new Date(Date.now() + 7 * 86_400_000) });
   return { id, token };
 }

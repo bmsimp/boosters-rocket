@@ -57,10 +57,11 @@ test.describe("a parent changes their sign-in email", () => {
     await sql`UPDATE guardian SET status = ${saved.link.status}, disabled_reason = ${saved.link.disabled_reason}, status_before_disable = ${saved.link.status_before_disable}
             WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
     // Asking replaced the seeded request: put it back, and drop the one this spec made.
-    const [link] = await sql`SELECT id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
+    // The request names the family it was asked in by the app's record, the one Zelda's row in it names.
+    const [link] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = ${PARENT_SESSION_FAMILY}`;
     await sql`DELETE FROM parent_email_change WHERE parent_id = ${p.id} AND used_at IS NULL`;
-    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_qbo_id, record_qbo_id, new_email, token_hash, expires_at)
-            VALUES (${p.id}, ${link!.id}, ${PARENT_SESSION_FAMILY}, 'E2E-P1', ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
+    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at)
+            VALUES (${p.id}, ${link!.id}, ${link!.family_id}, 'E2E-P1', ${E2E_EMAIL.own.newEmail}, ${emailTokenHash(E2E_EMAIL.own.token)}, now() + interval '7 days')`;
   });
 
   test("asks at phone width, gets the link by mail, is asked, and is refused before anything is sent to QuickBooks", async ({ context, page, baseURL }) => {

@@ -25,7 +25,7 @@ describe("the signed-in parent helpers", () => {
     const [link] = await db.select().from(guardian).where(eq(guardian.id, ana.identity.guardianId));
     expect(link).toMatchObject({ status: "active", isPrimary: true, sourceQboId: FAMILY_A.parent.qboId, parentId: ana.identity.parentId, familyQboId: FAMILY_A.family.qboId, familyId });
     const [session] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, ana.identity.sessionId));
-    expect(session).toMatchObject({ token: ana.session.token, familyQboId: FAMILY_A.family.qboId });
+    expect(session).toMatchObject({ token: ana.session.token, familyId });
     const cached = await db.select().from(qboCustomer).where(eq(qboCustomer.parentQboId, FAMILY_A.family.qboId));
     expect(cached.map((c) => c.displayName).sort()).toEqual(["Ansgar Alderquist", "Aurelio Alderquist", "Azalea Alderquist"]);
   });
@@ -58,7 +58,7 @@ describe("the signed-in parent helpers", () => {
       const [link] = await db.select().from(guardian).where(eq(guardian.id, p.identity.guardianId));
       expect(link).toMatchObject({ status: "active", disabledReason: null, sourceQboId: p.spec.parent.qboId });
       const [session] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, p.identity.sessionId));
-      const state = await resolveParentSession({ id: session!.id, userId: session!.userId, familyQboId: session!.familyQboId });
+      const state = await resolveParentSession({ id: session!.id, userId: session!.userId, familyId: session!.familyId });
       expect(state).toEqual({ status: "ok", identity: p.identity });
     }
     expect(await db.select().from(guardian)).toHaveLength(2);

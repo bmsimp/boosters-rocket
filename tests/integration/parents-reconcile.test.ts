@@ -5,7 +5,7 @@ import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthU
 import { SHAPE_KEY } from "@/lib/roster/shape";
 import { runReconcile } from "../helpers/reconcile";
 import { resetDb, seedParent, seedGuardian, seedParentSession } from "../helpers/db";
-import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu, P_SHAPE } from "../helpers/roster-cache";
+import { seedCache, seedRosterRead, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu, P_SHAPE } from "../helpers/roster-cache";
 
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const links = async () => (await db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId)))
@@ -114,6 +114,9 @@ describe("the reconcile", () => {
   });
 
   it("ends the session for a closed family at once and leaves the person's other family alone, then reopens it as it was", async () => {
+    // A roster company, so each family has its record: a session names the family record it chose, and a closed link
+    // ends the sessions that chose its row's record.
+    await seedRosterRead({ realmId: "4620000000000001" });
     await seedParentSettings(SIGNINS_ON);
     const both = [...RIVERA, fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")];
     await seedCache(both);
@@ -165,7 +168,7 @@ describe("the reconcile", () => {
   it("signs the person out when their address changes in place, since a session was proved with the old address", async () => {
     await seedParentSettings(SIGNINS_ON); await seedCache(RIVERA); await run();
     const [u] = await db.select().from(parentAuthUser);
-    await seedParentSession(u!.id, { familyQboId: "10" });
+    await seedParentSession(u!.id);
     await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com"), stu("12", "Leo Rivera", "10")]);
     expect(await run()).toMatchObject({ emailChanged: 1, ended: 0 });
     expect(await db.select().from(parentAuthSession)).toEqual([]);

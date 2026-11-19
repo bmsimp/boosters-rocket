@@ -49,7 +49,7 @@ describe("chooseFamilyAction", () => {
     expect(two).toContain(`>${unknown} (2)</button>`);
     // The chosen family goes away and one is left: the parent is sent back here, with one family to choose.
     expect(await redirectOf(chooseFamilyAction(second.id))).toBe("/");
-    expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBe("F2");
+    expect((await db.select().from(parentAuthSession))[0]!.familyId).toBe(second.familyId);
     await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, second.id));
     const one = renderToStaticMarkup(await ChooseFamily());
     expect(one.match(/<button class="btn"/g)).toHaveLength(1);
@@ -73,7 +73,7 @@ describe("chooseFamilyAction", () => {
       second.id.toUpperCase(), ` ${second.id}`];
     for (const v of bad) {
       expect(await redirectOf((chooseFamilyAction as (x: unknown) => Promise<void>)(v))).toBe("/choose-family");
-      expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBe("F1");
+      expect((await db.select().from(parentAuthSession))[0]!.familyId).toBe(first.familyId);
     }
     const refused = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused");
     expect(refused).toHaveLength(bad.length);
@@ -101,7 +101,7 @@ describe("chooseFamilyAction", () => {
     const before = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused").length;
     for (const row of [second, earlier]) {
       expect(await redirectOf(chooseFamilyAction(row.id))).toBe("/choose-family");
-      expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBe("F1");
+      expect((await db.select().from(parentAuthSession))[0]!.familyId).toBe(first.familyId);
     }
     const refused = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused");
     expect(refused).toHaveLength(before + 2);

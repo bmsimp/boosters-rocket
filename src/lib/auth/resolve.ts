@@ -72,12 +72,11 @@ function toStaff(s: typeof staffUser.$inferSelect): StaffIdentity {
  * choose. A row counts when it is open and names an active app family record (enterableGuardianRows(); app-owned
  * families spec §6).
  *
- * This is the one place the session's family becomes the app's: the session still stores the family's QuickBooks id
- * (`parent_auth_session.family_qbo_id`, until stage 3's fifth slice moves the column), which is matched here to the
- * person's own rows by each row's `family_qbo_id`, and the identity carries that row's `family_id`. Nothing after the
- * gate sees the QuickBooks id.
+ * The session stores the app's own family record it chose (`parent_auth_session.family_id`, since stage 3's fifth
+ * slice), which is matched here to the person's own rows that count by each row's `family_id`, and the identity carries
+ * that row and its family. No QuickBooks id takes part: nothing on the parent side turns one into a family.
  */
-export async function resolveParentSession(s: { id: string; userId: string; familyQboId: string | null }, ip: string | null = null): Promise<ParentSessionState> {
+export async function resolveParentSession(s: { id: string; userId: string; familyId: AppFamilyId | null }, ip: string | null = null): Promise<ParentSessionState> {
   const [row] = await db.select({ p: parent }).from(parentAuthUser).innerJoin(parent, eq(parent.id, parentAuthUser.parentId)).where(eq(parentAuthUser.id, s.userId));
   if (!row) return { status: "none" };
   const p = row.p;
@@ -95,11 +94,11 @@ export async function resolveParentSession(s: { id: string; userId: string; fami
     return { status: "none" };
   }
   const families = rows.map((r) => ({ guardianId: r.id, familyId: r.familyId }));
-  const chosen = s.familyQboId ? rows.find((r) => r.familyQboId === s.familyQboId) : undefined;
+  const chosen = s.familyId ? rows.find((r) => r.familyId === s.familyId) : undefined;
   if (!chosen) {
-    if (s.familyQboId) {
-      await db.update(parentAuthSession).set({ familyQboId: null, updatedAt: new Date() }).where(eq(parentAuthSession.id, s.id));
-      await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "family_not_enabled", familyQboId: s.familyQboId }, ip });
+    if (s.familyId) {
+      await db.update(parentAuthSession).set({ familyId: null, updatedAt: new Date() }).where(eq(parentAuthSession.id, s.id));
+      await writeAudit({ actor, action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "family_not_enabled", familyId: String(s.familyId) }, ip });
     }
     return { status: "choose", parentId: p.id, sessionId: s.id, name: p.name, families };
   }

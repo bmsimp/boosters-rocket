@@ -47,12 +47,10 @@ async function main() {
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
   await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY-2', ${p!.id}, false, 'active', 'E2E-P2')
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
-  // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
-  // code (tests/e2e/parent-session.ts makes the cookie). Every session she has is deleted first, as the staff one is.
+  // Zelda's live session is made once the app's records exist (below): it names the family it chose by its record.
+  // Every session she has is deleted first, as the staff one is.
   const [zelda] = await sql`SELECT id FROM parent_auth_user WHERE parent_id = ${p!.id}`;
   await sql`DELETE FROM parent_auth_session WHERE user_id = ${zelda!.id}`;
-  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_qbo_id, expires_at)
-          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, 'E2E-FAMILY', now() + interval '7 days')`;
   // SMTP to the e2e mail sink (tests/e2e/parent-sign-in.spec.ts), counted as tested.
   const sealed = createSecretBox({ current: process.env.SETTINGS_ENCRYPTION_KEY! }).seal("sink-password", "mail:smtp-password");
   const mail = { method: "smtp", host: "127.0.0.1", port: mailPort, security: "tls", username: "sender", from: "boosters@e2e.example.org",
@@ -313,14 +311,6 @@ async function main() {
               VALUES ('e2e00000-0000-4000-8000-000000000002', ${formIds["Travel consent"]!}, ${second}, 'waiting', 'envelope_e2esecondfamily', 'PENDING', ${template.templateId}, ${template.templateUpdatedAt},
                 'any', 'Second Family', ${tx.json(secondWaiting)}, now(), now())`;
   };
-  // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
-  // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
-  // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).
-  for (const [key, family, record, used] of [["own", "E2E-FAMILY", "E2E-P1", false], ["other", "E2E-FAMILY-2", "E2E-P2", true]] as const) {
-    const [link] = await sql`SELECT id FROM guardian WHERE parent_id = ${p!.id} AND family_qbo_id = ${family}`;
-    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_qbo_id, record_qbo_id, new_email, token_hash, expires_at, used_at)
-            VALUES (${p!.id}, ${link!.id}, ${family}, ${record}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
-  }
   await sql`DELETE FROM write_queue`;
   await sql`DELETE FROM job_run`;
   await sql`INSERT INTO job_run (job, started_at, finished_at, outcome, detail, started_by) VALUES ('roster.refresh', now(), now(), 'ok', '16 customers, 4 customer types', 'worker')`;
@@ -329,6 +319,25 @@ async function main() {
   // what the portal's keepAppRecordsInStep() makes. One connection: its scratch tables are the session's.
   const fill = appRecordsFillStatements();
   await sql.begin(async (tx) => { for (const statement of fill) await tx.unsafe(statement); });
+  // Zelda's guardian row in a family, with the app's family record the fill gave it: a session and a change of sign-in
+  // address name the family by that record, as the sign-in stores it and migration 0037 carried them over.
+  const zeldaIn = async (family: string): Promise<{ id: string; familyId: string }> => {
+    const [row] = await sql`SELECT id, family_id FROM guardian WHERE parent_id = ${p!.id} AND family_qbo_id = ${family}`;
+    if (!row?.family_id) throw new Error(`seed-e2e: Zelda's row in ${family} names no family record`);
+    return { id: row.id as string, familyId: row.family_id as string };
+  };
+  // A live session for Zelda with the first family chosen, so the e2e run can open parent pages without the emailed
+  // code (tests/e2e/parent-session.ts makes the cookie).
+  await sql`INSERT INTO parent_auth_session (id, token, user_id, family_id, expires_at)
+          VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, now() + interval '7 days')`;
+  // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
+  // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
+  // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).
+  for (const [key, family, record, used] of [["own", "E2E-FAMILY", "E2E-P1", false], ["other", "E2E-FAMILY-2", "E2E-P2", true]] as const) {
+    const link = await zeldaIn(family);
+    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at, used_at)
+            VALUES (${p!.id}, ${link.id}, ${link.familyId}, ${record}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
+  }
   // The season's chosen lists, ticks and waivers, the volunteer sign-ups, the form requests and evidence, the buy-outs and
   // each family's stored figures, by the app's own record of each customer, of the kind each names it as, in the roster's
   // company: as migrations 0024, 0026, 0028, 0030 and 0032 store them. A customer with no such record stops the seed.

@@ -61,10 +61,13 @@ export async function endParentSessions(parentId: string, tx?: Tx): Promise<numb
   return Array.from(rows as ArrayLike<{ id: string }>).length;
 }
 
-/** Ends the person's sessions that are in one family (spec §2 Closing a link). Sessions in their other families carry on. */
-export async function endFamilySessions(parentId: string, familyQboId: string, tx?: Tx): Promise<number> {
+/**
+ * Ends the person's sessions that chose one family (spec §2 Closing a link), by the app's own family record the session
+ * stores (`parent_auth_session.family_id`). Sessions in their other families, and one still choosing, carry on.
+ */
+export async function endFamilySessions(parentId: string, familyId: AppFamilyId, tx?: Tx): Promise<number> {
   const rows = await (tx ?? db).execute<{ id: string }>(sql`DELETE FROM parent_auth_session
-    WHERE family_qbo_id = ${familyQboId} AND user_id IN (SELECT id FROM parent_auth_user WHERE parent_id = ${parentId}) RETURNING id`);
+    WHERE family_id = ${String(familyId)} AND user_id IN (SELECT id FROM parent_auth_user WHERE parent_id = ${parentId}) RETURNING id`);
   return Array.from(rows as ArrayLike<{ id: string }>).length;
 }
 
@@ -79,8 +82,8 @@ export type EnterableRow = GuardianRow & { familyId: AppFamilyId };
  * a person with no row that counts is refused as one with no open row (src/lib/auth/resolve.ts): sent no code and
  * refused at the code check (signin-codes.ts, `no_enabled_guardian`) and at the sign-in's end (completeParentSignin()).
  * In the chooser's order, by `family_qbo_id`. Nothing else asks this: the welcome email counts every open row with a
- * query of its own (welcome.ts), and closing a membership ends the sessions that chose its family by the session's
- * stored family (endFamilySessions()), and every session once no open row is left (membership.ts).
+ * query of its own (welcome.ts), and closing a membership ends the sessions that chose the row's family record
+ * (endFamilySessions()), and every session once no open row is left (membership.ts).
  */
 export async function enterableGuardianRows(parentId: string, tx?: Tx): Promise<EnterableRow[]> {
   const rows = await (tx ?? db).select({ g: guardian, familyId: family.id }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))

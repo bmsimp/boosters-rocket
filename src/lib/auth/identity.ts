@@ -7,6 +7,7 @@ import { getStaffAuth } from "./staff-auth";
 import { getParentAuth } from "./parent-auth";
 import { resolveStaff, resolveParentSession, type StaffIdentity, type ParentIdentity, type ParentSessionState } from "./resolve";
 import { renewParentSession } from "@/lib/parents/sessions";
+import { asAppFamilyId } from "@/lib/families/ids";
 
 export async function getStaffIdentity(): Promise<StaffIdentity | null> {
   const session = await (await getStaffAuth()).api.getSession({ headers: stampClientIp(await headers()) });
@@ -23,8 +24,10 @@ export async function getStaffIdentity(): Promise<StaffIdentity | null> {
 export const getParentState = cache(async (): Promise<ParentSessionState> => {
   const session = await (await getParentAuth()).api.getSession({ headers: stampClientIp(await headers()) });
   if (!session) return { status: "none" };
-  const familyQboId = (session.session as { familyQboId?: string | null }).familyQboId ?? null;
-  const state = await resolveParentSession({ id: session.session.id, userId: session.user.id, familyQboId }, await requestIp());
+  // The family the session chose (parent-auth.ts): a uuid read from `parent_auth_session.family_id`, or null.
+  const stored = (session.session as { familyId?: string | null }).familyId ?? null;
+  const familyId = stored === null ? null : asAppFamilyId(stored);
+  const state = await resolveParentSession({ id: session.session.id, userId: session.user.id, familyId }, await requestIp());
   if (state.status !== "none") await renewParentSession({ id: session.session.id, expiresAt: session.session.expiresAt });
   return state;
 });
