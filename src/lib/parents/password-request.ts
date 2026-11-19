@@ -107,8 +107,11 @@ export const passwordLink = (purpose: LinkPurpose, token: string) =>
  *     blocked, a sign-in account, a row that counts, the door open, and whether they have a password, so the link's
  *     purpose is what is true at that moment), makes the link (mintSigninLink(), which replaces their unused one of
  *     that purpose) and writes `parent.password.reset_asked`; for any other ask it writes that row alone, after one
- *     keyed hash of a random token of a link's length, as the mint makes, so both paths do the same kind of work. Over
- *     a limit, only the first refusal of a full window is recorded (rate-limit.ts), naming no person.
+ *     keyed hash of a random token of a link's length, as the mint makes, so both paths do the same kind of work. The
+ *     mailed path's transaction still does more (the lock, which may wait on a roster write, the checks again and the
+ *     mint), so its time can tell an address it mails from others: bounded by the per-address limit, as the code
+ *     request's is (requestSigninCode()). Over a limit, only the first refusal of a full window is recorded
+ *     (rate-limit.ts), naming no person.
  * Then the mail, to the address read under the lock and no other; a send that fails deletes the link it made, with a
  * row saying so (`mail_failed`): nobody got it. The token is in the mail's body alone: never in an audit row, a log
  * line or the answer.
