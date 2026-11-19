@@ -21,7 +21,7 @@ import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helper
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { parentDevice, parentSigninToken } from "@/lib/db/schema";
 import { hashLinkToken } from "@/lib/parents/signin-links";
-import { credentialRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
+import { credentialRows, holdLink, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -127,6 +127,8 @@ describe("connecting a different QuickBooks company", () => {
     const used = await mintLink(ana!.id, "setup");
     await db.update(parentSigninToken).set({ usedAt: new Date() }).where(eq(parentSigninToken.tokenHash, hashLinkToken("setup", used)));
     await mintLink(ana!.id, "reset");
+    // A link held while its mail is on its way (the request page) goes with the unused ones.
+    await holdLink(ana!.id, "setup");
     await seedDevice(ana!.id);
     const [user] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana!.id));
     await seedPassword(user!.id, "a password long enough to keep");
@@ -134,7 +136,7 @@ describe("connecting a different QuickBooks company", () => {
     expect((await db.select().from(parentSigninToken)).map((r) => r.purpose)).toEqual(["setup"]);
     expect(await db.select().from(parentDevice)).toEqual([]);
     expect(await credentialRows(user!.id)).toHaveLength(1);
-    expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ linksDeleted: 1, devicesForgotten: 1 });
+    expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ linksDeleted: 2, devicesForgotten: 1 });
   });
 
   it("keeps the old company's links out of the new company's roster pages, and labels them on the person's page", async () => {

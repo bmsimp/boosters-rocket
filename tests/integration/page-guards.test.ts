@@ -391,6 +391,7 @@ const PARENT_CODE_ELSEWHERE = [
   // What a set-up or reset link's page and action run for a visitor with no session (the pages and their action are
   // under src/app/sign-in, BEFORE_SIGN_IN_CODE below): they read one person from a token anyone can send.
   "src/lib/parents/signin-links.ts",
+  "src/lib/parents/link-state.ts",
   "src/lib/parents/password-set.ts",
   // What the page that mails a set-up or reset link runs (slice SI-3a): it reads one person from an address anyone can
   // type. And the one finish of a sign-in, with the step that copies its cookie onto a link form's answer.

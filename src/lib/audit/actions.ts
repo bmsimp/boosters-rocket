@@ -75,6 +75,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "parent.match.decided": "Family match decided",
   "parent.name.changed": "A parent's name changed (by staff in the portal; in QuickBooks, in older rows)",
   "parent.password.link_made": "A set-up or reset link for a parent's password was made",
+  "parent.password.link_not_sent": "A set-up or reset link asked for by email wasn't put in place",
   "parent.password.refused": "A parent's password wasn't set from a link",
   "parent.password.reset_asked": "Someone asked for a password set-up or reset link by email",
   "parent.password.set": "A parent set their password from a link",

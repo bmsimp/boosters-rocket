@@ -50,18 +50,19 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * codes, their set-up and reset links (`parent_signin_token`), their password (the `credential` row of
  * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
  * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet. Everything that ends all of a
- * person's sign-in deletes their unused links, a held one on its way included (unspentLink, ./link-state.ts; a password reset spends its own) and forgets their devices, in that
- * place, and keeps their password: blocking, sign-ins switched off, the change-of-company clear, a password reset, a
- * confirmed change of sign-in email, and closing a person's last open membership (closeMembership(), membership.ts;
- * the lead's choice 10 of the sign-in release). So:
+ * person's sign-in deletes their unused links, a held one on its way included (unspentLink, ./link-state.ts) and forgets their devices, in that
+ * place, and keeps their password: blocking, sign-ins switched off, the change-of-company clear, a confirmed change of
+ * sign-in email, and closing a person's last open membership (closeMembership(), membership.ts; the lead's choice 10 of
+ * the sign-in release). A password reset ends their sign-in too, in the same place, but sets the new password: it spends
+ * its own link and deletes their other unspent reset links, a held one included. So:
  * - choosePasswordFromLink() (password-set.ts) takes the row FOR UPDATE, then, as its re-check, its link's row FOR
  *   UPDATE, and only then, for a reset, deletes the unused codes and those spent within a code's life (so the code
- *   door's last check refuses a sign-in whose code was spent before the reset: signinStands(), below); then it
- *   spends the link, replaces or inserts the password, and for a reset forgets the devices and ends the sessions. That one link ahead of the codes is the one
+ *   door's last check refuses a sign-in whose code was spent before the reset: signinStands(), below), then their
+ *   other unspent reset links; then it spends the link, replaces or inserts the password, and for a reset forgets the devices and ends the sessions. That one link ahead of the codes is the one
  *   step out of the order above, and is safe because nothing else takes both without the person's row first: every
  *   writer of a person's links holds that row, and the code check of signin-codes.ts touches no link. A new writer of
- *   both that does not take the person's row first must take the link before the codes too. mintSigninLink() takes the row FOR UPDATE, then replaces the unused link
- *   of its purpose;
+ *   both that does not take the person's row first must take the link before the codes too. mintSigninLink() takes the row FOR UPDATE, then replaces the unspent links
+ *   of its purpose, a held one included;
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request and
  *   changes the address, then deletes the person's other requests, then their unused codes, then their unused links,
  *   then their devices, then their sessions, and only then, in a savepoint, the roster lock and the app's records;

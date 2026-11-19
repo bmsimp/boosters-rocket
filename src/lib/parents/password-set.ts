@@ -9,7 +9,7 @@
 // the one finish every sign-in goes through (src/lib/auth/parent-link-signin.ts, then parent-signin-finish.ts).
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
 import { parent, parentAuthAccount, parentSigninToken } from "@/lib/db/schema";
@@ -22,6 +22,7 @@ import { takeRateLimit, type RateLimitTake } from "./rate-limit";
 import { CODE_TTL_MS, type LinkSigninProof } from "./signin-codes";
 import { getParentSettings } from "./settings";
 import { deleteUnusedSigninCodes, endParentSessions, forgetDevices, parentActor } from "./sessions";
+import { unspentLink } from "./link-state";
 import { hashLinkToken, isLinkPurpose, isLinkToken, linkVerdict, type LinkPurpose, type LinkRefusal } from "./signin-links";
 
 /**
@@ -133,7 +134,9 @@ export async function choosePasswordFromLink(raw: { purpose: unknown; token: unk
  * Then: for a reset, the person's unused sign-in codes go (until the code stops being a way in by itself, a reset that
  * left one would leave a way in), and so do those spent within a code's life (CODE_TTL_MS), so a code sign-in that
  * spent its code before the reset and makes its session after it is refused at its last check (signinStands(),
- * signin-codes.ts, which reads the code it spent again under the person's lock); the link is spent; the person's
+ * signin-codes.ts, which reads the code it spent again under the person's lock); for a reset, the person's other
+ * unspent reset links go, one held while its mail is on its way included (unspentLink, ./link-state.ts), so none made
+ * before the reset works after it; the link is spent; the person's
  * `credential` row is replaced, or made when there is none, so a person never has two; and for a reset every remembered device is forgotten and every session ended (open
  * question 23). A set-up ends nothing. Audited `parent.password.set`, never with the password, its hash, the token or
  * its hash.
@@ -170,6 +173,10 @@ async function writePassword(o: { purpose: LinkPurpose; token: string; hash: str
     // A code spent within a code's life goes too: a sign-in that spent it just before this reset, and makes its session
     // just after, finds it gone at its last check (signinStands()) and is refused.
     const codesDeleted = reset ? await deleteUnusedSigninCodes(link.parentId, tx, { spentSince: new Date(now.getTime() - CODE_TTL_MS) }) : 0;
+    // A reset ends every other reset link of the person's, one held while its mail is on its way included (unspentLink),
+    // so no link made before the reset comes to life after it.
+    const linksDeleted = reset ? (await tx.delete(parentSigninToken).where(and(eq(parentSigninToken.parentId, link.parentId), eq(parentSigninToken.purpose, "reset"),
+      ne(parentSigninToken.id, link.tokenId), unspentLink)).returning({ id: parentSigninToken.id })).length : 0;
     await tx.update(parentSigninToken).set({ usedAt: now }).where(eq(parentSigninToken.id, link.tokenId));
     const [had] = await tx.select({ id: parentAuthAccount.id }).from(parentAuthAccount)
       .where(and(eq(parentAuthAccount.userId, link.authUserId), eq(parentAuthAccount.providerId, "credential"))).for("update");
@@ -187,7 +194,7 @@ async function writePassword(o: { purpose: LinkPurpose; token: string; hash: str
     await writeAudit({ actor: parentActor({ id: link.parentId, email: link.email }), action: "parent.password.set", targetType: "parent", targetId: link.parentId,
       after: { purpose: o.purpose, replaced: Boolean(had), breachChecked: o.breach.outcome === "not_found",
         ...(o.breach.outcome === "not_checked" ? { breachNotChecked: o.breach.why } : {}),
-        ...(reset ? { codesDeleted, devicesForgotten, sessionsEnded } : {}) }, ip: o.ip }, tx);
+        ...(reset ? { codesDeleted, linksDeleted, devicesForgotten, sessionsEnded } : {}) }, ip: o.ip }, tx);
     // The proof of what this set spent: its link, now spent, and the password row as written here. The sign-in's last
     // check reads both again under the person's lock, so a reset or a block that commits in between refuses it.
     const signIn: LinkSignin | null = o.purpose === "setup" && level === "standard"

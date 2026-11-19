@@ -4,9 +4,9 @@
 // password already), and nobody else is sent anything. Server only.
 import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { parent, parentAuthAccount, parentAuthUser } from "@/lib/db/schema";
+import { parent, parentAuthAccount, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/setup/state";
 import { mailWorking } from "@/lib/mail/settings";
@@ -34,11 +34,18 @@ export const hashAskedAddress = (address: string): string =>
 /**
  * Why nothing was mailed, for the `parent.password.reset_asked` row only: over a limit, not an address, nobody's sign-in
  * address, no sign-in account, blocked, no guardian row that counts, sign-ins off, mail not working, the Strict rules
- * (./password-request-rule.ts), a link of that purpose sent less than the resend wait ago (resend_wait), the send
- * failed (mail_failed), or the link to send changed while its mail went (changed_while_mailing).
+ * (./password-request-rule.ts), or a link of that purpose sent less than the resend wait ago (resend_wait).
  */
 type NotMailed = "rate_limited" | "not_an_address" | "unknown_email" | "no_sign_in_account" | "blocked" | "no_enabled_guardian"
-  | "signins_off" | "mail_not_working" | "strict_no_setup" | "strict_no_factor" | "resend_wait" | "mail_failed" | "changed_while_mailing";
+  | "signins_off" | "mail_not_working" | "strict_no_setup" | "strict_no_factor" | "resend_wait";
+/**
+ * Why a link held on its way was never put in place, for the `parent.password.link_not_sent` row only: a check under
+ * the person's lock that now says no (a reason of decide()); the link to send is now of the other purpose, or an end of
+ * the person's sign-in or a password reset removed it (changed_while_mailing); a link made since replaced it
+ * (superseded); the mail was not handed over (mail_failed); or it was, and putting the link in place then failed, so
+ * the person holds a mail whose link never works (not_put_in_place).
+ */
+type NotSent = NotMailed | "changed_while_mailing" | "superseded" | "mail_failed" | "not_put_in_place";
 
 /** No person has this id: the rows of an address nobody holds are read for it, so every ask makes the same reads. */
 const NOBODY = "00000000-0000-0000-0000-000000000000";
@@ -79,6 +86,22 @@ async function audit(who: Who | null, after: Record<string, unknown>, ip: string
     targetId: who?.id, after, ip }, tx);
 }
 
+/**
+ * What became of a link held on its way, when it was not put in place: one `parent.password.link_not_sent` row, in the
+ * transaction that makes that true. (Put in place, its row is `parent.password.link_made`, putHeldLinkInPlace().)
+ */
+async function notSent(who: Who, purpose: LinkPurpose, reason: NotSent, ip: string | null, tx: Tx) {
+  await writeAudit({ actor: parentActor(who), action: "parent.password.link_not_sent", targetType: "parent", targetId: who.id,
+    after: { purpose, reason }, ip }, tx);
+}
+
+/** Postgres ended the transaction to break a deadlock (40P01), or for a serialization failure (40001): worth one more try. */
+function worthAnotherTry(e: unknown): boolean {
+  const code = (v: unknown) => (typeof v === "object" && v !== null ? (v as { code?: unknown }).code : undefined);
+  const c = code(e) ?? code((e as { cause?: unknown } | null)?.cause);
+  return c === "40P01" || c === "40001";
+}
+
 /** A link's life in words, for its mail: "1 hour", "7 days". */
 export function lifeWords(ms: number): string {
   const hours = Math.round(ms / 3_600_000);
@@ -110,17 +133,20 @@ export const passwordLink = (purpose: LinkPurpose, token: string) =>
  *     purpose is what is true at that moment), then the resend wait: while a link of that purpose sent less than
  *     RESEND_AFTER_MS ago (the code's own wait) may be in the mailbox unused, or is on its way, nothing is made or
  *     mailed and the row says `resend_wait`. Otherwise it holds a new link (holdSigninLink(): stored, but working for
- *     nobody yet, beside the person's earlier unused one, which it doesn't touch) and writes no row yet; for any
- *     other ask it writes `parent.password.reset_asked` alone, after one keyed hash of a random token of a link's
+ *     nobody yet, beside the person's earlier unused one, which it doesn't touch) and writes the ask's row with the
+ *     link's purpose, on its way (`{ outcome, link: "on_its_way" }`); for any other ask it writes `parent.password.reset_asked` alone, after one keyed hash of a random token of a link's
  *     length, as the hold makes, so both paths do the same kind of work. The mailed path's transaction still does
  *     more (the lock, which may wait on a roster write, the checks again and the hold), so its time can tell an
  *     address it mails from others: bounded by the per-address limit, as the code request's is (requestSigninCode()).
  *     Over a limit, only the first refusal of a full window is recorded (rate-limit.ts), naming no person.
- * Then the mail, to the address read under the lock and no other. Only once it has been handed over is the new link
- * put in place, replacing the earlier one, with its one `reset_asked` row (putLinkInPlace()); a send that fails, or
- * anything that throws, removes the new link and leaves the earlier one working, with one row saying so
- * (`mail_failed`). So an ask that never reached the person never takes a link from them. The token is in the mail's
- * body alone: never in an audit row, a log line or the answer.
+ * So every ask past (a) has exactly one `parent.password.reset_asked` row, written in the transaction that decided it.
+ * Then the mail, to the address read under the lock and no other. What becomes of the held link is a second fact with
+ * its own row, written in the transaction that makes it true: once the mail has been handed over the link is put in
+ * place, replacing the earlier one (`parent.password.link_made`, putLinkInPlace()); otherwise it is removed and the
+ * earlier one left working (`parent.password.link_not_sent`, with its reason). An ask whose process stopped mid-way
+ * keeps its `reset_asked` row with no row after it: that is its trace, and the held link is a spent one to the
+ * clean-up. So an ask that never reached the person never takes a link from them. The token is in the mail's body
+ * alone: never in an audit row, a log line or the answer.
  */
 export async function askForPasswordLink(raw: unknown, ip: string | null, now = new Date()): Promise<{ delivery: Promise<void> }> {
   if (typeof raw !== "string" || raw.length > MOST_ASKED) return DONE;
@@ -164,22 +190,28 @@ export async function askForPasswordLink(raw: unknown, ip: string | null, now = 
       return null;
     }
     const { linkId, token } = await holdSigninLink(tx, { parentId: live.id, purpose: again.mail, now });
-    return { linkId, purpose: again.mail, token, to: live.email, who: { id: live.id, email: live.email } };
+    await audit(live, { outcome: again.mail, link: "on_its_way" }, ip, tx);
+    return { linkId, madeAt: now, purpose: again.mail, token, to: live.email, who: { id: live.id, email: live.email } };
   });
   if (!held) return DONE;
 
   // The person's earlier link keeps working until the new one is put in place, and that happens only once its mail has
-  // been handed over: a send that fails, or anything here that throws, removes the held link instead.
+  // been handed over: a send that fails, or a putting in place that fails (tried once more after a deadlock or a
+  // serialization failure), removes the held link instead, each with its own reason.
   const delivery = (async () => {
     const sent = await mailLink(held, ip).catch(() => false);
-    if (sent && await putLinkInPlace(held, ip).then(() => true, () => false)) return;
-    await forgetUnsentLink(held, ip);
+    if (!sent) { await forgetUnsentLink(held, ip, "mail_failed"); return; }
+    try {
+      await putLinkInPlace(held, ip).catch((e: unknown) => { if (worthAnotherTry(e)) return putLinkInPlace(held, ip); throw e; });
+    } catch {
+      await forgetUnsentLink(held, ip, "not_put_in_place");
+    }
   })().catch(() => undefined); // every outcome above is audited (mail.failed, and the rows below); nothing here may surface to the caller
   return { delivery };
 }
 
 /** A held link on its way (holdSigninLink(), signin-links.ts): its token, which only its mail carries, and who it is for. */
-type Held = { linkId: string; purpose: LinkPurpose; token: string; to: string; who: Who };
+type Held = { linkId: string; madeAt: Date; purpose: LinkPurpose; token: string; to: string; who: Who };
 
 /** The link's mail, to the address read under the lock and no other. Whether it was handed over. */
 async function mailLink(l: Held, ip: string | null): Promise<boolean> {
@@ -194,9 +226,11 @@ async function mailLink(l: Held, ip: string | null): Promise<boolean> {
  * lock, as before the mail: the address still the one mailed, and everything else that let it be sent. An end of the
  * person's sign-in meanwhile (blocking, a last membership closed, a change of address, sign-ins switched off) deleted
  * the held link with the unused ones (unspentLink, ./link-state.ts), so it stays gone even when the person is let in
- * again before the mail is handed over. Then `parent.password.reset_asked` with the link's purpose. When the check says no, the held link is
- * removed and the row gives the reason (`changed_while_mailing` when the link to mail is now of the other purpose, or
- * the link is no longer held). Throws when the transaction fails; the caller then removes the held link.
+ * again before the mail is handed over; a newer link made meanwhile (mintSigninLink()) deleted it too, and wins. Put in
+ * place, its row is `parent.password.link_made`. When the check says no, the held link is removed and one
+ * `parent.password.link_not_sent` row gives the reason (`changed_while_mailing` when the link to mail is now of the
+ * other purpose); when the link is no longer held, nothing is removed and the row says `superseded` (a newer link) or
+ * `changed_while_mailing` (an end of the person's sign-in, or a password reset). Throws when the transaction fails.
  */
 async function putLinkInPlace(l: Held, ip: string | null): Promise<void> {
   await db.transaction(async (tx) => {
@@ -206,25 +240,31 @@ async function putLinkInPlace(l: Held, ip: string | null): Promise<void> {
     const again = live && live.email === l.to
       ? decide({ email: l.to, person: live, counts, settings: await getParentSettings(tx), mail: true })
       : { reason: "unknown_email" as const };
-    const reason: NotMailed | null = !("mail" in again) ? again.reason : again.mail !== l.purpose ? "changed_while_mailing" : null;
-    if (reason === null && live && await putHeldLinkInPlace(tx, { linkId: l.linkId, parentId: live.id, purpose: l.purpose, actor: parentActor(live), ip })) {
-      await audit(live, { outcome: l.purpose }, ip, tx);
+    const reason: NotSent | null = !("mail" in again) ? again.reason : again.mail !== l.purpose ? "changed_while_mailing" : null;
+    if (reason === null && live) {
+      const put = await putHeldLinkInPlace(tx, { linkId: l.linkId, parentId: live.id, purpose: l.purpose, madeAt: l.madeAt, actor: parentActor(live), ip });
+      if (put !== "put") await notSent(l.who, l.purpose, put === "superseded" ? "superseded" : "changed_while_mailing", ip, tx);
       return;
     }
     await dropHeldLink(tx, l.linkId);
-    await audit(l.who, { outcome: "none", reason: reason ?? "changed_while_mailing", purpose: l.purpose }, ip, tx);
+    await notSent(l.who, l.purpose, reason ?? "changed_while_mailing", ip, tx);
   });
 }
 
 /**
- * A link whose mail failed, or whose putting in place failed: nobody may use it. The held link is removed in one
- * transaction with a `parent.password.reset_asked` row saying so (`mail_failed`), after the person's row, in the order
- * above lockedPerson(). The person's earlier link, if any, was never touched and still works.
+ * A link whose mail was not handed over (`mail_failed`), or was and whose putting in place then failed
+ * (`not_put_in_place`): nobody may use it. Under the person's row, in the order above lockedPerson(), it looks first:
+ * a link that is live after all (the putting in place committed and only its answer was lost) is left as it is, with no
+ * row. Otherwise the held link is removed with one `parent.password.link_not_sent` row giving the reason. The person's
+ * earlier link, if any, was never touched and still works.
  */
-async function forgetUnsentLink(l: Held, ip: string | null): Promise<void> {
+async function forgetUnsentLink(l: Held, ip: string | null, reason: "mail_failed" | "not_put_in_place"): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, l.who.id)).for("update");
+    const [live] = await tx.select({ id: parentSigninToken.id }).from(parentSigninToken)
+      .where(and(eq(parentSigninToken.id, l.linkId), isNull(parentSigninToken.usedAt)));
+    if (live) return;
     await dropHeldLink(tx, l.linkId);
-    await audit(l.who, { outcome: "none", reason: "mail_failed", purpose: l.purpose }, ip, tx);
+    await notSent(l.who, l.purpose, reason, ip, tx);
   });
 }

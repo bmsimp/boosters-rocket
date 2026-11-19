@@ -24,6 +24,22 @@ vi.mock("@/lib/mail/send", async (importOriginal) => {
     return actual.currentBrand();
   } };
 });
+/**
+ * Putting a held link in place fails the next `fails` times, with the Postgres code `code` when one is set (40P01, a
+ * deadlock, is tried once more; anything else is not). The transaction it runs in rolls back, as a real failure's does.
+ */
+const putting = vi.hoisted(() => ({ fails: 0, code: undefined as string | undefined }));
+vi.mock("@/lib/parents/signin-links", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/parents/signin-links")>();
+  return { ...actual, putHeldLinkInPlace: async (...args: Parameters<typeof actual.putHeldLinkInPlace>) => {
+    if (putting.fails > 0) { putting.fails--; throw Object.assign(new Error("the database said no"), { code: putting.code }); }
+    return actual.putHeldLinkInPlace(...args);
+  } };
+});
+// A reset made in a test asks no outside service: the breach check says it has seen no such password.
+vi.mock("@/lib/parents/breach-check", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/parents/breach-check")>()), checkBreach: async () => ({ outcome: "not_found" as const }),
+}));
 import { fromIp, renderPage } from "../helpers/signed-in";
 
 import { eq, isNull } from "drizzle-orm";
@@ -35,6 +51,8 @@ import { hashAskedAddress } from "@/lib/parents/password-request";
 import { takeRateLimit, RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { linkVerdict } from "@/lib/parents/signin-links";
 import { blockPerson, unblockPerson } from "@/lib/parents/people";
+import { removeGuardian } from "@/lib/parents/guardians";
+import { choosePasswordFromLink } from "@/lib/parents/password-set";
 import { setSignins } from "@/lib/parents/switches";
 import { SIGNIN_UNAVAILABLE } from "@/lib/parents/signin-copy";
 import { askPasswordLinkAction } from "@/app/sign-in/password-actions";
@@ -42,7 +60,7 @@ import RequestPage from "@/app/sign-in/password/page";
 import SignInPage from "@/app/sign-in/page";
 import { resetDb, seedGuardianInFamily, seedParent, seedStaff, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
-import { seedPassword } from "../helpers/signin-links";
+import { mintLink, seedPassword } from "../helpers/signin-links";
 
 /**
  * "Set up or reset my password" (the sign-in release, slice SI-3a): a visitor types an address and is always answered
@@ -55,6 +73,8 @@ const ask = (email: unknown) => askPasswordLinkAction(email);
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const asked = () => audits("parent.password.reset_asked");
 const reasons = async () => (await asked()).map((r) => r.after as { outcome: string; reason?: string; limit?: string });
+/** What became of each held link that was not put in place: the reasons of the `parent.password.link_not_sent` rows. */
+const notSent = async () => (await audits("parent.password.link_not_sent")).map((r) => (r.after as { reason: string }).reason);
 /** The link a mail holds, and the token in it. */
 const linkIn = (m: Msg) => /\/sign-in\/(set-up|reset)\/([A-Za-z0-9_-]{43})/.exec(m.text);
 /**
@@ -88,7 +108,7 @@ async function seedEveryone() {
 const OUTSIDERS = ["nobody@example.com", "coach@example.org"];
 
 describe("asking for a set-up or reset link", () => {
-  beforeEach(async () => { await resetDb(); outbox.length = 0; sender.mode = "works"; sender.release = null; fromIp(IP); });
+  beforeEach(async () => { await resetDb(); outbox.length = 0; sender.mode = "works"; sender.release = null; putting.fails = 0; putting.code = undefined; fromIp(IP); });
 
   it("answers the same for every address, mails a set-up link and a reset link to the two it may, and nothing to anyone else", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
@@ -108,12 +128,16 @@ describe("asking for a set-up or reset link", () => {
     expect(await linkVerdict("setup", linkIn(setup)![2])).toMatchObject({ ok: true, link: { parentId: noPassword.id } });
     expect(await linkVerdict("reset", linkIn(reset)![2])).toMatchObject({ ok: true, link: { parentId: withPassword.id } });
 
-    // One row per ask: against the person when the address is theirs, naming nobody otherwise.
+    // One row per ask, written when it was decided: against the person when the address is theirs, naming nobody
+    // otherwise; a mailed one says which link is on its way.
     const rows = await asked();
     expect(rows).toHaveLength(answers.length);
     const of = (id: string) => rows.find((r) => r.targetId === id)!;
-    expect(of(noPassword.id)).toMatchObject({ door: "parent", actorId: noPassword.id, targetType: "parent", after: { outcome: "setup" }, ip: IP });
-    expect(of(withPassword.id)).toMatchObject({ actorId: withPassword.id, after: { outcome: "reset" } });
+    expect(of(noPassword.id)).toMatchObject({ door: "parent", actorId: noPassword.id, targetType: "parent", ip: IP });
+    expect(of(noPassword.id).after).toEqual({ outcome: "setup", link: "on_its_way" });
+    expect(of(withPassword.id)).toMatchObject({ actorId: withPassword.id, after: { outcome: "reset", link: "on_its_way" } });
+    // Both links were put in place: no row says one wasn't.
+    expect(await notSent()).toEqual([]);
     expect(of(blocked.id).after).toEqual({ outcome: "none", reason: "blocked" });
     expect(of(noRow.id).after).toEqual({ outcome: "none", reason: "no_enabled_guardian" });
     expect(of(noAccount.id).after).toEqual({ outcome: "none", reason: "no_sign_in_account" });
@@ -211,7 +235,8 @@ describe("asking for a set-up or reset link", () => {
     await ask("ana@example.com");
     await vi.waitFor(() => expect(sender.release).not.toBeNull());
     await ask("ana@example.com");
-    expect((await reasons()).map((r) => r.reason)).toEqual(["resend_wait"]);
+    // The first ask's row, written with its hold, then the second's.
+    expect((await reasons()).map((r) => r.reason ?? r.outcome)).toEqual(["setup", "resend_wait"]);
     sender.release!();
     await untilPutInPlace(1);
     expect(outbox).toHaveLength(1);
@@ -228,12 +253,15 @@ describe("asking for a set-up or reset link", () => {
     await pastTheResendWait();
     sender.mode = "fails";
     expect(await ask("ana@example.com")).toEqual(ANSWER);
-    await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual([undefined, "mail_failed"]));
+    await vi.waitFor(async () => expect(await notSent()).toEqual(["mail_failed"]));
     // The earlier link, already in the mailbox, still works: the ask that failed to reach the person took nothing.
     expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: true, link: { parentId: noPassword.id } });
     expect(await db.select().from(parentSigninToken)).toHaveLength(1);
     expect(await audits("parent.password.link_made")).toHaveLength(1);
-    expect((await asked()).at(-1)).toMatchObject({ actorId: noPassword.id, targetId: noPassword.id, after: { outcome: "none", reason: "mail_failed", purpose: "setup" } });
+    // Each ask has its one row, written when it was decided; what became of the second link is a row of its own.
+    expect((await reasons()).map((r) => r.outcome)).toEqual(["setup", "setup"]);
+    expect((await audits("parent.password.link_not_sent"))[0]).toMatchObject({ actorId: noPassword.id, targetType: "parent", targetId: noPassword.id,
+      after: { purpose: "setup", reason: "mail_failed" }, ip: IP });
     // The failed send is audited by the mail module, with the address and its error, never the body (and so never the token).
     const [failed] = await audits("mail.failed");
     expect(failed!.after).toMatchObject({ purpose: "password_setup", to: "ana@example.com" });
@@ -250,7 +278,7 @@ describe("asking for a set-up or reset link", () => {
     await pastTheResendWait();
     sender.mode = "brandThrows";
     expect(await ask("ana@example.com")).toEqual(ANSWER);
-    await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual([undefined, "mail_failed"]));
+    await vi.waitFor(async () => expect(await notSent()).toEqual(["mail_failed"]));
     expect(outbox).toHaveLength(1);
     expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: true, link: { parentId: noPassword.id } });
     expect(await db.select().from(parentSigninToken)).toHaveLength(1);
@@ -264,7 +292,8 @@ describe("asking for a set-up or reset link", () => {
     await vi.waitFor(() => expect(sender.release).not.toBeNull());
     await db.update(parent).set({ blocked: true }).where(eq(parent.id, noPassword.id));
     sender.release!();
-    await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual(["blocked"]));
+    await vi.waitFor(async () => expect(await notSent()).toEqual(["blocked"]));
+    expect((await reasons()).map((r) => r.outcome)).toEqual(["setup"]);
     expect(outbox).toHaveLength(1);
     expect(await db.select().from(parentSigninToken)).toEqual([]);
     expect(await audits("parent.password.link_made")).toEqual([]);
@@ -275,15 +304,23 @@ describe("asking for a set-up or reset link", () => {
   // An end of the person's sign-in deletes the held link with their unused ones, so letting them in again before the
   // mail is handed over never brings a link from before the end to life.
   const STAFF = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000002", label: "reg@club.org" }, ip: "203.0.113.9", permission: "Parents.ReadWrite" };
-  const ENDS = {
-    "blocked and unblocked": async (parentId: string) => {
-      expect(await blockPerson(parentId, "Custody order on file.", STAFF)).toMatchObject({ ok: true });
+  type Seeded = Awaited<ReturnType<typeof seedEveryone>>["noPassword"];
+  const ENDS: Record<string, (p: Seeded) => Promise<void>> = {
+    "blocked and unblocked": async (p) => {
+      expect(await blockPerson(p.id, "Custody order on file.", STAFF)).toMatchObject({ ok: true });
       expect((await audits("parent.block")).at(-1)!.after).toMatchObject({ linksDeleted: 1 });
-      expect(await unblockPerson(parentId, STAFF)).toEqual({ ok: true, changed: true });
+      expect(await unblockPerson(p.id, STAFF)).toEqual({ ok: true, changed: true });
     },
     "with sign-ins switched off and on": async () => {
       expect(await setSignins(false, STAFF)).toEqual({ ok: true });
       expect(await setSignins(true, STAFF)).toEqual({ ok: true });
+    },
+    // Closing the person's last open membership (the lead's choice 10), then the row opened again as it was. Its family
+    // has no link, so the row is opened by hand, as a reinstate opens it.
+    "removed from their last family and let back in": async (p) => {
+      expect(await removeGuardian(p.row.id, "Moved away.", STAFF)).toMatchObject({ ok: true });
+      expect((await audits("parent.access.ended")).at(-1)!.after).toMatchObject({ linksDeleted: 1 });
+      await db.update(guardian).set({ status: p.row.status, disabledReason: null }).where(eq(guardian.id, p.row.id));
     },
   };
   for (const [how, end] of Object.entries(ENDS)) {
@@ -293,10 +330,10 @@ describe("asking for a set-up or reset link", () => {
       sender.mode = "waits";
       await ask("ana@example.com");
       await vi.waitFor(() => expect(sender.release).not.toBeNull());
-      await end(noPassword.id);
+      await end(noPassword);
       expect(await db.select().from(parentSigninToken)).toEqual([]);
       sender.release!();
-      await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual(["changed_while_mailing"]));
+      await vi.waitFor(async () => expect(await notSent()).toEqual(["changed_while_mailing"]));
       expect(outbox).toHaveLength(1);
       expect(await db.select().from(parentSigninToken)).toEqual([]);
       expect(await audits("parent.password.link_made")).toEqual([]);
@@ -304,12 +341,86 @@ describe("asking for a set-up or reset link", () => {
     });
   }
 
-  it("answers at once when the send never finishes", async () => {
+  it("a link made while the asked-for one's mail is on its way wins: the held one is never put in place", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
-    await seedEveryone();
+    const { noPassword } = await seedEveryone();
+    sender.mode = "waits";
+    await ask("ana@example.com");
+    await vi.waitFor(() => expect(sender.release).not.toBeNull());
+    // As the welcome (SI-4) or the staff reset (SI-9) will make one: it replaces the held link.
+    const minted = await mintLink(noPassword.id, "setup");
+    expect((await audits("parent.password.link_made")).map((r) => r.after)).toEqual([expect.objectContaining({ purpose: "setup", replaced: 1 })]);
+    sender.release!();
+    await vi.waitFor(async () => expect(await notSent()).toEqual(["superseded"]));
+    expect(outbox).toHaveLength(1);
+    expect(await linkVerdict("setup", minted)).toMatchObject({ ok: true, link: { parentId: noPassword.id } });
+    expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: false, reason: "unknown" });
+    expect(await db.select().from(parentSigninToken)).toHaveLength(1);
+    // Only the mint's own row: the held link was never put in place.
+    expect(await audits("parent.password.link_made")).toHaveLength(1);
+  });
+
+  it("a password reset ends a reset link whose mail is on its way", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    const { withPassword } = await seedEveryone();
+    await ask("ben@example.com");
+    await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    await untilPutInPlace(1);
+    const earlier = linkIn(outbox[0]!)![2]!;
+    await pastTheResendWait();
+    sender.mode = "waits";
+    await ask("ben@example.com");
+    await vi.waitFor(() => expect(sender.release).not.toBeNull());
+    // Ben resets his password with the link he already had, while the second one's mail is on its way.
+    const phrase = "a brand new phrase for Ben, long enough";
+    expect(await choosePasswordFromLink({ purpose: "reset", token: earlier, password: phrase, again: phrase }, { ip: IP })).toMatchObject({ ok: true });
+    expect((await audits("parent.password.set")).map((r) => r.after)).toEqual([expect.objectContaining({ purpose: "reset", linksDeleted: 1 })]);
+    sender.release!();
+    await vi.waitFor(async () => expect(await notSent()).toEqual(["changed_while_mailing"]));
+    expect(outbox).toHaveLength(2);
+    expect(await linkVerdict("reset", linkIn(outbox[1]!)![2])).toMatchObject({ ok: false, reason: "unknown" });
+    // No live link: the one row left is the link the reset spent.
+    const rows = await db.select().from(parentSigninToken).where(eq(parentSigninToken.parentId, withPassword.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.usedAt).not.toBeNull();
+    expect(await audits("parent.password.link_made")).toHaveLength(1);
+  });
+
+  it("a link whose mail went but which can't then be put in place goes, and its row says so, not that the mail failed", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    const { noPassword } = await seedEveryone();
+    putting.fails = 1;
+    expect(await ask("ana@example.com")).toEqual(ANSWER);
+    await vi.waitFor(async () => expect(await notSent()).toEqual(["not_put_in_place"]));
+    expect(outbox).toHaveLength(1);
+    expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: false, reason: "unknown" });
+    expect(await db.select().from(parentSigninToken)).toEqual([]);
+    expect(await audits("parent.password.link_made")).toEqual([]);
+    expect(await audits("mail.failed")).toEqual([]);
+    expect((await audits("parent.password.link_not_sent"))[0]).toMatchObject({ targetId: noPassword.id, after: { purpose: "setup", reason: "not_put_in_place" } });
+    expect((await reasons()).map((r) => r.outcome)).toEqual(["setup"]);
+  });
+
+  it("a putting in place that a deadlock ended is tried once more, and the link works", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    const { noPassword } = await seedEveryone();
+    putting.fails = 1; putting.code = "40P01";
+    expect(await ask("ana@example.com")).toEqual(ANSWER);
+    await untilPutInPlace(1);
+    expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: true, link: { parentId: noPassword.id } });
+    expect(await notSent()).toEqual([]);
+  });
+
+  it("answers at once when the send never finishes, the ask's one row written already", async () => {
+    await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+    const { noPassword } = await seedEveryone();
     sender.mode = "hangs";
     expect(await ask("ana@example.com")).toEqual(ANSWER);
     expect(await db.select().from(parentSigninToken)).toHaveLength(1);
+    // Written with the hold, in its transaction: an ask whose delivery never settles still has its row, and no row after it.
+    expect((await asked()).map((r) => ({ targetId: r.targetId, after: r.after }))).toEqual([{ targetId: noPassword.id, after: { outcome: "setup", link: "on_its_way" } }]);
+    expect(await notSent()).toEqual([]);
+    expect(await audits("parent.password.link_made")).toEqual([]);
   });
 
   it("mails nothing on the fourth ask for one address in a window or the 61st from one IP address; with no address the IP limit is skipped", async () => {

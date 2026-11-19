@@ -283,7 +283,7 @@ describe("setting a password from a link", () => {
     expect(await db.select().from(parentAuthSession)).toEqual([]);
     expect(await db.select().from(parentDevice)).toEqual([]);
     expect(await db.select().from(signinCode)).toEqual([]);
-    expect((await audits("parent.password.set"))[0]!.after).toEqual({ purpose: "reset", replaced: true, breachChecked: true, codesDeleted: 1, devicesForgotten: 2, sessionsEnded: 2 });
+    expect((await audits("parent.password.set"))[0]!.after).toEqual({ purpose: "reset", replaced: true, breachChecked: true, codesDeleted: 1, linksDeleted: 0, devicesForgotten: 2, sessionsEnded: 2 });
     expect(await choose("reset", token)).toEqual(REFUSED);
   });
 

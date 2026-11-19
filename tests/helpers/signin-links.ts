@@ -4,7 +4,7 @@ import { hashPassword } from "better-auth/crypto";
 import { db } from "@/lib/db/client";
 import { parentAuthAccount, parentDevice, parentSigninToken, signinCode } from "@/lib/db/schema";
 import { hashSigninCode } from "@/lib/parents/signin-codes";
-import { mintSigninLink, type LinkPurpose } from "@/lib/parents/signin-links";
+import { holdSigninLink, mintSigninLink, type LinkPurpose } from "@/lib/parents/signin-links";
 
 /** Who makes a link in a test: the system, as the welcome job will (SI-4). */
 const SYSTEM = { door: "system" as const, id: null, label: "test" };
@@ -12,6 +12,14 @@ const SYSTEM = { door: "system" as const, id: null, label: "test" };
 /** A person's set-up or reset link, made as the portal makes one (mintSigninLink()); its token, which only the caller ever holds. */
 export async function mintLink(parentId: string, purpose: LinkPurpose, now = new Date()): Promise<string> {
   return db.transaction((tx) => mintSigninLink(tx, { parentId, purpose, actor: SYSTEM, ip: null, now }));
+}
+
+/**
+ * A person's link held while its mail is on its way, as the request page holds one (holdSigninLink()): stored, working
+ * for nobody yet. Its token.
+ */
+export async function holdLink(parentId: string, purpose: LinkPurpose, now = new Date()): Promise<string> {
+  return (await db.transaction((tx) => holdSigninLink(tx, { parentId, purpose, now }))).token;
 }
 
 /** A token of a token's shape that names no link. */
