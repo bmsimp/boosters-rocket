@@ -97,22 +97,25 @@ describe("the daily clean-up deletes only what is past use", () => {
     expect(left).not.toContain(expiredGone); expect(left).not.toContain(spentLongAgo);
   });
 
-  it("set-up and reset links: a used one goes, and one that expired a second ago; one with a second left stays", async () => {
-    // The sign-in release's one-time links (slice SI-1): nothing makes them yet, so they are seeded here as a later slice
-    // will store them. One unused link per person and purpose, so each person below holds at most one of each.
-    const people = await Promise.all(["a", "b", "c", "d"].map((n) => seedParent({ name: n })));
+  it("set-up and reset links: one spent over a code's life ago goes, and one that expired a second ago; one spent since, or with a second left, stays", async () => {
+    // The sign-in release's one-time links, seeded here as the request page and the link's form store them. One unused
+    // link per person and purpose, so each person below holds at most one unused one of each. A spent link stays for a
+    // code's life after it was spent (slice SI-3a): a set-up link's sign-in reads it again at its last check.
+    const people = await Promise.all(["a", "b", "c", "d", "e"].map((n) => seedParent({ name: n })));
     const link = async (i: number, purpose: "setup" | "reset", v: { expiresAt: Date; usedAt?: Date }) =>
       String((await db.insert(parentSigninToken).values({ parentId: people[i]!.id, purpose, tokenHash: `h${i}${purpose}`, createdAt: at(-DAY), ...v })
         .returning({ id: parentSigninToken.id }))[0]!.id);
     const expiredGone = await link(0, "setup", { expiresAt: at(-SEC) });
-    const usedGone = await link(1, "reset", { expiresAt: at(DAY), usedAt: at(-SEC) });
+    const usedGone = await link(1, "reset", { expiresAt: at(DAY), usedAt: at(-CODE_TTL_MS - SEC) });
     const usedAndExpired = await link(1, "setup", { expiresAt: at(-DAY), usedAt: at(-2 * DAY) });
     const expiresNow = await link(2, "setup", { expiresAt: NOW });
     const secondLeft = await link(3, "reset", { expiresAt: at(SEC) });
     const setupBesideReset = await link(3, "setup", { expiresAt: at(7 * DAY) });
+    const spentJustNow = await link(4, "setup", { expiresAt: at(DAY), usedAt: at(-SEC) });
+    const spentALifeAgo = await link(4, "reset", { expiresAt: at(DAY), usedAt: at(-CODE_TTL_MS) });
     expect(await clean()).toEqual({ ...NOTHING, signinLinks: 3 });
     const left = await ids(db.select({ id: parentSigninToken.id }).from(parentSigninToken));
-    expect(left).toEqual([expiresNow, secondLeft, setupBesideReset].sort());
+    expect(left).toEqual([expiresNow, secondLeft, setupBesideReset, spentJustNow, spentALifeAgo].sort());
     for (const gone of [expiredGone, usedGone, usedAndExpired]) expect(left).not.toContain(gone);
     expect(describeCleanup({ ...NOTHING, signinLinks: 1 })).toBe("Removed 1 used or expired password link.");
     expect(describeCleanup({ ...NOTHING, signinLinks: 3 })).toBe("Removed 3 used or expired password links.");
