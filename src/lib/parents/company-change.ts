@@ -3,6 +3,7 @@ import type { Tx } from "@/lib/db/client";
 import { guardian, parent, parentAuthSession, parentDevice, parentEmailChange, parentSigninToken, signinCode } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getParentSettings, putParentSettings, PARENTS_KEY } from "./settings";
+import { unspentLink } from "./link-state";
 
 // This module is called from src/lib/roster/source.ts, so it must import nothing from src/lib/roster/.
 
@@ -37,7 +38,7 @@ export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toReal
   // sign-in address also names the record it would change: another company's customer now (email-change.ts).
   await tx.delete(parentEmailChange);
   const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
-  const links = await tx.delete(parentSigninToken).where(isNull(parentSigninToken.usedAt)).returning({ id: parentSigninToken.id });
+  const links = await tx.delete(parentSigninToken).where(unspentLink).returning({ id: parentSigninToken.id });
   const devices = await tx.delete(parentDevice).returning({ id: parentDevice.id });
   const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
   const welcomed = await tx.update(parent).set({ welcomedAt: null, updatedAt: new Date() }).where(isNotNull(parent.welcomedAt)).returning({ id: parent.id });

@@ -5,6 +5,7 @@ import type { Actor } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { getShape, shapeNamesStudents, type MembershipShape } from "@/lib/roster/shape";
 import { getParentSettings } from "./settings";
+import { unspentLink } from "./link-state";
 
 export type GuardianRow = typeof guardian.$inferSelect;
 
@@ -49,7 +50,7 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * codes, their set-up and reset links (`parent_signin_token`), their password (the `credential` row of
  * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
  * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet. Everything that ends all of a
- * person's sign-in deletes their unused links (a password reset spends its own) and forgets their devices, in that
+ * person's sign-in deletes their unused links, a held one on its way included (unspentLink, ./link-state.ts; a password reset spends its own) and forgets their devices, in that
  * place, and keeps their password: blocking, sign-ins switched off, the change-of-company clear, a password reset, a
  * confirmed change of sign-in email, and closing a person's last open membership (closeMembership(), membership.ts;
  * the lead's choice 10 of the sign-in release). So:
@@ -210,9 +211,12 @@ export async function deleteUnusedSigninCodes(parentId: string, tx: Tx, o: { spe
   return rows.length;
 }
 
-/** The person's set-up and reset links not yet used (signin-links.ts), and how many there were. A used one stays until the daily clean-up. */
+/**
+ * The person's set-up and reset links not yet spent (unused, or held while their mail goes: unspentLink, ./link-state.ts), and
+ * how many there were. A used one stays until the daily clean-up.
+ */
 export async function deleteUnusedSigninLinks(parentId: string, tx: Tx): Promise<number> {
-  const rows = await tx.delete(parentSigninToken).where(and(eq(parentSigninToken.parentId, parentId), isNull(parentSigninToken.usedAt)))
+  const rows = await tx.delete(parentSigninToken).where(and(eq(parentSigninToken.parentId, parentId), unspentLink))
     .returning({ id: parentSigninToken.id });
   return rows.length;
 }

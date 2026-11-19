@@ -34,6 +34,8 @@ import { PASSWORD_COPY } from "@/lib/parents/password-copy";
 import { hashAskedAddress } from "@/lib/parents/password-request";
 import { takeRateLimit, RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { linkVerdict } from "@/lib/parents/signin-links";
+import { blockPerson, unblockPerson } from "@/lib/parents/people";
+import { setSignins } from "@/lib/parents/switches";
 import { SIGNIN_UNAVAILABLE } from "@/lib/parents/signin-copy";
 import { askPasswordLinkAction } from "@/app/sign-in/password-actions";
 import RequestPage from "@/app/sign-in/password/page";
@@ -269,6 +271,38 @@ describe("asking for a set-up or reset link", () => {
     await db.update(parent).set({ blocked: false }).where(eq(parent.id, noPassword.id));
     expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: false, reason: "unknown" });
   });
+
+  // An end of the person's sign-in deletes the held link with their unused ones, so letting them in again before the
+  // mail is handed over never brings a link from before the end to life.
+  const STAFF = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000002", label: "reg@club.org" }, ip: "203.0.113.9", permission: "Parents.ReadWrite" };
+  const ENDS = {
+    "blocked and unblocked": async (parentId: string) => {
+      expect(await blockPerson(parentId, "Custody order on file.", STAFF)).toMatchObject({ ok: true });
+      expect((await audits("parent.block")).at(-1)!.after).toMatchObject({ linksDeleted: 1 });
+      expect(await unblockPerson(parentId, STAFF)).toEqual({ ok: true, changed: true });
+    },
+    "with sign-ins switched off and on": async () => {
+      expect(await setSignins(false, STAFF)).toEqual({ ok: true });
+      expect(await setSignins(true, STAFF)).toEqual({ ok: true });
+    },
+  };
+  for (const [how, end] of Object.entries(ENDS)) {
+    it(`a person ${how} while their link's mail is on its way gets no live link from it`, async () => {
+      await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+      const { noPassword } = await seedEveryone();
+      sender.mode = "waits";
+      await ask("ana@example.com");
+      await vi.waitFor(() => expect(sender.release).not.toBeNull());
+      await end(noPassword.id);
+      expect(await db.select().from(parentSigninToken)).toEqual([]);
+      sender.release!();
+      await vi.waitFor(async () => expect((await reasons()).map((r) => r.reason)).toEqual(["changed_while_mailing"]));
+      expect(outbox).toHaveLength(1);
+      expect(await db.select().from(parentSigninToken)).toEqual([]);
+      expect(await audits("parent.password.link_made")).toEqual([]);
+      expect(await linkVerdict("setup", linkIn(outbox[0]!)![2])).toMatchObject({ ok: false, reason: "unknown" });
+    });
+  }
 
   it("answers at once when the send never finishes", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();

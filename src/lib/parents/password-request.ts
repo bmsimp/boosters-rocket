@@ -191,9 +191,10 @@ async function mailLink(l: Held, ip: string | null): Promise<boolean> {
 
 /**
  * A link whose mail was handed over, put in place (putHeldLinkInPlace()) once the person is checked again under their
- * lock, as before the mail: the address still the one mailed, and everything else that let it be sent (blocking, a
- * change of address or sign-ins switched off meanwhile deleted the unused links, and the held one must not come back
- * after them). Then `parent.password.reset_asked` with the link's purpose. When the check says no, the held link is
+ * lock, as before the mail: the address still the one mailed, and everything else that let it be sent. An end of the
+ * person's sign-in meanwhile (blocking, a last membership closed, a change of address, sign-ins switched off) deleted
+ * the held link with the unused ones (unspentLink, ./link-state.ts), so it stays gone even when the person is let in
+ * again before the mail is handed over. Then `parent.password.reset_asked` with the link's purpose. When the check says no, the held link is
  * removed and the row gives the reason (`changed_while_mailing` when the link to mail is now of the other purpose, or
  * the link is no longer held). Throws when the transaction fails; the caller then removes the held link.
  */

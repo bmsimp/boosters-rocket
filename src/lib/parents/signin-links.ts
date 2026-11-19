@@ -9,6 +9,7 @@ import { db, type Tx } from "@/lib/db/client";
 import { parent, parentAuthAccount, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { env } from "@/env";
+import { heldLink } from "./link-state";
 import { enterableGuardianRows } from "./sessions";
 import { getParentSettings, parentDoorClosed } from "./settings";
 
@@ -66,11 +67,12 @@ export async function mintSigninLink(tx: Tx, o: { parentId: string; purpose: Lin
 }
 
 /**
- * A held link: stored with `used_at` set to its own `created_at`, so it works for nobody yet (linkVerdict() reads it as
- * used) and holds no place under `parent_signin_token_one_live_uq`, so the person's earlier unused link of that purpose
- * stays as it is and keeps working. A spent link is spent later than it was made, so this marks a held one alone.
+ * A held link (heldLink, ./link-state.ts): stored with `used_at` set to its own `created_at`, so it works for nobody yet
+ * (linkVerdict() reads it as used) and holds no place under `parent_signin_token_one_live_uq`, so the person's earlier
+ * unused link of that purpose stays as it is and keeps working. Everything that deletes a person's unused links deletes
+ * a held one too (unspentLink), so putHeldLinkInPlace() then finds nothing to put in place.
  */
-const isHeld = sql`${parentSigninToken.usedAt} = ${parentSigninToken.createdAt}`;
+const isHeld = heldLink;
 
 /**
  * Makes a held link (isHeld, above) for a link whose mail goes out after this transaction: the request page's
