@@ -85,9 +85,11 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    has signed in, and open the file in Excel or Google Sheets.
    **Pass:** the accent shows as it should, and the columns read well. **If not:** note which program and what it
    showed.
-10. **Publish the first release.** Make the version in `package.json` the one you mean (it is `0.1.0`), then on GitHub,
-    **Releases**, draft a release with the tag `v<that version>` and publish it. The release workflow builds, checks
-    and pushes the image.
+10. **Publish the first release.** Make the version in `package.json` the one you mean (it is `0.1.0`), then run CI
+    on `main` by hand and wait for it to finish green: `gh workflow run ci.yml --ref main` (or on GitHub, **Actions**,
+    **ci**, **Run workflow**). CI runs on pull requests, not on pushes to `main`, and the release workflow publishes only
+    a commit CI has passed on. Then on GitHub, **Releases**, draft a release with the tag `v<that version>` and publish
+    it. The release workflow builds, checks and pushes the image.
     **Pass:** the workflow is green, and the repository's **Packages** shows `booster-rocket` with three tags: the
     version, the commit's first 12 characters and `stable`. If clubs are to pull it without signing in, open the
     package's settings and make it public. **If not:** the workflow's log; a tag that doesn't match `package.json`

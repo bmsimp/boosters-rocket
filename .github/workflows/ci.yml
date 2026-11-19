@@ -1,10 +1,17 @@
 name: ci
+# Runs on a pull request, and by hand (Actions, ci, Run workflow), which is how main is checked before a release:
+# .github/workflows/release.yml publishes only a commit this has passed on. It runs on GitHub's hosted runners unless
+# the repository variable CI_RUNNER_LABELS names a runner of the club's own as a JSON list of labels (ci/runner/).
 on:
-  push: { branches: [main] }
   pull_request:
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:18
@@ -19,7 +26,7 @@ jobs:
         with: { node-version-file: .nvmrc, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh scripts/backup.sh scripts/restore.sh scripts/backup-schedule.sh scripts/move-postgres.sh scripts/postgres-guard.sh deploy/proxy-start.sh
+      - run: shellcheck scripts/poc/setup.sh scripts/poc/deploy.sh scripts/poc/setup-code.sh scripts/poc/reopen-setup.sh scripts/check-image-secrets.sh scripts/smoke-image.sh scripts/backup.sh scripts/restore.sh scripts/backup-schedule.sh scripts/move-postgres.sh scripts/postgres-guard.sh deploy/proxy-start.sh ci/runner/entrypoint.sh ci/runner/job-started.sh
       - name: PowerShell lint
         shell: pwsh
         run: |
@@ -31,7 +38,7 @@ jobs:
       - name: Unit and integration tests
         # Test files run in parallel workers. Worker 1 uses booster_test; each other worker makes, migrates and at the end
         # drops a database of its own on the same server (booster_w2_test, ...), which the service's superuser may do.
-        # The runner has 4 cores beside Postgres: 2 workers. BR_TEST_WORKERS=1 runs the files one at a time, as before.
+        # A hosted runner has 4 cores beside Postgres, the club's own (ci/runner/) shares 4: 2 workers. BR_TEST_WORKERS=1 runs the files one at a time, as before.
         # The backup test (tests/integration/backup-restore.test.ts) dumps and restores with Postgres's own tools, which
         # must be no older than the server and not so new that their dumps use settings it lacks. It runs them inside
         # the service's container, as the scripts do in deploy/, so they are always the server's own version.
@@ -61,12 +68,34 @@ jobs:
           pnpm tsx scripts/seed-e2e.ts
           pnpm e2e
   image:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      # The image is built and checked only when a pull request changes something it is made from or checked with, or
+      # when the run was started by hand. Otherwise the job ends green at once, so a pull request's checks stay the same.
+      - name: Whether the image needs checking
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then echo "image=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          changed="$(git diff --name-only "origin/${BASE}...HEAD")"
+          if printf '%s\n' "$changed" | grep -qE '^(Dockerfile|\.dockerignore|package\.json|pnpm-lock\.yaml|next\.config\.ts|(drizzle|scripts|deploy|ci|\.github/workflows)/.*)$'; then
+            echo "image=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the image is made from or checked with changed: it isn't built."
+          fi
       - name: Build the production image
+        if: steps.changed.outputs.image == 'true'
         run: docker build -t booster-rocket-app:ci .
       - name: Smoke-test the image
+        if: steps.changed.outputs.image == 'true'
         run: bash scripts/smoke-image.sh booster-rocket-app:ci
       - name: No env-file secrets in the image
+        if: steps.changed.outputs.image == 'true'
         run: bash scripts/check-image-secrets.sh

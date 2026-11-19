@@ -33,7 +33,11 @@ describe("a release publishes only a commit CI has passed on", () => {
     expect(release.slice(0, release.indexOf("\njobs:"))).not.toContain("packages: write");
   });
 
-  it("can find CI's run for a commit on main: CI runs on every push to main", () => {
-    expect(read(".github/workflows/ci.yml")).toMatch(/on:\n\s+push: \{ branches: \[main\] \}/);
+  it("can find CI's run for a commit on main: CI runs there by hand, as the release's own steps say", () => {
+    // CI runs on pull requests and by hand only (no run on a push to main), so a release asks for one on main first.
+    expect(read(".github/workflows/ci.yml")).toMatch(/\non:\n {2}pull_request:\n {2}workflow_dispatch:\n(?! )/);
+    for (const doc of [".github/workflows/release.yml", "docs/runbooks/before-the-first-family.md", "ci/runner/README.md"]) {
+      expect(read(doc), doc).toContain("gh workflow run ci.yml --ref main");
+    }
   });
 });
