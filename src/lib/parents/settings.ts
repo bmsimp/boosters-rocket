@@ -10,11 +10,14 @@ export const PARENTS_KEY = "parents.settings";
  * an Admin says the club is ready). The parent door is open only while `signin` is on (parentDoorClosed()), so a
  * guardian staff add before then can't sign in until it is. `requireActiveStudents` is read by the gate
  * (enterableGuardianRows(), ./sessions.ts). `level` is the club's sign-in level of the sign-in release (section 6 of
- * the app-owned families spec, "Signing in"; open questions 21 and 24): Standard or Strict. Nothing writes it or reads
- * it yet (slice SI-1): every value reads Standard, and every save keeps the level stored. No page names it; it is in
- * the before and after of each `settings.parents.save` audit row, as stored, which the audit page shows as JSON. A save
- * after a stored value that failed to parse stores the closed state, at Standard: harmless while nothing stores Strict,
- * and SI-10, which first stores it, keeps a readable level through such a save or refuses it.
+ * the app-owned families spec, "Signing in"; open questions 21 and 24): Standard or Strict. Nothing writes it until
+ * SI-10 (every value reads Standard, and every save keeps the level stored), but since SI-3a it is read: a set-up link
+ * signs the parent in only at Standard (choosePasswordFromLink(), password-set.ts), the request page mails nothing on
+ * request under Strict (askForPasswordLink(), password-request.ts) and says so in its words (/sign-in/password). No
+ * staff page names it; it is in the before and after of each `settings.parents.save` audit row, as stored, which the
+ * audit page shows as JSON. A save after a stored value that failed to parse stores the closed state, at Standard:
+ * harmless while nothing stores Strict, and SI-10, which first stores it, keeps a readable level through such a save or
+ * refuses it.
  */
 export const SIGNIN_LEVELS = ["standard", "strict"] as const;
 export type SigninLevel = (typeof SIGNIN_LEVELS)[number];

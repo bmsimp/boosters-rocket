@@ -99,6 +99,16 @@ describe("asking for a set-up or reset link", () => {
     for (const r of nobody) expect(r).toMatchObject({ actorId: null, actorLabel: null, targetType: null });
     // The mint's own row, as SI-2 wrote it, for each link made.
     expect((await audits("parent.password.link_made")).map((r) => (r.after as { purpose: string }).purpose).sort()).toEqual(["reset", "setup"]);
+    // The tokens are in the mails alone: in no audit row (reset_asked, link_made or any other) and no rate-limit count.
+    const everyRow = JSON.stringify(await db.select().from(auditLog));
+    const subjects = (await db.select().from(rateLimitEvent)).map((r) => r.subject);
+    for (const m of [setup, reset]) {
+      const token = linkIn(m)![2]!;
+      expect(everyRow).not.toContain(token);
+      expect(subjects).not.toContain(token);
+    }
+    expect(everyRow).not.toContain("/sign-in/set-up/");
+    expect(everyRow).not.toContain("/sign-in/reset/");
   });
 
   it("the mailed link opens its page with the form", async () => {
@@ -231,13 +241,17 @@ describe("the page", () => {
     expect(html).toContain('type="email"');
     expect(html).toContain('autocomplete="email"');
     expect(html).not.toContain(PASSWORD_COPY.askStrict.replaceAll("'", "&#x27;"));
+    expect(html).toContain(PASSWORD_COPY.askLede.replaceAll("'", "&#x27;"));
     expect(html).toContain('href="/sign-in"');
     expect(await renderPage(SignInPage)).toContain('href="/sign-in/password"');
   });
 
-  it("under Strict, says to ask the club", async () => {
+  it("under Strict, says to ask the club, and promises no email", async () => {
     await seedParentSettings({ ...SIGNINS_ON, level: "strict" }); await seedWorkingMail();
-    expect(await renderPage(RequestPage)).toContain(PASSWORD_COPY.askStrict.replaceAll("'", "&#x27;"));
+    const html = await renderPage(RequestPage);
+    expect(html).toContain(PASSWORD_COPY.askStrict.replaceAll("'", "&#x27;"));
+    expect(html).toContain(PASSWORD_COPY.askLedeStrict.replaceAll("'", "&#x27;"));
+    expect(html).not.toContain(PASSWORD_COPY.askLede.replaceAll("'", "&#x27;"));
   });
 
   it("shows no form while sign-ins are off, nor /sign-in a link to it", async () => {
