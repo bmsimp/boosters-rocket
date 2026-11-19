@@ -7,7 +7,7 @@ import { hashSigninCode } from "@/lib/parents/signin-codes";
 import { hashDeviceToken } from "@/lib/parents/devices";
 import { holdSigninLink, mintSigninLink, type LinkPurpose } from "@/lib/parents/signin-links";
 
-/** Who makes a link in a test: the system, as the welcome job will (SI-4). */
+/** Who makes a link in a test: the system, as the staff reset will (SI-9). */
 const SYSTEM = { door: "system" as const, id: null, label: "test" };
 
 /** A person's set-up or reset link, made as the portal makes one (mintSigninLink()); its token, which only the caller ever holds. */
@@ -60,6 +60,18 @@ export async function seedCode(parentId: string, o: { code?: string; usedAt?: Da
     .returning({ id: signinCode.id });
   return row!.id;
 }
+
+/**
+ * A message as the SMTP sink kept it (`sink.messages[i].raw`), with its quoted-printable soft line breaks joined and
+ * its `=XX` escapes decoded, so a sentence or a link the mailer folded over two lines reads whole again. Every message
+ * the portal sends is plain ASCII, which the mailer writes as quoted-printable (or as it is).
+ */
+export const mailText = (raw: string): string =>
+  raw.replace(/=\r?\n/g, "").replace(/=([0-9A-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+
+/** The set-up tokens a sink message carries (its text and HTML parts both hold the link): each once. */
+export const setupTokensIn = (raw: string): string[] =>
+  [...new Set([...mailText(raw).matchAll(/\/sign-in\/set-up\/([A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g)].map((m) => m[1]!))];
 
 /** The person's link rows, used or not. */
 export const linkRows = (parentId: string) => db.select().from(parentSigninToken).where(eq(parentSigninToken.parentId, parentId));

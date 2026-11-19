@@ -32,13 +32,55 @@ export function signinCodeMessage(b: Brand, to: string, code: string, o: { passw
   return { to, subject: `Your ${b.clubName} sign-in code: ${code}`, text: text(lines), html: html(b, lines, code) };
 }
 
-/** The welcome (parents spec §3). It holds no family details: the address alone decides what the person sees after signing in. */
-export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null }): MailMessage {
+/**
+ * A set-up link as the welcome and the press's mail carry it (the sign-in release, slice SI-4): its address, how long it
+ * works in words (lifeWords() of LINK_LIFE_MS.setup), and whether the club is at Strict, where "Set up or reset my
+ * password" mails no set-up link (whichLinkToMail(), `strict_no_setup`), so the mail says to ask the club instead.
+ */
+export type SetupLinkWords = { url: string; life: string; strict: boolean };
+
+/** What to do once a set-up link has run out: ask for a new one on the request page (Standard), or ask the club (Strict). */
+const afterItRunsOut = (appUrl: string, link: SetupLinkWords) => (link.strict
+  ? "If the link runs out before you use it, please ask the club to send this email again."
+  : `If the link runs out before you use it, you can ask for a new one at ${appUrl}/sign-in/password`);
+
+/**
+ * The welcome (parents spec §3; since the sign-in release's slice SI-4 it carries a set-up link). It holds no family
+ * details: the address alone decides what the person sees after signing in. `link` for a person with no password yet:
+ * the link chooses one, on a line of its own. Null for a person who has a password: no link, and where to sign in with
+ * it (`appUrl` and /sign-in, written out in full).
+ */
+export function welcomeMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null; link: SetupLinkWords | null }): MailMessage {
   const lines = [
-    `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address. We'll email you a code each time, so there is no password.`,
+    ...(o.link ? [
+      `You can now sign in to ${b.clubName} at ${o.appUrl} with this email address. First, choose your password with this link:`,
+      o.link.url,
+      `The link works once, for ${o.link.life}. After that, you sign in with this email address and the password you chose.`,
+      afterItRunsOut(o.appUrl, o.link),
+    ] : [`You can now sign in to ${b.clubName} with this email address and your password, at ${o.appUrl}/sign-in`]),
+    NEVER_ASKS(b),
     ...(o.contact ? [`Questions? Write to ${o.contact}.`] : []),
   ];
   return { to, subject: `You can now sign in to ${b.clubName}`, text: text(lines), html: html(b, lines) };
+}
+
+/**
+ * The set-up link an Admin asks for, on the parents' settings page, for a person the club welcomed before the portal
+ * signed parents in with a password (the sign-in release, slice SI-4): they were told there was no password, so this
+ * says what changed, that the link chooses theirs, how long it works and what to do after, and that a device they are
+ * signed in on now stays signed in. Like the welcome, it names no family, student or other person.
+ */
+export function signinChangedMessage(b: Brand, to: string, o: { appUrl: string; contact: string | null; link: SetupLinkWords }): MailMessage {
+  const lines = [
+    `The ${b.clubName} portal at ${o.appUrl} now signs you in with a password, instead of a code alone. To choose your password for this email address, open this link:`,
+    o.link.url,
+    `The link works once, for ${o.link.life}.`,
+    afterItRunsOut(o.appUrl, o.link),
+    "If you're signed in to the portal on a phone or computer now, it stays signed in. You'll need your password the next time you sign in.",
+    NEVER_ASKS(b),
+    ...(o.contact ? [`Questions? Write to ${o.contact}.`] : []),
+  ];
+  return { to, subject: `How you sign in to ${b.clubName} has changed`, text: text(lines), html: html(b, lines) };
 }
 
 /**

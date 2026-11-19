@@ -24,7 +24,7 @@ vi.mock("next/navigation", () => ({
 import { renderToStaticMarkup } from "react-dom/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, jobRun, qboConnection, role, roleAssignment, roleRule, setting, student } from "@/lib/db/schema";
+import { auditLog, guardian, jobRun, parentSigninToken, qboConnection, role, roleAssignment, roleRule, setting, student } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { getParentSettings } from "@/lib/parents/settings";
 import { ROSTER_JOB, setRosterSource } from "@/lib/roster/source";
@@ -140,6 +140,12 @@ describe("the Parent sign-ins settings", () => {
     const welcome = await setup("welcome");
     expect(welcome).toContain("1 person would be emailed now.");
     expect(welcome).toContain("You can now sign in to");
+    // The sample's link is plainly a sample: no token's shape, and no link made, held or read for it.
+    expect(welcome).toContain("/sign-in/set-up/(a link made for each person)");
+    expect(welcome).not.toMatch(/\/sign-in\/set-up\/[A-Za-z0-9_-]{43}/);
+    expect(welcome).toContain("It works once, for 7 days");
+    expect(welcome).not.toContain("a code each time");
+    expect(await db.select().from(parentSigninToken)).toEqual([]);
     expect(await setWelcomeAction(true)).toEqual({ ok: true, message: "Welcome emails are on. They go out a few each minute." });
     expect(await setSigninsAction(false)).toEqual({ ok: true, message: "Parent sign-ins are off. Every parent has been signed out, and welcome emails are off." });
     expect(await view()).toContain("Off: nobody can sign in");

@@ -45,13 +45,20 @@ export const unblockAction = staffAction(P, async (ctx, parentId: string): Promi
 const RESEND_FAILED = {
   not_found: "That person isn't in the portal any more.", blocked: "This person is blocked, so no email was sent.",
   no_access: "This person can't sign in to any family right now, so no email was sent.", mail_failed: "The email couldn't be sent. Check outgoing mail under Mail.",
+  link_not_in_place: "The email went, but something changed for this person while it was on its way, so the link in it to choose a password won't work. Look at their page again before sending another.",
+} as const;
+// What the welcome carried, never the link itself.
+const RESENT = {
+  setup: "Sent, with a link to choose a password.",
+  none: "Sent. They have a password, so it says to sign in with it.",
+  not_in_place: "Sent. They chose a password while it was on its way, so they can sign in with it.",
 } as const;
 export const resendWelcomeAction = staffAction(P, async (ctx, parentId: string): Promise<Done> => {
   if (!personId(parentId)) return NOT_FROM_PAGE;
   const r = await resendWelcome(parentId, op(ctx));
   if (!r.ok) return { ok: false, errors: [RESEND_FAILED[r.reason]] };
   refresh();
-  return { ok: true, message: "Sent." };
+  return { ok: true, message: RESENT[r.link] };
 });
 
 // A family's guardians (stage 3's slice 7b), from a family's roster page or a person's page. Each id is the app's own

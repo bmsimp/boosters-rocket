@@ -56,7 +56,10 @@ export type DeliveryCheck = (tx: Tx, live: LinkPerson | null) => Promise<string 
  * was, and the link is in place (the person's one live link of its purpose), or it was not put in place, with the reason
  * of its `link_not_sent` row (a reason of the check, `superseded`, `changed_while_mailing`, `not_put_in_place`).
  */
-export type Delivered = { handedOver: false } | { handedOver: true; inPlace: true } | { handedOver: true; inPlace: false; reason: string };
+export type Delivered = { handedOver: false; error: string } | { handedOver: true; inPlace: true } | { handedOver: true; inPlace: false; reason: string };
+
+/** Why a mail wasn't handed over when the message itself couldn't be written (the club's name not read, say): a fixed sentence, as a send failure's is. */
+const NOT_WRITTEN = "The email couldn't be written.";
 
 type Options = { message: () => Promise<MailMessage>; purpose: MailPurpose; actor: Actor; permission?: string; ip: string | null; check: DeliveryCheck };
 
@@ -82,10 +85,11 @@ async function notSent(l: HeldLink, o: Options, reason: string, tx: Tx) {
  * not be written is answered as what was known when it failed. The token is in the mail's body alone.
  */
 export async function deliverHeldLink(l: HeldLink, o: Options): Promise<Delivered> {
-  const sent = await (async () => (await sendMail(await o.message(), { purpose: o.purpose, actor: o.actor, ip: o.ip })).ok)().catch(() => false);
-  if (!sent) {
+  const sent = await (async () => sendMail(await o.message(), { purpose: o.purpose, actor: o.actor, ip: o.ip }))()
+    .catch(() => ({ ok: false as const, error: NOT_WRITTEN }));
+  if (!sent.ok) {
     await forgetUnsentLink(l, o, "mail_failed").catch(() => undefined);
-    return { handedOver: false };
+    return { handedOver: false, error: sent.error };
   }
   try {
     return await putLinkInPlace(l, o).catch((e: unknown) => { if (worthAnotherTry(e)) return putLinkInPlace(l, o); throw e; });

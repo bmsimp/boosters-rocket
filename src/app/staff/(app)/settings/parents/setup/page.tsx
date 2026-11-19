@@ -2,7 +2,9 @@ import { Notice } from "@/app/components/notice";
 import { requireStaffPage } from "@/lib/guards";
 import { missingForSignins, signinCounts } from "@/lib/parents/switches";
 import { getParentSettings } from "@/lib/parents/settings";
-import { welcomeEmailFor } from "@/lib/parents/welcome";
+import { sampleWelcome } from "@/lib/parents/welcome";
+import { lifeWords } from "@/lib/parents/link-delivery";
+import { LINK_LIFE_MS } from "@/lib/parents/signin-links";
 import { SwitchButton } from "../forms";
 import { setSigninsAction, setWelcomeAction } from "../actions";
 
@@ -25,7 +27,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
   const asked = STEPS.find((s) => s.step === (typeof sp.step === "string" ? sp.step : ""))?.step;
   const [settings, counts, missing] = await Promise.all([getParentSettings(), signinCounts(), missingForSignins()]);
   const step: Step = asked ?? (settings.signin ? "welcome" : "signins");
-  const sample = step === "welcome" ? await welcomeEmailFor("parent@example.org") : null;
+  const sample = step === "welcome" ? await sampleWelcome("parent@example.org") : null;
   return (
     <main className="wrap single">
       <p className="back-to-settings"><a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
@@ -62,6 +64,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
             : "Welcome emails are off. Nobody is emailed."}</Notice>
           {!settings.welcome && <p><b>{n(counts.welcomeNow, "person", "people")} would be emailed now.</b> Someone who can only sign in later isn&apos;t emailed by themselves, but a guardian staff add or reinstate while welcome emails are on is emailed once they can sign in. They go out a few each minute.</p>}
           <h3>The email</h3>
+          <p>{`The welcome carries a link the person uses to choose their password, made for them when it is sent. It works once, for ${lifeWords(LINK_LIFE_MS.setup)}; after that, ${settings.level === "strict" ? "staff send the welcome again from the person's page on Parents" : "they can ask for a new one from “Set up or reset my password” on the sign-in page, or staff can send the welcome again from the person's page on Parents"}. Someone who has a password already is sent it with no link, saying to sign in with their password.`}</p>
           <p>Subject: {sample.subject}</p>
           <pre className="email-sample">{sample.text}</pre>
           {settings.welcome ? <SwitchButton quiet label="Switch welcome emails off" pendingLabel="Switching off…" act={setWelcomeAction.bind(null, false)} />
