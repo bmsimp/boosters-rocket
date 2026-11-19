@@ -28,6 +28,18 @@ describe("every permission has words", () => {
     expect(PERMISSION_WORDS["Parents.ReadWrite"]).toBe("See every parent, change a parent's name, block or unblock a parent, and resend a welcome email");
   });
 
+  it("has a linking permission an Admin holds and a custom role (a treasurer's) may be given, which brings the roster's view with it", () => {
+    // Open question 1 of the app-owned families spec: "Link families to accounting", not Admin-only. Stage 3's slice 10
+    // uses it for "Create a family from this" on Reconciliation, a Roster.Read page, so ticking it brings Roster.Read.
+    expect(PERMISSIONS).toContain("Accounting.Link.ReadWrite");
+    expect(ADMIN_ONLY).not.toContain("Accounting.Link.ReadWrite");
+    expect(GRANTABLE).toContain("Accounting.Link.ReadWrite");
+    expect(PERMISSION_WORDS["Accounting.Link.ReadWrite"]).toMatch(/^Link families to accounting/);
+    expect(PERMISSION_AREAS.find((a) => a.permissions.includes("Accounting.Link.ReadWrite"))?.area).toBe("Families");
+    expect(readTwinOf("Accounting.Link.ReadWrite")).toBe("Roster.Read");
+    expect(rulesFromChecklist(["Accounting.Link.ReadWrite"])).toEqual({ ok: true, rules: { include: ["Roster.Read", "Accounting.Link.ReadWrite"], exclude: [] } });
+  });
+
   it("puts every permission a role may hold in exactly one area, and no Admin-only one in any", () => {
     const listed = PERMISSION_AREAS.flatMap((a) => a.permissions);
     expect([...listed].sort()).toEqual([...GRANTABLE].sort());

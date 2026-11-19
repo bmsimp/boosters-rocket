@@ -167,7 +167,7 @@ export async function seedGuardian(o: {
  * A guardian row (seedGuardian()) in an active family record of the app's own, with no link to QuickBooks: a family the
  * gate lets its person into (an open row naming an active family record, src/lib/auth/resolve.ts), for the tests of the
  * door that seed people by hand with no roster company. Rows of one `familyQboId` share one record, as the session's
- * stored family id is matched to a row by it. A test with a roster company brings the records into step instead
+ * stored family id is matched to a row by it. A test with a roster company imports the records instead
  * (syncAppRecords()), which would point these rows elsewhere.
  */
 export async function seedGuardianInFamily(o: Parameters<typeof seedGuardian>[0]): Promise<GuardianRow> {

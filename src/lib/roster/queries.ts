@@ -54,9 +54,9 @@ export async function loadRosterPage(): Promise<RosterPage> {
   }
   const brokenTypes = shape && lastOk ? missingTypes(shape, typeRows) : [];
   const roster = shape && !brokenTypes.length ? buildRoster(shape, await customers()) : null;
-  // A cache that names no company has no family records yet (keepAppRecordsInStep() makes none until a read records
-  // it), so no sign-in can be held to one: the two sign-in rules wait for that read, which the Families list says is
-  // coming, rather than flag every open sign-in as attached to no family. QuickBooks' own tidy rules still run.
+  // A cache that names no company has no records' company to hold a sign-in's family to (every link names one), so the
+  // sign-in rule waits for a read that records it, rather than flag every open sign-in as attached to no family.
+  // QuickBooks' own tidy rules still run.
   const judged = from === null ? [] : people;
   return {
     connected: conn.connected, shape, shapeWords: shape ? describeShape(shape, typeRows) : null, brokenTypes, roster,
@@ -79,18 +79,23 @@ export async function previewShape(shape: MembershipShape): Promise<ShapePreview
 /**
  * A student as the app keeps it (`student`, by its `family_id`), with what QuickBooks holds for them: their customer
  * through the student link, as the roster lists it under the family's customer (`customer`; null when it has no link,
- * or the roster lists that customer elsewhere or not at all). Names are the record's (recordNameWords() when the
- * portal knows none).
+ * or the roster lists that customer elsewhere or not at all). `linked`: the record has a student link at all.
+ * `elsewhere`: the linked customer, where the roster lists it under another family (since stage 3's slice 9c the
+ * portal and QuickBooks can disagree where a student is: a move QuickBooks took that was given up, or one made in
+ * QuickBooks alone), with that family's customer and its name in QuickBooks. Names are the record's (recordNameWords()
+ * when the portal knows none).
  */
-export type RecordStudent = { id: AppStudentId; name: string; active: boolean; customer: Cust | null };
+export type RecordStudent = { id: AppStudentId; name: string; active: boolean; customer: Cust | null; linked: boolean;
+  elsewhere: { customer: Cust; familyQboId: string; familyName: string } | null };
 /**
  * A family as the app keeps it (`family`), with what QuickBooks holds for it: its customer through the family link, as
  * the roster lists it as a family (a member, in flat books; `customer`, null when it has none, or the roster doesn't
  * list that customer as one), its students, and the Parent sub-customers the roster lists under that customer
  * (`parents`: QuickBooks' own, which have no record of their own; none without a customer). The write forms send
- * QuickBooks ids and versions, so only what has a `customer` can be changed from the page.
+ * QuickBooks ids and versions, so only what has a `customer` can be changed from the page. `linked`: the record has a
+ * family link at all, though the roster may not list its customer as a family now.
  */
-export type RecordFamily = { id: AppFamilyId; name: string; active: boolean; customer: Cust | null; students: RecordStudent[]; parents: Cust[] };
+export type RecordFamily = { id: AppFamilyId; name: string; active: boolean; customer: Cust | null; linked: boolean; students: RecordStudent[]; parents: Cust[] };
 
 const COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
 const numeric = (a: string, b: string) => a.localeCompare(b, "en", { numeric: true });
@@ -121,6 +126,10 @@ export async function rosterFamilies(page: RosterPage, only?: AppFamilyId): Prom
   const listed = new Map<string, { customer: Cust; students: Cust[]; parents: Cust[] }>(roster.kind === "flat"
     ? roster.members.map((m) => [m.qboId, { customer: m, students: [], parents: [] }])
     : roster.families.map((f) => [f.customer.qboId, f]));
+  // Where the roster lists each student customer, for a record whose customer is under another family than its own.
+  const listedUnder = new Map<string, { customer: Cust; familyQboId: string; familyName: string }>(roster.kind === "flat" ? []
+    : roster.families.flatMap((f) => f.students.map((c): [string, { customer: Cust; familyQboId: string; familyName: string }] =>
+      [c.qboId, { customer: c, familyQboId: f.customer.qboId, familyName: f.customer.displayName }])));
   const under = new Map<string, typeof students>();
   for (const s of students) if (s.familyId !== null) under.set(String(s.familyId), [...(under.get(String(s.familyId)) ?? []), s]);
   const out: RecordFamily[] = [];
@@ -131,9 +140,12 @@ export async function rosterFamilies(page: RosterPage, only?: AppFamilyId): Prom
     const mine = (under.get(String(f.id)) ?? []).flatMap((s): RecordStudent[] => {
       const studentCustomer = links.customerOfStudent.get(s.id);
       const customer = studentCustomer === undefined ? undefined : there?.students.find((c) => c.qboId === studentCustomer);
-      return !s.active && !customer ? [] : [{ id: s.id, name: recordNameWords(s.name, "student"), active: s.active, customer: customer ?? null }];
+      const away = customer || studentCustomer === undefined ? undefined : listedUnder.get(studentCustomer);
+      return !s.active && !customer ? [] : [{ id: s.id, name: recordNameWords(s.name, "student"), active: s.active, customer: customer ?? null,
+        linked: studentCustomer !== undefined, elsewhere: away && away.familyQboId !== customerId ? away : null }];
     });
-    out.push({ id: f.id, name: recordNameWords(f.name, "family"), active: f.active, customer: there?.customer ?? null, students: mine.sort(byName), parents: there?.parents ?? [] });
+    out.push({ id: f.id, name: recordNameWords(f.name, "family"), active: f.active, customer: there?.customer ?? null, linked: customerId !== undefined,
+      students: mine.sort(byName), parents: there?.parents ?? [] });
   }
   return out.sort(byName);
 }

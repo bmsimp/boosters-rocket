@@ -265,8 +265,8 @@ describe("confirming: QuickBooks first, then the portal", () => {
     for (const action of ["parent.email.changed", "parent.access.granted", "parent.access.moved", "parent.access.ended", "parent.hold.opened"]) {
       expect((await audits()).map((a) => a.action)).not.toContain(action);
     }
-    // The app's own records followed the change in its transaction (src/lib/families/in-step.ts): the sign-in is in its
-    // family and linked to its own record, and a fresh run finds nothing to change.
+    // The confirm changes none of the app's own records (stage 3's slice 9c): the sign-in is still in its family and
+    // linked to its own record, as an import of the cache would leave them.
     const records = await appRecordsByCustomer();
     expect(records.memberships).toContainEqual({ guardianId: r.identity.guardianId, family: R_FAMILY });
     expect(records.links).toContainEqual(expect.objectContaining({ customer: R_PARENT, kind: "membership", guardianId: r.identity.guardianId }));

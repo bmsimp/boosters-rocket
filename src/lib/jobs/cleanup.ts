@@ -70,9 +70,9 @@ export const KEPT_TABLES: Record<string, string> = {
   form_withdrawal: "documents waiting to be withdrawn in Documenso: the worker removes each once it is done",
   qbo_check_run: "the runs of the check of the portal's QuickBooks requests: a few a year, the record of what QuickBooks was seen to answer",
   qbo_check_record: "the records the check made in a sandbox company, kept so the next run makes inactive any a cut-off run left; emptied on a change of company",
-  family: "the portal's own families, kept in step with the roster cache; emptied on a change of company",
-  student: "the portal's own students, kept in step with the roster cache; emptied on a change of company",
-  accounting_link: "each family, student and sign-in's link to its QuickBooks customer, kept in step with the roster cache; emptied on a change of company",
+  family: "the portal's own families; emptied on a change of company",
+  student: "the portal's own students; emptied on a change of company",
+  accounting_link: "each family, student and sign-in's link to its QuickBooks customer; emptied on a change of company",
   audit_log: "append-only",
 };
 

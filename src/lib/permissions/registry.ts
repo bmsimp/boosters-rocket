@@ -30,6 +30,7 @@ export const PERMISSIONS = [
   "Forms.Signature.Read",          // see who has signed each form, and open and download signed forms with their evidence (the Earlier company archive too)
   "Forms.Signature.ReadWrite",     // remind guardians to sign, set a form's reminder schedule, and start a form that isn't finished again
   "Volunteer.Credit.ReadWrite",    // see a family's volunteer credit, add a missed check-in, remove one, credit volunteering done outside the portal
+  "Accounting.Link.ReadWrite",     // link families to accounting: make a family from a QuickBooks customer no family is linked to (open question 1 of the app-owned families spec; not Admin-only, so a treasurer's role can hold it)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

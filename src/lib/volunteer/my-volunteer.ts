@@ -198,7 +198,7 @@ const NOT_SET_UP = "Your family isn't set up in the portal yet, so you can't sig
  * student's app id as the page was given it, looked up among the family's own active students and checked again under
  * the lock: a student's id is the same in every family). The shift row is locked for the length of the transaction, so two people
  * taking the last place at the same moment are put one after the other: the first gets it, the second is told the
- * shift is full. The roster lock is held too, shared, so no refresh (which brings the app's records into step) or
+ * shift is full. The roster lock is held too, shared, so no staff roster write (which may change a student's record) or
  * change of QuickBooks company runs between the check that the family and the student are its own and the write.
  * After the write, the guardian gets a confirmation with a calendar file.
  */

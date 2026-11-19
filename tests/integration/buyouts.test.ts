@@ -179,7 +179,7 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     // Rafferty's choice as his page showed it: the first of the family's students by name.
     const rafferty = await shown(p, req, "s1");
     expect(rafferty.who).toBe(RIVERA.students[0]!.name);
-    // Romilly is renamed in QuickBooks so she sorts first; the roster read brings her record's name into step.
+    // Romilly's record is renamed so she sorts first (here by importing a cache that names her so, as a staff rename leaves it).
     await db.update(qboCustomer).set({ displayName: "Abigail Riverquill" }).where(eq(qboCustomer.qboId, RIVERA.students[1]!.qboId));
     await syncAppRecords();
     const now = await shown(p, req, "s1");

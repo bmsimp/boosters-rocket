@@ -5,6 +5,7 @@
  */
 export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "access.refused": "Refused: no permission for that page or action",
+  "accounting.family.from_customer": "A family made in the portal from a QuickBooks customer no family was linked to, with its students, each linked to its customer",
   "accounting.link.carried_over": "The portal's own families and students made from the roster, each linked to its QuickBooks customer, with counts",
   "accounting.links.cleared": "The portal's own families, students and their QuickBooks links cleared after a company change",
   "admin.bootstrap": "First Admin made",
@@ -108,6 +109,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "roster.customer.rename": "A family, student, parent or member renamed in QuickBooks by staff",
   "roster.family.deactivate": "Staff asked to make a family and everyone under it inactive in QuickBooks: who was made inactive, and where it stopped",
   "roster.family.read": "A family's record opened",
+  "roster.record.follows": "A staff change QuickBooks showed made already: nothing was sent, and the portal's own record was changed to match",
   "roster.refresh": "Roster read from QuickBooks",
   "roster.refresh.failed": "Roster couldn't be read from QuickBooks",
   "roster.student.move": "A student moved to another family in QuickBooks by staff",
@@ -115,7 +117,7 @@ export const ACTION_NAMES: Readonly<Record<string, string>> = {
   "roster.write.again": "Staff asked for a waiting change to QuickBooks to be tried again",
   "roster.write.done": "A waiting change to QuickBooks went through",
   "roster.write.given_up": "Staff gave up a waiting change to QuickBooks",
-  "roster.write.queued": "A staff change is waiting to reach QuickBooks",
+  "roster.write.queued": "A staff change put on the write queue: waiting to reach QuickBooks, or taken there and waiting for the portal to finish it",
   "roster.write.refused": "A staff change to QuickBooks refused: nothing was changed",
   "roster.write.retry": "A waiting change to QuickBooks was tried again and is still waiting",
   "roster.write.stuck": "A waiting change to QuickBooks is stuck: staff must look at it",

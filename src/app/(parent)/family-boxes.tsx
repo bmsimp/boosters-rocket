@@ -107,8 +107,12 @@ export function NotSetUpBox({ treasurerEmail }: { treasurerEmail: string | null 
   );
 }
 
-/** Where the students and details come from, and when they were last read. Nothing when that isn't known. */
+/**
+ * Where the contact details come from, and when they were last read: the guardian's own record in the roster cache
+ * (`me`). The family's name and its students are the portal's own records since stage 3's slice 9c, which a read of
+ * QuickBooks doesn't change, so the line names only the details. Nothing when the time isn't known.
+ */
 export function RosterAsOf({ family }: { family: MyFamily }) {
   if (!family.rosterReadAt) return null;
-  return <p className="roster-asof">From the club&apos;s QuickBooks, as of <LocalTime iso={family.rosterReadAt} />.</p>;
+  return <p className="roster-asof">From the club&apos;s QuickBooks, as of <LocalTime iso={family.rosterReadAt} />: your contact details.</p>;
 }

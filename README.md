@@ -7,8 +7,10 @@ Each family signs in and sees only its own students, what it owes and what it mu
 Volunteers manage the roster, forms and settings from the same app. The club's books stay in
 QuickBooks Online.
 
-- **QuickBooks Online is the source of truth** for invoices, payments and the family roster. The
-  portal reads them and keeps a copy for speed; it never holds its own version of the books. It
+- **QuickBooks Online is the source of truth** for invoices and payments. The portal reads them and
+  keeps a copy for speed; it never holds its own version of the books. The families, students and
+  sign-ins are the portal's own records, each linked to its customer in QuickBooks; a change made
+  in QuickBooks doesn't change them. It
   writes back only what someone asks it to: a parent's own phone, mailing address and sign-in
   email, the roster changes staff make (new families, students and parents, names, a student's
   family, making a customer inactive), and the one invoice it ever makes, for a guardian who

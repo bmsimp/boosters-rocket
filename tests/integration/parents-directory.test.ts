@@ -98,7 +98,7 @@ describe("the people directory", () => {
     await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     const g = await seedGuardian({ parentId: p.id, familyQboId: "10" });
-    await syncAppRecords(); // the membership's family record, as the next roster read would set it
+    await syncAppRecords(); // the membership's family record, as the import sets it
     expect(await signinsOf("10")).toEqual([{ guardianId: g.id, parentId: p.id, name: "Hand Seeded", email: "seeded@example.com", kind: "blocked", words: "Blocked", open: true, reinstatable: false }]);
   });
 

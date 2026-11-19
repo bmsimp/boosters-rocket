@@ -141,8 +141,8 @@ describe("the roster refresh", () => {
     await expectFailedRun(r, "The roster couldn't be read. (unexpected)", "unexpected");
   });
 
-  // An answer with no customers in it would be saved as an empty roster, and the reconcile would then end every
-  // parent's access. So only a well-formed query answer counts, for the customers and for the types alike.
+  // An answer with no customers in it would be saved as an empty roster, and every family would then be shown no
+  // invoices. So only a well-formed query answer counts, for the customers and for the types alike.
   const FAULT = { Fault: { Error: [{ Message: "a message the portal must never store", code: "4000" }], type: "ValidationFault" } };
   const NOT_AN_ANSWER: [string, unknown][] = [
     ["null", null],

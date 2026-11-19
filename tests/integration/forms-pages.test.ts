@@ -301,7 +301,7 @@ describe("a session whose family record is inactive", () => {
     await resetDb(); stub.reset();
     const { a } = await seedTwoFamilies();
     await connectForms(stub); // set up, so an open that went through would ask Documenso
-    // As keepAppRecordsInStep() leaves a family the roster no longer holds as one, while the session still names it.
+    // A family's record made inactive (as a staff write makes one), while the session still names it.
     await db.update(family).set({ active: false }).where(eq(family.id, await familyRecord(FAMILY_A.family.qboId)));
     const snapshot = async () => JSON.stringify([await db.select().from(signatureRequest).orderBy(signatureRequest.id), await db.select().from(signatureConsent).orderBy(signatureConsent.id),
       (await db.select().from(auditLog)).filter((r) => r.action.startsWith("form."))]);

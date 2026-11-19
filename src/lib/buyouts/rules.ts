@@ -95,8 +95,8 @@ export const perUnitWords = (unit: Requirement["amountUnit"]): string => (unit =
  * `paid` (its balance is 0), `ok` (still there, on its customer, with something to pay), `voided` (voided in
  * QuickBooks: it is there with a total of 0, so nothing is owed for it), or a flag for staff: the invoice is on another
  * customer than the buy-out's (`other_customer`), QuickBooks no longer shows it to the family because it was deleted
- * there (`missing`), or the student it was billed to has moved to another family in QuickBooks (`student_moved`: the
- * check then has it voided, as a move made in the portal does).
+ * there (`missing`), or the student it was billed to is no longer active and directly under the family in QuickBooks
+ * (`student_moved`: since stage 3's slice 9c the check voids nothing for such a buy-out; it flags it once for staff).
  */
 export function judgeInvoice(b: { invoiceQboId: string; customerQboId: string; perStudent: boolean },
   invoices: readonly { qboId: string; customerQboId: string; totalCents: number; balanceCents: number }[], customerStillTheFamilys: boolean):

@@ -214,8 +214,8 @@ describe("evidence of a family or student with no QuickBooks link, and the one s
     const familyForm = await seedFormRequirement({ stepId: r!.stepId, title: "Code of conduct", appliesTo: "family", form: formSetting({ id: templateId }), position: 2 });
     return signedInStub(stub, { requirementId: familyForm, templateId, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.family.qboId, guardians: [guardianOf(a)] });
   };
-  // Made by hand: until the source move (stage 3, S9) the keep-in-step makes a record with no link inactive, so
-  // syncAppRecords() is never called after; the records are read before their links go.
+  // Made by hand: the import (syncAppRecords(), which nothing in the portal runs since stage 3's slice 9c) would make a
+  // record with no link inactive, so it is never called after; the records are read before their links go.
   const unlinkFamily = async (familyId: AppFamilyId) => { await db.delete(accountingLink).where(eq(accountingLink.familyId, familyId)); };
   const unlinkStudent = async (studentId: AppStudentId) => { await db.delete(accountingLink).where(eq(accountingLink.studentId, studentId)); };
 

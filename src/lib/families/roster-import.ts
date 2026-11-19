@@ -1,5 +1,14 @@
-// Reads every family's customers, sign-ins and records to keep the app's own records in step: staff and worker code
-// only, never imported by a parent page (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
+// The import of the app's own records from the roster cache. It reads every family's customers, sign-ins and records,
+// so it is staff code only, never imported by a parent page (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
+//
+// Since stage 3's slice 9c of the app-owned families spec the records stand alone: no roster read, staff write,
+// read-again, shape save or email confirm changes them from the cache any more, and a staff write changes its own
+// record itself (changeOwnRecord(), src/lib/roster/writes.ts). Its one caller under src/ is "Create a family from this"
+// (stage 3's slice 10, src/lib/roster/no-family.ts), which runs it narrowed to one family customer (`one`); stage 4's
+// import will run it whole. It is also the one statement of the rules migration 0023's fill followed
+// (tests/integration/app-records-fill.test.ts proves the two make the same records). The tests' helpers call it after
+// they write the cache (syncAppRecords(), tests/helpers/app-records.ts), so the records they seed are the ones an
+// import would make.
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
@@ -7,7 +16,7 @@ import { accountingLink, family, guardian, qboCustomer, student } from "@/lib/db
 import { getShape } from "@/lib/roster/shape";
 import { getRosterSource } from "@/lib/roster/source";
 import { asAppFamilyId, asAppStudentId, QUICKBOOKS, type AppFamilyId, type AppStudentId } from "./ids";
-import { EMPTY_PLAN, planAppRecords, type PlanInput, type PlanRef } from "./plan";
+import { EMPTY_PLAN, planAppRecords, planForOneFamily, type PlanInput, type PlanRef } from "./plan";
 import { noAppRecordChanges, type AppRecordChanges } from "./changes";
 
 const CHUNK = 500;
@@ -62,49 +71,58 @@ async function loadPlanInput(tx: Tx, realmId: string): Promise<Omit<PlanInput, "
   return { shape, customers, refs, hints, guardians };
 }
 
-/** Thrown when bringing the records into step fails, so the roster read can say which part failed (app_records_failed). */
+/** Thrown when the import fails, with what failed as its cause, so a caller can tell it from its own failures. */
 export class AppRecordsFailed extends Error {}
-
-/**
- * The server log line for a roster read whose app records' step failed (AppRecordsFailed's cause): the error's class
- * name and, for a database error, its SQLSTATE and the constraint it broke. Never the message, the query or its
- * parameters: any of them can hold a name or an address. Drizzle wraps a driver error, so the code and constraint are
- * looked for on its cause too. It lives here, not in the roster code, which logs nothing at all (QuickBooks spec §7).
- */
-export function logAppRecordsFailure(e: unknown): void {
-  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
-  const err = (typeof e === "object" && e !== null ? e : {}) as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
-  const pg = (err.code === undefined && typeof err.cause === "object" && err.cause !== null ? err.cause : err) as typeof err;
-  const name = typeof e === "object" && e !== null ? e.constructor?.name ?? "Object" : typeof e;
-  console.error("[roster] app records failed", { name, code: str(pg.code), constraint: str(pg.constraint_name) ?? str(pg.constraint) });
-}
 
 const inChunks = async <T>(rows: T[], f: (chunk: T[]) => Promise<unknown>) => { for (let i = 0; i < rows.length; i += CHUNK) await f(rows.slice(i, i + CHUNK)); };
 
 /**
- * Makes the app's own records and links agree with the roster cache and what the current company's records name
- * (./plan.ts says what that is): the one definition of "in step" until stage 3 makes the app the source. It changes
- * only what differs, so a second run changes nothing. It never deletes a record or a link: one nothing needs any more
- * is made inactive and keeps its id and its link, and is the same record, active again, when its customer is named
- * again. Only a change of company removes them (clearAppRecords(), ./company-change.ts). A cache that names no company
- * leaves every record inactive. Every link it makes is carried over from the roster, now, with nobody named.
- *
- * It writes no audit row of its own and returns what it made and changed: the change that ran it puts that on its own
- * audit row, in the same transaction, whenever anything changed (appRecordsAudit()). Its callers, each after it changes
- * the roster cache: the roster read (src/lib/roster/refresh.ts), a staff roster write and the queue's (applyWritten()),
- * a read-again (src/lib/roster/writes.ts), a confirmed change of a parent's sign-in email that the cache took
- * (src/lib/parents/email-change.ts), and saveShape() after a new membership shape. The caller owns the transaction and
- * holds the roster lock (ROSTER_LOCK) exclusively.
+ * One family customer to import alone, by a staff member who confirmed it ("Create a family from this"): the plan is
+ * narrowed to that customer's family record and its students' (planForOneFamily()), and each link made is `confirmed`
+ * by `linkedBy` (a `staff_user.id`).
  */
-export async function keepAppRecordsInStep(tx: Tx): Promise<AppRecordChanges> {
+export type OneFamily = { familyCustomerId: string; linkedBy: string };
+/**
+ * What a run narrowed to one family made: the family record (null when the customer had one already, or the plan has
+ * none of it), the student records made, and the students the plan holds under it that have a record already (another
+ * family's, or inactive), left exactly as they are, each with its customer.
+ */
+export type OneFamilyImport = {
+  changes: AppRecordChanges;
+  family: AppFamilyId | null;
+  students: { made: { id: AppStudentId; customerId: string }[]; leftAlone: { id: AppStudentId; customerId: string }[] };
+};
+
+/**
+ * Imports the app's own records and links from the roster cache and what the current company's records name
+ * (./plan.ts says what that is). Until stage 3's slice 9c a mirror of the cache ran it after every change of it (the
+ * note at the top of this file says who runs it now). It changes only what differs, so a second run changes nothing.
+ * It never deletes a record or a link: one nothing needs any more is made inactive and keeps its id and its link, and
+ * is the same record, active again, when its customer is named again. Only a change of company removes them
+ * (clearAppRecords(), ./company-change.ts). A cache that names no company leaves every record inactive. Every link a
+ * whole run makes is carried over from the roster, now, with nobody named.
+ *
+ * Given `one`, it runs by the same rules narrowed to that family customer (planForOneFamily()) and only makes what is
+ * missing there: the family record and its link, and a record and link for each student customer under it that has no
+ * student record yet; it changes no record that exists (a student with a record is left alone, and counted), points
+ * or links no guardian row, and each link it makes is `confirmed` by `one.linkedBy`.
+ *
+ * It writes no audit row of its own and returns what it made and changed: its caller puts that on its own audit row,
+ * in the same transaction (appRecordsAudit() for a whole run). The caller owns the transaction and holds the roster
+ * lock (ROSTER_LOCK) exclusively.
+ */
+export async function importRecordsFromRoster(tx: Tx): Promise<AppRecordChanges>;
+export async function importRecordsFromRoster(tx: Tx, one: OneFamily): Promise<OneFamilyImport>;
+export async function importRecordsFromRoster(tx: Tx, one?: OneFamily): Promise<AppRecordChanges | OneFamilyImport> {
   try {
-    return await bringIntoStep(tx);
+    const made = await importInto(tx, one);
+    return one === undefined ? made.changes : made;
   } catch (e) {
     throw new AppRecordsFailed("The portal's own family records couldn't be brought up to date.", { cause: e });
   }
 }
 
-async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
+async function importInto(tx: Tx, one: OneFamily | undefined): Promise<OneFamilyImport> {
   const realmId = await getRosterSource(tx);
   const changes = noAppRecordChanges();
 
@@ -128,16 +146,21 @@ async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
   const known = { families: new Map<string, string>(), students: new Map<string, string>() };
   for (const [customerId, id] of familyIdOf) { const name = nameOfFamily.get(id); if (name) known.families.set(customerId, name); }
   for (const [customerId, id] of studentIdOf) { const name = nameOfStudent.get(id); if (name) known.students.set(customerId, name); }
-  const plan = realmId === null ? EMPTY_PLAN : planAppRecords({ ...(await loadPlanInput(tx, realmId)), known });
+  const whole = realmId === null ? EMPTY_PLAN : planAppRecords({ ...(await loadPlanInput(tx, realmId)), known });
+  const plan = one === undefined ? whole : planForOneFamily(whole, one.familyCustomerId);
+  // A whole run's links are carried over from the roster, by nobody; one family's are confirmed by who asked.
+  const linkedAs = one === undefined ? { origin: "carried_over" as const } : { origin: "confirmed" as const, linkedBy: one.linkedBy };
+  // Narrowed to one family, nothing that exists is changed: only what is missing there is made.
+  const changeExisting = one === undefined;
 
   // 1. Families: new ones with their links; every existing one as the plan has it, or inactive when it isn't there.
   const newFamilies = [...plan.families].filter(([customerId]) => !familyIdOf.has(customerId))
     .map(([customerId, f]) => { const id = asAppFamilyId(randomUUID()); familyIdOf.set(customerId, id); return { id, customerId, ...f }; });
   await inChunks(newFamilies, (rows) => tx.insert(family).values(rows.map((f) => ({ id: f.id, name: f.name, active: f.active }))));
-  await inChunks(newFamilies, (rows) => tx.insert(accountingLink).values(rows.map((f) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: f.customerId, familyId: f.id, origin: "carried_over" as const }))));
+  await inChunks(newFamilies, (rows) => tx.insert(accountingLink).values(rows.map((f) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: f.customerId, familyId: f.id, ...linkedAs }))));
   changes.families.made = newFamilies.length;
   const customerOfFamily = new Map([...familyIdOf].map(([customerId, id]) => [id, customerId]));
-  for (const f of families) {
+  for (const f of changeExisting ? families : []) {
     const customerId = customerOfFamily.get(f.id);
     const want = customerId === undefined ? undefined : plan.families.get(customerId);
     const next = want ?? { name: f.name, active: false };
@@ -149,13 +172,14 @@ async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
 
   // 2. Students the same way, each in the family the roster holds them under; one it doesn't keeps the family they were
   //    last in (none, for one never held under a family).
+  const leftAlone = [...plan.students.keys()].flatMap((customerId) => { const id = studentIdOf.get(customerId); return id === undefined ? [] : [{ id, customerId }]; });
   const newStudents = [...plan.students].filter(([customerId]) => !studentIdOf.has(customerId))
     .map(([customerId, s]) => { const id = asAppStudentId(randomUUID()); studentIdOf.set(customerId, id); return { id, customerId, ...s }; });
   await inChunks(newStudents, (rows) => tx.insert(student).values(rows.map((s) => ({ id: s.id, name: s.name, active: s.active, familyId: familyFor(s.familyCustomerId) }))));
-  await inChunks(newStudents, (rows) => tx.insert(accountingLink).values(rows.map((s) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: s.customerId, studentId: s.id, origin: "carried_over" as const }))));
+  await inChunks(newStudents, (rows) => tx.insert(accountingLink).values(rows.map((s) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: s.customerId, studentId: s.id, ...linkedAs }))));
   changes.students.made = newStudents.length;
   const customerOfStudent = new Map([...studentIdOf].map(([customerId, id]) => [id, customerId]));
-  for (const s of students) {
+  for (const s of changeExisting ? students : []) {
     const customerId = customerOfStudent.get(s.id);
     const want = customerId === undefined ? undefined : plan.students.get(customerId);
     const familyId = want && want.familyCustomerId !== null ? familyFor(want.familyCustomerId) : s.familyId;
@@ -166,8 +190,9 @@ async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
   }
 
   // 3. Each guardian row in its family, and linked to the record its sign-in came from. A row whose sign-in no longer
-  //    comes from a record of its own keeps the link it had: it says where the sign-in came from.
-  for (const m of memberships) {
+  //    comes from a record of its own keeps the link it had: it says where the sign-in came from. Narrowed to one
+  //    family, no guardian row is touched (the narrowed plan holds none).
+  for (const m of changeExisting ? memberships : []) {
     const now = familyFor(plan.memberships.get(m.id));
     if (m.familyId === now) continue;
     await tx.update(guardian).set({ familyId: now }).where(eq(guardian.id, m.id));
@@ -181,7 +206,7 @@ async function bringIntoStep(tx: Tx): Promise<AppRecordChanges> {
     await tx.update(accountingLink).set({ customerId, linkedAt: new Date(), updatedAt: new Date() }).where(eq(accountingLink.id, had.id));
     changes.memberships.relinked++;
   }
-  await inChunks(newLinks, (rows) => tx.insert(accountingLink).values(rows.map(([guardianId, customerId]) => ({ system: QUICKBOOKS, realmId: realmId!, customerId, guardianId, origin: "carried_over" as const }))));
+  await inChunks(newLinks, (rows) => tx.insert(accountingLink).values(rows.map(([guardianId, customerId]) => ({ system: QUICKBOOKS, realmId: realmId!, customerId, guardianId, ...linkedAs }))));
   changes.memberships.linked = newLinks.length;
-  return changes;
+  return { changes, family: newFamilies[0]?.id ?? null, students: { made: newStudents.map((s) => ({ id: s.id, customerId: s.customerId })), leftAlone } };
 }

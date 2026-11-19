@@ -38,7 +38,7 @@ export type BuyoutToLook = {
 const FLAG_WORDS: Record<string, string> = {
   missing: "QuickBooks no longer shows this invoice to the family: it was voided or deleted there. Check it in QuickBooks.",
   other_customer: "The invoice is on another customer in QuickBooks than the one it was made for. Check it in QuickBooks.",
-  student_moved: "The student it was billed to has moved to another family. If anything was paid on the invoice, the treasurer sorts it out in QuickBooks.",
+  student_moved: "The student it was billed to has moved to another family, or is no longer active, in QuickBooks. If anything was paid on the invoice, the treasurer sorts it out in QuickBooks.",
   paid_before_void: "The family switched back to volunteering, but something was paid on the invoice, so the portal didn't void it. Sort it out in QuickBooks.",
   void_refused: "QuickBooks refused to void this invoice, so it is as it was. Check it in QuickBooks.",
   given_up: "A change to this buy-out's invoice was given up before QuickBooks said whether it went through. Check it in QuickBooks.",

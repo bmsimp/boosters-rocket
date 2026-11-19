@@ -662,8 +662,8 @@ describe("stored figures are shown only while they are still this family's", () 
     const asked = stub.calls.length;
     expect(await moneyOf("10")).toEqual({ familyName: null, figures: null, notConnected: false, today: calendarDayIn("UTC") });
     expect(stub.calls).toHaveLength(asked);
-    // The roster read that made it inactive has not brought the records into step yet: the family record is still
-    // active, so the failed try is stamped on its row.
+    // QuickBooks made it inactive, which changes no record (stage 3's slice 9c): the family record is still active, so
+    // the failed try is stamped on its row.
     expect((await moneyRow("10"))!.failedCode).toBe("not_a_family");
   });
 
@@ -673,7 +673,7 @@ describe("stored figures are shown only while they are still this family's", () 
     stub.invoices = [inv("1", "10")];
     expect((await moneyOf("10")).figures).toMatchObject({ current: true, totalCents: 8500 });
     const [before] = await db.select().from(familyMoney);
-    // QuickBooks made the family inactive, and the roster read brought the records into step: its record is inactive.
+    // The family's record inactive, as a staff member's make-inactive leaves it (here by the import of a cache that holds it so).
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "10"));
     await syncAppRecords();
     expect((await db.select({ active: family.active }).from(family).where(eq(family.id, (await familyRecordOf("10"))!)))[0]!.active).toBe(false);
@@ -769,7 +769,7 @@ describe("never the wrong company", () => {
     // The same family id in another company: the cache now says it came from 2222, and QuickBooks is connected to 2222.
     await db.transaction((tx) => setRosterSource(tx, "2222"));
     await db.update(qboConnection).set({ realmId: "2222" });
-    // The roster read of that company brings the app's records into step with it: the family has a record linked there.
+    // The records imported from that company (as a stage 4 import would): the family has a record linked there.
     await syncAppRecords();
     stub.invoices = [inv("7", "10", { Balance: 5 })];
     const money = await moneyOf("10");
