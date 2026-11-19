@@ -175,12 +175,15 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
     expect(mail.outbox).toHaveLength(1);
   });
 
-  it("a move whose answer named another record changes nothing at once; the queue finishes it once a read shows it, follow-ups and record together", async () => {
+  it("a move whose answer named another record changes nothing at once; the queue finishes it once a read shows it, and follows nothing", async () => {
+    // A move is the portal's own change (stage 3's slice 9f): its record moved and its follow-ups ran when moveStudent()
+    // saved it. QuickBooks' answer, taken now or found later, moves no record and follows nothing again.
     const leo = await seedLeo();
+    const before = await leosThings(leo);
     moveInQuickBooks(LEO, CHEN);
     await applyWritten({ op: "move", role: "student", qboId: LEO, syncToken: "0", fromFamilyQboId: RIVERA, toFamilyQboId: CHEN },
       { Id: "13", DisplayName: "Someone Else", SyncToken: "1", ParentRef: { value: CHEN } },
-      // Filed under the records the staff action's checks found (prepare()), as every real send is.
+      // Filed under the records the staff action's checks found, as every real send is.
       { realmId: REALM, actor: WORKER.actor, ip: null, linkedBy: null, filed: { familyId: await recordOfCustomer(RIVERA, "family"), studentId: await recordOfCustomer(LEO, "student") } });
     expect(await followed()).toEqual([]);
     expect((await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY)))).toHaveLength(1);
@@ -188,32 +191,35 @@ describe("a student moved, renamed or made inactive in QuickBooks, read by a ref
     const [item] = await db.select().from(writeQueue);
     expect(item).toMatchObject({ state: "waiting", sent: true, lastCode: "answer_other", targetQboId: LEO });
 
-    // A refresh alone follows nothing; the queue, after one, finds the move made and finishes it.
+    // A refresh alone follows nothing; the queue, after one, finds the move made and marks it done, following nothing.
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     expect(await followed()).toEqual([]);
     await db.update(writeQueue).set({ nextTryAt: new Date(Date.now() - 60_000) });
     expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
     expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
-    expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ cause: `roster.write.found#${LEO}`, formsReset: 1, formsMoved: 1, placesGivenUp: 1 }) })]);
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    expect(await leoRecord()).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family") });
+    expect(await followed()).toEqual([]);
+    const now = await leosThings(leo);
+    expect({ ...now, queue: [] }).toEqual({ ...before, queue: [] });
+    expect(now.record).toMatchObject({ familyId: await recordOfCustomer(RIVERA, "family") });
+    expect(mail.outbox).toEqual([]);
     expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
 
-  it("a queued move QuickBooks made already: the queue follows it once it finds it, and the refresh before that follows nothing", async () => {
+  it("a queued move QuickBooks made already: the queue marks it done once it finds it, and neither it nor the refresh before it follows anything", async () => {
     const leo = await seedLeo();
+    const before = await leosThings(leo);
     moveInQuickBooks(LEO, CHEN);
     // Sent after the last read, its answer lost: the queue reads the roster again before it looks for it.
     const item = await seedQueued({ op: "move", role: "student", qboId: LEO, syncToken: "0", fromFamilyQboId: RIVERA, toFamilyQboId: CHEN }, { sent: true, lastTriedAt: new Date() });
 
     expect(await runWriteQueue()).toMatchObject({ ran: true, ok: true });
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
-    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: CHEN, state: "not_opened" });
-    expect((await followed()).map((r) => (r.after as { cause: string }).cause)).toEqual([`roster.write.found#${LEO}`]);
-    expect((await followed())[0]!.after).toMatchObject({ formsMoved: 1, formsReset: 1, placesGivenUp: 1 });
-    expect(await leoRecord()).toMatchObject({ familyId: await recordOfCustomer(CHEN, "family") });
-    expect(await db.select().from(formWithdrawal)).toHaveLength(1);
-    expect(mail.outbox).toHaveLength(1);
+    expect(await followed()).toEqual([]);
+    const now = await leosThings(leo);
+    expect({ ...now, queue: [] }).toEqual({ ...before, queue: [] });
+    expect(await requestByCustomer(leo.open)).toMatchObject({ familyQboId: RIVERA, state: "waiting" });
+    expect(await db.select().from(formWithdrawal)).toEqual([]);
+    expect(mail.outbox).toEqual([]);
     expect(stub.apiCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
 });
