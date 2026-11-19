@@ -14,6 +14,8 @@ const FINISH = "src/lib/auth/parent-signin-finish.ts";
 const PLUGIN = "src/lib/auth/parent-code-plugin.ts";
 /** Where the Set-Cookie of a sign-in finished on the server is copied onto a server action's answer (an action has no endpoint of its own). */
 const COPY = "src/lib/auth/parent-link-signin.ts";
+/** The form of a set-up or reset link: the one place a link's sign-in starts (after the set that spent the link). */
+const ACTION = "src/app/sign-in/password-actions.ts";
 
 const files = readdirSync(path.join(root, "src"), { recursive: true }).map((f) => `src/${String(f).replaceAll("\\", "/")}`)
   .filter((f) => /\.(ts|tsx|mts|js|mjs)$/.test(f));
@@ -58,6 +60,15 @@ describe("one way in", () => {
     expect(code(read(PLUGIN)).match(/\bfinishParentSignin\s*\(/g)).toHaveLength(2);
   });
 
+  it("a set-up link's sign-in is started only by the link's form action, and only the copy names the server-only endpoint", () => {
+    // The proof a link's sign-in takes is built by the set that spent the link (choosePasswordFromLink()); a caller that
+    // built one from rows read out of the database could sign a person in with no password typed.
+    const starters = files.filter((f) => f !== COPY && /\bsignInFromLink\s*\(/.test(code(read(f))));
+    expect(starters, `Only ${ACTION} may call signInFromLink() (AGENTS.md, "Sign-in release").`).toEqual([ACTION]);
+    const naming = files.filter((f) => /\bfinishLinkSignin\b/.test(code(read(f))));
+    expect(naming, `Only ${PLUGIN} (which defines it) and ${COPY} may name finishLinkSignin.`).toEqual([PLUGIN, COPY].sort());
+  });
+
   it("the Set-Cookie of a sign-in is copied onto a server action's answer in one place only", () => {
     const copiers = files.filter((f) => /\bgetSetCookie\s*\(|\bparseSetCookieHeader\s*\(/.test(code(read(f))));
     expect(copiers).toEqual([COPY]);
@@ -76,7 +87,11 @@ describe("one way in", () => {
     // The session is made with no family chosen, and the cookie with the long life the code door gives it.
     expect(body).toMatch(/createSession\(\s*user\.id,\s*false,\s*\{\s*familyId:\s*null\s*\}\s*\)/);
     expect(body).toMatch(/setSessionCookie\(ctx,\s*\{\s*session,\s*user\s*\},\s*false,\s*\{\s*maxAge:\s*PARENT_SESSION_COOKIE_SECONDS\s*\}\s*\)/);
-    // A session refused by the last check, or ended before the end, gets no cookie.
+    // Each refusal returns before the next step: no user, no session; a last check that says no, no family and no
+    // cookie; a session ended before the end, no cookie.
+    expect(body.slice(at("findUserById"), at("createSession"))).toMatch(/if\s*\(\s*!\s*user\s*\)\s*return\s+REFUSED\b/);
+    expect(body.slice(at("createSession"), at("completeParentSignin"))).toMatch(/if\s*\(\s*!\s*\(\s*await\s+signinStands\s*\(/);
+    expect(body.slice(at("deleteSession"), at("completeParentSignin"))).toMatch(/\breturn\s+REFUSED\b/);
     expect(body.slice(at("completeParentSignin"), at("setSessionCookie"))).toMatch(/if\s*\(\s*sessionEnded\s*\)\s*return/);
   });
 });

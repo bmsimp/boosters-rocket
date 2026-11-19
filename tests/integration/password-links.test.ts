@@ -27,7 +27,7 @@ import { credentialRows, linkRows, mintLink, seedCode, seedDevice, seedPassword,
 /**
  * The sign-in release's set-up and reset links (slice SI-2): a token minted for a person, stored only as a keyed hash,
  * single use, 7 days for a set-up link and an hour for a reset; the page a link opens, which writes nothing; and its
- * form's action, the portal's one action before sign-in, which sets the password in one transaction with its audit row.
+ * form's action, an action before sign-in (beside the request page's, slice SI-3a), which sets the password in one transaction with its audit row.
  */
 const sha1 = (s: string) => createHash("sha1").update(s, "utf8").digest("hex").toUpperCase();
 const GOOD = "correct horse battery staple, the club's own";
