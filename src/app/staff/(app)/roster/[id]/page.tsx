@@ -138,7 +138,9 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // whose own record is inactive in the portal (the action refuses one too, prepare() in src/lib/roster/writes.ts).
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null && fam.active;
   // The family's own create waiting or stuck on the queue (stage 3's slice 9d): nothing else is changed on it meanwhile.
-  const making = !fam.linked && waiting.some((w) => w.write.op === "create" && (w.write.role === "family" || w.write.role === "member"));
+  // A change QuickBooks refused that the portal kept (stage 3's slice 9e) is listed, and blocks nothing.
+  const open = waiting.filter((w) => w.state !== "refused");
+  const making = !fam.linked && open.some((w) => w.write.op === "create" && (w.write.role === "family" || w.write.role === "member"));
   // A family with no link, and students with none, are changed in the portal only, connected or not (stage 3's slice 9d),
   // on a roster of the portal's company (changeInPortal() refuses one whose cache names none).
   const changesHere = can(ctx.effective, "Roster.Family.ReadWrite") && page.shape !== null && fam.active && !making && rosterTag !== "none";
@@ -157,8 +159,13 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   const inactiveRecords = new Set(fam.students.flatMap((s) => (!s.active && s.customer ? [s.customer.qboId] : [])));
   const elsewhere = fam.students.flatMap((s) => (s.active && s.elsewhere ? [{ name: s.name, ...s.elsewhere }] : []));
   const records = inQuickBooks ? [inQuickBooks.customer, ...inQuickBooks.students, ...inQuickBooks.parents, ...elsewhere.map((s) => s.customer)] : [];
-  const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)),
-    blocked: new Set(waiting.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
+  // Each linked record by its customer, for the renames saved in the portal first (by the app's id, from the portal's own name).
+  const linkedRecords = new Map<string, { kind: "family" | "student"; id: string; name: string }>(inQuickBooks ? [
+    [inQuickBooks.customer.qboId, { kind: "family", id: String(familyId), name: fam.name }],
+    ...fam.students.flatMap((s): [string, { kind: "student"; id: string; name: string }][] => (s.customer ? [[s.customer.qboId, { kind: "student", id: String(s.id), name: s.name }]] : [])),
+  ] : []);
+  const edit = canChange && inQuickBooks ? { rosterTag, versions: await versionsOf(records.map((r) => r.qboId)), familyId: String(familyId), records: linkedRecords,
+    blocked: new Set(open.map((w) => (w.write.op === "create" || !("qboId" in w.write) ? null : w.write.qboId)).filter((x): x is string => x !== null)) } : null;
   // Who making the family inactive covers: everyone active under it in the cache, at any depth, with their versions.
   const cover = edit && inQuickBooks && entry.kind === "family" ? await familyCover(inQuickBooks.customer.qboId) : null;
   // Where a student may be moved: the app's own active families whose customer is an active family on the roster, by the

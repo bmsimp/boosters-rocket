@@ -55,7 +55,7 @@ export async function unblockPerson(parentId: string, o: StaffOp): Promise<{ ok:
 
 /**
  * Changes a person's name, in the app only (stage 3's slice 7b; sending it on to a Parent customer in QuickBooks is
- * slice 9f's): `parent.name` and the sign-in account's name, which mirrors it, in one transaction under the person's
+ * slice 9g's): `parent.name` and the sign-in account's name, which mirrors it, in one transaction under the person's
  * row, audited `parent.name.changed` with before and after. The same name, once tidied, changes and records nothing.
  */
 export async function renamePerson(parentId: string, rawName: string, o: StaffOp): Promise<{ ok: true; changed: boolean } | { ok: false; reason: "not_found" | "invalid" }> {

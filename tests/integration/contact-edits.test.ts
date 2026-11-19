@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, qboConnection, qboCustomer, rateLimitEvent } from "@/lib/db/schema";
+import { accountingLink, auditLog, guardian, qboConnection, qboCustomer, rateLimitEvent } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { CONTACT_COPY, loadMyContact } from "@/lib/parents/contact-edits";
 import { canChangeMyEmail } from "@/lib/parents/email-change";
@@ -52,6 +52,9 @@ const save = (values: ContactValues, version = "0", extra: Record<string, string
 describe("a parent saves their own phone and address to QuickBooks", () => {
   it("layered, with a parent type: the phone goes to the parent's own record, the cache follows, and the save is audited", async () => {
     const { r } = await seedContactFamilies(stub);
+    // Each link as it starts, with the version the portal last aligned with (stage 3's slice 9e).
+    const linksBefore = await db.select().from(accountingLink).orderBy(asc(accountingLink.id));
+    expect(linksBefore.filter((l) => l.syncedToken !== null && l.syncedAt !== null).length).toBeGreaterThan(0);
     const before = copyOf(stub.customers);
     asParent(r.identity);
     fromIp("203.0.113.77");
@@ -72,6 +75,8 @@ describe("a parent saves their own phone and address to QuickBooks", () => {
     expect(await cached(R_FAMILY)).toMatchObject({ phone: null, syncToken: "0" });
     expect(await cached(C_PARENT)).toMatchObject({ phone: CHENOWETH.parent.phone, syncToken: "0" });
     expect(await rosterRefreshAsked()).toBe(false);
+    // No link's version moves for a parent's own save, the parent's own link included: only a staff send aligns one.
+    expect(await db.select().from(accountingLink).orderBy(asc(accountingLink.id))).toEqual(linksBefore);
 
     const log = await audits();
     expect(log).toHaveLength(1);

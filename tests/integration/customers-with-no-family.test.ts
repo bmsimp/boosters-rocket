@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, qboConnection, qboCustomerType, setting, student } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, qboConnection, qboCustomer, qboCustomerType, setting, student } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { loadFamilyMoney } from "@/lib/money/family-money";
 import { addGuardian } from "@/lib/parents/guardians";
@@ -141,6 +141,11 @@ describe("Create a family from this", () => {
       .toEqual([{ name: "Asha Patel", active: true }, { name: "Ravi Patel", active: false }]);
     for (const id of ["71", "72"]) expect(await studentLinkOf(id), id).toMatchObject({ origin: "confirmed", linkedBy: treasurer.id });
     expect(await studentLinkOf("73")).toBeUndefined(); // a parent: no record, and no guardian either
+    // Each new link starts aligned with its customer's version in the cache (stage 3's slice 9e), as 0041 filled them.
+    const cacheToken = async (id: string) => (await db.select({ token: qboCustomer.syncToken }).from(qboCustomer).where(eq(qboCustomer.qboId, id)))[0]!.token;
+    expect(link!.syncedToken).toBe(await cacheToken("70"));
+    expect(link!.syncedAt).not.toBeNull();
+    for (const id of ["71", "72"]) expect((await studentLinkOf(id))!.syncedToken, id).toBe(await cacheToken(id));
 
     const [row] = await audits("accounting.family.from_customer");
     expect(row).toMatchObject({ actorId: treasurer.id, permission: "Accounting.Link.ReadWrite", targetType: "family", targetId: String(made!.id), ip: "203.0.113.9" });

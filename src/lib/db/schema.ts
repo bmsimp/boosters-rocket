@@ -168,6 +168,13 @@ export const guardian = pgTable("guardian", {
  * was linked to and the students under it, is `confirmed`, with `linked_by` the staff member with the linking
  * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it. Nothing deletes one but a change of company, which
  * deletes every row. A lookup always asks for one kind (src/lib/families/links.ts).
+ * `synced_token` is the customer's QuickBooks version (its SyncToken) the portal last aligned with, and `synced_at` when
+ * (stage 3's slice 9e): set from the answer of a send the portal made that carried the link's own version (or the one
+ * resend made after a live read found the field as the portal held it), from a create's answer, from the roster cache
+ * row of a change the queue found made by the same rule, and, for a link staff confirm ("Create a family from this",
+ * "Link the student to it"), from the cache row of that customer; never from a roster read. A rename is sent with it,
+ * so an edit made in QuickBooks since is met as stale, never overwritten. Null when the portal has never aligned with
+ * the customer (migration 0041 filled each link of the roster's company from the cache).
  */
 export const accountingLink = pgTable("accounting_link", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -180,6 +187,8 @@ export const accountingLink = pgTable("accounting_link", {
   origin: text("origin", { enum: ["carried_over", "created", "confirmed"] }).notNull(),
   linkedAt: timestamp("linked_at", { withTimezone: true }).notNull().defaultNow(),
   linkedBy: uuid("linked_by"),                         // staff_user.id of who asked for it or confirmed it; null for a link carried over
+  syncedToken: text("synced_token"),                   // the customer's QuickBooks version the portal last aligned with; null: never
+  syncedAt: timestamp("synced_at", { withTimezone: true }),
   createdAt: created(),
   updatedAt: updated(),
 }, (t) => [
@@ -463,7 +472,15 @@ export type RosterRole = "family" | "student" | "parent" | "member";
  */
 export type RosterWrite =
   | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null }
-  | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string }
+  /**
+   * A rename: `was`, for a linked family, member or student (saved in the portal first since stage 3's slice 9e), the
+   * portal's own name of the record before this change, which a stale answer's live read is compared with (a parent's,
+   * and one sent before that slice: the cache's name). `syncToken` is the link's own version (empty when the link has
+   * none, and then nothing is sent before a live read); `checked`, that it was sent with a version read live after the
+   * name read as the portal held it (or by "Send the portal's value", whose `was` is then the name its row showed, which
+   * a later try compares QuickBooks' with), so its answer aligns the link. Neither is sent.
+   */
+  | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string; checked?: true }
   | { op: "move"; role: "student"; qboId: string; syncToken: string; fromFamilyQboId: string; toFamilyQboId: string }
   /**
    * `other`: a customer under a family that is neither its student nor its parent (a deeper sub-customer, or one of a
@@ -502,6 +519,11 @@ export type QueuedWrite = RosterWrite | BuyoutWrite;
  * make-inactive is for. Each is null where there is no such record: a new family or member (made after QuickBooks
  * answers), a parent's own customer, an invoice's student. A done or given-up item is kept 30 days (the daily
  * clean-up); every item goes when a different company is connected, before the app's records.
+ * `refused` (stage 3's slice 9e): a change the portal saved first (a rename of a linked family, member or student, or a
+ * student's create filed under the student record) that QuickBooks refused: the portal keeps its value, and the item
+ * holds what was asked, as sent, and QuickBooks' short code, until staff send the portal's value again, give it up, or
+ * a later change to the same record takes its place. It is never tried by the worker and blocks nothing; the clean-up
+ * keeps it.
  */
 export const writeQueue = pgTable("write_queue", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -510,7 +532,7 @@ export const writeQueue = pgTable("write_queue", {
   targetQboId: text("target_qbo_id"),                // the customer it changes; null for a create
   familyId: uuid("family_id").references(() => family.id, { onDelete: "restrict" }).$type<AppFamilyId>(),     // the family it is filed under
   studentId: uuid("student_id").references(() => student.id, { onDelete: "restrict" }).$type<AppStudentId>(), // the student it is for
-  state: text("state", { enum: ["waiting", "stuck", "done", "given_up"] }).notNull().default("waiting"),
+  state: text("state", { enum: ["waiting", "stuck", "done", "given_up", "refused"] }).notNull().default("waiting"),
   sent: boolean("sent").notNull(),                    // QuickBooks may have acted on the last try
   tries: integer("tries").notNull().default(1),
   lastCode: text("last_code"),                        // the last short code, never QuickBooks' words

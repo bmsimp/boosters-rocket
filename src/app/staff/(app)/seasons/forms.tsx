@@ -8,7 +8,8 @@ import { ChoiceGroup } from "@/app/components/choice-group";
 // The forms of the season pages. No form `action` on a form with a field: React resets a form after one, and what was
 // typed would vanish on a refusal. State is the source of truth; a type="button" calls the action inside
 // startTransition (as in ../parents/forms.tsx). Each is given only what it shows.
-export type Done = { ok: true; message: string } | { ok: false; errors: string[] };
+/** `status`: how a change that went through but isn't finished stands (ActionOutcome()); none, done. */
+export type Done = { ok: true; message: string; status?: "waiting" | "attention" } | { ok: false; errors: string[] };
 const failed: Done = { ok: false, errors: [ACTION_FAILED] };
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 

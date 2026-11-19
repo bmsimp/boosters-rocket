@@ -2,7 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { staffAction, type StaffCtx } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
-import { addFamily, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, linkStudentMadeAfterGivingUp, type PortalChange, type WriteAsk, type WriteResult } from "@/lib/roster/writes";
+import { addFamily, addStudentToLinked, askFamilyInactive, askRosterWrite, changeInPortal, createInQuickBooksAndLink, linkStudentMadeAfterGivingUp, renameLinked, sendPortalValue, type PortalChange,
+  type WriteAsk, type WriteResult } from "@/lib/roster/writes";
 import { giveUp, tryAgainNow, NOTE_MAX } from "@/lib/roster/queue";
 import { NAME_MAX } from "@/lib/roster/names";
 
@@ -90,17 +91,38 @@ export const deactivateHereAction = staffAction(P, async (ctx, rosterTag: string
   return inPortal(ctx, kind === "family" ? { op: "deactivate_family", familyId: recordId } : { op: "deactivate_student", studentId: recordId }, rosterTag);
 });
 
-/** A student under a family, or a parent with their own email address. */
-export const addToFamilyAction = staffAction(P, async (ctx, rosterTag: string, role: "student" | "parent", familyQboId: string, newName: string, email?: string | null): Promise<WriteResult> => {
-  const address = email ?? null; // a student's form, bound to fewer arguments, leaves it out
-  if (!tag(rosterTag) || (role !== "student" && role !== "parent") || !id(familyQboId) || !name(newName)) return NOT_FROM_PAGE;
-  if (role === "parent" ? !str(address, EMAIL_MAX) : address !== null) return NOT_FROM_PAGE;
-  return run(ctx, { op: "create", role, name: newName, familyQboId, email: address, typeQboId: null }, rosterTag);
+/** A parent with their own email address, under a linked family: QuickBooks first, as before (a parent has no record in the portal). */
+export const addToFamilyAction = staffAction(P, async (ctx, rosterTag: string, role: "parent", familyQboId: string, newName: string, email: string): Promise<WriteResult> => {
+  if (!tag(rosterTag) || role !== "parent" || !id(familyQboId) || !name(newName) || !str(email, EMAIL_MAX)) return NOT_FROM_PAGE;
+  return run(ctx, { op: "create", role, name: newName, familyQboId, email, typeQboId: null }, rosterTag);
 });
 
-export const renameAction = staffAction(P, async (ctx, rosterTag: string, qboId: string, syncToken: string, newName: string): Promise<WriteResult> => {
+/**
+ * A student added to a linked family (stage 3's slice 9e): the portal's own record first, then made in QuickBooks
+ * (addStudentToLinked()). The page sends the family's app id, a uuid, never its customer's.
+ */
+export const addStudentAction = staffAction(P, async (ctx, rosterTag: string, familyId: string, newName: string): Promise<WriteResult> => {
+  if (!canRead(ctx) || !tag(rosterTag) || !uuid(familyId) || !name(newName)) return NOT_FROM_PAGE;
+  const r = await addStudentToLinked(familyId, newName, rosterTag, op(ctx));
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+});
+
+/**
+ * A linked family, member or student renamed (stage 3's slice 9e): saved in the portal first, then sent to QuickBooks
+ * with the link's own version (renameLinked()). The page sends the record's kind and app id, a uuid, and no version.
+ */
+export const renameLinkedAction = staffAction(P, async (ctx, rosterTag: string, kind: "family" | "student", recordId: string, newName: string): Promise<WriteResult> => {
+  if (!canRead(ctx) || !tag(rosterTag) || (kind !== "family" && kind !== "student") || !uuid(recordId) || !name(newName)) return NOT_FROM_PAGE;
+  const r = await renameLinked({ kind, recordId, name: newName }, rosterTag, op(ctx));
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+});
+
+/** A Parent customer renamed: it has no record in the portal, so QuickBooks first, with the version its page was shown. */
+export const renameParentAction = staffAction(P, async (ctx, rosterTag: string, qboId: string, syncToken: string, newName: string): Promise<WriteResult> => {
   if (!tag(rosterTag) || !id(qboId) || !version(syncToken) || !name(newName)) return NOT_FROM_PAGE;
-  return run(ctx, { op: "rename", qboId, syncToken, name: newName }, rosterTag);
+  return run(ctx, { op: "rename", qboId, syncToken, name: newName, parentOnly: true }, rosterTag);
 });
 
 export const moveAction = staffAction(P, async (ctx, rosterTag: string, qboId: string, syncToken: string, toFamilyQboId: string): Promise<WriteResult> => {
@@ -152,7 +174,19 @@ export const linkMadeStudentAction = staffAction(P, async (ctx, rosterTag: strin
   return r;
 });
 
-export const giveUpAction =staffAction(P, async (ctx, itemId: string, note: string): Promise<Done> => {
+/**
+ * "Send the portal's value", for a change QuickBooks refused that the portal kept (sendPortalValue()): `shown` is what the
+ * row showed of QuickBooks and `stamp` seals it to the item, so a value the form sends that isn't what the row showed is
+ * refused.
+ */
+export const sendPortalValueAction = staffAction(P, async (ctx, itemId: string, shown: string, stamp: string): Promise<WriteResult> => {
+  if (!canRead(ctx) || !uuid(itemId) || !str(shown, NAME_MAX * 4) || !str(stamp, TAG_MAX)) return NOT_FROM_PAGE;
+  const r = await sendPortalValue(itemId, shown, stamp, op(ctx));
+  revalidatePath("/", "layout");
+  return r;
+});
+
+export const giveUpAction = staffAction(P, async (ctx, itemId: string, note: string): Promise<Done> => {
   if (!canRead(ctx) || !uuid(itemId) || !str(note, NOTE_MAX * 4)) return NOT_FROM_PAGE;
   const r = await giveUp(itemId, note, op(ctx));
   if (r.ok) revalidatePath("/staff", "layout");

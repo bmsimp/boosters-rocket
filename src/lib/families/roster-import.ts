@@ -152,12 +152,18 @@ async function importInto(tx: Tx, one: OneFamily | undefined): Promise<OneFamily
   const linkedAs = one === undefined ? { origin: "carried_over" as const } : { origin: "confirmed" as const, linkedBy: one.linkedBy };
   // Narrowed to one family, nothing that exists is changed: only what is missing there is made.
   const changeExisting = one === undefined;
+  // A new link starts aligned with its customer's version in the cache (`synced_token`, stage 3's slice 9e), as
+  // migration 0041 filled every link: the customer staff confirmed, or the roster carried over. None for a customer the
+  // cache doesn't hold. A link that exists keeps its version, but a guardian's link moved to another customer takes that one's.
+  const tokenOf = new Map((await tx.select({ qboId: qboCustomer.qboId, syncToken: qboCustomer.syncToken }).from(qboCustomer)).map((c) => [c.qboId, c.syncToken]));
+  const alignedAt = new Date();
+  const aligned = (customerId: string) => (tokenOf.has(customerId) ? { syncedToken: tokenOf.get(customerId)!, syncedAt: alignedAt } : {});
 
   // 1. Families: new ones with their links; every existing one as the plan has it, or inactive when it isn't there.
   const newFamilies = [...plan.families].filter(([customerId]) => !familyIdOf.has(customerId))
     .map(([customerId, f]) => { const id = asAppFamilyId(randomUUID()); familyIdOf.set(customerId, id); return { id, customerId, ...f }; });
   await inChunks(newFamilies, (rows) => tx.insert(family).values(rows.map((f) => ({ id: f.id, name: f.name, active: f.active }))));
-  await inChunks(newFamilies, (rows) => tx.insert(accountingLink).values(rows.map((f) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: f.customerId, familyId: f.id, ...linkedAs }))));
+  await inChunks(newFamilies, (rows) => tx.insert(accountingLink).values(rows.map((f) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: f.customerId, familyId: f.id, ...linkedAs, ...aligned(f.customerId) }))));
   changes.families.made = newFamilies.length;
   const customerOfFamily = new Map([...familyIdOf].map(([customerId, id]) => [id, customerId]));
   for (const f of changeExisting ? families : []) {
@@ -176,7 +182,7 @@ async function importInto(tx: Tx, one: OneFamily | undefined): Promise<OneFamily
   const newStudents = [...plan.students].filter(([customerId]) => !studentIdOf.has(customerId))
     .map(([customerId, s]) => { const id = asAppStudentId(randomUUID()); studentIdOf.set(customerId, id); return { id, customerId, ...s }; });
   await inChunks(newStudents, (rows) => tx.insert(student).values(rows.map((s) => ({ id: s.id, name: s.name, active: s.active, familyId: familyFor(s.familyCustomerId) }))));
-  await inChunks(newStudents, (rows) => tx.insert(accountingLink).values(rows.map((s) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: s.customerId, studentId: s.id, ...linkedAs }))));
+  await inChunks(newStudents, (rows) => tx.insert(accountingLink).values(rows.map((s) => ({ system: QUICKBOOKS, realmId: realmId!, customerId: s.customerId, studentId: s.id, ...linkedAs, ...aligned(s.customerId) }))));
   changes.students.made = newStudents.length;
   const customerOfStudent = new Map([...studentIdOf].map(([customerId, id]) => [id, customerId]));
   for (const s of changeExisting ? students : []) {
@@ -205,10 +211,11 @@ async function importInto(tx: Tx, one: OneFamily | undefined): Promise<OneFamily
     const had = linkOfRow.get(guardianId);
     if (!had) { newLinks.push([guardianId, customerId]); continue; }
     if (had.customerId === customerId) continue;
-    await tx.update(accountingLink).set({ customerId, linkedAt: new Date(), updatedAt: new Date() }).where(eq(accountingLink.id, had.id));
+    // Now another customer's link, it holds that customer's version from the cache (or none), never the old one's.
+    await tx.update(accountingLink).set({ customerId, linkedAt: new Date(), ...(tokenOf.has(customerId) ? aligned(customerId) : { syncedToken: null, syncedAt: null }), updatedAt: new Date() }).where(eq(accountingLink.id, had.id));
     changes.memberships.relinked++;
   }
-  await inChunks(newLinks, (rows) => tx.insert(accountingLink).values(rows.map(([guardianId, customerId]) => ({ system: QUICKBOOKS, realmId: realmId!, customerId, guardianId, ...linkedAs }))));
+  await inChunks(newLinks, (rows) => tx.insert(accountingLink).values(rows.map(([guardianId, customerId]) => ({ system: QUICKBOOKS, realmId: realmId!, customerId, guardianId, ...linkedAs, ...aligned(customerId) }))));
   changes.memberships.linked = newLinks.length;
   return { changes, family: newFamilies[0]?.id ?? null, students: { made: newStudents.map((s) => ({ id: s.id, customerId: s.customerId })), leftAlone } };
 }

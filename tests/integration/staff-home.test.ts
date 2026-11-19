@@ -22,10 +22,12 @@ let families: Awaited<ReturnType<typeof seedTwoFamilies>>;
 beforeEach(async () => {
   await resetDb();
   families = await seedTwoFamilies();
-  // Two changes waiting to reach QuickBooks, and one stuck.
+  // Two changes waiting to reach QuickBooks, one stuck, and one saved in the portal first that QuickBooks didn't take
+  // (stage 3's slice 9e), kept: filed under no record, as only its count is read.
   await seedQueued({ op: "deactivate", role: "parent", qboId: "21", syncToken: "0" }, { familyQboId: FAMILY_A.family.qboId });
   await seedQueued({ op: "deactivate", role: "parent", qboId: "22", syncToken: "0" }, { familyQboId: FAMILY_B.family.qboId });
   await seedQueued({ op: "deactivate", role: "parent", qboId: "23", syncToken: "0" }, { state: "stuck", tries: 8 });
+  await seedQueued({ op: "rename", role: "family", qboId: "24", syncToken: "0", name: "Kept Name", was: "Old Name" }, { state: "refused", code: "fault_6000", nextTryAt: null, familyQboId: null });
   // Forms: Travel consent (asked of each family, neither has signed) is due in three days; A's student's signed form has
   // waited two hours for Documenso to seal it; A's complete form has waited two hours for its signed copy to be kept.
   await db.update(requirement).set({ dueOn: addDays(await clubToday(), 3) }).where(eq(requirement.title, "Travel consent"));
@@ -63,7 +65,8 @@ describe("the staff home", () => {
     const cases: [string[], string[], string[]][] = [
       // The held-address review is gone (stage 3 of the app-owned families spec): Parents has nothing waiting to count.
       [["Parents.ReadWrite"], [], []],
-      [["Roster.Read"], ["stuck", "waiting"], ["1 change stuck on its way to QuickBooks", "2 changes waiting to reach QuickBooks", 'href="/staff/reconciliation"']],
+      [["Roster.Read"], ["stuck", "refused", "waiting"], ["1 change stuck on its way to QuickBooks", "1 change kept in the portal that QuickBooks didn't take",
+        "2 changes waiting to reach QuickBooks", 'href="/staff/reconciliation"']],
       [["Forms.Signature.Read"], ["due", "sealing", "evidence"], ["2 forms still to sign, due within 7 days or already due",
         "1 form signed but not yet finished by Documenso", "1 signed form waiting for the signed copy to be kept", 'href="/staff/forms"']],
       [["Volunteer.Event.Read"], ["shifts"], ["2 places to fill on 1 shift in the next 7 days", 'href="/staff/volunteer"']],
@@ -86,7 +89,7 @@ describe("the staff home", () => {
   it("says nothing needs doing when nothing is waiting, even to an Admin", async () => {
     const admin = await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true });
     asStaff(admin);
-    expect(todayItems(await home())).toEqual(["stuck", "waiting", "due", "sealing", "evidence", "shifts"]);
+    expect(todayItems(await home())).toEqual(["stuck", "refused", "waiting", "due", "sealing", "evidence", "shifts"]);
     await resetDb();
     asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
     const quiet = await home();
