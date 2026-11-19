@@ -238,9 +238,10 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
   // Welcome emails waiting because mail is failing: the last welcome the worker tried to send failed, and while that is
   // so it tries one person a wake, not five (sendOwedWelcomes(), src/lib/parents/welcome.ts; its mark, WELCOME_MARK).
   // It counts only the people the worker can send to (welcomesToSend(): owed, not blocked, and able to sign in), so the
-  // note goes once none is left to send to, even though no wake has tried anyone since the failure.
+  // note goes once none is left to send to, even though no wake has tried anyone since the failure. It shows only while
+  // the worker would really try: while the saved mail settings are untested it tries nobody, and the mail line says so.
   const [welcomeMark, owed] = await Promise.all([readMark(WELCOME_MARK), welcomesToSend()]);
-  const welcomesNote = parents.signin && parents.welcome && failedLast(welcomeMark) && owed > 0
+  const welcomesNote = parents.signin && parents.welcome && mail.working && failedLast(welcomeMark) && owed > 0
     ? `Welcome emails are waiting because mail is failing: ${owed === 1 ? "1 person is" : `${owed} people are`} owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five.`
     : null;
   const headerMissing = addressNote !== null && env.CLIENT_IP_HEADER !== "none";

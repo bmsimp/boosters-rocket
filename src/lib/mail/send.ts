@@ -8,7 +8,7 @@ import { mailConfigHash } from "./config-hash";
 import { testMessage, type Brand } from "./messages";
 import { MailSendError, type MailMessage, type MailPurpose, type StoredMailConfig } from "./types";
 
-/** `recipientRefused`: the server refused this one address for good (MailSendError), not a failure of the mail itself. */
+/** `recipientRefused`: the server refused this one address on its own account (MailSendError), not a failure of the mail itself. */
 export type SendOutcome = { ok: true } | { ok: false; error: string; recipientRefused?: true };
 const MAIL_ACTOR: Actor = { door: "system", id: null, label: "mail" };
 

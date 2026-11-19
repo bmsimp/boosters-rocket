@@ -27,7 +27,7 @@ import { runDueJobs, WAKE_KEY } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import { BUYOUT_CHECK_MARK, markJob, readMark, REMINDERS_MARK, WELCOME_MARK } from "@/lib/jobs/marks";
 import { BUYOUT_CHECK_LATE_MS } from "@/lib/health/job-lines";
-import { patchMailStatus } from "@/lib/mail/settings";
+import { getMailStatus, patchMailStatus } from "@/lib/mail/settings";
 import { ADMIN_ONLY } from "@/lib/permissions/registry";
 import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
@@ -327,6 +327,7 @@ describe("the health page", () => {
 
   it("says when welcome emails are waiting because mail is failing, and stops once a welcome goes", async () => {
     await seedParentSettings({ ...SIGNINS_ON, welcome: true });
+    await seedWorkingMail(); // tested: the worker would really try
     const owedOne = await seedParent({ name: "Owed One", welcomeOwed: true });
     const row = await seedGuardianInFamily({ parentId: owedOne.id, familyQboId: "10", status: "invited" });
     // Owed but with no guardian row, so no wake tries them: not counted.
@@ -338,6 +339,13 @@ describe("the health page", () => {
     const waiting = await parents();
     expect(waiting).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" } });
     expect(waiting.notes).toEqual(["Welcome emails are waiting because mail is failing: 1 person is owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five."]);
+    // Mail settings saved but not tested: the worker tries nobody, so the note says nothing (the mail line says why).
+    const tested = (await getMailStatus()).verifiedHash;
+    await patchMailStatus({ verifiedHash: "saved-since-and-not-tested" });
+    expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
+    expect(line(await healthReport(NOW), "mail")).toMatchObject({ word: "Not tested" });
+    await patchMailStatus({ verifiedHash: tested });
+    expect((await parents()).notes).toHaveLength(1);
     // Their family made inactive: they stay owed but can't sign in, so no wake tries anyone and the mark stays failed,
     // yet nobody is waiting to be sent to, and the note goes.
     await db.update(family).set({ active: false }).where(eq(family.id, row.familyId!));

@@ -95,4 +95,19 @@ describe("SMTP sender", () => {
     expect((e as MailSendError).recipientRefused).toBe(true);
     expect(sink.messages).toHaveLength(0);
   });
+
+  // The rule is refusedThisRecipient() (src/lib/mail/refusal.ts), read from what nodemailer reports of the real reply.
+  it("marks a relay refused at RCPT TO with an enhanced code of policy as the mail failing, and a full mailbox as the address's own", async () => {
+    sink = await startMailSink({ secure: true, ...tls });
+    sink.rejectRecipient = "*";
+    sink.rejectReply = { code: 554, text: "5.7.1 Relay access denied" };
+    const relay = await sender(sink.port, "tls")(msg).catch((x: unknown) => x);
+    expect(relay).toBeInstanceOf(MailSendError);
+    expect((relay as Error).message).toBe("The mail server didn't accept the message (EENVELOPE 554).");
+    expect((relay as MailSendError).recipientRefused).toBe(false);
+    sink.rejectReply = { code: 452, text: "4.2.2 Mailbox full" };
+    const full = await sender(sink.port, "tls")(msg).catch((x: unknown) => x);
+    expect((full as MailSendError).recipientRefused).toBe(true);
+    expect(sink.messages).toHaveLength(0);
+  });
 });
