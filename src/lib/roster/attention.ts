@@ -40,7 +40,7 @@ export function needsAttention(roster: Roster, shape: MembershipShape, signIns: 
       if (shape.parentTypeId && !f.parents.some((p) => p.active)) out.push(item("family_no_parent", f.customer, "No parent is listed under this family in QuickBooks."));
       if (shape.studentTypeId && !f.students.some((s) => s.active)) out.push(item("family_no_student", f.customer, "No student is listed under this family in QuickBooks."));
       if (f.customer.parentQboId) out.push(item("family_is_sub", f.customer, "This family is a sub-customer of another customer in QuickBooks. A family should be a top-level customer."));
-      for (const p of f.parents) if (p.active && !p.email) out.push(item("no_email", p, "This parent has no email address in QuickBooks, so they can't be given a sign-in."));
+      for (const p of f.parents) if (p.active && !p.email) out.push(item("no_email", p, "This parent has no email address in QuickBooks."));
       out.push(...sameEmail(f.parents, "Another parent in this family has the same email address in QuickBooks."));
     }
     for (const s of roster.strays) if (s.active) out.push(item("not_under_family", s, "This student or parent isn't directly under a family in QuickBooks."));
@@ -55,7 +55,7 @@ export function needsAttention(roster: Roster, shape: MembershipShape, signIns: 
         ? "This portal sign-in isn't attached to any family the portal keeps."
         : `This portal sign-in is attached to QuickBooks ID ${s.customerQboId}, which isn't a ${roster.kind === "flat" ? "member" : "family"} in QuickBooks.` });
     } else if (!customer.active && s.status !== "disabled" && !out.some((o) => o.rule === "inactive_with_signin" && o.qboId === customer.qboId)) {
-      out.push(item("inactive_with_signin", customer, "This is inactive in QuickBooks, but someone can still sign in to the portal for it."));
+      out.push(item("inactive_with_signin", customer, "This is inactive in QuickBooks. Its guardians' sign-ins are still open in the portal, but nobody can sign in to it while it is inactive."));
     }
   }
   return out;
