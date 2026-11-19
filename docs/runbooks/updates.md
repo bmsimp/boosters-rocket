@@ -45,8 +45,8 @@ if you use this installation's proxy.
    `docker compose logs migrate` says why, and the app was not started on a database it couldn't bring up to date.
    One reason is the backup check, below. Another is a change the database refuses: the log shows a line starting
    "migration failed: Failed query", followed by the change itself, in which you'll find the words "Migration ...
-   stopped, and changed nothing". The reason, with how many rows it is about, is in the database's own log:
-   `docker compose logs db` shows it as an `ERROR:` line with those same words. Every change of one update is made
+   stopped, and changed nothing", and then a line starting "the database said:" with the reason and how many rows it
+   is about. `docker compose logs db` shows the same reason as an `ERROR:` line. Every change of one update is made
    together or not at all, so when one stops, none of them is kept and the database is exactly as the version you
    were running left it. Keep it as it is, report both logs' lines, and run the previous version until a fix comes
    ([Going back](#going-back)).

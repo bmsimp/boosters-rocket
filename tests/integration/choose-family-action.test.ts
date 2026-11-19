@@ -84,4 +84,31 @@ describe("chooseFamilyAction", () => {
     const all = JSON.stringify(await db.select().from(auditLog));
     for (const needle of ["obj-marker", "arr-marker", "4242424242", "xxxxxxxxxx", "F".repeat(65)]) expect(all).not.toContain(needle);
   });
+
+  it("refuses the person's own row once it is closed, and one a change of company closed, naming the row and leaving the session's family", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const first = await seedGuardian({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardian({ parentId: a.id, familyQboId: "F2" });
+    // A row a change of company closed: another company's family, and no family record of the portal's (family_id null).
+    const earlier = await seedGuardian({ parentId: a.id, familyQboId: "OLD-F", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
+    expect(earlier.familyId).toBeNull();
+    await post("/portal-code/send", { email: "ana@example.com" });
+    await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
+    const res = await post("/portal-code/verify", { email: "ana@example.com", code: /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]! });
+    state.cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
+    expect(await redirectOf(chooseFamilyAction(first.id))).toBe("/");
+    // The second row closes while the session is open: the chooser's button for it, posted now, is refused.
+    await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, second.id));
+    const before = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused").length;
+    for (const row of [second, earlier]) {
+      expect(await redirectOf(chooseFamilyAction(row.id))).toBe("/choose-family");
+      expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBe("F1");
+    }
+    const refused = (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused");
+    expect(refused).toHaveLength(before + 2);
+    for (const row of [second, earlier]) {
+      expect(refused.filter((r) => (r.after as { guardianId?: string }).guardianId === row.id)).toEqual([
+        expect.objectContaining({ actorId: a.id, targetId: a.id, after: { reason: "family_not_enabled", guardianId: row.id } })]);
+    }
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.family_switch")).toEqual([]);
+  });
 });

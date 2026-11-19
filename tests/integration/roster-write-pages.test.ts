@@ -260,7 +260,7 @@ describe("the Reconciliation page (Roster.Read)", () => {
 
   it("says a queued buy-out invoice's amount only to staff who may see money, here and on the family's page", async () => {
     await db.insert(writeQueue).values({ realmId: REALM, request: { op: "invoice_create", buyoutId: "00000000-0000-4000-8000-0000000000b1", customerQboId: "10", itemQboId: "4343",
-      units: 2, unitCents: 3719, familyQboId: "10" }, familyQboId: "10", sent: false, tries: 1, lastCode: "http_429", nextTryAt: new Date(), askedByLabel: "a guardian" });
+      units: 2, unitCents: 3719 }, familyId: await recordOfCustomer("10", "family"), sent: false, tries: 1, lastCode: "http_429", nextTryAt: new Date(), askedByLabel: "a guardian" });
     asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
     for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: "10" } })]) {
       expect(html).toContain("for a volunteer buy-out");
@@ -270,6 +270,34 @@ describe("the Reconciliation page (Roster.Read)", () => {
     for (const html of [await renderPage(ReconciliationPage), await renderPage(RosterEntryPage, { params: { id: "10" } })]) {
       expect(html).toContain("$74.38 for a volunteer buy-out");
     }
+  });
+
+  it("links each change to the page of the family it is filed under, by that family's customer, and a family's page lists every change under, about or into it", async () => {
+    // The Rivera family (10) has a change of every arm: filed under it (a student's rename, a buy-out's void, a move
+    // out of it) and one moving a student into Chen (20). A new family is filed under none, and the stray student (50)
+    // has no family record at all: its change is found by its target alone, and links nowhere.
+    await seedQueued(RENAME, { familyQboId: "10" });
+    await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20" }, { state: "stuck", familyQboId: "10" });
+    await db.insert(writeQueue).values({ realmId: REALM, request: { op: "invoice_void", buyoutId: "00000000-0000-4000-8000-0000000000b2", invoiceQboId: "9001", customerQboId: "10",
+      why: "switched_back" }, familyId: await recordOfCustomer("10", "family"), sent: false, tries: 1, lastCode: "http_429", nextTryAt: new Date(), askedByLabel: "a guardian" });
+    await seedQueued({ op: "create", role: "family", name: "Patel Family", typeQboId: "1", familyQboId: null, email: null });
+    await seedQueued({ op: "rename", role: "student", qboId: "50", syncToken: "0", name: "Stray Two", was: "Stray Student" });
+    asStaff(await staffWith("reader@club.org", ["Roster.Read"]));
+    const html = await renderPage(ReconciliationPage);
+    // The rename, the move (filed under the family it moves from) and the void link to Rivera; nothing to Chen or the stray.
+    // Only the changes' section is read: the Needs attention list below it links families of its own (Chen has no student).
+    const start = html.indexOf('id="writes-h"');
+    expect(start).toBeGreaterThan(-1);
+    const writes = html.slice(start, html.indexOf("</section>", start));
+    const links = [...writes.matchAll(/href="\/staff\/roster\/([^"]*)"/g)].map((m) => m[1]).filter((id) => ["10", "20", "50"].includes(id!));
+    expect(links).toEqual(["10", "10", "10"]);
+    const rivera = await renderPage(RosterEntryPage, { params: { id: "10" } });
+    for (const words of ["Rename the student “Leo Rivera” to “Leon Rivera”", "Move the student Leo Rivera from Rivera Family to Chen Family", "Void the volunteer buy-out invoice of Rivera Family"]) expect(rivera).toContain(words);
+    expect(rivera).not.toContain("Make the family “Patel Family”");
+    const chen = await renderPage(RosterEntryPage, { params: { id: "20" } });
+    expect(chen).toContain("Move the student Leo Rivera from Rivera Family to Chen Family");
+    expect(chen).not.toContain("Rename the student “Leo Rivera”");
+    expect(chen).not.toContain("Void the volunteer buy-out invoice");
   });
 
   it("offers Try again now and Give up to staff who may change the roster, and the money worth a look to staff who may see money", async () => {

@@ -396,8 +396,8 @@ describe("the write queue's share of a buy-out", () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement();
     const b = await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "being_invoiced" });
-    const [item] = await db.insert(writeQueue).values({ realmId: b.realmId, request: { op: "invoice_create", buyoutId: b.id, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 5000, familyQboId: FAMILY },
-      familyQboId: FAMILY, sent: false, tries: 0, nextTryAt: later(5) }).returning();
+    const [item] = await db.insert(writeQueue).values({ realmId: b.realmId, request: { op: "invoice_create", buyoutId: b.id, customerQboId: FAMILY, itemQboId: BUYOUT_ITEM, units: 2, unitCents: 5000 },
+      familyId: b.familyId, sent: false, tries: 0, nextTryAt: later(5) }).returning();
     const { tryAgainNow } = await import("@/lib/roster/queue");
     const op = { actor: { door: "staff" as const, id: null, label: "registrar@club.org" }, ip: null, permission: "Roster.Family.ReadWrite" };
     expect(await tryAgainNow(item!.id, op)).toMatchObject({ ok: false });
@@ -416,7 +416,10 @@ describe("the write queue's share of a buy-out", () => {
     expect((await confirmBuyoutAction(req, "family", choice.stamp)).ok).toBe(true);
     const [b] = await buyoutsOf(FAMILY);
     expect((await queueOf(b!.id))[0]).toMatchObject({ state: "waiting", sent: false, lastCode: "http_429" });
-    await db.update(writeQueue).set({ tries: 7, createdAt: new Date(Date.now() - 3_600_000) }).where(eq(writeQueue.familyQboId, FAMILY));
+    // Filed under the session's own family record, checked under the lock; what it sends names the customer billed only.
+    expect((await queueOf(b!.id))[0]).toMatchObject({ familyId: await recordOfCustomer(FAMILY, "family"), studentId: null, targetQboId: null });
+    expect((await queueOf(b!.id))[0]!.request).not.toHaveProperty("familyQboId");
+    await db.update(writeQueue).set({ tries: 7, createdAt: new Date(Date.now() - 3_600_000) }).where(eq(writeQueue.familyId, b!.familyId));
     await runWriteQueue(later(2));
     expect((await queueOf(b!.id))[0]).toMatchObject({ state: "stuck", tries: 8 });
     expect((await buyoutsOf(FAMILY))[0]!.state).toBe("stuck");
@@ -426,11 +429,11 @@ describe("the write queue's share of a buy-out", () => {
 
   it("says what each write is, in words, with the names the cache has", () => {
     const names = new Map([[FAMILY, "Riverquill Family"]]);
-    const create = { op: "invoice_create" as const, buyoutId: "b", customerQboId: FAMILY, itemQboId: "1", units: 2, unitCents: 2500, familyQboId: FAMILY };
+    const create = { op: "invoice_create" as const, buyoutId: "b", customerQboId: FAMILY, itemQboId: "1", units: 2, unitCents: 2500 };
     expect(describeWrite(create, names, { showAmounts: true })).toBe("Invoice Riverquill Family $50.00 for a volunteer buy-out");
     // The amount is what the family is billed: said only to staff who may see money.
     expect(describeWrite(create, names)).toBe("Invoice Riverquill Family for a volunteer buy-out");
-    expect(describeWrite({ op: "invoice_void", buyoutId: "b", invoiceQboId: "5001", customerQboId: FAMILY, familyQboId: FAMILY, why: "switched_back" }, names))
+    expect(describeWrite({ op: "invoice_void", buyoutId: "b", invoiceQboId: "5001", customerQboId: FAMILY, why: "switched_back" }, names))
       .toBe("Void the volunteer buy-out invoice of Riverquill Family");
   });
 });

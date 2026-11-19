@@ -573,7 +573,8 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     expect(inStub("12").DisplayName).toBe("Leon Rivera");
     expect(await cached("12")).toMatchObject({ displayName: "Leo Rivera" });
     const [item] = await queue();
-    expect(item).toMatchObject({ state: "waiting", sent: true, tries: 1, targetQboId: "12", familyQboId: "10", realmId: REALM, askedByLabel: "registrar@club.org",
+    expect(item).toMatchObject({ state: "waiting", sent: true, tries: 1, targetQboId: "12", familyId: await recordOfCustomer("10", "family"), studentId: await recordOfCustomer("12", "student"),
+      realmId: REALM, askedByLabel: "registrar@club.org",
       request: { op: "rename", qboId: "12", syncToken: "0", name: "Leon Rivera", was: "Leo Rivera" } });
     expect(item!.lastCode).toMatch(/^(unreachable|timeout)$/);
     expect(item!.nextTryAt!.getTime()).toBeGreaterThan(Date.now() + 50_000);
@@ -592,6 +593,10 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
     expect((await askRosterWrite({ op: "create", role: "family", name: "Patel Family", familyQboId: null, email: null, typeQboId: null }, tag, op))).toMatchObject({ ok: true, queued: true });
     const items = await queue();
     expect(items.map((i) => [i.request.op, i.sent, i.lastCode])).toEqual([["rename", true, "unreachable"], ["deactivate", true, "http_500"], ["create", false, "http_429"]]);
+    // Each filed under the app's records it is for: Leo and his family; Mei's family (a parent has no record of her own);
+    // nothing for a new family, whose record is made once QuickBooks answers.
+    const [rivera, chen, leo] = [await recordOfCustomer("10", "family"), await recordOfCustomer("20", "family"), await recordOfCustomer("12", "student")];
+    expect(items.map((i) => [i.request.op, i.familyId, i.studentId])).toEqual([["rename", rivera, leo], ["deactivate", chen, null], ["create", null, null]]);
   });
 
   it("a connection row held elsewhere while the token needs renewing is busy: queued as not sent, and the staff member never waits for it", async () => {
@@ -698,6 +703,13 @@ describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2"] } });
     expect((await askRosterWrite({ op: "create", role: "member", name: "Sky Lee", familyQboId: null, email: null, typeQboId: null }, tag, op)).ok).toBe(true);
     expect(sent()).toEqual([{ DisplayName: "Sky Lee", CustomerTypeRef: { value: "2" } }]);
+  });
+
+  it("flat: a member's change that has to wait is filed under the member's own family record", async () => {
+    tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2"] } });
+    stub.rateLimitNext = 1;
+    expect(await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana R. Rivera" }, tag, op)).toMatchObject({ ok: true, queued: true });
+    expect((await queue()).map((i) => [i.request.op, i.targetQboId, i.familyId, i.studentId])).toEqual([["rename", "11", await recordOfCustomer("11", "family"), null]]);
   });
 });
 

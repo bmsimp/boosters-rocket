@@ -31,6 +31,12 @@ try {
   }
 } catch (e) {
   console.error("migration failed:", e instanceof Error ? e.message : e);
+  // Drizzle wraps the database's error in its own, whose message is only the statement: the database's reason (a
+  // migration that stops says why, with its counts) is its cause, printed on a line of its own. Only an error the
+  // database itself sent says so (postgres-js gives it a severity): a cause that is the network's, such as a refused
+  // connection, is not the database speaking and is left as drizzle's message says it.
+  const cause = e instanceof Error && e.cause instanceof Error && typeof e.cause.severity === "string" ? e.cause.message : null;
+  if (cause && cause !== e.message) console.error("the database said:", cause);
   process.exitCode = 1;
 } finally {
   await pg.end({ timeout: 5 });
