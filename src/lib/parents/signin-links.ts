@@ -64,7 +64,12 @@ export async function mintSigninLink(tx: Tx, o: { parentId: string; purpose: Lin
   return token;
 }
 
-/** A link that names nothing (unknown), was spent (used), ran out (expired), or a set-up link for someone with a password. */
+/**
+ * Why a link can't be used. About the link: it names nothing (unknown), was spent (used), ran out (expired), or is a
+ * set-up link for someone with a password (has_password). About its person and the door: they have no sign-in account
+ * (no_sign_in_account), are blocked (blocked), have no guardian row that counts (no_enabled_guardian), or parent
+ * sign-ins are switched off (signins_off). Every one can be the reason of a `parent.password.refused` row.
+ */
 export type LinkRefusal = "unknown" | "used" | "expired" | "has_password" | "no_sign_in_account" | "blocked" | "no_enabled_guardian" | "signins_off";
 export type UsableLink = { tokenId: string; parentId: string; email: string; authUserId: string; hasPassword: boolean };
 /**

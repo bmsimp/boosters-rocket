@@ -387,7 +387,18 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/buyouts/writes.ts",
   "src/app/components/parent-frame.tsx",
   "src/app/not-found.tsx",
+  // What a set-up or reset link's page and action run for a visitor with no session (the pages and their action are
+  // under src/app/sign-in, BEFORE_SIGN_IN_CODE below): they read one person from a token anyone can send.
+  "src/lib/parents/signin-links.ts",
+  "src/lib/parents/password-set.ts",
 ];
+
+/**
+ * The pages and actions a visitor reaches before signing in (src/app/sign-in, the parent door's sign-in and a set-up
+ * or reset link's pages): scanned whole as parent code, so none can come to import a module that reads across
+ * families.
+ */
+const BEFORE_SIGN_IN_CODE = "src/app/sign-in/";
 
 /**
  * Parent-facing folders under src/lib/: code that parent pages call to read one family's data. The scan reads every
@@ -399,6 +410,7 @@ describe("parent code never imports the staff-only queries", () => {
   const isSource = (f: string) => /\.(tsx?|jsx?|mjs|cjs)$/.test(f);
   const parentCode = [
     ...app.filter((f) => f.startsWith(PARENT_PAGES) && isSource(f)),
+    ...app.filter((f) => f.startsWith(BEFORE_SIGN_IN_CODE) && isSource(f)),
     ...PARENT_CODE_ELSEWHERE,
     ...PARENT_FACING_LIB.flatMap(filesUnder).filter(isSource),
   ];
@@ -407,6 +419,8 @@ describe("parent code never imports the staff-only queries", () => {
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/page.tsx", "src/app/(parent)/layout.tsx", "src/app/(parent)/display/display-settings.tsx"]));
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/payments/page.tsx", "src/app/(parent)/money-box.tsx", "src/lib/money/family-money.ts"]));
     expect(parentCode).toEqual(expect.arrayContaining(["src/app/(parent)/forms/[id]/page.tsx", "src/app/(parent)/forms/actions.ts", "src/lib/forms/my-forms.ts", "src/lib/forms/signing.ts", "src/lib/documenso/client.ts"]));
+    expect(parentCode).toEqual(expect.arrayContaining(["src/app/sign-in/page.tsx", "src/app/sign-in/password-link-page.tsx", "src/app/sign-in/password-form.tsx",
+      "src/app/sign-in/password-actions.ts", "src/app/sign-in/set-up/[token]/page.tsx", "src/app/sign-in/reset/[token]/page.tsx"]));
     // read() throws for a file that is gone, so a module renamed or removed can't stay listed and unscanned.
     for (const file of PARENT_CODE_ELSEWHERE) expect(read(file).length, file).toBeGreaterThan(0);
   });

@@ -134,7 +134,15 @@ describe("invariant 4: the public pages show no family data", () => {
     { file: "src/app/refused/page.tsx" },
     { file: "src/app/not-found.tsx" },
   ];
+  /** The set-up and reset links' pages: each folder under src/app/sign-in, and the purpose of the link it opens. */
+  const LINK_PAGES = [["set-up", "setup"], ["reset", "reset"]] as const;
   const markers = () => [...a.markers, ...b.markers, ...moneyMarkers(a.spec), ...moneyMarkers(b.spec), ...a.season!.staffOnly, ...b.season!.staffOnly];
+
+  it("renders every page under src/app/sign-in, found on disk", () => {
+    const covered = new Set([...PUBLIC.map((p) => p.file), ...LINK_PAGES.map(([folder]) => `src/app/sign-in/${folder}/[token]/page.tsx`)]);
+    const missing = filesUnder("src/app/sign-in").filter((f) => /\/page\.tsx$/.test(f) && !covered.has(f));
+    expect(missing, "A page a visitor reaches before signing in is rendered here with no session: add it to PUBLIC (or, for a link's page, LINK_PAGES).").toEqual([]);
+  });
 
   it.each(PUBLIC)("$file shows a visitor with no session none of either family's data", async ({ file, props }) => {
     const outcome = await pageOutcome(await load(file), props);
@@ -145,7 +153,7 @@ describe("invariant 4: the public pages show no family data", () => {
 
   // The set-up and reset pages (slice SI-2) are public too: with a token that names no link (the refusal), and with a
   // live link of family A's own parent (the form), they show none of either family's data, A's included.
-  it.each([["set-up", "setup"], ["reset", "reset"]] as const)("the %s link's page shows a visitor with no session none of either family's data", async (folder, purpose) => {
+  it.each(LINK_PAGES)("the %s link's page shows a visitor with no session none of either family's data", async (folder, purpose) => {
     const Page = await load(`src/app/sign-in/${folder}/[token]/page.tsx`);
     const live = await mintLink(a.identity.parentId, purpose);
     for (const [token, form] of [[unknownToken(), false], [live, true]] as const) {

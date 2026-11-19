@@ -76,8 +76,8 @@ export async function choosePasswordFromLink(raw: { purpose: unknown; token: unk
   const now = o.now ?? new Date();
   const ip = o.ip;
 
-  // Over a limit, the link is still read and its answer thrown away (c); only the audit row differs (one per full
-  // window, rate-limit.ts).
+  // Over a limit, the link is still read and its answer thrown away (c). What differs: the audit row (one per full
+  // window, rate-limit.ts, naming no person), and, with the address over its limit, nothing is counted for the link.
   const byIp: RateLimitTake = ip === null ? "taken" : await takeRateLimit("password_link_ip", ip, now);
   const byLink: RateLimitTake = byIp === "taken" ? await takeRateLimit("password_link_token", hashLinkToken(purpose, token), now) : "refused";
   const verdict = await linkVerdict(purpose, token, { now });

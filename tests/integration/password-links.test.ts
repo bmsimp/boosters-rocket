@@ -134,39 +134,40 @@ describe("set-up and reset links", () => {
 describe("the page a link opens, and its action, refuse every unusable link alike", () => {
   beforeEach(async () => { await resetDb(); mode = "answer"; fromIp(IP); });
 
-  /** Each way a set-up link can't be used, set up from nothing: the token it gives the page and the action. */
-  const CASES: Record<string, () => Promise<{ token: string; purpose: LinkPurpose }>> = {
-    unknown: async () => { await seedAna(); return { token: unknownToken(), purpose: "setup" }; },
-    "the wrong shape": async () => { await seedAna(); return { token: "not-a-token", purpose: "setup" }; },
+  const otherPurpose = (purpose: LinkPurpose): LinkPurpose => (purpose === "setup" ? "reset" : "setup");
+  /**
+   * Each way a link of `purpose` can't be used, set up from nothing: the token it gives that purpose's page and action.
+   * A set-up link for someone with a password is the set-up page's alone; every other way is each page's.
+   */
+  const casesFor = (purpose: LinkPurpose): Record<string, () => Promise<string>> => ({
+    unknown: async () => { await seedAna(); return unknownToken(); },
+    "the wrong shape": async () => { await seedAna(); return "not-a-token"; },
     used: async () => {
-      const { ana } = await seedAna(); const token = await mintLink(ana.id, "setup");
-      await db.update(parentSigninToken).set({ usedAt: new Date() }); return { token, purpose: "setup" };
+      const { ana } = await seedAna(); const token = await mintLink(ana.id, purpose);
+      await db.update(parentSigninToken).set({ usedAt: new Date() }); return token;
     },
-    expired: async () => {
-      const { ana } = await seedAna(); const token = await mintLink(ana.id, "setup", new Date(Date.now() - LINK_LIFE_MS.setup - 1000)); return { token, purpose: "setup" };
-    },
-    "a set-up link for someone with a password": async () => {
-      const { ana } = await seedAna(); await seedPassword(ana.authUserId, OTHER); return { token: await mintLink(ana.id, "setup"), purpose: "setup" };
-    },
-    "a reset token on the set-up page": async () => { const { ana } = await seedAna(); return { token: await mintLink(ana.id, "reset"), purpose: "setup" }; },
-    blocked: async () => { const { ana } = await seedAna({ blocked: true }); return { token: await mintLink(ana.id, "setup"), purpose: "setup" }; },
+    expired: async () => { const { ana } = await seedAna(); return mintLink(ana.id, purpose, new Date(Date.now() - LINK_LIFE_MS[purpose] - 1000)); },
+    ...(purpose === "setup" ? {
+      "a set-up link for someone with a password": async () => { const { ana } = await seedAna(); await seedPassword(ana.authUserId, OTHER); return mintLink(ana.id, "setup"); },
+    } : {}),
+    "the other page's token": async () => { const { ana } = await seedAna(); return mintLink(ana.id, otherPurpose(purpose)); },
+    blocked: async () => { const { ana } = await seedAna({ blocked: true }); return mintLink(ana.id, purpose); },
     "no row that counts": async () => {
       const { ana, row } = await seedAna(); await db.update(guardian).set({ status: "disabled", disabledReason: "removed" }).where(eq(guardian.id, row.id));
-      return { token: await mintLink(ana.id, "setup"), purpose: "setup" };
+      return mintLink(ana.id, purpose);
     },
     "no sign-in account": async () => {
-      const { ana } = await seedAna(); await db.delete(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)); return { token: await mintLink(ana.id, "setup"), purpose: "setup" };
+      const { ana } = await seedAna(); await db.delete(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)); return mintLink(ana.id, purpose);
     },
-    "sign-ins off": async () => {
-      const { ana } = await seedAna(); const token = await mintLink(ana.id, "setup"); await seedParentSettings({ signin: false }); return { token, purpose: "setup" };
-    },
-  };
+    "sign-ins off": async () => { const { ana } = await seedAna(); const token = await mintLink(ana.id, purpose); await seedParentSettings({ signin: false }); return token; },
+  });
+  const PURPOSES = ["setup", "reset"] as const;
 
-  it("shows one message, the same HTML, and gives one answer, whatever the reason; the page writes nothing", async () => {
+  it.each(PURPOSES)("the %s page shows one message, the same HTML, and its action gives one answer, whatever the reason; the page writes nothing", async (purpose) => {
     const pages = new Map<string, string>(), answers = new Map<string, string>();
-    for (const [name, make] of Object.entries(CASES)) {
+    for (const [name, make] of Object.entries(casesFor(purpose))) {
       await resetDb();
-      const { token, purpose } = await make();
+      const token = await make();
       const before = await written();
       const html = await page(purpose, token);
       expect(await written(), `${name}: opening the page wrote something`).toEqual(before);
@@ -182,12 +183,16 @@ describe("the page a link opens, and its action, refuse every unusable link alik
     expect(new Set(answers.values())).toEqual(new Set([JSON.stringify(REFUSED)]));
   }, 120_000);
 
-  it("records each refusal with its reason, for the audit log only", async () => {
-    const reasons: Record<string, string> = { unknown: "unknown", used: "used", expired: "expired", "a set-up link for someone with a password": "has_password",
-      "a reset token on the set-up page": "unknown", blocked: "blocked", "no row that counts": "no_enabled_guardian", "no sign-in account": "no_sign_in_account", "sign-ins off": "signins_off" };
+  it.each(PURPOSES)("the %s action records each refusal with its reason, for the audit log only", async (purpose) => {
+    const reasons: Record<string, string> = { unknown: "unknown", used: "used", expired: "expired", "the other page's token": "unknown", blocked: "blocked",
+      "no row that counts": "no_enabled_guardian", "no sign-in account": "no_sign_in_account", "sign-ins off": "signins_off",
+      ...(purpose === "setup" ? { "a set-up link for someone with a password": "has_password" } : {}) };
+    const cases = casesFor(purpose);
+    // Every way but the bad request has its reason here.
+    expect(Object.keys(cases).filter((name) => name !== "the wrong shape").sort()).toEqual(Object.keys(reasons).sort());
     for (const [name, reason] of Object.entries(reasons)) {
       await resetDb();
-      const { token, purpose } = await CASES[name]!();
+      const token = await cases[name]!();
       expect(await choose(purpose, token)).toEqual(REFUSED);
       const [row] = await audits("parent.password.refused");
       expect(row, name).toMatchObject({ door: "parent", after: { purpose, reason }, ip: IP });
@@ -197,8 +202,7 @@ describe("the page a link opens, and its action, refuse every unusable link alik
     }
     // The wrong shape is a bad request: refused before anything is counted or recorded.
     await resetDb();
-    const { token } = await CASES["the wrong shape"]!();
-    expect(await choose("setup", token)).toEqual(REFUSED);
+    expect(await choose(purpose, await cases["the wrong shape"]!())).toEqual(REFUSED);
     expect(await audits("parent.password.refused")).toEqual([]);
     expect(await db.select().from(rateLimitEvent)).toEqual([]);
   }, 120_000);

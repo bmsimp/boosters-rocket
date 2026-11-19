@@ -96,6 +96,15 @@ const BEFORE_SIGN_IN: Target[] = [
 
 const TARGETS = [...parentTargets(), ...BEFORE_SIGN_IN];
 
+/** The pages under src/app/sign-in, from disk: "set-up/[token]/page.tsx" is "/sign-in/set-up/[token]". */
+const signInRoutes = () => parentRoutes("src/app/sign-in").map((route) => (route === "/" ? "/sign-in" : `/sign-in${route}`));
+
+test("every page under src/app/sign-in is opened here", () => {
+  const labels = BEFORE_SIGN_IN.map((t) => t.label);
+  const missing = signInRoutes().filter((route) => !labels.some((l) => l === route || l.startsWith(`${route} `) || l.startsWith(`${route},`)));
+  expect(missing, "A page a visitor reaches before signing in is checked here: add it to BEFORE_SIGN_IN, labelled with its route.").toEqual([]);
+});
+
 test.skip(({ viewport }) => (viewport?.width ?? 0) < 760, "one pass, in the desktop project, at its own widths: the phone project would repeat it");
 test.describe.configure({ timeout: 120_000 });
 test.afterAll(async () => { await removeZeldaLinks(sql); await sql.end(); });
