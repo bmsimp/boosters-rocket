@@ -400,7 +400,11 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect((await inactivate("20", await stampFor("20"), op)).result).toMatchObject({ ok: true });
       expect(sent().map((b) => b.Id)).toEqual(["12", "21", "20"]);
       expect(await studentRow(leo)).toMatchObject({ active: true, familyId: rivera });
+      // His link is left with the version the portal last aligned with: the step changed no record of his, so the link
+      // never claims QuickBooks' inactive version for a record that is still active.
+      expect((await studentLinkOf("12"))!.syncedToken).toBe("0");
       expect((await auditsOf("roster.customer.deactivate")).find((a) => a.targetId === "12")!.after).not.toHaveProperty("appRecord");
+      expect((await auditsOf("roster.customer.deactivate")).find((a) => a.targetId === "12")!.after).not.toHaveProperty("linkVersion");
       expect(await familyRow(await recordOfCustomer("20", "family"))).toMatchObject({ active: false });
     });
 
@@ -787,9 +791,8 @@ describe("what QuickBooks shows of each record, read before anything is sent, an
       { Id: "12", SyncToken: "3", sparse: true, Active: false }, { Id: "10", SyncToken: "0", sparse: true, Active: false }]);
     expect((await studentLinkOf("12"))!.syncedToken).toBe("4");
     expect((await auditsOf("roster.customer.deactivate")).find((a) => a.targetId === "12")!.after).toMatchObject({ resent: "stale" });
-    // A Parent customer alone keeps its page's version: one QuickBooks has moved on from is read again and shown.
-    const one = await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op);
-    expect(one).toMatchObject({ ok: true });
+    // A Parent customer alone keeps its page's version (Mei, outside Rivera's cover, still active): one QuickBooks has
+    // moved on from is read again and shown.
     stub.customers.find((c) => c.Id === "21")!.SyncToken = "5";
     expect(await askRosterWrite({ op: "deactivate", qboId: "21", syncToken: "0" }, tag, op)).toMatchObject({ ok: false, errors: [WRITE_COPY.changed], current: { name: "Mei Chen" } });
   });

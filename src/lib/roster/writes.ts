@@ -662,7 +662,7 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
         if (appRecord?.kind === "student" && "linked" in appRecord) {
           await replaceRefusedCreates(tx, asAppStudentId(appRecord.studentId), { op: "create", customerQboId: targetId, ...(o.queueId ? { queueId: o.queueId } : {}) }, o);
         }
-        aligned = await alignAfterWrite(tx, w, o.realmId, answerToken);
+        aligned = await alignAfterWrite(tx, w, o.realmId, answerToken, o.filed);
         if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
       } else if (ours) {
         // The answer wasn't the record asked about: the roster is read again rather than guessed at, and the queue finds
@@ -702,11 +702,12 @@ const linkKindOf = (role: RosterWrite["role"]): "family" | "student" | null => (
  * in the caller's transaction, which holds the roster lock exclusively (as every link write does). `onlyIf`: only
  * while the link holds that version. Whether it changed anything.
  */
-async function alignLink(tx: Tx, kind: "family" | "student", customerId: string, realmId: string, token: string | null, onlyIf?: string): Promise<boolean> {
+async function alignLink(tx: Tx, kind: "family" | "student", customerId: string, realmId: string, token: string | null, onlyIf?: string, recordId?: AppFamilyId | AppStudentId): Promise<boolean> {
   if (token === null || !/^\d{1,20}$/.test(token)) return false;
   const rows = await tx.update(accountingLink).set({ syncedToken: token, syncedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), eq(accountingLink.customerId, customerId),
       kind === "family" ? isNotNull(accountingLink.familyId) : isNotNull(accountingLink.studentId),
+      recordId === undefined ? undefined : kind === "family" ? eq(accountingLink.familyId, recordId as AppFamilyId) : eq(accountingLink.studentId, recordId as AppStudentId),
       onlyIf === undefined ? undefined : eq(accountingLink.syncedToken, onlyIf))).returning({ id: accountingLink.id });
   return rows.length > 0;
 }
@@ -721,12 +722,22 @@ async function alignLink(tx: Tx, kind: "family" | "student", customerId: string,
  * action's last step when the version it just read differs (one that happens to
  * equal the link's is a send that carried the link's own version, by the same rule); a parent's change has no link. A
  * create's link takes it in changeOwnRecord(). The queue aligns a change it finds made only when it was sent.
+ * A make-inactive aligns only the link of the record it is filed under (`filed`), the record changeOwnRecord() makes
+ * inactive with it: a step of the family action for a student QuickBooks has under this family whose record is in
+ * another family is filed under no student, leaves that record active, and so leaves its link alone too, so the link
+ * never claims a version whose Active flag differs from its record's.
  */
-export async function alignAfterWrite(tx: Tx, w: RosterWrite, realmId: string, token: string | null): Promise<boolean> {
+export async function alignAfterWrite(tx: Tx, w: RosterWrite, realmId: string, token: string | null, filed?: Filed): Promise<boolean> {
   if (w.op === "create") return false;
   const kind = linkKindOf(w.role);
   if (kind === null) return false;
-  return alignLink(tx, kind, w.qboId, realmId, token, w.checked ? undefined : w.syncToken);
+  let recordId: AppFamilyId | AppStudentId | undefined;
+  if (w.op === "deactivate") {
+    const own = kind === "student" ? filed?.studentId : filed?.familyId;
+    if (own === null || own === undefined) return false;
+    recordId = own;
+  }
+  return alignLink(tx, kind, w.qboId, realmId, token, w.checked ? undefined : w.syncToken, recordId);
 }
 
 /** Puts a write that may go through later on the queue, audited, in one transaction. */

@@ -262,7 +262,7 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Fou
       if (appRecord?.kind === "student" && "linked" in appRecord) {
         await replaceRefusedCreates(tx, asAppStudentId(appRecord.studentId), { op: "create", customerQboId: qboId, queueId: item.id }, { actor: WORKER_ACTOR, ip: null });
       }
-      if (item.sent) await alignAfterWrite(tx, w, item.realmId, row?.syncToken ?? null);
+      if (item.sent) await alignAfterWrite(tx, w, item.realmId, row?.syncToken ?? null, { familyId: item.familyId, studentId: item.studentId });
     }
     await markDone(item, "found", qboId, item.tries, tx, appRecord);
     return "done";
