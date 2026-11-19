@@ -53,7 +53,7 @@ describe("what the roster pages load", () => {
     expect(page.roster.families.map((f) => f.customer.displayName)).toEqual(["Chen Family", "Old Family", "Rivera Family"]);
     expect(page.roster.outside).toBe(2);
     expect(page.attention.map((a) => `${a.rule}:${a.qboId ?? a.name}`).sort()).toEqual([
-      "family_no_signin:20", "family_no_student:20", "no_email:21", "not_under_family:50", "signin_unknown:Ana Rivera",
+      "family_no_student:20", "no_email:21", "not_under_family:50", "signin_unknown:Ana Rivera",
     ]);
     // Each sign-in by its membership's family record, with the customer that record is linked to.
     expect(page.signIns.map((s) => [s.customerQboId, s.status]).sort()).toEqual([["10", "invited"], ["POC-FAMILY-1", "active"]]);

@@ -122,7 +122,7 @@ const ROUTE_HANDLERS: Record<string, string> = {
  */
 const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string }[] = [
   { module: "@/lib/roster/queries", names: "all", why: "loadRosterPage(), rosterFamilies() and rosterEntry() load every family in the club" },
-  { module: "@/lib/parents/directory", names: ["listPeople", "getPerson", "heldReview", "familySignins"], why: "they return other families' names, or a block reason (see the note at the top of the module)" },
+  { module: "@/lib/parents/directory", names: ["listPeople", "getPerson", "familySignins"], why: "they return other families' names, a family's guardians, or a block reason (see the note at the top of the module)" },
   { module: "@/lib/seasons/setup", names: "all", why: "a requirement's chosen list names other families and students" },
   { module: "@/lib/seasons/subjects", names: "all", why: "loadSeasonFamilies() loads every family in the club" },
   { module: "@/lib/seasons/staff-progress", names: "all", why: "it reads every family's ticks and waivers, with the reasons" },
@@ -443,7 +443,7 @@ describe("parent code never imports the staff-only queries", () => {
   it.each([
     ["a named import", `import { listPeople } from "${DIRECTORY}";`, "takes listPeople from"],
     ["a named import under another name", `import { accessWords, getPerson as person } from "${DIRECTORY}";`, "takes getPerson from"],
-    ["a named import over several lines", `import {\n  accessWords,\n  heldReview,\n  familySignins,\n} from "${DIRECTORY}";`, "takes heldReview, familySignins from"],
+    ["a named import over several lines", `import {\n  accessWords,\n  getPerson,\n  familySignins,\n} from "${DIRECTORY}";`, "takes getPerson, familySignins from"],
     ["a named import after a line with no semicolon", `export const dynamic = "force-dynamic"\nimport { listPeople } from '${DIRECTORY}'`, "takes listPeople from"],
     ["a namespace import", `import * as dir from "${DIRECTORY}";\nconst people = await dir.listPeople();`, "takes the whole of"],
     ["a default import", `import dir from "${DIRECTORY}";`, "takes the whole of"],

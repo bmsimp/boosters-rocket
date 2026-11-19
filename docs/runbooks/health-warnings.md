@@ -36,11 +36,12 @@ installation with. `docker compose ps` shows what is running, and `docker compos
 - **"Needs attention"**, with one of these notes:
   - "The QuickBooks connection couldn't be refreshed" or "expires within 30 days": reconnect the same company.
   - "The last roster refresh failed": the note gives Intuit's reason. If it repeats, check that the Intuit app's keys
-    are still valid on the developer site, then reconnect. Three reasons are the portal's own, not Intuit's: "The parent
-    sign-ins couldn't be brought up to date" (`reconcile_failed`), "The portal's own family and student records couldn't
-    be brought up to date" (`app_records_failed`) and "The forms and volunteer places of a student who
-    moved to another family couldn't be brought up to date" (`follow_up_failed`). Whichever it is, the roster, and every
-    parent's access, stay as they were until a refresh succeeds; press **Refresh** on the Roster page once. If it fails
+    are still valid on the developer site, then reconnect. Two reasons are the portal's own, not Intuit's: "The portal's
+    own family and student records couldn't be brought up to date" (`app_records_failed`) and "The forms and volunteer
+    places of a student who moved to another family couldn't be brought up to date" (`follow_up_failed`). (An older
+    run may still say "The parent sign-ins couldn't be brought up to date", `reconcile_failed`: a refresh no longer
+    decides sign-ins, so it can't happen again.) Whichever it is, the roster and the family records stay as they were
+    until a refresh succeeds, and no refresh changes who can sign in; press **Refresh** on the Roster page once. If it fails
     the same way again, that is a fault in the portal for whoever maintains it.
   - "The roster was read from another QuickBooks company than the one connected now, so it wasn't read. Disconnect
     QuickBooks, then connect the company the roster was read from." (`roster_company`): the connection holds a different
@@ -164,8 +165,8 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 ## Parent sign-ins
 
 - **"Off"** / **"Not switched on yet."** No parent can sign in. It is a choice: **Settings**, **Parent sign-ins**
-  switches them on (once QuickBooks and mail work). Reconnecting the same QuickBooks company leaves them as they are; a
-  different company can't be connected until the mapping screen ships.
+  switches them on (once outgoing mail works: QuickBooks plays no part in who can sign in). Reconnecting the same
+  QuickBooks company leaves them as they are; a different company can't be connected until the mapping screen ships.
 - **"Needs attention"**, with "The latest sign-ins have no address: the proxy in front of the portal doesn't send the
   header ...". `CLIENT_IP_HEADER` in `deploy/.env` names a header your proxy doesn't set. Find the one it does set
   ([a proxy of your own](first-install.md#a-proxy-of-your-own)), put it in `.env`, and `docker compose up -d app`.

@@ -5,7 +5,7 @@
 // family alone: no other family is named, and no staff note shown. Which requirements and families, and what each says,
 // are the pure rules of ./due-reminder-rules.ts.
 import "server-only";
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { env } from "@/env";
 import { db, type Tx } from "@/lib/db/client";
 import { guardian, parent, requirement, requirementReminder, season, seasonStep, setting } from "@/lib/db/schema";
@@ -16,6 +16,7 @@ import { mailWorking } from "@/lib/mail/settings";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { moneyRows } from "@/lib/money/stored";
 import { getParentSettings } from "@/lib/parents/settings";
+import { guardianRowCounts, studentsRuleInForce } from "@/lib/parents/sessions";
 import { getClubSettings } from "@/lib/settings/club";
 import { dateWords } from "@/lib/volunteer/clock";
 import { checklistVerdict, dueToday, owedReminders, paymentVerdict, type DueKind, type Verdict } from "./due-reminder-rules";
@@ -131,8 +132,8 @@ async function owedToday(due: { kind: DueKind; days: number; dueOn: string }[]) 
 /**
  * One wake's due-date reminders, from 9:00 on the club's clock, while parent sign-ins and welcome emails are both
  * switched on (the Admin's sign that the club is ready to email families) and outgoing mail works. At most
- * DUE_REMINDER_BATCH emails a wake, each claimed before it is sent, to the family's guardians with an open link who
- * aren't blocked; each wake that sent or failed something is audited with the counts, never an address.
+ * DUE_REMINDER_BATCH emails a wake, each claimed before it is sent, to the family's guardians whose row counts at the
+ * gate (guardianRowCounts()) and who aren't blocked; each wake that sent or failed something is audited with the counts, never an address.
  */
 export async function sendDueReminders(now: Date = new Date()): Promise<{ sent: number; failed: number }> {
   const none = { sent: 0, failed: 0 };
@@ -141,9 +142,10 @@ export async function sendDueReminders(now: Date = new Date()): Promise<{ sent: 
   const day = dueToday((await getClubSettings()).timeZone, now);
   if (!day) return none;
   const owed = await owedToday(day.due);
-  // Each family's guardians by its membership rows (guardian.family_id, the app's own family).
+  // Each family's guardians by its membership rows (guardian.family_id, the app's own family), only those the gate
+  // would let in: a reminder asks them to sign in.
   const people = owed.length === 0 ? [] : await db.select({ familyId: guardian.familyId, parentId: parent.id, email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyId, [...new Set(owed.map((o) => o.familyId))]), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+    .where(and(inArray(guardian.familyId, [...new Set(owed.map((o) => o.familyId))]), guardianRowCounts(await studentsRuleInForce()), eq(parent.blocked, false)))
     .orderBy(asc(guardian.familyId), asc(parent.createdAt), asc(parent.id));
   const emails = owed.flatMap((o) => people.filter((p) => p.familyId === o.familyId).map((p) => ({ ...o, parentId: p.parentId, email: p.email })));
   const done = emails.length === 0 ? new Set<string>() : await taken(day.due.map((d) => d.dueOn), now);

@@ -1,6 +1,6 @@
-// Closing one membership: a guardian row stops letting its person sign in for its family. The reconcile calls it for
-// every link it closes (src/lib/parents/reconcile.ts); stage 3 of the app-owned families spec gives staff a "remove a
-// guardian" that will call it too. It is not for parent code. It changes nothing but the row, the person's sessions,
+// Closing one membership: a guardian row stops letting its person sign in for its family. Since the reconcile that
+// closed rows for what QuickBooks held went (stage 3 of the app-owned families spec), nothing calls it yet: staff's
+// "remove a guardian" (stage 3's slice 7b) is to. It is not for parent code. It changes nothing but the row, the person's sessions,
 // the family's forms still waiting on them and the audit row, all in the caller's transaction.
 import { eq, and, ne } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
@@ -18,11 +18,11 @@ export type CloseMembership = {
   actor: Actor;
   /** Drops the row's `source_qbo_id` too, so another row can carry it; the audit row keeps what it was. */
   dropSource?: boolean;
-  /** Added to the audit row's `after`, as the reconcile's rows carry it. */
+  /** Added to the audit row's `after`: what led to the close. */
   cause?: string;
   /**
-   * Whether the person still has an open membership once this one is closed. The reconcile answers from the rows it
-   * holds locked; left out, the database is asked, in the caller's transaction.
+   * Whether the person still has an open membership once this one is closed, for a caller that holds the person's rows
+   * locked and answers from them; left out, the database is asked, in the caller's transaction.
    */
   stillOpenElsewhere?: () => boolean;
 };

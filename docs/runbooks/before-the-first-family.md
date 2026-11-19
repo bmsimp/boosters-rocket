@@ -69,12 +69,14 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
    `docker exec booster-rocket-db-1 psql -U booster -d booster -c "drop database booster_restore_check"`.
    **Pass:** it says `Restored ... (<number> tables ...)`. **If not:** its message and exit code (2 refused, 3 the
    server couldn't be reached, 4 the restore failed and nothing was changed).
-8. **Run checks 18 to 24** of [the proof of concept's checklist](poc-linuxdev.md#9-the-test-checklist): parent sign-ins
-   from QuickBooks, an address under two families, an inactive parent, blocking and welcome emails. They need edits in
-   the Intuit sandbox and a mailbox you can read.
+8. **Run checks 18 to 24** of [the proof of concept's checklist](poc-linuxdev.md#9-the-test-checklist): who can sign
+   in, an edit in QuickBooks that changes no sign-in, blocking and welcome emails. They need edits in the Intuit sandbox
+   and a mailbox you can read. Since the portal keeps its own list of each family's guardians, a parent in QuickBooks
+   is given no sign-in by it; until staff can add a guardian in the portal (the next part of the work), the host's
+   guardians are the ones it already holds.
    **Pass:** each step does what its line says; add a row for each to that runbook's Results table.
    **If not:** note the step and what you saw; that runbook's Troubleshooting table covers the usual causes.
-   **Check 25, a second sandbox company, and the match review that follows it, wait for the mapping screen:** until
+   **Check 25, a second sandbox company, waits for the mapping screen:** until
    families can be linked to another company's customers, the portal refuses any company but the one its families were
    read from ([reconnecting QuickBooks](quickbooks-reconnect.md#connecting-a-different-company)), so the host stays on
    the first sandbox company, the one part 2 needs. Don't try it: it is refused and changes nothing, and the roster
@@ -402,7 +404,7 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    that didn't match the runbook. **If not:** answer Intuit's questions by email; the runbook's "true answers" are a
    start.
 
-## 6. Connect the club's real books, and read the clean-up preview
+## 6. Connect the club's real books
 
 1. **Connect the real books** by [Intuit, part 4](intuit.md#4-connect-the-clubs-real-books), as the first company of
    the installation families will use. That installation must never have read a sandbox company's customers: until the
@@ -415,14 +417,11 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    **Run the check**. Against the real books it only reads.
    **Pass:** every reading row answers as the portal expects. **If not:** as in part 2; don't switch parent sign-ins on
    until it does.
-3. **Read the parent sign-ins clean-up preview:** Settings, Parent sign-ins, **Set up**, Step 1, "What would happen".
-   **Pass:** the number who could sign in looks right, and you have read each list: addresses under more than one
-   family (held until someone answers on Parents), no email address, more than one address on a person's record, nobody
-   could sign in. Fix what you can in QuickBooks, **Refresh now** on the Roster, and open the preview again; the rest
-   you know about. Against the real books, each problem is a table under a heading with its count, and a long one is
-   folded behind **Show all**; it should read well at the club's size.
-   **If not:** a family you expected and don't see is a QuickBooks record to check: its type, its parent customer, an
-   email address on the parent.
+3. **Read who can sign in:** Settings, Parent sign-ins. Who can sign in is the portal's own list of each family's
+   guardians, not QuickBooks' parents.
+   **Pass:** the number of people and families looks right for the guardians the portal holds, and **Parents** lists
+   each one with their families. **If not:** a guardian you expected and don't see is the portal's to add, not a
+   QuickBooks record to fix.
 4. **The daily read of every family's invoices, at the club's size.** The day after connecting, open Health.
    **Pass:** **Every family's invoices** is "Working" and finished within the day. A run longer than a few minutes
    carries on at the next wake by itself. QuickBooks turning the portal away for asking too often shows as a stop with
@@ -436,15 +435,16 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 
 ## 7. A pilot with a few families
 
-1. **Choose three to five families** who will tell you what confused them. In QuickBooks, check each has a parent
-   customer under the family with its own email address.
-   **Pass:** the preview (part 6, item 3) counts them among those who could sign in.
+1. **Choose three to five families** who will tell you what confused them. Check each has its guardians in the portal,
+   with the email address each signs in with.
+   **Pass:** **Parents** lists each of their guardians, and Settings, Parent sign-ins counts them among those who could
+   sign in.
 2. **Switch parent sign-ins on, and leave welcome emails off:** Settings, Parent sign-ins, **Set up** (or
-   **Change**), step 2, **Switch parent sign-ins on**.
-   **Pass:** the step says "Parent sign-ins are on." No email goes to anyone: every parent with an address in QuickBooks
-   could now sign in, but only those you tell will know to. Scheduled reminders stay off while welcome emails are off;
+   **Change**), step 1, **Switch parent sign-ins on**.
+   **Pass:** the step says "Parent sign-ins are on." No email goes to anyone: every guardian the portal holds could now
+   sign in, but only those you tell will know to. Scheduled reminders stay off while welcome emails are off;
    don't press **Remind now** on Signed forms during the pilot: it emails every guardian still to sign that form.
-   **If not:** the step lists what is missing first (QuickBooks, mail).
+   **If not:** the step lists what is missing first (working mail).
 3. **Tell the pilot families** the portal's address and to sign in with their email. Ask each to, on their own phone:
    look at Home and Payments, sign a form, sign up for a shift and check in at it, update their details, and try
    Display.
@@ -456,7 +456,7 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
 
 ## 8. Switch welcome emails on
 
-1. **Settings, Parent sign-ins, step 3, "Welcome emails".** Read the sample email and how many people would be emailed
+1. **Settings, Parent sign-ins, step 2, "Welcome emails".** Read the sample email and how many people would be emailed
    now, then **Switch welcome emails on**.
    **Pass:** they go out a few each minute; Health's mail line stays "Working". From now on, scheduled form reminders,
    volunteer due-date nudges and the payment and checklist reminders also go, from 9:00 club time. **If not:** **Switch welcome emails off** stops the rest
@@ -476,7 +476,9 @@ work another. Any time before the pilot.
    The lead's decision, with no exception for an installation that holds no season records yet.
 4. The cancelling cut-off for a shift is 48 hours before it; a staff tick no longer counts for volunteering; a declined
    form still gets reminders.
-5. A parent in two families can't change their own sign-in email (they ask the club).
+5. A parent in two families can't change their own sign-in email (they ask the club). Until the staff email change
+   ships (open question 8 of the app-owned families spec) the club can't change it for them either: a change made in
+   QuickBooks no longer changes anyone's sign-in address.
 6. The staff menu's groups (Families, Season, Money, Admin, with Reconciliation under Money and Settings as one entry)
    and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); setup asks for the club before the first
    Admin; a role saved from the checklist no longer takes up new permissions by itself.

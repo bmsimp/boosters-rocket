@@ -13,7 +13,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { currencyOf, formatMoney, toCents } from "@/lib/money/cents";
 import { normalizeEmail } from "@/lib/email";
 import { lockRosterAs, rosterTagOf, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
-import { reconcileAccess } from "@/lib/parents/reconcile";
+import { keepAppRecordsInStep } from "@/lib/families/in-step";
 import { appRecordsAudit, changedAppRecords, noAppRecordChanges } from "@/lib/families/changes";
 import { familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
@@ -228,7 +228,7 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       let email: string | null = null;
       if (ask.role === "parent") {
         email = normalizeEmail(ask.email ?? "");
-        if (email === null || email.length > 100) return no("Enter the parent's own email address: they sign in to the portal with it.");
+        if (email === null || email.length > 100) return no("Enter the parent's own email address: it goes on their record in QuickBooks.");
       }
       const name = checkName(ask.name);
       if (!name.ok) return no(name.error);
@@ -344,8 +344,9 @@ export async function afterStudentMoved(tx: Tx, move: { studentQboId: string; fr
  * What follows a write QuickBooks said yes to (spec 6.1: QuickBooks first, then the cache from its answer). In one
  * transaction that holds the roster lock: when the cache is still the company the write was sent to, the customer is
  * stored from the answer (only if newer), a moved student's follow-ups run, a family made inactive asks the worker for
- * a roster refresh (QuickBooks may have changed the customers under it), and the reconcile brings sign-ins in line (a
- * new parent can sign in at once; an inactive family, student or parent ends what the rules say). The write is audited
+ * a roster refresh (QuickBooks may have changed the customers under it), and the app's own records are brought into
+ * step with the cache (keepAppRecordsInStep()). Who may sign in is the app's own guardian rows: a write to QuickBooks
+ * opens or closes none of them. The write is audited
  * with before and after, whether or not the cache could take it. `inside` runs last, in the same transaction. When
  * that transaction fails, the change is still audited (code cache_failed) and a refresh asked for; `cached` says so.
  */
@@ -364,7 +365,7 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
         await upsertFromAnswer(tx, answer, await getShape(tx));
         if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
         if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
-        ({ appRecords } = await reconcileAccess(tx, { cause }));
+        appRecords = await keepAppRecordsInStep(tx);
       } else if (ours) {
         await askForRosterRefresh(tx); refreshAsked = true; // the answer wasn't the record asked about: read the roster again rather than guess
       }
@@ -423,7 +424,7 @@ async function readAgain(qboId: string, realmId: string, o: { actor: Actor; ip: 
     if (!(await lockRosterAs(tx, rosterTagOf(realmId)))) return null;
     const shape = await getShape(tx);
     const { stored, took } = await upsertFromAnswer(tx, answer, shape);
-    const { appRecords } = await reconcileAccess(tx, { cause: `roster.read_again#${qboId}` });
+    const appRecords = await keepAppRecordsInStep(tx);
     if (took || changedAppRecords(appRecords)) {
       await writeAudit({ actor: o.actor, action: "roster.customer.read_again", permission: o.permission, ip: o.ip, targetType: "qbo_customer", targetId: qboId,
         after: { cached: took, syncToken: stored?.syncToken ?? null, ...appRecordsAudit(appRecords) } }, tx);
@@ -664,7 +665,7 @@ export type FamilyInactiveAnswer = { result: WriteResult; changed: boolean };
  *      read stops it before anything is sent when a version there is newer than the one the page showed, and passes
  *      over anyone it shows already inactive;
  *   3. each made inactive, deepest first and the family last, each through sendWrite() and applyWritten(): QuickBooks
- *      first, then the cache from its answer under the roster lock, with the reconcile, its follow-ups and its audit row.
+ *      first, then the cache from its answer under the roster lock, with the records' step, its follow-ups and its audit row.
  *      The family's own last step is the one exception to carrying the version the page showed: the family is read
  *      once more after its members' writes, and sent with the version just read, since QuickBooks may raise it when a
  *      customer under it changes. Its version was the page's when the action began (step 2), the write sets only the

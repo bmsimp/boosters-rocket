@@ -36,6 +36,14 @@ export function shapeTypeIds(s: MembershipShape | null): string[] {
   return s.kind === "flat" ? s.memberTypeIds : [s.familyTypeId, s.studentTypeId, s.parentTypeId].filter((t): t is string => t !== null);
 }
 
+/**
+ * Whether a shape lets a family have students: a layered one that names a student type. Only then does the app hold
+ * active student records (src/lib/families/plan.ts makes them from that type alone), so only then can the Admin's
+ * "Families with no active student" mean anything other than "nobody signs in": the rule is in force only then
+ * (studentsRuleInForce(), src/lib/parents/sessions.ts), and is switched on only then (src/lib/parents/switches.ts).
+ */
+export const shapeNamesStudents = (s: MembershipShape | null): boolean => s?.kind === "layered" && s.studentTypeId !== null;
+
 /** Named types that aren't in QuickBooks' list any more: the shape is broken until an Admin chooses again. */
 export function missingTypes(s: MembershipShape, types: TypeRow[]): string[] {
   const known = new Set(types.map((t) => t.qboId));
@@ -94,7 +102,9 @@ export function describeShape(s: MembershipShape, types: TypeRow[]): string {
 /**
  * Saves the shape and, in the same transaction, drops email and phone from every customer the new shape doesn't name
  * (spec §1 Rules), forgets what each family was last seen to owe (`family_money`) and brings the app's own records in
- * line with the new shape (keepAppRecordsInStep()). It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
+ * line with the new shape (keepAppRecordsInStep()). It leaves the parents' settings alone: "Families with no active
+ * student" is simply not in force while the shape names no students (studentsRuleInForce(), src/lib/parents/sessions.ts).
+ * It waits for a running refresh first, and no refresh starts until it commits. The caller still starts
  * a refresh afterward to bring the rest of the cache up to date. A shape `getShape` wouldn't read back is refused (it
  * throws): saved, it would show as "no shape" while its audit row said otherwise.
  */

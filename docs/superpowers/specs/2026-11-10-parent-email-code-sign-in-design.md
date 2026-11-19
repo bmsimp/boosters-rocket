@@ -6,6 +6,8 @@
 in first-run setup (`2026-11-08-first-run-setup-design.md`) and the parent half of certificate
 sign-in (`2026-11-09-certificate-credentials-design.md`).
 
+**Changed since** (2026-11-19, stage 3 slice 7a of `2026-11-18-app-owned-families-design.md`): the person and their guardian rows are no longer made, moved or closed from QuickBooks; a code goes to a person with a guardian row that counts (open, in an active family record, and with an active student while the club asks for one), and a confirmed change of sign-in email changes the person's own address after QuickBooks takes it. The code, the session, the chooser and the welcome are as this spec says.
+
 ## Why
 
 The v1 design signed parents in through a Microsoft Entra External ID tenant, using email one-time

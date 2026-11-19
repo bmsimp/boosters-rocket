@@ -23,7 +23,7 @@ open one is also in `docs/ui-backlog.md`). "Both" means 390 and 1440.
 
 The journeys the browser suite already proved piece by piece stay where they are: the email change
 (`family-email.spec.ts`, which needs parent sign-ins on and Zelda in one family, so it runs at phone width only),
-parent sign-ins switched on and a held address decided (`parents.spec.ts`), the install hint and the service worker
+parent sign-ins switched on (`parents.spec.ts`), the install hint and the service worker
 (`pwa.spec.ts`), the grouped menu by keyboard (`staff-menu.spec.ts`), setup reopened (`setup.spec.ts`).
 
 ### Running the forms walk against the local Documenso
@@ -74,7 +74,7 @@ On 2026-11-16 it ended `SIGNED` at both 390 and 1440.
 | Setup, the first Admin | 1440 | "Save name and email" says nothing when it has worked; the sign-in button simply appears under it. | **Fixed** (`d78381e`, `slice/finish`): "Saved. Now sign in below as the Admin." in a done notice |
 | Staff home | 1440 | The two Today lines put "Open Reconciliation" at the end of one line and under the words on the next, only because one description was longer. | **Fixed** (`44b0068`) |
 | A family's roster page | Both | A dead end: reading the same family's money, season or volunteering credit meant going back to another list and finding it again. | **Fixed** (`d92f4e2`): "More about this family" links each, for staff who may open it |
-| Parents | Both | "To review (0)" before parent sign-ins are on, while Reconciliation's "Needs attention" already names Sam's address under two families and says someone with Parents must decide. It does say "once parent sign-ins are on", but a reader goes to Parents and finds nothing to decide. | **Fixed** (`691c878`, `slice/finish`): before sign-ins are on, To review says an address under more than one family is held and comes up there once they are |
+| Parents | Both | "To review (0)" before parent sign-ins are on, while Reconciliation's "Needs attention" already names Sam's address under two families and says someone with Parents must decide. It does say "once parent sign-ins are on", but a reader goes to Parents and finds nothing to decide. | **Fixed** (`691c878`, `slice/finish`): before sign-ins are on, To review says an address under more than one family is held and comes up there once they are. **Gone since** stage 3's slice 7a of the app-owned families work: held addresses, To review and that Needs attention item were retired, and a guardian in two families simply belongs to both |
 | Seasons, a new season | Both | "Start with no steps" answered on the Seasons list and left the new season to be found in the table before a step could be added. | **Fixed** (`1d89993`): it goes on to the new season's page, as a new volunteer event does |
 | A requirement of each kind | Both | Worked: checklist, form, payment and volunteering each added. A payment requirement is added with no item: it is chosen on the requirement's page afterwards, and nothing on the step says one is still needed. | **Fixed** (`2dbd5b0`, `slice/finish`): the step's line reads "No QuickBooks product or service chosen yet" until one is |
 | Tick and waive | Both | Worked: the waiver's reason is shown to staff and in the audit log; the parent's Season page says "Waived" and never the reason. | Nothing to fix |

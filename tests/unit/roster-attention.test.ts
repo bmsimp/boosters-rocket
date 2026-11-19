@@ -69,15 +69,12 @@ describe("Needs attention", () => {
     // A family the app keeps with no QuickBooks customer (none exists until families are made in the portal) is nothing to tidy in QuickBooks.
     expect(rules(tidy, layered, [{ ...signIn("10"), customerQboId: null }])).toEqual([]);
   });
-  it("an inactive family that still has a sign-in that isn't disabled", () => {
+  // Nobody can enter an inactive family (the gate), and nothing closes its rows any more, so its open sign-ins ask
+  // nothing of staff: a rule for them could never be cleared.
+  it("an inactive family's sign-ins, open or closed, are not listed", () => {
     const company = [c("40", "Old Family", "1", null, { active: false })];
-    expect(rules(company, layered, [signIn("40", "active")])).toEqual(["inactive_with_signin:40"]);
-    expect(rules(company, layered, [signIn("40", "invited")])).toEqual(["inactive_with_signin:40"]);
-    expect(rules(company, layered, [signIn("40", "disabled")])).toEqual([]);
-  });
-  it("an inactive family with two live sign-ins is listed once", () => {
-    const company = [c("40", "Old Family", "1", null, { active: false })];
-    expect(rules(company, layered, [signIn("40", "active", "a@example.com"), signIn("40", "invited", "b@example.com")])).toEqual(["inactive_with_signin:40"]);
+    for (const status of ["active", "invited", "disabled"] as const) expect(rules(company, layered, [signIn("40", status)]), status).toEqual([]);
+    expect(rules(company, layered, [signIn("40", "active", "a@example.com"), signIn("40", "invited", "b@example.com")])).toEqual([]);
   });
   it("a closed sign-in on an unknown QuickBooks ID is not listed: nobody can sign in with it and nothing would clear it", () => {
     expect(rules(tidy, layered, [signIn("POC-FAMILY-1", "disabled")])).toEqual([]);
@@ -97,9 +94,9 @@ describe("Needs attention", () => {
   it("an inactive family that is a sub-customer is not listed as a sub-customer", () => {
     expect(rules([...tidy, c("80", "Old Nested", "1", "10", { active: false })])).toEqual([]);
   });
-  it("flat: an inactive member with a live sign-in is listed, and an unknown sign-in says member", () => {
+  it("flat: an inactive member with a live sign-in is not listed, and an unknown sign-in says member", () => {
     const flat: Parameters<typeof buildRoster>[0] = { kind: "flat", memberTypeIds: ["3"] };
-    expect(rules([c("12", "Leo", "3", null, { active: false })], flat, [signIn("12", "active")])).toEqual(["inactive_with_signin:12"]);
+    expect(rules([c("12", "Leo", "3", null, { active: false })], flat, [signIn("12", "active")])).toEqual([]);
     const [item] = needsAttention(buildRoster(flat, []), flat, [signIn("99")]);
     expect(item!.detail).toContain("isn't a member in QuickBooks");
     expect(item!.detail).not.toContain("family");

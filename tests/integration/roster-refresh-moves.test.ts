@@ -16,7 +16,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password",
 
 import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, formWithdrawal, guardian, jobRun, parent, parentAuthUser, qboCustomer, setting, signatureConsent, signedFormEvidence, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, formWithdrawal, guardian, jobRun, parent, qboCustomer, setting, signatureConsent, signedFormEvidence, volunteerCredit, volunteerSignup, writeQueue } from "@/lib/db/schema";
 import * as volunteerMoved from "@/lib/volunteer/moved-student";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
@@ -35,7 +35,7 @@ import { connectForms, formSetting, requestByCustomer, seedConsent, seedEvidence
 import { identityNow } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
 import { seedCheckIn, seedEvent, seedSignup } from "../helpers/volunteer";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedBuyout, seedBuyoutRequirement, queueOf } from "../helpers/buyouts";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -63,8 +63,8 @@ const moveInQuickBooks = (id: string, toQboId: string | null, o: { active?: bool
 };
 /**
  * A guardian in a family, seeded before the roster is read. Their session is made only after the read (signedInNow()):
- * a session names the app's own family record, which the read's reconcile makes and gives their row, and the gate lets
- * them in only once that record is active.
+ * a session names the app's own family record, which the read's records' step makes and gives their row, and the gate
+ * lets them in only once that record is active.
  */
 async function guardianBeforeTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
   const person = await seedParent({ name: o.name, email: o.email, welcomedAt: new Date() });
@@ -79,6 +79,11 @@ const followed = () => auditsOf("roster.student.move.followed");
 const lastRun = async () => (await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1))[0]!;
 const signup = async (id: string) => (await db.select().from(volunteerSignup).where(eq(volunteerSignup.id, id)))[0]!;
 const anaId = async () => (await db.select().from(parent).where(eq(parent.email, "ana@example.com")))[0]!.id;
+/**
+ * Ana, the Rivera family's guardian, as the portal holds her: a roster read makes no sign-in from QuickBooks (stage 3's
+ * slice 7a), so she is seeded before the read, whose records' step puts her row in the Rivera family's record.
+ */
+const anaBeforeTheRead = () => guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
 
 /** Leo, under the Rivera family, with an open form, a signed one with its evidence, a place still to come, and one done and checked in. */
 async function seedLeo() {
@@ -108,7 +113,7 @@ beforeEach(async () => {
 });
 
 describe("a student QuickBooks moved to another family, read by a refresh", () => {
-  beforeEach(async () => { await connectRoster(stub); });
+  beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
 
   it("is followed as a move made in the portal: the forms and the place still to come follow, the place done stays, once", async () => {
     const leo = await seedLeo();
@@ -349,6 +354,7 @@ describe("not followed when the cache a refresh replaces isn't this company's", 
   // anything (open question 18), so it clears nothing and follows nothing. (The rule that a cleared cache has no move to
   // follow stays in the refresh for when stage 4 lets a company change again.)
   it("a refresh over another company's cache is refused, and follows nothing", async () => {
+    await anaBeforeTheRead();
     await connectRoster(stub);
     await seedLeo();
     await db.transaction((tx) => setRosterSource(tx, "9130000000000999"));
@@ -363,7 +369,7 @@ describe("not followed when the cache a refresh replaces isn't this company's", 
 });
 
 describe("buy-outs of a student QuickBooks moved are the daily check's, and never voided twice", () => {
-  beforeEach(async () => { await connectRoster(stub); });
+  beforeEach(async () => { await anaBeforeTheRead(); await connectRoster(stub); });
 
   /** A money run that read every family, as the daily check follows it. */
   const moneyRun = () => db.insert(jobRun).values({ job: MONEY_JOB, startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), outcome: "ok", startedBy: "worker" });
@@ -501,14 +507,15 @@ describe("what each family reads after a student QuickBooks moved", () => {
     expect((await signup(leo.coming.id)).cancelledAt).not.toBeNull();
     expect(await followed()).toEqual([expect.objectContaining({ targetId: LEO, after: expect.objectContaining({ fromFamilyQboId: RIVERA, toFamilyQboId: OKAFOR, formsMoved: 1, formsReset: 1, placesGivenUp: 1 }) })]);
 
-    // The new family's guardian reads it as signed, without the old family's guardian or the PDF they signed.
-    // The read itself made the new family's guardian, from its parent record (parent sign-ins are on): the person, their
-    // sign-in and their link to the family. They sign in as the portal made them.
-    const [obiPerson] = await db.select().from(parent).where(eq(parent.email, "obi@example.com"));
-    expect(obiPerson).toBeTruthy();
-    const [obiUser] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, obiPerson!.id));
-    expect((await db.select().from(guardian).where(eq(guardian.parentId, obiPerson!.id)))).toEqual([expect.objectContaining({ familyQboId: OKAFOR, familyId: okafor, sourceQboId: "71" })]);
-    const obi = { session: await seedParentSession(obiUser!.id, { familyQboId: OKAFOR }) };
+    // The new family's guardian reads it as signed, without the old family's guardian or the PDF they signed. The read
+    // made no sign-in from QuickBooks' parent record: the club gives Obi his, as the portal holds guardians (written
+    // here directly), and his row is in the new family's record.
+    expect(await db.select().from(parent).where(eq(parent.email, "obi@example.com"))).toEqual([]);
+    const obiPerson = await seedParent({ name: "Obi Okafor", email: "obi@example.com", welcomedAt: new Date() });
+    await seedGuardian({ parentId: obiPerson.id, familyQboId: OKAFOR, status: "active", isPrimary: true, sourceQboId: "71" });
+    await syncAppRecords();
+    expect((await db.select().from(guardian).where(eq(guardian.parentId, obiPerson.id)))).toEqual([expect.objectContaining({ familyQboId: OKAFOR, familyId: okafor, sourceQboId: "71" })]);
+    const obi = { session: await seedParentSession(obiPerson.authUserId, { familyQboId: OKAFOR }) };
     asParent(await identityNow(obi.session.id));
     const theirs = await renderPage(FormPage, { params: { id: leo.signed } });
     expect(theirs).toContain("Photo consent");

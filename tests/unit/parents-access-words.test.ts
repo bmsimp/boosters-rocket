@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { accessWords } from "@/lib/parents/directory";
 
-describe("accessWords", () => {
+describe("accessWords: words for every closing reason, since old rows carry them", () => {
   it.each([
     [{ status: "active", reason: null, blocked: false }, "can", "Can sign in"],
     [{ status: "invited", reason: null, blocked: false }, "can", "Can sign in (hasn't yet)"],
@@ -15,9 +15,20 @@ describe("accessWords", () => {
     [{ status: "disabled", reason: "company_changed", blocked: false }, "cannot", "Can't sign in: a different QuickBooks company was connected"],
     [{ status: "disabled", reason: "removed", blocked: false }, "cannot", "Can't sign in: removed by staff"],
     [{ status: "disabled", reason: null, blocked: false }, "cannot", "Can't sign in"],
-    [{ status: "disabled", reason: "held", blocked: false }, "held", "Held: this address is also under another family"],
-    [{ status: "disabled", reason: "held", blocked: false, otherFamilies: ["Chen Family", "Old Family"] }, "held", "Held: this address is also under Chen Family and Old Family"],
-    [{ status: "disabled", reason: "held", blocked: false, otherFamilies: [] }, "held", "Held: this address is also under another family"],
+    // Old rows the retired held-address review closed keep their reason, and read in words, naming no family.
+    [{ status: "disabled", reason: "held", blocked: false }, "cannot", "Can't sign in: the address was under more than one family, and held for staff to review"],
+  ] as const)("%j", (input, kind, words) => {
+    expect(accessWords(input)).toEqual({ kind, words });
+  });
+
+  // An open row whose family the gate won't let its person into now: nothing closed it, and the words say why not.
+  it.each([
+    [{ status: "invited", reason: null, blocked: false, family: "counts" }, "can", "Can sign in (hasn't yet)"],
+    [{ status: "active", reason: null, blocked: false, family: "inactive" }, "cannot", "Can't sign in now: the family is inactive"],
+    [{ status: "invited", reason: null, blocked: false, family: "no_students" }, "cannot", "Can't sign in now: the family has no active students"],
+    [{ status: "active", reason: null, blocked: false, family: "no_record" }, "cannot", "Can't sign in now: the family isn't set up in the portal"],
+    [{ status: "active", reason: null, blocked: true, family: "inactive" }, "blocked", "Blocked"],
+    [{ status: "disabled", reason: "removed", blocked: false, family: "inactive" }, "cannot", "Can't sign in: removed by staff"],
   ] as const)("%j", (input, kind, words) => {
     expect(accessWords(input)).toEqual({ kind, words });
   });

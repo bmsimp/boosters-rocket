@@ -5,7 +5,7 @@
 // Families and students are the app's own records (stage 2 of the app-owned families spec), as the season's are: the
 // families are the app's active ones, read once (loadSeasonFamilies()), and a claim names the app's family.
 import "server-only";
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { guardian, parent, requirement, season, seasonStep, volunteerEvent, volunteerReminder, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
@@ -15,6 +15,7 @@ import { currentBrand, sendMail } from "@/lib/mail/send";
 import { volunteerDueMessage, volunteerReminderMessage, type VolunteerDueWords } from "@/lib/mail/messages";
 import { mailWorking } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { guardianRowCounts, studentsRuleInForce } from "@/lib/parents/sessions";
 import { everyCover, everyonesFacts } from "@/lib/seasons/everyone";
 import { isCovered, type SubjectId } from "@/lib/seasons/progress";
 import { toRequirement } from "@/lib/seasons/recorded";
@@ -59,7 +60,8 @@ async function taken(kind: "day_before" | "due_14" | "due_3", keys: string[], no
 
 /**
  * The day-before reminders: each live place on a live shift of an event on the club's tomorrow, to the guardian who
- * took it, while their link to the family is open and they aren't blocked.
+ * took it, while their guardian row in the place's family counts at the gate (guardianRowCounts()) and they aren't
+ * blocked.
  */
 async function dayBefore(tomorrow: string, now: Date): Promise<{ sent: number; failed: number }> {
   const rows = await db.select({ s: volunteerSignup, shift: volunteerShift, event: volunteerEvent, email: parent.email }).from(volunteerSignup)
@@ -67,7 +69,7 @@ async function dayBefore(tomorrow: string, now: Date): Promise<{ sent: number; f
     .innerJoin(parent, eq(parent.id, volunteerSignup.signedUpBy))
     .innerJoin(guardian, and(eq(guardian.parentId, volunteerSignup.signedUpBy), eq(guardian.familyId, volunteerSignup.familyId)))
     .where(and(eq(volunteerEvent.onDate, tomorrow), isNull(volunteerEvent.cancelledAt), isNull(volunteerShift.cancelledAt), isNull(volunteerSignup.cancelledAt),
-      ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+      guardianRowCounts(await studentsRuleInForce()), eq(parent.blocked, false)))
     .orderBy(asc(volunteerShift.startsAt), asc(volunteerSignup.createdAt));
   // A student who has moved to another family, or is no longer active, takes the place out of the old family's list.
   const moved = new Set<string>();
@@ -99,7 +101,7 @@ async function dayBefore(tomorrow: string, now: Date): Promise<{ sent: number; f
  * The nudges before a due date: for each required volunteer requirement of the current season due 14 or 3 days from
  * the club's today, each active family that hasn't met it (for the family, or for a student it is asked of) and
  * hasn't had it waived gets one email per guardian, covering every such requirement due that day. To the family's
- * guardians with an open link who aren't blocked.
+ * guardians whose row counts at the gate (guardianRowCounts()) and who aren't blocked.
  */
 async function nudges(today: string, now: Date): Promise<{ sent: number; failed: number }> {
   const due = NUDGES.map((n) => ({ ...n, dueOn: daysAfter(today, n.days) }));
@@ -127,7 +129,8 @@ async function nudges(today: string, now: Date): Promise<{ sent: number; failed:
   }
   if (owed.length === 0) return { sent: 0, failed: 0 };
   const people = await db.select({ familyId: guardian.familyId, parentId: parent.id, email: parent.email }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(inArray(guardian.familyId, [...new Map(owed.map((o) => [String(o.familyId), o.familyId])).values()]), ne(guardian.status, "disabled"), eq(parent.blocked, false)))
+    .where(and(inArray(guardian.familyId, [...new Map(owed.map((o) => [String(o.familyId), o.familyId])).values()]),
+      guardianRowCounts(await studentsRuleInForce()), eq(parent.blocked, false)))
     .orderBy(asc(guardian.familyId), asc(parent.createdAt), asc(parent.id));
   const emails = owed.flatMap((o) => people.filter((p) => String(p.familyId) === String(o.familyId))
     .map((p) => ({ ...o, parentId: p.parentId, email: p.email, key: nudgeKey(o.familyId, o.dueOn, p.parentId) })));

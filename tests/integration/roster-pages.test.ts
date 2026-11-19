@@ -283,9 +283,9 @@ describe("the roster pages", () => {
     expect(html).not.toContain("Rivera Family</a>");
   });
 
-  it("holds back the two sign-in rules while the cache names no company, and keeps QuickBooks' own tidy rules", async () => {
-    // No company recorded, so no family record is made and every guardian row's family is null: the sign-in rules
-    // can't hold a sign-in to anything yet, and wait for the read the Families list says is coming.
+  it("holds back the sign-in rule while the cache names no company, and keeps QuickBooks' own tidy rules", async () => {
+    // No company recorded, so no family record is made and every guardian row's family is null: the sign-in rule
+    // can't hold a sign-in to anything yet, and waits for the read the Families list says is coming.
     await seedShape();
     await addToCache([fam("10", "Rivera Family"), stu("12", "Maya Rivera", "10"), fam("20", "Gone Family", { active: false }), stu("22", "Gil Gone", "20")]);
     await seedRosterRead();
@@ -296,14 +296,14 @@ describe("the roster pages", () => {
     expect((await loadRosterPage()).signIns.map((s) => [s.name, s.familyId, s.customerQboId]).sort()).toEqual([["Ana Rivera", null, null], ["Gail Gone", null, null]]);
     const before = await rules();
     expect(before).toContain("family_no_parent:10");
-    expect(before.filter((r) => r.startsWith("signin_unknown") || r.startsWith("inactive_with_signin"))).toEqual([]);
+    expect(before.filter((r) => r.startsWith("signin_unknown"))).toEqual([]);
     expect(await list()).not.toContain("isn&#x27;t attached to any family the portal keeps");
-    // Once a read records the company the records are made, and the rules judge every sign-in as before.
+    // Once a read records the company the records are made, and the rule judges every sign-in: both are held to a
+    // family of the roster. The inactive family's open sign-in asks nothing of staff: nobody can enter that family.
     await seedRosterRead({ realmId: "1111" });
     const after = await rules();
     expect(after).toContain("family_no_parent:10");
-    expect(after).toContain("inactive_with_signin:20");
-    expect(after.filter((r) => r.startsWith("signin_unknown"))).toEqual([]);
+    expect(after.filter((r) => r.startsWith("signin_unknown") || r.endsWith(":20"))).toEqual([]);
   });
 
   it("keeps No family matches for a search that finds nothing", async () => {

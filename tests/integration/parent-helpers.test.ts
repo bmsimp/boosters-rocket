@@ -9,8 +9,7 @@ import { AccessDenied, parentAction, requireStaffPage } from "@/lib/guards";
 import ParentHome from "@/app/(parent)/page";
 import { resetDb, seedStaff } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
-import { runReconcile } from "../helpers/reconcile";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 describe("the signed-in parent helpers", () => {
   beforeEach(resetDb);
@@ -51,9 +50,9 @@ describe("the signed-in parent helpers", () => {
     }
   });
 
-  it("seeds what sign-ins from QuickBooks would keep: a reconcile changes neither family's link", async () => {
+  it("seeds links the app's own records keep: bringing the records into step again changes neither family's link", async () => {
     const { a, b } = await seedTwoFamilies();
-    await runReconcile({ cause: "test" });
+    await syncAppRecords();
     for (const p of [a, b]) {
       const [link] = await db.select().from(guardian).where(eq(guardian.id, p.identity.guardianId));
       expect(link).toMatchObject({ status: "active", disabledReason: null, sourceQboId: p.spec.parent.qboId });

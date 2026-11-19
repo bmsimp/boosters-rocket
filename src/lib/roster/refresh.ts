@@ -8,8 +8,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { getShape, shapeTypeIds, ROSTER_LOCK } from "./shape";
 import { clearRosterOfOtherCompanyLocked, getRosterSource, ROSTER_JOB, setRosterSource } from "./source";
 import { studentMoves, studentsUnderFamilies, type StudentMove } from "./moves";
-import { logReconcileFailure, reconcileAccess, ReconcileFailed } from "@/lib/parents/reconcile";
-import { AppRecordsFailed } from "@/lib/families/in-step";
+import { AppRecordsFailed, keepAppRecordsInStep, logAppRecordsFailure } from "@/lib/families/in-step";
 import { appRecordsAudit, noAppRecordChanges } from "@/lib/families/changes";
 import { formsForMovedStudent, requestsHeldElsewhere } from "@/lib/forms/moved";
 import { placesHeldElsewhere, volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
@@ -77,7 +76,7 @@ export function customerRow(c: Raw, named: Set<string>, now: Date) {
  * Replaces the cache from QuickBooks: every customer type and every customer, active and inactive. QuickBooks is read
  * first; the tables change only if all of it arrived, in the same transaction, so a failure leaves the old cache whole.
  *
- * An empty roster ends every parent's access (the reconcile below), so it is believed from one answer only: a
+ * An empty roster would make every family record inactive (the records' step below), so it is believed from one answer only: a
  * well-formed one (the client reads strictly, and anything else is a failed read), and never over a cache of the same
  * company that holds customers. QuickBooks makes a customer inactive and never deletes one, so a company that had
  * customers still has them; an answer with none is recorded as a failed run (`no_customers`) and the cache stays.
@@ -144,15 +143,15 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
     // What the read changed in the app's own records (src/lib/families/in-step.ts), for the run's audit row.
     let appRecords = noAppRecordChanges();
     try {
-      // A savepoint: a failure here undoes the cache changes and the parent-access changes together, so the roster and
-      // who can sign in never disagree (parents spec §2), and the failed run can still be recorded.
+      // A savepoint: a failure here undoes the cache changes and the app's own records' changes together, so the roster
+      // and the records never disagree, and the failed run can still be recorded.
       await tx.transaction(async (sp) => {
         // Whether the cache about to be replaced is this company's: a first read of a company, and another company's
         // cache cleared below, have no move to follow.
         const ours = (await getRosterSource(sp)) === realmId;
         // The cache came from another company and connecting didn't clear it: clear it now, with that company's parent
         // access, in the same savepoint as the swap. Its shape goes with it, so the rows are stored with no contact
-        // details, as with no shape, and the reconcile below does nothing. Until stage 4 another company's cache is
+        // details, as with no shape. Until stage 4 another company's cache is
         // refused above, so this clears nothing; it stays for when stage 4 allows a change of company again.
         const cleared = await clearRosterOfOtherCompanyLocked(sp, realmId, { actor: o.actor, ip: o.ip, keepRunId: run!.id });
         // Another company's cache was just cleared, and a new company may truly have no customers yet. Otherwise the
@@ -175,15 +174,15 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
         const under = ours ? studentsUnderFamilies(shape, rows) : new Map<string, string>();
         const held = under.size === 0 ? [] : [...(await requestsHeldElsewhere(sp, under)), ...(await placesHeldElsewhere(sp, under))];
         const moves = before.length === 0 ? [] : studentMoves(shape, before, rows, held);
-        // The reconcile first, which brings the app's own records into step with the cache just stored, so a family
+        // The app's own records first, brought into step with the cache just stored, so a family
         // QuickBooks made in this same read has its record before a student's move into it is followed: the follow-ups
         // take the move (found above, from the cache this read replaced) to records through their links, and a
         // complete form goes with the student to the new family's record at once. Nothing a follow-up changes (form
         // requests, consents, withdrawals, sign-ups) is read by the records' step, and a failure in either undoes the
-        // whole savepoint.
-        try { ({ appRecords } = await reconcileAccess(sp, { cause })); } catch (e) {
-          if (e instanceof AppRecordsFailed) { logReconcileFailure(e.cause, "app records"); throw e; }
-          logReconcileFailure(e); throw new ReconcileFailed();
+        // whole savepoint. Who may sign in is the app's own guardian rows, which a read of QuickBooks no longer changes.
+        try { appRecords = await keepAppRecordsInStep(sp); } catch (e) {
+          logAppRecordsFailure(e instanceof AppRecordsFailed ? e.cause : e);
+          throw e;
         }
         const owed: (() => Promise<unknown>)[] = [];
         try { for (const m of moves) owed.push(await followMovedStudent(sp, m, cause)); } catch { throw new FollowUpFailed(); }
@@ -191,10 +190,8 @@ export async function refreshRoster(o: { startedBy: string; actor: Actor; ip: st
       });
     } catch (e) {
       tells = [];
-      return e instanceof ReconcileFailed
-        ? fail("The parent sign-ins couldn't be brought up to date, so the roster was left as it was. (reconcile_failed)", "reconcile_failed")
-        : e instanceof AppRecordsFailed
-          ? fail("The portal's own family and student records couldn't be brought up to date, so the roster was left as it was. (app_records_failed)", "app_records_failed")
+      return e instanceof AppRecordsFailed
+        ? fail("The portal's own family and student records couldn't be brought up to date, so the roster was left as it was. (app_records_failed)", "app_records_failed")
         : e instanceof NoCustomersInAnswer
           ? fail("QuickBooks sent a roster with no customers in it, so the roster was left as it was. (no_customers)", "no_customers")
           : e instanceof FollowUpFailed

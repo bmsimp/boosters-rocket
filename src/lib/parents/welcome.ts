@@ -1,6 +1,6 @@
-import { and, asc, eq, exists, isNull, lt, ne, or } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { guardian, parent } from "@/lib/db/schema";
+import { parent } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { env } from "@/env";
 import { sendMail, currentBrand } from "@/lib/mail/send";
@@ -8,6 +8,7 @@ import { getStoredMailConfig, mailWorking } from "@/lib/mail/settings";
 import { welcomeMessage } from "@/lib/mail/messages";
 import type { StaffOp } from "./people";
 import { getParentSettings, parentDoorClosed } from "./settings";
+import { enterableGuardianRows, hasRowThatCounts, studentsRuleInForce } from "./sessions";
 
 export const WELCOME_BATCH = 5;
 export const WELCOME_RETRY_MS = 15 * 60_000;
@@ -20,15 +21,14 @@ export async function welcomeEmailFor(to: string) {
   const contact = stored ? (stored.method === "graph" ? stored.mailbox : stored.from) : null;
   return welcomeMessage(await currentBrand(), to, { appUrl: env.APP_URL.replace(/\/+$/, ""), contact });
 }
-const hasOpenLink = exists(db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, parent.id), ne(guardian.status, "disabled"))));
-
 /**
  * Takes one person for sending, in a single statement: it succeeds for one run only, and only while the person is still
- * owed, not blocked, not tried in the last 15 minutes, and has an open link. The claim time is the back-off after a failure.
+ * owed, not blocked, not tried in the last 15 minutes, and has a guardian row that counts (`counts`, hasRowThatCounts():
+ * the rule the gate lets them in by). The claim time is the back-off after a failure.
  */
-async function claim(id: string, now: Date): Promise<boolean> {
+async function claim(id: string, now: Date, counts: SQL): Promise<boolean> {
   const rows = await db.update(parent).set({ welcomeTriedAt: now })
-    .where(and(eq(parent.id, id), eq(parent.welcomeOwed, true), eq(parent.blocked, false), hasOpenLink,
+    .where(and(eq(parent.id, id), eq(parent.welcomeOwed, true), eq(parent.blocked, false), counts,
       or(isNull(parent.welcomeTriedAt), lt(parent.welcomeTriedAt, new Date(now.getTime() - WELCOME_RETRY_MS)))))
     .returning({ id: parent.id });
   return rows.length > 0;
@@ -36,20 +36,23 @@ async function claim(id: string, now: Date): Promise<boolean> {
 const welcomesOn = async () => { const s = await getParentSettings(); return s.welcome && s.signin; };
 
 /**
- * Sends welcomes the reconcile or the switch marked as owed (spec §2 Welcome emails). Called on every wake of the
+ * Sends welcomes the switches or an unblock marked as owed (spec §2 Welcome emails). Called on every wake of the
  * worker: at most five a wake, so a whole roster goes out over some minutes, not in one burst from the club's mailbox.
- * Each person is claimed before their email goes, so two overlapping runs never welcome the same person twice.
+ * Each person is claimed before their email goes, so two overlapping runs never welcome the same person twice. A
+ * person owed a welcome with no guardian row that counts (the gate's rule, enterableGuardianRows()) is skipped and
+ * stays owed: the welcome goes once they can sign in.
  */
 export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: number; failed: number }> {
   if (!(await welcomesOn()) || !(await mailWorking())) return { sent: 0, failed: 0 };
+  const counts = hasRowThatCounts(await studentsRuleInForce());
   const due = await db.select().from(parent)
-    .where(and(eq(parent.welcomeOwed, true), eq(parent.blocked, false), hasOpenLink,
+    .where(and(eq(parent.welcomeOwed, true), eq(parent.blocked, false), counts,
       or(isNull(parent.welcomeTriedAt), lt(parent.welcomeTriedAt, new Date(now.getTime() - WELCOME_RETRY_MS)))))
     .orderBy(asc(parent.createdAt), asc(parent.id)).limit(WELCOME_BATCH);
   let sent = 0, failed = 0;
   for (const p of due) {
     if (!(await welcomesOn())) break; // switched off while this run was going
-    if (!(await claim(p.id, now))) continue;
+    if (!(await claim(p.id, now, counts))) continue;
     const r = await sendMail(await welcomeEmailFor(p.email), { purpose: "welcome", actor: WELCOME_ACTOR });
     if (r.ok) {
       await db.update(parent).set({ welcomedAt: new Date(), welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, p.id));
@@ -70,8 +73,8 @@ export async function resendWelcome(parentId: string, o: StaffOp): Promise<{ ok:
   if (!p) return { ok: false, reason: "not_found" };
   if (p.blocked) return { ok: false, reason: "blocked" };
   if (parentDoorClosed(await getParentSettings())) return { ok: false, reason: "no_access" }; // they could not sign in
-  const [open] = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, p.id), ne(guardian.status, "disabled"))).limit(1);
-  if (!open) return { ok: false, reason: "no_access" };
+  // Only to someone the gate would let in: a row that counts, as the code request asks (./sessions.ts).
+  if ((await enterableGuardianRows(p.id)).length === 0) return { ok: false, reason: "no_access" };
   const r = await sendMail(await welcomeEmailFor(p.email), { purpose: "welcome", actor: o.actor, ip: o.ip });
   if (!r.ok) {
     await writeAudit({ actor: o.actor, action: "parent.welcome.failed", permission: o.permission, targetType: "parent", targetId: p.id, after: { to: p.email, error: r.error, resend: true }, ip: o.ip });

@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, requirementReminder, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentEmailChange, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -13,10 +13,17 @@ export const REMINDER_CLAIM_DAYS = 365;
 /** A staff roster write that went through, or that staff gave up, is kept this long for the Reconciliation page's story. */
 export const FINISHED_WRITES_DAYS = 30;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
+/**
+ * Settings whose feature is gone (stage 3 of the app-owned families spec, slice 7a), so nothing reads, writes or
+ * expires them any more: the previous company's people as they were (`parents.previous_company`, names and addresses
+ * of a company the club left, promised gone after 90 days) and the review notice's last send (`parents.review_notice`).
+ * Their life ended with the feature: the clean-up removes any still stored.
+ */
+export const RETIRED_SETTINGS = ["parents.previous_company", "parents.review_notice"] as const;
 
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; rateLimitEvents: number;
-  emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number;
+  emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number; retiredSettings: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
@@ -26,6 +33,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   reminderClaims: ["reminder record older than a year", "reminder records older than a year"],
   writeQueue: ["finished change to QuickBooks", "finished changes to QuickBooks"],
   verifications: ["expired sign-in check", "expired sign-in checks"],
+  retiredSettings: ["setting of a retired feature", "settings of retired features"],
 };
 
 /**
@@ -38,11 +46,12 @@ export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "sig
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
-  setting: "the portal's settings, replaced in place",
+  setting: "the portal's settings, replaced in place; only a retired feature's (RETIRED_SETTINGS) is deleted",
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
-  parent: "parents, kept from QuickBooks by the roster refresh", guardian: "links from parents to families, kept by the roster refresh",
-  held_address: "addresses held for staff to decide", family_match: "staff decisions about families",
+  parent: "the people who sign in to the portal: the app's own records", guardian: "each person's membership of a family, open or closed: the app's own records",
+  held_address: "retired with the held-address review (stage 3 of the app-owned families spec): neither read nor written, kept until a later slice drops it",
+  family_match: "retired with the match review (stage 3 of the app-owned families spec): neither read nor written, kept until a later slice drops it",
   qbo_connection: "the one QuickBooks connection", qbo_customer_type: "the roster cache, replaced by each refresh", qbo_customer: "the roster cache, replaced by each refresh",
   qbo_item: "QuickBooks' products and services, replaced each time staff read the list; emptied on a change of company",
   season: "seasons are history", season_step: "seasons are history", requirement: "seasons are history", requirement_cover: "seasons are history",
@@ -101,10 +110,20 @@ export function describeCleanup(c: CleanupCounts): string {
 export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCounts> {
   const n = (rows: unknown[]) => rows.length;
   const staffSessions = n(await tx.delete(staffAuthSession).where(lt(staffAuthSession.expiresAt, now)).returning({ id: staffAuthSession.id }));
-  const parentSessions = n(await tx.delete(parentAuthSession).where(lt(parentAuthSession.expiresAt, now)).returning({ id: parentAuthSession.id }));
-  const signinCodes = n(await tx.delete(signinCode)
-    .where(and(or(isNotNull(signinCode.usedAt), lt(signinCode.expiresAt, now)), lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS))))
-    .returning({ id: signinCode.id }));
+  // What hangs on a person goes in the order src/lib/parents/sessions.ts gives (lockedPerson()): the rows of everyone
+  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their sessions. So the
+  // clean-up never waits on a person's change of address while that change waits on it.
+  const requestGone = lt(parentEmailChange.expiresAt, now);
+  const codeGone = and(or(isNotNull(signinCode.usedAt), lt(signinCode.expiresAt, now)), lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)));
+  const sessionGone = lt(parentAuthSession.expiresAt, now);
+  await tx.select({ id: parent.id }).from(parent).where(or(
+    inArray(parent.id, tx.select({ id: parentEmailChange.parentId }).from(parentEmailChange).where(requestGone)),
+    inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(codeGone)),
+    inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)).where(sessionGone)),
+  )).orderBy(parent.id).for("update");
+  const emailChanges = n(await tx.delete(parentEmailChange).where(requestGone).returning({ id: parentEmailChange.id }));
+  const signinCodes = n(await tx.delete(signinCode).where(codeGone).returning({ id: signinCode.id }));
+  const parentSessions = n(await tx.delete(parentAuthSession).where(sessionGone).returning({ id: parentAuthSession.id }));
 
   const kinds = Object.keys(RATE_LIMITS) as RateLimitKind[];
   let rateLimitEvents = 0;
@@ -117,7 +136,6 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   rateLimitEvents += n(await tx.delete(rateLimitEvent)
     .where(and(notInArray(rateLimitEvent.kind, kinds), lt(rateLimitEvent.at, new Date(now.getTime() - longest)))).returning({ id: rateLimitEvent.id }));
 
-  const emailChanges = n(await tx.delete(parentEmailChange).where(lt(parentEmailChange.expiresAt, now)).returning({ id: parentEmailChange.id }));
   // A family's figures go only when its family customer (the customer its family record's own link names, in the
   // roster's company) is gone from the roster cache altogether: never because the family is inactive, since an inactive
   // customer is still in the cache. Skipped while the cache is empty.
@@ -142,7 +160,9 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const verifications = n(await tx.delete(staffAuthVerification).where(lt(staffAuthVerification.expiresAt, now)).returning({ id: staffAuthVerification.id }))
     + n(await tx.delete(parentAuthVerification).where(lt(parentAuthVerification.expiresAt, now)).returning({ id: parentAuthVerification.id }));
 
-  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications };
+  const retiredSettings = n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
+
+  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
 }
 
 /**

@@ -1,106 +1,44 @@
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { guardian, jobRun, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
+import { family, guardian, parent, parentAuthSession, parentAuthUser, signinCode, student } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
-import { connectionView } from "@/lib/quickbooks/connection";
 import { mailWorking } from "@/lib/mail/settings";
-import { getShape, ROSTER_LOCK } from "@/lib/roster/shape";
-import { appRecordsAudit } from "@/lib/families/changes";
-import { ROSTER_JOB } from "@/lib/roster/source";
-import type { HeldAddress } from "./access-rules";
+import { getShape, shapeNamesStudents } from "@/lib/roster/shape";
 import type { StaffOp } from "./people";
-import { loadDecision, reconcileAccess, type EndedReport } from "./reconcile";
+import { hasRowThatCounts, studentsRuleInForce } from "./sessions";
 import { getParentSettings, putParentSettings, PARENTS_KEY, type ParentSettings } from "./settings";
 
-const FRESH_MS = 48 * 3_600_000;
-export type Ready = { connected: boolean; shape: boolean; rosterFresh: boolean; mail: boolean };
-export type AccessPreview = {
-  ready: Ready; settings: ParentSettings; people: number; families: number; held: HeldAddress[];
-  noEmail: { qboId: string; name: string }[]; manyAddresses: { qboId: string; name: string }[]; noSignin: { qboId: string; name: string }[];
-  ending: { name: string; email: string; familyQboId: string }[]; welcomeNow: number;
-  students: { offered: boolean; families: number; people: number };
-  /** True when the list of ending sign-ins could not be worked out now because a roster refresh is running. */
-  endingUnknown: boolean;
-};
 export type SwitchResult = { ok: true } | { ok: false; errors: string[] };
 
-async function readiness(hasDecision: boolean): Promise<Ready> {
-  const [conn, mail, [lastOk]] = await Promise.all([connectionView(), mailWorking(),
-    db.select().from(jobRun).where(and(eq(jobRun.job, ROSTER_JOB), eq(jobRun.outcome, "ok"))).orderBy(desc(jobRun.id)).limit(1)]);
-  return { connected: conn.connected, shape: hasDecision, mail,
-    rosterFresh: Boolean(lastOk?.finishedAt && Date.now() - lastOk.finishedAt.getTime() <= FRESH_MS) };
-}
-
-class RolledBack extends Error {}
-
 /**
- * The sign-ins the reconcile would close, from the reconcile itself run as if sign-ins were on and then rolled back, so
- * there is one implementation of link matching. Never waits for the roster lock: null when a refresh holds it.
+ * Who can sign in now, by the gate's own rule (a guardian row that counts, ./sessions.ts) and never blocked: how many
+ * people, to how many families, and how many of those people have never been welcomed. Nothing here reads QuickBooks.
  */
-async function dryRunEnding(): Promise<EndedReport["ended"] | null> {
-  const report: EndedReport = { ended: [] };
-  let busy = false;
-  try {
-    await db.transaction(async (tx) => {
-      const got = Array.from(await tx.execute<{ locked: boolean }>(sql`select pg_try_advisory_xact_lock(${ROSTER_LOCK}) as locked`))[0];
-      if (!got?.locked) { busy = true; return; }
-      await reconcileAccess(tx, { cause: "preview", report, assumeSignin: true });
-      throw new RolledBack();
-    });
-  } catch (e) {
-    if (!(e instanceof RolledBack)) throw e;
-  }
-  if (busy) return null;
-  return report.ended.sort((a, b) => a.name.localeCompare(b.name) || a.familyQboId.localeCompare(b.familyQboId, "en", { numeric: true }));
-}
-
+export type SigninCounts = { people: number; families: number; welcomeNow: number };
 /**
- * What switching on would do, and what needs cleaning up first (spec §3 step 1). It changes nothing. The list of
- * sign-ins that would end comes from a dry run of the reconcile, which locks every link and person and takes the roster
- * lock: it runs only with `ending: true`, which the setup page passes only for the steps that show the list, and only
- * while sign-ins are off.
- * People and welcomes count nobody who is blocked: they can't sign in and are never emailed.
+ * What switching "Families with no active student" on would do now (the gate reads the setting, so nothing is closed):
+ * how many families with someone who can sign in have no active student record, and how many people would then have
+ * no family to sign in to.
  */
-export async function accessPreview(o: { ending?: boolean } = {}): Promise<AccessPreview> {
-  const loaded = await loadDecision();
-  const settings = loaded?.settings ?? (await getParentSettings());
-  const ready = await readiness(loaded !== null);
-  const empty = { ready, settings, people: 0, families: 0, held: [], noEmail: [], manyAddresses: [], noSignin: [], ending: [], welcomeNow: 0,
-    students: { offered: false, families: 0, people: 0 }, endingUnknown: false };
-  if (!loaded) return empty;
-  const { decision, shape } = loaded;
-  const flagged = (rule: string) => decision.flags.filter((f) => f.rule === rule && f.qboId !== null).map((f) => ({ qboId: f.qboId!, name: f.name }));
-  const blocked = new Set((await db.select({ email: parent.email }).from(parent).where(eq(parent.blocked, true))).map((p) => p.email));
-  const emails = new Set(decision.grants.map((g) => g.email).filter((e) => !blocked.has(e)));
-  const ending = o.ending ? await dryRunEnding() : [];
-  const welcomed = new Set((await db.select({ email: parent.email }).from(parent).where(sql`${parent.welcomedAt} is not null`)).map((p) => p.email));
-  const offered = shape.kind === "layered" && shape.studentTypeId !== null;
-  const strict = offered ? ((await loadDecision(undefined, { requireActiveStudents: true }))?.decision.grants ?? decision.grants) : decision.grants;
-  const lost = decision.grants.filter((g) => !strict.some((s) => s.email === g.email && s.familyQboId === g.familyQboId));
-  return {
-    ...empty, people: emails.size, families: new Set(decision.grants.map((g) => g.familyQboId)).size, held: decision.held,
-    noEmail: decision.denials.filter((d) => d.reason === "no_email").map((d) => ({ qboId: d.sourceQboId, name: d.name })),
-    manyAddresses: flagged("many_addresses"), noSignin: flagged("family_no_signin"),
-    ending: ending ?? [], endingUnknown: ending === null,
-    welcomeNow: [...emails].filter((e) => !welcomed.has(e)).length,
-    students: { offered, families: new Set(lost.map((g) => g.familyQboId)).size, people: new Set(lost.map((g) => g.email)).size },
-  };
-}
+export type StudentsEffect = { families: number; people: number };
 
 /**
  * One settings change: lock, write, do the work the change needs, and audit it with what happened (spec §7). A patch
- * that changes nothing (a stale press) does nothing and records nothing. `refuse`, checked under the lock, can stop
- * the change with its reasons before anything is written.
+ * that changes nothing (a stale press) does nothing and records nothing. `refuse`, checked under the lock and before
+ * that, can stop the change with its reasons before anything is written, a stale press included. The lock is the settings' own: nothing a switch does reads
+ * or waits for the roster.
  */
 async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx, next: ParentSettings, before: ParentSettings) => Promise<Record<string, unknown>>,
-  refuse?: (before: ParentSettings) => string[] | null): Promise<SwitchResult> {
+  refuse?: (before: ParentSettings, tx: Tx) => string[] | null | Promise<string[] | null>): Promise<SwitchResult> {
   return db.transaction(async (tx): Promise<SwitchResult> => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PARENTS_KEY}))`);
     const before = await getParentSettings(tx);
     const next = { ...before, ...patch };
-    if ((Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
-    const errors = refuse?.(before);
+    // Refused before a patch that changes nothing is answered: a value stored already is refused for the same reason
+    // as one that isn't (the students rule stored on beside a shape that names no students is not in force).
+    const errors = await refuse?.(before, tx);
     if (errors) return { ok: false, errors };
+    if ((Object.keys(patch) as (keyof ParentSettings)[]).every((k) => before[k] === next[k])) return { ok: true };
     await putParentSettings(tx, next);
     const did = await work(tx, next, before);
     await writeAudit({ actor: o.actor, action: "settings.parents.save", permission: o.permission, targetType: "setting", targetId: PARENTS_KEY, ip: o.ip,
@@ -109,19 +47,35 @@ async function change(patch: Partial<ParentSettings>, o: StaffOp, work: (tx: Tx,
   });
 }
 
-/** The sentences for what is missing before sign-ins can be switched on; empty when ready. The settings page uses them too. */
+/**
+ * Takes FOR UPDATE, in id order, the row of every person `where` names, before this transaction touches anything that
+ * hangs on them: the order ./sessions.ts gives (lockedPerson()), so a switch never waits on a person's change of
+ * address while that change waits on the switch.
+ */
+async function lockPeople(tx: Tx, where: SQL | undefined): Promise<void> {
+  await tx.select({ id: parent.id }).from(parent).where(where).orderBy(parent.id).for("update");
+}
+
+/**
+ * Marks as owed a welcome everyone who can sign in by the gate's rule (a row that counts, with the students rule as
+ * it is in force in `tx`, where change() has just stored the new settings), is not blocked and was never welcomed. A
+ * person with no row that counts is not marked: the welcome is for someone who can sign in. Returns how many were
+ * marked.
+ */
+async function oweWelcomes(tx: Tx): Promise<number> {
+  const owed = and(isNull(parent.welcomedAt), eq(parent.blocked, false), eq(parent.welcomeOwed, false), hasRowThatCounts(await studentsRuleInForce(tx)));
+  await lockPeople(tx, owed);
+  const rows = await tx.update(parent).set({ welcomeOwed: true, updatedAt: new Date() }).where(owed).returning({ id: parent.id });
+  return rows.length;
+}
+
+/**
+ * The sentences for what is missing before sign-ins can be switched on; empty when ready. The settings page uses them
+ * too. Only working mail: a sign-in is a code sent by email. QuickBooks plays no part (open question 15 of the
+ * app-owned families spec).
+ */
 export async function missingForSignins(): Promise<string[]> {
-  const decided = (await loadDecision()) !== null;
-  const ready = await readiness(decided);
-  const shapeMessage = (await getShape()) === null
-    ? "Choose the membership shape first."
-    : "The roster can't be used yet: refresh it, and check the membership shape under QuickBooks.";
-  return [
-    ...(ready.connected ? [] : ["Connect QuickBooks first."]),
-    ...(ready.shape ? [] : [shapeMessage]),
-    ...(ready.rosterFresh ? [] : ["Refresh the roster first: it hasn't been read in the last 2 days."]),
-    ...(ready.mail ? [] : ["Set up outgoing mail and send a test email first."]),
-  ];
+  return (await mailWorking()) ? [] : ["Set up outgoing mail and send a test email first."];
 }
 
 export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult> {
@@ -130,64 +84,107 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
     if (!(await getParentSettings()).everEnabled) return { ok: true };
     // Welcome emails go off with sign-ins: switching sign-ins on again must never start emailing families by itself.
     return change({ signin: false, welcome: false }, o, async (tx, _next, before) => {
-      const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
-      const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
+      // Everyone's rows first, in id order, then what hangs on them in the order ./sessions.ts gives: the owed welcomes
+      // (on the person's row), the unused codes, the sessions.
+      await lockPeople(tx, or(eq(parent.welcomeOwed, true),
+        inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(isNull(signinCode.usedAt))),
+        inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)))));
       const owed = await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true)).returning({ id: parent.id });
+      const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
+      const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
       return { sessionsEnded: ended.length, codesDeleted: codes.length, ...(before.welcome ? { welcomeSwitchedOff: true, owedCleared: owed.length } : {}) };
     });
   }
   if ((await getParentSettings()).signin) return { ok: true }; // already on: a stale press changes nothing
   const errors = await missingForSignins();
   if (errors.length) return { ok: false, errors };
-  try {
-    const r = await change({ signin: true, everEnabled: true }, o, async (tx) => {
-      const r = await reconcileAccess(tx, { cause: "settings.signin" });
-      // The roster stopped being usable after the check above: save nothing.
-      if (!r.ran) throw new RolledBack();
-      return { granted: r.granted, ended: r.ended, ...appRecordsAudit(r.appRecords) };
-    });
-    return r;
-  } catch (e) {
-    if (!(e instanceof RolledBack)) throw e;
-    return { ok: false, errors: ["The roster changed while this was being switched on. Check the preview and try again."] };
-  }
+  // Who can sign in is the guardian rows the app holds, as they are: switching on opens and closes none of them.
+  return change({ signin: true, everEnabled: true }, o, async (tx, next) => (next.welcome ? { welcomeOwed: await oweWelcomes(tx) } : {}));
 }
 
+/** Why "Families with no active student" can't be switched on, when it can't. */
+export const NO_STUDENTS_IN_SHAPE = "The membership shape doesn't say which customers are students, so this can't be used.";
+/**
+ * What the settings page says when "Families with no active student" is stored on beside a shape that names no
+ * students (one saved before stage 3's slice 7a, or a shape saved later without students): it is not in force
+ * (studentsRuleInForce(), ./sessions.ts).
+ */
+export const STUDENTS_RULE_NOT_IN_USE = "On, but not in use: the membership shape doesn't say which customers are students, so students don't affect who can sign in. It is used again once a membership shape that names students is saved.";
+
+/**
+ * "Families with no active student": saved and audited, and nothing else. The gate reads it (enterableGuardianRows(),
+ * ./sessions.ts) from the app's own student records, so a family with no active student stops counting at once, a
+ * session already open in one is sent back on its next request, and switching it off lets them in again. No row is
+ * closed or reopened. It is switched on only while the membership shape names a student type (shapeNamesStudents()):
+ * with none the app holds no active student, and the setting would keep every parent out. That reads the stored shape,
+ * never QuickBooks. A shape saved later without students leaves the stored value alone: it is simply not in force
+ * while the shape names no students (studentsRuleInForce(), ./sessions.ts), and is again once a shape with students
+ * is saved.
+ */
 export async function setRequireStudents(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  const loaded = await loadDecision();
-  if (on && !(loaded?.shape.kind === "layered" && loaded.shape.studentTypeId !== null)) {
-    return { ok: false, errors: ["The membership shape doesn't say which customers are students, so this can't be used."] };
-  }
-  return change({ requireActiveStudents: on }, o, async (tx) => {
-    const r = await reconcileAccess(tx, { cause: "settings.students" });
-    return { granted: r.granted, ended: r.ended, ...appRecordsAudit(r.appRecords) };
-  });
-}
-
-export async function setReviewEmails(on: boolean, o: StaffOp): Promise<SwitchResult> {
-  return change({ reviewEmails: on }, o, async () => ({}));
-}
-
-/** How many people have an open link and are not blocked, whether or not the parent door is open. */
-export async function peopleWithAccess(): Promise<number> {
-  const rows = await db.selectDistinct({ id: guardian.parentId }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(ne(guardian.status, "disabled"), eq(parent.blocked, false)));
-  return rows.length;
+  return change({ requireActiveStudents: on }, o, async () => ({}),
+    async (_before, tx) => (on && !shapeNamesStudents(await getShape(tx)) ? [NO_STUDENTS_IN_SHAPE] : null));
 }
 
 /**
- * Welcome emails, behind their own switch (spec §3 step 3). On: everyone with access who was never welcomed is owed one.
- * Refused while sign-ins are off; off always works.
+ * How many guardian rows an earlier version of the portal closed for "Families with no active student"
+ * (`disabled_reason` `no_active_students`). Nothing reopens them now, whatever the setting or the family's students:
+ * the settings page says so, so its words hold for them too.
+ */
+export async function closedForNoStudents(): Promise<number> {
+  const rows = await db.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.status, "disabled"), eq(guardian.disabledReason, "no_active_students")));
+  return rows.length;
+}
+
+/** Whether "Families with no active student" can be switched on now (setRequireStudents()). */
+export async function studentsRuleUsable(): Promise<boolean> {
+  return shapeNamesStudents(await getShape());
+}
+
+/** How many people can sign in now by the gate's rule (a row that counts) and are not blocked, whether or not the parent door is open. */
+export async function peopleWithAccess(): Promise<number> {
+  return (await signinCounts()).people;
+}
+
+/** SigninCounts, by the gate's rule with the students rule as it is in force (studentsRuleInForce()). */
+export async function signinCounts(): Promise<SigninCounts> {
+  const studentsRule = await studentsRuleInForce();
+  const people = await db.select({ id: parent.id, welcomedAt: parent.welcomedAt }).from(parent)
+    .where(and(eq(parent.blocked, false), hasRowThatCounts(studentsRule)));
+  const ids = new Set(people.map((p) => p.id));
+  const rows = (await countingRows()).filter((r) => ids.has(r.parentId) && (!studentsRule || r.hasStudent));
+  return { people: people.length, families: new Set(rows.map((r) => r.familyId)).size, welcomeNow: people.filter((p) => p.welcomedAt === null).length };
+}
+
+/** StudentsEffect, worked out from the rows that count with the setting off. */
+export async function studentsEffect(): Promise<StudentsEffect> {
+  const rows = await countingRows();
+  const without = new Set(rows.filter((r) => !r.hasStudent).map((r) => r.familyId));
+  const keeps = new Set(rows.filter((r) => r.hasStudent).map((r) => r.parentId));
+  const loses = new Set(rows.filter((r) => !r.hasStudent && !keeps.has(r.parentId)).map((r) => r.parentId));
+  return { families: without.size, people: loses.size };
+}
+
+/** Every open row of a person who isn't blocked, in an active family record, with whether that family has an active student. */
+async function countingRows(): Promise<{ parentId: string; familyId: string; hasStudent: boolean }[]> {
+  const rows = await db.select({ parentId: guardian.parentId, familyId: family.id,
+    hasStudent: sql<boolean>`exists (select 1 from ${student} where ${student.familyId} = ${family.id} and ${student.active})` })
+    .from(guardian).innerJoin(family, eq(family.id, guardian.familyId)).innerJoin(parent, eq(parent.id, guardian.parentId))
+    .where(and(sql`${guardian.status} <> 'disabled'`, eq(family.active, true), eq(parent.blocked, false)));
+  return rows.map((r) => ({ parentId: r.parentId, familyId: String(r.familyId), hasStudent: r.hasStudent === true }));
+}
+
+/**
+ * Welcome emails, behind their own switch (spec §3 step 3). On: everyone who can sign in (a row that counts) and was
+ * never welcomed is owed one. Refused while sign-ins are off; off always works.
  */
 export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult> {
   return change({ welcome: on }, o, async (tx) => {
     if (!on) {
+      await lockPeople(tx, eq(parent.welcomeOwed, true));
       const owed = await tx.update(parent).set({ welcomeOwed: false, updatedAt: new Date() }).where(eq(parent.welcomeOwed, true)).returning({ id: parent.id });
       return { owedCleared: owed.length };
     }
-    const rows = await tx.execute<{ id: string }>(sql`UPDATE parent SET welcome_owed = true, updated_at = now()
-      WHERE welcomed_at IS NULL AND blocked = false AND welcome_owed = false
-        AND EXISTS (SELECT 1 FROM guardian g WHERE g.parent_id = parent.id AND g.status <> 'disabled') RETURNING id`);
-    return { owed: Array.from(rows as ArrayLike<{ id: string }>).length };
+    return { owed: await oweWelcomes(tx) };
   }, (before) => (on && !before.signin ? ["Switch parent sign-ins on first."] : null));
 }

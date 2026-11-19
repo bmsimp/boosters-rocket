@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 
 /**
- * The whole way in, joined up: a roster refresh with parent sign-ins switched on makes the person and their link, and
- * that person then asks for a code, enters it, gets a session and reaches their family. The sign-in tests seed their
- * people by hand and the reconcile tests stop at the rows; this is the path between them, with nothing seeded by hand
- * but the QuickBooks company (a stub of Intuit's API), working mail and the two settings an Admin saves.
+ * The whole way in, joined up, beside a roster refresh: a guardian the portal holds (since stage 3 of the app-owned
+ * families spec, nothing makes one from QuickBooks) is in the family record the refresh keeps, asks for a code, enters
+ * it, gets a session and reaches their family; and what QuickBooks then changes about their parent record changes
+ * nothing about their sign-in. Only the family record going inactive stops it, at the gate.
  */
 const stubBase = vi.hoisted(() => ({ url: "" }));
 vi.mock("@/lib/quickbooks/endpoints", async (original) => {
@@ -25,7 +25,7 @@ import { getParentState } from "@/lib/auth/identity";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
 import { env } from "@/env";
-import { resetDb, seedWorkingMail } from "../helpers/db";
+import { resetDb, seedGuardian, seedParent, seedWorkingMail } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 
@@ -51,10 +51,16 @@ async function codeMailedTo(typed: string): Promise<Msg | null> {
 const codeIn = (m: Msg) => /sign-in code: (\d{6})/.exec(m.subject)![1]!;
 const pageRequest = async (cookie: string) => { fromBrowser(cookie, IP); return getParentState(); };
 const actions = async () => (await db.select().from(auditLog).orderBy(auditLog.id)).map((r) => r.action);
+/** Ana Rivera as the portal holds her: the person, her sign-in account and an invited row in the Rivera family (customer 10) from her record (11). */
+const seedAna = async () => {
+  const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+  await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
+  return ana;
+};
 /** A minute and more goes by: a second code may be asked for (the portal refuses one inside 60 seconds). */
 const aMinutePasses = () => db.update(signinCode).set({ createdAt: new Date(Date.now() - 120_000) });
 
-describe("a parent the roster refresh made signs in", () => {
+describe("a guardian the portal holds signs in beside the roster refresh", () => {
   beforeEach(async () => {
     await resetDb(); outbox.length = 0;
     stub.reset(); Object.assign(stub, fznCompany());
@@ -62,21 +68,19 @@ describe("a parent the roster refresh made signs in", () => {
     await seedWorkingMail(); await seedParentSettings(SIGNINS_ON);
   });
 
-  it("from QuickBooks to their family: refresh, code, session, and the family the roster gave them", async () => {
-    expect(await db.select().from(parent)).toEqual([]);
+  it("from the portal's own row to their family: refresh, code, session, and the family record the refresh keeps", async () => {
+    const ana = await seedAna();
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
-    // Ana Rivera is the one parent in the company with an address (" Ana@Example.com " in QuickBooks). The refresh made her.
-    const [ana] = await db.select().from(parent);
+    // The refresh made nobody: Ana is the one person, as seeded, and QuickBooks' other records gave no one a sign-in.
     expect(await db.select().from(parent)).toHaveLength(1);
-    expect(ana).toMatchObject({ name: "Ana Rivera", email: "ana@example.com", blocked: false });
     const [link] = await db.select().from(guardian);
-    expect(link).toMatchObject({ parentId: ana!.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
+    expect(link).toMatchObject({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
     // The refresh brought the app's records into step: her row names the family record of customer 10, which the gate enters.
     const familyId = link!.familyId;
     expect(familyId).not.toBeNull();
     expect(await db.select().from(parentAuthSession)).toEqual([]);
 
-    // She types her address her own way and gets a code at the address QuickBooks holds.
+    // She types her address her own way and gets a code at the address the portal holds.
     const mail = await codeMailedTo("  ANA@example.COM ");
     expect(mail).toMatchObject({ to: "ana@example.com" });
     const res = await post("/portal-code/verify", { email: "Ana@Example.com", code: codeIn(mail!) });
@@ -84,7 +88,7 @@ describe("a parent the roster refresh made signs in", () => {
 
     // The next page request is hers, in the Rivera family, and the link is active.
     const state = await pageRequest(cookieFrom(res));
-    expect(state).toMatchObject({ status: "ok", identity: { door: "parent", parentId: ana!.id, name: "Ana Rivera", email: "ana@example.com",
+    expect(state).toMatchObject({ status: "ok", identity: { door: "parent", parentId: ana.id, name: "Ana Rivera", email: "ana@example.com",
       familyId, guardianId: link!.id, families: [{ guardianId: link!.id, familyId }] } });
     // The identity names the app's family alone, and so does the session: no QuickBooks id of the family is stored.
     expect(JSON.stringify(state)).not.toContain('"10"');
@@ -93,18 +97,19 @@ describe("a parent the roster refresh made signs in", () => {
     const [session] = await db.select().from(parentAuthSession);
     expect(session).toMatchObject({ userId: account!.id, familyId });
     expect(session).not.toHaveProperty("familyQboId");
-    expect(account).toMatchObject({ parentId: ana!.id, email: "ana@example.com" });
-    expect((await actions()).filter((a) => /^(parent\.create|parent\.access\.granted|signin|guardian\.activate)/.test(a)))
-      .toEqual(["parent.create", "parent.access.granted", "signin.code_sent", "guardian.activate", "signin"]);
+    expect(account).toMatchObject({ parentId: ana.id, email: "ana@example.com" });
+    expect((await actions()).filter((a) => /^(parent\.|signin|guardian\.activate)/.test(a)))
+      .toEqual(["signin.code_sent", "guardian.activate", "signin"]);
     const signedIn = (await db.select().from(auditLog)).find((r) => r.action === "signin");
-    expect(signedIn).toMatchObject({ door: "parent", actorId: ana!.id, targetId: ana!.id, after: { familyId: String(familyId) }, ip: IP });
+    expect(signedIn).toMatchObject({ door: "parent", actorId: ana.id, targetId: ana.id, after: { familyId: String(familyId) }, ip: IP });
 
     // A second refresh that finds nothing changed leaves her signed in.
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
     expect(await pageRequest(cookieFrom(res))).toMatchObject({ status: "ok", identity: { familyId } });
   }, 30_000);
 
-  it("and is out again with the refresh that no longer finds them in QuickBooks", async () => {
+  it("stays in when the refresh no longer finds her parent record, and is out once her family's record is inactive, with her row open", async () => {
+    await seedAna();
     await refreshRoster(worker);
     const mail = await codeMailedTo("ana@example.com");
     const res = await post("/portal-code/verify", { email: "ana@example.com", code: codeIn(mail!) });
@@ -113,35 +118,35 @@ describe("a parent the roster refresh made signs in", () => {
 
     stub.customers = stub.customers.filter((c) => c.Id !== "11");
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
+    expect((await db.select().from(guardian))[0]).toMatchObject({ status: "active", disabledReason: null });
+
+    // The family itself leaves the roster: its record goes inactive, and the gate keeps her out of it.
+    stub.customers = stub.customers.filter((c) => c.Id !== "10" && c.Id !== "12");
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
     expect(await pageRequest(cookie)).toEqual({ status: "none" });
     expect(await db.select().from(parentAuthSession)).toEqual([]);
-    expect((await db.select().from(guardian))[0]).toMatchObject({ status: "disabled", disabledReason: "not_in_quickbooks" });
+    expect((await db.select().from(guardian))[0]).toMatchObject({ status: "active", disabledReason: null });
     await aMinutePasses();
     expect(await codeMailedTo("ana@example.com")).toBeNull();
   }, 30_000);
 
-  it("and signs in with the new address, and no longer with the old, after QuickBooks changes it", async () => {
+  it("keeps signing in with the portal's address when QuickBooks changes the one on her record", async () => {
+    const ana = await seedAna();
     await refreshRoster(worker);
     const first = await codeMailedTo("ana@example.com");
     const res = await post("/portal-code/verify", { email: "ana@example.com", code: codeIn(first!) });
     const cookie = cookieFrom(res);
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
-    const [ana] = await db.select().from(parent);
-    const [{ familyId }] = (await db.select().from(guardian)) as [typeof guardian.$inferSelect];
-    expect(familyId).not.toBeNull();
 
     (stub.customers.find((c) => c.Id === "11") as { PrimaryEmailAddr: { Address: string } }).PrimaryEmailAddr = { Address: "Ana.New@Example.com" };
     expect(await refreshRoster(worker)).toMatchObject({ ok: true });
-    // The same person, a new address; the session proved with the old one is over.
-    expect(await db.select().from(parent)).toEqual([expect.objectContaining({ id: ana!.id, email: "ana.new@example.com" })]);
-    expect(await pageRequest(cookie)).toEqual({ status: "none" });
+    // The same person, the same address: her sign-in email is the app's record, and her session goes on.
+    expect(await db.select().from(parent)).toEqual([expect.objectContaining({ id: ana.id, email: "ana@example.com" })]);
+    expect(await pageRequest(cookie)).toMatchObject({ status: "ok", identity: { email: "ana@example.com" } });
 
     await aMinutePasses();
-    expect(await codeMailedTo("ana@example.com")).toBeNull();
-    const second = await codeMailedTo("ana.new@example.com");
-    expect(second).toMatchObject({ to: "ana.new@example.com" });
-    const again = await post("/portal-code/verify", { email: "ana.new@example.com", code: codeIn(second!) });
-    expect(await again.json()).toEqual({ ok: true, next: "/" });
-    expect(await pageRequest(cookieFrom(again))).toMatchObject({ status: "ok", identity: { parentId: ana!.id, email: "ana.new@example.com", familyId } });
+    expect(await codeMailedTo("ana.new@example.com")).toBeNull();
+    expect(await codeMailedTo("ana@example.com")).toMatchObject({ to: "ana@example.com" });
   }, 30_000);
 });

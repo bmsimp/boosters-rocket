@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, reviewNoticeMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage } from "@/lib/mail/messages";
+import { signinCodeMessage, welcomeMessage, emailChangeConfirmMessage, emailChangeNoticeMessage, testMessage, signedFormCopyMessage, formReminderMessage, volunteerSignupMessage } from "@/lib/mail/messages";
 
 const b = { clubName: "FZN <Band> Boosters", color: "#5b2a86" };
 
@@ -44,14 +44,6 @@ describe("mail messages", () => {
   });
   it("has a plain test message", () => {
     expect(testMessage(b, "admin@example.org").subject).toBe("Test email from FZN <Band> Boosters");
-  });
-  it("the staff review notice gives two numbers and a link, and names nobody", () => {
-    const m = reviewNoticeMessage({ clubName: "FZN Band Boosters", color: "#005102" }, "reg@club.org", { newCount: 2, waiting: 5, link: "https://portal.example.org/staff/parents" });
-    expect(m.subject).toBe("FZN Band Boosters: 2 parent sign-ins to review");
-    expect(m.text).toContain("2 new");
-    expect(m.text).toContain("5 waiting in all");
-    expect(m.text).toContain("https://portal.example.org/staff/parents");
-    expect(reviewNoticeMessage({ clubName: "C", color: "#005102" }, "r@c.org", { newCount: 1, waiting: 1, link: "x" }).subject).toBe("C: 1 parent sign-in to review");
   });
 
   it("writes QuickBooks' and the club's own text into the HTML as text, never as markup (v1 spec §12, invariant 6)", () => {

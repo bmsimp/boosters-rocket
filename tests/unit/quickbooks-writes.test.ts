@@ -228,8 +228,10 @@ function writerProblems(source: string): string[] {
 
 /**
  * What is wrong with how the email change reaches its write; nothing when the write is imported under its own name,
- * called once, inside the confirmation, for the record loadMyRecord(ctx) found for the session, and the module exports
- * nothing but its list. The checks of writerProblems(), for the second write.
+ * called once, inside the confirmation, for the record loadMyRecordForMyEmailChange(ctx) found for the session (its own
+ * record by the address it signs in with, or while the record's email field reads as its own live change: only this
+ * module may ask for that, tests/unit/my-record-for-email-change.test.ts), and the module exports nothing but its list.
+ * The checks of writerProblems(), for the second write.
  */
 function emailWriterProblems(source: string): string[] {
   const text = code(source), problems: string[] = [];
@@ -241,8 +243,8 @@ function emailWriterProblems(source: string): string[] {
   if (calls.length !== 1) problems.push(`${CONFIRM} calls ${EMAIL_WRITE} ${calls.length} times, not once`);
   else if (calls[0] !== "record.qboId") problems.push(`${EMAIL_WRITE} is called for ${calls[0]}, not for record.qboId`);
   if (named !== 2) problems.push(`${EMAIL_WRITE} is named ${named} times: once to import it and once to call it is all`);
-  const OWN = "const record = await loadMyRecord(ctx);";
-  if (confirm.split(OWN).length !== 2) problems.push(`${CONFIRM} does not get its record from loadMyRecord(ctx), once`);
+  const OWN = "const record = await loadMyRecordForMyEmailChange(ctx);";
+  if (confirm.split(OWN).length !== 2) problems.push(`${CONFIRM} does not get its record from loadMyRecordForMyEmailChange(ctx), once`);
   if (/\b(?:const|let|var)\s+record\b|\brecord\s*=[^=>]|\brecord\.qboId\s*=[^=]/.test(confirm.replace(OWN, ""))) problems.push(`${CONFIRM} gives record another value`);
   if (!confirm.startsWith(`export async function ${CONFIRM}(ctx: ParentCtx, `)) problems.push(`${CONFIRM} does not take the session's ParentCtx first`);
   const exported = [...text.matchAll(/^export\s+(?:declare\s+)?(?:async\s+)?(?:function\*?|const|let|var|class|type|interface|enum)\s+(\w+)/gm)].map((m) => m[1]!);
@@ -729,7 +731,7 @@ describe("the portal writes one thing to QuickBooks: a parent's own phone and ad
       const added = (more: string) => `${emailChange}\n${more}\n`;
       const cut = emailChange.indexOf(`export async function ${CONFIRM}(`);
       const inConfirm = (from: string, to: string) => emailChange.slice(0, cut) + emailChange.slice(cut).replace(from, to);
-      const OWN = "const record = await loadMyRecord(ctx);";
+      const OWN = "const record = await loadMyRecordForMyEmailChange(ctx);";
       const refused = [
         added(`export async function staffSetEmail(qboId: string, version: string, field: string) { return qboUpdateCustomerEmail(qboId, version, field, { realmId: "1" }); }`),
         added(`async function alsoSend(qboId: string) { return qboUpdateCustomerEmail(qboId, "0", "a@b.org", { realmId: "1" }); }`),

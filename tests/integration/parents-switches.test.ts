@@ -1,77 +1,66 @@
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-
-const stubBase = vi.hoisted(() => ({ url: "" }));
-vi.mock("@/lib/quickbooks/endpoints", async (original) => {
-  const m = await original<typeof import("@/lib/quickbooks/endpoints")>();
-  return { ...m, qboEndpoints: () => ({ authorize: `${stubBase.url}/authorize`, token: `${stubBase.url}/token`, revoke: `${stubBase.url}/revoke`,
-    api: { sandbox: stubBase.url, production: stubBase.url } }) };
-});
-
+import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
-import { sql } from "drizzle-orm";
-import { auditLog, guardian, heldAddress, jobRun, parent, parentAuthSession, parentAuthUser, setting, signinCode } from "@/lib/db/schema";
-import { noAppRecordChanges } from "@/lib/families/changes";
-import * as reconcileModule from "@/lib/parents/reconcile";
-import { ROSTER_LOCK } from "@/lib/roster/shape";
-import { ROSTER_JOB } from "@/lib/roster/source";
+import { eq } from "drizzle-orm";
+import { auditLog, family, guardian, parent, parentAuthSession, parentAuthUser, qboConnection, setting, signinCode, student } from "@/lib/db/schema";
 import { getParentSettings, PARENTS_KEY } from "@/lib/parents/settings";
-import { runReconcile } from "../helpers/reconcile";
-import { accessPreview, missingForSignins, peopleWithAccess, setRequireStudents, setReviewEmails, setSignins, setWelcome } from "@/lib/parents/switches";
+import { missingForSignins, NO_STUDENTS_IN_SHAPE, peopleWithAccess, setRequireStudents, setSignins, setWelcome, signinCounts, studentsEffect } from "@/lib/parents/switches";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
-import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
-import { fam, par, seedCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
-import { startQboStub, seedConnected, type QboStub } from "../helpers/qbo-stub";
-
-let stub: QboStub;
-beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
-afterAll(() => stub.close());
+import { resetDb, seedGuardian, seedGuardianInFamily, seedParent, seedParentSession, seedWorkingMail } from "../helpers/db";
+import { storeShape } from "../helpers/roster-cache";
+import { saveShape } from "@/lib/roster/shape";
+import { studentsRuleInForce } from "@/lib/parents/sessions";
 
 const admin = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: "203.0.113.9", permission: "Settings.Parents.ReadWrite" };
-const freshRun = () => db.insert(jobRun).values({ job: ROSTER_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "ok" });
-const RIVERA = [fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo Rivera", "10")];
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
+const rows = async () => (await db.select().from(guardian).orderBy(guardian.id)).map((g) => ({ id: g.id, status: g.status, disabledReason: g.disabledReason, familyId: g.familyId }));
 
-const snapshot = async () => [await db.select().from(guardian).orderBy(guardian.id), await db.select().from(parent).orderBy(parent.id),
-  await db.select().from(parentAuthUser).orderBy(parentAuthUser.id), await db.select().from(heldAddress).orderBy(heldAddress.email),
-  await db.select().from(auditLog).orderBy(auditLog.id), await db.select().from(setting).orderBy(setting.key)];
+/**
+ * Ana, with an invited row in a family of the app's own (seedGuardianInFamily()), and no QuickBooks at all: the switches
+ * need none (open question 15 of the app-owned families spec).
+ */
+async function seedAna(o: { familyQboId?: string } = {}) {
+  const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+  const row = await seedGuardianInFamily({ parentId: ana.id, familyQboId: o.familyQboId ?? "10", status: "invited" });
+  return { ana, row };
+}
 
 describe("the parent switches", () => {
-  beforeEach(async () => { await resetDb(); stub.reset(); });
-  const ready = async (customers = RIVERA) => { await seedConnected(stub); await seedShape(); await seedCache(customers); await freshRun(); await seedWorkingMail(); };
+  beforeEach(async () => { await resetDb(); });
 
-  it("says what is missing, and refuses to switch on, until QuickBooks, the shape, a fresh roster and mail are all there", async () => {
-    expect((await accessPreview()).ready).toEqual({ connected: false, shape: false, rosterFresh: false, mail: false });
-    expect(await setSignins(true, admin)).toEqual({ ok: false, errors: [
-      "Connect QuickBooks first.", "Choose the membership shape first.", "Refresh the roster first: it hasn't been read in the last 2 days.", "Set up outgoing mail and send a test email first." ] });
-    await ready();
-    await db.update(jobRun).set({ finishedAt: new Date(Date.now() - 49 * 3_600_000) });
-    expect((await accessPreview()).ready).toEqual({ connected: true, shape: true, rosterFresh: false, mail: true });
+  it("asks only for working mail before switching on: no QuickBooks, shape or roster read", async () => {
+    await seedAna();
+    expect(await db.select().from(qboConnection)).toEqual([]);
+    expect(await missingForSignins()).toEqual(["Set up outgoing mail and send a test email first."]);
+    expect(await setSignins(true, admin)).toEqual({ ok: false, errors: ["Set up outgoing mail and send a test email first."] });
     expect((await getParentSettings()).signin).toBe(false);
     expect(await audits("settings.parents.save")).toEqual([]);
-  });
-
-  it("names the real cause: no shape chosen, or a shape the roster can't be used with", async () => {
-    await seedConnected(stub); await freshRun(); await seedWorkingMail();
-    expect(await missingForSignins()).toEqual(["Choose the membership shape first."]);
-    await seedShape();                                                      // chosen, but nothing has been read yet
-    expect(await missingForSignins()).toEqual(["The roster can't be used yet: refresh it, and check the membership shape under QuickBooks."]);
-    await seedCache(RIVERA);
+    await seedWorkingMail();
     expect(await missingForSignins()).toEqual([]);
+    expect(await setSignins(true, admin)).toEqual({ ok: true });
+    expect(await getParentSettings()).toMatchObject({ signin: true, everEnabled: true });
   });
 
-  it("rolls back and saves nothing when the roster stops being usable while switching on", async () => {
-    await ready();
-    // reconcileAccess is spied to report ran: false, as it would if the roster became unusable after the readiness check.
-    const spy = vi.spyOn(reconcileModule, "reconcileAccess").mockResolvedValueOnce({ ran: false, granted: 0, ended: 0, emailChanged: 0, welcomeOwed: 0, appRecords: noAppRecordChanges() });
-    try {
-      expect(await setSignins(true, admin)).toEqual({ ok: false, errors: ["The roster changed while this was being switched on. Check the preview and try again."] });
-    } finally { spy.mockRestore(); }
-    expect(await getParentSettings()).toMatchObject({ signin: false, everEnabled: false });
-    expect(await audits("settings.parents.save")).toEqual([]);
+  it("switching on saves the switch and is audited, and opens, closes and makes no sign-in", async () => {
+    await seedWorkingMail();
+    await seedAna();
+    // A row closed earlier for a QuickBooks reason, and an open one of a family the app holds as inactive.
+    const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com" });
+    await seedGuardianInFamily({ parentId: mei.id, familyQboId: "20", status: "disabled", disabledReason: "not_in_quickbooks", statusBeforeDisable: "active" });
+    const leo = await seedParent({ name: "Leo Park", email: "leo@example.com" });
+    const inactive = await seedGuardianInFamily({ parentId: leo.id, familyQboId: "30" });
+    await db.update(family).set({ active: false }).where(eq(family.id, inactive.familyId!));
+    const [before, people] = [await rows(), await db.select().from(parent).orderBy(parent.id)];
+    expect(await setSignins(true, admin)).toEqual({ ok: true });
+    expect(await rows()).toEqual(before);
+    expect(await db.select().from(parent).orderBy(parent.id)).toEqual(people);
+    const [row] = await audits("settings.parents.save");
+    expect(row).toMatchObject({ door: "staff", actorLabel: "admin@club.org", permission: "Settings.Parents.ReadWrite", targetType: "setting", targetId: PARENTS_KEY, ip: "203.0.113.9" });
+    expect(row!.before).toMatchObject({ signin: false });
+    expect(row!.after).toEqual({ signin: true, everEnabled: true, welcome: false, requireActiveStudents: false });
+    for (const action of ["parent.create", "parent.access.granted", "parent.access.ended"]) expect(await audits(action)).toEqual([]);
   });
 
   it("switching off when sign-ins were never on does nothing", async () => {
-    await ready();
     const u = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
     await seedGuardian({ parentId: u.id, familyQboId: "POC-FAMILY-1" });
     await seedParentSession(u.authUserId);
@@ -81,121 +70,27 @@ describe("the parent switches", () => {
   });
 
   it("switching off deletes every unused sign-in code and counts them", async () => {
-    await ready(); await setSignins(true, admin);
-    const [p] = await db.select().from(parent);
-    await db.insert(signinCode).values({ parentId: p!.id, codeHash: "ab".repeat(32), expiresAt: new Date(Date.now() + 600_000) });
-    await db.insert(signinCode).values({ parentId: p!.id, codeHash: "cd".repeat(32), expiresAt: new Date(Date.now() + 600_000), usedAt: new Date() });
+    await seedWorkingMail(); const { ana } = await seedAna(); await setSignins(true, admin);
+    await db.insert(signinCode).values({ parentId: ana.id, codeHash: "ab".repeat(32), expiresAt: new Date(Date.now() + 600_000) });
+    await db.insert(signinCode).values({ parentId: ana.id, codeHash: "cd".repeat(32), expiresAt: new Date(Date.now() + 600_000), usedAt: new Date() });
     await setSignins(false, admin);
     expect(await db.select().from(signinCode)).toHaveLength(1);              // only the used one remains
     expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: false, codesDeleted: 1 });
   });
 
-  it("previews who would get access, what needs fixing and which sign-ins would end, before anything is on", async () => {
-    await ready([...RIVERA, par("13", "No Mail", "10", null), par("14", "Two Mail", "10", "a@example.com, b@example.com"),
-      fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com"), fam("30", "Empty Family")]);
-    const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
-    await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
-    const p = await accessPreview({ ending: true });
-    // ana@example.com is under families 10 and 20 and held in both, so only Two Mail (a@example.com, family 10) is granted.
-    expect(p).toMatchObject({ people: 1, families: 1, welcomeNow: 1,
-      noEmail: [{ qboId: "13", name: "No Mail" }], manyAddresses: [{ qboId: "14", name: "Two Mail" }],
-      noSignin: [{ qboId: "20", name: "Chen Family" }, { qboId: "30", name: "Empty Family" }],
-      ending: [{ name: "Hand Seeded", email: "seeded@example.com", familyQboId: "POC-FAMILY-1" }] });
-    expect(p.held.map((h) => h.email)).toEqual(["ana@example.com"]);
-    expect(await db.select().from(guardian)).toHaveLength(1);              // the preview changed nothing
-    expect(await db.select().from(auditLog)).toEqual([]);
-  });
-
-  it("lists no ending sign-in for a customer whose address changed, because the reconcile handles that in place", async () => {
-    await ready();
-    await setSignins(true, admin);
-    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com"), stu("12", "Leo Rivera", "10")]);
-    expect((await accessPreview({ ending: true })).ending).toEqual([]);
-  });
-
-  it("lists the sign-ins the reconcile would close, by the owner's name before the run", async () => {
-    await ready();
-    await setSignins(true, admin);
-    await seedCache([fam("10", "Rivera Family"), stu("12", "Leo Rivera", "10")]);   // the parent left QuickBooks
-    expect((await accessPreview({ ending: true })).ending).toEqual([{ name: "Ana Rivera", email: "ana@example.com", familyQboId: "10" }]);
-    expect((await db.select().from(guardian))[0]!.status).toBe("invited");
-  });
-
-  it("changes nothing in the database, whether sign-ins have never been on or are on", async () => {
-    const world = [...RIVERA, par("14", "Two Mail", "10", "a@example.com, b@example.com"), fam("20", "Chen Family"), par("21", "Ana Rivera", "20", "ana@example.com")];
-    await ready(world);
-    const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
-    await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
-    let before = await snapshot();
-    expect((await accessPreview({ ending: true })).ending).toHaveLength(1);
-    expect(await snapshot()).toEqual(before);
-    await seedParentSettings({ welcome: true });
-    await setSignins(true, admin);
-    await seedCache([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana.new@example.com"), par("14", "Two Mail", "10", "c@example.com"), fam("30", "New Family"), par("31", "New Parent", "30", "new@example.com")]);
-    before = await snapshot();
-    await accessPreview({ ending: true });
-    expect(await snapshot()).toEqual(before);
-  });
-
-  it("runs the dry run only when asked for the ending list", async () => {
-    await ready();
-    const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
-    await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
-    const spy = vi.spyOn(reconcileModule, "reconcileAccess");
-    try {
-      expect(await accessPreview()).toMatchObject({ ending: [], endingUnknown: false, people: 1 });
-      expect(spy).not.toHaveBeenCalled();
-      expect((await accessPreview({ ending: true })).ending).toHaveLength(1);
-      expect(spy).toHaveBeenCalledTimes(1);
-    } finally { spy.mockRestore(); }
-  });
-
-  it("counts no blocked person among the people who could sign in or would be welcomed", async () => {
-    await ready([...RIVERA, par("13", "Bo Rivera", "10", "bo@example.com")]);
-    await seedParent({ name: "Ana Rivera", email: "ana@example.com", blocked: true });
-    expect(await accessPreview()).toMatchObject({ people: 1, families: 1, welcomeNow: 1 });          // Bo only
-  });
-
-  it("never waits for a running refresh: it says the ending list is not known yet", async () => {
-    await ready();
-    const seeded = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
-    await seedGuardian({ parentId: seeded.id, familyQboId: "POC-FAMILY-1" });
-    let busy!: Awaited<ReturnType<typeof accessPreview>>;
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(${ROSTER_LOCK})`);
-      busy = await accessPreview({ ending: true });
-    });
-    expect(busy).toMatchObject({ ending: [], endingUnknown: true });
-    expect(await accessPreview({ ending: true })).toMatchObject({ endingUnknown: false, ending: [{ email: "seeded@example.com" }] });
-  });
-
-  it("switching on runs the reconcile and is audited with the counts", async () => {
-    await ready();
-    expect(await setSignins(true, admin)).toEqual({ ok: true });
-    expect(await getParentSettings()).toMatchObject({ signin: true, everEnabled: true });
-    expect(await db.select().from(guardian)).toHaveLength(1);
-    const [row] = await audits("settings.parents.save");
-    expect(row).toMatchObject({ door: "staff", actorLabel: "admin@club.org", permission: "Settings.Parents.ReadWrite", targetType: "setting", targetId: PARENTS_KEY, ip: "203.0.113.9" });
-    expect(row!.before).toMatchObject({ signin: false });
-    expect(row!.after).toMatchObject({ signin: true, granted: 1, ended: 0 });
-  });
-
-  it("switching off signs every parent out and stops the reconcile; links stay", async () => {
-    await ready(); await setSignins(true, admin);
-    const [u] = await db.select().from(parentAuthUser);
-    await seedParentSession(u!.id);
+  it("switching off signs every parent out; the rows stay as they were", async () => {
+    await seedWorkingMail(); const { ana } = await seedAna(); await setSignins(true, admin);
+    await seedParentSession(ana.authUserId);
+    const before = await rows();
     expect(await setSignins(false, admin)).toEqual({ ok: true });
     expect(await db.select().from(parentAuthSession)).toEqual([]);
     expect(await getParentSettings()).toMatchObject({ signin: false, everEnabled: true });
-    expect((await db.select().from(guardian))[0]!.status).toBe("invited");
+    expect(await rows()).toEqual(before);
     expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: false, sessionsEnded: 1 });
-    await seedCache([]);                                                   // would close the link if the reconcile still ran
-    expect((await runReconcile({ cause: "test" })).ran).toBe(false);
-    expect((await db.select().from(guardian))[0]!.status).toBe("invited");
   });
 
   it("switching off switches welcome emails off too, so switching on again emails nobody by surprise", async () => {
-    await ready(); await setSignins(true, admin);
+    await seedWorkingMail(); await seedAna(); await setSignins(true, admin);
     expect(await setWelcome(true, admin)).toEqual({ ok: true });
     expect((await db.select().from(parent)).filter((p) => p.welcomeOwed)).toHaveLength(1);
     expect(await setSignins(false, admin)).toEqual({ ok: true });
@@ -208,7 +103,7 @@ describe("the parent switches", () => {
   });
 
   it("switching welcome emails off clears the owed welcomes and records how many", async () => {
-    await ready(); await setSignins(true, admin);
+    await seedWorkingMail(); await seedAna(); await setSignins(true, admin);
     await setWelcome(true, admin);
     expect(await setWelcome(false, admin)).toEqual({ ok: true });
     expect((await db.select().from(parent)).filter((p) => p.welcomeOwed)).toEqual([]);
@@ -216,54 +111,98 @@ describe("the parent switches", () => {
   });
 
   it("refuses to switch welcome emails on while sign-ins are off, and saves nothing", async () => {
-    await ready();
+    await seedWorkingMail(); await seedAna();
     expect(await setWelcome(true, admin)).toEqual({ ok: false, errors: ["Switch parent sign-ins on first."] });
     await setSignins(true, admin); await setSignins(false, admin);
-    const rows = (await audits("settings.parents.save")).length;
+    const saved = (await audits("settings.parents.save")).length;
     expect(await setWelcome(true, admin)).toEqual({ ok: false, errors: ["Switch parent sign-ins on first."] });
     expect((await getParentSettings()).welcome).toBe(false);
-    expect(await audits("settings.parents.save")).toHaveLength(rows);
+    expect(await audits("settings.parents.save")).toHaveLength(saved);
     expect(await setWelcome(false, admin)).toEqual({ ok: true });            // off always works
   });
 
   it("a press that changes nothing does no work and records nothing", async () => {
-    await ready([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo", "10")]);
+    await seedWorkingMail(); await seedAna(); await storeShape();
     await setSignins(true, admin);
-    const spy = vi.spyOn(reconcileModule, "reconcileAccess");
-    try {
-      expect(await setSignins(true, admin)).toEqual({ ok: true });
-      expect(spy).not.toHaveBeenCalled();
-    } finally { spy.mockRestore(); }
+    expect(await setSignins(true, admin)).toEqual({ ok: true });
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
-    expect(await setReviewEmails(false, admin)).toEqual({ ok: true });
-    expect(await setReviewEmails(false, admin)).toEqual({ ok: true });
-    const rows = await audits("settings.parents.save");
-    expect(rows.filter((r) => (r.after as { signin?: boolean }).signin === true && !(r.before as { signin?: boolean }).signin)).toHaveLength(1);
-    expect(rows.filter((r) => (r.after as Record<string, unknown>).requireActiveStudents === true && !(r.before as Record<string, unknown>).requireActiveStudents)).toHaveLength(1);
-    expect(rows.filter((r) => (r.after as Record<string, unknown>).reviewEmails === false && (r.before as Record<string, unknown>).reviewEmails)).toHaveLength(1);
-    expect(rows).toHaveLength(3);
+    const saved = await audits("settings.parents.save");
+    expect(saved.filter((r) => (r.after as { signin?: boolean }).signin === true && !(r.before as { signin?: boolean }).signin)).toHaveLength(1);
+    expect(saved.filter((r) => (r.after as Record<string, unknown>).requireActiveStudents === true && !(r.before as Record<string, unknown>).requireActiveStudents)).toHaveLength(1);
+    expect(saved).toHaveLength(2);
   });
 
-  it("offers the active-students setting only when the shape names a student type, and shows what it would close", async () => {
-    await ready([fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo", "10", { active: false })]);
+  it("the active-students setting is saved and audited and closes nothing; the gate reads it, from the app's own students", async () => {
+    await seedWorkingMail();
+    const { ana, row } = await seedAna();
+    await db.insert(student).values({ familyId: row.familyId!, name: "Leo", active: false });
     await setSignins(true, admin);
-    expect((await accessPreview()).students).toEqual({ offered: true, families: 1, people: 1 });
+    // The stored shape names students, so the setting can be switched on; no QuickBooks and no roster read: the gate
+    // reads it from the app's own students.
+    await storeShape();
+    expect(await studentsEffect()).toEqual({ families: 1, people: 1 });
+    expect(await signinCounts()).toEqual({ people: 1, families: 1, welcomeNow: 1 });
+    const before = await rows();
     expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
-    expect((await db.select().from(guardian))[0]).toMatchObject({ status: "disabled", disabledReason: "no_active_students" });
-    await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: null, parentTypeId: "P" });
-    expect((await accessPreview()).students.offered).toBe(false);
-    expect(await setRequireStudents(true, admin)).toEqual({ ok: false, errors: ["The membership shape doesn't say which customers are students, so this can't be used."] });
+    expect(await rows()).toEqual(before);
+    expect(await audits("parent.access.ended")).toEqual([]);
+    expect((await audits("settings.parents.save")).at(-1)!.after).toEqual({ signin: true, everEnabled: true, welcome: false, requireActiveStudents: true });
+    expect(await signinCounts()).toEqual({ people: 0, families: 0, welcomeNow: 0 });
+    // A student comes back: she counts again, with no row reopened, since none was closed.
+    await db.update(student).set({ active: true });
+    expect(await signinCounts()).toEqual({ people: 1, families: 1, welcomeNow: 1 });
+    expect(await studentsEffect()).toEqual({ families: 0, people: 0 });
+    expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)))).toHaveLength(1);
   });
 
-  it("saves the review-email switch and audits it", async () => {
-    expect(await setReviewEmails(false, admin)).toEqual({ ok: true });
-    expect((await getParentSettings()).reviewEmails).toBe(false);
-    expect((await audits("settings.parents.save"))[0]!.after).toMatchObject({ reviewEmails: false });
+  // With no student type the app holds no active student, so the setting would keep every parent out: it is never
+  // switched on then, and a shape saved without one leaves it stored but not in force (studentsRuleInForce()).
+  it("the active-students setting is refused while the shape names no students, and a shape saved without them leaves it stored but not in force", async () => {
+    await seedWorkingMail(); await seedAna(); await setSignins(true, admin);
+    for (const shape of [null, { kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }]) {
+      if (shape) await storeShape(shape);
+      expect(await setRequireStudents(true, admin)).toEqual({ ok: false, errors: [NO_STUDENTS_IN_SHAPE] });
+      expect((await getParentSettings()).requireActiveStudents).toBe(false);
+    }
+    expect((await audits("settings.parents.save")).filter((r) => (r.after as Record<string, unknown>).requireActiveStudents === true)).toEqual([]);
+    // Off always works, and on works once the shape names students.
+    expect(await setRequireStudents(false, admin)).toEqual({ ok: true });
+    await storeShape();
+    expect(await setRequireStudents(true, admin)).toEqual({ ok: true });
+    expect(await studentsRuleInForce()).toBe(true);
+    // A shape save never touches the parents' settings: one with students keeps the rule in force; one without leaves
+    // the stored value as it is, not in force; one with students again puts it back in force, with nothing switched.
+    // (Who it then lets in is tests/integration/parent-door.test.ts: a shape save here, with no roster company, also
+    // takes Ana's row out of its family record, as keepAppRecordsInStep() does with no company.)
+    const saved = (await audits("settings.parents.save")).length;
+    await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S2", parentTypeId: "P" }, { actor: admin.actor, ip: null });
+    expect(await studentsRuleInForce()).toBe(true);
+    for (const shape of [{ kind: "flat" as const, memberTypeIds: ["M"] }, { kind: "layered" as const, familyTypeId: "F", studentTypeId: null, parentTypeId: "P" }]) {
+      await saveShape(shape, { actor: admin.actor, ip: null });
+      expect(await getParentSettings()).toMatchObject({ signin: true, requireActiveStudents: true });
+      expect(await studentsRuleInForce()).toBe(false);
+      // Pressing "on" again (a stale page) is refused as when it is off, never told it is saved while not in force,
+      // and changes and records nothing.
+      expect(await setRequireStudents(true, admin)).toEqual({ ok: false, errors: [NO_STUDENTS_IN_SHAPE] });
+      expect(await getParentSettings()).toMatchObject({ requireActiveStudents: true });
+    }
+    await saveShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: "P" }, { actor: admin.actor, ip: null });
+    expect(await studentsRuleInForce()).toBe(true);
+    expect(await audits("settings.parents.save")).toHaveLength(saved);
+    expect((await audits("settings.membership.save")).map((r) => r.after)).not.toContainEqual(expect.objectContaining({ requireActiveStudentsSwitchedOff: expect.anything() }));
   });
 
-  it("counts the people who can sign in now", async () => {
-    await ready(); await setSignins(true, admin);
+  it("counts the people who can sign in now by the gate's rule: never blocked, never of an inactive family", async () => {
+    await seedWorkingMail(); await seedAna(); await setSignins(true, admin);
+    const blocked = await seedParent({ name: "Blocked", email: "blocked@example.com", blocked: true });
+    await seedGuardianInFamily({ parentId: blocked.id, familyQboId: "10" });
+    const gone = await seedParent({ name: "Gone", email: "gone@example.com", welcomedAt: new Date() });
+    const row = await seedGuardianInFamily({ parentId: gone.id, familyQboId: "40" });
+    expect(await peopleWithAccess()).toBe(2);
+    expect(await signinCounts()).toEqual({ people: 2, families: 2, welcomeNow: 1 });
+    await db.update(family).set({ active: false }).where(eq(family.id, row.familyId!));
     expect(await peopleWithAccess()).toBe(1);
+    expect(await db.select().from(setting).where(eq(setting.key, PARENTS_KEY))).toHaveLength(1);
   });
 });

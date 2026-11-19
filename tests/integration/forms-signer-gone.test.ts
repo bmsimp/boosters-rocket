@@ -1,15 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, formWithdrawal, parent, type RequestSigner } from "@/lib/db/schema";
+import { auditLog, formWithdrawal, guardian, parent, type RequestSigner } from "@/lib/db/schema";
 import { blockPerson } from "@/lib/parents/people";
-import { runReconcile } from "../helpers/reconcile";
+import { closeMembership } from "@/lib/parents/membership";
 import { resetDb, seedParent, seedGuardian } from "../helpers/db";
 import { seedCache, seedRosterRead, seedShape, seedParentSettings, SIGNINS_ON, fam, par, stu } from "../helpers/roster-cache";
 import { recordOfCustomer } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
 import { formSetting, requestNow, seedFormRequirement, seedRequest } from "../helpers/forms";
 
-// A guardian who can no longer sign for a family (blocked, or their link closed by the reconcile) keeps a working
+// A guardian who can no longer sign for a family (blocked, or their membership closed, closeMembership()) keeps a working
 // Documenso signing link on any document made for them. Their unfinished forms start again, and the documents are
 // withdrawn, so a signature or decline made through that link never counts for the family.
 
@@ -61,7 +62,7 @@ describe("a guardian who can no longer sign for the family", () => {
     expect((await db.select().from(parent)).find((p) => p.id === ana.id)!.blocked).toBe(true);
   });
 
-  it("the reconcile closing a link starts again that family's forms waiting for them, and no other family's", async () => {
+  it("closing a membership starts again that family's forms waiting for them, and no other family's", async () => {
     await seedRosterRead({ realmId: REALM });
     await seedShape(); await seedParentSettings(SIGNINS_ON);
     const both = [fam("10", "Rivera Family"), par("11", "Ana Rivera", "10", "ana@example.com"), stu("12", "Leo Rivera", "10"),
@@ -74,8 +75,10 @@ describe("a guardian who can no longer sign for the family", () => {
     const inTen = await seedRequest({ requirementId: r.any, familyQboId: "10", subjectQboId: "10", state: "waiting", envelopeId: "envelope_ten", signers: [signer(ana.id, "Ana")] });
     const inTwenty = await seedRequest({ requirementId: r.any, familyQboId: "20", subjectQboId: "20", state: "waiting", envelopeId: "envelope_twenty", signers: [signer(ana.id, "Ana")] });
 
-    await seedCache(both.map((c) => (c.qboId === "11" ? { ...c, active: false } : c)));
-    expect(await runReconcile({ cause: "test" })).toMatchObject({ ended: 1 });
+    await db.transaction(async (tx) => {
+      const [row] = await tx.select().from(guardian).where(and(eq(guardian.parentId, ana.id), eq(guardian.familyQboId, "10"))).for("update");
+      expect(await closeMembership(tx, row!, { reason: "removed", actor: staff.actor })).toMatchObject({ wasOpen: true });
+    });
 
     expect(await requestNow(inTen)).toMatchObject({ state: "not_opened", envelopeId: null });
     expect(await requestNow(inTwenty)).toMatchObject({ state: "waiting", envelopeId: "envelope_twenty" });

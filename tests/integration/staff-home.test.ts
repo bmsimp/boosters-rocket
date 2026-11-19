@@ -8,7 +8,6 @@ import { addDays, formsToChase, shiftsToFill } from "@/lib/staff-home/today";
 import StaffHome from "@/app/staff/(app)/page";
 import { resetDb, seedStaff } from "../helpers/db";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies } from "../helpers/parent";
-import { addToCache, par } from "../helpers/roster-cache";
 import { seedQueued, staffWith } from "../helpers/roster-writes";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
 
@@ -23,8 +22,6 @@ let families: Awaited<ReturnType<typeof seedTwoFamilies>>;
 beforeEach(async () => {
   await resetDb();
   families = await seedTwoFamilies();
-  // An address under both families: held until someone decides (parents spec §5).
-  await addToCache([par("SH-A", "Shared Sam", FAMILY_A.family.qboId, "shared.sam@example.com"), par("SH-B", "Shared Sam", FAMILY_B.family.qboId, "shared.sam@example.com")]);
   // Two changes waiting to reach QuickBooks, and one stuck.
   await seedQueued({ op: "deactivate", role: "parent", qboId: "21", syncToken: "0" }, { familyQboId: FAMILY_A.family.qboId });
   await seedQueued({ op: "deactivate", role: "parent", qboId: "22", syncToken: "0" }, { familyQboId: FAMILY_B.family.qboId });
@@ -64,7 +61,8 @@ describe("the counts", () => {
 describe("the staff home", () => {
   it("shows each item only to staff who hold its permission, as a count in words with a link", async () => {
     const cases: [string[], string[], string[]][] = [
-      [["Parents.ReadWrite"], ["reviews"], ["1 address to review", 'href="/staff/parents"']],
+      // The held-address review is gone (stage 3 of the app-owned families spec): Parents has nothing waiting to count.
+      [["Parents.ReadWrite"], [], []],
       [["Roster.Read"], ["stuck", "waiting"], ["1 change stuck on its way to QuickBooks", "2 changes waiting to reach QuickBooks", 'href="/staff/reconciliation"']],
       [["Forms.Signature.Read"], ["due", "sealing", "evidence"], ["2 forms still to sign, due within 7 days or already due",
         "1 form signed but not yet finished by Documenso", "1 signed form waiting for the signed copy to be kept", 'href="/staff/forms"']],
@@ -88,7 +86,7 @@ describe("the staff home", () => {
   it("says nothing needs doing when nothing is waiting, even to an Admin", async () => {
     const admin = await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true });
     asStaff(admin);
-    expect(todayItems(await home())).toEqual(["reviews", "stuck", "waiting", "due", "sealing", "evidence", "shifts"]);
+    expect(todayItems(await home())).toEqual(["stuck", "waiting", "due", "sealing", "evidence", "shifts"]);
     await resetDb();
     asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
     const quiet = await home();
@@ -100,7 +98,7 @@ describe("the staff home", () => {
     const before = (await db.select().from(auditLog)).length;
     asStaff(await seedStaff({ email: "admin@club.org", name: "Ada Admin", admin: true }));
     const html = await home();
-    for (const marker of [FAMILY_A.family.name, FAMILY_B.family.name, FAMILY_A.family.qboId, FAMILY_B.family.qboId, "shared.sam@example.com", "Concessions", "Travel consent"]) {
+    for (const marker of [FAMILY_A.family.name, FAMILY_B.family.name, FAMILY_A.family.qboId, FAMILY_B.family.qboId, "Concessions", "Travel consent"]) {
       expect(html).not.toContain(marker);
     }
     expect((await db.select().from(auditLog)).length).toBe(before);

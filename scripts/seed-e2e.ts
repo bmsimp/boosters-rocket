@@ -38,14 +38,23 @@ async function main() {
           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
   await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
           VALUES (${crypto.randomUUID()}, 'Zelda Quetzalcoatl', 'zelda@example.com', true, ${p!.id}) ON CONFLICT (parent_id) DO NOTHING`;
-  // Each link names the QuickBooks record it came from (E2E-P1, E2E-P2 below), as the reconcile leaves it once parent
-  // sign-ins are switched on (tests/e2e/parents.spec.ts): "Your details" then offers "Update my details" in both passes
-  // of the run. Those ids are not numbers on purpose. The edit page reads a parent's record from QuickBooks as it
+  // Each link names the QuickBooks record it came from (E2E-P1, E2E-P2 below): "Your details" then offers "Update my
+  // details" in both passes of the run. Those ids are not numbers on purpose. The edit page reads a parent's record from QuickBooks as it
   // opens, and an id that isn't digits is never sent: with the made-up tokens below, a number here would send this
   // run's requests to Intuit's real servers (tests/e2e/family-details.spec.ts checks the id before it opens the page).
   await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY', ${p!.id}, true, 'active', 'E2E-P1')
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
   await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-FAMILY-2', ${p!.id}, false, 'active', 'E2E-P2')
+          ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
+  // Ana Rivera, invited to the Rivera family from her parent record (E2E-11). Who can sign in is the portal's own list
+  // of guardians (stage 3 of the app-owned families spec): switching sign-ins on (tests/e2e/parents.spec.ts) gives
+  // nobody else one, so the club holds 2 people in 3 families. Sam Okafor has parent records under two families in
+  // QuickBooks and no sign-in.
+  const [ana] = await sql`INSERT INTO parent (name, email) VALUES ('Ana Rivera', 'ana@example.com')
+          ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name RETURNING id`;
+  await sql`INSERT INTO parent_auth_user (id, name, email, email_verified, parent_id)
+          VALUES (${crypto.randomUUID()}, 'Ana Rivera', 'ana@example.com', true, ${ana!.id}) ON CONFLICT (parent_id) DO NOTHING`;
+  await sql`INSERT INTO guardian (family_qbo_id, parent_id, is_primary, status, source_qbo_id) VALUES ('E2E-10', ${ana!.id}, true, 'invited', 'E2E-11')
           ON CONFLICT (family_qbo_id, parent_id) DO NOTHING`;
   // Zelda's live session is made once the app's records exist (below): it names the family it chose by its record.
   // Every session she has is deleted first, as the staff one is.
@@ -109,14 +118,10 @@ async function main() {
           ('E2E-41', 'Sam Okafor', true, 'E2E-40', 'E2E-T2', 'sam@example.com', null, '0'),
           ('E2E-50', 'Lee Family', true, null, 'E2E-T1', null, null, '0'),
           ('E2E-51', 'Sam Okafor', true, 'E2E-50', 'E2E-T2', 'sam@example.com', null, '0')`;
-  // Zelda is in two families on purpose (the family chooser test), so staff have already said she is one person.
-  // Sam's address is under two families and waits for a decision (tests/e2e/parents.spec.ts decides and reverses it).
+  // Zelda is in two families on purpose (the family chooser test): one guardian simply belongs to both.
   // The parents setting is cleared here and nowhere else: tests/e2e/parents.spec.ts switches sign-ins on, and that
   // state must survive the second (desktop) pass of the run.
-  await sql`INSERT INTO held_address (email, approved_family_qbo_ids) VALUES ('zelda@example.com', ${sql.json(["E2E-FAMILY", "E2E-FAMILY-2"])})
-          ON CONFLICT (email) DO UPDATE SET approved_family_qbo_ids = EXCLUDED.approved_family_qbo_ids`;
-  await sql`DELETE FROM held_address WHERE email = 'sam@example.com'`;
-  await sql`DELETE FROM setting WHERE key IN ('parents.settings', 'parents.review_notice', 'parents.previous_company')`;
+  await sql`DELETE FROM setting WHERE key = 'parents.settings'`;
   await sql`INSERT INTO setting (key, value) VALUES ('membership.shape', ${sql.json({ kind: "layered", familyTypeId: "E2E-T1", studentTypeId: "E2E-T3", parentTypeId: "E2E-T2" })})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   // The cache says which company it came from, as a real refresh records it; without this the pages treat it as unread.

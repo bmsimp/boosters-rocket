@@ -44,7 +44,7 @@ describe("the parents-from-QuickBooks schema", () => {
 
   it("reads a stored parents setting it can't parse as closed, not as the defaults", async () => {
     await db.insert(setting).values({ key: PARENTS_KEY, value: { signin: "yes" } });
-    expect(await getParentSettings()).toEqual({ signin: false, everEnabled: true, welcome: false, requireActiveStudents: false, reviewEmails: false });
+    expect(await getParentSettings()).toEqual({ signin: false, everEnabled: true, welcome: false, requireActiveStudents: false });
   });
 
   it("adds an Admin-only settings permission and a grantable parents permission", () => {

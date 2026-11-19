@@ -26,10 +26,10 @@ export async function completeParentSignin(parentId: string, ip: string | null, 
   const ENDED = { familyId: null, sessionEnded: true } as const;
   const sessionLives = async (q: Pick<typeof db, "select">) =>
     !sessionId || (await q.select({ id: parentAuthSession.id }).from(parentAuthSession).where(eq(parentAuthSession.id, sessionId))).length > 0;
-  // The person's rows are locked in id order first, the order the reconcile locks every row in, so the two never deadlock.
+  // The person's rows are locked in id order first, the order every change of several guardian rows locks them in.
   const activated = await db.transaction(async (tx) => {
     const mine = await tx.select({ id: guardian.id, status: guardian.status }).from(guardian).where(eq(guardian.parentId, parentId)).orderBy(guardian.id).for("update");
-    // A reconcile that held these rows has finished by now, and whatever it ended is ended.
+    // A change that held these rows has finished by now, and whatever it ended is ended.
     if (!(await sessionLives(tx))) return false;
     if ((await enterableGuardianRows(parentId, tx)).length === 0) {
       await endParentSessions(parentId, tx);

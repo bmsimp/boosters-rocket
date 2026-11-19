@@ -4,11 +4,11 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, familyMoney, jobRun, parentAuthSession, parentAuthVerification, parentEmailChange, rateLimitEvent, setting, signinCode, staffAuthSession, staffAuthUser, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
 import { getTableName, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
-import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, FINISHED_WRITES_DAYS, JOB_HISTORY_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
+import { cleanUp, runCleanup, describeCleanup, CLEANED_TABLES, KEPT_TABLES, CLEANUP_JOB, RETIRED_SETTINGS, FINISHED_WRITES_DAYS, JOB_HISTORY_DAYS, REMINDER_CLAIM_DAYS, type CleanupCounts } from "@/lib/jobs/cleanup";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { RATE_LIMITS } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -26,7 +26,7 @@ const MONEY_COMPANY = "4620000000000001";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
 const at = (ms: number) => new Date(NOW.getTime() + ms);
 const SEC = 1000, DAY = 86_400_000;
-const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0 };
+const NOTHING: CleanupCounts = { staffSessions: 0, parentSessions: 0, signinCodes: 0, rateLimitEvents: 0, emailChanges: 0, familyMoney: 0, jobRuns: 0, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 };
 const clean = (now = NOW) => db.transaction((tx) => cleanUp(tx, now));
 
 async function staffSession(id: string, expiresAt: Date) {
@@ -226,6 +226,25 @@ describe("the daily clean-up deletes only what is past use", () => {
   });
 });
 
+describe("the settings of retired features", () => {
+  beforeEach(async () => { await resetDb(); });
+
+  // The previous company's snapshot held its people's names and addresses for 90 days; nothing expires it now that
+  // its feature is gone, so the clean-up removes it, and the review notice's mark, and no other setting.
+  it("are deleted, and every other setting is kept", async () => {
+    await db.insert(setting).values([
+      { key: "parents.previous_company", value: { realmId: "1", people: [{ name: "Old Name", email: "old@example.com" }] } },
+      { key: "parents.review_notice", value: { sentAt: "2026-11-01T00:00:00Z" } },
+      { key: "parents.settings", value: { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false } },
+    ]);
+    expect(RETIRED_SETTINGS).toEqual(["parents.previous_company", "parents.review_notice"]);
+    expect(await clean()).toEqual({ ...NOTHING, retiredSettings: 2 });
+    expect((await db.select({ key: setting.key }).from(setting)).map((r) => r.key)).toEqual(["parents.settings"]);
+    expect(await clean()).toEqual(NOTHING);
+    expect(describeCleanup({ ...NOTHING, retiredSettings: 2 })).toBe("Removed 2 settings of retired features.");
+  });
+});
+
 describe("a run of the clean-up", () => {
   beforeEach(async () => { await resetDb(); });
   const audits = async () => (await db.select().from(auditLog)).filter((r) => r.action === "cleanup.run");
@@ -270,7 +289,7 @@ describe("a run of the clean-up", () => {
   it("says what it removed in plain words", () => {
     expect(describeCleanup(NOTHING)).toBe("Nothing to remove.");
     expect(describeCleanup({ ...NOTHING, staffSessions: 1 })).toBe("Removed 1 expired staff session.");
-    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0 }))
+    expect(describeCleanup({ staffSessions: 2, parentSessions: 1, signinCodes: 3, rateLimitEvents: 4, emailChanges: 1, familyMoney: 1, jobRuns: 5, reminderClaims: 0, writeQueue: 0, verifications: 0, retiredSettings: 0 }))
       .toBe("Removed 2 expired staff sessions, 1 expired parent session, 3 sign-in codes, 4 rate-limit records, 1 expired email change, 1 set of figures for a family no longer in the roster and 5 old job records.");
     expect(describeCleanup({ ...NOTHING, reminderClaims: 3 })).toBe("Removed 3 reminder records older than a year.");
   });

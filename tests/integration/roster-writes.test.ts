@@ -25,7 +25,8 @@ import { seedSeason } from "../helpers/season";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
 import { fznCompany, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
-import { asOp, auditsOf, connectRoster, queueItem, REALM, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
+import { asOp, auditsOf, connectRoster, queueItem, REALM, seedAnaRivera, seedQueued, staffWith, WORKER } from "../helpers/roster-writes";
+import { enterableGuardianRows } from "@/lib/parents/sessions";
 import { holdTheRosterLock } from "../helpers/reconcile";
 
 let stub: QboStub;
@@ -79,7 +80,7 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(await cached(made.Id as string)).toMatchObject({ parentQboId: "10", typeQboId: "3", email: null });
   });
 
-  it("adds a parent with their own email address, billed apart, and with parent sign-ins on they can sign in at once", async () => {
+  it("adds a parent with their own email address, billed apart; the portal makes them no sign-in from it", async () => {
     await seedParentSettings(SIGNINS_ON);
     const r = await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email: " Luis@Example.COM ", typeQboId: null }, tag, op);
     expect(r.ok).toBe(true);
@@ -87,10 +88,10 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
       PrimaryEmailAddr: { Address: "luis@example.com" } }]);
     const made = stub.customers.find((c) => c.DisplayName === "Luis Rivera")!;
     expect(await cached(made.Id as string)).toMatchObject({ email: "luis@example.com", typeQboId: "2" });
-    const [person] = await db.select().from(parent).where(eq(parent.email, "luis@example.com"));
-    expect(person).toBeDefined();
-    const links = await db.select().from(guardian).where(eq(guardian.parentId, person!.id));
-    expect(links).toEqual([expect.objectContaining({ familyQboId: "10", sourceQboId: made.Id, status: "invited" })]);
+    // Who signs in is the portal's own list of guardians (stage 3 of the app-owned families spec): a parent added in
+    // QuickBooks is given none, whatever the switches say.
+    expect(await db.select().from(parent).where(eq(parent.email, "luis@example.com"))).toEqual([]);
+    expect(await db.select().from(guardian)).toEqual([]);
   });
 
   it("refuses a parent with no usable address, before anything is sent", async () => {
@@ -149,11 +150,10 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
       after: { fromFamilyQboId: "10", toFamilyQboId: "20", formsMoved: 1, formsReset: 1, formsToWithdraw: 1, placesGivenUp: 1 } });
   });
 
-  it("makes a family inactive in one action: everyone under it first, then the family, and its parents' access ends", async () => {
+  it("makes a family inactive in one action: everyone under it first, then the family, and its parents can no longer enter it", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await refreshRoster(WORKER); // read again with sign-ins on, so Ana has a link to the Rivera family
-    const [ana] = await db.select().from(parent).where(eq(parent.email, "ana@example.com"));
-    expect((await db.select().from(guardian).where(eq(guardian.parentId, ana!.id)))[0]).toMatchObject({ status: "invited" });
+    const { ana } = await seedAnaRivera();
+    expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
     stub.calls.length = 0;
     const r = await askFamilyInactive("10", await shownFor("10"), tag, op);
     expect(r).toEqual({ changed: true, result: { ok: true, message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera, then Rivera Family." } });
@@ -165,7 +165,9 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     // The family is read once more before its own write, for the version QuickBooks has now.
     expect(calls.slice(3)).toEqual(["POST customer", "POST customer", "GET customer/10", "POST customer"]);
     for (const id of ["10", "11", "12"]) expect(await cached(id)).toMatchObject({ active: false });
-    expect((await db.select().from(guardian).where(eq(guardian.parentId, ana!.id)))[0]).toMatchObject({ status: "disabled" });
+    // Her row stays as it was: the gate keeps her out of a family whose record is inactive, and closes nothing.
+    expect((await db.select().from(guardian).where(eq(guardian.parentId, ana.id)))[0]).toMatchObject({ status: "invited", disabledReason: null });
+    expect(await enterableGuardianRows(ana.id)).toEqual([]);
     expect((await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY)))).toHaveLength(1);
     // Each write is audited as one write is, the family last; and one row says how the whole of it went.
     const rows = (await auditsOf("roster.customer.deactivate")).reverse();
@@ -211,13 +213,14 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(posts()).toEqual([]);
   });
 
-  it("makes a parent inactive: that parent's access ends", async () => {
+  it("makes a parent inactive in QuickBooks: the portal's own sign-in for them stays", async () => {
     await seedParentSettings(SIGNINS_ON);
-    await refreshRoster(WORKER);
+    const { ana } = await seedAnaRivera();
     const r = await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op);
     expect(r.ok).toBe(true);
-    const [ana] = await db.select().from(parent).where(eq(parent.email, "ana@example.com"));
-    expect((await db.select().from(guardian).where(eq(guardian.parentId, ana!.id)))[0]).toMatchObject({ status: "disabled", disabledReason: "inactive" });
+    expect((await db.select().from(guardian).where(eq(guardian.parentId, ana.id)))[0]).toMatchObject({ status: "invited", disabledReason: null });
+    expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
+    expect((await db.select().from(auditLog)).filter((a) => a.action === "parent.access.ended")).toEqual([]);
     expect(await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY))).toEqual([]); // only a family's asks for a refresh
   });
 });

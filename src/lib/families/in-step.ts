@@ -65,6 +65,20 @@ async function loadPlanInput(tx: Tx, realmId: string): Promise<Omit<PlanInput, "
 /** Thrown when bringing the records into step fails, so the roster read can say which part failed (app_records_failed). */
 export class AppRecordsFailed extends Error {}
 
+/**
+ * The server log line for a roster read whose app records' step failed (AppRecordsFailed's cause): the error's class
+ * name and, for a database error, its SQLSTATE and the constraint it broke. Never the message, the query or its
+ * parameters: any of them can hold a name or an address. Drizzle wraps a driver error, so the code and constraint are
+ * looked for on its cause too. It lives here, not in the roster code, which logs nothing at all (QuickBooks spec §7).
+ */
+export function logAppRecordsFailure(e: unknown): void {
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const err = (typeof e === "object" && e !== null ? e : {}) as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
+  const pg = (err.code === undefined && typeof err.cause === "object" && err.cause !== null ? err.cause : err) as typeof err;
+  const name = typeof e === "object" && e !== null ? e.constructor?.name ?? "Object" : typeof e;
+  console.error("[roster] app records failed", { name, code: str(pg.code), constraint: str(pg.constraint_name) ?? str(pg.constraint) });
+}
+
 const inChunks = async <T>(rows: T[], f: (chunk: T[]) => Promise<unknown>) => { for (let i = 0; i < rows.length; i += CHUNK) await f(rows.slice(i, i + CHUNK)); };
 
 /**
@@ -76,10 +90,11 @@ const inChunks = async <T>(rows: T[], f: (chunk: T[]) => Promise<unknown>) => { 
  * leaves every record inactive. Every link it makes is carried over from the roster, now, with nobody named.
  *
  * It writes no audit row of its own and returns what it made and changed: the change that ran it puts that on its own
- * audit row, in the same transaction, whenever anything changed (appRecordsAudit()). Its callers are reconcileAccess()
- * (src/lib/parents/reconcile.ts), which runs it last and returns its counts, for every roster read, staff roster write,
- * read-again, reconcile and confirmed change of a parent's sign-in email; and saveShape() after a new membership shape.
- * The caller owns the transaction and holds the roster lock (ROSTER_LOCK) exclusively.
+ * audit row, in the same transaction, whenever anything changed (appRecordsAudit()). Its callers, each after it changes
+ * the roster cache: the roster read (src/lib/roster/refresh.ts), a staff roster write and the queue's (applyWritten()),
+ * a read-again (src/lib/roster/writes.ts), a confirmed change of a parent's sign-in email that the cache took
+ * (src/lib/parents/email-change.ts), and saveShape() after a new membership shape. The caller owns the transaction and
+ * holds the roster lock (ROSTER_LOCK) exclusively.
  */
 export async function keepAppRecordsInStep(tx: Tx): Promise<AppRecordChanges> {
   try {

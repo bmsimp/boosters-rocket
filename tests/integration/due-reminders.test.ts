@@ -9,7 +9,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, familyMoney, guardian, parent, qboConnection, requirement, requirementProgress, requirementReminder, setting } from "@/lib/db/schema";
+import { auditLog, familyMoney, guardian, parent, qboConnection, requirement, requirementProgress, requirementReminder, setting, student } from "@/lib/db/schema";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { formatMoney } from "@/lib/money/cents";
 import { getParentSettings, putParentSettings } from "@/lib/parents/settings";
@@ -20,6 +20,8 @@ import { resetDb, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { ageMoney } from "../helpers/money";
 import { FAMILY_A, FAMILY_B, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { TRIP_DEPOSIT_ITEM } from "../helpers/season";
+import { P_SHAPE } from "../helpers/roster-cache";
+import { SHAPE_KEY } from "@/lib/roster/shape";
 import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 
 /**
@@ -31,7 +33,7 @@ import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
  */
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(asc(auditLog.id))).filter((r) => r.action === action);
 const setZone = (timeZone: string) => db.insert(setting).values({ key: "club", value: { timeZone } }).onConflictDoUpdate({ target: setting.key, set: { value: { timeZone } } });
-const switches = async (o: { signin?: boolean; welcome?: boolean }) => {
+const switches = async (o: { signin?: boolean; welcome?: boolean; requireActiveStudents?: boolean }) => {
   const s = await getParentSettings();
   await db.transaction((tx) => putParentSettings(tx, { ...s, ...o }));
 };
@@ -191,12 +193,40 @@ describe("the reminders before a due date", () => {
     expect(await sendDueReminders(at("2027-03-09T18:59:00Z"))).toEqual({ sent: 0, failed: 0 });
   });
 
-  it("goes to the family's guardians with an open link who aren't blocked", async () => {
+  it("goes to the family's guardians whose row counts at the gate and who aren't blocked", async () => {
     const { a, b } = await season();
     await db.update(parent).set({ blocked: true }).where(eq(parent.id, a.identity.parentId));
     await db.update(guardian).set({ status: "disabled" }).where(eq(guardian.id, b.identity.guardianId));
     expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 0, failed: 0 });
     expect(mail.outbox).toEqual([]);
+  });
+
+  // A reminder asks them to sign in: it goes only to guardians the gate would let in (guardianRowCounts()), so none to
+  // a family with no active student while the club asks for one, though nothing closed its rows.
+  it("goes to no guardian of a family with no active student while the club asks for one", async () => {
+    await season();
+    await db.update(student).set({ active: false }).where(eq(student.familyId, await recordOfCustomer(FAMILY_B.family.qboId, "family")));
+    // Off: B is reminded of its own family's two, as before.
+    expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 3, failed: 0 });
+    await db.delete(requirementReminder); mail.outbox.length = 0;
+    await switches({ requireActiveStudents: true });
+    expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 1, failed: 0 });
+    expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
+    expect((await db.select({ status: guardian.status }).from(guardian)).every((g) => g.status !== "disabled")).toBe(true);
+    // Stored on beside a shape that names no students (as one saved before stage 3's slice 7a may be), it is not in
+    // force (studentsRuleInForce()): B is reminded as with it off. The shape is stored alone, bringing nothing into step.
+    const shape = (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, SHAPE_KEY)))[0]!.value;
+    for (const stale of [{ kind: "flat", memberTypeIds: ["F"] }, { ...P_SHAPE, studentTypeId: null }]) {
+      await db.delete(requirementReminder); mail.outbox.length = 0;
+      await db.update(setting).set({ value: stale }).where(eq(setting.key, SHAPE_KEY));
+      await sendDueReminders(at(WAKE));
+      expect(mail.outbox.map((m) => m.to)).toContain(FAMILY_B.parent.email);
+    }
+    // A shape with students again: the rule is in force again, and B is not reminded.
+    await db.delete(requirementReminder); mail.outbox.length = 0;
+    await db.update(setting).set({ value: shape }).where(eq(setting.key, SHAPE_KEY));
+    expect(await sendDueReminders(at(WAKE))).toEqual({ sent: 1, failed: 0 });
+    expect(mail.outbox.map((m) => m.to)).toEqual([FAMILY_A.parent.email]);
   });
 
   it("claims each email before sending it, so two wakes at once send it once, and tries a failed one again after 15 minutes", async () => {
