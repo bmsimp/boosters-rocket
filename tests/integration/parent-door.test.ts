@@ -24,7 +24,7 @@ import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
 // open row naming an active family record.
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
-import { seedParentSettings, storeShape } from "../helpers/roster-cache";
+import { SIGNINS_ON, seedParentSettings, storeShape } from "../helpers/roster-cache";
 
 const IP = "203.0.113.30";
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
@@ -73,7 +73,7 @@ const stateOf = async (cookie: string) => {
 };
 
 describe("the parent door", () => {
-  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); });
+  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
 
   it("answers the same for known, unknown, blocked and all-disabled, and only the known one gets mail", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
@@ -153,7 +153,7 @@ describe("the parent door", () => {
     await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
     const { cookie } = await signIn("ana@example.com");
     expect(await stateOf(cookie)).toMatchObject({ status: "ok" });
-    await seedParentSettings({ signin: false, everEnabled: true });
+    await seedParentSettings({ signin: false });
     expect(await stateOf(cookie)).toEqual({ status: "none" });
     expect(await db.select().from(parentAuthSession)).toEqual([]);
     expect((await db.select().from(auditLog)).filter((x) => x.action === "signin.refused").at(-1)).toMatchObject({
@@ -410,7 +410,7 @@ describe("the parent door", () => {
 });
 
 describe("the gate: a parent enters only an active family of the app's own (app-owned families spec section 6)", () => {
-  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); });
+  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
   const makeInactive = (familyId: AppFamilyId | null) => db.update(family).set({ active: false }).where(eq(family.id, familyId!));
   const refusedFor = async (reason: string) => (await db.select().from(auditLog)).filter((x) => x.action === "signin.refused" && (x.after as { reason?: string } | null)?.reason === reason);
 
@@ -503,7 +503,7 @@ describe("the gate: a parent enters only an active family of the app's own (app-
 describe("the gate: while the club asks for an active student, a family with none is not one to enter (open question 15)", () => {
   // The setting is switched on only while the membership shape names students, and is in force only then
   // (studentsRuleInForce()): the gate reads the stored shape for that, and never QuickBooks.
-  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await storeShape(); });
+  beforeEach(async () => { await resetDb(); outbox.length = 0; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); await storeShape(); });
   const admin = { actor: { door: "staff" as const, id: null, label: "admin@club.org" }, ip: null, permission: "Settings.Parents.ReadWrite" };
   const refusedFor = async (action: string, reason: string) =>
     (await db.select().from(auditLog)).filter((x) => x.action === action && (x.after as { reason?: string } | null)?.reason === reason);
@@ -555,7 +555,7 @@ describe("the gate: while the club asks for an active student, a family with non
   it("does not apply the setting stored on while the shape names no students, and applies it again once a shape does", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });   // no active student
-    await seedParentSettings({ signin: true, everEnabled: true, welcome: true, requireActiveStudents: true });
+    await seedParentSettings({ signin: true, welcome: true, requireActiveStudents: true });
     await db.update(parent).set({ welcomeOwed: true }).where(eq(parent.id, a.id));
     /** The rule as SQL, as the reminders read a row (guardianRowCounts()) and the welcome a person (hasRowThatCounts()). */
     const sqlSays = async () => {

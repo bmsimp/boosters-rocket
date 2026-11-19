@@ -6,25 +6,28 @@ import { setting } from "@/lib/db/schema";
 export const PARENTS_KEY = "parents.settings";
 
 /**
- * The Admin's switches for parent sign-ins (spec §3; open question 15 of the app-owned families spec). `everEnabled`
- * stays true once sign-ins have been on: before that hand-seeded sign-ins work; after it, `signin: false` closes the
- * parent door. `requireActiveStudents` is read by the gate (enterableGuardianRows(), ./sessions.ts).
+ * The Admin's switches for parent sign-ins (spec §3; open question 15 of the app-owned families spec: the switch is how
+ * an Admin says the club is ready). The parent door is open only while `signin` is on (parentDoorClosed()), so a
+ * guardian staff add before then can't sign in until it is. `requireActiveStudents` is read by the gate
+ * (enterableGuardianRows(), ./sessions.ts).
  */
-export type ParentSettings = { signin: boolean; everEnabled: boolean; welcome: boolean; requireActiveStudents: boolean };
-export const DEFAULT_PARENT_SETTINGS: ParentSettings = { signin: false, everEnabled: false, welcome: false, requireActiveStudents: false };
+export type ParentSettings = { signin: boolean; welcome: boolean; requireActiveStudents: boolean };
+export const DEFAULT_PARENT_SETTINGS: ParentSettings = { signin: false, welcome: false, requireActiveStudents: false };
 
 /**
  * A plain object, which strips keys it doesn't name: a value stored before the held-address review went (stage 3 of
- * the app-owned families spec) still holds `reviewEmails`, and reads as the same switches. A key added here later
- * needs a default, or every value stored before it fails to parse and closes the door (CLOSED_PARENT_SETTINGS).
+ * the app-owned families spec) still holds `reviewEmails`, and one stored before stage 3's slice 7b `everEnabled`
+ * (which once left the door open until sign-ins were first switched on); each reads as the same switches. A key added
+ * here later needs a default, or every value stored before it fails to parse and closes the door
+ * (CLOSED_PARENT_SETTINGS).
  */
-const stored = z.object({ signin: z.boolean(), everEnabled: z.boolean(), welcome: z.boolean(), requireActiveStudents: z.boolean() });
+const stored = z.object({ signin: z.boolean(), welcome: z.boolean(), requireActiveStudents: z.boolean() });
 
 /**
- * What a stored value that can't be read means: sign-ins were on and are off, so the parent door is closed, until an
- * Admin saves the settings again. Failing open (the defaults) would let hand-seeded sign-ins in.
+ * What a stored value that can't be read means: sign-ins are off, so the parent door is closed, until an Admin saves
+ * the settings again. Since stage 3's slice 7b the defaults close the door too.
  */
-export const CLOSED_PARENT_SETTINGS: ParentSettings = { signin: false, everEnabled: true, welcome: false, requireActiveStudents: false };
+export const CLOSED_PARENT_SETTINGS: ParentSettings = { signin: false, welcome: false, requireActiveStudents: false };
 
 /** `undefined` is no stored row: the defaults. Anything stored that doesn't parse is the closed state. */
 export function parseParentSettings(value: unknown): ParentSettings {
@@ -44,5 +47,8 @@ export async function putParentSettings(tx: Tx, next: ParentSettings): Promise<v
   await tx.insert(setting).values({ key: PARENTS_KEY, value }).onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } });
 }
 
-/** The door is closed only when sign-ins were on and an Admin switched them off. */
-export const parentDoorClosed = (s: ParentSettings): boolean => s.everEnabled && !s.signin;
+/**
+ * The door is closed unless an Admin has switched sign-ins on (the lead's reading of open question 15): before they are
+ * first switched on, as after they are switched off. Nothing else opens it.
+ */
+export const parentDoorClosed = (s: ParentSettings): boolean => !s.signin;

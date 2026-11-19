@@ -49,7 +49,7 @@ describe("welcome emails", () => {
     sink.rejectRecipient = null;
     await seedWorkingMail({ method: "smtp", host: "127.0.0.1", port: sink.port, security: "tls", username: "sender", from: "boosters@example.org",
       passwordCiphertext: "unused", passwordKeyId: "unused" });
-    await seedParentSettings({ signin: true, everEnabled: true });
+    await seedParentSettings({ signin: true });
   });
 
   it("switching welcomes on marks everyone with access who was never welcomed, and nobody else", async () => {
@@ -177,16 +177,17 @@ describe("welcome emails", () => {
   });
 
   it("a resend while the parent door is closed emails nobody", async () => {
-    await seedParentSettings({ signin: false, everEnabled: true });
+    await seedParentSettings({ signin: false });
     const p = await person("Ana Rivera");
     expect(await resendWelcome(p.id, admin)).toEqual({ ok: false, reason: "no_access" });
     expect(sink.messages).toEqual([]);
   });
 
-  it("a resend before sign-ins were ever switched on still goes", async () => {
-    await seedParentSettings({ signin: false, everEnabled: false });
+  it("a resend before sign-ins were ever switched on emails nobody either: the door is closed until they are", async () => {
+    await db.delete(setting).where(eq(setting.key, "parents.settings"));
     const p = await person("Ana Rivera");
-    expect(await resendWelcome(p.id, admin)).toEqual({ ok: true });
+    expect(await resendWelcome(p.id, admin)).toEqual({ ok: false, reason: "no_access" });
+    expect(sink.messages).toEqual([]);
   });
 
   it("switching off sets updated_at on the rows it clears", async () => {
@@ -245,7 +246,7 @@ describe("welcome emails", () => {
 
   it("switching welcomes on, or sign-ins on with welcomes on, marks only people with a row that counts", async () => {
     await storeShape(); // the students rule is in force only while the shape names students
-    await seedParentSettings({ signin: false, everEnabled: true, requireActiveStudents: true });
+    await seedParentSettings({ signin: false, requireActiveStudents: true });
     const counts = await person("Counts", { family: "50" });
     await db.insert(student).values({ familyId: counts.familyId, name: "Sam", active: true });
     await person("No Student", { family: "60" });

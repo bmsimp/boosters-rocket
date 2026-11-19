@@ -80,8 +80,8 @@ export async function missingForSignins(): Promise<string[]> {
 
 export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult> {
   if (!on) {
-    // Never on: there is nothing to close, and nothing to record.
-    if (!(await getParentSettings()).everEnabled) return { ok: true };
+    // Off already (or never on): there is nothing to close, and nothing to record.
+    if (!(await getParentSettings()).signin) return { ok: true };
     // Welcome emails go off with sign-ins: switching sign-ins on again must never start emailing families by itself.
     return change({ signin: false, welcome: false }, o, async (tx, _next, before) => {
       // Everyone's rows first, in id order, then what hangs on them in the order ./sessions.ts gives: the owed welcomes
@@ -99,7 +99,7 @@ export async function setSignins(on: boolean, o: StaffOp): Promise<SwitchResult>
   const errors = await missingForSignins();
   if (errors.length) return { ok: false, errors };
   // Who can sign in is the guardian rows the app holds, as they are: switching on opens and closes none of them.
-  return change({ signin: true, everEnabled: true }, o, async (tx, next) => (next.welcome ? { welcomeOwed: await oweWelcomes(tx) } : {}));
+  return change({ signin: true }, o, async (tx, next) => (next.welcome ? { welcomeOwed: await oweWelcomes(tx) } : {}));
 }
 
 /** Why "Families with no active student" can't be switched on, when it can't. */

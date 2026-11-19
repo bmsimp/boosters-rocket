@@ -94,7 +94,7 @@ describe("the people directory", () => {
   });
 
   it("shows a blocked person as blocked, and a link made by hand as it stands", async () => {
-    await seedParentSettings({ signin: false, everEnabled: false });
+    await seedParentSettings({ signin: false });
     await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com", blocked: true });
     const g = await seedGuardian({ parentId: p.id, familyQboId: "10" });
@@ -121,7 +121,7 @@ describe("the people directory", () => {
   });
 
   it("reads a family's sign-ins by the membership's own family record, not by the QuickBooks ID the row was made with", async () => {
-    await seedParentSettings({ signin: false, everEnabled: false });
+    await seedParentSettings({ signin: false });
     await withCompany(); await seedCache(ALL);
     const p = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
     const [g] = await db.insert(guardian).values({ parentId: p.id, familyQboId: "10", status: "invited" }).returning();

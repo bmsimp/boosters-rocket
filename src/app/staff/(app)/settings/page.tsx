@@ -117,7 +117,7 @@ const LOADERS: Record<SettingsKey, () => Promise<Summary>> = {
   async parents() {
     const [s, people] = await Promise.all([getParentSettings(), peopleWithAccess()]);
     return {
-      state: s.signin ? "done" : "todo", words: s.signin ? `On: ${n(people, "person", "people")} can sign in` : s.everEnabled ? "Switched off: nobody can sign in" : "Not switched on yet",
+      state: s.signin ? "done" : "todo", words: s.signin ? `On: ${n(people, "person", "people")} can sign in` : "Off: nobody can sign in",
       open: "Open parent sign-in settings", details: [["Welcome emails", s.welcome ? "On" : "Off"]],
     };
   },

@@ -20,6 +20,7 @@ import { guardian } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
+import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 
 async function post(path: string, body: unknown) {
   return (await getParentAuth()).handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
@@ -29,7 +30,7 @@ async function post(path: string, body: unknown) {
 const redirectOf = async (p: Promise<unknown>) => { try { await p; return null; } catch (e) { return (e as { url?: string }).url ?? String(e); } };
 
 describe("chooseFamilyAction", () => {
-  beforeEach(async () => { await resetDb(); state.outbox.length = 0; state.cookie = ""; await seedWorkingMail(); });
+  beforeEach(async () => { await resetDb(); state.outbox.length = 0; state.cookie = ""; await seedWorkingMail(); await seedParentSettings(SIGNINS_ON); });
 
   it("the chooser says 'more than one family' only when there is more than one to choose from", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });

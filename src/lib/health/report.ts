@@ -207,7 +207,7 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
       ? { key: "parents", title: "Parent sign-ins", state: "attention", word: "Needs attention", says: "On. Parents sign in with a code sent to their email.", times: [], notes: [addressNote], fix: null }
       : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
     : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
-      says: parents.everEnabled ? "Switched off. No parent can sign in right now." : "Not switched on yet. No parent can sign in until an Admin switches them on." });
+      says: "Off. No parent can sign in until an Admin switches them on." });
 
   // The reminders before a payment's or a checklist item's due date (src/lib/seasons/due-reminders.ts): when the worker
   // last looked, and what it sent or couldn't send that day.

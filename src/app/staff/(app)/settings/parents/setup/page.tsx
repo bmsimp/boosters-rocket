@@ -26,7 +26,6 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
   const [settings, counts, missing] = await Promise.all([getParentSettings(), signinCounts(), missingForSignins()]);
   const step: Step = asked ?? (settings.signin ? "welcome" : "signins");
   const sample = step === "welcome" ? await welcomeEmailFor("parent@example.org") : null;
-  const switchedOff = settings.everEnabled && !settings.signin;
   return (
     <main className="wrap single">
       <p className="back-to-settings"><a href="/staff/settings/parents">Back to Parent sign-ins</a></p>
@@ -35,7 +34,7 @@ export default async function ParentSetupPage({ searchParams }: { searchParams: 
 
       {step === "signins" && (
         <section className="box" aria-labelledby="psi-h"><h2 id="psi-h">Step 1: Parent sign-ins</h2>
-          {switchedOff && <Notice tone="info">Parent sign-ins are off. Nobody can sign in.</Notice>}
+          {!settings.signin && <Notice tone="info">Parent sign-ins are off. Nobody can sign in.</Notice>}
           {settings.signin ? (
             <>
               <Notice tone="done" live="none">Parent sign-ins are on. {n(counts.people, "person", "people")} can sign in, to {n(counts.families, "family", "families")}.</Notice>

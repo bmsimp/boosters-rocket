@@ -343,6 +343,8 @@ something QuickBooks held (an address under two families, an inactive record) st
    Success prints `seeded guardian <id>`. It refuses unless the env file holds `BR_PROOF_OF_CONCEPT=yes` (add that line to `.env.poc` on a proof of concept, never on a club's real portal). Running it again with
    the same email and family prints "That person is already a guardian in that family." The same email with
    `--family POC-FAMILY-2` adds a second family to the same person.
+   The tester can't sign in until parent sign-ins are switched on (section 5, "Parent sign-ins"): the parent door is
+   closed until an Admin switches them on, however the guardian came to be.
    The seeded row has no family record of the portal's own until the roster is next read, and until then the tester
    can't sign in to it. Once the portal has read a roster from a company (even if QuickBooks is disconnected now),
    read the roster again (**Refresh now** on the staff roster page; reconnect QuickBooks first if it is

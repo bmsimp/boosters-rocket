@@ -544,7 +544,7 @@ describe("a different QuickBooks company connected", () => {
     await seedShape();
     await addToCache([fam(FAMILY_A.family.qboId, "Newcomb Family"), par("NEW-P-1", "Nell Newcomb", FAMILY_A.family.qboId, "nell.newcomb@new.example"),
       stu(FAMILY_A.students[1]!.qboId, "Nico Newcomb", FAMILY_A.family.qboId)]);
-    await seedParentSettings({ signin: true, everEnabled: true, welcome: true });
+    await seedParentSettings({ signin: true, welcome: true });
     const nell = await seedParentIn({ familyQboId: FAMILY_A.family.qboId, name: "Nell Newcomb", email: "nell.newcomb@new.example", sourceQboId: "NEW-P-1" });
     asParent(nell.identity);
     const forms = await renderPage(FormsPage);
