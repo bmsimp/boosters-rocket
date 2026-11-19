@@ -485,6 +485,10 @@ Seventeen tables hold one as a record of their own; eight more hold one too, lis
 Consents, and the form reminder claims and rounds, stop being deleted on a change of company; the signed-form copies
 were already kept.
 
+The lead's reading (2026-11-18): the table names no stage for `write_queue.family_qbo_id` and
+`parent_email_change.family_qbo_id`, so they move in stage 3 with the session and the roster writes, and stage 2 ends
+once `family_money` is keyed by the app's family.
+
 ### Areas of code
 
 Retired items not among the owner's three ("deriving logins from QuickBooks", "the two-family review step",
