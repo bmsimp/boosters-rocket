@@ -81,8 +81,10 @@ const isHeld = heldLink;
 /**
  * Makes a held link (isHeld, above) for a link whose mail goes out after this transaction: the request page's
  * (askForPasswordLink(), password-request.ts) and, since SI-4, the welcome's (sendOwedWelcomes() and resendWelcome(),
- * welcome.ts), each delivered by deliverHeldLink() (link-delivery.ts). In the caller's transaction, under the person's lock the caller took; the
- * caller's own row, in the same transaction, says the link is on its way (`parent.password.reset_asked`). Once the mail has been handed over, putHeldLinkInPlace() makes it
+ * welcome.ts), each delivered by deliverHeldLink() (link-delivery.ts). In the caller's transaction, under the person's lock the caller took.
+ * The request page's own row in that transaction says the link is on its way (`parent.password.reset_asked`, `link:
+ * "on_its_way"`); the welcome writes no row there: its claim (`welcome_tried_at`) and the delivery's `link_made` or
+ * `link_not_sent` row are its trace. Once the mail has been handed over, putHeldLinkInPlace() makes it
  * the person's one live link of its purpose; if it never is, dropHeldLink() removes it. One the portal never comes back
  * to (the process stopped mid-send) is a spent link to the daily clean-up, gone after a code's life.
  */

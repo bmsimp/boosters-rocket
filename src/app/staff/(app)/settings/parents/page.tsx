@@ -38,7 +38,7 @@ export default async function ParentSettingsPage() {
           (the sign-in release, slice SI-4). Shown only while an email can go and there is anyone to email. */}
       {s.signin && s.welcome && noPassword > 0 && (
         <section className="box" aria-labelledby="ps-setup-h"><h2 id="ps-setup-h">Passwords not chosen yet</h2>
-          <p>{`${n(noPassword, "person", "people")} can sign in and ${noPassword === 1 ? "hasn't" : "haven't"} chosen a password. Each can be emailed a link to choose one: anyone never welcomed gets the welcome, and anyone welcomed before gets an email saying the portal now signs parents in with a password. A phone or computer they are signed in on now stays signed in. They go out a few each minute.`}</p>
+          <p>{`${n(noPassword, "person", "people")} can sign in and ${noPassword === 1 ? "hasn't" : "haven't"} chosen a password, with no link to choose one that still works (someone emailed a link is counted again only once it runs out unused). Each can be emailed a link: anyone never welcomed gets the welcome, and anyone welcomed before gets an email saying the portal now signs parents in with a password. A phone or computer they are signed in on now stays signed in. They go out a few each minute.`}</p>
           <SwitchButton label={`Email a set-up link to everyone who can sign in and hasn't chosen a password (${noPassword})`} pendingLabel="Queueing…" act={oweSetupMailsAction} />
         </section>
       )}

@@ -234,7 +234,7 @@ describe("staff manage a family's guardians", () => {
       expect(await addGuardianAction(String(rivera), "Ana Rivera", "ana@example.com")).toMatchObject({ ok: false, samePerson: ana.id });
       expect((await rowsOf(ana.id))[0]).toMatchObject({ status: "disabled" });
       expect(await addGuardianAction(String(rivera), "Ana R.", "ana@example.com", ana.id)).toEqual({ ok: true,
-        message: "Ana Rivera, who already had a sign-in with this address (their name is unchanged), was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on." });
+        message: "Ana Rivera, who already had a sign-in with this address (their name is unchanged), was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on; if they haven't chosen one, Resend welcome email on their page sends them a link to choose it." });
       expect(await rowsOf(ana.id)).toEqual([expect.objectContaining({ id: old.id, status: "active", disabledReason: null, statusBeforeDisable: null })]);
       expect((await audits("parent.access.granted"))[0]).toMatchObject({ targetId: old.id, permission: R, before: { status: "disabled", disabledReason: "not_in_quickbooks" },
         after: { parentId: ana.id, familyId: String(rivera), familyQboId: "10", status: "active", reinstated: true, addedBy: "staff", person: "existing", typedName: "Ana R." } });

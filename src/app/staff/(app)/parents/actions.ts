@@ -44,7 +44,9 @@ export const unblockAction = staffAction(P, async (ctx, parentId: string): Promi
 
 const RESEND_FAILED = {
   not_found: "That person isn't in the portal any more.", blocked: "This person is blocked, so no email was sent.",
-  no_access: "This person can't sign in to any family right now, so no email was sent.", mail_failed: "The email couldn't be sent. Check outgoing mail under Mail.",
+  no_access: "This person can't sign in to any family right now, so no email was sent.",
+  on_its_way: "An email with a link to choose a password is on its way to this person right now, so no other was sent. Look at their page again in a minute.",
+  mail_failed: "The email couldn't be sent. Check outgoing mail under Mail.",
   link_not_in_place: "The email went, but something changed for this person while it was on its way, so the link in it to choose a password won't work. Look at their page again before sending another.",
 } as const;
 // What the welcome carried, never the link itself.
@@ -103,7 +105,7 @@ export const addGuardianAction = staffAction(R, async (ctx, familyId: string, na
   // Said of a person who held the address already, between their name and what follows it.
   const known = r.person === "existing" ? ", who already had a sign-in with this address (their name is unchanged)" : "";
   return { ok: true, message: r.outcome === "reinstated"
-    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on.`
+    ? `${r.name}${known}${known ? "," : ""} was a guardian of this family before: their sign-in for it is back. They sign in with this address and their password while parent sign-ins are on; if they haven't chosen one, Resend welcome email on their page sends them a link to choose it.`
     : `Added ${r.name}${known}. They sign in with this address and a password while parent sign-ins are on. If they have never had a welcome email and welcome emails are on, they are sent one, with a link to choose a password if they have none.` };
 });
 

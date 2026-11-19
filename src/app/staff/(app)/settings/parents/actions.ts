@@ -37,6 +37,6 @@ export const setRequireStudentsAction = staffAction(P, async (ctx, on: boolean):
 export const oweSetupMailsAction = staffAction(P, async (ctx): Promise<Done> => {
   const r = await oweSetupMails(op(ctx));
   if (!r.ok) return r;
-  return done(r, r.owed === 0 ? "Nobody needs one now: everyone who can sign in has a password, or was sent a link a moment ago."
+  return done(r, r.owed === 0 ? "Nobody needs one now: everyone who can sign in has a password, has a link to choose one that still works, or is already waiting for theirs to be sent."
     : `${r.owed === 1 ? "1 person is" : `${r.owed} people are`} queued for a link to choose a password. They go out a few each minute.`);
 });

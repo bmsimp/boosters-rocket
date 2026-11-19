@@ -279,12 +279,12 @@ describe("the Parent sign-ins settings", () => {
     await setWelcomeAction(true);
     // Ana was never welcomed, so switching welcomes on owed her the welcome already: nobody is left to ask for.
     expect(await view()).not.toContain(section);
-    expect(await oweSetupMailsAction()).toEqual({ ok: true, message: "Nobody needs one now: everyone who can sign in has a password, or was sent a link a moment ago." });
+    expect(await oweSetupMailsAction()).toEqual({ ok: true, message: "Nobody needs one now: everyone who can sign in has a password, has a link to choose one that still works, or is already waiting for theirs to be sent." });
     // Welcomed before this release, with no password: one to email.
     await db.update(parent).set({ welcomedAt: new Date("2026-01-01T00:00:00Z"), welcomeOwed: false }).where(eq(parent.id, ana.id));
     const html = (await view()).replaceAll("&#x27;", "'");
     expect(html).toContain(section);
-    expect(html).toContain("1 person can sign in and hasn't chosen a password.");
+    expect(html).toContain("1 person can sign in and hasn't chosen a password, with no link to choose one that still works");
     expect(html).toContain("Email a set-up link to everyone who can sign in and hasn't chosen a password (1)");
     revalidated.count = 0;
     expect(await oweSetupMailsAction()).toEqual({ ok: true, message: "1 person is queued for a link to choose a password. They go out a few each minute." });

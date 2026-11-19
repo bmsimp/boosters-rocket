@@ -36,6 +36,7 @@ import { resetDb, seedGuardian, seedParent, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { rowNamed, tableRows } from "../helpers/table";
 import { seedPassword } from "../helpers/signin-links";
+import * as sendModule from "@/lib/mail/send";
 
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const thrown = async (p: Promise<unknown>) => (await p.catch((e: { url?: string; notFound?: boolean }) => e)) as { url?: string; notFound?: boolean };
@@ -209,6 +210,19 @@ describe("the staff pages for parents", () => {
     const html = await personPage(ana.id);
     expect(html).toContain("Parent sign-ins are switched off, so no welcome can be sent.");
     expect(html).not.toContain("Resend welcome email");
+  });
+
+  it("a resend says in words whether it carried a link to choose a password, and never the link", async () => {
+    const ana = await anaRow();
+    // The mail is taken as handed over without sending it: the words are what is tested here.
+    const spy = vi.spyOn(sendModule, "sendMail").mockResolvedValue({ ok: true });
+    try {
+      const sent = await resendWelcomeAction(ana.id);
+      expect(sent).toEqual({ ok: true, message: "Sent, with a link to choose a password." });
+      expect(JSON.stringify(sent)).not.toContain("/sign-in/set-up/");
+      await seedPassword((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana.id)))[0]!.id, "a phrase Ana chose some time ago");
+      expect(await resendWelcomeAction(ana.id)).toEqual({ ok: true, message: "Sent. They have a password, so it says to sign in with it." });
+    } finally { spy.mockRestore(); }
   });
 
   it("a family's roster page lists the family's guardian rows, open and closed, in words; only Parents.ReadWrite gets links", async () => {

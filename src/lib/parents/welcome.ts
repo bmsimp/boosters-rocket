@@ -1,6 +1,6 @@
-import { and, asc, eq, isNull, lt, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, or, type SQL } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { parent } from "@/lib/db/schema";
+import { parent, parentSigninToken } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { sendMail, currentBrand } from "@/lib/mail/send";
 import { getStoredMailConfig, mailWorking } from "@/lib/mail/settings";
@@ -10,6 +10,7 @@ import type { StaffOp } from "./people";
 import { getParentSettings, parentDoorClosed } from "./settings";
 import { enterableGuardianRows, hasRowThatCounts, studentsRuleInForce } from "./sessions";
 import { RESEND_AFTER_MS } from "./signin-codes";
+import { heldLink } from "./link-state";
 import { holdSigninLink, linkSentWithin, LINK_LIFE_MS } from "./signin-links";
 import { deliverHeldLink, lifeWords, passwordLink, personBy, portalAddress, type HeldLink, type LinkPerson } from "./link-delivery";
 
@@ -64,11 +65,27 @@ type Kind = { worker: true } | { worker: false };
  * link held for it (holdSigninLink()) when the person has no password, or none. Otherwise why not: for a resend, the
  * refusals as before; for the worker, nothing to send now (`quiet`: switched off, no longer owed, blocked, no row that
  * counts or no sign-in account since the claim; it stays as it is), a press mail skipped for a password chosen since
- * (`skipped`, its row written), or a press mail to someone sent a set-up link a moment ago (`wait`, still owed).
+ * or a set-up link that still works (`skipped`, its row written), or a mail to someone whose set-up link from another
+ * sender is on its way, or a press mail to someone sent a set-up link a moment ago (`wait`, still owed). A resend to a
+ * person whose set-up link is on its way from another sender (the worker's welcome, an ask on "Set up or reset my
+ * password") is refused (`on_its_way`): its link would replace the one in that mail.
  */
 type Prepared =
   | { go: true; to: string; mail: Mail; held: HeldLink | null; strict: boolean }
-  | { go: false; why: "not_found" | "blocked" | "no_access" | "quiet" | "skipped" | "wait" };
+  | { go: false; why: "not_found" | "blocked" | "no_access" | "on_its_way" | "quiet" | "skipped" | "wait" };
+
+/**
+ * The person's set-up links as a welcome reads them under the person's lock: one held on its way, made less than
+ * RESEND_AFTER_MS ago (another sender's mail is going; a link held longer ago belongs to a send the portal never came
+ * back to), and one that still works (unused and not expired, however old).
+ */
+async function setupLinks(tx: Tx, parentId: string, now: Date): Promise<{ onItsWay: boolean; works: boolean }> {
+  const rows = await tx.select({ usedAt: parentSigninToken.usedAt }).from(parentSigninToken)
+    .where(and(eq(parentSigninToken.parentId, parentId), eq(parentSigninToken.purpose, "setup"),
+      or(and(isNull(parentSigninToken.usedAt), gt(parentSigninToken.expiresAt, now)),
+        and(heldLink, gt(parentSigninToken.createdAt, new Date(now.getTime() - RESEND_AFTER_MS))))));
+  return { onItsWay: rows.some((r) => r.usedAt !== null), works: rows.some((r) => r.usedAt === null) };
+}
 
 async function prepare(parentId: string, kind: Kind, by: Sender, now: Date): Promise<Prepared> {
   return db.transaction(async (tx): Promise<Prepared> => {
@@ -94,9 +111,23 @@ async function prepare(parentId: string, kind: Kind, by: Sender, now: Date): Pro
     }
     const strict = settings.level === "strict";
     if (live.hasPassword) return { go: true, to: live.email, mail, held: null, strict };
-    // The resend wait of the request page: a set-up link sent a moment ago, or on its way, may be in the mailbox unused,
-    // and the press's mail would replace it. It waits, owed, for a later wake.
-    if (mail === "signin_changed" && await linkSentWithin(tx, { parentId: live.id, purpose: "setup", now, withinMs: RESEND_AFTER_MS })) return { go: false, why: "wait" };
+    // Another sender's set-up link on its way (a resend and the worker at once, or an ask on the request page): this
+    // mail's link would replace it once both were handed over, so the first mail's link wouldn't work. The worker
+    // waits, owed, for a later wake; a resend is refused in words.
+    const links = await setupLinks(tx, live.id, now);
+    if (links.onItsWay) return { go: false, why: kind.worker ? "wait" : "on_its_way" };
+    if (mail === "signin_changed") {
+      // The resend wait of the request page: a set-up link sent a moment ago may be in the mailbox unused, and the
+      // press's mail would replace it. It waits, owed, for a later wake.
+      if (await linkSentWithin(tx, { parentId: live.id, purpose: "setup", now, withinMs: RESEND_AFTER_MS })) return { go: false, why: "wait" };
+      // A set-up link that still works, made longer ago (asked for since the press): they have one to choose a password
+      // with, and the press's mail would only replace it. It isn't sent.
+      if (links.works) {
+        await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, live.id));
+        await writeAudit({ actor: by.actor, action: "parent.welcome.skipped", targetType: "parent", targetId: live.id, after: { to: live.email, mail, reason: "has_live_link" }, ip: by.ip }, tx);
+        return { go: false, why: "skipped" };
+      }
+    }
     const { linkId, token } = await holdSigninLink(tx, { parentId: live.id, purpose: "setup", now });
     return { go: true, to: live.email, mail, strict, held: { linkId, purpose: "setup", token, to: live.email, who: { id: live.id, email: live.email } } };
   });
@@ -163,9 +194,25 @@ async function send(parentId: string, p: Extract<Prepared, { go: true }>, by: Se
       await writeAudit({ ...row, action: "parent.welcome.failed", after: { ...base, link: "setup", error: "link_not_put_in_place", reason: outcome.notInPlace } }, tx);
       return { ok: false, why: "link_not_in_place" };
     }
+    let link = outcome.link;
+    if (link === "setup" && p.held) {
+      // The link was put in place in the delivery's own transaction. Under the person's row again it must still be there
+      // (unused, or spent by their choosing a password with it): an end of their sign-in in between (a block and an
+      // unblock, say) deleted it, and recording them as welcomed would leave them a dead link and nothing owed. Then
+      // they stay owed with the claim's back-off, unless they have a password by now, which leaves nothing to choose.
+      await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, parentId)).for("update");
+      const [still] = await tx.select({ id: parentSigninToken.id }).from(parentSigninToken).where(eq(parentSigninToken.id, p.held.linkId));
+      if (!still) {
+        if (!(await personBy({ id: parentId }, tx))?.hasPassword) {
+          await writeAudit({ ...row, action: "parent.welcome.failed", after: { ...base, link: "setup", error: "link_not_put_in_place", reason: "changed_while_mailing" } }, tx);
+          return { ok: false, why: "link_not_in_place" };
+        }
+        link = "not_in_place";
+      }
+    }
     await tx.update(parent).set({ welcomedAt: new Date(), welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, parentId));
-    await writeAudit({ ...row, action: "parent.welcome.sent", after: { ...base, link: outcome.link } }, tx);
-    return { ok: true, link: outcome.link };
+    await writeAudit({ ...row, action: "parent.welcome.sent", after: { ...base, link } }, tx);
+    return { ok: true, link };
   });
 }
 
@@ -198,19 +245,20 @@ export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: 
   return { sent, failed };
 }
 
-export type ResendRefusal = "not_found" | "no_access" | "blocked" | "mail_failed" | "link_not_in_place";
+export type ResendRefusal = "not_found" | "no_access" | "blocked" | "on_its_way" | "mail_failed" | "link_not_in_place";
 /**
  * **Resend welcome email** on a person's page. It goes at once and does not depend on the welcome switch. It is the
  * welcome of the worker, sent now: with a set-up link for a person with no password, which takes the place of their
  * unused one only once its mail has gone, and with none for a person with a password. The staff member is the actor of
  * every row. Refused for a person not there, blocked, or who can't sign in (`no_access`: the door closed, no row that
- * counts, no sign-in account); `mail_failed` when the mail wasn't handed over (an earlier link keeps working), and
+ * counts, no sign-in account), and while another set-up link is on its way to them (`on_its_way`: the worker's welcome,
+ * or an ask on "Set up or reset my password", whose link this one would replace); `mail_failed` when the mail wasn't handed over (an earlier link keeps working), and
  * `link_not_in_place` when it was but something changed for the person while it went, so its link won't work.
  */
 export async function resendWelcome(parentId: string, o: StaffOp, now: Date = new Date()): Promise<{ ok: true; link: WelcomeLink } | { ok: false; reason: ResendRefusal }> {
   const by = { actor: o.actor, permission: o.permission, ip: o.ip };
   const ready = await prepare(parentId, { worker: false }, by, now);
-  if (!ready.go) return { ok: false, reason: ready.why === "blocked" || ready.why === "not_found" ? ready.why : "no_access" };
+  if (!ready.go) return { ok: false, reason: ready.why === "blocked" || ready.why === "not_found" || ready.why === "on_its_way" ? ready.why : "no_access" };
   const r = await send(parentId, ready, by, true);
   return r.ok ? r : { ok: false, reason: r.why };
 }

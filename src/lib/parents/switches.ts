@@ -200,9 +200,12 @@ export async function setWelcome(on: boolean, o: StaffOp): Promise<SwitchResult>
 /**
  * Who the Admin's press would email a set-up link (the sign-in release, slice SI-4): everyone who can sign in by the
  * gate's rule (a row that counts, with the students rule as it is in force), not blocked, with a sign-in account and no
- * password (no `credential` row of `parent_auth_account`), not owed a mail already, and not sent a set-up link less
- * than RESEND_AFTER_MS ago that is live and unused or still on its way (linkSentWithin()'s rule, signin-links.ts), so
- * the press never replaces a link that may be in a mailbox unread. A condition on a query of `parent`.
+ * password (no `credential` row of `parent_auth_account`), not owed a mail already, with no set-up link that still
+ * works (unused and not expired, however long ago it was made: a welcome's, the press's or one asked for on "Set up or
+ * reset my password", which may be in their mailbox unread, and which a new link would replace), and none on its way
+ * made less than RESEND_AFTER_MS ago (a held link, linkSentWithin()'s rule, signin-links.ts). So a person the press or
+ * a welcome has just mailed is not counted again while their link works, and is counted again once it runs out
+ * unused. A condition on a query of `parent`.
  */
 function setupMailOwedTo(studentsRule: boolean, now: Date): SQL {
   return and(eq(parent.blocked, false), eq(parent.welcomeOwed, false), hasRowThatCounts(studentsRule),
@@ -210,8 +213,8 @@ function setupMailOwedTo(studentsRule: boolean, now: Date): SQL {
     notExists(db.select({ id: parentAuthAccount.id }).from(parentAuthAccount).innerJoin(parentAuthUser, eq(parentAuthUser.id, parentAuthAccount.userId))
       .where(and(eq(parentAuthUser.parentId, parent.id), eq(parentAuthAccount.providerId, "credential")))),
     notExists(db.select({ id: parentSigninToken.id }).from(parentSigninToken).where(and(eq(parentSigninToken.parentId, parent.id), eq(parentSigninToken.purpose, "setup"),
-      gt(parentSigninToken.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)),
-      or(and(isNull(parentSigninToken.usedAt), gt(parentSigninToken.expiresAt, now)), heldLink)))))!;
+      or(and(isNull(parentSigninToken.usedAt), gt(parentSigninToken.expiresAt, now)),
+        and(heldLink, gt(parentSigninToken.createdAt, new Date(now.getTime() - RESEND_AFTER_MS))))))))!;
 }
 
 /** How many people the press would email a set-up link now (setupMailOwedTo()), for the settings page. */

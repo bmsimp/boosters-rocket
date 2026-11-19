@@ -496,12 +496,15 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    volunteer due-date nudges and the payment and checklist reminders also go, from 9:00 club time. **If not:** **Switch welcome emails off** stops the rest
    at once; Health's mail line says why sending failed ([outgoing mail](mail.md)).
 2. **Anyone welcomed before the portal signed parents in with a password** (an installation that welcomed its families
-   while parents signed in with a code alone, or the pilot guardians of part 7) has no password and is not welcomed
-   again by themselves. Settings, Parent sign-ins shows **Passwords not chosen yet** while there is anyone to email:
-   read the count, then **Email a set-up link to everyone who can sign in and hasn't chosen a password**.
+   while parents signed in with a code alone) has no password and is not welcomed again by themselves. Settings,
+   Parent sign-ins shows **Passwords not chosen yet** while there is anyone to email: everyone who can sign in, has no
+   password and has no link to choose one that still works. A pilot guardian of part 7 who chose a password isn't
+   counted, and nor is one whose link from part 7 still works. Read the count, then **Email a set-up link to everyone
+   who can sign in and hasn't chosen a password**.
    **Pass:** the answer says how many are queued, and they go out a few each minute: someone welcomed before gets an
    email saying the portal now signs parents in with a password, with the link; anyone never welcomed gets the welcome.
-   The section is gone once nobody is left to email. **If not:** Health's mail line says why sending failed.
+   The section is gone once everyone queued has been emailed, and comes back only for someone whose link ran out (after
+   7 days) unused: press again for them when you choose. **If not:** Health's mail line says why sending failed.
 
 ## Choices to confirm
 
