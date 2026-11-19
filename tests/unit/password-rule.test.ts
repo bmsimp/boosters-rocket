@@ -24,7 +24,25 @@ describe("the password rule", () => {
     }
   });
 
-  it("counts characters as a person does, by code point, and never trims or changes the password", () => {
+  it("counts combined emoji and a decomposed accent as their code points, not as a person sees them", () => {
+    // A thumbs-up with a skin tone is two code points: six of them look like six characters and count as twelve.
+    const thumbs = String.fromCodePoint(0x1f44d, 0x1f3fd);
+    expect([...thumbs].length).toBe(2);
+    expect(checkPasswordRule(thumbs.repeat(6))).toEqual({ ok: true });
+    // A family joined by zero-width joiners is five code points (three people and two joiners).
+    const family = String.fromCodePoint(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467);
+    expect([...family].length).toBe(5);
+    expect(checkPasswordRule(family.repeat(2))).toEqual({ ok: false, problem: "too_short" });
+    expect(checkPasswordRule(family.repeat(3))).toEqual({ ok: true });
+    // An e followed by a combining acute accent is two: ten letters and one such accented e count as twelve, while the
+    // same letter written as one code point leaves them at eleven.
+    const decomposed = String.fromCodePoint(0x65, 0x301);
+    expect(decomposed.normalize("NFC")).toHaveLength(1);
+    expect(checkPasswordRule(`abcdefghij${decomposed}`)).toEqual({ ok: true });
+    expect(checkPasswordRule(`abcdefghij${decomposed.normalize("NFC")}`)).toEqual({ ok: false, problem: "too_short" });
+  });
+
+  it("counts characters by code point, and never trims or changes the password", () => {
     // Twelve emoji are twelve characters (24 UTF-16 units), and eleven are too few.
     expect(checkPasswordRule("🔑".repeat(12))).toEqual({ ok: true });
     expect(checkPasswordRule("🔑".repeat(11))).toEqual({ ok: false, problem: "too_short" });

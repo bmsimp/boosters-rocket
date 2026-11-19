@@ -1,8 +1,11 @@
 /**
  * The rule a parent's password must meet (the sign-in release; open question 27 of the app-owned families spec): at
  * least PASSWORD_MIN and at most PASSWORD_MAX characters, any characters at all. Nothing about symbols, digits, case or
- * mixing them. Characters are counted as a person counts them, by code point, so an accented letter or an emoji is one;
- * a password is never trimmed or changed, since a space is a character like any other.
+ * mixing them. Characters are counted by Unicode code point, not by UTF-16 unit: an accented letter typed as one
+ * character, or most single emoji, is one, but a combined emoji (a skin tone, a flag, a family joined by zero-width
+ * joiners) or an accent typed as its own mark counts as its parts, so a page that puts the rule in words says
+ * "characters" and never promises a person's count. A password is never trimmed or changed, since a space is a
+ * character like any other.
  *
  * Pure, and nothing calls it yet (slice SI-1). It answers with a code a later page turns into words, and never logs,
  * keeps or returns the password.
