@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentEmailChange, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
+import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, parentAuthSession, parentAuthUser, parentAuthVerification, parentDevice, parentEmailChange, parentSigninToken, rateLimitEvent, requirementReminder, setting, signinCode, staffAuthSession, staffAuthVerification, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
@@ -22,12 +22,15 @@ const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 export const RETIRED_SETTINGS = ["parents.previous_company", "parents.review_notice"] as const;
 
 export type CleanupCounts = {
-  staffSessions: number; parentSessions: number; signinCodes: number; rateLimitEvents: number;
+  staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; rememberedDevices: number; rateLimitEvents: number;
   emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number; retiredSettings: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
-  signinCodes: ["sign-in code", "sign-in codes"], rateLimitEvents: ["rate-limit record", "rate-limit records"],
+  signinCodes: ["sign-in code", "sign-in codes"],
+  signinLinks: ["used or expired password link", "used or expired password links"],
+  rememberedDevices: ["expired remembered device", "expired remembered devices"],
+  rateLimitEvents: ["rate-limit record", "rate-limit records"],
   emailChanges: ["expired email change", "expired email changes"], familyMoney: ["set of figures for a family no longer in the roster", "sets of figures for families no longer in the roster"],
   jobRuns: ["old job record", "old job records"],
   reminderClaims: ["reminder record older than a year", "reminder records older than a year"],
@@ -41,7 +44,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * leaves alone, with why. A new table must join one list (tests/integration/cleanup.test.ts fails until it does); one
  * whose rows expire gets its delete below and a boundary test.
  */
-export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "rate_limit_event", "parent_email_change", "family_money", "job_run",
+export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "parent_signin_token", "parent_device", "rate_limit_event", "parent_email_change", "family_money", "job_run",
   "form_reminder_claim", "form_reminder_round", "requirement_reminder", "write_queue", "staff_auth_verification", "parent_auth_verification"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
@@ -90,6 +93,9 @@ export function describeCleanup(c: CleanupCounts): string {
  *   renewed by use (sessions.ts), so one that has run out was not used for 90 days.
  * - Sign-in codes that are used or have expired, once they are older than the wait between two sends: until then the
  *   newest code, used or not, is what holds back the next one (signin-codes.ts).
+ * - A person's set-up and reset links (`parent_signin_token`) that are used or past their expiry: a link works once,
+ *   and only before it expires.
+ * - Remembered devices (`parent_device`) past their expiry: a device is remembered only until then, renewed by use.
  * - Rate-limit records older than their kind's window (rate-limit.ts counts only those inside it): the sign-in limits
  *   and the limits on a parent's own contact edits, each kind by its own window.
  * - Email changes whose link has expired, confirmed or not.
@@ -111,18 +117,25 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const n = (rows: unknown[]) => rows.length;
   const staffSessions = n(await tx.delete(staffAuthSession).where(lt(staffAuthSession.expiresAt, now)).returning({ id: staffAuthSession.id }));
   // What hangs on a person goes in the order src/lib/parents/sessions.ts gives (lockedPerson()): the rows of everyone
-  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their sessions. So the
+  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their set-up and reset links
+  // and remembered devices (the sign-in release's, which hang on the person as a code does), then their sessions. So the
   // clean-up never waits on a person's change of address while that change waits on it.
   const requestGone = lt(parentEmailChange.expiresAt, now);
   const codeGone = and(or(isNotNull(signinCode.usedAt), lt(signinCode.expiresAt, now)), lt(signinCode.createdAt, new Date(now.getTime() - RESEND_AFTER_MS)));
+  const linkGone = or(isNotNull(parentSigninToken.usedAt), lt(parentSigninToken.expiresAt, now));
+  const deviceGone = lt(parentDevice.expiresAt, now);
   const sessionGone = lt(parentAuthSession.expiresAt, now);
   await tx.select({ id: parent.id }).from(parent).where(or(
     inArray(parent.id, tx.select({ id: parentEmailChange.parentId }).from(parentEmailChange).where(requestGone)),
     inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(codeGone)),
+    inArray(parent.id, tx.select({ id: parentSigninToken.parentId }).from(parentSigninToken).where(linkGone)),
+    inArray(parent.id, tx.select({ id: parentDevice.parentId }).from(parentDevice).where(deviceGone)),
     inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)).where(sessionGone)),
   )).orderBy(parent.id).for("update");
   const emailChanges = n(await tx.delete(parentEmailChange).where(requestGone).returning({ id: parentEmailChange.id }));
   const signinCodes = n(await tx.delete(signinCode).where(codeGone).returning({ id: signinCode.id }));
+  const signinLinks = n(await tx.delete(parentSigninToken).where(linkGone).returning({ id: parentSigninToken.id }));
+  const rememberedDevices = n(await tx.delete(parentDevice).where(deviceGone).returning({ id: parentDevice.id }));
   const parentSessions = n(await tx.delete(parentAuthSession).where(sessionGone).returning({ id: parentAuthSession.id }));
 
   const kinds = Object.keys(RATE_LIMITS) as RateLimitKind[];
@@ -162,7 +175,7 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
 
   const retiredSettings = n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
 
-  return { staffSessions, parentSessions, signinCodes, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
+  return { staffSessions, parentSessions, signinCodes, signinLinks, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
 }
 
 /**
