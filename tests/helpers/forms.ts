@@ -84,8 +84,9 @@ const hash = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 export type SeededEvidence = { id: string; sealed: Buffer; sealedSha256: string; files: { kind: string; sha256: string }[] };
 /**
  * The evidence the worker would have kept for a complete request (src/lib/signed-forms/evidence-job.ts): the row with
- * the names as they were, and its four files, with made-up PDF bytes. The company is the roster cache's, unless given.
- * Clears the request's `evidence_owed`, as storing does.
+ * the names as they were, and its four files, with made-up PDF bytes. The company is the roster cache's, unless given,
+ * and none when the request's family has no link there (as the job keeps it: a family with no link keeps no copy and no
+ * company, and a student with none keeps no subject copy). Clears the request's `evidence_owed`, as storing does.
  */
 export async function seedEvidence(requestId: string, o: { tag: string; formTitle?: string; familyName?: string; subjectName?: string; realmId?: string | null; earlierCompanyAt?: Date | null;
   consents?: { parentId: string; name: string; email: string }[]; copiesDone?: boolean } = { tag: "seeded" }): Promise<SeededEvidence> {
@@ -97,11 +98,12 @@ export async function seedEvidence(requestId: string, o: { tag: string; formTitl
     { kind: "audit_log_pdf" as const, itemId: null, bytes: fakePdf(`audit log ${o.tag}`) },
     { kind: "audit_log_json" as const, itemId: null, bytes: Buffer.from(JSON.stringify({ envelopeId: row.envelopeId, count: 1, entries: [{ type: "DOCUMENT_COMPLETED", tag: o.tag }] })) },
   ];
-  // The customers of the request's records, which the evidence keeps as its own copies; the app's records only for the
-  // current company's evidence (an earlier company's names none: signed_form_evidence_app_records).
-  const familyQboId = await customerOf(row.familyId), subjectQboId = row.studentId === null ? familyQboId : await customerOf(row.studentId);
+  // The customers of the request's records, which the evidence keeps as its own copies (null with no link); the app's
+  // records only for the current company's evidence (an earlier company's names none: signed_form_evidence_app_records).
+  const familyQboId = await linkedCustomer(row.familyId);
+  const subjectQboId = familyQboId === null ? null : row.studentId === null ? familyQboId : await linkedCustomer(row.studentId);
   const [evidence] = await db.insert(signedFormEvidence).values({
-    requestId: o.earlierCompanyAt ? null : requestId, realmId: o.realmId === undefined ? await getRosterSource() : o.realmId, earlierCompanyAt: o.earlierCompanyAt ?? null,
+    requestId: o.earlierCompanyAt ? null : requestId, realmId: o.realmId !== undefined ? o.realmId : familyQboId === null ? null : await getRosterSource(), earlierCompanyAt: o.earlierCompanyAt ?? null,
     requirementId: row.requirementId, familyQboId, subjectQboId, subjectKind: row.studentId === null ? "family" : "student",
     familyId: o.earlierCompanyAt ? null : row.familyId, studentId: o.earlierCompanyAt ? null : row.studentId,
     formTitle: o.formTitle ?? "Seeded form", familyName: o.familyName ?? null, subjectName: o.subjectName ?? row.subjectName, seasonName: null,
@@ -139,14 +141,18 @@ export async function signedInStub(stub: { origin: string; token: string; envelo
   return { id, envelopeId: made.id };
 }
 
-/** The customer a family or student record is linked to, in the roster's company. */
-async function customerOf(id: AppFamilyId | AppStudentId): Promise<string> {
+/** The customer a family or student record is linked to, in the roster's company, or null when it has no link there. */
+async function linkedCustomer(id: AppFamilyId | AppStudentId): Promise<string | null> {
   const realmId = await getRosterSource();
   const links = await db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId, studentId: accountingLink.studentId }).from(accountingLink)
     .where(and(eq(accountingLink.realmId, realmId ?? ""), eq(accountingLink.system, "quickbooks")));
-  const found = links.find((x) => String(x.familyId) === String(id) || String(x.studentId) === String(id));
-  if (!found) throw new Error("seedEvidence: the request's family or student record has no link in the roster's company");
-  return found.customerId;
+  return links.find((x) => String(x.familyId) === String(id) || String(x.studentId) === String(id))?.customerId ?? null;
+}
+/** The same, for a test that names families by customer: a record with no link is the test's mistake. */
+async function customerOf(id: AppFamilyId | AppStudentId): Promise<string> {
+  const found = await linkedCustomer(id);
+  if (found === null) throw new Error("requestCustomers: the request's family or student record has no link in the roster's company");
+  return found;
 }
 
 /**

@@ -64,6 +64,10 @@ describe("connecting a different company after step 5", () => {
     const studentA = await recordOfCustomer(a.spec.students[0]!.qboId, "student");
     await db.insert(writeQueue).values({ realmId: "1111", request: { op: "deactivate", role: "student", qboId: a.spec.students[0]!.qboId, syncToken: "0" }, targetQboId: a.spec.students[0]!.qboId,
       familyId: famA, studentId: studentA, state: "waiting", sent: false });
+    // B's form was kept while B had no QuickBooks link (as the evidence job keeps one since migration 0036): no company
+    // and no copy. It is the club's record like any other: archived with the rest and never deleted, since the clear
+    // removes the families it names.
+    await db.update(signedFormEvidence).set({ realmId: null, familyQboId: null, subjectQboId: null }).where(eq(signedFormEvidence.id, b.forms!.evidence.id));
     const before = {
       credit: (await db.select().from(volunteerCredit)).length, emails: (await db.select().from(parentEmailChange)).length,
       evidence: await db.select().from(signedFormEvidence), files: await db.select().from(signedFormFile),
@@ -111,7 +115,8 @@ describe("connecting a different company after step 5", () => {
     expect(kept.map((e) => e.id).sort()).toEqual(before.evidence.map((e) => e.id).sort());
     // Kept, marked as the earlier company's and cut from its request and from the app's records, which are gone: every
     // QuickBooks id, name, signer and consent it holds as it was.
-    for (const e of kept) expect(e).toMatchObject({ requestId: null, realmId: "1111", earlierCompanyAt: expect.any(Date), familyId: null, studentId: null });
+    for (const e of kept) expect(e).toMatchObject({ requestId: null, realmId: e.id === b.forms!.evidence.id ? null : "1111", earlierCompanyAt: expect.any(Date), familyId: null, studentId: null });
+    expect(kept.find((e) => e.id === b.forms!.evidence.id)).toMatchObject({ realmId: null, familyQboId: null, subjectQboId: null });
     const asSigned = (e: typeof kept[number]) => ({ ...e, requestId: null, earlierCompanyAt: null, familyId: null, studentId: null });
     for (const e of kept) expect(asSigned(e)).toEqual(asSigned(before.evidence.find((x) => x.id === e.id)!));
     const files = await db.select().from(signedFormFile);

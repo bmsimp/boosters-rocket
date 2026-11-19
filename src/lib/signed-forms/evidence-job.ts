@@ -20,7 +20,7 @@ import {
 } from "@/lib/documenso/client";
 import { getRosterSource } from "@/lib/roster/source";
 import { FORMS_WORKER, requestRecords, type FormsFailure } from "@/lib/forms/requests";
-import { customerOfFamily, customerOfStudent } from "@/lib/families/links";
+import { customerOfFamily, customerOfStudent, recordsCompany } from "@/lib/families/links";
 import { readDocument } from "@/lib/forms/states";
 import { getFormsConfig, noteApiFailure, noteApiOk } from "@/lib/forms/settings";
 import { sendOwedCopies } from "./copies";
@@ -65,18 +65,42 @@ async function fetchEvidence(config: DocumensoConfig, row: RequestRow): Promise<
 }
 
 /**
+ * Whether the request's links can be read now. While QuickBooks is connected to a company other than the roster's,
+ * every lookup through a link answers nothing though the links exist (recordsCompany() is null while the roster names a
+ * company), so a record with no link can't be told from one whose link can't be read: nothing is kept then
+ * (`other_company`), and the job tries again later. Otherwise the links are read in the roster's company, or there is
+ * no company at all (the roster names none: a club with no accounting system), and a record with no link is no reason
+ * to wait.
+ */
+async function linksReadable(): Promise<{ readable: false } | { readable: true; realmId: string | null }> {
+  const [source, company] = await Promise.all([getRosterSource(), recordsCompany()]);
+  if (source !== null && company !== source) return { readable: false };
+  return { readable: true, realmId: source };
+}
+
+type Names = { formTitle: string; seasonName: string | null; familyName: string | null; subjectKind: "family" | "student"; realmId: string | null; familyQboId: string | null; subjectQboId: string | null };
+
+/**
  * The names as they are now, kept with the evidence as they were: the form's title, its season, the family (the app's
  * record of it, named from the roster). And the QuickBooks customers of the request's family and student records, in
- * the records' company, which the evidence keeps as its own copies of whose form it was (family_qbo_id,
- * subject_qbo_id): null when a record has no link there, and then nothing is stored and the job tries again later.
+ * the roster's company, which the evidence keeps as its own copies of whose form it was (family_qbo_id,
+ * subject_qbo_id), each null when that record has no link; with them the company (realm_id), kept only with the
+ * family's copy. A QuickBooks id is never kept without its company, so a family with no link keeps no copy at all,
+ * whatever its student's link. Throws EvidenceNotStored("other_company") when the links can't be read, before the
+ * lookups or after them (the connection changed while they ran).
  */
-async function namesOf(row: RequestRow): Promise<{ formTitle: string; seasonName: string | null; familyName: string | null; subjectKind: "family" | "student"; familyQboId: string | null; subjectQboId: string | null }> {
+async function namesOf(row: RequestRow): Promise<Names> {
+  const before = await linksReadable();
+  if (!before.readable) throw new EvidenceNotStored("other_company");
   const [r] = await db.select({ title: requirement.title, seasonName: season.name }).from(requirement)
     .innerJoin(seasonStep, eq(seasonStep.id, requirement.stepId)).innerJoin(season, eq(season.id, seasonStep.seasonId)).where(eq(requirement.id, row.requirementId));
   const [mine] = await db.select({ name: family.name }).from(family).where(eq(family.id, row.familyId));
-  const familyQboId = await customerOfFamily(row.familyId);
-  const subjectQboId = row.studentId === null ? familyQboId : await customerOfStudent(row.studentId);
-  return { formTitle: r?.title ?? "Form", seasonName: r?.seasonName ?? null, familyName: mine?.name ?? null, subjectKind: row.studentId === null ? "family" : "student", familyQboId, subjectQboId };
+  const familyQboId = before.realmId === null ? null : await customerOfFamily(row.familyId);
+  const subjectQboId = familyQboId === null ? null : row.studentId === null ? familyQboId : await customerOfStudent(row.studentId);
+  const after = await linksReadable();
+  if (!after.readable || after.realmId !== before.realmId) throw new EvidenceNotStored("other_company");
+  return { formTitle: r?.title ?? "Form", seasonName: r?.seasonName ?? null, familyName: mine?.name ?? null, subjectKind: row.studentId === null ? "family" : "student",
+    realmId: familyQboId === null ? null : before.realmId, familyQboId, subjectQboId };
 }
 
 const shown = (f: Pick<Fetched, "kind" | "position" | "sha256"> & { size: number }) => ({ kind: f.kind, position: f.position, sha256: f.sha256, size: f.size });
@@ -84,21 +108,16 @@ const shown = (f: Pick<Fetched, "kind" | "position" | "sha256"> & { size: number
 export type StoreOutcome = "stored" | "same" | "mismatch" | "gone";
 
 /**
- * Why evidence fetched (or about to be) can't be kept, in the portal's own records rather than in Documenso:
- * `no_link`, the request's family or student has no link in the roster's company (or the roster names none), so the
- * evidence couldn't keep whose form it was; `moved_while_fetched`, the request moved to another family while its files
- * were being fetched. Recorded as the request's evidence error and said on the Health page's forms line.
+ * Why evidence fetched (or about to be) can't be kept yet, in the portal's own records rather than in Documenso:
+ * `other_company`, QuickBooks is connected to a company other than the roster's, so the request's links can't be read
+ * and the evidence couldn't keep whose form it was (a family or student with no link is no reason: its evidence is kept
+ * with no copy); `moved_while_fetched`, the request moved to another family while its files were being fetched.
+ * Recorded as the request's evidence error and said on the Health page's forms line. (Until migration 0036 the first
+ * was `no_link`, for a record with no link too; a request still holding that code is tried again on its own schedule.)
  */
-export type NotStoredCode = "no_link" | "moved_while_fetched";
+export type NotStoredCode = "other_company" | "moved_while_fetched";
 export class EvidenceNotStored extends Error {
   constructor(readonly code: NotStoredCode) { super(code); }
-}
-
-/** True when the request's records have links in the roster's company, so its evidence can keep their customers. */
-async function linksStand(row: RequestRow): Promise<boolean> {
-  if ((await getRosterSource()) === null) return false;
-  const names = await namesOf(row);
-  return names.familyQboId !== null && names.subjectQboId !== null;
 }
 
 /**
@@ -110,10 +129,9 @@ async function linksStand(row: RequestRow): Promise<boolean> {
 export async function storeEvidence(row: RequestRow, got: Evidence, at: Date = new Date()): Promise<StoreOutcome> {
   const names = await namesOf(row);
   const consents = await db.select().from(signatureConsent).where(eq(signatureConsent.requestId, row.id)).orderBy(asc(signatureConsent.agreedAt));
-  const realmId = await getRosterSource();
-  // The evidence names the roster's company and keeps its customers as they are now: with no company, or a record with
-  // no link in it, nothing is stored (runEvidenceJob() checks this before fetching anything; this is the last word).
-  if (realmId === null || names.familyQboId === null || names.subjectQboId === null) throw new EvidenceNotStored("no_link");
+  // The company and the customers as they are now (namesOf() throws while the links can't be read; runEvidenceJob()
+  // checks that before fetching anything, and this is the last word). Null with no link: never filled in later.
+  const realmId = names.realmId;
   return db.transaction(async (tx): Promise<StoreOutcome> => {
     const [current] = await tx.select().from(signatureRequest).where(eq(signatureRequest.id, row.id)).for("update");
     if (!current || current.state !== "complete" || current.envelopeId !== row.envelopeId) return "gone";
@@ -140,7 +158,7 @@ export async function storeEvidence(row: RequestRow, got: Evidence, at: Date = n
     const consent: EvidenceConsent[] = consents.map((c) => ({ parentId: c.parentId, name: c.parentName, email: c.parentEmail, textVersion: c.textVersion,
       agreedAt: c.agreedAt.toISOString(), ip: c.ip, userAgent: c.userAgent }));
     const [evidence] = await tx.insert(signedFormEvidence).values({
-      requestId: row.id, realmId, requirementId: row.requirementId, familyQboId: names.familyQboId!, subjectQboId: names.subjectQboId!, subjectKind: names.subjectKind,
+      requestId: row.id, realmId, requirementId: row.requirementId, familyQboId: names.familyQboId, subjectQboId: names.subjectQboId, subjectKind: names.subjectKind,
       familyId: current.familyId, studentId: current.studentId,
       formTitle: names.formTitle, familyName: names.familyName, subjectName: current.subjectName, seasonName: names.seasonName,
       envelopeId: current.envelopeId!, templateId: current.templateId, templateUpdatedAt: current.templateUpdatedAt, signers, consents: consent, originals: got.originals,
@@ -179,11 +197,12 @@ export async function runEvidenceJob(now: Date = new Date()): Promise<EvidenceRu
       .orderBy(sql`${signatureRequest.completedAt} asc nulls first`, asc(signatureRequest.id)).limit(EVIDENCE_PER_WAKE);
     for (const row of due) {
       run.fetched++;
-      // Nothing is asked of Documenso for evidence that couldn't be kept: the request's records have no link in the
-      // roster's company. That is the roster's to mend, not Documenso's, and its code says so.
-      if (!(await linksStand(row))) {
+      // Nothing is asked of Documenso for evidence that couldn't be kept: QuickBooks is connected to a company other
+      // than the roster's, so the request's links can't be read. That is QuickBooks' connection to mend, not
+      // Documenso's, and its code says so. A record with no link is no reason to wait: its evidence keeps no copy.
+      if (!(await linksReadable()).readable) {
         run.failed++;
-        await noteFailure(row, "no_link", now);
+        await noteFailure(row, "other_company", now);
         continue;
       }
       const got = await fetchEvidence(config, row);
@@ -247,15 +266,16 @@ async function withdrawLeftDocuments(config: DocumensoConfig): Promise<number> {
 
 /**
  * For the Health page: complete forms whose evidence isn't kept yet, how many waited more than an hour, how many of
- * those last failed because their family or student has no link in the roster's company (`noLink`), and any hash mismatch.
+ * those last waited because QuickBooks is connected to a company other than the roster's (`otherCompany`), and any
+ * hash mismatch.
  */
-export async function evidenceHealth(now: Date = new Date()): Promise<{ waiting: number; late: number; oldestCompletedAt: Date | null; mismatches: number; noLink: number }> {
+export async function evidenceHealth(now: Date = new Date()): Promise<{ waiting: number; late: number; oldestCompletedAt: Date | null; mismatches: number; otherCompany: number }> {
   const [owed] = await db.select({ n: count(), oldest: min(signatureRequest.completedAt) }).from(signatureRequest)
     .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete")));
   const [late] = await db.select({ n: count() }).from(signatureRequest)
     .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete"), lte(signatureRequest.completedAt, new Date(now.getTime() - EVIDENCE_LATE_MS))));
   const [mismatched] = await db.select({ n: count() }).from(signedFormEvidence).where(isNotNull(signedFormEvidence.mismatchAt));
-  const [unlinked] = await db.select({ n: count() }).from(signatureRequest)
-    .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete"), eq(signatureRequest.evidenceError, "no_link")));
-  return { waiting: owed?.n ?? 0, late: late?.n ?? 0, oldestCompletedAt: owed?.oldest ?? null, mismatches: mismatched?.n ?? 0, noLink: unlinked?.n ?? 0 };
+  const [elsewhere] = await db.select({ n: count() }).from(signatureRequest)
+    .where(and(eq(signatureRequest.evidenceOwed, true), eq(signatureRequest.state, "complete"), eq(signatureRequest.evidenceError, "other_company")));
+  return { waiting: owed?.n ?? 0, late: late?.n ?? 0, oldestCompletedAt: owed?.oldest ?? null, mismatches: mismatched?.n ?? 0, otherCompany: elsewhere?.n ?? 0 };
 }

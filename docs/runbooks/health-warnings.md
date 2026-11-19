@@ -144,14 +144,15 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
   after a form is completed: the worker fetches the sealed PDF, certificate and audit log a few at a time.
 - **"... waited more than an hour for the signed copy to be kept."** The worker can't fetch them: check that Documenso
   answers (the line above) and that the worker runs.
-- **"... signed forms can't be filed until the portal can find their families in the roster's QuickBooks company"**,
-  with the note "N signed forms can't be filed". Not a Documenso problem: the portal can't find the family or student
-  the form was signed for in the QuickBooks company the roster was read from, so it can't record whose form it is, and
-  asks Documenso nothing for it. Open **Settings**, **QuickBooks**: check that QuickBooks is connected to the company
-  the roster was read from (the QuickBooks line on this page), then read the roster again. The form stays signed in
-  Documenso. The worker tries again on its own schedule, which after a few failed tries is every three hours, so the
-  line can stay for up to that long after a good roster read: it counts by each form's last try. If it is still there
-  after that, report it: the portal keeps every family's link.
+- **"... signed forms can't be filed while QuickBooks is connected to a company other than the one the roster was read
+  from"**, with the note "N signed forms can't be filed yet". Not a Documenso problem: while QuickBooks is connected to
+  another company the portal can't look up which QuickBooks customers a form was signed for, so it keeps nothing and
+  asks Documenso nothing for it. The portal refuses to connect another company today, so this should never show: if it
+  does, report it. Open **Settings**, **QuickBooks**: disconnect, and connect the company the roster was read from (the
+  QuickBooks line on this page). The form stays signed in Documenso. The worker tries again on its own schedule, which
+  after a few failed tries is every three hours, so the line can stay for up to that long after the right company is
+  connected: it counts by each form's last try. A family or student with no QuickBooks link is no warning: its signed
+  form is kept like any other, with no QuickBooks number.
 - **"... came back from Documenso with a different file than the one kept."** The portal keeps the first copy and
   wrote `forms.evidence.mismatch` in the audit log. Tell the board: a signed document should never change. Keep the
   backups from before that date.
