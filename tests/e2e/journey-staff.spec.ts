@@ -6,7 +6,7 @@ import { noSidewaysScroll, shot, staffMenuTo } from "./journey-helpers";
 import { familyPages } from "./family-records";
 
 // A staff member's working session, walked by what they would tap (docs/walkthrough.md): the seeded Admin goes from the
-// staff home through the grouped menu to the roster and one family, its money, the Parents review, a new season with a
+// staff home through the grouped menu to the roster and one family, its money, the Parents list, a new season with a
 // requirement of each kind, a tick and a waiver (and what the parent then reads), a volunteer event with a shift, its
 // sign-up list and check-in sheet, a correction to a family's credit, the signed-forms matrix and one form's evidence,
 // Balances, Reconciliation, the audit log and its export, Health and Settings. It runs at 390 wide in the phone pass
@@ -47,8 +47,7 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
   await test.step("starts on the staff home and opens a family from the roster", async () => {
     await page.goto("/staff");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, E2E");
-    // The seed's waiting and stuck changes; once parent sign-ins are on (parents.spec.ts, in the phone pass), Sam's
-    // held address joins them.
+    // The seed's waiting and stuck changes.
     await expect(page.locator("[data-today]").filter({ hasText: "stuck on its way to QuickBooks" })).toHaveCount(1);
     await noSidewaysScroll(page);
     await shot(page, "s01-home");
@@ -71,13 +70,14 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await shot(page, "s03-family-money");
   });
 
-  await test.step("reads Parents: what is waiting for review and what was decided", async () => {
+  await test.step("reads Parents: everyone the portal holds, and each family they belong to", async () => {
     await staffMenuTo(page, "Families", "Parents");
     await expect(page).toHaveURL(/\/staff\/parents$/);
-    // Sam's address under two families is held for review once parent sign-ins are on (tests/e2e/parents.spec.ts
-    // switches them on, later in the phone pass); Zelda's two families were decided in the seed.
-    await expect(page.locator("main")).toContainText(/To review \(\d\)/);
-    await expect(page.locator("main")).toContainText("Same person in Quetzalcoatl Family, Second Family. Decided.");
+    // The seed's guardians: Zelda in her two families, Ana in the Rivera family. Nothing is held for review any more.
+    const zelda = page.getByRole("row").filter({ hasText: "zelda@example.com" });
+    await expect(zelda).toContainText("Quetzalcoatl Family");
+    await expect(zelda).toContainText("Second Family");
+    await expect(page.locator("main")).not.toContainText("To review");
     await noSidewaysScroll(page);
     await shot(page, "s04-parents");
   });

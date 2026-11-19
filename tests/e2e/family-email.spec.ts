@@ -45,7 +45,7 @@ test.describe("a parent changes their sign-in email", () => {
       setting: [...await sql`SELECT value FROM setting WHERE key = 'parents.settings'`],
       link: (await sql`SELECT status, disabled_reason, status_before_disable FROM guardian WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`)[0] as typeof saved.link,
     };
-    const on = { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false, reviewEmails: false };
+    const on = { signin: true, everEnabled: true, welcome: false, requireActiveStudents: false };
     await sql`INSERT INTO setting (key, value) VALUES ('parents.settings', ${sql.json(on)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
     await sql`UPDATE guardian SET status = 'disabled', disabled_reason = 'not_in_quickbooks', status_before_disable = ${saved.link.status} WHERE parent_id = ${p.id} AND family_qbo_id = 'E2E-FAMILY-2'`;
   });
