@@ -275,7 +275,8 @@ describe("the staff pages for parents", () => {
       families: [{ guardianId: rivera!.id, familyQboId: "10" }, { guardianId: unknown.id, familyQboId: "NOPE" }] };
     const html = renderToStaticMarkup(await ChooseFamily());
     expect(html).toContain("Rivera Family");
-    expect(html).toContain(recordNameWords(null, "family"));
+    // React writes the words' apostrophe as &#x27;.
+    expect(html).toContain(recordNameWords(null, "family").replaceAll("'", "&#x27;"));
     expect(html).not.toContain("Family account");
     expect(html).not.toContain("NOPE");
   });
