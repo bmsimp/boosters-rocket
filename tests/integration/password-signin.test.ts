@@ -7,7 +7,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, parent, parentAuthAccount, parentAuthSession, parentDevice, rateLimitEvent, signinCode, staffAuthUser } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice, rateLimitEvent, signinCode, staffAuthUser } from "@/lib/db/schema";
 import { blockPerson, unblockPerson } from "@/lib/parents/people";
 import { forgetDevices } from "@/lib/parents/sessions";
 import { hashTriedAddress } from "@/lib/parents/password-signin";
@@ -17,7 +17,7 @@ import { PARENT_SESSION_COOKIE_SECONDS } from "@/lib/parents/sessions";
 import { env } from "@/env";
 import { resetDb, seedParent, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
-import { DOOR_PASSWORD, codeMailed, codeStep, cookieNamed, passwordStep, postDoor, setCookieLine } from "../helpers/parent-door";
+import { DOOR_IP, DOOR_PASSWORD, codeMailed, codeStep, cookieNamed, cookiesSet, passwordStep, postDoor, setCookieLine } from "../helpers/parent-door";
 import { deviceRows, seedDevice, seedPassword } from "../helpers/signin-links";
 
 /**
@@ -87,6 +87,12 @@ describe("the password step", () => {
     ["sign-ins switched off", async () => { await seedAna(); await seedParentSettings({ signin: false }); return "ana@example.com"; }, "signins_off", true],
     ["the club at Strict", async () => { await seedAna(); await seedParentSettings({ level: "strict" }); return "ana@example.com"; }, "strict_no_factor", true],
     ["a malformed address", async () => { await seedAna(); return "not an address"; }, "not_an_address", false],
+    ["a person with no sign-in account", async () => {
+      const a = await seedAna();
+      await db.delete(parentAuthAccount).where(eq(parentAuthAccount.userId, a.authUserId));
+      await db.delete(parentAuthUser).where(eq(parentAuthUser.id, a.authUserId));
+      return "ana@example.com";
+    }, "no_sign_in_account", true],
   ];
   it.each(REFUSALS)("refuses %s with the one answer, no cookie and no mail", async (_, setup, reason, namesThePerson) => {
     const given = await setup();
@@ -121,6 +127,20 @@ describe("the password step", () => {
       [null, null, null, { reason: "rate_limited", limit: "email" }], [null, null, null, { reason: "rate_limited", limit: "email" }]]);
     expect(await audits("signin.password_wrong")).toHaveLength(5);
     expect(await sessions()).toEqual([]);
+  });
+
+  it("over the limit per IP address, refuses even the right password, naming nobody, and counts nothing against the address", async () => {
+    await seedAna();
+    const now = new Date();
+    await db.insert(rateLimitEvent).values(Array.from({ length: 180 }, () => ({ kind: "password_try_ip", subject: DOOR_IP, at: now })));
+    expect(await answerTo("ana@example.com")).toEqual([200, REFUSED, []]);
+    expect(await answerTo("ana@example.com")).toEqual([200, REFUSED, []]);
+    expect(outbox).toEqual([]);
+    expect(await sessions()).toEqual([]);
+    // The full window is recorded once, naming nobody; the address's own count was never taken.
+    expect((await audits("signin.password_refused")).map((r) => [r.actorId, r.actorLabel, r.targetId, r.after]))
+      .toEqual([[null, null, null, { reason: "rate_limited", limit: "ip" }]]);
+    expect((await db.select().from(rateLimitEvent)).filter((e) => e.kind === "password_try_email")).toEqual([]);
   });
 
   it("a right password on a device not remembered mails one code, sets the pending step and makes no session", async () => {
@@ -289,6 +309,79 @@ describe("the pending step", () => {
     await blockPerson(ana.id, "reason", staff);
     await refusedWith(fourth.code, fourth.pending);
     expect(await sessions()).toEqual([]);
+  });
+
+  /** Whether a response clears the pending step's cookie (sets it empty). */
+  const clearsStep = (res: Response) => Object.entries(cookiesSet(res)).some(([n, v]) => n.endsWith(".signin_step") && v === "");
+  /** A pending step for Ana, signed as the server signs one, ending `msLeft` from now. */
+  async function anaStepEnding(name: string, ana: { id: string; authUserId: string }, msLeft: number) {
+    const [cred] = await db.select().from(parentAuthAccount).where(eq(parentAuthAccount.userId, ana.authUserId));
+    return signedStep(name, { p: ana.id, e: "ana@example.com", c: cred!.id, u: (cred as { updatedAt: Date }).updatedAt.getTime(), x: Date.now() + msLeft });
+  }
+
+  it("ends at the code check once the person is blocked, or the club is at Strict, and clears its cookie", async () => {
+    const ana = await seedAna();
+    const first = await anaAtTheCode();
+    await blockPerson(ana.id, "reason", staff);
+    const blocked = await refusedWith(first.code, first.pending);
+    expect(clearsStep(blocked)).toBe(true);
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ targetId: ana.id, after: { reason: "blocked" } });
+    await unblockPerson(ana.id, staff);
+
+    // Strict stored after the step was made at Standard: an emailed code is never a second step under Strict.
+    await db.delete(rateLimitEvent);
+    const second = await anaAtTheCode();
+    await seedParentSettings({ level: "strict" });
+    const strict = await refusedWith(second.code, second.pending);
+    expect(clearsStep(strict)).toBe(true);
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ targetId: ana.id, after: { reason: "strict_no_factor" } });
+    expect(await sessions()).toEqual([]);
+  });
+
+  it("a resend after a reset, or under Strict, mails nothing and clears the step", async () => {
+    const ana = await seedAna();
+    const { pending } = await anaAtTheCode();
+    await db.update(signinCode).set({ createdAt: new Date(Date.now() - 120_000) });
+    await seedParentSettings({ level: "strict" });
+    const strict = await postDoor("/portal-code/resend", {}, { cookie: pending });
+    expect(await strict.json()).toEqual({ ok: true });
+    expect(clearsStep(strict)).toBe(true);
+    await seedParentSettings({ level: "standard" });
+    await db.delete(parentAuthAccount).where(eq(parentAuthAccount.userId, ana.authUserId));
+    await seedPassword(ana.authUserId, "a new password after the reset");
+    const reset = await postDoor("/portal-code/resend", {}, { cookie: pending });
+    expect(await reset.json()).toEqual({ ok: true });
+    expect(clearsStep(reset)).toBe(true);
+    expect(outbox).toHaveLength(1);
+    expect((await audits("signin.code_refused")).map((r) => (r.after as { reason: string }).reason)).toEqual(["strict_no_factor", "password_changed"]);
+  });
+
+  it("a code resent late in the step ends with the step, and its mail says how long it has; none is sent in the last minute", async () => {
+    const ana = await seedAna();
+    const { pending } = await anaAtTheCode();
+    const name = pending.split("=")[0]!;
+    await db.update(signinCode).set({ createdAt: new Date(Date.now() - 120_000) });
+    // Four and a half minutes of the step left: the code resent ends when the step does, not 10 minutes on.
+    const late = await anaStepEnding(name, ana, 4.5 * 60_000);
+    const endsAt = JSON.parse(Buffer.from(decodeURIComponent(late.split("=")[1]!).replace(/\.[^.]*$/, ""), "base64url").toString("utf8")).x as number;
+    expect(await (await postDoor("/portal-code/resend", {}, { cookie: late })).json()).toEqual({ ok: true });
+    await vi.waitFor(() => expect(outbox).toHaveLength(2));
+    const [row] = await db.select().from(signinCode);
+    expect(row!.expiresAt.getTime()).toBe(endsAt);
+    expect(outbox[1]!.text).toContain("It expires in 4 minutes.");
+    expect((await audits("signin.code_sent")).at(-1)!.after).toEqual({ expiresAt: new Date(endsAt).toISOString() });
+    // And it works, within the step.
+    const code = /sign-in code: (\d{6})/.exec(outbox[1]!.subject)![1]!;
+    expect((await codeStep(code, late)).body).toEqual({ ok: true, next: "/" });
+
+    // Under a minute left: nothing is stored or mailed, and the answer is the same.
+    await db.delete(rateLimitEvent); await db.update(signinCode).set({ createdAt: new Date(Date.now() - 120_000) });
+    const codes = (await db.select().from(signinCode)).map((c) => c.id);
+    const ending = await anaStepEnding(name, ana, 30_000);
+    expect(await (await postDoor("/portal-code/resend", {}, { cookie: ending })).json()).toEqual({ ok: true });
+    expect((await db.select().from(signinCode)).map((c) => c.id)).toEqual(codes);
+    expect(outbox).toHaveLength(2);
+    expect((await audits("signin.code_refused")).at(-1)).toMatchObject({ targetId: ana.id, after: { reason: "step_ending" } });
   });
 
   it("two right codes at once make at most one session", async () => {

@@ -36,11 +36,17 @@ const cookieOf = (ctx: GenericEndpointContext, name: string, maxAge?: number) =>
   return { name: c.name, attributes: { ...c.attributes, path: DOOR_PATH, httpOnly: true, sameSite: "lax" as const } };
 };
 
-/** Sets the pending step after a right password: it ends CODE_TTL_MS from `now`, and its cookie with it. */
-export async function setPendingStep(ctx: GenericEndpointContext, s: Omit<PendingStep, "endsAt">, now: Date): Promise<void> {
-  const endsAt = now.getTime() + CODE_TTL_MS;
+/** When a pending step made by a right password at `now` ends: CODE_TTL_MS on, never extended. */
+export const pendingStepEnd = (now: Date): Date => new Date(now.getTime() + CODE_TTL_MS);
+
+/**
+ * Sets the pending step after a right password, ending at `s.endsAt` (pendingStepEnd(), the end the code just sent for
+ * it was given too, so the two end together), and its cookie with it.
+ */
+export async function setPendingStep(ctx: GenericEndpointContext, s: PendingStep, now: Date): Promise<void> {
+  const endsAt = Math.min(s.endsAt.getTime(), now.getTime() + CODE_TTL_MS);
   const value = Buffer.from(JSON.stringify({ p: s.parentId, e: s.email, c: s.credentialId, u: s.credentialUpdatedAt.getTime(), x: endsAt })).toString("base64url");
-  const c = cookieOf(ctx, PENDING, seconds(CODE_TTL_MS));
+  const c = cookieOf(ctx, PENDING, seconds(endsAt - now.getTime()));
   await ctx.setSignedCookie(c.name, value, ctx.context.secret, c.attributes);
 }
 

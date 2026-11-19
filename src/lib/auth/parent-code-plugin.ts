@@ -6,7 +6,7 @@ import { refuseCodeWithoutStep, sendSecondStepCode, verifySigninCode } from "@/l
 import { checkPasswordSignin, MOST_TYPED_ADDRESS, MOST_TYPED_PASSWORD } from "@/lib/parents/password-signin";
 import { MAX_RETURN_PATH } from "./return-path";
 import { finishParentSignin } from "./parent-signin-finish";
-import { clearPendingStep, readDeviceToken, readPendingStep, setPendingStep } from "./parent-signin-step";
+import { clearPendingStep, pendingStepEnd, readDeviceToken, readPendingStep, setPendingStep } from "./parent-signin-step";
 
 type Ctx = { headers?: Headers; request?: Request };
 const ipOf = (ctx: Ctx) => { const h = ctx.headers ?? ctx.request?.headers; return h ? clientIpFrom(h) : null; };
@@ -45,18 +45,22 @@ export const parentCodePlugin = () => ({
       // doesn't wait for it.
       // A code that could not be sent because the step can't go on (a block or an address change landing just now) sets
       // no pending step; the answer is the same.
-      const { delivery, ended } = await sendSecondStepCode({ parentId: r.person.id, email: r.person.email, password: r.password }, ip, now);
+      // The step and its first code end together (pendingStepEnd()).
+      const endsAt = pendingStepEnd(now);
+      const { delivery, ended } = await sendSecondStepCode({ parentId: r.person.id, email: r.person.email, password: r.password, endsAt }, ip, now);
       void delivery;
-      if (!ended) await setPendingStep(ctx, { parentId: r.person.id, email: r.person.email, ...r.password }, now);
+      if (!ended) await setPendingStep(ctx, { parentId: r.person.id, email: r.person.email, ...r.password, endsAt }, now);
       return ctx.json({ ok: true, step: "code" });
     }),
-    // The code again, for the pending step's person; nothing the browser sends names anyone. Always the same answer.
+    // The code again, for the pending step's person; nothing the browser sends names anyone. Always the same answer. The
+    // step is not extended: the code resent ends when it does (sendSecondStepCode(), which says so in its mail and sends
+    // none in the step's last minute).
     portalCodeResend: createAuthEndpoint("/portal-code/resend", { method: "POST" }, async (ctx) => {
       const now = new Date();
       const step = await readPendingStep(ctx, now);
       if (step) {
         const { delivery, ended } = await sendSecondStepCode({ parentId: step.parentId, email: step.email,
-          password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt } }, ipOf(ctx), now);
+          password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt }, endsAt: step.endsAt }, ipOf(ctx), now);
         void delivery;
         if (ended) clearPendingStep(ctx);
       }
@@ -72,7 +76,8 @@ export const parentCodePlugin = () => ({
         const why = await refuseCodeWithoutStep(ip, now);
         return ctx.json({ ok: false, error: why });
       }
-      const r = await verifySigninCode({ parentId: step.parentId, email: step.email }, ctx.body.code, ip, now);
+      const r = await verifySigninCode({ parentId: step.parentId, email: step.email,
+        password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt } }, ctx.body.code, ip, now);
       if (!r.ok) {
         if (r.ended) clearPendingStep(ctx);
         return ctx.json({ ok: false, error: r.reason });

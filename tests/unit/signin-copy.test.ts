@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { signinFailure, TOO_MANY_TRIES, SIGNIN_NETWORK_FAILED, SIGNIN_LEDE, PASSWORD_REJECTED, CODE_SENT, CODE_REJECTED } from "@/lib/parents/signin-copy";
+import { signinFailure, TOO_MANY_TRIES, SIGNIN_NETWORK_FAILED, SIGNIN_LEDE, PASSWORD_REJECTED, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED } from "@/lib/parents/signin-copy";
 
 describe("what the sign-in page says when a request fails", () => {
   it("says too many tries for a 429, which is the portal's own limit and not a network fault", () => {
@@ -25,6 +25,10 @@ describe("the sign-in page's words (the sign-in release, slice SI-3b)", () => {
     expect(CODE_SENT).toMatch(/this device/);
     expect(CODE_SENT).not.toMatch(/If this email belongs/);
     expect(CODE_REJECTED).toMatch(/start again with your email and password/);
+  });
+  it("says a code step's time ran out without saying whether a code was sent, and leads back to the password", () => {
+    expect(CODE_STEP_ENDED).toBe("Time ran out for that code. Enter your email and password again to get a new one.");
+    expect(CODE_STEP_ENDED).not.toMatch(/sent|didn't|never/i);
   });
   it("says too many tries without promising a new code, since the password step meets it too", () => {
     expect(TOO_MANY_TRIES).toBe("Too many tries. Wait a few minutes and try again.");

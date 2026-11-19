@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { CODE_SENT, CODE_REJECTED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
-import { clearCodeStep, deviceStore, loadCodeStep, saveCodeStep } from "./code-step";
+import { CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
+import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep } from "./code-step";
 
 const BASE = "/api/auth/parent";
 const RESEND_SECONDS = 60;
@@ -30,6 +30,9 @@ export function PasswordSignIn({ next }: { next: string | null }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  // When the step began (the right password: the server's pending step ends CODE_STEP_LIFE_MS after it, however late a
+  // code is resent), and when its newest code was asked for (for Resend's one-a-minute wait).
+  const [startedAt, setStartedAt] = useState(0);
   const [sentAt, setSentAt] = useState(0);
   const [now, setNow] = useState(0);
   const [back, setBack] = useState(next);
@@ -46,21 +49,27 @@ export function PasswordSignIn({ next }: { next: string | null }) {
     const saved = loadCodeStep(deviceStore(), Date.now());
     if (!saved) return;
     /* eslint-disable react-hooks/set-state-in-effect */
-    setSentAt(saved.sentAt); setNow(Date.now()); setStep("code");
+    setStartedAt(saved.sentAt); setSentAt(saved.sentAt); setNow(Date.now()); setStep("code");
     if (!next) setBack(saved.next);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [next]);
 
+  // Once the step's time is over no code can work, so the page goes back to the password step and says so.
   useEffect(() => {
     if (step !== "code") return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => {
+      const at = Date.now();
+      if (at - startedAt < CODE_STEP_LIFE_MS) { setNow(at); return; }
+      clearCodeStep(deviceStore()); moved.current = true;
+      setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode(""); setProblem({ words: CODE_STEP_ENDED, passwordLink: false });
+    }, 1000);
     return () => clearInterval(t);
-  }, [step]);
+  }, [step, startedAt, next]);
 
   const toCodeStep = () => {
     const t = Date.now();
     saveCodeStep(deviceStore(), { sentAt: t, next: back });
-    moved.current = true; setSentAt(t); setNow(t); setCode(""); setPassword(""); setStep("code");
+    moved.current = true; setStartedAt(t); setSentAt(t); setNow(t); setCode(""); setPassword(""); setStep("code");
   };
   const signIn = async () => {
     setBusy(true); setProblem(null);
@@ -75,8 +84,8 @@ export function PasswordSignIn({ next }: { next: string | null }) {
     setBusy(true); setProblem(null);
     try {
       await post<{ ok: true }>("/portal-code/resend", {});
+      // The stored step keeps its first time: a resent code ends when the step does, so a reload never outlives it.
       const t = Date.now();
-      saveCodeStep(deviceStore(), { sentAt: t, next: back });
       setSentAt(t); setNow(t); setCode("");
       // Resend is now waiting (disabled), so its focus goes to the field.
       field.current?.focus();
@@ -97,6 +106,8 @@ export function PasswordSignIn({ next }: { next: string | null }) {
     setStep("password"); setEmail(""); setPassword(""); setBack(next); setCode(""); setProblem(null);
   };
   const wait = Math.max(0, RESEND_SECONDS - Math.floor((now - sentAt) / 1000));
+  // In the step's last minute the server sends no new code (it would be dead before it was read), so none is offered.
+  const lastMinute = CODE_STEP_LIFE_MS - (now - startedAt) < RESEND_SECONDS * 1000;
   const shown = problem && (
     <div role="alert">
       <p className="errors">{problem.words}</p>
@@ -129,7 +140,7 @@ export function PasswordSignIn({ next }: { next: string | null }) {
       {shown}
       <button className="btn" aria-disabled={busy || undefined}>{busy ? "Checking…" : "Sign in"}</button>
       <div className="stack">
-        <button type="button" className="btn btn-line" disabled={busy || wait > 0} onClick={() => void resend()}>
+        <button type="button" className="btn btn-line" disabled={busy || wait > 0 || lastMinute} onClick={() => void resend()}>
           {wait > 0 ? `Resend code (${wait} s)` : "Resend code"}
         </button>
         <button type="button" className="btn btn-line" onClick={startAgain}>Start again</button>

@@ -3,16 +3,18 @@ import { safeReturnPath } from "@/lib/auth/return-path";
 /**
  * The code step, kept on the device while its code can still work (open question 29). A parent leaves the portal to
  * read the code in their mail; a phone may reload an installed app when they come back, and without this they would be
- * asked for their password again. Kept: when the code was asked for, and the page they were heading to. Not the
- * address: since the sign-in release's slice SI-3b the server holds the person and the address in the pending step
- * (a signed cookie, src/lib/auth/parent-signin-step.ts), which lives exactly as long. It is removed on sign-in and on
- * "Start again", and dropped once the code's life is over.
+ * asked for their password again. Kept: when the first code was asked for (the right password), and the page they were
+ * heading to. Not the address: since the sign-in release's slice SI-3b the server holds the person and the address in
+ * the pending step (a signed cookie, src/lib/auth/parent-signin-step.ts), which ends CODE_TTL_MS after the right
+ * password and is never extended. A resend doesn't change what is kept here, since a resent code ends with the step
+ * (sendSecondStepCode()), so this lives as long as the step does. It is removed on sign-in and on "Start again", and
+ * dropped once the step's life is over.
  *
  * localStorage, not sessionStorage: an installed app that is reloaded starts a new session. No imports from the server
  * side: the sign-in form (a client component) uses this file.
  */
 export const CODE_STEP_KEY = "booster.signin.code-step";
-/** The code's own life, and the pending step's (CODE_TTL_MS in src/lib/parents/signin-codes.ts; tests/unit/code-step.test.ts keeps the two equal). */
+/** The pending step's life, and the longest a code lives (CODE_TTL_MS in src/lib/parents/signin-codes.ts; tests/unit/code-step.test.ts keeps the two equal). */
 export const CODE_STEP_LIFE_MS = 10 * 60 * 1000;
 export type CodeStep = { sentAt: number; next: string | null };
 export type CodeStepStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;

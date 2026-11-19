@@ -11,7 +11,12 @@ export const PASSWORD_REJECTED = "That email and password didn't work. Check the
 export const CODE_SENT = "To finish signing in on this device, enter the 6-digit code we've emailed you. It can take a minute. Check your spam folder too.";
 /** One answer for a wrong, expired, used-up or never-sent code, or a second step that has ended. */
 export const CODE_REJECTED = "That code didn't work. Check the newest email from us and try again, or start again with your email and password.";
-export const TOO_MANY_TRIES = "Too many tries. Wait a few minutes and try again.";
+/**
+ * Shown on the password step when an open code step's time ran out (a code works only while its step lasts, 10 minutes
+ * from the right password, however late it was resent). It never says whether a code was sent.
+ */
+export const CODE_STEP_ENDED = "Time ran out for that code. Enter your email and password again to get a new one.";
+export const TOO_MANY_TRIES ="Too many tries. Wait a few minutes and try again.";
 export const SIGNIN_UNAVAILABLE = "Parent sign-in isn't available yet.";
 export const SIGNIN_NETWORK_FAILED = "We couldn't reach the portal just then. Please try again in a moment.";
 /** What to say when a request came back without an answer to read. `status` is the HTTP status, or null when nothing came back. */

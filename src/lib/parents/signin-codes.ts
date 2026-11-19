@@ -15,11 +15,17 @@ import { sendMail, currentBrand } from "@/lib/mail/send";
 import { signinCodeMessage } from "@/lib/mail/messages";
 import { takeRateLimit, type RateLimitTake } from "./rate-limit";
 import { enterableGuardianRows, lockedPerson, parentActor } from "./sessions";
-import { getParentSettings, parentDoorClosed } from "./settings";
+import { getParentSettings, parentDoorClosed, type ParentSettings } from "./settings";
+import { secondStepFor } from "./second-step-rule";
 
 export const CODE_TTL_MS = 10 * 60 * 1000;
 export const CODE_MAX_TRIES = 5;
 export const RESEND_AFTER_MS = 60 * 1000;
+/**
+ * The least of its pending step's life a code is sent for. A code never outlives its pending step (sendSecondStepCode()),
+ * so one asked for in the step's last minute would be dead before its mail could be read: none is sent.
+ */
+export const LEAST_CODE_LIFE_MS = 60 * 1000;
 
 export const generateSigninCode = () => String(randomInt(0, 1_000_000)).padStart(6, "0");
 /** Keyed with the server secret, so a copy of the database alone can't be searched for the 1,000,000 possible codes. */
@@ -47,10 +53,15 @@ export type LinkSigninProof = { linkId: string; credentialId: string; credential
  */
 export type SigninProof = { password: PasswordProof; codeId: string } | { password: PasswordProof; deviceId: string } | { link: LinkSigninProof };
 
-/** Who a pending step names (src/lib/auth/parent-signin-step.ts): the person, the address the password was proved with, and that password. */
-export type StepPerson = { parentId: string; email: string; password: PasswordProof };
+/**
+ * Who a pending step names (src/lib/auth/parent-signin-step.ts): the person, the address the password was proved with,
+ * that password, and when the step ends (`endsAt`: CODE_TTL_MS after the right password, never extended). A code sent
+ * for the step never outlives it; with no `endsAt`, the step is the one about to be set, which ends CODE_TTL_MS from now.
+ */
+export type StepPerson = { parentId: string; email: string; password: PasswordProof; endsAt?: Date };
 
-type Refusal = "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off" | "address_changed" | "password_changed";
+type Refusal = "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off" | "address_changed" | "password_changed"
+  | "strict_no_factor" | "step_ending";
 const ANON: Actor = { door: "parent", id: null, label: null };
 /**
  * The per-IP limit, or "taken" when the visitor's address is unknown. With no address (CLIENT_IP_HEADER is none, or the
@@ -59,6 +70,14 @@ const ANON: Actor = { door: "parent", id: null, label: null };
  */
 export const takeIpLimit = (kind: "code_send_ip" | "code_check_ip" | "password_try_ip", ip: string | null, now: Date): Promise<RateLimitTake> =>
   ip === null ? Promise.resolve("taken") : takeRateLimit(kind, ip, now);
+/**
+ * Why the door can't go on for anyone now, or null: sign-ins off, or a level whose second step is not the emailed code
+ * (under Strict an emailed code is never a second step, secondStepFor(), so a pending step made at Standard goes no
+ * further once an Admin stores Strict). `hasSecondFactor: false`, as the password step passes it, until SI-6 and SI-7.
+ */
+const doorStops = (settings: ParentSettings): "signins_off" | "strict_no_factor" | null =>
+  parentDoorClosed(settings) ? "signins_off"
+    : secondStepFor({ level: settings.level, hasSecondFactor: false }).step !== "emailed_code" ? "strict_no_factor" : null;
 const DONE = { delivery: Promise.resolve(), ended: false };
 const ENDED = { delivery: Promise.resolve(), ended: true };
 
@@ -86,9 +105,12 @@ const samePassword = (stored: Date | null, proof: PasswordProof) => stored !== n
  * counted under the person's own address), mail working, the door open, the person not blocked and with a row that
  * counts; then, under the person's lock (lockedPerson()), their address still the one the password was proved with and
  * their password still the one it was checked against, and the resend wait (one code a minute); then the code, which
- * replaces their unused one. `ended` says the step can't go on (blocked, the address or the password changed, no row
- * that counts, sign-ins off), and the caller clears the pending step. Each refusal is `signin.code_refused` with its
- * reason (over a limit, once per full window); a code mailed is `signin.code_sent`.
+ * replaces their unused one. The code never outlives the pending step it is sent for (`person.endsAt`): it expires at
+ * the step's end or CODE_TTL_MS from now, whichever is sooner, and its mail says how many whole minutes that is; with
+ * less than LEAST_CODE_LIFE_MS of the step left none is sent (`step_ending`), since it would be dead before it was read.
+ * `ended` says the step can't go on (blocked, the address or the password changed, no row that counts, sign-ins off,
+ * Strict), and the caller clears the pending step. Each refusal is `signin.code_refused` with its reason (over a limit,
+ * once per full window); a code mailed is `signin.code_sent`.
  */
 export async function sendSecondStepCode(person: StepPerson, ip: string | null, now = new Date()): Promise<{ delivery: Promise<void>; ended: boolean }> {
   const email = person.email;
@@ -98,8 +120,11 @@ export async function sendSecondStepCode(person: StepPerson, ip: string | null, 
   if (byIp !== "taken") { if (byIp === "first_refusal") await refuse("rate_limited", null, ip, { limit: "ip" }); return DONE; }
   const byEmail = await takeRateLimit("code_send_email", email, now);
   if (byEmail !== "taken") { if (byEmail === "first_refusal") await refuse("rate_limited", who, ip, { limit: "email" }); return DONE; }
+  const expiresAt = new Date(Math.min(now.getTime() + CODE_TTL_MS, person.endsAt?.getTime() ?? Infinity));
+  if (expiresAt.getTime() - now.getTime() < LEAST_CODE_LIFE_MS) { await refuse("step_ending", who, ip); return DONE; }
   if (!(await mailWorking())) { await refuse("mail_failed", who, ip, { detail: "mail_not_working" }); return DONE; }
-  if (parentDoorClosed(await getParentSettings())) { await refuse("signins_off", who, ip); return ENDED; }
+  const stops = doorStops(await getParentSettings());
+  if (stops) { await refuse(stops, who, ip); return ENDED; }
   const [p] = await db.select().from(parent).where(eq(parent.id, person.parentId));
   if (!p || p.email !== email) { await refuse("address_changed", who, ip); return ENDED; }
   if (p.blocked) { await refuse("blocked", who, ip); return ENDED; }
@@ -120,7 +145,7 @@ export async function sendSecondStepCode(person: StepPerson, ip: string | null, 
       .orderBy(desc(signinCode.createdAt)).limit(1);
     if (last && now.getTime() - last.createdAt.getTime() < RESEND_AFTER_MS) return "resend" as const;
     await tx.delete(signinCode).where(and(eq(signinCode.parentId, p.id), isNull(signinCode.usedAt)));
-    const [row] = await tx.insert(signinCode).values({ parentId: p.id, codeHash: hashSigninCode(p.id, code), expiresAt: new Date(now.getTime() + CODE_TTL_MS), createdAt: now })
+    const [row] = await tx.insert(signinCode).values({ parentId: p.id, codeHash: hashSigninCode(p.id, code), expiresAt, createdAt: now })
       .returning({ id: signinCode.id });
     return { id: row!.id, to: live.email };
   });
@@ -130,11 +155,13 @@ export async function sendSecondStepCode(person: StepPerson, ip: string | null, 
   if (stored === "resend") { await refuse("rate_limited", who, ip, { limit: "resend" }); return DONE; }
 
   const passwordPage = `${env.APP_URL.replace(/\/+$/, "")}/sign-in/password`;
+  // Whole minutes, rounded down, so the mail never promises more than the code has.
+  const minutes = Math.max(1, Math.floor((expiresAt.getTime() - now.getTime()) / 60_000));
   const delivery = (async () => {
-    const r = await sendMail(signinCodeMessage(await currentBrand(), stored.to, code, { passwordPage }), { purpose: "signin_code", actor: parentActor(p), ip });
+    const r = await sendMail(signinCodeMessage(await currentBrand(), stored.to, code, { passwordPage, minutes }), { purpose: "signin_code", actor: parentActor(p), ip });
     if (r.ok) {
       await writeAudit({ actor: parentActor(p), action: "signin.code_sent", targetType: "parent", targetId: p.id,
-        after: { expiresAt: new Date(now.getTime() + CODE_TTL_MS).toISOString() }, ip });
+        after: { expiresAt: expiresAt.toISOString() }, ip });
     } else {
       await db.delete(signinCode).where(eq(signinCode.id, stored.id)); // nobody got it, so nobody may use it
       await refuse("mail_failed", who, ip);
@@ -146,7 +173,7 @@ export async function sendSecondStepCode(person: StepPerson, ip: string | null, 
 /**
  * A right code, spent: the code's own row, which the last check of the sign-in reads again (signinStands()). A refusal
  * says whether the pending step has ended (`ended`: its code's tries used up, the person blocked or gone from their
- * address, sign-ins off), so the caller clears it.
+ * address, their password changed, sign-ins off, Strict), so the caller clears it.
  */
 export type VerifyResult = { ok: true; codeId: string } | { ok: false; reason: "rejected" | "rate_limited"; ended: boolean };
 const REJECTED: VerifyResult = { ok: false, reason: "rejected", ended: false };
@@ -154,10 +181,13 @@ const REJECTED_ENDED: VerifyResult = { ok: false, reason: "rejected", ended: tru
 
 /**
  * Spec §1, for the person a pending step names (never a typed address). Single use, 10 minutes, 5 wrong tries, 180
- * checks per IP address per 15 minutes. Each refusal is audited (`signin.code_expired`, `signin.code_wrong`,
- * `signin.refused`), and the caller answers it as one refusal.
+ * checks per IP address per 15 minutes. Before the code is looked at, the step must still be able to go on: the person
+ * still at the address and not blocked, and, when the step's password is given (the door always gives it), their
+ * `credential` row still the one it proved. A block and a reset delete the person's codes too, so without this their
+ * step would be refused only as a missing code and linger to its end. Each refusal is audited (`signin.code_expired`,
+ * `signin.code_wrong`, `signin.refused`), and the caller answers it as one refusal.
  */
-export async function verifySigninCode(step: { parentId: string; email: string }, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
+export async function verifySigninCode(step: { parentId: string; email: string; password?: PasswordProof }, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
   const byIp = await takeIpLimit("code_check_ip", ip, now);
   if (byIp !== "taken") {
     if (byIp === "first_refusal") await refuse("rate_limited", null, ip, { limit: "check_ip" });
@@ -169,9 +199,14 @@ export async function verifySigninCode(step: { parentId: string; email: string }
     await writeAudit({ actor: parentActor(who), action: "signin.refused", targetType: "parent", targetId: step.parentId, after: { reason: "address_changed" }, ip });
     return REJECTED_ENDED;
   }
+  if (p.blocked) {
+    await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: "blocked" }, ip });
+    return REJECTED_ENDED;
+  }
   const code = rawCode.replace(/[\s-]/g, "");
 
   const outcome = await db.transaction(async (tx) => {
+    if (step.password && !samePassword(await credentialNow(tx, p.id, step.password.credentialId), step.password)) return "password_changed" as const;
     const [row] = await tx.select().from(signinCode).where(and(eq(signinCode.parentId, p.id), isNull(signinCode.usedAt))).for("update");
     if (!row) return "no_code" as const;
     if (row.expiresAt.getTime() <= now.getTime()) return "expired" as const;
@@ -185,6 +220,10 @@ export async function verifySigninCode(step: { parentId: string; email: string }
     await tx.update(signinCode).set({ usedAt: now }).where(eq(signinCode.id, row.id));
     return { spent: row.id } as const;
   });
+  if (outcome === "password_changed") {
+    await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason: outcome }, ip });
+    return REJECTED_ENDED;
+  }
   if (outcome === "no_code" || outcome === "expired" || outcome === "too_many_tries") {
     await writeAudit({ actor: parentActor(p), action: "signin.code_expired", targetType: "parent", targetId: p.id, after: { reason: outcome }, ip });
     return outcome === "too_many_tries" ? REJECTED_ENDED : REJECTED;
@@ -197,8 +236,8 @@ export async function verifySigninCode(step: { parentId: string; email: string }
   // sent). Whether the address and the password are still theirs is settled last of all, once the session exists
   // (signinStands).
   const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));
-  const reason = parentDoorClosed(await getParentSettings()) ? "signins_off"
-    : !fresh || fresh.blocked ? "blocked" : (await enterableGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
+  const reason = doorStops(await getParentSettings())
+    ?? (!fresh || fresh.blocked ? "blocked" : (await enterableGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null);
   if (reason) {
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason }, ip });
     return REJECTED_ENDED;
@@ -230,10 +269,11 @@ export async function refuseCodeWithoutStep(ip: string | null, now = new Date())
  * this one is stored where it can see it. For every kind of proof, the person's `credential` row is still the one the
  * password was checked against, or the set-up link wrote, by its id and its `updated_at` (`password_changed`
  * otherwise): a reset, or a staff reset, that committed since has replaced the password. Then what else it spent:
- * - a code (from verifySigninCode()): its row is still there. A reset deletes the person's codes spent within a code's
- *   life (choosePasswordFromLink(), password-set.ts), so a code spent before a reset that committed first is gone here
- *   (`code_gone`); the daily clean-up keeps a spent code until a code's life has passed since it was spent (cleanUp(),
- *   cleanup.ts), so it never takes one this soon.
+ * - a code (from verifySigninCode()): its row is still there (`code_gone` otherwise). A reset that committed first is
+ *   caught above as `password_changed`, since it replaces the `credential` row; it also deletes the person's codes
+ *   spent within a code's life (choosePasswordFromLink(), password-set.ts), so `code_gone` is a second line behind it.
+ *   The daily clean-up keeps a spent code until a code's life has passed since it was spent (cleanUp(), cleanup.ts), so
+ *   it never takes one this soon.
  * - a remembered device: its row is still there, the person's and unexpired (`device_gone` otherwise: a block, a reset
  *   or anything else that ends all of a person's sign-in forgets every device).
  * - a set-up link: the link's row is still there and spent (`link_gone` otherwise).
