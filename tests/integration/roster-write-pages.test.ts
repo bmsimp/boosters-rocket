@@ -14,7 +14,8 @@ import { db } from "@/lib/db/client";
 import { auditLog, family, familyMoney, guardian, qboCustomer, student, writeQueue } from "@/lib/db/schema";
 import { AccessDenied } from "@/lib/guards";
 import { NOT_HERE } from "@/lib/roster/operations";
-import { addToFamilyAction, createAction, deactivateAction, familyInactiveAction, giveUpAction, moveAction, renameAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
+import { addStudentHereAction, addToFamilyAction, createAction, createAndLinkAction, deactivateAction, deactivateHereAction, familyInactiveAction, giveUpAction, moveAction, renameAction,
+  renameHereAction, tryAgainAction } from "@/app/staff/(app)/roster/write-actions";
 import RosterPage from "@/app/staff/(app)/roster/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import ReconciliationPage from "@/app/staff/(app)/reconciliation/page";
@@ -228,21 +229,61 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
     expect(html).toContain(NOT_HERE.contact);
   });
 
-  it("offers a Parent sub-customer its changes with no sign-in behind it, and a family with no QuickBooks customer no form", async () => {
+  it("offers a Parent sub-customer its changes with no sign-in behind it, and a family with no QuickBooks customer the portal's own changes alone (stage 3's slice 9d)", async () => {
     asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
     // Sign-ins are off, so nobody has one: the parents are QuickBooks' own customers, listed and changed as before.
     expect(await db.select().from(guardian)).toEqual([]);
     const rivera = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
     for (const words of ["Ana Rivera", "ana@example.com", "Change the parent Ana Rivera"]) expect(rivera, words).toContain(words);
-    // A family made in the portal with no customer (none can be until families are made there): listed, opened, and
-    // offered no form, since every form sends QuickBooks ids.
+    // A linked family is offered no portal-only change, nor "Create in QuickBooks and link".
+    for (const words of ["Change in the portal", "Create in QuickBooks and link"]) expect(rivera, words).not.toContain(words);
+    // A family made in the portal with no customer: listed as not linked, opened, and offered the portal's own changes
+    // (no form that sends QuickBooks ids), its guardians' box, and the way to QuickBooks for whoever may link.
     const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
     await db.insert(student).values({ name: "Hal Handmade", active: true, familyId: hand!.id });
-    expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "1", "0", "No customer"]);
+    expect(rowNamed(await renderPage(RosterPage), "Handmade Family")).toEqual(["Handmade Family", "1", "0", "Not linked: in the portal only"]);
     const html = await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } });
-    expect(html).toContain("A family the portal keeps, with no customer in QuickBooks.");
+    expect(html).toContain("A family the portal keeps, not linked to QuickBooks: it is in the portal only, and a change to it is saved here only.");
     expect(html).toContain("Hal Handmade");
-    for (const words of ["Change in QuickBooks", "Add a student", "Add a parent", "Make Handmade Family inactive"]) expect(html, words).not.toContain(words);
+    const portal = html.slice(html.indexOf('id="portal-changes-h"'), html.indexOf("</section>", html.indexOf('id="portal-changes-h"')));
+    for (const words of ["Change the family Handmade Family", "Add a student", "Change the student Hal Handmade"]) expect(portal, words).toContain(words);
+    for (const words of ["Change in QuickBooks", "Add a parent"]) expect(html, words).not.toContain(words);
+    expect(html).toContain("Add a guardian");
+    // Without the linking permission, "Create in QuickBooks and link" says who may press it, and offers no button.
+    const link = html.slice(html.indexOf('id="create-link-h"'), html.indexOf("</section>", html.indexOf('id="create-link-h"')));
+    expect(link).toContain("Someone who may link families to accounting can make it in QuickBooks and link it.");
+    expect(link).not.toContain("<button");
+    expect(posts()).toEqual([]);
+  });
+
+  it("shows the button \"Create in QuickBooks and link\" only to staff who may change families and link them; the action checks both", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    const button = (html: string) => html.slice(html.indexOf('id="create-link-h"'), html.indexOf("</section>", html.indexOf('id="create-link-h"'))).includes("Create in QuickBooks and link</button>");
+    asStaff(await staffWith("treasurer@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
+    expect(button(await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } }))).toBe(true);
+    // The linking permission alone: the page offers no changes at all, and the action refuses it.
+    asStaff(await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]));
+    const linkerPage = await renderPage(RosterEntryPage, { params: { id: String(hand!.id) } });
+    expect(linkerPage).not.toContain('id="create-link-h"');
+    await expect(createAndLinkAction(tag, String(hand!.id))).rejects.toBeInstanceOf(AccessDenied);
+    // Changing families alone: the action refuses it as not from the page.
+    asStaff(await staffWith("writer@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    expect(await createAndLinkAction(tag, String(hand!.id))).toEqual(NOT_FROM_PAGE);
+    expect(await createAndLinkAction(tag, "not-a-uuid")).toEqual(NOT_FROM_PAGE);
+    expect(posts()).toEqual([]);
+  });
+
+  it("the portal's own changes refuse what no page sends, and need Roster.Read beside Roster.Family.ReadWrite", async () => {
+    const [hand] = await db.insert(family).values({ name: "Handmade Family", active: true }).returning();
+    asStaff(await staffWith("writer@club.org", ["Roster.Family.ReadWrite"]));
+    expect(await renameHereAction(tag, "family", String(hand!.id), "Hand Family")).toEqual(NOT_FROM_PAGE);
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    for (const act of [() => renameHereAction(tag, "family", "10", "Hand Family"), () => renameHereAction(tag, "parent" as "family", String(hand!.id), "Hand Family"),
+      () => addStudentHereAction(tag, String(hand!.id), 7 as unknown as string), () => deactivateHereAction(tag, "student", "x".repeat(36))]) {
+      expect(await act()).toEqual(NOT_FROM_PAGE);
+    }
+    expect(await renameHereAction(tag, "family", String(hand!.id), "Hand Family")).toEqual({ ok: true, message: "Renamed Hand Family in the portal." });
+    expect(revalidatedPaths()).toContain("/");
     expect(posts()).toEqual([]);
   });
 
@@ -288,7 +329,8 @@ describe("the roster pages offer the changes the shape allows, to staff who may 
   it("a flat club makes a member, of the kind staff choose when there are several, and renames or makes one inactive", async () => {
     await resetDb(); stub.reset();
     tag = await connectRoster(stub, { shape: { kind: "flat", memberTypeIds: ["2", "3"] } });
-    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"]));
+    // The kind is asked only of staff whose new member is made in QuickBooks too: they may link families to accounting.
+    asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite", "Accounting.Link.ReadWrite"]));
     const list = await renderPage(RosterPage);
     expect(list).toContain("Make a member");
     expect(list).toContain("<option value=\"2\">Parent</option>");

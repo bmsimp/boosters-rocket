@@ -15,7 +15,8 @@ import { AddGuardianForm } from "@/app/staff/(app)/parents/forms";
 import { GuardianChange } from "@/app/staff/(app)/parents/guardian-change";
 import { addGuardianAction } from "@/app/staff/(app)/parents/actions";
 import { DisconnectedNotice, Freshness } from "../freshness";
-import { FamilyChanges, MemberChanges, Waiting, WhatChanges } from "../changes";
+import { CreateInQuickBooks, FamilyChanges, MemberChanges, PortalChanges, Waiting, WhatChanges } from "../changes";
+import { offers } from "@/lib/roster/operations";
 import type { Cust, Family } from "@/lib/roster/model";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
@@ -62,7 +63,8 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
  * `links` is for staff with `Parents.ReadWrite`, who may open a person's page. `changes` is for staff with
  * `Roster.Family.ReadWrite`, who change the family: only they get the ways to remove, reinstate and add a guardian
  * (stage 3's slice 7b, in the portal only), which give or end an address's sign-in for it. `addable` says why a
- * guardian can't be added now, or null when one can: the action checks it again, under the roster lock.
+ * guardian can't be added now, or null when one can: the action checks it again, under the roster lock. A family with
+ * no link takes guardians too (stage 3's slice 9d).
  */
 function SignIns({ familyId, signins, links, changes, addable }: { familyId: AppFamilyId; signins: FamilySignin[]; links: boolean; changes: boolean; addable: string | null }) {
   const columns: Column<FamilySignin>[] = [
@@ -135,6 +137,15 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   // version and sends QuickBooks ids, so a family the roster lists no customer for is offered none; nor is a family
   // whose own record is inactive in the portal (the action refuses one too, prepare() in src/lib/roster/writes.ts).
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite") && page.connected && page.shape !== null && fam.active;
+  // The family's own create waiting or stuck on the queue (stage 3's slice 9d): nothing else is changed on it meanwhile.
+  const making = !fam.linked && waiting.some((w) => w.write.op === "create" && (w.write.role === "family" || w.write.role === "member"));
+  // A family with no link, and students with none, are changed in the portal only, connected or not (stage 3's slice 9d).
+  const changesHere = can(ctx.effective, "Roster.Family.ReadWrite") && page.shape !== null && fam.active && !making;
+  const hereStudents = fam.students.filter((s) => s.active && !s.linked);
+  const studentType = page.shape?.kind === "layered" && page.shape.studentTypeId !== null;
+  // "Create in QuickBooks and link": for an active family with no link, or with active students with none (where the
+  // books have a student type), to staff who may change families and link them to accounting.
+  const toMake = !fam.linked || (studentType && hereStudents.length > 0 && customer !== null);
   const inQuickBooks: Family | null = customer === null ? null
     : { customer, students: fam.students.flatMap((s) => (s.customer ? [s.customer] : [])), parents: fam.parents };
   // Students whose record is inactive are offered nothing that would send; one QuickBooks has under another family is
@@ -155,7 +166,8 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
     <main className="wrap single">
       <h1 className="page-title">{fam.name}</h1>
       <p className="lede">{entry.kind === "family" ? "A family" : "A member"} the portal keeps{customer ? <>, linked to its customer in QuickBooks{customer.active ? "" : ", which is inactive there"}</>
-        : fam.linked ? `, linked to a customer QuickBooks doesn't list as a ${entry.kind} now` : ", with no customer in QuickBooks"}. <Link href="/staff/roster">Back to the roster</Link></p>
+        : fam.linked ? `, linked to a customer QuickBooks doesn't list as a ${entry.kind} now`
+        : making ? ", not linked to QuickBooks yet: its customer is being made there" : ", not linked to QuickBooks: it is in the portal only, and a change to it is saved here only"}. <Link href="/staff/roster">Back to the roster</Link></p>
       <DisconnectedNotice page={page} admin={admin} />
       {entry.kind === "family" ? (
         <>
@@ -173,9 +185,16 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
       <Waiting items={waiting} />
       {edit && inQuickBooks && entry.kind === "family" && page.shape?.kind === "layered" && <FamilyChanges shape={page.shape} family={inQuickBooks} families={families} edit={edit} cover={cover} inactiveRecords={inactiveRecords} elsewhere={elsewhere} />}
       {edit && inQuickBooks && entry.kind === "member" && <MemberChanges member={inQuickBooks.customer} edit={edit} />}
-      {page.shape && <WhatChanges shape={page.shape} canChange={canChange} />}
+      {changesHere && page.shape && <PortalChanges familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
+        addStudents={offers(page.shape, "add_student")} students={hereStudents.map((s) => ({ id: String(s.id), name: s.name }))} rosterTag={rosterTag} />}
+      {changesHere && toMake && <CreateInQuickBooks familyId={String(familyId)} name={fam.name} noun={entry.kind} unlinked={!fam.linked}
+        students={studentType ? hereStudents.map((s) => s.name) : []} rosterTag={rosterTag} ready={page.connected && page.roster !== null}
+        may={can(ctx.effective, "Accounting.Link.ReadWrite")}
+        types={page.shape?.kind === "flat" ? page.shape.memberTypeIds.map((t) => ({ qboId: t, name: page.types.find((x) => x.qboId === t)?.name ?? "A member type" })) : []} />}
+      {page.shape && <WhatChanges shape={page.shape} canChange={canChange} unlinked={!fam.linked} />}
       <SignIns familyId={familyId} signins={signins} links={links} changes={changesGuardians}
-        addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it." : !fam.linked ? "This family has no customer in QuickBooks linked to it, so a guardian can't be added to it yet." : null} />
+        addable={!fam.active ? "This family is inactive in the portal, so nobody can be added to it."
+          : making ? "Making this family in QuickBooks is still waiting on the queue, so nobody can be added to it for now." : null} />
       <Freshness page={page} admin={admin} />
     </main>
   );

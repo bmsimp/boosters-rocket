@@ -4,7 +4,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { buyout, jobRun, qboCustomer, setting, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
+import { buyout, family, jobRun, qboCustomer, setting, writeQueue, type QueuedWrite, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getConnection } from "@/lib/quickbooks/connection";
 import { WORKER_ACTOR } from "@/lib/quickbooks/client";
@@ -16,7 +16,7 @@ import { afterStudentMoved, applyWritten, changeOwnRecord, owedBy, REFRESH_ASK_K
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
-import { customerOfFamily, linksOf } from "@/lib/families/links";
+import { customerOfFamily, familyLinkedTo, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 
 export const WRITE_QUEUE_JOB = "roster.write_queue";
@@ -152,20 +152,28 @@ async function tryItem(item: Item, now: Date, refreshedAt: Date | null): Promise
  * roster lock while the cache is still the item's company; the guardians whose places were given up are told after
  * the commit. `qboId` is the customer it was found as: the one a create made.
  */
-async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<void> {
+async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<"done" | "linked_elsewhere"> {
   let tell: (() => Promise<unknown>) | null = null;
-  await db.transaction(async (tx) => {
+  const how = await db.transaction(async (tx): Promise<"done" | "linked_elsewhere"> => {
     let appRecord: OwnRecordChange | null = null;
     if (await lockRosterAs(tx, rosterTagOf(item.realmId))) {
+      // A family's own create (stage 3's slice 9d), found made as a customer another family is linked to already (made
+      // a family of on Reconciliation meanwhile, say): no second family link is made, and the item is left for staff.
+      if (w.op === "create" && (w.role === "family" || w.role === "member") && item.familyId !== null) {
+        const holder = await familyLinkedTo(qboId, tx);
+        if (holder !== null && String(holder) !== String(item.familyId)) return "linked_elsewhere";
+      }
       if (w.op === "move") {
         ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
           { actor: WORKER_ACTOR, ip: null }));
       }
-      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId });
+      appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId, familyId: item.familyId });
     }
     await markDone(item, "found", qboId, item.tries, tx, appRecord);
+    return "done";
   });
   if (tell) await (tell as () => Promise<unknown>)().catch(() => undefined);
+  return how;
 }
 
 /**
@@ -177,13 +185,19 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<voi
  * leads to its being sent again.
  */
 async function finishFound(item: Item, w: RosterWrite, qboId: string, now: Date): Promise<Step> {
+  let how: "done" | "linked_elsewhere";
   try {
-    await foundDone(item, w, qboId);
-    return "done";
+    how = await foundDone(item, w, qboId);
   } catch {
     return settle(item, { ...afterFailedTry(item.tries + 1, item.createdAt, now), code: "finish_failed", sent: item.sent, ...(w.op === "create" ? { resultQboId: qboId } : {}) }, now);
   }
+  // QuickBooks made it, and another family is linked to that customer: stuck with its own code, never sent again
+  // (`result_qbo_id` keeps the customer), for staff to look at on Reconciliation.
+  if (how === "linked_elsewhere") return settle(item, { state: "stuck", code: CUSTOMER_HAS_FAMILY, sent: true, resultQboId: qboId }, now);
+  return "done";
 }
+/** The code of a family's create found made as a customer another family is linked to already (finishFound()). */
+export const CUSTOMER_HAS_FAMILY = "customer_has_family";
 
 /**
  * The worker's share of the queue at one wake: a roster refresh first when one was asked for (a family made inactive)
@@ -223,13 +237,13 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
 
 /**
  * An item as the Reconciliation page and a family's page show it. `familyId` is the family record the item is filed
- * under, for the link to that family's page (addressed by the record's own id); null when it is filed under none (a new
- * family or member) or the record has no link in the roster's company.
+ * under, for the link to that family's page (addressed by the record's own id); null when it is filed under none (a
+ * create queued before slice 9d) or that page can't stand (an inactive record with no link).
  */
 export type QueueView = {
   id: string; state: "waiting" | "stuck"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
   lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null;
-  /** The family record it is filed under, for the link to that family's page: null when it has none, or that record no link in the roster's company (no page). */
+  /** The family record it is filed under, for the link to that family's page: null when it has none, or that record has no page (inactive, with no link). */
   familyId: AppFamilyId | null;
   /**
    * QuickBooks took it, but the portal couldn't take it in then: its transaction failed (`cache_failed`), QuickBooks
@@ -284,11 +298,15 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
   if (!rows.length) return [];
   const names = new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)).map((c) => [c.qboId, c.name]));
   const families = [...new Set(rows.map((r) => r.familyId).filter((f): f is AppFamilyId => f !== null))];
-  const links = await linksOf({ families, students: [] });
+  // A family's page stands for an active record, linked or not (stage 3's slice 9d), and for an inactive one the roster
+  // still lists through its link: an item is linked to its record's page whenever that page may stand.
+  const [links, active] = await Promise.all([linksOf({ families, students: [] }),
+    families.length ? db.select({ id: family.id }).from(family).where(and(inArray(family.id, families), eq(family.active, true))) : Promise.resolve([])]);
+  const withPage = new Set([...active.map((f) => String(f.id)), ...[...links.customerOfFamily.keys()].map(String)]);
   return rows.map((r) => ({
     id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
     lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
-    familyId: r.familyId !== null && links.customerOfFamily.has(r.familyId) ? r.familyId : null,
+    familyId: r.familyId !== null && withPage.has(String(r.familyId)) ? r.familyId : null,
     finishing: r.sent && r.lastCode !== null && FINISHING_CODES.has(r.lastCode),
   }));
 }
@@ -357,5 +375,5 @@ const GIVEN_UP_NEXT: Partial<Record<QueuedWrite["op"], string>> = {
   move: "To bring the portal's own record into line, open the family's page and move the student to the family QuickBooks has them in: nothing is sent, and the record, forms and places follow. If that family isn't one of the portal's own, the page offers a move to one that is instead, which is sent to QuickBooks.",
   deactivate: "To bring the portal's own record into line, open the family's page and make them inactive there: nothing is sent when QuickBooks has them inactive already.",
   rename: "To bring the portal's own record into line, rename it on the family's page to the name QuickBooks has: nothing is sent.",
-  create: "A new customer QuickBooks made has no record in the portal: look for it in QuickBooks.",
+  create: "A family the portal saved first stays in the portal, unlinked: once a roster read shows whether QuickBooks made it, press “Create in QuickBooks and link” on its page (a name QuickBooks has already is met with another). Any other new customer QuickBooks made has no record in the portal: look for it in QuickBooks.",
 };

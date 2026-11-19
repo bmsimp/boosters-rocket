@@ -9,14 +9,15 @@ import { Notice } from "@/app/components/notice";
 
 /** What a roster write answers (src/lib/roster/writes.ts): a free name to offer when the one asked for is taken, or the record as QuickBooks has it now. */
 export type WriteResult =
-  | { ok: true; message: string; queued?: true }
+  | { ok: true; message: string; queued?: true; unlinked?: true }
   | { ok: false; errors: string[]; offer?: string; current?: { name: string; active: boolean; familyName: string | null } };
 const failed: WriteResult = { ok: false, errors: [ACTION_FAILED] };
 const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 
 function Outcome({ state, onOffer, pending }: { state: WriteResult | null; onOffer?: (name: string) => void; pending: boolean }) {
   if (!state) return null;
-  if (state.ok) return <Notice tone={state.queued ? "info" : "done"}>{state.message}</Notice>;
+  // `unlinked`: saved in the portal, but not (or not yet) in QuickBooks: the words say why, and what to do next.
+  if (state.ok) return <Notice tone={state.unlinked ? "warning" : state.queued ? "info" : "done"}>{state.message}</Notice>;
   return (
     <Notice tone="problem">
       {state.errors.length === 1 ? state.errors[0] : <ul className="notice-list">{state.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
@@ -48,8 +49,11 @@ export function NameForm({ field, label, pendingLabel, initial = "", act }: { fi
   );
 }
 
-/** A new member of a flat club, of the member type chosen when the club has several. */
-export function MemberForm({ types, act }: { types: { qboId: string; name: string }[]; act: (name: string, typeQboId: string | null) => Promise<WriteResult> }) {
+/**
+ * A new member of a flat club, of the member type chosen when the club has several (asked only when it will be made in
+ * QuickBooks: `types` is empty otherwise). Saved in the portal first (stage 3's slice 9d).
+ */
+export function MemberForm({ types, act, pendingLabel }: { types: { qboId: string; name: string }[]; act: (name: string, typeQboId: string | null) => Promise<WriteResult>; pendingLabel: string }) {
   const [name, setName] = useState("");
   const [type, setType] = useState(types.length === 1 ? types[0]!.qboId : "");
   const [state, run, pending] = useActionState(async (_: WriteResult | null, asked: string) => {
@@ -60,7 +64,7 @@ export function MemberForm({ types, act }: { types: { qboId: string; name: strin
   const send = (asked: string) => startTransition(() => run(asked));
   return (
     <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>The member&apos;s name, as QuickBooks will show it</span><input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <label className="field"><span>The member&apos;s name</span><input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
       {types.length > 1 && (
         <label className="field"><span>Kind of member</span>
           <select value={type} onChange={(e) => setType(e.target.value)}>
@@ -69,7 +73,30 @@ export function MemberForm({ types, act }: { types: { qboId: string; name: strin
           </select></label>
       )}
       <Outcome state={state} pending={pending} onOffer={(offer) => { setName(offer); send(offer); }} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => send(name)}>{pending ? "Making it in QuickBooks…" : "Make the member"}</button>
+      <button type="button" className="btn btn-line" disabled={pending} onClick={() => send(name)}>{pending ? pendingLabel : "Add the member"}</button>
+    </form>
+  );
+}
+
+/**
+ * "Create in QuickBooks and link" (stage 3's slice 9d): one press, with the member type to choose first when a flat
+ * club has several. Given only what it shows; the family's id and the roster tag are bound into its action on the
+ * server. After a stop part way the answer stays on screen and the page is made again, so pressing again carries on.
+ */
+export function CreateAndLinkForm({ types, act }: { types: { qboId: string; name: string }[]; act: (typeQboId: string | null) => Promise<WriteResult> }) {
+  const [type, setType] = useState(types.length === 1 ? types[0]!.qboId : "");
+  const [state, run, pending] = useActionState(async () => safely(() => act(types.length ? type || null : null), failed), null);
+  return (
+    <form onSubmit={noSubmit} className="stack">
+      {types.length > 1 && (
+        <label className="field"><span>Kind of member</span>
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="">Choose one</option>
+            {types.map((t) => <option key={t.qboId} value={t.qboId}>{t.name}</option>)}
+          </select></label>
+      )}
+      <Outcome state={state} pending={pending} />
+      <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run())}>{pending ? "Making it in QuickBooks…" : "Create in QuickBooks and link"}</button>
     </form>
   );
 }

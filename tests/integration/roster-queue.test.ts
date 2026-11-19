@@ -39,7 +39,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, formWithdrawal, jobRun, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import { giveUp, loadOpenWrites, queueCounts, runWriteQueue, tryAgainNow, waitingWords, WRITE_QUEUE_JOB } from "@/lib/roster/queue";
-import { applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
+import { addFamily, applyWritten, askRosterWrite, REFRESH_ASK_KEY } from "@/lib/roster/writes";
 import { clearRosterOfOtherCompany, ROSTER_JOB } from "@/lib/roster/source";
 import { runDueJobs } from "@/lib/jobs/runner";
 import { resetDb } from "../helpers/db";
@@ -256,26 +256,43 @@ describe("a write QuickBooks may already have made is never simply sent again (v
       familyId: await recordOfCustomer("20", "family"), studentId: null, askedBy: op.staffUserId });
   });
 
-  it("a family staff made that the portal couldn't take in is queued as made, and the worker makes its record and link once a read shows it", async () => {
+  it("a family staff added that the portal couldn't take in is queued as made, filed under its record, and the worker links that record once a read shows it", async () => {
     cacheFails.on = true;
     const tag = await (await import("@/lib/seasons/roster-lock")).currentRosterTag();
-    expect(await askRosterWrite({ op: "create", role: "family", name: "Okafor Family", familyQboId: null, email: null, typeQboId: null }, tag, op))
-      .toEqual({ ok: true, message: expect.stringContaining("Done in QuickBooks") });
+    expect(await addFamily({ role: "family", name: "Okafor Family", typeQboId: null }, tag, { ...op, mayLink: true }))
+      .toEqual({ ok: true, message: expect.stringContaining("The portal links the two once it has read QuickBooks again") });
     cacheFails.on = false;
     const made = stub.customers.find((c) => c.DisplayName === "Okafor Family")!;
+    // The portal's own record, saved first (stage 3's slice 9d), with no link yet.
+    const okafor = (await db.select().from(family).where(eq(family.name, "Okafor Family")))[0]!;
     const [item] = await db.select().from(writeQueue);
-    expect(item).toMatchObject({ state: "waiting", sent: true, lastCode: "cache_failed", familyId: null, askedBy: op.staffUserId });
+    expect(item).toMatchObject({ state: "waiting", sent: true, lastCode: "cache_failed", familyId: okafor.id, askedBy: op.staffUserId });
     expect((await auditsOf("roster.write.queued"))[0]).toMatchObject({ targetId: item!.id, after: { op: "create", role: "family", code: "cache_failed", sent: true } });
-    // Nothing in the portal yet: the cache missed it, and no read makes a record.
+    // No link yet: the cache missed it, and no read makes one.
     expect(await db.select().from(accountingLink).where(eq(accountingLink.customerId, made.Id as string))).toEqual([]);
     await db.update(writeQueue).set({ nextTryAt: ago(MIN) });
     await runWriteQueue();
     expect(posts()).toHaveLength(1); // the create itself, never sent again
     expect(await queueItem(item!.id)).toMatchObject({ state: "done", resultQboId: made.Id });
     const [link] = await db.select().from(accountingLink).where(eq(accountingLink.customerId, made.Id as string));
-    expect(link).toMatchObject({ origin: "created", linkedBy: op.staffUserId, realmId: REALM, studentId: null, guardianId: null });
+    expect(link).toMatchObject({ origin: "created", linkedBy: op.staffUserId, realmId: REALM, familyId: okafor.id, studentId: null, guardianId: null });
+    // One family: the record saved first, linked; none made beside it.
+    expect(await db.select().from(family).where(eq(family.name, "Okafor Family"))).toEqual([expect.objectContaining({ id: okafor.id, active: true })]);
+    expect((await auditsOf("roster.write.done"))[0]!.after).toMatchObject({ how: "found", appRecord: { kind: "family", familyId: String(okafor.id), linked: true, linkId: link!.id } });
+  });
+
+  it("a family create queued before slice 9d (filed under no record) still makes its record and link once found made", async () => {
+    const item = await seedQueued({ op: "create", role: "family", name: "Okafor Family", typeQboId: "1", familyQboId: null, email: null },
+      { sent: true, code: "unreachable" });
+    expect(item.familyId).toBeNull();
+    // QuickBooks made it at that try: the read the worker runs first shows it.
+    stub.customers.push({ Id: "77", SyncToken: "0", DisplayName: "Okafor Family", Active: true, CustomerTypeRef: { value: "1" } });
+    await runWriteQueue();
+    expect(posts()).toEqual([]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "done", resultQboId: "77" });
+    const [link] = await db.select().from(accountingLink).where(eq(accountingLink.customerId, "77"));
+    expect(link).toMatchObject({ origin: "created", studentId: null });
     expect((await db.select().from(family).where(eq(family.id, link!.familyId!)))[0]).toMatchObject({ name: "Okafor Family", active: true });
-    expect((await auditsOf("roster.write.done"))[0]!.after).toMatchObject({ how: "found", appRecord: { kind: "family", familyId: String(link!.familyId), made: true, linkId: link!.id } });
   });
 
   it("a move staff made that the portal couldn't take in is queued as made, and the worker runs its follow-ups and moves the record once a read shows it", async () => {

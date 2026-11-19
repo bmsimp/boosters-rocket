@@ -34,6 +34,8 @@ const CODE_WORDS: Record<string, string> = {
   answer_other: "QuickBooks answered about another record, so the portal looks for the change after its next read of QuickBooks, sending nothing again",
   made_unmatched: "QuickBooks made a customer for it, but not under the name, family and type sent, so it won't be sent again: check it in QuickBooks, then give it up",
   finish_failed: "QuickBooks has the change, but the portal couldn't finish it on its side: it tries again later",
+  // A family saved in the portal first, whose customer QuickBooks made, found linked to another family meanwhile (stage 3's slice 9d).
+  customer_has_family: "QuickBooks made the customer, but another family in the portal is linked to it already, so this family was left unlinked and nothing will be sent again: check both in QuickBooks, then give this up",
 };
 const codeWords = (code: string | null) => (code === null ? null
   : CODE_WORDS[code] ?? (/^http_5\d\d/.test(code) ? "QuickBooks had a problem of its own" : /^token_/.test(code) ? "the portal couldn't get a key to QuickBooks" : "QuickBooks refused it"));
