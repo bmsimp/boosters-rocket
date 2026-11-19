@@ -11,7 +11,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, student, writeQueue } from "@/lib/db/schema";
-import { CREDIT_BALANCE, deactivateLinked, FAMILY_BEING_CHANGED, renameLinked, SENDING_LOCK, STALE_TWICE, STUDENT_BEING_CHANGED, WRITE_COPY } from "@/lib/roster/writes";
+import { askFamilyInactive, CREDIT_BALANCE, deactivateLinked, FAMILY_BEING_CHANGED, renameLinked, SENDING_LOCK, STALE_TWICE, STUDENT_BEING_CHANGED, WRITE_COPY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
 import type { AppStudentId } from "@/lib/families/ids";
@@ -91,7 +91,7 @@ describe("a linked student made inactive by the record, with the link's own vers
 
   it("stale, then the live read shows them inactive there: found made, nothing more sent, the record follows and the link is left", async () => {
     stub.beforeUpdate = (c) => { if (c.Id === "12") { c.Active = false; c.SyncToken = "2"; } }; // made inactive in QuickBooks at that moment
-    expect(await offLeo()).toEqual({ ok: true, message: WRITE_COPY.inactiveFollowed });
+    expect(await offLeo()).toEqual({ ok: true, message: WRITE_COPY.inactiveMeanwhile }); // a request went, so never "nothing was sent"
     expect(bodies()).toHaveLength(1);
     expect(await studentRow(leo)).toMatchObject({ active: false });
     expect((await studentLink("12")).syncedToken).toBe("0");
@@ -127,6 +127,31 @@ describe("a linked student made inactive by the record, with the link's own vers
     expect(posts()).toEqual([]);
     expect(await queueItem(item!.id)).toMatchObject({ state: "done" });
     expect(await studentRow(leo)).toMatchObject({ active: false });
+  });
+
+  it("a live read that shows no version: nothing sent, and the words say the answer couldn't be read, not what is owed", async () => {
+    await db.update(accountingLink).set({ syncedToken: null, syncedAt: null }).where(and(eq(accountingLink.customerId, "12"), isNotNull(accountingLink.studentId)));
+    delete inStub("12").SyncToken;
+    expect(await offLeo()).toEqual({ ok: false, errors: ["QuickBooks' answer about Leo Rivera couldn't be read (it didn't say which version it holds), so nothing was changed. Try again in a few minutes."] });
+    expect(posts()).toEqual([]);
+    expect(await items()).toEqual([]);
+  });
+
+  it("an unlinked student, or a student with a move QuickBooks refused that the portal kept, is refused with nothing read or sent", async () => {
+    const [nia] = await db.insert(student).values({ familyId: await recordOfCustomer("10", "family"), name: "Nia Rivera", active: true }).returning({ id: student.id });
+    expect(await deactivateLinked({ kind: "student", recordId: String(nia!.id) }, tag, op))
+      .toEqual({ ok: false, errors: [expect.stringMatching(/^That isn't linked to QuickBooks, so it is made inactive in the portal only/)] });
+    await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20" }, { state: "refused", code: "fault_6000" });
+    expect(await offLeo()).toEqual({ ok: false, errors: [expect.stringMatching(/^A move of this student hasn't reached QuickBooks yet/)] });
+    expect(stub.apiCalls()).toEqual([]);
+    expect(await studentRow(leo)).toMatchObject({ active: true });
+  });
+
+  it("the family action refuses a family with no link: that is made inactive in the portal only", async () => {
+    const [okafor] = await db.insert(family).values({ name: "Okafor Family", active: true }).returning({ id: family.id });
+    expect(await askFamilyInactive(String(okafor!.id), "not-a-stamp", tag, op))
+      .toEqual({ changed: false, result: { ok: false, errors: [expect.stringMatching(/^That isn't linked to QuickBooks, so it is made inactive in the portal only/)] } });
+    expect(stub.apiCalls()).toEqual([]);
   });
 
   it("a member (flat books) the same way, by their own family record", async () => {
@@ -226,6 +251,43 @@ describe("the worker reads the balance again before it sends a waiting make-inac
     expect(await queueItem(item.id)).toMatchObject({ state: "done" });
     expect(await studentRow(leo)).toMatchObject({ active: false });
     expect((await studentLink("12")).syncedToken).toBe("6");
+  });
+
+  it("stale twice at the worker: left waiting with the stale code, nothing changed, never sent a third time", async () => {
+    stub.beforeUpdate = (c) => { if (c.Id === "12") c.SyncToken = String(Number(c.SyncToken) + 1); };
+    const item = await seedQueued({ op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, { sent: false, tries: 1 });
+    await runWriteQueue(later());
+    expect(bodies().map((b) => b.SyncToken)).toEqual(["0", "1"]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "waiting", lastCode: "fault_5010", tries: 2, sent: false });
+    expect(await studentRow(leo)).toMatchObject({ active: true });
+  });
+
+  it("a balance on the read after a stale answer at the worker: stuck, never sent again", async () => {
+    stub.beforeUpdate = (c) => { if (c.Id === "12" && c.SyncToken === "0") { c.SyncToken = "1"; stub.invoices = [balance("905", "12", 30)]; } };
+    const item = await seedQueued({ op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, { sent: false, tries: 1 });
+    await runWriteQueue(later());
+    expect(bodies()).toHaveLength(1);
+    expect(await queueItem(item.id)).toMatchObject({ state: "stuck", lastCode: "open_balance" });
+    expect(await studentRow(leo)).toMatchObject({ active: true });
+  });
+
+  it("a resend whose answer is lost at the worker: kept as sent with the version it carried, then found after a roster read and the link aligned", async () => {
+    stub.beforeUpdate = (c) => { if (c.Id === "12" && c.SyncToken === "0") c.SyncToken = "1"; };
+    let n = 0;
+    stub.onApiRequest = (c) => { if (c.method === "POST" && ++n === 2) stub.loseUpdateAnswer = true; };
+    const item = await seedQueued({ op: "deactivate", role: "student", qboId: "12", syncToken: "0" }, { sent: false, tries: 1 });
+    await runWriteQueue(later());
+    expect(bodies().map((b) => b.SyncToken)).toEqual(["0", "1"]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "waiting", sent: true, request: { op: "deactivate", role: "student", qboId: "12", syncToken: "1", checked: true } });
+    expect(await studentRow(leo)).toMatchObject({ active: true }); // never guessed
+    stub.onApiRequest = null; stub.loseUpdateAnswer = false; stub.beforeUpdate = null;
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    stub.calls.length = 0;
+    await runWriteQueue(new Date(Date.now() + 10 * MIN)); // past the 5 minutes its second try waits
+    expect(posts()).toEqual([]);
+    expect(await queueItem(item.id)).toMatchObject({ state: "done" });
+    expect(await studentRow(leo)).toMatchObject({ active: false });
+    expect((await studentLink("12")).syncedToken).toBe("2");
   });
 
   it("one whose stale answer's read shows them inactive there: found made, nothing more sent, the record follows", async () => {

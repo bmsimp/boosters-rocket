@@ -832,11 +832,36 @@ describe("what QuickBooks shows of each record, read before anything is sent, an
     const leo = await recordOfCustomer("12", "student");
     // Made inactive in QuickBooks at the very moment the portal sends it.
     stub.beforeUpdate = (c) => { if (c.Id === "12") { c.Active = false; c.SyncToken = "1"; } };
-    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera, then Rivera Family." });
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: true, message: "Made inactive in QuickBooks: Ana Rivera, then Rivera Family. "
+      + "QuickBooks had Leo Rivera made inactive meanwhile, so nothing more was sent for them. The portal's own record of Leo Rivera is inactive now too." });
     expect(sent().map((b) => b.Id)).toEqual(["11", "12", "10"]);
+    expect(await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY))).toHaveLength(1); // the roster is read again
     expect((await db.select().from(student).where(eq(student.id, leo)))[0]).toMatchObject({ active: false });
     expect((await studentLinkOf("12"))!.syncedToken).toBe("0"); // not the portal's send that made it so
     expect((await auditsOf("roster.record.follows")).map((a) => a.targetId)).toEqual(["12"]);
+  });
+
+  it("the family made inactive in QuickBooks before its own last read: nothing sent for it, the read stored, the roster asked to be read again, and the family follows", async () => {
+    const rivera = await recordOfCustomer("10", "family");
+    stub.onApiRequest = (c) => { if (c.method === "POST" && /"Id":"12"/.test(c.body)) Object.assign(inStub("10"), { Active: false, SyncToken: "1" }); };
+    expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: true,
+      message: "Made inactive in QuickBooks: Ana Rivera and Leo Rivera. Rivera Family is inactive in QuickBooks now, so nothing more was sent for it. The portal's own family is inactive now too." });
+    expect(sent().map((b) => b.Id)).toEqual(["11", "12"]);
+    expect(await cached("10")).toMatchObject({ active: false, syncToken: "1" });
+    expect(await db.select().from(setting).where(eq(setting.key, REFRESH_ASK_KEY))).toHaveLength(1);
+    expect((await db.select().from(family).where(eq(family.id, rivera)))[0]).toMatchObject({ active: false });
+  });
+
+  it("someone a stale answer's read found inactive is named when a later step stops it", async () => {
+    stub.beforeUpdate = (c) => {
+      if (c.Id === "11") { c.Active = false; c.SyncToken = "1"; } // Ana made inactive in QuickBooks as the portal sends hers
+      if (c.Id === "12" && c.SyncToken === "0") { c.SyncToken = "1"; stub.invoices = [owes("913", "12", 8)]; }
+    };
+    const r = await inactivate("10", await stampFor("10"), op);
+    expect(r).toEqual({ changed: true, result: { ok: false, errors: ["Nobody was made inactive.", "QuickBooks had Ana Rivera made inactive meanwhile, so nothing more was sent for them.",
+      `Leo Rivera has an open balance in QuickBooks. They weren't made inactive. ${WRITE_COPY.balanceFix}`,
+      "Rivera Family is still active. Press “Make Rivera Family inactive” again to carry on with whoever is still active."] } });
+    expect(sent().map((b) => b.Id)).toEqual(["11", "12"]);
   });
 
   it("a balance that appears meanwhile: on a step's read after a stale answer, and on the family's own read before its last step", async () => {

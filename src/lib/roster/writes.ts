@@ -96,6 +96,7 @@ export const WRITE_COPY = {
   coverChanged: "Who is under this family changed in QuickBooks since the page was shown, so nothing was changed. Reload the page, look at the list again, and confirm it.",
   notOurs: "That family isn't one of the portal's own active families, so nobody can be moved to it. Choose a family from the list on this page.",
   inactiveFollowed: "That is inactive in QuickBooks already, so nothing was sent. The portal's own record is inactive now too.",
+  inactiveMeanwhile: "QuickBooks had that made inactive meanwhile (it answered the portal's request as changed since), so nothing more was sent. The portal's own record is inactive now too.",
   namedFollowed: "QuickBooks has that name already, so nothing was sent. The portal's own record has it now too.",
   inactiveHere: "That is inactive in the portal, so nothing was sent to QuickBooks.",
   notOursToAdd: "That family isn't one of the portal's own active families, so nobody can be added to it.",
@@ -931,18 +932,27 @@ const sentWith = (w: DeactivateWrite, read: { syncToken: string | null }): Deact
 /**
  * How one try of a make-inactive came out (sendDeactivate(), tryDeactivate()): `answer`, QuickBooks took `write`
  * (`resent`: the second send, after a stale answer and a live read); `inactive_there`, a live read shows the customer
- * inactive already, so nothing (more) was sent and the change is found made; `stopped`, the balance rule stopped it
+ * inactive already, so nothing (more) was sent and the change is found made (`sent`: a request went first, which
+ * QuickBooks answered as stale); `stopped`, the balance rule stopped it
  * before a send (the first, or the resend after a stale answer); `failed`, the send failed (`sent`: QuickBooks may have
  * acted on it); `stale_again`, QuickBooks answered as changed twice, each time just after a live read.
  */
 export type DeactivateTry =
   | { is: "answer"; write: DeactivateWrite; answer: Record<string, unknown>; resent: boolean }
-  | { is: "inactive_there"; answer: Record<string, unknown> }
+  | { is: "inactive_there"; answer: Record<string, unknown>; sent: boolean }
   | { is: "stopped"; stop: BalanceStop }
   | { is: "failed"; code: string; sent: boolean; write: DeactivateWrite }
   | { is: "stale_again"; write: DeactivateWrite };
 type DeactivateHow = { mayWait: boolean; name: string; showAmounts: boolean; actor: Actor; ip: string | null; permission?: string };
-const unreadAnswer = (name: string, showAmounts: boolean): DeactivateTry => ({ is: "stopped", stop: balanceStops({ ok: false, code: "bad_answer" }, name, showAmounts)! });
+/**
+ * A live read that showed the balance but no version to send with: nothing is sent. Its code is the one an answer that
+ * couldn't be read has (`bad_answer`, so the worker tries it again later), and its words say what was missing, not that
+ * the balance was.
+ */
+const unreadAnswer = (name: string): DeactivateTry => {
+  const words = `QuickBooks' answer about ${name} couldn't be read (it didn't say which version it holds), so nothing was changed. Try again in a few minutes.`;
+  return { is: "stopped", stop: { code: "bad_answer", words, who: words } };
+};
 
 /**
  * A make-inactive sent once a live read (`read`, owedBy()) has shown the customer active with no balance, and its stale
@@ -954,7 +964,7 @@ const unreadAnswer = (name: string, showAmounts: boolean): DeactivateTry => ({ i
  */
 export async function sendDeactivate(w: DeactivateWrite, read: Extract<Owed, { ok: true }>, realmId: string, o: DeactivateHow): Promise<DeactivateTry> {
   const first = sentWith(w, read);
-  if (first === null) return unreadAnswer(o.name, o.showAmounts);
+  if (first === null) return unreadAnswer(o.name);
   try {
     return { is: "answer", write: first, answer: await sendWrite(first, realmId, { mayWait: o.mayWait }), resent: false };
   } catch (e) {
@@ -966,11 +976,11 @@ export async function sendDeactivate(w: DeactivateWrite, read: Extract<Owed, { o
   const live = await owedBy(w.qboId, realmId, { mayWait: o.mayWait });
   if (!live.ok) return { is: "stopped", stop: balanceStops(live, o.name, o.showAmounts)! };
   await storeReadAgain(live.answer, realmId, o);
-  if (!live.active) return { is: "inactive_there", answer: live.answer };
+  if (!live.active) return { is: "inactive_there", answer: live.answer, sent: true };
   const stop = balanceStops(live, o.name, o.showAmounts);
   if (stop) return { is: "stopped", stop };
   const again = sentWith({ ...w, syncToken: "" }, live);
-  if (again === null) return unreadAnswer(o.name, o.showAmounts);
+  if (again === null) return unreadAnswer(o.name);
   try {
     return { is: "answer", write: again, answer: await sendWrite(again, realmId, { mayWait: o.mayWait }), resent: true };
   } catch (e) {
@@ -991,7 +1001,7 @@ export async function sendDeactivate(w: DeactivateWrite, read: Extract<Owed, { o
 export async function tryDeactivate(w: DeactivateWrite, realmId: string, o: DeactivateHow): Promise<DeactivateTry> {
   const read = await owedBy(w.qboId, realmId, { mayWait: o.mayWait });
   if (!read.ok) return { is: "stopped", stop: balanceStops(read, o.name, o.showAmounts)! };
-  if (!read.active) return { is: "inactive_there", answer: read.answer };
+  if (!read.active) return { is: "inactive_there", answer: read.answer, sent: false };
   const stop = balanceStops(read, o.name, o.showAmounts);
   if (stop) return { is: "stopped", stop };
   return sendDeactivate(w, read, realmId, o);
@@ -1069,7 +1079,9 @@ async function deactivateHolding(kind: "family" | "student", recordId: string, r
   if (!p.ok) return p.result;
   const audited = (code: string, write: DeactivateWrite) => writeAudit({ actor: o.actor, action: "roster.write.refused", permission: o.permission, ip: o.ip,
     targetType: "qbo_customer", targetId: write.qboId, after: { op: "deactivate", role: write.role, code: short(code) } });
-  const follows = async (): Promise<WriteResult> => ((await recordFollows(p.write, p.filed, p.realmId, "already_inactive", o)) ? { ok: true, message: WRITE_COPY.inactiveFollowed } : refuse(ALREADY_INACTIVE));
+  // `sent`: a request went first, answered as stale, so the words never say nothing was sent.
+  const follows = async (sent = false): Promise<WriteResult> => ((await recordFollows(p.write, p.filed, p.realmId, "already_inactive", o))
+    ? { ok: true, message: sent ? WRITE_COPY.inactiveMeanwhile : WRITE_COPY.inactiveFollowed } : refuse(ALREADY_INACTIVE));
   // The cache shows QuickBooks has it inactive already: nothing is read or sent; the record takes what was asked.
   if (p.already) return follows();
   const t = await tryDeactivate(p.write, p.realmId, { mayWait: false, name: p.name, showAmounts: o.showAmounts === true, actor: o.actor, ip: o.ip, permission: o.permission });
@@ -1084,7 +1096,7 @@ async function deactivateHolding(kind: "family" | "student", recordId: string, r
       // is not aligned: it wasn't the portal's send that made it inactive).
       await storeReadAgain(t.answer, p.realmId, o);
       await db.transaction((tx) => askForRosterRefresh(tx));
-      return follows();
+      return follows(t.sent);
     }
     case "stopped":
       await audited(t.stop.code, p.write);
@@ -1394,7 +1406,18 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
   const made: FamilyStep[] = [];
   // Someone a stale answer's live read shows inactive there meanwhile: passed over, their record made to follow.
   const followedLate: FamilyStep[] = [];
+  // Of those, the ones whose own record the portal made inactive with them (a Parent customer has none), and whether
+  // the family's own record followed, when it was the family QuickBooks had made inactive meanwhile.
+  const recordsFollowed: FamilyStep[] = [];
+  let familyFollowed = false;
   let allShown = true;
+  // Whoever a stale answer's read showed inactive meanwhile, said in both answers: nothing more was sent for them.
+  const lateWords = (): string[] => {
+    const late = followedLate.filter((s) => s.write.role !== "family");
+    if (!late.length) return [];
+    return [`QuickBooks had ${listed(late.map((s) => s.name))} made inactive meanwhile, so nothing more was sent for them.${recordsFollowed.length
+      ? ` The portal's own ${recordsFollowed.length > 1 ? "records" : "record"} of ${listed(recordsFollowed.map((s) => s.name))} ${recordsFollowed.length > 1 ? "are" : "is"} inactive now too.` : ""}`];
+  };
   const stop = async (i: number, code: string, why: { words: string; maybe: boolean; changed: boolean }) => {
     const step = steps[i]!;
     const after = steps.slice(i + 1).filter((s) => s.write.role !== "family").map((s) => s.name);
@@ -1402,6 +1425,7 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
       { maybe: why.maybe ? [step.write.qboId] : [], alreadyInactive });
     const errors = [
       made.length ? `Made inactive in QuickBooks: ${listed(made.map((s) => s.name))}.` : "Nobody was made inactive.",
+      ...lateWords(),
       why.words,
       ...(after.length ? [`Not made inactive yet: ${listed(after)}.`] : []),
       step.write.role === "family" && why.maybe ? `Whether ${p.familyName} is still active shows once the roster is read again.`
@@ -1420,7 +1444,11 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
         return stop(i, fresh.code, { words: `${p.familyName} couldn't be read from QuickBooks again before it was made inactive, so it wasn't changed.${classify(fresh.code).kind === "retry" ? " Try again in a few minutes." : ""}`, maybe: false, changed: false });
       }
       if (!fresh.active) {
-        await recordFollows(step.write, step.filed, p.realmId, "already_inactive", o);
+        // Made inactive in QuickBooks meanwhile: the read is stored and the roster read again, as for anyone the first
+        // reads showed inactive, and the portal's family follows.
+        await storeReadAgain(fresh.answer, p.realmId, o);
+        await db.transaction((tx) => askForRosterRefresh(tx));
+        familyFollowed = (await recordFollows(step.write, step.filed, p.realmId, "already_inactive", o)) !== null;
         followedLate.push(step);
         continue;
       }
@@ -1439,11 +1467,16 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
         made.push(step);
         break;
       }
-      case "inactive_there":
-        // A stale answer's live read shows it inactive there: nothing more is sent, and its record follows.
-        await recordFollows(step.write, step.filed, p.realmId, "already_inactive", o);
+      case "inactive_there": {
+        // A stale answer's live read shows it inactive there: nothing more is sent (the read is stored already), the
+        // roster is read again, and its record follows.
+        await db.transaction((tx) => askForRosterRefresh(tx));
+        const change = await recordFollows(step.write, step.filed, p.realmId, "already_inactive", o);
+        if (step.write.role === "family") familyFollowed = change !== null;
+        else if (change) recordsFollowed.push(step);
         followedLate.push(step);
         break;
+      }
       case "stopped":
         return stop(i, t.stop.code, { words: t.stop.words, maybe: false, changed: true });
       case "stale_again":
@@ -1455,8 +1488,9 @@ async function familyInactiveHolding(familyId: AppFamilyId, stamp: string, roste
   await summary("done", null, made.map((s) => s.write.qboId), [], { alreadyInactive: [...alreadyInactive, ...followedLate.map((s) => s.write.qboId)] });
   const under = made.filter((s) => s.write.role !== "family").map((s) => s.name);
   const familyMade = made.some((s) => s.write.role === "family");
-  const message = !familyMade ? `${under.length ? `Made inactive in QuickBooks: ${listed(under)}. ` : ""}${p.familyName} is inactive in QuickBooks now, so nothing more was sent for it. The portal's own family is inactive now too.`
+  const said = !familyMade ? `${under.length ? `Made inactive in QuickBooks: ${listed(under)}. ` : ""}${p.familyName} is inactive in QuickBooks now, so nothing more was sent for it.${familyFollowed ? " The portal's own family is inactive now too." : ""}`
     : under.length ? `Made inactive in QuickBooks: ${listed(under)}, then ${p.familyName}.` : `Made ${p.familyName} inactive in QuickBooks.`;
+  const message = [said, ...lateWords()].join(" ");
   return { result: { ok: true, message: allShown ? message : `${message} The roster here shows it after its next read of QuickBooks, usually within a few minutes.` }, changed: true };
 }
 
