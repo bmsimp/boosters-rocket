@@ -72,8 +72,8 @@ sandbox company and the club's Microsoft 365 mail, but no Documenso.
 8. **Run checks 18 to 24** of [the proof of concept's checklist](poc-linuxdev.md#9-the-test-checklist): who can sign
    in, an edit in QuickBooks that changes no sign-in, blocking and welcome emails. They need edits in the Intuit sandbox
    and a mailbox you can read. Since the portal keeps its own list of each family's guardians, a parent in QuickBooks
-   is given no sign-in by it; until staff can add a guardian in the portal (the next part of the work), the host's
-   guardians are the ones it already holds.
+   is given no sign-in by it: the host's guardians are the ones it already holds and those staff add on a family's
+   page (under **Families**, the **Portal sign-ins** box, **Add guardian**, as in part 6, step 3).
    **Pass:** each step does what its line says; add a row for each to that runbook's Results table.
    **If not:** note the step and what you saw; that runbook's Troubleshooting table covers the usual causes.
    **Check 25, a second sandbox company, waits for the mapping screen:** until

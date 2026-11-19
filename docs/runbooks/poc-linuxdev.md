@@ -315,8 +315,9 @@ assessment first.
 Since stage 3 of the app-owned families work (slice 7a), who can sign in is the portal's own list of each family's
 guardians: a Parent customer in QuickBooks gives nobody a sign-in, and a change in QuickBooks ends none. The guardians
 are the ones the portal already holds (on this host, the test parents seeded in section 6, and anyone the earlier
-version gave a sign-in from QuickBooks, who keeps it); staff adding a guardian in the portal is the next slice.
-Switching on needs only working mail.
+version gave a sign-in from QuickBooks, who keeps it), and those staff add in the portal: on a family's page under
+**Families**, the **Portal sign-ins** box, **Add guardian** (nothing is sent to QuickBooks for them). Nobody signs in
+until parent sign-ins are switched on, however they came to be a guardian. Switching on needs only working mail.
 
 1. Choose **Parent sign-ins** in the staff menu (Admins only), then **Set up**.
 2. **Step 1: Parent sign-ins**: it says how many people could sign in, to how many families. **Switch parent sign-ins
@@ -356,7 +357,8 @@ something QuickBooks held (an address under two families, an inactive record) st
 2. Parent two is any other address you can read. It gets no guardian row on purpose (checklist step 7).
 
 The seed script makes a sign-in by hand, for testing. It sends no welcome email; tell the parent to go to `/sign-in`
-and ask for a code. It keeps working once parent sign-ins are switched on: nothing in QuickBooks ends it.
+and ask for a code. Like every guardian's, it lets the tester in only while parent sign-ins are on, and nothing in
+QuickBooks ends it.
 
 **Blocking a parent.** Choose **Parents** in the staff menu, open the person, enter a reason under
 **Why? (staff only)** and choose **Block**; **Unblock** on the same page gives back the same access. Both are in the
@@ -566,8 +568,8 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 1. Visit https://portaltest.rhinoautomator.com: the portal's sign-in page shows directly. (Only if Cloudflare Access is set up, section 7 B, it first asks for an email code.)
 - [ ] 2. Finish setup at `/setup` (Step 3 signs you in as Admin) -> staff home, as Admin.
 - [ ] 3. Set the club name and color -> they show on every page.
-- [ ] 4. Parent: at `/sign-in`, enter the seeded parent's email, get the code from `webmaster@fznband.org`, enter it -> parent home (with two families, the family chooser first).
-- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, `signin.code_sent`, parent `signin`, `guardian.activate`, `settings.club.save`, and from setup `settings.mail.save`, `settings.mail.test`, `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Check and switch** after **Replace certificate** retires the old one, and `certificate.discard` after **Discard replacement**). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
+- [ ] 4. Parent: first switch parent sign-ins on (**Parent sign-ins** in the staff menu, **Set up**, step 1, **Switch parent sign-ins on**; it needs only the working mail of check 2, and until then no parent gets a code: the audit shows `signin.code_refused` with reason `signins_off`). Then at `/sign-in`, enter the seeded parent's email, get the code from `webmaster@fznband.org`, enter it -> parent home (with two families, the family chooser first).
+- [ ] 5. Audit log shows: `admin.bootstrap`, `staff.bind`, staff `signin`, `signin.code_sent`, parent `signin`, `guardian.activate`, `settings.club.save`, `settings.parents.save` (sign-ins switched on in check 4), and from setup `settings.mail.save`, `settings.mail.test`, `setup.code.issue`, `setup.unlock`, `setup.provider.save`, `setup.admin_email.save`, `setup.finish`, and from the Microsoft certificate steps `certificate.create` and `certificate.activate` (`certificate.retire` appears later, when **Check and switch** after **Replace certificate** retires the old one, and `certificate.discard` after **Discard replacement**). Also `setup.unlock.refused` after entering a wrong code, `setup.provider.remove` after removing a sign-in provider, and `setup.reopen` after running `scripts/poc/reopen-setup.sh`.
 - [ ] 6. Sign out at both doors -> both `signout` entries appear.
 - [ ] 7. Parent two's address -> the same "If this email belongs to a family…" message, no email arrives, and the audit shows `signin.code_refused` with reason `unknown_email`.
 - [ ] 8. `deploy.sh` run a second time with no changes completes and keeps the app healthy; `--rollback` returns to the previous image and the app stays healthy.
@@ -583,7 +585,7 @@ Run these in order, in a private browser window. Record each outcome in section 
 - [ ] 15. Waits for the mapping screen, as check 25 does (see "Switching companies" in section 5). When it ships: **Disconnect**, then connect a second sandbox company -> the old company's families are gone: **Roster** says "The membership shape hasn't been chosen yet." and the QuickBooks page shows the shape as "Not chosen yet." until it is chosen again in step 3. The audit log has `roster.cleared`.
 - [ ] 16. Customer query order: in the sandbox's API explorer, or with a query in the style of the plan's check script (`q("...")`), run `select * from Customer where Active in (true, false) orderby Id startposition 1 maxresults 1000` and confirm it is accepted (HTTP 200, customers in `Id` order). The portal sends this query for every page of a roster read, so a club with more than 1000 customers loses none between pages.
 - [ ] 17. Inactive customer types: make one customer type inactive in the sandbox, run `select * from CustomerType`, and note whether the inactive type still appears in the list (record it in section 11).
-- [ ] 18. Parent sign-ins, **Set up**, **Step 1: Parent sign-ins** (section 5, "Parent sign-ins") -> it counts the guardians the portal holds (the hand-seeded ones on `POC-FAMILY-1` among them), whatever the sandbox's Parent customers are, and asks for nothing but working mail.
+- [ ] 18. Parent sign-ins, **Set up**, **Step 1: Parent sign-ins** (section 5, "Parent sign-ins"): **Switch parent sign-ins off** first (they went on in check 4), so this check and the next walk the step from off -> it counts the guardians the portal holds (the hand-seeded ones on `POC-FAMILY-1` among them), whatever the sandbox's Parent customers are, and asks for nothing but working mail.
 - [ ] 19. **Switch parent sign-ins on** -> the step says "Parent sign-ins are on."; a seeded test parent signs in at `/sign-in` with a code; the audit log has `settings.parents.save` and no `parent.access.granted` or `parent.access.ended`.
 - [ ] 20. In the sandbox, put a test parent's address on a Parent customer under a second family, then **Refresh now** -> nothing changes for anyone: no "address to review", no staff email, and the test parent signs in to their own family as before.
 - [ ] 21. **Parents** in the staff menu -> it lists every person with their families and has no **To review**; a test parent seeded in two families (`--family POC-FAMILY-2`) is offered both by name in the family chooser.
