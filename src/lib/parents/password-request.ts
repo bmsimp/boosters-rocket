@@ -191,7 +191,7 @@ export async function askForPasswordLink(raw: unknown, ip: string | null, now = 
     }
     const { linkId, token } = await holdSigninLink(tx, { parentId: live.id, purpose: again.mail, now });
     await audit(live, { outcome: again.mail, link: "on_its_way" }, ip, tx);
-    return { linkId, madeAt: now, purpose: again.mail, token, to: live.email, who: { id: live.id, email: live.email } };
+    return { linkId, purpose: again.mail, token, to: live.email, who: { id: live.id, email: live.email } };
   });
   if (!held) return DONE;
 
@@ -211,7 +211,7 @@ export async function askForPasswordLink(raw: unknown, ip: string | null, now = 
 }
 
 /** A held link on its way (holdSigninLink(), signin-links.ts): its token, which only its mail carries, and who it is for. */
-type Held = { linkId: string; madeAt: Date; purpose: LinkPurpose; token: string; to: string; who: Who };
+type Held = { linkId: string; purpose: LinkPurpose; token: string; to: string; who: Who };
 
 /** The link's mail, to the address read under the lock and no other. Whether it was handed over. */
 async function mailLink(l: Held, ip: string | null): Promise<boolean> {
@@ -229,8 +229,9 @@ async function mailLink(l: Held, ip: string | null): Promise<boolean> {
  * again before the mail is handed over; a newer link made meanwhile (mintSigninLink()) deleted it too, and wins. Put in
  * place, its row is `parent.password.link_made`. When the check says no, the held link is removed and one
  * `parent.password.link_not_sent` row gives the reason (`changed_while_mailing` when the link to mail is now of the
- * other purpose); when the link is no longer held, nothing is removed and the row says `superseded` (a newer link) or
- * `changed_while_mailing` (an end of the person's sign-in, or a password reset). Throws when the transaction fails.
+ * other purpose); when the link is no longer held, nothing is removed and the row says `superseded` (a newer link
+ * mintSigninLink() made replaced it) or `changed_while_mailing` (an end of the person's sign-in, or a password reset,
+ * whatever the person asked for again since). Throws when the transaction fails.
  */
 async function putLinkInPlace(l: Held, ip: string | null): Promise<void> {
   await db.transaction(async (tx) => {
@@ -242,7 +243,7 @@ async function putLinkInPlace(l: Held, ip: string | null): Promise<void> {
       : { reason: "unknown_email" as const };
     const reason: NotSent | null = !("mail" in again) ? again.reason : again.mail !== l.purpose ? "changed_while_mailing" : null;
     if (reason === null && live) {
-      const put = await putHeldLinkInPlace(tx, { linkId: l.linkId, parentId: live.id, purpose: l.purpose, madeAt: l.madeAt, actor: parentActor(live), ip });
+      const put = await putHeldLinkInPlace(tx, { linkId: l.linkId, parentId: live.id, purpose: l.purpose, actor: parentActor(live), ip });
       if (put !== "put") await notSent(l.who, l.purpose, put === "superseded" ? "superseded" : "changed_while_mailing", ip, tx);
       return;
     }

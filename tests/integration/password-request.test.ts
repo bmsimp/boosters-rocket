@@ -349,7 +349,7 @@ describe("asking for a set-up or reset link", () => {
     await vi.waitFor(() => expect(sender.release).not.toBeNull());
     // As the welcome (SI-4) or the staff reset (SI-9) will make one: it replaces the held link.
     const minted = await mintLink(noPassword.id, "setup");
-    expect((await audits("parent.password.link_made")).map((r) => r.after)).toEqual([expect.objectContaining({ purpose: "setup", replaced: 1 })]);
+    expect((await audits("parent.password.link_made")).map((r) => r.after)).toEqual([expect.objectContaining({ purpose: "setup", replaced: 1, heldReplaced: [expect.any(String)] })]);
     sender.release!();
     await vi.waitFor(async () => expect(await notSent()).toEqual(["superseded"]));
     expect(outbox).toHaveLength(1);
@@ -359,6 +359,44 @@ describe("asking for a set-up or reset link", () => {
     // Only the mint's own row: the held link was never put in place.
     expect(await audits("parent.password.link_made")).toHaveLength(1);
   });
+
+  // A link the person asked for again after an end is no newer link that replaced the first: the end removed it, and
+  // its row says so whichever of the two mails is handed over first.
+  for (const firstHandedOver of ["the first ask's", "the second ask's"] as const) {
+    it(`a person who asks again after an end, ${firstHandedOver} mail handed over first: the first link's row says it changed while mailing`, async () => {
+      await seedParentSettings(SIGNINS_ON); await seedWorkingMail();
+      const { noPassword } = await seedEveryone();
+      sender.mode = "waits";
+      await ask("ana@example.com");
+      await vi.waitFor(() => expect(sender.release).not.toBeNull());
+      const releaseFirst = sender.release!;
+      sender.release = null;
+      await ENDS["blocked and unblocked"]!(noPassword);
+      // Nothing live and nothing on its way any more, so the second ask holds a link of its own and mails it.
+      await ask("ana@example.com");
+      await vi.waitFor(() => expect(sender.release).not.toBeNull());
+      const releaseSecond = sender.release!;
+      expect((await reasons()).map((r) => r.outcome)).toEqual(["setup", "setup"]);
+      if (firstHandedOver === "the first ask's") {
+        releaseFirst();
+        await vi.waitFor(async () => expect(await notSent()).toEqual(["changed_while_mailing"]));
+        releaseSecond();
+        await untilPutInPlace(1);
+      } else {
+        releaseSecond();
+        await untilPutInPlace(1);
+        releaseFirst();
+        await vi.waitFor(async () => expect(await notSent()).toEqual(["changed_while_mailing"]));
+      }
+      expect(outbox).toHaveLength(2);
+      // The second ask's link is the one live link; the first one's mail holds a link that works for nobody.
+      const live = [];
+      for (const m of outbox) if ((await linkVerdict("setup", linkIn(m)![2]!)).ok) live.push(m);
+      expect(live).toHaveLength(1);
+      expect(await db.select().from(parentSigninToken).where(eq(parentSigninToken.parentId, noPassword.id))).toHaveLength(1);
+      expect(await audits("parent.password.link_made")).toHaveLength(1);
+    });
+  }
 
   it("a password reset ends a reset link whose mail is on its way", async () => {
     await seedParentSettings(SIGNINS_ON); await seedWorkingMail();

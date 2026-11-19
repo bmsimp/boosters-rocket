@@ -4,9 +4,9 @@
 // link and mails it, and is never stored, logged or audited.
 import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
-import { and, eq, gte, gt, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { parent, parentAuthAccount, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
+import { auditLog, parent, parentAuthAccount, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { env } from "@/env";
 import { heldLink, unspentLink } from "./link-state";
@@ -59,12 +59,14 @@ export async function mintSigninLink(tx: Tx, o: { parentId: string; purpose: Lin
   if (!person) throw new Error("mintSigninLink: no such person");
   const replaced = await tx.delete(parentSigninToken)
     .where(and(eq(parentSigninToken.parentId, person.id), eq(parentSigninToken.purpose, o.purpose), unspentLink))
-    .returning({ id: parentSigninToken.id });
+    .returning({ id: parentSigninToken.id, held: sql<boolean>`${heldLink}` });
   const token = randomBytes(LINK_TOKEN_BYTES).toString("base64url");
   const expiresAt = new Date(now.getTime() + LINK_LIFE_MS[o.purpose]);
   await tx.insert(parentSigninToken).values({ purpose: o.purpose, parentId: person.id, tokenHash: hashLinkToken(o.purpose, token), createdAt: now, expiresAt });
+  // The held links it replaced are named by id (never a token or a hash), so the delivery of one tells "a newer link
+  // replaced it" (`superseded`) from "an end of sign-in or a reset removed it" by this row alone: supersededBy(), below.
   await writeAudit({ actor: o.actor, action: "parent.password.link_made", targetType: "parent", targetId: person.id,
-    after: { purpose: o.purpose, expiresAt: expiresAt.toISOString(), replaced: replaced.length }, ip: o.ip }, tx);
+    after: { purpose: o.purpose, expiresAt: expiresAt.toISOString(), replaced: replaced.length, heldReplaced: replaced.filter((r) => r.held).map((r) => r.id) }, ip: o.ip }, tx);
   return token;
 }
 
@@ -93,21 +95,17 @@ export async function holdSigninLink(tx: Tx, o: { parentId: string; purpose: Lin
 /**
  * A held link whose mail has been handed over, put in place: the person's unused link of its purpose is deleted (the
  * mail just sent replaces it, as mintSigninLink() replaces one) and the held one made unused, so it works (`put`).
- * When it is no longer held, nothing is put in place or deleted: `superseded` when a link of its purpose made since it
- * was held (`madeAt`) is why (mintSigninLink() deleted it: the newer link wins), else `gone` (an end of the person's
- * sign-in, or a password reset, deleted it). In the caller's transaction, under the person's lock the caller took (the
+ * When it is no longer held, nothing is put in place or deleted: `superseded` when mintSigninLink() deleted it (its
+ * `link_made` row names it among `heldReplaced`: the newer link wins), else `gone` (an end of the person's sign-in, or a
+ * password reset, deleted it; a later ask's link, held or put in place since, never makes it `superseded`). In the caller's transaction, under the person's lock the caller took (the
  * caller checks the person again under it first). Audited `parent.password.link_made` as mintSigninLink() audits a link,
  * with its purpose, expiry and how many it replaced, when it is put in place.
  */
-export async function putHeldLinkInPlace(tx: Tx, o: { linkId: string; parentId: string; purpose: LinkPurpose; madeAt: Date; actor: Actor; ip: string | null }):
+export async function putHeldLinkInPlace(tx: Tx, o: { linkId: string; parentId: string; purpose: LinkPurpose; actor: Actor; ip: string | null }):
   Promise<"put" | "superseded" | "gone"> {
   const [held] = await tx.select({ id: parentSigninToken.id, expiresAt: parentSigninToken.expiresAt }).from(parentSigninToken)
     .where(and(eq(parentSigninToken.id, o.linkId), eq(parentSigninToken.parentId, o.parentId), eq(parentSigninToken.purpose, o.purpose), isHeld)).for("update");
-  if (!held) {
-    const [newer] = await tx.select({ id: parentSigninToken.id }).from(parentSigninToken).where(and(eq(parentSigninToken.parentId, o.parentId),
-      eq(parentSigninToken.purpose, o.purpose), ne(parentSigninToken.id, o.linkId), gte(parentSigninToken.createdAt, o.madeAt))).limit(1);
-    return newer ? "superseded" : "gone";
-  }
+  if (!held) return (await supersededBy(tx, o.parentId, o.linkId)) ? "superseded" : "gone";
   const replaced = await tx.delete(parentSigninToken)
     .where(and(eq(parentSigninToken.parentId, o.parentId), eq(parentSigninToken.purpose, o.purpose), isNull(parentSigninToken.usedAt)))
     .returning({ id: parentSigninToken.id });
@@ -115,6 +113,17 @@ export async function putHeldLinkInPlace(tx: Tx, o: { linkId: string; parentId: 
   await writeAudit({ actor: o.actor, action: "parent.password.link_made", targetType: "parent", targetId: o.parentId,
     after: { purpose: o.purpose, expiresAt: held.expiresAt.toISOString(), replaced: replaced.length }, ip: o.ip }, tx);
   return "put";
+}
+
+/**
+ * Whether mintSigninLink() deleted this held link: its `link_made` row for the person names the link among the held
+ * links it replaced (`heldReplaced`). Only a mint deletes a held link for a newer one; whatever else removed it (an end
+ * of the person's sign-in, a reset) wrote no such row, whatever links the person was asked for or given since.
+ */
+async function supersededBy(tx: Tx, parentId: string, linkId: string): Promise<boolean> {
+  const [row] = await tx.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.targetType, "parent"), eq(auditLog.targetId, parentId),
+    eq(auditLog.action, "parent.password.link_made"), sql`${auditLog.after}->'heldReplaced' @> ${JSON.stringify([linkId])}::jsonb`)).limit(1);
+  return row !== undefined;
 }
 
 /** Removes a held link whose mail never went (or whose person changed while it went), while it is still held. */
