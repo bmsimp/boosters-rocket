@@ -2,7 +2,8 @@
 // The change is still written to QuickBooks first, and never queued: the parent is waiting. Once QuickBooks has it, the
 // portal changes the person's own sign-in address itself (stage 3 of the app-owned families spec: a sign-in email is
 // the app's record), and takes QuickBooks' answer into the roster cache when the roster is free.
-// Privacy: whose record is decided by loadMyRecord() from the session's ParentCtx and nothing else. The token a link
+// Privacy: whose record is decided by loadMyRecord() (for a live link and its confirm, by
+// loadMyRecordForMyEmailChange()) from the session's ParentCtx and nothing else. The token a link
 // carries is untrusted: it is found by its hash, and only among the requests of the session's own person, link, family
 // and record. This module is in the staff-only import scan (tests/integration/page-guards.test.ts), and it is the only
 // one that may name the client's email write, qboUpdateCustomerEmail (tests/unit/quickbooks-writes.test.ts).
