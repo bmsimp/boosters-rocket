@@ -5,16 +5,16 @@
 // A form not finished was made for the old family's guardians, so its document is withdrawn (after the transaction: the
 // worker does it from form_withdrawal) and the request goes back to not opened under the new family, with the old
 // family's consents taken away. Requests and evidence name the app's own family and student (stage 2 of the app-owned
-// families spec); the staff move names the move by QuickBooks ids, so the move is turned into those records here,
-// through their links in the records' company: a boundary AGENTS.md lists, until the order of a staff write flips
-// (stage 3's slice 9f). Kept evidence changes only in the app family it names: its own copies of the QuickBooks ids stay
-// as they were stored. Imports no staff-only module (tests/integration/page-guards.test.ts).
+// families spec), and since stage 3's slice 9f the move comes by those records too (the portal saves it first), so it
+// runs the same for a student or family with no link to QuickBooks. Kept evidence changes only in the app family it
+// names: its own copies of the QuickBooks ids stay as they were stored. Imports no staff-only module
+// (tests/integration/page-guards.test.ts).
 import "server-only";
 import { and, eq, isNotNull } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { formWithdrawal, signatureConsent, signatureRequest, signedFormEvidence, type RequestSigner, type SignatureRequestState } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
+import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
 import { NO_DOCUMENT } from "./requests";
 
 /** What becomes of one of the student's requests. */
@@ -35,26 +35,22 @@ export function movedStudentPlan(rows: readonly { id: string; state: SignatureRe
  * by movedStudentPlan(), each change audited. The documents to withdraw are queued for the worker; the answer lists
  * them too, for a caller that would rather withdraw them itself after the commit.
  *
- * The move comes by QuickBooks ids, as the staff move has it; a student or old family with no app record has no
- * requests. A staff move goes only to one of the app's own active families (prepare() in src/lib/roster/writes.ts
- * refuses any other, and the family's page offers no other), which has its record. Should one ever have none,
- * it can't be given a request: a complete one then stays where it is, and an unfinished one is still reset and its
- * document withdrawn, under the old family, where the new family's Forms page takes it over as it takes over any
- * request nothing was made for (loadMyForms()).
+ * The move comes by the app's own records (moveStudent() in src/lib/roster/writes.ts, which saves it in the portal
+ * first, into one of the portal's own active families): the student, the family left and the family joined, each
+ * linked to QuickBooks or not.
  */
-export async function formsForMovedStudent(tx: Tx, o: { studentQboId: string; fromFamilyQboId: string; toFamilyQboId: string; actor?: Actor; ip?: string | null }): Promise<{ moved: number; reset: number; toWithdraw: string[] }> {
+export async function formsForMovedStudent(tx: Tx, o: { studentId: AppStudentId; fromFamilyId: AppFamilyId; toFamilyId: AppFamilyId; actor?: Actor; ip?: string | null }): Promise<{ moved: number; reset: number; toWithdraw: string[] }> {
   const nothing = { moved: 0, reset: 0, toWithdraw: [] };
-  if (o.fromFamilyQboId === o.toFamilyQboId) return nothing;
-  const [studentId, fromFamilyId, toFamilyId] = await Promise.all([studentLinkedTo(o.studentQboId, tx), familyLinkedTo(o.fromFamilyQboId, tx), familyLinkedTo(o.toFamilyQboId, tx)]);
-  if (studentId === null || fromFamilyId === null || String(fromFamilyId) === String(toFamilyId)) return nothing;
+  const { studentId, fromFamilyId, toFamilyId } = o;
+  if (String(fromFamilyId) === String(toFamilyId)) return nothing;
   const rows = await tx.select().from(signatureRequest)
     .where(and(eq(signatureRequest.studentId, studentId), eq(signatureRequest.familyId, fromFamilyId))).for("update");
   const actor = o.actor ?? { door: "system", id: null, label: "roster" };
-  const plans = movedStudentPlan(rows).filter((p) => p.do === "reset" || toFamilyId !== null);
+  const plans = movedStudentPlan(rows);
   const now = new Date();
   for (const plan of plans) {
     const row = rows.find((r) => r.id === plan.requestId)!;
-    const familyId = toFamilyId ?? fromFamilyId;
+    const familyId = toFamilyId;
     if (plan.do === "move") {
       await tx.update(signatureRequest).set({ familyId, updatedAt: now }).where(eq(signatureRequest.id, row.id));
       // The evidence of the current company only (an earlier company's is cut from its request and names no family).

@@ -420,7 +420,8 @@ describe("the guardians' copies", () => {
 
   it("reaches a guardian whose student moved to another family before the evidence was kept, by their link to the family they signed in", async () => {
     const { id, envelopeId } = await signedForA();
-    await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: FAMILY_A.students[0]!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
+    const move = { studentId: await studentRecord(FAMILY_A.students[0]!.qboId), fromFamilyId: await familyRecord(FAMILY_A.family.qboId), toFamilyId: await familyRecord(FAMILY_B.family.qboId) };
+    await db.transaction((tx) => formsForMovedStudent(tx, move));
     await runEvidenceJob();
     // Kept after the move: it names the family the request is under now, by its record and, as its own copy, its customer.
     expect((await db.select().from(signedFormEvidence))[0]).toMatchObject({ familyId: await familyRecord(FAMILY_B.family.qboId), familyQboId: FAMILY_B.family.qboId });

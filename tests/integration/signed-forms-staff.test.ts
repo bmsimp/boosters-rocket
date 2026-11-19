@@ -447,12 +447,15 @@ describe("starting a form again", () => {
 });
 
 describe("a student moved to another family", () => {
+  /** The move from family A to family B, by the app's own records, as the portal saves it (stage 3's slice 9f). */
+  const moveOf = async (studentQboId: string) => ({ studentId: await studentRecord(studentQboId), fromFamilyId: await familyRecord(FAMILY_A.family.qboId), toFamilyId: await familyRecord(FAMILY_B.family.qboId) });
   it("takes a complete form along with its evidence, and resets the others under the new family, queuing their documents to withdraw", async () => {
     await seedConsent(a.forms!.ids.signed, { parentId: a.identity.parentId, name: FAMILY_A.parent.name, email: FAMILY_A.parent.email });
     const [s1, s2] = [FAMILY_A.students[0]!, FAMILY_A.students[1]!];
+    const [m1, m2] = [await moveOf(s1.qboId), await moveOf(s2.qboId)];
     const result = await db.transaction(async (tx) => {
-      const first = await formsForMovedStudent(tx, { studentQboId: s1.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId });
-      const second = await formsForMovedStudent(tx, { studentQboId: s2.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId });
+      const first = await formsForMovedStudent(tx, m1);
+      const second = await formsForMovedStudent(tx, m2);
       return { first, second };
     });
     expect(result.first).toMatchObject({ moved: 0, reset: 2 });
@@ -476,7 +479,8 @@ describe("a student moved to another family", () => {
 
   it("gives the new family nothing of who signed a form it brought along: no names, no download, no PDF", async () => {
     const s2 = FAMILY_A.students[1]!;
-    await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: s2.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
+    const m2 = await moveOf(s2.qboId);
+    await db.transaction((tx) => formsForMovedStudent(tx, m2));
     await moveInCache([s2.qboId], FAMILY_B.family.qboId); // as a move staff make leaves it: the app's records follow
     const bCtx = { ...b.identity, ip: null };
     expect(await findMySignedPdf(bCtx, a.forms!.ids.complete)).toBeNull();
@@ -504,7 +508,8 @@ describe("a student moved to another family", () => {
     const who = { parentId: a.identity.parentId, name: FAMILY_A.parent.name, email: FAMILY_A.parent.email };
     const sealed = await signedInStub(stub, { requirementId, templateId: template.id, familyQboId: FAMILY_A.family.qboId, subjectQboId: FAMILY_A.students[0]!.qboId, guardians: [who], sign: false });
     stub.sign(sealed.envelopeId, FAMILY_A.parent.email);
-    await db.transaction((tx) => formsForMovedStudent(tx, { studentQboId: FAMILY_A.students[0]!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
+    const m0 = await moveOf(FAMILY_A.students[0]!.qboId);
+    await db.transaction((tx) => formsForMovedStudent(tx, m0));
     expect(await db.select().from(formWithdrawal).where(eq(formWithdrawal.envelopeId, sealed.envelopeId))).toMatchObject([{ anySigned: false }]);
     await runEvidenceJob(); await runEvidenceJob();
     expect(stub.apiCalls("/envelope/delete")).toEqual([]);

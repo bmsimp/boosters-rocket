@@ -375,7 +375,8 @@ describe("a student moved to another family (for the roster writes slice)", () =
     const t = shiftAround(new Date(), 10, 60);
     const { shifts: [now] } = await seedEvent({ name: "Under way", onDate: t.onDate, shifts: [{ startsAt: t.startsAt, endsAt: t.endsAt }] });
     const underWay = await seedSignup({ shiftId: now!.id, familyQboId: FAMILY_A.family.qboId, signedUpBy: a.identity.parentId, student: AURELIO! });
-    const moved = await db.transaction((tx) => volunteerForMovedStudent(tx, { studentQboId: AURELIO!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }));
+    const move = { studentId: await studentOf(AURELIO!.qboId), fromFamilyId: await familyOf(FAMILY_A.family.qboId), toFamilyId: await familyOf(FAMILY_B.family.qboId) };
+    const moved = await db.transaction((tx) => volunteerForMovedStudent(tx, move));
     expect(moved.cancelled).toBe(1);
     expect(mail.outbox).toEqual([]); // nothing goes until the move is committed and tell() is called
     expect(await moved.tell()).toEqual({ sent: 1, failed: 0 });
@@ -385,11 +386,11 @@ describe("a student moved to another family (for the roster writes slice)", () =
     expect(mail.outbox.map((m) => [m.to, m.subject])).toEqual([[FAMILY_A.parent.email, "Your place has been freed: Spring fling"]]);
     expect(mail.outbox[0]!.text).toContain(`${AURELIO!.name}'s place on a shift at Spring fling (Concessions) has been freed, because ${AURELIO!.name} is no longer listed with your family in the club's records.`);
     expect(mail.outbox[0]!.text).not.toContain(FAMILY_B.family.name);
-    // The move comes by QuickBooks ids, as the roster has it; the new audit row names the app's own records.
+    // The move comes by the app's own records, and the audit row names them.
     expect((await audits("volunteer.signup.moved"))[0]).toMatchObject({ targetType: "student", targetId: await idOf(studentOf(AURELIO!.qboId)),
       before: { familyId: await idOf(familyOf(FAMILY_A.family.qboId)) }, after: { familyId: await idOf(familyOf(FAMILY_B.family.qboId)), cancelled: 1, guardiansTold: 1 } });
     expect((await live()).find((c) => c.signupId === forA.id)).toMatchObject({ familyId: await familyOf(FAMILY_A.family.qboId) });
     // Nothing to give up the second time.
-    expect((await db.transaction((tx) => volunteerForMovedStudent(tx, { studentQboId: AURELIO!.qboId, fromFamilyQboId: FAMILY_A.family.qboId, toFamilyQboId: FAMILY_B.family.qboId }))).cancelled).toBe(0);
+    expect((await db.transaction((tx) => volunteerForMovedStudent(tx, move))).cancelled).toBe(0);
   });
 });
