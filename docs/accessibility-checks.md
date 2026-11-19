@@ -15,7 +15,7 @@ in the page's order, and a page the keyboard can't Tab out of; and after each ac
 
 | Journey | What the test holds |
 |---|---|
-| 1. Signing in with an emailed code | The first stop is the email field. Enter sends the code and the code field takes the focus; a wrong code is an alert with the focus left in the field; Enter signs in; the chooser's family button by Tab and Enter. |
+| 1. Signing in with a password and an emailed code | The first stop is the email field, then the password, then Sign in. Enter checks the password and, on a browser the portal doesn't remember, the code field takes the focus; a wrong code is an alert with the focus left in the field; Enter signs in; the chooser's family button by Tab and Enter. |
 | 2. Home to Payments | "Skip to the page" is the first stop, drawn while focused (44px), and the next Tab lands past the club bar and the Switch family line. The bar's order (Skip, Home, Forms, Payments); after Enter on Payments the focus stays on its link; the Pay link is reached and named with its amount and invoice (not followed: it is Intuit's page). |
 | 3. Opening a form | The family's signed form opened by keyboard; its page title is the form's name; the download and Back to Forms are reached. Agreeing and Documenso's frame are not: forms are not set up in the seed (below). |
 | 4. Signing up for a shift and cancelling | The choice group is one stop, then Sign me up; the thank-you takes the focus. Cancel my sign-up puts the focus on Keep it, inside the group "Cancel my sign-up?"; Keep it gives it back; Shift+Tab reaches Yes, cancel it; the cancelled message takes the focus. |

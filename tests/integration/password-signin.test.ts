@@ -27,6 +27,8 @@ import { deviceRows, seedDevice, seedPassword } from "../helpers/signin-links";
  * password step is one answer, with no cookie and no mail.
  */
 const REFUSED = { ok: false, error: "rejected" };
+/** Over a limit: said as such, the same for any address (the count is taken by what was typed, before any read). */
+const LIMITED = { ok: false, error: "rate_limited" };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const staff = { actor: { door: "staff" as const, id: null, label: "board" }, ip: null };
 const sessions = () => db.select().from(parentAuthSession);
@@ -114,27 +116,69 @@ describe("the password step", () => {
     expect((await db.select().from(rateLimitEvent)).filter((e) => e.kind === "password_try_email").map((e) => e.subject)).toEqual([hashTriedAddress(email.trim().toLowerCase())]);
   });
 
-  it("holds 5 tries per address in 15 minutes, whatever the address names, a right password included, and mails nothing past it", async () => {
+  /** The rows counted under one kind of the password step's limits. */
+  const counted = async (kind: string) => (await db.select().from(rateLimitEvent)).filter((e) => e.kind === kind);
+  /** Every counted try of the password step as if made more than 15 minutes ago, so the window has freed. */
+  const windowFrees = () => db.update(rateLimitEvent).set({ at: new Date(Date.now() - 15 * 60_000 - 1000) });
+
+  it("counts only wrong tries per address: a right password gives its place back, and past five wrong ones even the right one waits, in words that say so", async () => {
     await seedAna();
-    for (let i = 0; i < 5; i++) expect(await answerTo("ana@example.com", "a wrong password, try " + i)).toEqual([200, REFUSED, []]);
-    // The sixth: the right password, refused as anything is, with no code.
-    expect(await answerTo("ana@example.com")).toEqual([200, REFUSED, []]);
-    for (let i = 0; i < 6; i++) expect(await answerTo("nobody@example.com", "anything at all " + i)).toEqual([200, REFUSED, []]);
-    expect(outbox).toEqual([]);
-    const limited = (await audits("signin.password_refused")).filter((r) => (r.after as { reason: string }).reason === "rate_limited");
+    for (let i = 0; i < 4; i++) expect(await answerTo("ana@example.com", "a wrong password, try " + i)).toEqual([200, REFUSED, []]);
+    // Four wrong, then the right password five times over: never refused, since each right one gives its place back.
+    for (let i = 0; i < 5; i++) expect((await passwordStep("ana@example.com")).body).toEqual({ ok: true, step: "code" });
+    expect(await counted("password_try_email")).toHaveLength(4);
+    // The fifth wrong try fills the window, and the right password then waits, with the over-limit answer and no code.
+    expect(await answerTo("ana@example.com", "a wrong password, the fifth")).toEqual([200, REFUSED, []]);
+    const asked = (await audits("signin.second_step_asked")).length;
+    expect(await answerTo("ana@example.com")).toEqual([200, LIMITED, []]);
+    expect(await audits("signin.second_step_asked")).toHaveLength(asked);
+    // An address that is nobody's meets the same limit, in the same words.
+    for (let i = 0; i < 5; i++) expect(await answerTo("nobody@example.com", "anything at all " + i)).toEqual([200, REFUSED, []]);
+    expect(await answerTo("nobody@example.com", "anything at all, once more")).toEqual([200, LIMITED, []]);
     // Each address's full window is recorded once, naming nobody.
+    const limited = (await audits("signin.password_refused")).filter((r) => (r.after as { reason: string }).reason === "rate_limited");
     expect(limited.map((r) => [r.actorId, r.actorLabel, r.targetId, r.after])).toEqual([
       [null, null, null, { reason: "rate_limited", limit: "email" }], [null, null, null, { reason: "rate_limited", limit: "email" }]]);
     expect(await audits("signin.password_wrong")).toHaveLength(5);
     expect(await sessions()).toEqual([]);
+    // Once the window frees, the right password goes on.
+    await windowFrees();
+    expect((await passwordStep("ana@example.com")).body).toEqual({ ok: true, step: "code" });
   });
 
-  it("over the limit per IP address, refuses even the right password, naming nobody, and counts nothing against the address", async () => {
+  it("on a device the portal remembers for the person, tries are counted against the device, not the address", async () => {
+    const ana = await seedAna();
+    const { token, id: deviceId } = await seedDevice(ana.id);
+    const device = `br_parent.device=${token}`;
+    // A stranger's five wrong tries for the address, with no device cookie: they stop a new device...
+    for (let i = 0; i < 5; i++) expect(await answerTo("ana@example.com", "a stranger's guess " + i)).toEqual([200, REFUSED, []]);
+    expect(await answerTo("ana@example.com")).toEqual([200, LIMITED, []]);
+    // ...but not Ana on her remembered device, whose right password signs her in at once and uses nothing up.
+    const onHers = await postDoor("/portal-password/check", { email: "ana@example.com", password: DOOR_PASSWORD }, { cookie: device });
+    expect(await onHers.json()).toEqual({ ok: true, next: "/" });
+    expect(await counted("password_try_device")).toEqual([]);
+
+    // Five wrong tries with the device cookie stop that device, and not the address.
+    await db.delete(rateLimitEvent);
+    for (let i = 0; i < 5; i++) expect(await answerTo("ana@example.com", "a guess on the device " + i, device)).toEqual([200, REFUSED, []]);
+    expect((await counted("password_try_device")).map((e) => e.subject)).toEqual(Array(5).fill(deviceId));
+    expect(await counted("password_try_email")).toEqual([]);
+    expect(await answerTo("ana@example.com", DOOR_PASSWORD, device)).toEqual([200, LIMITED, []]);
+    expect((await passwordStep("ana@example.com")).body).toEqual({ ok: true, step: "code" });
+    expect((await audits("signin.password_refused")).map((r) => [r.actorId, r.after]).filter(([, a]) => (a as { reason: string }).reason === "rate_limited"))
+      .toEqual([[null, { reason: "rate_limited", limit: "email" }], [null, { reason: "rate_limited", limit: "device" }]]);
+    // The device's row id is the count's key; its token, and its hash, are in no row.
+    const stored = JSON.stringify([await db.select().from(auditLog), await db.select().from(rateLimitEvent)]);
+    expect(stored).not.toContain(token);
+    expect(stored).not.toContain(hashDeviceToken(token));
+  });
+
+  it("over the limit per IP address, refuses even the right password with the over-limit answer, naming nobody, and counts nothing against the address", async () => {
     await seedAna();
     const now = new Date();
     await db.insert(rateLimitEvent).values(Array.from({ length: 180 }, () => ({ kind: "password_try_ip", subject: DOOR_IP, at: now })));
-    expect(await answerTo("ana@example.com")).toEqual([200, REFUSED, []]);
-    expect(await answerTo("ana@example.com")).toEqual([200, REFUSED, []]);
+    expect(await answerTo("ana@example.com")).toEqual([200, LIMITED, []]);
+    expect(await answerTo("ana@example.com")).toEqual([200, LIMITED, []]);
     expect(outbox).toEqual([]);
     expect(await sessions()).toEqual([]);
     // The full window is recorded once, naming nobody; the address's own count was never taken.
@@ -369,7 +413,8 @@ describe("the pending step", () => {
     const [row] = await db.select().from(signinCode);
     expect(row!.expiresAt.getTime()).toBe(endsAt);
     expect(outbox[1]!.text).toContain("It expires in 4 minutes.");
-    expect((await audits("signin.code_sent")).at(-1)!.after).toEqual({ expiresAt: new Date(endsAt).toISOString() });
+    // The mail's delivery writes `signin.code_sent` after the sender has the message, so the row is waited for itself.
+    await vi.waitFor(async () => expect((await audits("signin.code_sent")).map((r) => r.after)).toContainEqual({ expiresAt: new Date(endsAt).toISOString() }));
     // And it works, within the step.
     const code = /sign-in code: (\d{6})/.exec(outbox[1]!.subject)![1]!;
     expect((await codeStep(code, late)).body).toEqual({ ok: true, next: "/" });

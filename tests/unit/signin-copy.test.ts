@@ -32,5 +32,7 @@ describe("the sign-in page's words (the sign-in release, slice SI-3b)", () => {
   });
   it("says too many tries without promising a new code, since the password step meets it too", () => {
     expect(TOO_MANY_TRIES).toBe("Too many tries. Wait a few minutes and try again.");
+    // Nor a reset: the password step shows it over a limit, and a reset ends every session and doesn't shorten the wait.
+    expect(TOO_MANY_TRIES).not.toMatch(/reset|password|code/i);
   });
 });

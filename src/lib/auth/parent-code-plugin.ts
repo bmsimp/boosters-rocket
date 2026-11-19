@@ -11,6 +11,7 @@ import { clearPendingStep, pendingStepEnd, readDeviceToken, readPendingStep, set
 type Ctx = { headers?: Headers; request?: Request };
 const ipOf = (ctx: Ctx) => { const h = ctx.headers ?? ctx.request?.headers; return h ? clientIpFrom(h) : null; };
 const REJECTED = { ok: false, error: "rejected" } as const;
+const LIMITED = { ok: false, error: "rate_limited" } as const;
 
 /**
  * The portal's parent door (spec §1, and the sign-in release, slice SI-3b). A sign-in is the address and the password,
@@ -33,9 +34,13 @@ export const parentCodePlugin = () => ({
       body: z.object({ email: z.string().max(MOST_TYPED_ADDRESS), password: z.string().max(MOST_TYPED_PASSWORD), next: z.string().max(MAX_RETURN_PATH).optional() }),
     }, async (ctx) => {
       const ip = ipOf(ctx);
-      const now = new Date();
-      const r = await checkPasswordSignin(ctx.body.email, ctx.body.password, readDeviceToken(ctx), ip, now);
-      if (!r.ok) return ctx.json(REJECTED);
+      // The request's signal: a try whose client has gone leaves the wait for a password check (inTurn()).
+      const r = await checkPasswordSignin(ctx.body.email, ctx.body.password, readDeviceToken(ctx), ip, new Date(), ctx.request?.signal);
+      // Over a limit, or turned away by a full wait for a check, the page says so; the count was taken by what the
+      // visitor sent alone, so it is the same for an address on file and one that isn't. Every other refusal is one answer.
+      if (!r.ok) return ctx.json(r.limited ? LIMITED : REJECTED);
+      // What follows is timed from when the check finished (r.at), so a wait for its turn never shortens the step.
+      const now = r.at;
       if (r.device) {
         // A device the portal remembers for this person: the password and the device are the proof, and no code is asked.
         const done = await finishParentSignin(ctx, { parentId: r.person.id, email: r.person.email, proof: { password: r.password, deviceId: r.device.deviceId }, ip, next: ctx.body.next });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
-import { RATE_LIMITS, takeRateLimit } from "@/lib/parents/rate-limit";
+import { RATE_LIMITS, giveBackRateLimit, takeRateLimit, takeRateLimitPlace } from "@/lib/parents/rate-limit";
 import { resetDb } from "../helpers/db";
 
 describe("database rate limits", () => {
@@ -38,6 +38,19 @@ describe("database rate limits", () => {
     expect(await takeRateLimit("code_send_email", "ana@example.com", plus(15 * 60_000 + 3))).toBe("refused");
   });
 
+  it("gives back the one place it is asked to, and nothing else", async () => {
+    const t = new Date("2026-11-10T12:00:00Z");
+    const places = [];
+    for (let i = 0; i < 5; i++) places.push(await takeRateLimitPlace("password_try_email", "h", t));
+    expect(places.map((p) => p.take)).toEqual(["taken", "taken", "taken", "taken", "taken"]);
+    expect(await takeRateLimitPlace("password_try_email", "h", t)).toEqual({ take: "first_refusal", placeId: null });
+    await giveBackRateLimit(places[4]!.placeId);
+    await giveBackRateLimit(null);
+    expect((await db.select().from(rateLimitEvent)).map((e) => e.id).sort((a, b) => a - b)).toEqual(places.slice(0, 4).map((p) => p.placeId));
+    expect((await takeRateLimitPlace("password_try_email", "h", t)).take).toBe("taken");
+    expect((await takeRateLimitPlace("password_try_email", "h", t)).take).toBe("refused");
+  });
+
   it("holds under a burst of parallel requests", async () => {
     const t = new Date("2026-11-10T12:00:00Z");
     const got = await Promise.all(Array.from({ length: 75 }, () => takeRateLimit("code_send_ip", "203.0.113.9", t)));
@@ -57,9 +70,11 @@ describe("database rate limits", () => {
       // Asking for a set-up or reset link by email (src/lib/parents/password-request.ts): as the code request, 3 per
       // address (counted under a keyed hash of it) and a flood stop per IP address.
       password_ask_email: { max: 3, ...window }, password_ask_ip: { max: 60, ...window },
-      // Signing in with a password (src/lib/parents/password-signin.ts; the sign-in release, slice SI-3b): 5 tries of any
-      // kind per typed address (counted under a keyed hash of it), and a flood stop per IP address, as the code check.
-      password_try_email: { max: 5, ...window }, password_try_ip: { max: 180, ...window } });
+      // Signing in with a password (src/lib/parents/password-signin.ts; the sign-in release, slice SI-3b): 5 wrong tries
+      // per typed address (counted under a keyed hash of it; a right password gives its place back), or, on a device the
+      // portal remembers for the person, 5 wrong tries per device in its place, and a flood stop per IP address, as the
+      // code check.
+      password_try_email: { max: 5, ...window }, password_try_device: { max: 5, ...window }, password_try_ip: { max: 180, ...window } });
     // A parent's own phone and address (src/lib/parents/contact-edits.ts), counted per person: a handful of saves an
     // hour, each a write to the club's QuickBooks, and the reads the edit page makes as it opens.
     expect(contact_save_parent).toEqual({ max: 6, windowMs: 60 * 60 * 1000 });

@@ -77,7 +77,8 @@ export function PasswordSignIn({ next }: { next: string | null }) {
       const r = await post<Answer>("/portal-password/check", { email, password, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
       if (r.ok && r.step === "code") { toCodeStep(); return; }
-      setProblem({ words: PASSWORD_REJECTED, passwordLink: true });
+      // Too many tries is said as such, with no way to a reset: a reset ends every session and doesn't shorten the wait.
+      setProblem(r.error === "rate_limited" ? { words: TOO_MANY_TRIES, passwordLink: false } : { words: PASSWORD_REJECTED, passwordLink: true });
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
   };
   const resend = async () => {

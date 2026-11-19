@@ -59,7 +59,7 @@ export function MailStep({ n, summary, error }: { n: number; summary: MailSummar
   return (
     <>
       <h2 className="page-title">Step {n}: Outgoing mail</h2>
-      <p className="lede">Parents sign in with a code the portal emails them, so the portal has to be able to send mail first. Use Microsoft 365 if the club has it; otherwise use your mail provider&apos;s SMTP settings.</p>
+      <p className="lede">Parents sign in with a password, which they choose from a link the portal emails them, and on a new device the portal emails them a code too, so the portal has to be able to send mail first. Use Microsoft 365 if the club has it; otherwise use your mail provider&apos;s SMTP settings.</p>
       {error === "mail_first" && <Notice tone="problem">Save the mail settings and send a test email before going on.</Notice>}
       <MailGuide summary={summary} save={saveSetupMailAction} test={sendSetupTestMailAction} />
       <div className="stack">

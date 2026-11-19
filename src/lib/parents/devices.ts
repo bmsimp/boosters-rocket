@@ -11,7 +11,7 @@ import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
 import { and, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { parentAuthSession, parentDevice } from "@/lib/db/schema";
+import { parent, parentAuthSession, parentDevice } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import { env } from "@/env";
 import { lockedPerson } from "./sessions";
@@ -39,6 +39,19 @@ export async function rememberedDevice(parentId: string, token: string | null, n
   if (!isDeviceToken(token)) return null;
   const [row] = await db.select({ id: parentDevice.id }).from(parentDevice)
     .where(and(eq(parentDevice.tokenHash, hashDeviceToken(token)), eq(parentDevice.parentId, parentId), gt(parentDevice.expiresAt, now)));
+  return row ? { deviceId: row.id } : null;
+}
+
+/**
+ * The remembered device the cookie's token names, unexpired, of the person who holds `email` (as normalizeEmail() reads
+ * it), or null: no such person, none, of another shape (answered without a query), expired, or another person's. The
+ * password step reads it before it counts a try (password-signin.ts), to count a try on the person's own device against
+ * that device rather than the address. It tells a stranger nothing: only the device's own token finds its row.
+ */
+export async function deviceOfAddress(email: string, token: string | null, now = new Date()): Promise<{ deviceId: string } | null> {
+  if (!isDeviceToken(token)) return null;
+  const [row] = await db.select({ id: parentDevice.id }).from(parentDevice).innerJoin(parent, eq(parent.id, parentDevice.parentId))
+    .where(and(eq(parentDevice.tokenHash, hashDeviceToken(token)), eq(parent.email, email), gt(parentDevice.expiresAt, now)));
   return row ? { deviceId: row.id } : null;
 }
 

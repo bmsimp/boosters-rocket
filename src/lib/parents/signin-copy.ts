@@ -2,9 +2,10 @@
 /** The page's lede, above the form: what signing in is for, and that a new device takes a code too. */
 export const SIGNIN_LEDE = "Sign in with your email and password to see your students, what's owed, the forms to sign and the volunteer shifts. On a device we don't know yet, we'll also email you a code.";
 /**
- * One answer for every refusal at the password step (an address nobody holds, no password yet, a wrong password, a
- * blocked person, nobody the club lets in, sign-ins off, too many tries), so the page can't tell anyone whether an
- * address is on file. The page shows it with a link to "Set up or reset my password".
+ * One answer for every refusal at the password step but too many tries (an address nobody holds, no password yet, a
+ * wrong password, a blocked person, nobody the club lets in, sign-ins off), so the page can't tell anyone whether an
+ * address is on file. The page shows it with a link to "Set up or reset my password". Too many tries is TOO_MANY_TRIES,
+ * with no link: the count is taken by what was typed before anything is read, so it is the same for any address.
  */
 export const PASSWORD_REJECTED = "That email and password didn't work. Check them and try again. If you haven't set up a password yet, or you've forgotten it, you can set up or reset it.";
 /** The second step, once the password was right on a device the portal doesn't remember. It never says whether the mail went. */
@@ -16,6 +17,7 @@ export const CODE_REJECTED = "That code didn't work. Check the newest email from
  * from the right password, however late it was resent). It never says whether a code was sent.
  */
 export const CODE_STEP_ENDED = "Time ran out for that code. Enter your email and password again to get a new one.";
+/** Over a limit at either step (and, at the password step, the portal too busy to check a password just then). */
 export const TOO_MANY_TRIES ="Too many tries. Wait a few minutes and try again.";
 export const SIGNIN_UNAVAILABLE = "Parent sign-in isn't available yet.";
 export const SIGNIN_NETWORK_FAILED = "We couldn't reach the portal just then. Please try again in a moment.";
