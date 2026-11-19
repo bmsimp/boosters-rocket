@@ -32,6 +32,7 @@ import { ADMIN_ONLY } from "@/lib/permissions/registry";
 import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
+import { BREACH_MARK, markBreachCheck, readBreachMark } from "@/lib/parents/breach-mark";
 import { resetDb, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
@@ -67,7 +68,7 @@ describe("the health page", () => {
   it("on a portal that was just installed, says in plain words what isn't set up yet", async () => {
     await admin();
     const lines = await healthReport(NOW);
-    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "due_reminders", "backup", "version"]);
+    expect(lines.map((l) => l.key)).toEqual(["database", "worker", "cleanup", "quickbooks", "money", "buyout_check", "mail", "volunteer_reminders", "forms", "parents", "breach_check", "due_reminders", "backup", "version"]);
     expect(line(lines, "forms")).toMatchObject({ state: "off", word: "Not set up" });
     expect(line(lines, "database")).toMatchObject({ state: "ok", word: "Working" });
     expect(line(lines, "worker")).toMatchObject({ state: "attention", times: [{ label: "Last woke", at: null }] });
@@ -77,6 +78,7 @@ describe("the health page", () => {
     expect(line(lines, "money")).toMatchObject({ state: "off", word: "Not running" });
     expect(line(lines, "mail")).toMatchObject({ state: "attention", word: "Not set up" });
     expect(line(lines, "parents")).toMatchObject({ state: "off", word: "Off" });
+    expect(line(lines, "breach_check")).toMatchObject({ state: "off", word: "Not used yet", times: [{ label: "Last answered", at: null }, { label: "Last failed", at: null }] });
     expect(line(lines, "due_reminders")).toMatchObject({ state: "off", word: "Off", fix: { href: "/staff/settings/parents" } });
     expect(line(lines, "backup")).toMatchObject({ state: "attention", word: "None recorded" });
     expect(line(lines, "backup").says).toMatch(/scripts\/backup\.sh/);
@@ -107,6 +109,8 @@ describe("the health page", () => {
     // done, and the wake's check of the buy-out invoices follows it.
     await db.insert(jobRun).values({ job: MONEY_JOB, finishedAt: new Date(), outcome: "ok", startedBy: "worker" });
     await runDueJobs(); // a wake: the clean-up, the token refresh, the roster read, the volunteer reminders and the buy-out check all run
+    // A parent chose a password and the breach service answered (tests/integration/password-links.test.ts asks it for real).
+    await markBreachCheck({ outcome: "not_found" });
     const lines = await healthReport();
     for (const l of lines) expect(l.state, `${l.key}: ${l.says} ${l.notes.join(" ")}`).toBe("ok");
     expect(line(lines, "worker").says).toBe("Waking every minute to run the scheduled jobs.");
@@ -301,6 +305,33 @@ describe("the health page", () => {
       expect(chosen).toMatchObject({ state: "ok", word: "On" });
       expect(chosen.notes.join(" ")).toMatch(/addresses aren't recorded, because CLIENT_IP_HEADER is none/);
     } finally { env.CLIENT_IP_HEADER = setting; }
+  });
+
+  it("says how the password breach check stands: not used yet, working, and a failure the latest word, with why", async () => {
+    const breach = async () => line(await healthReport(NOW), "breach_check");
+    expect(await breach()).toMatchObject({ state: "off", word: "Not used yet", fix: null });
+    expect((await breach()).says).toMatch(/^Not used yet./);
+    const t1 = new Date(NOW.getTime() - 3_600_000), t2 = new Date(NOW.getTime() - 60_000), t3 = new Date(NOW.getTime() - 1000);
+    await markBreachCheck({ outcome: "found" }, t1);
+    expect(await breach()).toMatchObject({ state: "ok", word: "Working", notes: [], times: [{ label: "Last answered", at: t1.toISOString() }, { label: "Last failed", at: null }] });
+    await markBreachCheck({ outcome: "not_checked", why: "timeout" }, t2);
+    const failed = await breach();
+    expect(failed).toMatchObject({ state: "attention", word: "Needs attention", notes: ["The last time it didn't answer within 3 seconds."],
+      times: [{ label: "Last answered", at: t1.toISOString() }, { label: "Last failed", at: t2.toISOString() }] });
+    expect(failed.says).toMatch(/passwords chosen since then were accepted without the check/);
+    expect(failed.says).toMatch(/server must be able to reach the service/);
+    for (const why of ["unreachable", "bad_answer"] as const) {
+      await markBreachCheck({ outcome: "not_checked", why }, t2);
+      expect((await breach()).notes).toEqual([why === "unreachable" ? "The last time it couldn't be reached." : "The last time its answer couldn't be read."]);
+    }
+    // An answer after the failure is the latest word again, even at the same instant.
+    await markBreachCheck({ outcome: "not_found" }, t2);
+    expect(await breach()).toMatchObject({ state: "ok", times: [{ label: "Last answered", at: t2.toISOString() }, { label: "Last failed", at: t2.toISOString() }] });
+    await markBreachCheck({ outcome: "not_found" }, t3);
+    expect((await readBreachMark())).toEqual({ answeredAt: t3.toISOString(), failedAt: t2.toISOString(), failure: "bad_answer", failedLast: false });
+    // The mark is counts and times only.
+    const [row] = await db.select().from(setting).where(eq(setting.key, BREACH_MARK));
+    expect(Object.keys(row!.value as object).sort()).toEqual(["answeredAt", "failedAt", "failedLast", "failure"]);
   });
 
   it("leaves /api/health a bare liveness check that says nothing else", async () => {

@@ -98,7 +98,8 @@ export async function requestSigninCode(rawEmail: string, ip: string | null, now
   return { delivery };
 }
 
-export type VerifyResult = { ok: true; parentId: string } | { ok: false; reason: "rejected" | "rate_limited" };
+/** A right code, spent: the person, and the code's own row, which the last check of the sign-in reads again (signinStands()). */
+export type VerifyResult = { ok: true; parentId: string; codeId: string } | { ok: false; reason: "rejected" | "rate_limited" };
 const REJECTED: VerifyResult = { ok: false, reason: "rejected" };
 
 /** Spec §1. Single use, 10 minutes, 5 wrong tries, 180 checks per IP per 15 minutes. */
@@ -128,10 +129,10 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
       return { wrong: row.tries + 1 } as const;
     }
     await tx.update(signinCode).set({ usedAt: now }).where(eq(signinCode.id, row.id));
-    return "ok" as const;
+    return { spent: row.id } as const;
   });
   if (outcome === "no_code" || outcome === "expired" || outcome === "too_many_tries") { await expired(p, outcome); return REJECTED; }
-  if (typeof outcome === "object") {
+  if ("wrong" in outcome) {
     await writeAudit({ actor: parentActor(p), action: "signin.code_wrong", targetType: "parent", targetId: p.id, after: { try: outcome.wrong }, ip });
     return REJECTED;
   }
@@ -144,21 +145,30 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason }, ip });
     return REJECTED;
   }
-  return { ok: true, parentId: p.id };
+  return { ok: true, parentId: p.id, codeId: outcome.spent };
 }
 
 /**
  * The last check of a sign-in, made once the session row exists: the address the code was proved with is still the
- * person's, and they are not blocked. Read under the lock an address change or a block waits for (lockedPerson), and
- * after the session is stored, so there is no moment in which a session proved with a replaced address can slip
- * through. A change that committed first is seen here and the caller removes the session; a change that comes later
- * ends the person's sessions itself, and by then this one is stored where it can see it.
+ * person's, they are not blocked, and the code it spent (`codeId`, from verifySigninCode()) is still there. Read under
+ * the lock an address change, a block or a password reset waits for (lockedPerson), and after the session is stored,
+ * so there is no moment in which a session proved with a replaced address, or before a reset, can slip through. A
+ * reset deletes the person's codes spent within a code's life (choosePasswordFromLink(), password-set.ts), so a code
+ * spent before a reset that committed first is gone here; the daily clean-up keeps a spent code until a code's life
+ * has passed since it was spent (cleanUp(), cleanup.ts), so it never takes one this soon. A change that committed first is seen here and the caller
+ * removes the session; a change that comes later ends the person's sessions itself, and by then this one is stored
+ * where it can see it.
  */
-export async function signinStands(parentId: string, rawEmail: string, ip: string | null): Promise<boolean> {
+export async function signinStands(parentId: string, rawEmail: string, ip: string | null, codeId: string): Promise<boolean> {
   const email = normalizeEmail(rawEmail);
-  const live = await db.transaction((tx) => lockedPerson(tx, parentId));
-  if (live && email && live.email === email && !live.blocked) return true;
+  const seen = await db.transaction(async (tx) => {
+    const live = await lockedPerson(tx, parentId);
+    const [code] = await tx.select({ id: signinCode.id }).from(signinCode).where(and(eq(signinCode.id, codeId), eq(signinCode.parentId, parentId)));
+    return { live, codeKept: code !== undefined };
+  });
+  const { live } = seen;
+  if (live && email && live.email === email && !live.blocked && seen.codeKept) return true;
   await writeAudit({ actor: { door: "parent", id: parentId, label: email }, action: "signin.refused", targetType: "parent", targetId: parentId,
-    after: { reason: live?.blocked ? "blocked" : "address_changed" }, ip });
+    after: { reason: live?.blocked ? "blocked" : !live || !email || live.email !== email ? "address_changed" : "code_gone" }, ip });
   return false;
 }

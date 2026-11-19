@@ -28,6 +28,9 @@ function buildVersion(): string {
  */
 const NO_FRAMING = "frame-ancestors 'none'";
 
+/** The addresses of the pages a set-up or reset link opens (src/app/sign-in/set-up/[token], reset/[token]). */
+const LINK_PAGES = ["/sign-in/set-up/:token", "/sign-in/reset/:token"];
+
 const nextConfig: NextConfig = {
   // The Docker image sets NEXT_OUTPUT=standalone; local `pnpm start` and CI e2e keep the default output.
   ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
@@ -55,6 +58,10 @@ const nextConfig: NextConfig = {
           { key: "Content-Security-Policy", value: `default-src 'self'; script-src 'self'; ${NO_FRAMING}` },
         ],
       },
+      // The pages a set-up or reset link opens carry its token in their address: no request they make sends it on as a
+      // Referer, not even the first ones, for the page's own scripts and styles, which go out before the page's
+      // <meta name="referrer"> is read. Each replaces the rule above for its own address (a later rule's header wins).
+      ...LINK_PAGES.map((source) => ({ source, headers: [{ key: "Referrer-Policy", value: "no-referrer" }] })),
     ];
   },
   async rewrites() {

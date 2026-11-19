@@ -118,7 +118,7 @@ describe("a sign-in that meets a change of address", () => {
     // The new address is the one that works now.
     await (await requestSigninCode(NEW, IP, new Date(T0.getTime() + 1000))).delivery;
     expect(outbox.map((m) => m.to)).toEqual([NEW]);
-    expect(await verifySigninCode(NEW, codeOf(outbox[0]!), IP, new Date(T0.getTime() + 2000))).toEqual({ ok: true, parentId: r.identity.parentId });
+    expect(await verifySigninCode(NEW, codeOf(outbox[0]!), IP, new Date(T0.getTime() + 2000))).toEqual({ ok: true, parentId: r.identity.parentId, codeId: expect.any(String) });
   }, 30_000);
 
   it("neither side is the loser of a deadlock when the person already holds an unused code", async () => {

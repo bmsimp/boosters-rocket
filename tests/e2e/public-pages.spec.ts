@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { NO_SUCH_LINK } from "./signin-links";
 
-const PUBLIC = ["/sign-in", "/staff/sign-in", "/refused"];
+// The pages a set-up or reset link opens, with a token that names no link (tests/e2e/password-links.spec.ts opens a live one).
+const PUBLIC = ["/sign-in", "/staff/sign-in", "/refused", `/sign-in/set-up/${NO_SUCH_LINK}`, `/sign-in/reset/${NO_SUCH_LINK}`];
 
 for (const path of PUBLIC) {
   test(`${path} shows no family data to an anonymous visitor`, async ({ page }) => {

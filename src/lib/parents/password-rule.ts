@@ -7,8 +7,9 @@
  * "characters" and never promises a person's count. A password is never trimmed or changed, since a space is a
  * character like any other.
  *
- * Pure, and nothing calls it yet (slice SI-1). It answers with a code a later page turns into words, and never logs,
- * keeps or returns the password.
+ * Pure. Called by choosePasswordFromLink() (./password-set.ts), the set-up and reset links' form, since slice SI-2.
+ * It answers with a code, which that function turns into words (password-copy.ts), and never logs, keeps or returns the
+ * password.
  */
 export const PASSWORD_MIN = 12;
 export const PASSWORD_MAX = 128;

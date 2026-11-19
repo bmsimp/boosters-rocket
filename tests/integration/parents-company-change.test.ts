@@ -19,6 +19,9 @@ import { resetDb, seedGuardian, seedParent, seedParentSession } from "../helpers
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helpers/qbo-stub";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { parentDevice, parentSigninToken } from "@/lib/db/schema";
+import { hashLinkToken } from "@/lib/parents/signin-links";
+import { credentialRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -117,6 +120,21 @@ describe("connecting a different QuickBooks company", () => {
     await clearRosterOfOtherCompany("2222", admin);
     expect((await db.select().from(signinCode)).map((c) => c.codeHash)).toEqual(["y"]);
     expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ codesDeleted: 1 });
+  });
+
+  it("deletes every unused set-up and reset link and forgets every device, keeping passwords", async () => {
+    const [ana] = await db.select().from(parent).where(eq(parent.email, "ana@example.com"));
+    const used = await mintLink(ana!.id, "setup");
+    await db.update(parentSigninToken).set({ usedAt: new Date() }).where(eq(parentSigninToken.tokenHash, hashLinkToken("setup", used)));
+    await mintLink(ana!.id, "reset");
+    await seedDevice(ana!.id);
+    const [user] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, ana!.id));
+    await seedPassword(user!.id, "a password long enough to keep");
+    await clearRosterOfOtherCompany("2222", admin);
+    expect((await db.select().from(parentSigninToken)).map((r) => r.purpose)).toEqual(["setup"]);
+    expect(await db.select().from(parentDevice)).toEqual([]);
+    expect(await credentialRows(user!.id)).toHaveLength(1);
+    expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ linksDeleted: 1, devicesForgotten: 1 });
   });
 
   it("keeps the old company's links out of the new company's roster pages, and labels them on the person's page", async () => {
