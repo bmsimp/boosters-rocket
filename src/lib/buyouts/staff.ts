@@ -75,7 +75,8 @@ export async function itemsOf(ids: readonly string[], tx?: Tx): Promise<Map<stri
     .where(inArray(sql`${writeQueue.request}->>'buyoutId'`, [...ids])).orderBy(desc(writeQueue.createdAt));
   const rows = tx ? await q.for("update") : await q;
   for (const r of rows) {
-    if (r.request.op !== "invoice_create" && r.request.op !== "invoice_void") continue;
+    // A buy-out's invoice write is never kept as refused (only a roster change saved in the portal first is).
+    if ((r.request.op !== "invoice_create" && r.request.op !== "invoice_void") || r.state === "refused") continue;
     const list = out.get(r.request.buyoutId) ?? [];
     list.push({ id: r.id, op: r.request.op, state: r.state, sent: r.sent });
     out.set(r.request.buyoutId, list);

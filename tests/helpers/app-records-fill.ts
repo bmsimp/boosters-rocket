@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 export const FILL_MIGRATION = "drizzle/0023_app_records.sql";
+/** Migration 0041, whose last statement starts each link of the roster's company aligned with its customer's cached version. */
+export const TOKEN_FILL_MIGRATION = "drizzle/0041_link_synced_token.sql";
 
 /**
  * The lines of 0023's fill that read a column a later migration removed: stage 2 re-keyed those tables to the app's own
@@ -46,8 +48,10 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
 
 /**
  * The statements from the fill's begin marker to its end marker, and the last one, which drops its scratch tables, with
- * the lines of RE_KEYED_SINCE_0023 taken out. The carry-over's audit row is left out: it belongs to the migration's own
- * run. Run them in order on one connection (a transaction): the scratch tables are that session's.
+ * the lines of RE_KEYED_SINCE_0023 taken out, then 0041's fill of each link's `synced_token` from the roster cache, so the
+ * links stand as a migrated database's do (a rename is sent with the link's own version). The carry-over's audit row is
+ * left out: it belongs to the migration's own run. Run them in order on one connection (a transaction): the scratch
+ * tables are that session's.
  */
 export function appRecordsFillStatements(): string[] {
   let text = readFileSync(path.resolve(FILL_MIGRATION), "utf8").replaceAll("\r\n", "\n");
@@ -63,5 +67,7 @@ export function appRecordsFillStatements(): string[] {
   if (begin < 0 || end <= begin || !drop.startsWith("DROP TABLE pg_temp.app_fill_source")) {
     throw new Error(`${FILL_MIGRATION} no longer has the app-records fill between its begin and end markers, followed by the drop of its scratch tables.`);
   }
-  return [...chunks.slice(begin, end), drop];
+  const tokens = readFileSync(path.resolve(TOKEN_FILL_MIGRATION), "utf8").split("\r\n").join("\n").split("--> statement-breakpoint").map((c) => c.trim()).filter(Boolean).at(-1) ?? "";
+  if (!tokens.includes('SET "synced_token" = c."sync_token"')) throw new Error(`${TOKEN_FILL_MIGRATION} no longer ends with the fill of each link's synced_token.`);
+  return [...chunks.slice(begin, end), drop, tokens];
 }

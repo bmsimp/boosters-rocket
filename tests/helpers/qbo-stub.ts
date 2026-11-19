@@ -115,7 +115,7 @@ export type StubQuirks = {
   fullNames: boolean;                 // a customer read by id carries FullyQualifiedName, built from its ParentRef chain
   balances: boolean;                  // a customer read by id carries Balance and BalanceWithJobs worked out from `invoices`
   inactiveWithBalance: string | null; // refuse making a customer that owes something inactive, with this code ("6220", as the sandbox did on 2026-11-17)
-  parentVersionFollows: boolean;      // an update of a customer under a family raises the family's own SyncToken too (not known of QuickBooks: the check's "familyVersionRose" says)
+  parentVersionFollows: boolean;      // an update of a customer under a family, or a create under it, raises the family's own SyncToken too (not known of QuickBooks: the check's "familyVersionRose" says)
   inactiveWithActiveUnder: string | null; // refuse making a customer inactive while an active customer is under it, with this code ("800", as the sandbox did on 2026-11-17)
   copyFamilyContact: boolean;         // a sub-customer made under a family is given the family's phone and address
   invoiceLinkHost: string | null;     // the host of a made invoice's InvoiceLink; null for no link
@@ -283,6 +283,11 @@ export async function startQboStub(): Promise<QboStub> {
           const made: Record<string, unknown> = { ...copied, ...sent, Id: next, SyncToken: "0", Active: true, MetaData: { CreateTime: new Date().toISOString(), LastUpdatedTime: new Date().toISOString() } };
           for (const f of stub.quirks.createDrops) delete made[f];
           stub.customers.push(made);
+          // A customer made under a family raises the family's version too, as an update under it does (parentVersionFollows).
+          if (stub.quirks.parentVersionFollows && parentId !== undefined) {
+            const parent = stub.customers.find((c) => c.Id === parentId);
+            if (parent) parent.SyncToken = String(Number(parent.SyncToken ?? 0) + 1);
+          }
           if (stub.loseUpdateAnswer) { req.socket.destroy(); return; }
           if (stub.updateServerFault) return json(stub.updateServerFault.status, { ...fault(stub.updateServerFault.code), Fault: { ...fault(stub.updateServerFault.code).Fault, type: "SystemFault" } });
           return json(200, { Customer: made, time: new Date().toISOString() });
