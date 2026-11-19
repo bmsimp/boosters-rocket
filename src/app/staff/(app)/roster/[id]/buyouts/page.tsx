@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
+import { familyRecordAt } from "@/lib/families/address";
 import { loadFamilyBuyouts, type FamilyBuyout } from "@/lib/buyouts/staff";
 import { formatMoney } from "@/lib/money/cents";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
@@ -11,11 +12,10 @@ import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { closeBuyoutAction } from "../../../reconciliation/buyout-actions";
 import { CloseBuyout } from "../../../reconciliation/close-buyout";
+import { familyPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Buy-outs" };
 export const dynamic = "force-dynamic";
-
-const ID_MAX = 64;
 
 /** What the family's figures last said of the invoice, in words; what is owed on it only to staff who may see money. */
 function InvoiceWords({ b, money }: { b: FamilyBuyout; money: boolean }) {
@@ -36,17 +36,16 @@ function InvoiceWords({ b, money }: { b: FamilyBuyout; money: boolean }) {
 export default async function FamilyBuyoutsPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireStaffPage("Roster.Read");
   const { id } = await params;
-  let qboId: string;
-  try { qboId = decodeURIComponent(id); } catch { notFound(); }
-  if (qboId.length === 0 || qboId.length > ID_MAX) notFound();
+  // The app's own family id (stage 3 of the app-owned families spec): anything that isn't a family record's answers 404.
+  const familyId = await familyRecordAt(id);
+  if (!familyId) notFound();
   // The tag first: the buy-outs shown are that company's or a later one's, never an earlier one's.
   const rosterTag = await currentRosterTag();
-  const { familyId, familyName, buyouts } = await loadFamilyBuyouts(qboId);
+  const { familyName, buyouts } = await loadFamilyBuyouts(familyId);
   if (familyName === null && buyouts.length === 0) notFound();
-  // Naming the app's family (stage 2 of the app-owned families spec); its customer only for one the roster holds with no
-  // family record yet. Older rows name the customer, and the audit page's record filter finds both.
+  // Naming the app's family. Older rows name the customer, and the audit page's record filter finds both.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "volunteer.buyout.family.read", permission: "Roster.Read",
-    ...(familyId === null ? { targetType: "qbo_customer", targetId: qboId } : { targetType: "family", targetId: String(familyId) }), ip: ctx.ip });
+    targetType: "family", targetId: String(familyId), ip: ctx.ip });
   const money = can(ctx.effective, "Finance.Balance.Read");
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
   const columns: Column<FamilyBuyout>[] = [
@@ -63,7 +62,7 @@ export default async function FamilyBuyoutsPage({ params }: { params: Promise<{ 
     <main className="wrap single">
       <h1 className="page-title">Volunteer buy-outs</h1>
       <p className="lede">{familyName ?? "A family no longer on the roster"}: each time it chose to pay instead of volunteering, and where that stands.{" "}
-        {familyName !== null && <Link href={`/staff/roster/${encodeURIComponent(qboId)}`}>Back to the family</Link>}</p>
+        {familyName !== null && <Link href={familyPage(familyId)}>Back to the family</Link>}</p>
       <section className="box" aria-labelledby="family-buyouts-h"><h2 id="family-buyouts-h">Buy-outs{buyouts.length ? ` (${buyouts.length})` : ""}</h2>
         {buyouts.length === 0 ? <Notice tone="done" live="none">This family hasn&apos;t chosen to pay instead of volunteering.</Notice>
           : <DataTable caption="The family's buy-outs, newest first" captionHidden columns={columns} rows={buyouts} rowKey={(b) => b.id} />}

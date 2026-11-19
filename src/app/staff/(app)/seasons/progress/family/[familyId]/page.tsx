@@ -4,6 +4,7 @@ import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { writeAudit } from "@/lib/audit/log";
 import { isUuid } from "@/lib/seasons/ids";
+import { familyRecordAt } from "@/lib/families/address";
 import { pairKey } from "@/lib/seasons/kinds";
 import { linesLeft, type Line, type SubjectId } from "@/lib/seasons/progress";
 import { defaultProgressSeasonId, loadFamilyProgress, type FamilyProgress } from "@/lib/seasons/staff-progress";
@@ -51,14 +52,14 @@ export default async function FamilyProgressPage({ params, searchParams }: {
 }) {
   const ctx = await requireStaffPage("Season.Progress.Read");
   const [{ familyId }, sp] = await Promise.all([params, searchParams]);
-  // Both come from the address, so both are checked before anything is looked up. The family is named by its QuickBooks
-  // id, as the address always has; loadFamilyProgress() finds the app's own family for it, in one place.
-  let qboId: string;
-  try { qboId = decodeURIComponent(familyId); } catch { notFound(); }
+  // Both come from the address, so both are checked before anything is looked up. The family is named by the app's own
+  // id (stage 3 of the app-owned families spec): anything that isn't a family record's answers 404, before any other read.
   const asked = typeof sp.season === "string" ? sp.season : null;
-  if (qboId.length === 0 || qboId.length > 64 || (asked !== null && !isUuid(asked))) notFound();
+  if (asked !== null && !isUuid(asked)) notFound();
+  const record = await familyRecordAt(familyId);
+  if (!record) notFound();
   const seasonId = asked ?? await defaultProgressSeasonId();
-  const progress = seasonId ? await loadFamilyProgress(qboId, seasonId, can(ctx.effective, "Finance.Balance.Read") ? "all" : "none") : null;
+  const progress = seasonId ? await loadFamilyProgress(record, seasonId, can(ctx.effective, "Finance.Balance.Read") ? "all" : "none") : null;
   if (!progress) notFound();
   // A staff read of one family's data (spec §5): recorded before anything is shown, naming the app's own family.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "season.progress.family.read", permission: "Season.Progress.Read",

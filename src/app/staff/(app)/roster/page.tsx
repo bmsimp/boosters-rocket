@@ -1,18 +1,19 @@
 import { requireStaffPage } from "@/lib/guards";
 import { can } from "@/lib/permissions/effective";
 import { loadRosterPage } from "@/lib/roster/queries";
+import { linksOfCustomers } from "@/lib/families/links";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { rosterCounts } from "../settings/quickbooks/roster-counts";
 import { DataTable, type Column } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { DisconnectedNotice, Freshness } from "./freshness";
 import { CreateBox, WhatChanges } from "./changes";
+import { familyPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Roster" };
 export const dynamic = "force-dynamic";
 
 type Row = { id: string; name: string; students: number | null; parents: number | null; active: boolean };
-const entryHref = (id: string) => `/staff/roster/${encodeURIComponent(id)}`;
 
 export default async function RosterPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireStaffPage("Roster.Read");
@@ -32,11 +33,15 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
     ? roster.members.filter((m) => matches(m.displayName)).map((m) => ({ id: m.qboId, name: m.displayName, students: null, parents: null, active: m.active }))
     : roster.families.filter((f) => matches(f.customer.displayName)).map((f) => ({ id: f.customer.qboId, name: f.customer.displayName,
         students: f.students.length, parents: f.parents.length, active: f.customer.active }));
-  const hasPage = new Set(!roster ? [] : roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId));
+  // Each family's (or member's) page is addressed by its app family record, found through the family kind of link for
+  // the whole list in one lookup: a customer with none has no page, and its name links nowhere.
+  const withPage = !roster ? [] : roster.kind === "flat" ? roster.members.map((m) => m.qboId) : roster.families.map((f) => f.customer.qboId);
+  const pageOf = (await linksOfCustomers({ families: withPage, students: [] })).familyOfCustomer;
+  const named = (qboId: string | null, name: string) => { const at = qboId === null ? undefined : pageOf.get(qboId); return at ? <a href={familyPage(at)}>{name}</a> : name; };
   const noun = roster?.kind === "flat" ? "member" : "family";
   const nouns = roster?.kind === "flat" ? "members" : "families";
   const columns: Column<Row>[] = [
-    { key: "name", header: roster?.kind === "flat" ? "Member" : "Family", rowHeader: true, sorted: "ascending", cell: (r) => <a href={entryHref(r.id)}>{r.name}</a> },
+    { key: "name", header: roster?.kind === "flat" ? "Member" : "Family", rowHeader: true, sorted: "ascending", cell: (r) => named(r.id, r.name) },
     ...(roster?.kind === "flat" ? [] : [
       { key: "students", header: "Students", numeric: true, cell: (r: Row) => r.students },
       { key: "parents", header: "Parents", numeric: true, cell: (r: Row) => r.parents },
@@ -81,7 +86,7 @@ export default async function RosterPage({ searchParams }: { searchParams: Promi
           <p>Things to tidy up in QuickBooks, or in the portal&apos;s sign-ins. Nothing here is changed by itself: fix each in QuickBooks, or from a family&apos;s page.</p>
           <DataTable caption="What to tidy, for each customer" captionHidden rowKey={(a) => a.key} rows={page.attention.map((a, i) => ({ ...a, key: `${a.rule}-${a.qboId ?? a.name}-${i}` }))}
             columns={[
-              { key: "name", header: "Customer", rowHeader: true, cell: (a) => (a.qboId && hasPage.has(a.qboId) ? <a href={entryHref(a.qboId)}>{a.name}</a> : a.name) },
+              { key: "name", header: "Customer", rowHeader: true, cell: (a) => named(a.qboId, a.name) },
               { key: "detail", header: "What to tidy", cell: (a) => a.detail },
             ]} />
         </section>

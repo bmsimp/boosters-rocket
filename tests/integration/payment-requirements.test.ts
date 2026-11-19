@@ -218,7 +218,7 @@ describe("how much is left to pay is said only from current figures, and only to
     const without = textOf(await renderPage(RequirementProgressPage, params));
     expect(without).toContain("Not paid yet");
     expect(without).not.toContain("$40.50");
-    expect(JSON.stringify(await loadFamilyProgress(FAMILY, fall.seasonId, "none"))).not.toContain("$40.50");
+    expect(JSON.stringify(await loadFamilyProgress(await recordOfCustomer(FAMILY, "family"), fall.seasonId, "none"))).not.toContain("$40.50");
     asStaff(await withRole("treasurer@club.org", ["Season.Progress.Read", "Finance.Balance.Read"]));
     expect(textOf(await renderPage(RequirementProgressPage, params))).toContain("Not paid yet ($40.50 left to pay)");
   });

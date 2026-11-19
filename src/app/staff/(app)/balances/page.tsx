@@ -8,6 +8,7 @@ import { CalendarDate } from "@/app/components/calendar-date";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
+import { familyBalancePage } from "@/app/staff/(app)/family-pages";
 import { OneButton } from "../seasons/forms";
 import { askForMoneyRunAction } from "./actions";
 import { WorthALook } from "./worth-a-look";
@@ -15,7 +16,6 @@ import { WorthALook } from "./worth-a-look";
 export const metadata = { title: "Balances" };
 export const dynamic = "force-dynamic";
 
-const familyHref = (qboId: string) => `/staff/balances/${encodeURIComponent(qboId)}`;
 const familiesWord = (n: number) => `${n} ${n === 1 ? "family" : "families"}`;
 
 function Run({ run }: { run: MoneyRunView }) {
@@ -37,7 +37,7 @@ function Run({ run }: { run: MoneyRunView }) {
 function FamilyTable({ rows, caption }: { rows: BalanceRow[]; caption: string }) {
   return (
     <DataTable caption={caption} rows={rows} rowKey={(r) => r.familyQboId} columns={[
-      { key: "name", header: "Family", rowHeader: true, cell: (r) => <Link href={familyHref(r.familyQboId)}>{r.name}</Link> },
+      { key: "name", header: "Family", rowHeader: true, cell: (r) => (r.familyId === null ? r.name : <Link href={familyBalancePage(r.familyId)}>{r.name}</Link>) },
       { key: "open", header: "Open invoices", cell: (r) => (r.figures === null ? "Not read from QuickBooks yet" : r.figures.openCount === 0 ? "Nothing owed"
         : <>{r.figures.openCount === 1 ? "1 open invoice" : `${r.figures.openCount} open invoices`}{r.figures.oldestDue && <>, oldest due <CalendarDate iso={r.figures.oldestDue} /></>}</>) },
       { key: "read", header: "Read from QuickBooks", cell: (r) => (

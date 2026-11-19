@@ -99,6 +99,18 @@ describe("the audit page's filter for one family or student", () => {
     expect(await targets(`family:${chen}`)).toEqual([`family:${chen}`, `family:${chen}`, "family:20", "qbo_customer:20", `signature_request:${FORM_MOVED}`].sort());
   });
 
+  it("finds a family's roster page reads written while the page was addressed by its customer, and those written since, by its record", async () => {
+    // Before stage 3's third slice: the roster page read under the customer. Since: under the app's own family.
+    await row("roster.family.read", "qbo_customer", "10");
+    await row("roster.family.read", "family", rivera);
+    await row("roster.family.read", "family", chen);
+    const reads = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+      .filter((r) => r.action === "roster.family.read").map((r) => `${r.targetType}:${r.targetId}`).sort();
+    expect(await reads(`family:${rivera}`)).toEqual([`family:${rivera}`, "qbo_customer:10"].sort());
+    expect(await reads(rivera)).toEqual([`family:${rivera}`, "qbo_customer:10"].sort());
+    expect(await reads(`family:${chen}`)).toEqual([`family:${chen}`]);
+  });
+
   it("finds a student's ticks and moved places under the old key and the new, and never another's whose id ends the same", async () => {
     expect(await targets(`student:${leo}`)).toEqual([`requirement_progress:${REQ}:12`, `requirement_progress:${REQ}:${leo}`, "student:12", `student:${leo}`,
       `signature_request:${FORM_OLD}`, `signature_request:${FORM_NEW}`, `signature_request:${FORM_MOVED}`].sort());

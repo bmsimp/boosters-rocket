@@ -4,6 +4,7 @@ import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, guardian, heldAddress, parent, qboCustomer, staffUser, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
 import { familyLabel } from "@/app/components/family-label";
+import type { AppFamilyId } from "@/lib/families/ids";
 import type { HeldAddress } from "./access-rules";
 import { loadDecision } from "./reconcile";
 
@@ -13,8 +14,10 @@ export type FamilySignin = { parentId: string | null; sourceQboId: string | null
 /**
  * `previousCompany`: the link was closed when a different QuickBooks company was connected. Its `familyQboId` is the
  * old company's, so a page shows the family name as text and never links it to, or looks it up in, the roster.
+ * `familyId`: the membership's own app family (`guardian.family_id`), which the family's page is addressed by; null for
+ * a previous company's link, which has none.
  */
-export type PersonFamily = { familyQboId: string; familyName: string; previousCompany: boolean; kind: AccessKind; words: string };
+export type PersonFamily = { familyQboId: string; familyId: AppFamilyId | null; familyName: string; previousCompany: boolean; kind: AccessKind; words: string };
 export type PersonRow = { parentId: string; name: string; email: string; blocked: boolean; families: PersonFamily[]; lastSigninAt: string | null; welcomedAt: string | null };
 export type PersonDetail = PersonRow & { blockedReason: string | null; blockedAt: string | null; welcomeOwed: boolean };
 export type DecidedHold = { email: string; approved: string[]; rejected: string[]; note: string | null; decidedAt: string | null; decidedBy: string | null };
@@ -67,7 +70,7 @@ async function people(where?: ReturnType<typeof eq>): Promise<PersonDetail[]> {
   return persons.map((p) => ({
     parentId: p.id, name: p.name, email: p.email, blocked: p.blocked,
     families: links.filter((l) => l.parentId === p.id).sort((a, b) => Number(oldCompany(a)) - Number(oldCompany(b)) || numeric(a.familyQboId, b.familyQboId)).map((l) => ({
-      familyQboId: l.familyQboId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!, previousCompany: oldCompany(l),
+      familyQboId: l.familyQboId, familyId: oldCompany(l) ? null : l.familyId, familyName: oldCompany(l) ? PREVIOUS_COMPANY_FAMILY : names.get(l.familyQboId)!, previousCompany: oldCompany(l),
       ...accessWords({ status: l.status, reason: l.disabledReason, blocked: p.blocked,
         otherFamilies: held.find((h) => h.email === p.email)?.families.filter((f) => f.qboId !== l.familyQboId).map((f) => f.name) ?? null }) })),
     lastSigninAt: last.get(p.id)?.toISOString() ?? null, welcomedAt: p.welcomedAt?.toISOString() ?? null,

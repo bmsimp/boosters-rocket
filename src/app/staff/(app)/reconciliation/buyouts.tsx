@@ -7,6 +7,7 @@ import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { closeBuyoutAction } from "./buyout-actions";
 import { CloseBuyout } from "./close-buyout";
+import { familyBuyoutsPage, familyPage } from "@/app/staff/(app)/family-pages";
 
 /**
  * The volunteer buy-outs staff must look at (v1 spec §8.4, §11.5): one QuickBooks no longer shows, one whose student
@@ -26,8 +27,8 @@ export async function BuyoutsToLook({ showAmounts, canChange = false }: { showAm
         <DataTable caption="Volunteer buy-outs that need a look" captionHidden rowKey={(b) => b.id} rows={items}
           columns={[
             { key: "family", header: "Family", rowHeader: true, cell: (b) => (b.familyQboId === null ? <>{b.familyName ?? "A family no longer on the roster"}</> : (
-              <><Link href={`/staff/roster/${encodeURIComponent(b.familyQboId)}`}>{b.familyName ?? "A family no longer on the roster"}</Link>
-                <span className="when"><Link href={`/staff/roster/${encodeURIComponent(b.familyQboId)}/buyouts`}>Its buy-outs</Link></span></>)) },
+              <><Link href={familyPage(b.familyId)}>{b.familyName ?? "A family no longer on the roster"}</Link>
+                <span className="when"><Link href={familyBuyoutsPage(b.familyId)}>Its buy-outs</Link></span></>)) },
             { key: "requirement", header: "Requirement", cell: (b) => <>{b.requirement}{b.subjectName ? `, for ${b.subjectName}` : ""}</> },
             ...(showAmounts ? [{ key: "amount", header: "Amount", numeric: true, cell: (b: (typeof items)[number]) => formatMoney(b.amountCents) }] : []),
             { key: "what", header: "What happened", cell: (b) => <>{b.words}{b.code ? ` (${b.code})` : ""}</> },

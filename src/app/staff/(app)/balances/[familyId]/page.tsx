@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { writeAudit } from "@/lib/audit/log";
+import { familyRecordAt } from "@/lib/families/address";
 import type { StoredInvoice } from "@/lib/db/schema";
 import { formatMoney } from "@/lib/money/cents";
 import { loadFamilyBalance } from "@/lib/money/balances";
@@ -32,15 +33,14 @@ function InvoiceLine({ invoice, paid }: { invoice: StoredInvoice; paid: boolean 
 export default async function FamilyBalancePage({ params }: { params: Promise<{ familyId: string }> }) {
   const ctx = await requireStaffPage("Finance.Balance.Read");
   const { familyId } = await params;
-  let familyQboId: string;
-  try { familyQboId = decodeURIComponent(familyId); } catch { notFound(); }
-  if (familyQboId.length > 64) notFound();
-  const family = await loadFamilyBalance(familyQboId);
+  // The app's own family id (stage 3 of the app-owned families spec): anything that isn't a family record's answers 404.
+  const record = await familyRecordAt(familyId);
+  if (!record) notFound();
+  const family = await loadFamilyBalance(record);
   if (!family) notFound();
-  // A staff read of one family's balance and invoices (v1 spec §13): recorded before anything is shown, naming the
-  // app's family, or the customer for one with no family record (as the family's buy-outs page does).
+  // A staff read of one family's balance and invoices (v1 spec §13): recorded before anything is shown, naming the app's family.
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "money.family.read", permission: "Finance.Balance.Read",
-    ...(family.familyId === null ? { targetType: "qbo_customer", targetId: familyQboId } : { targetType: "family", targetId: String(family.familyId) }), ip: ctx.ip });
+    targetType: "family", targetId: String(family.familyId), ip: ctx.ip });
   const f = family.figures;
   const total = f && f.currency !== null ? formatMoney(f.totalCents, f.currency) : null;
   return (

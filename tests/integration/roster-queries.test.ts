@@ -15,6 +15,8 @@ import { refreshRoster } from "@/lib/roster/refresh";
 import { saveShape } from "@/lib/roster/shape";
 import { loadRosterPage, previewShape, rosterEntry, entryFrom } from "@/lib/roster/queries";
 import { resetDb, seedParent, seedGuardian } from "../helpers/db";
+import { recordOfCustomer } from "../helpers/app-records";
+import { asAppFamilyId } from "@/lib/families/ids";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 
 let stub: QboStub;
@@ -23,6 +25,8 @@ afterAll(() => stub.close());
 
 const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
 const staffOp = { actor: { door: "staff" as const, id: "5a1e7a2e-0000-4000-8000-000000000001", label: "admin@example.org" }, ip: null };
+/** A family's page is addressed by its app family record: the roster entry of the customer this one's family record is linked to. */
+const entryOf = async (customer: string) => rosterEntry(await recordOfCustomer(customer, "family"));
 
 describe("what the roster pages load", () => {
   beforeEach(async () => {
@@ -102,18 +106,19 @@ describe("what the roster pages load", () => {
     expect(await previewShape({ kind: "flat", memberTypeIds: ["3"] })).toMatchObject({ members: 2, outside: 7, samples: { members: ["Leo Rivera", "Stray Student"] } });
   });
 
-  it("finds one family with its sign-ins, and nothing for a customer outside the shape", async () => {
+  it("finds one family by its app record, with its sign-ins, and nothing for a record whose customer is outside the shape", async () => {
     await saveShape(FZN_SHAPE, staffOp);
     await refreshRoster(worker);
     const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10" });
-    const entry = await rosterEntry("10");
+    const entry = await entryOf("10");
     if (entry?.kind !== "family") throw new Error("expected a family");
     expect(entry.family.parents.map((p) => [p.displayName, p.email, p.phone])).toEqual([["Ana Rivera", "ana@example.com", "555-0101"]]);
     expect(entry.signIns.map((s) => s.email)).toEqual(["ana@example.com"]);
-    expect(await rosterEntry("30")).toBeNull(); // Lincoln High: a School
-    expect(await rosterEntry("11")).toBeNull(); // a parent is not a page of its own
-    expect(await rosterEntry("nope")).toBeNull();
+    // A family record (made inactive, as 0023 made one) whose customer isn't a family of the roster has no entry.
+    expect(await entryOf("30")).toBeNull(); // Lincoln High: a School
+    expect(await entryOf("11")).toBeNull(); // a parent is not a page of its own
+    expect(await rosterEntry(asAppFamilyId(crypto.randomUUID()))).toBeNull(); // no such record: no link, no entry
   });
 
   it("a family's page lists only its own sign-ins", async () => {
@@ -128,7 +133,7 @@ describe("what the roster pages load", () => {
     await seedGuardian({ parentId: mei.id, familyQboId: "20" });
     await seedGuardian({ parentId: lost.id, familyQboId: "POC-FAMILY-1" });
     const emails = async (id: string) => {
-      const e = await rosterEntry(id);
+      const e = await entryOf(id);
       if (e?.kind !== "family") throw new Error("expected a family");
       return e.signIns.map((s) => s.email).sort();
     };
@@ -139,14 +144,14 @@ describe("what the roster pages load", () => {
   it("flat: a customer outside the member types has no page", async () => {
     await saveShape({ kind: "flat", memberTypeIds: ["2"] }, staffOp);
     await refreshRoster(worker);
-    expect(await rosterEntry("12")).toBeNull(); // Leo Rivera: a Student
-    expect(await rosterEntry("30")).toBeNull();
+    expect(await entryOf("12")).toBeNull(); // Leo Rivera: a Student
+    expect(await entryOf("30")).toBeNull();
   });
 
   it("flat: finds a member", async () => {
     await saveShape({ kind: "flat", memberTypeIds: ["2"] }, staffOp);
     await refreshRoster(worker);
-    expect(await rosterEntry("11")).toMatchObject({ kind: "member", member: { displayName: "Ana Rivera", email: "ana@example.com" } });
+    expect(await entryOf("11")).toMatchObject({ kind: "member", member: { displayName: "Ana Rivera", email: "ana@example.com" } });
   });
 
   it("entryFrom: finds a family, a member, and nothing else, from a page already loaded", async () => {

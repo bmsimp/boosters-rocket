@@ -20,6 +20,7 @@ import { expirePreviousCompany, getPreviousCompany, PREVIOUS_COMPANY_KEY } from 
 import { resetDb, seedGuardian, seedParent, seedParentSession } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helpers/qbo-stub";
+import { recordOfCustomer } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -132,7 +133,7 @@ describe("connecting a different QuickBooks company", () => {
     expect(page.attention.filter((a) => a.rule === "signin_unknown" || a.rule === "inactive_with_signin")).toEqual([]);
     expect(JSON.stringify(page)).not.toContain("Ana Rivera");
     expect(JSON.stringify(page)).not.toContain("Mei Chen");
-    expect((await rosterEntry("12"))!.signIns).toEqual([]);
+    expect((await rosterEntry(await recordOfCustomer("12", "family")))!.signIns).toEqual([]);
     const person = await getPerson(ana!.id);
     expect(person!.families.map((f) => [f.familyName, f.kind, f.words])).toEqual([
       [OLD_LABEL, "cannot", "Can't sign in: a different QuickBooks company was connected"],

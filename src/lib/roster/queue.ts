@@ -16,7 +16,7 @@ import { afterStudentMoved, applyWritten, owedBy, REFRESH_ASK_KEY, sendWrite } f
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
-import { familyLinkedTo, linksOf } from "@/lib/families/links";
+import { customerOfFamily, linksOf } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 
 export const WRITE_QUEUE_JOB = "roster.write_queue";
@@ -197,7 +197,9 @@ export async function runWriteQueue(now: Date = new Date()): Promise<{ ran: bool
  */
 export type QueueView = {
   id: string; state: "waiting" | "stuck"; write: QueuedWrite; words: string; askedBy: string | null; askedAt: string;
-  lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null; familyQboId: string | null;
+  lastTriedAt: string; nextTryAt: string | null; tries: number; lastCode: string | null;
+  /** The family record it is filed under, for the link to that family's page: null when it has none, or that record no link in the roster's company (no page). */
+  familyId: AppFamilyId | null;
 };
 
 /**
@@ -219,17 +221,18 @@ export function describeWrite(w: QueuedWrite, names: Map<string, string>, o: { s
 }
 
 /**
- * Every waiting and stuck item, newest first; for one family, only the items under or about it. The staff family page
- * still names its family by customer (`familyQboId`, from its address), turned into that customer's family record once
- * here, through a family link only: an item filed under that record, one whose target is that customer, or a move into
- * it (its request names the family moved to by customer). A customer with no family record still finds its items by
- * target. Each item's family record is turned back into its customer for the page's link in one lookup for the list.
- * With `showAmounts` a buy-out invoice's words carry its amount (describeWrite).
+ * Every waiting and stuck item, newest first; for one family (`familyId`, the app's family its staff page's address
+ * names), only the items under or about it: an item filed under that record, one whose target is the family's
+ * customer, or a move into it (what is sent names the family moved to by customer). The record's customer is found once
+ * here, through its own link in the roster's company; with none, only the items filed under the record are found. Each
+ * item's family record is offered as the page's link only when it has a link (one lookup for the list). With
+ * `showAmounts` a buy-out invoice's words carry its amount (describeWrite).
  */
-export async function loadOpenWrites(o: { familyQboId?: string; showAmounts?: boolean } = {}): Promise<QueueView[]> {
-  const familyId = o.familyQboId === undefined ? null : await familyLinkedTo(o.familyQboId);
-  const where = and(inArray(writeQueue.state, ["waiting", "stuck"]), o.familyQboId === undefined ? undefined
-    : or(familyId === null ? undefined : eq(writeQueue.familyId, familyId), eq(writeQueue.targetQboId, o.familyQboId), sql`${writeQueue.request}->>'toFamilyQboId' = ${o.familyQboId}`));
+export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: boolean } = {}): Promise<QueueView[]> {
+  const customer = o.familyId === undefined ? null : await customerOfFamily(o.familyId);
+  const where = and(inArray(writeQueue.state, ["waiting", "stuck"]), o.familyId === undefined ? undefined
+    : or(eq(writeQueue.familyId, o.familyId), customer === null ? undefined : eq(writeQueue.targetQboId, customer),
+      customer === null ? undefined : sql`${writeQueue.request}->>'toFamilyQboId' = ${customer}`));
   const rows = await db.select().from(writeQueue).where(where).orderBy(desc(writeQueue.createdAt));
   if (!rows.length) return [];
   const names = new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)).map((c) => [c.qboId, c.name]));
@@ -238,7 +241,7 @@ export async function loadOpenWrites(o: { familyQboId?: string; showAmounts?: bo
   return rows.map((r) => ({
     id: r.id, state: r.state as "waiting" | "stuck", write: r.request, words: describeWrite(r.request, names, { showAmounts: o.showAmounts }), askedBy: r.askedByLabel, askedAt: r.createdAt.toISOString(),
     lastTriedAt: r.lastTriedAt.toISOString(), nextTryAt: r.nextTryAt?.toISOString() ?? null, tries: r.tries, lastCode: r.lastCode,
-    familyQboId: r.familyId === null ? null : links.customerOfFamily.get(r.familyId) ?? null,
+    familyId: r.familyId !== null && links.customerOfFamily.has(r.familyId) ? r.familyId : null,
   }));
 }
 

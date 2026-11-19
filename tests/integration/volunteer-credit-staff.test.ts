@@ -102,7 +102,7 @@ describe("the credit permission, pages and actions", () => {
     const creditActions = [() => addCheckInAction(forB.id, tag), () => removeCreditAction(credit!.id, tag, "Mistake"),
       () => addOutsideCreditAction(tag, famA, { requirementId: hours.id, who: "family", amount: "1", note: "Raked leaves" })];
     const eventActions = [() => renewCheckInCodeAction(shift.id), () => removeSignupAction(forB.id)];
-    const creditPages = [() => pageOutcome(CreditPage), () => pageOutcome(FamilyCreditPage, { params: { familyId: FAMILY_A.family.qboId } })];
+    const creditPages = [() => pageOutcome(CreditPage), () => pageOutcome(FamilyCreditPage, { params: { familyId: famA } })];
     const sheet = () => pageOutcome(CheckInSheetPage, { params: { shiftId: shift.id } });
     const snapshot = async () => JSON.stringify([await credits(), await db.select().from(volunteerShift), await db.select().from(volunteerSignup).orderBy(asc(volunteerSignup.id))]);
     const before = await snapshot();
@@ -214,7 +214,7 @@ describe("check-ins on a shift's sign-up list", () => {
     expect(page).not.toContain(reason);
     // Staff see it among the removed credit, with the reason.
     asStaff(writer);
-    const staffPage = textOf(await renderPage(FamilyCreditPage, { params: { familyId: FAMILY_A.family.qboId } }));
+    const staffPage = textOf(await renderPage(FamilyCreditPage, { params: { familyId: String(await familyOf(FAMILY_A.family.qboId)) } }));
     expect(staffPage).toContain("Removed credit");
     expect(staffPage).toContain(`Reason (staff only): ${reason}`);
   });
@@ -262,10 +262,13 @@ describe("removing one person's sign-up", () => {
 describe("a family's credit page", () => {
   it("is audited before it shows anything, shows each credit with its note and where it is spent, and answers 404 for a family the roster doesn't show", async () => {
     const { b, famB } = await shared();
-    for (const familyId of ["no-such-family", "x".repeat(65), famB]) expect(await pageOutcome(FamilyCreditPage, { params: { familyId } })).toEqual({ notFound: true });
+    // Text, its QuickBooks id (the old address), a uuid that names nothing, a student's record: none is a family record.
+    for (const familyId of ["no-such-family", "x".repeat(65), FAMILY_B.family.qboId, crypto.randomUUID(), String(await studentOf(FAMILY_B.students[0]!.qboId))]) {
+      expect(await pageOutcome(FamilyCreditPage, { params: { familyId } }), familyId).toEqual({ notFound: true });
+    }
     expect(await audits("volunteer.credit.family.read")).toEqual([]);
-    const page = textOf(await renderPage(FamilyCreditPage, { params: { familyId: FAMILY_B.family.qboId } }));
-    // The page's address names the family by its QuickBooks id; the audit row names the app's own family.
+    const page = textOf(await renderPage(FamilyCreditPage, { params: { familyId: famB } }));
+    // The page's address and its audit row name the app's own family.
     expect(await audits("volunteer.credit.family.read")).toMatchObject([{ actorId: writer.id, permission: "Volunteer.Credit.ReadWrite", targetType: "family", targetId: famB }]);
     expect(page).toContain(FAMILY_B.family.name);
     expect(page).toContain(`Done outside the portal: ${TWO_FAMILY_HOURS}`);
@@ -273,7 +276,10 @@ describe("a family's credit page", () => {
     expect(page).toContain(`Counts as 2 hours toward ${TWO_FAMILY_HOURS}.`);
     expect(page).toContain("2 of 6 hours done, signed up for 3");
     expect(page).not.toContain(FAMILY_A.family.name);
-    const list = textOf(await renderPage(CreditPage));
+    const listed = await renderPage(CreditPage), list = textOf(listed);
+    // Each family links to its own page by its app record, never by its customer.
+    expect(listed).toContain(`href="/staff/volunteer/credit/${famB}"`);
+    expect(listed).not.toContain(`href="/staff/volunteer/credit/${FAMILY_B.family.qboId}"`);
     expect(list).toContain(`${FAMILY_A.family.name} 1 credit`);
     expect(list).toContain(`${FAMILY_B.family.name} 1 credit`);
   });

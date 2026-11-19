@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { familyRecordAt } from "@/lib/families/address";
 import { requireStaffPage } from "@/lib/guards";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { familyCreditDetail, type StaffCreditLine } from "@/lib/volunteer/staff-credit";
@@ -50,10 +51,13 @@ function CreditTable({ caption, credits, remove }: { caption: string; credits: S
 export default async function FamilyCreditPage({ params }: { params: Promise<{ familyId: string }> }) {
   const ctx = await requireStaffPage("Volunteer.Credit.ReadWrite");
   const { familyId } = await params;
+  // The app's own family id (stage 3 of the app-owned families spec): anything that isn't a family record's answers 404.
+  const record = await familyRecordAt(familyId);
+  if (!record) notFound();
   // Read before the roster: a change of company in between makes the tag the older one, and a write is refused.
   const rosterTag = await currentRosterTag();
-  const detail = familyId.length <= 64 ? await familyCreditDetail(familyId, rosterTag,
-    { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: "Volunteer.Credit.ReadWrite" }) : null;
+  const detail = await familyCreditDetail(record, rosterTag,
+    { actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, ip: ctx.ip, permission: "Volunteer.Credit.ReadWrite" });
   if (!detail) notFound();
   const { family } = detail;
   const options = detail.requirements.map((r) => ({ id: r.id, unit: r.unit, appliesTo: r.appliesTo,
