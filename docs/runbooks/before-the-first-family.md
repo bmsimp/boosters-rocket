@@ -413,8 +413,10 @@ take weeks. Start it as early as you like; it doesn't wait for the parts above.
    mapping screen ships it would refuse the real books
    ([reconnecting QuickBooks, a different company](quickbooks-reconnect.md#connecting-a-different-company)). The
    proof-of-concept host stays on the sandbox; the club's installation is a fresh one ([first install](first-install.md)).
-   **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster lists the
-   club's families with the counts QuickBooks has. **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
+   **Pass:** Health says QuickBooks is "Connected" to the club's company, with no word of a sandbox; Roster's counts
+   line has the counts QuickBooks has. A fresh installation lists no families yet: a read of QuickBooks brings no
+   customer into the portal's own families, and the import that will (the roadmap's S10 and stage 4) isn't built yet.
+   **If not:** [reconnecting QuickBooks](quickbooks-reconnect.md).
 2. **Check the portal's requests against the real books.** Settings, QuickBooks, **Check the portal's requests**,
    **Run the check**. Against the real books it only reads.
    **Pass:** every reading row answers as the portal expects. **If not:** as in part 2; don't switch parent sign-ins on
@@ -508,12 +510,15 @@ work another. Any time before the pilot.
 14. Payment and checklist items are reminded 14 and 3 days before their due date, with no schedule of their own, and
     a payment's reminder says its amount only from figures read in the last few minutes, so most say "Not paid yet".
 15. Staff can make a customer inactive from the roster pages, but not active again: that was left out while building
-    because it widens what the portal changes in QuickBooks. Today a customer is made active again in QuickBooks
-    itself, and the next roster refresh brings it back.
-16. The lead's choice, not the owner's (2026-11-17): making a family inactive is never put on the write queue. When
-    QuickBooks can't be reached part way, it stops, says who was made inactive and who wasn't, asks for a roster
-    refresh where a write's answer was lost, and staff press it again later. One student or parent made inactive by
-    itself still waits on the queue as before.
+    because it widens what the portal changes in QuickBooks. A customer can be made active again in QuickBooks
+    itself, but the portal's own family or student stays inactive: no roster refresh changes the portal's families
+    and students any more. Taking such a change into the portal waits for the mapping screen's "Take QuickBooks'
+    into the app" (the roadmap's stage 4).
+16. The lead's choice, not the owner's (2026-11-17): making a family inactive is never put on the write queue to be
+    sent later. When QuickBooks can't be reached part way, it stops, says who was made inactive and who wasn't, and
+    staff press it again later. A step whose answer was lost asks for a roster refresh and waits on the queue only to
+    be looked for after it, so the portal's own record follows without anything being sent twice. One student or
+    parent made inactive by itself still waits on the queue as before.
 17. The lead's choice, not the owner's (2026-11-17): a credit (a negative balance) is left to QuickBooks. The portal's
     own check stops only an amount owed; whatever QuickBooks refuses is told in words.
 18. The lead's choice, not the owner's (2026-11-17): when a family is made inactive, its own last write is sent with

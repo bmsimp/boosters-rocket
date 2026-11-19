@@ -160,7 +160,7 @@ describe("signing up", () => {
     const [hours] = await db.insert(requirement).values({ stepId: Object.values(seeded.stepIds)[0]!, kind: "volunteer", title: "Student hours", appliesTo: "student", amount: 6, amountUnit: "hours", position: 0 }).returning();
     const { shifts: [shift] } = await seedEvent({ shifts: [{ startsAt: "09:00", endsAt: "12:00", requirementIds: [hours!.id] }] });
     await seedSignup({ shiftId: shift!.id, familyQboId: FAMILY_B.family.qboId, signedUpBy: b.identity.parentId, student: BARNABY! });
-    await moveInCache([BARNABY!.qboId], FAMILY_A.family.qboId); // as a roster read leaves it: the app's records follow
+    await moveInCache([BARNABY!.qboId], FAMILY_A.family.qboId); // as a move staff make leaves it: the app's records follow
     const season = (await loadMySeason(ctxOf(a.identity)))!;
     expect(season.steps[0]!.students.find((s) => s.name === BARNABY!.name)!.lines.map((l) => l.words)).toEqual(["0 of 6 hours done"]);
     const view = (await loadShiftForMe(ctxOf(a.identity), shift!.id))!;
@@ -389,7 +389,7 @@ describe("cancelling", () => {
     const { a, mine } = await seedOwn();
     const early = new Date("2027-03-01T12:00:00Z");
     expect((await loadMyVolunteering(ctxOf(a.identity), early)).signups.map((s) => s.id)).toEqual([mine.id]);
-    await moveInCache([AURELIO!.qboId], FAMILY_B.family.qboId); // as a roster read leaves it: the app's records follow
+    await moveInCache([AURELIO!.qboId], FAMILY_B.family.qboId); // as a move staff make leaves it: the app's records follow
     const view = await loadMyVolunteering(ctxOf(a.identity), early);
     expect(view.signups).toEqual([]);
     expect(JSON.stringify(view)).not.toContain(AURELIO!.name);
