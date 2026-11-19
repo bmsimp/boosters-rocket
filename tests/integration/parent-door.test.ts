@@ -17,7 +17,7 @@ import { chooseFamily, completeParentSignin } from "@/lib/parents/family-choice"
 import { blockPerson } from "@/lib/parents/people";
 import { endParentSessions, renewParentSession } from "@/lib/parents/sessions";
 import { env } from "@/env";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // Each person is seeded in a family of the app's own (seedGuardianInFamily()): the gate lets a parent in only through an
 // open row naming an active family record.
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
@@ -42,7 +42,7 @@ const cookieFrom = (res: Response) => res.headers.getSetCookie().map((c) => c.sp
 async function getSession(cookie: string) {
   const auth = await getParentAuth();
   const res = await auth.handler(new Request(`${env.APP_URL}/api/auth/parent/get-session`, { headers: { cookie, origin: env.APP_URL } }));
-  return (await res.json()) as { session: { id: string; userId: string; familyQboId?: string | null; expiresAt: string } } | null;
+  return (await res.json()) as { session: { id: string; userId: string; familyId?: string | null; expiresAt: string } } | null;
 }
 async function signIn(email: string, extra: Record<string, unknown> = {}) {
   const sent = outbox.length;
@@ -65,7 +65,8 @@ const sessionRow = async () => (await db.select().from(parentAuthSession))[0]!;
 const near = (actual: number, wanted: number) => { expect(actual).toBeGreaterThan(wanted - 10_000); expect(actual).toBeLessThan(wanted + 10_000); };
 const stateOf = async (cookie: string) => {
   const s = (await getSession(cookie))!;
-  return resolveParentSession({ id: s.session.id, userId: s.session.userId, familyQboId: s.session.familyQboId ?? null });
+  // The session's family as /get-session answers it: the uuid of the app's family record it stores, or null.
+  return resolveParentSession({ id: s.session.id, userId: s.session.userId, familyId: s.session.familyId ? asAppFamilyId(s.session.familyId) : null });
 };
 
 describe("the parent door", () => {
@@ -105,12 +106,14 @@ describe("the parent door", () => {
     expect(body).toEqual({ ok: true, next: "/" });
     const state = await stateOf(cookie);
     expect(state).toMatchObject({ status: "ok", identity: { parentId: a.id, familyId: g.familyId, guardianId: g.id, families: [{ guardianId: g.id, familyId: g.familyId }] } });
-    // The identity names the app's family alone, never the QuickBooks id the session stores.
+    // The identity names the app's family alone, and the session stores no QuickBooks id: the record's own.
     expect(JSON.stringify(state)).not.toContain('"F1"');
+    expect(await sessionRow()).toMatchObject({ familyId: g.familyId });
+    expect(await sessionRow()).not.toHaveProperty("familyQboId");
     expect((await db.select().from(guardian))[0]!.status).toBe("active");
     const rows = await db.select().from(auditLog);
     expect(rows.filter((x) => x.action === "guardian.activate")).toHaveLength(1);
-    expect(rows.find((x) => x.action === "signin")).toMatchObject({ door: "parent", actorId: a.id, targetType: "parent", targetId: a.id, after: { familyQboId: "F1" }, ip: IP });
+    expect(rows.find((x) => x.action === "signin")).toMatchObject({ door: "parent", actorId: a.id, targetType: "parent", targetId: a.id, after: { familyId: String(g.familyId) }, ip: IP });
   });
 
   it("activates every invited link at once, audits each, and leaves a closed link closed", async () => {
@@ -118,7 +121,7 @@ describe("the parent door", () => {
     const one = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
     const two = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2", status: "invited" });
     const shut = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F3", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
-    expect(await completeParentSignin(a.id, IP)).toEqual({ familyQboId: null });                // two families: the parent chooses
+    expect(await completeParentSignin(a.id, IP)).toEqual({ familyId: null });                // two families: the parent chooses
     const status = Object.fromEntries((await db.select().from(guardian)).map((g) => [g.id, g.status]));
     expect(status).toEqual({ [one.id]: "active", [two.id]: "active", [shut.id]: "disabled" });
     const activated = (await db.select().from(auditLog)).filter((x) => x.action === "guardian.activate");
@@ -132,13 +135,13 @@ describe("the parent door", () => {
     const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1", status: "invited" });
     const live = await seedParentSession(a.authUserId);
     await endParentSessions(a.id);                                       // a block or a change of address got there first
-    expect(await completeParentSignin(a.id, IP, live.id)).toEqual({ familyQboId: null, sessionEnded: true });
+    expect(await completeParentSignin(a.id, IP, live.id)).toEqual({ familyId: null, sessionEnded: true });
     expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
     expect(await db.select().from(auditLog)).toEqual([]);
     // The session that is still there is entered into the one family, and audited.
     const kept = await seedParentSession(a.authUserId);
-    expect(await completeParentSignin(a.id, IP, kept.id)).toEqual({ familyQboId: "F1" });
-    expect((await db.select().from(parentAuthSession))[0]).toMatchObject({ id: kept.id, familyQboId: "F1" });
+    expect(await completeParentSignin(a.id, IP, kept.id)).toEqual({ familyId: g.familyId });
+    expect((await db.select().from(parentAuthSession))[0]).toMatchObject({ id: kept.id, familyId: g.familyId });
     expect((await db.select().from(auditLog)).map((x) => x.action)).toEqual(["guardian.activate", "signin"]);
   });
 
@@ -167,8 +170,9 @@ describe("the parent door", () => {
     expect(await stateOf(cookie)).toMatchObject({ status: "ok", identity: { familyId: f2.familyId } });
     expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: f1.id, ip: IP })).toBe(true);
     const rows = await db.select().from(auditLog);
-    expect(rows.filter((x) => x.action === "signin").map((x) => x.after)).toEqual([{ familyQboId: "F2" }]);
-    expect(rows.find((x) => x.action === "signin.family_switch")!.after).toEqual({ from: "F2", to: "F1" });
+    // Both name the app's family records, never a QuickBooks id.
+    expect(rows.filter((x) => x.action === "signin").map((x) => x.after)).toEqual([{ familyId: String(f2.familyId) }]);
+    expect(rows.find((x) => x.action === "signin.family_switch")!.after).toEqual({ from: String(f2.familyId), to: String(f1.familyId) });
     const stranger = await seedGuardianInFamily({ parentId: (await seedParent({ name: "Bo", email: "bo@example.com" })).id, familyQboId: "F2" });
     for (const guardianId of [crypto.randomUUID(), stranger.id]) {
       expect(await chooseFamily({ sessionId, parentId: a.id, guardianId, ip: IP })).toBe(false);
@@ -189,8 +193,8 @@ describe("the parent door", () => {
     await chooseFamily({ sessionId: s.status === "choose" ? s.sessionId : "", parentId: a.id, guardianId: g1.id, ip: IP });
     await dropRow(g1.id);
     expect(await stateOf(cookie)).toMatchObject({ status: "choose", families: [{ guardianId: g2.id, familyId: g2.familyId }] });
-    expect((await db.select().from(parentAuthSession))[0]!.familyQboId).toBeNull();
-    expect((await db.select().from(auditLog)).find((x) => x.action === "signin.refused")!.after).toEqual({ reason: "family_not_enabled", familyQboId: "F1" });
+    expect((await db.select().from(parentAuthSession))[0]!.familyId).toBeNull();
+    expect((await db.select().from(auditLog)).find((x) => x.action === "signin.refused")!.after).toEqual({ reason: "family_not_enabled", familyId: String(g1.familyId) });
   });
 
   it("signs a parent out at once when their last family goes, or they're blocked", async () => {
@@ -220,7 +224,7 @@ describe("the parent door", () => {
   });
 
   it("starts its 90 days again when it is used, at most once a day", async () => {
-    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
     const { cookie } = await signIn("ana@example.com");
     const made = await sessionRow();
     // Used again the same day: nothing is written.
@@ -239,7 +243,7 @@ describe("the parent door", () => {
     near(renewed.updatedAt.getTime(), Date.now());
     // Nothing else about the session changes: it is the same one, made when it was made.
     expect(renewed).toEqual({ ...dayOld, expiresAt: renewed.expiresAt, updatedAt: renewed.updatedAt });
-    expect(renewed).toMatchObject({ id: made.id, token: made.token, familyQboId: "F1" });
+    expect(renewed).toMatchObject({ id: made.id, token: made.token, familyId: g.familyId });
     // And the next use that day leaves it alone again.
     expect(await pageRequest(cookie)).toMatchObject({ status: "ok" });
     expect(await sessionRow()).toEqual(renewed);
@@ -350,7 +354,7 @@ describe("the parent door", () => {
   }, 60_000);
 
   it("answers not found, and changes nothing, on every Better Auth endpoint a parent could write through", async () => {
-    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); const g = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
     const { cookie } = await signIn("ana@example.com");
     const auth = await getParentAuth();
     const call = (path: string, method: "GET" | "POST", body: unknown = {}) => auth.handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
@@ -359,7 +363,7 @@ describe("the parent door", () => {
     }));
     const writes: [string, "GET" | "POST", unknown][] = [
       ["/update-user", "POST", { name: "Mallory", image: "https://evil.example/x.png" }],
-      ["/update-session", "POST", { familyQboId: "F9" }],
+      ["/update-session", "POST", { familyId: crypto.randomUUID() }],
       ["/revoke-sessions", "POST", {}], ["/revoke-other-sessions", "POST", {}], ["/revoke-session", "POST", { token: "x" }],
       ["/change-email", "POST", { newEmail: "mallory@example.com" }], ["/change-password", "POST", { currentPassword: "a", newPassword: "b" }],
       ["/delete-user", "POST", {}], ["/link-social", "POST", { provider: "microsoft" }], ["/unlink-account", "POST", { providerId: "x" }],
@@ -373,7 +377,10 @@ describe("the parent door", () => {
     const [u] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.id, a.authUserId));
     expect(u).toMatchObject({ name: "Ana", image: null, email: "ana@example.com" });
     expect(await db.select().from(parentAuthSession).where(eq(parentAuthSession.userId, a.authUserId))).toHaveLength(1);
-    expect(await getSession(cookie)).toMatchObject({ session: { familyQboId: "F1" } });
+    // /get-session answers the session's own family as the app's record id, and no QuickBooks id of it.
+    const answered = await getSession(cookie);
+    expect(answered).toMatchObject({ session: { familyId: String(g.familyId) } });
+    expect(JSON.stringify(answered)).not.toContain('"F1"');
     expect((await post("/sign-out", {}, cookie)).status).toBe(200);
     expect((await db.select().from(auditLog)).filter((x) => x.action === "signout")).toHaveLength(1);
   }, 30_000);
@@ -415,8 +422,8 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     // Made inactive some way the reconcile doesn't follow: the row is still open, the family is not one to enter.
     await makeInactive(g1.familyId);
     expect(await stateOf(cookie)).toEqual({ status: "choose", parentId: a.id, sessionId, name: "Ana", families: [{ guardianId: g2.id, familyId: g2.familyId }] });
-    expect((await sessionRow()).familyQboId).toBeNull();
-    expect((await refusedFor("family_not_enabled")).map((x) => x.after)).toEqual([{ reason: "family_not_enabled", familyQboId: "F1" }]);
+    expect((await sessionRow()).familyId).toBeNull();
+    expect((await refusedFor("family_not_enabled")).map((x) => x.after)).toEqual([{ reason: "family_not_enabled", familyId: String(g1.familyId) }]);
     // It can't be chosen again, and the gate closed nothing: both rows are as they were.
     expect(await chooseFamily({ sessionId, parentId: a.id, guardianId: g1.id, ip: IP })).toBe(false);
     expect((await db.select().from(guardian)).map((g) => g.status)).toEqual(["active", "active"]);
@@ -434,7 +441,7 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     expect(body).toEqual({ ok: true, next: "/" });
     const s = await stateOf(cookie);
     expect(s).toMatchObject({ status: "ok", identity: { guardianId: g2.id, familyId: g2.familyId, families: [{ guardianId: g2.id, familyId: g2.familyId }] } });
-    expect((await db.select().from(auditLog)).find((x) => x.action === "signin")!.after).toEqual({ familyQboId: "F2" });
+    expect((await db.select().from(auditLog)).find((x) => x.action === "signin")!.after).toEqual({ familyId: String(g2.familyId) });
     expect(await chooseFamily({ sessionId: s.status === "ok" ? s.identity.sessionId : "", parentId: a.id, guardianId: bare.id, ip: IP })).toBe(false);
     // Its family goes inactive too: nothing is left that counts, so the person is signed out as one with no open row.
     await makeInactive(g2.familyId);
@@ -467,7 +474,7 @@ describe("the gate: a parent enters only an active family of the app's own (app-
     const live = await seedParentSession(a.authUserId);   // the session the plugin has just made
     await makeInactive(g.familyId);
     // sessionEnded: the plugin answers "rejected" and sets no cookie (parent-code-plugin.ts).
-    expect(await completeParentSignin(a.id, IP, live.id)).toEqual({ familyQboId: null, sessionEnded: true });
+    expect(await completeParentSignin(a.id, IP, live.id)).toEqual({ familyId: null, sessionEnded: true });
     expect(await db.select().from(parentAuthSession)).toEqual([]);
     expect((await db.select().from(guardian))[0]).toMatchObject({ id: g.id, status: "invited" });
     const rows = await db.select().from(auditLog);

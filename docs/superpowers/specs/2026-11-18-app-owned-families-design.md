@@ -345,7 +345,9 @@ reminders, the money cache.
 - *Users see:* staff add guardians and edit contact details in the portal; QuickBooks edits no longer change who can
   sign in, and a student moved in QuickBooks no longer takes their forms and places along. Parents see nothing new.
 - *Not half done:* the session's family id and every parent query change in one release; a session that can't be
-  carried over is ended. A refused change shows on Reconciliation until stage 4.
+  carried over has its family cleared, so its parent chooses again, or is signed out by the gate when no family is
+  left to choose (the lead's decision when the slice was built, in place of ending every such session). A refused
+  change shows on Reconciliation until stage 4.
 
 **Sign-in** *(proposed: its own release after stage 3, before or after stage 4; Open questions, 32)*.
 - *Done:* the set-up link, passwords, the second step and remembered devices, passkeys, the authenticator app, the

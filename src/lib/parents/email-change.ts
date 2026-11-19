@@ -74,30 +74,18 @@ const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 export const emailChangeLink = (token: string) => `${env.APP_URL.replace(/\/+$/, "")}/family/email/${token}`;
 
 /**
- * The QuickBooks id of the family of the guardian row the session chose (`guardian.family_qbo_id`), read by the row's
- * own id, person and app family: the comparisons this module still makes by it go through here and nowhere else. A
- * pending change stores it (`parent_email_change.family_qbo_id`, until stage 3's fifth slice moves that column to the
- * app's family, and deletes this), and the person's other open rows are compared with it. Null when the row is not
- * the session's any more, which no comparison matches.
- */
-async function chosenFamilyQboId(ctx: ParentCtx): Promise<string | null> {
-  const [row] = await db.select({ familyQboId: guardian.familyQboId }).from(guardian)
-    .where(and(eq(guardian.id, ctx.guardianId), eq(guardian.parentId, ctx.parentId), eq(guardian.familyId, ctx.familyId)));
-  return row?.familyQboId ?? null;
-}
-
-/**
  * Who else must agree, beside the record: parent sign-ins switched on (the reconcile follows nothing while they are
- * off), and the person's open links all to this one family. A person whose address is on records of more than one
- * family would be split by changing one of them, so they ask the club.
+ * off), and the person's open links all to this one family: the session's own guardian row is among their open rows,
+ * and every open row of theirs names the session's family record (`guardian.family_id` is `ctx.familyId`, the app's
+ * family the gate gave the session). A person whose address is on records of more than one family would be split by
+ * changing one of them, so they ask the club; so does one with an open row that names no family record.
  */
 async function othersAllow(ctx: ParentCtx): Promise<boolean> {
-  const [settings, links, chosen] = await Promise.all([
+  const [settings, links] = await Promise.all([
     getParentSettings(),
-    db.select({ familyQboId: guardian.familyQboId }).from(guardian).where(and(eq(guardian.parentId, ctx.parentId), ne(guardian.status, "disabled"))),
-    chosenFamilyQboId(ctx),
+    db.select({ id: guardian.id, familyId: guardian.familyId }).from(guardian).where(and(eq(guardian.parentId, ctx.parentId), ne(guardian.status, "disabled"))),
   ]);
-  return settings.signin && chosen !== null && links.length > 0 && links.every((l) => l.familyQboId === chosen);
+  return settings.signin && links.some((l) => l.id === ctx.guardianId) && links.every((l) => l.familyId === ctx.familyId);
 }
 
 /** The session's own record when this person may change their sign-in address here; null when they ask the club. */
@@ -133,8 +121,8 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
   const email = typeof input === "string" && input.length <= 320 ? normalizeEmail(input) : null;
   if (!email) return { ok: false, errors: [EMAIL_COPY.invalid] };
   if (email === ctx.email.trim().toLowerCase()) return { ok: false, errors: [EMAIL_COPY.same] };
-  const [record, familyQboId] = await Promise.all([mayChange(ctx), chosenFamilyQboId(ctx)]);
-  if (!record || familyQboId === null) return refused("not_offered", [EMAIL_COPY.askTheClub]);
+  const record = await mayChange(ctx);
+  if (!record) return refused("not_offered", [EMAIL_COPY.askTheClub]);
 
   const token = randomBytes(32).toString("base64url");
   const actor = actorOf(ctx);
@@ -142,9 +130,11 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
     // The person's row first, as every change of a person's sign-in does: two asks at once end with one live request.
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
-    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyQboId, recordQboId: record.qboId,
+    // The request is asked in the session's own family (the app's family record the gate gave it).
+    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId, recordQboId: record.qboId,
       newEmail: email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + EMAIL_CHANGE_TTL_MS) });
-    await writeAudit({ actor, action: "parent.email.request", targetType: "qbo_customer", targetId: record.qboId, before: { email: ctx.email }, after: { email }, ip: ctx.ip }, tx);
+    await writeAudit({ actor, action: "parent.email.request", targetType: "qbo_customer", targetId: record.qboId, before: { email: ctx.email },
+      after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);
   });
   const brand = await currentBrand();
   const sent = await sendMail(emailChangeConfirmMessage(brand, email, { link: emailChangeLink(token) }), { purpose: "email_change_confirm", actor, ip: ctx.ip });
@@ -155,14 +145,16 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
 
 type Request = typeof parentEmailChange.$inferSelect;
 
-/** The live request this token is for, made by the session's own person under the session's own link and family. */
+/**
+ * The live request this token is for, made by the session's own person under the session's own link, in the session's
+ * own family: a request asked in another family (`parent_email_change.family_id`, the app's family it was asked in),
+ * or in none, is never live here.
+ */
 async function liveRequest(ctx: ParentCtx, token: unknown): Promise<Request | null> {
   if (!isToken(token)) return null;
-  const familyQboId = await chosenFamilyQboId(ctx);
-  if (familyQboId === null) return null;
   const [row] = await db.select().from(parentEmailChange).where(and(
     eq(parentEmailChange.tokenHash, hashToken(token)), isNull(parentEmailChange.usedAt), gt(parentEmailChange.expiresAt, new Date()),
-    eq(parentEmailChange.parentId, ctx.parentId), eq(parentEmailChange.guardianId, ctx.guardianId), eq(parentEmailChange.familyQboId, familyQboId)));
+    eq(parentEmailChange.parentId, ctx.parentId), eq(parentEmailChange.guardianId, ctx.guardianId), eq(parentEmailChange.familyId, ctx.familyId)));
   return row ?? null;
 }
 
@@ -339,7 +331,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
 
   // QuickBooks has the change. From here the request is spent, whatever happens to the portal's copy.
   const audit = (tx: Tx, after: Record<string, unknown>) => writeAudit({ actor, action: "parent.email.save", targetType: "qbo_customer", targetId: record.qboId,
-    before: { email: oldEmail, field: live.field }, after: { email: newEmail, ...after }, ip: ctx.ip }, tx);
+    before: { email: oldEmail, field: live.field }, after: { email: newEmail, familyId: String(ctx.familyId), ...after }, ip: ctx.ip }, tx);
   // The cache is left alone, and the worker reads the roster again at its next wake: never a refresh in this request.
   // A change this call found made, on a request already spent, was finished by the confirmation that spent it: a second
   // press of the button, say. Nothing more is done or audited for it. A write this call sent is always audited.
@@ -379,10 +371,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   }
 
   // What the parent is told depends on the outcome alone: the new address can sign in to this family now, or not yet.
-  // The family as the request names it, which liveRequest() matched to the session's own row (chosenFamilyQboId()).
-  const family = row.familyQboId;
+  // The family the request was asked in, which liveRequest() matched to the session's own (ctx.familyId).
+  const family = row.familyId;
   const [open] = family === null ? [] : await db.select({ id: guardian.id }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-    .where(and(eq(parent.email, newEmail), eq(parent.blocked, false), eq(guardian.familyQboId, family), ne(guardian.status, "disabled"))).limit(1);
+    .where(and(eq(parent.email, newEmail), eq(parent.blocked, false), eq(guardian.familyId, family), ne(guardian.status, "disabled"))).limit(1);
   return { ok: true, message: open ? EMAIL_COPY.done(newEmail) : EMAIL_COPY.finishing, signedOut: true };
 }
 

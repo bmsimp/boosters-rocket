@@ -74,7 +74,7 @@ describe("the parent switches", () => {
     await ready();
     const u = await seedParent({ name: "Hand Seeded", email: "seeded@example.com" });
     await seedGuardian({ parentId: u.id, familyQboId: "POC-FAMILY-1" });
-    await seedParentSession(u.authUserId, { familyQboId: "POC-FAMILY-1" });
+    await seedParentSession(u.authUserId);
     expect(await setSignins(false, admin)).toEqual({ ok: true });
     expect(await db.select().from(parentAuthSession)).toHaveLength(1);
     expect(await audits("settings.parents.save")).toEqual([]);
@@ -183,7 +183,7 @@ describe("the parent switches", () => {
   it("switching off signs every parent out and stops the reconcile; links stay", async () => {
     await ready(); await setSignins(true, admin);
     const [u] = await db.select().from(parentAuthUser);
-    await seedParentSession(u!.id, { familyQboId: "10" });
+    await seedParentSession(u!.id);
     expect(await setSignins(false, admin)).toEqual({ ok: true });
     expect(await db.select().from(parentAuthSession)).toEqual([]);
     expect(await getParentSettings()).toMatchObject({ signin: false, everEnabled: true });

@@ -38,6 +38,10 @@ export const RE_KEYED_SINCE_0023: { line: string; by: string }[] = [
   { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "write_queue" WHERE "realm_id" = (SELECT realm_id FROM app_fill_source)`, by: "0035_write_queue_app_ids_finish" },
   { line: `    UNION ALL SELECT "target_qbo_id", CASE WHEN "request"->>'role' = 'student' THEN 'student' ELSE 'family' END FROM "write_queue"`, by: "0034_write_queue_app_ids_additive" },
   { line: `      WHERE "realm_id" = (SELECT realm_id FROM app_fill_source) AND "request"->>'op' IN ('rename', 'move', 'deactivate') AND "request"->>'role' IN ('family', 'member', 'student')`, by: "0034_write_queue_app_ids_additive" },
+  // A parent's session and a pending change of sign-in address name the family they chose, or were asked in, by its
+  // record's id since 0037; 0038 dropped the QuickBooks columns.
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "parent_email_change"`, by: "0038_sessions_app_ids_finish" },
+  { line: `    UNION ALL SELECT "family_qbo_id", 'family' FROM "parent_auth_session"`, by: "0038_sessions_app_ids_finish" },
 ];
 
 /**

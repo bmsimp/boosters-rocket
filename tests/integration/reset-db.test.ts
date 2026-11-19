@@ -22,7 +22,7 @@ describe("resetDb", () => {
     const staff = await seedStaff({ email: "admin@club.org", admin: true });
     const ana = await seedParent({ name: "Ana Rivera" });
     await seedGuardian({ parentId: ana.id, familyQboId: "10" });
-    await seedParentSession(ana.authUserId, { familyQboId: "10" });
+    await seedParentSession(ana.authUserId);
     const [custom] = await db.insert(role).values({ key: "custom", name: "Custom" }).returning();
     await db.insert(roleRule).values({ roleId: custom!.id, kind: "include", pattern: "Roster.*" });
     await db.insert(setting).values({ key: "reset.test", value: { any: "thing" } });

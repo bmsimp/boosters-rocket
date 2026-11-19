@@ -23,17 +23,16 @@ const CHUNK = 500;
  * current company's signed-form evidence, migrations 0028 and 0029; buy-outs, migrations 0030 and 0031; the money
  * cache, migrations 0032 and 0033, a row of which is only ever written for a family that has a record; and the write
  * queue, migrations 0034 and 0035, whose items name the family they are filed under and the student they are for by
- * their records' ids: the customers they send stay QuickBooks', and the restrict keys keep the records), which name a
- * record by its id and keep it, inactive, for as long as they do. So what is read here is guardian rows, sessions and
- * every email change request, used or not, until the clean-up removes it, each naming a family. Migration 0023 read the same in SQL, with those as they were;
- * tests/helpers/app-records-fill.ts leaves them out when it runs 0023's fill again on today's tables. Change the two
- * together.
+ * their records' ids: the customers they send stay QuickBooks', and the restrict keys keep the records; and parents'
+ * sessions and pending email changes, migrations 0037 and 0038, which name the family a session chose, or a change was
+ * asked in, by its record's id), which name a record by its id and keep it, inactive, for as long as they do. So what
+ * is read here is guardian rows alone (but those a change of company closed), each naming a family. Migration 0023 read
+ * the same in SQL, with those as they were; tests/helpers/app-records-fill.ts leaves them out when it runs 0023's fill
+ * again on today's tables. Change the two together.
  */
 const refsQuery = () => sql`
   SELECT DISTINCT customer_id, kind FROM (
     SELECT family_qbo_id AS customer_id, 'family' AS kind FROM guardian WHERE disabled_reason IS DISTINCT FROM 'company_changed'
-    UNION ALL SELECT family_qbo_id, 'family' FROM parent_email_change
-    UNION ALL SELECT family_qbo_id, 'family' FROM parent_auth_session
   ) refs WHERE customer_id IS NOT NULL`;
 
 /**

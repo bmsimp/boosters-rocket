@@ -62,14 +62,18 @@ const moveInQuickBooks = (id: string, toQboId: string | null, o: { active?: bool
   c.SyncToken = String(Number(c.SyncToken) + 1);
 };
 /**
- * A guardian with a session in a family, seeded before the roster is read: the gate lets them in only once the read has
- * made the family's active record, so they are resolved afterward, with identityNow().
+ * A guardian in a family, seeded before the roster is read. Their session is made only after the read (signedInNow()):
+ * a session names the app's own family record, which the read's reconcile makes and gives their row, and the gate lets
+ * them in only once that record is active.
  */
-async function signedInBeforeTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
+async function guardianBeforeTheRead(o: { familyQboId: string; name: string; email: string; sourceQboId: string }) {
   const person = await seedParent({ name: o.name, email: o.email, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId });
-  return { session: await seedParentSession(person.authUserId, { familyQboId: o.familyQboId }) };
+  return { authUserId: person.authUserId, familyQboId: o.familyQboId };
 }
+/** A session for a guardian seeded before the read, in the family record their row names now. */
+const signedInNow = async (g: { authUserId: string; familyQboId: string }) =>
+  ({ session: await seedParentSession(g.authUserId, { familyQboId: g.familyQboId }) });
 const cached = async (qboId: string) => (await db.select().from(qboCustomer).where(eq(qboCustomer.qboId, qboId)))[0];
 const followed = () => auditsOf("roster.student.move.followed");
 const lastRun = async () => (await db.select().from(jobRun).where(eq(jobRun.job, ROSTER_JOB)).orderBy(desc(jobRun.id)).limit(1))[0]!;
@@ -438,9 +442,11 @@ describe("what each family reads after a student QuickBooks moved", () => {
     // Both families' guardians sign in, matched to their own records in QuickBooks.
     const company = fznCompany();
     Object.assign(company.customers.find((c) => c.Id === "21")!, { PrimaryEmailAddr: { Address: "mei@example.com" } });
-    const ana = await signedInBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
-    const mei = await signedInBeforeTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
+    const anaRow = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+    const meiRow = await guardianBeforeTheRead({ familyQboId: CHEN, name: "Mei Chen", email: "mei@example.com", sourceQboId: "21" });
     await connectRoster(stub, { company });
+    const ana = await signedInNow(anaRow);
+    const mei = await signedInNow(meiRow);
     const leo = await seedLeo();
 
     asParent(await identityNow(ana.session.id));
@@ -472,8 +478,9 @@ describe("what each family reads after a student QuickBooks moved", () => {
   });
 
   it("a family QuickBooks made in the same read as a student's move into it gets the student's forms at once, and a second read changes nothing", async () => {
-    const ana = await signedInBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
+    const anaRow = await guardianBeforeTheRead({ familyQboId: RIVERA, name: "Ana Rivera", email: "ana@example.com", sourceQboId: "11" });
     await connectRoster(stub);
+    const ana = await signedInNow(anaRow);
     const leo = await seedLeo();
     // Forms are set up (nothing here calls Documenso), so reminders could go.
     await connectForms({ origin: "http://127.0.0.1:9", token: "api_never_called" });

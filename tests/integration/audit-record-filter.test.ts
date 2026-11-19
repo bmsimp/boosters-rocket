@@ -99,6 +99,39 @@ describe("the audit page's filter for one family or student", () => {
     expect(await targets(`family:${chen}`)).toEqual([`family:${chen}`, `family:${chen}`, "family:20", "qbo_customer:20", `signature_request:${FORM_MOVED}`].sort());
   });
 
+  it("finds a family's sign-in and email-change rows by its customer before the session moved and by its record since, and nothing of another family's", async () => {
+    // A sign-in row's target is the person; the family is in its body. Each row carries a tag, to name it here.
+    const PERSON = "7d1f0b2a-4444-4c3d-8e9f-000000000001";
+    const signin = (action: string, tag: string, after: Record<string, unknown>) => bodied(action, "parent", PERSON, { after: { ...after, tag } });
+    // Before stage 3's fifth slice: by the family's customer.
+    await signin("signin", "old-in-rivera", { familyQboId: "10" });
+    await signin("signin.refused", "old-refused-rivera", { reason: "family_not_enabled", familyQboId: "10" });
+    await signin("signin.family_switch", "old-switch-chen-to-rivera", { from: "20", to: "10" });
+    await signin("signin", "old-in-chen", { familyQboId: "20" });
+    // Since: by the app's own family record.
+    await signin("signin", "new-in-rivera", { familyId: rivera });
+    await signin("signin.refused", "new-refused-rivera", { reason: "family_not_enabled", familyId: rivera });
+    await signin("signin.family_switch", "new-switch-rivera-to-chen", { from: rivera, to: chen });
+    await signin("signin", "new-in-chen", { familyId: chen });
+    // Nobody's family: a refusal naming none, and what a browser sent the chooser, which may be any string.
+    await signin("signin.refused", "no-family", { reason: "no_enabled_guardian" });
+    await signin("signin.refused", "sent-a-number", { reason: "family_not_enabled", sent: "10" });
+    // A change of sign-in address targets the QuickBooks record it changes, and names the family it was asked in since.
+    await bodied("parent.email.request", "qbo_customer", "11", { after: { email: "rosa.new@example.com", familyId: rivera, tag: "email-asked-rivera" } });
+    await bodied("parent.email.save", "qbo_customer", "11", { after: { email: "rosa.new@example.com", familyId: rivera, tag: "email-saved-rivera" } });
+    await bodied("parent.email.request", "qbo_customer", "21", { after: { email: "mei.new@example.com", familyId: chen, tag: "email-asked-chen" } });
+    const tagged = async (record: string) => (await auditPage(parseAuditFilters({ record }))).rows
+      .map((r) => (r.after as { tag?: string } | null)?.tag).filter((t): t is string => t !== undefined).sort();
+    const rivers = ["old-in-rivera", "old-refused-rivera", "old-switch-chen-to-rivera", "new-in-rivera", "new-refused-rivera", "new-switch-rivera-to-chen",
+      "email-asked-rivera", "email-saved-rivera"].sort();
+    expect(await tagged(`family:${rivera}`)).toEqual(rivers);
+    expect(await tagged(rivera)).toEqual(rivers);
+    expect(await tagged(`family:${chen}`)).toEqual(["old-switch-chen-to-rivera", "old-in-chen", "new-switch-rivera-to-chen", "new-in-chen", "email-asked-chen"].sort());
+    // A student's record finds none of them; the person's own record finds every sign-in row, as before.
+    expect(await tagged(`student:${leo}`)).toEqual([]);
+    expect(await tagged(`parent:${PERSON}`)).toHaveLength(10);
+  });
+
   it("finds a family's roster page reads written while the page was addressed by its customer, and those written since, by its record", async () => {
     // Before stage 3's third slice: the roster page read under the customer. Since: under the app's own family.
     await row("roster.family.read", "qbo_customer", "10");

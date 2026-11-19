@@ -51,7 +51,9 @@ export async function setRosterSource(tx: Tx, realmId: string): Promise<void> {
 export async function clearRosterOfOtherCompanyLocked(tx: Tx, realmId: string, o: { actor: Actor; ip: string | null; keepRunId?: number }): Promise<boolean> {
   const from = await getRosterSource(tx);
   if (from === null || from === realmId) return false;
-  // Parent access first: the snapshot it keeps takes the family names from the cache deleted below.
+  // Parent access first: the snapshot it keeps takes the family names from the cache deleted below. It deletes every
+  // parent session and every email change request, which name the app's own family they chose or were asked in, so
+  // they are gone before clearAppRecords() removes the families below (their restrict keys would stop it).
   await clearParentAccess(tx, { fromRealmId: from, toRealmId: realmId, actor: o.actor, ip: o.ip });
   // The season's ticks, waivers, chosen lists and reminder claims, every volunteer sign-up, credit and reminder claim,
   // and every form request, name the app's own records, so they go before them.

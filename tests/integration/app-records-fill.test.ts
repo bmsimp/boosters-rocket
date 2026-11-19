@@ -44,8 +44,9 @@ const member = (qboId: string, displayName: string, o: Partial<CacheCustomer> = 
 /**
  * Evidence of an earlier company, which still names customers and is never read. The records of the current company
  * that name customers the cache doesn't hold, or a roster student as a family, are the guardian rows each test seeds:
- * since the write queue was re-keyed (migrations 0034 and 0035) the function reads only guardian rows, sessions and
- * pending email changes, all naming a family, so no record names a customer as a student any more. The season's chosen
+ * since parents' sessions and pending email changes were re-keyed (migrations 0037 and 0038) the function reads guardian
+ * rows alone, each naming a family, so no record names a customer as a student any more. This test seeded no session
+ * or email change, so it lost no case with them: every customer they could name, a guardian row here names too. The season's chosen
  * lists, ticks and reminder claims, volunteering's sign-ups, credit and reminder claims, form requests and the current
  * company's signed-form evidence, buy-outs, the money cache and the write queue name the app's own records (migrations
  * 0024 to 0035), so they name no customer for the fill to make a record of (RE_KEYED_SINCE_0023). The queue's cases

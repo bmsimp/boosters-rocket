@@ -25,7 +25,7 @@ import ParentLayout from "@/app/(parent)/layout";
 import NotFound from "@/app/not-found";
 import ChooseFamily from "@/app/choose-family/page";
 import { resetDb, seedGuardian, seedParent, seedParentSession } from "../helpers/db";
-import { FAMILY_A, FAMILY_B, identityNow, moneyMarkers, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, identityAfterChoosingAgain, identityNow, moneyMarkers, seedParentIn, seedSignedInParent, seedTwoFamilies } from "../helpers/parent";
 import { addToCache, fam, par, seedRosterRead, seedShape, stu } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 import { seedConnected, startQboStub, type QboStub } from "../helpers/qbo-stub";
@@ -41,9 +41,11 @@ const NOT_CONNECTED = "The club hasn&#x27;t connected your payments to the porta
 async function gateOf(familyQboId: string, email: string) {
   const person = await seedParent({ name: "Hand Made", email, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId, status: "active" });
-  const session = await seedParentSession(person.authUserId, { familyQboId });
   await syncAppRecords();
-  return resolveParentSession({ id: session.id, userId: person.authUserId, familyQboId });
+  // The session stores the row's own family record, as the sign-in does; with no roster company there is none.
+  const [row] = await db.select({ familyId: guardian.familyId }).from(guardian).where(eq(guardian.parentId, person.id));
+  const session = await seedParentSession(person.authUserId, { familyId: row?.familyId ?? null });
+  return resolveParentSession({ id: session.id, userId: person.authUserId, familyId: row?.familyId ?? null });
 }
 
 // Nothing here reaches Intuit: the stub is what seedConnected() needs to write a connection row, and what a read of a
@@ -197,8 +199,9 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
     await seedConnected(stub, { realmId: REALM });
     const readAt = await seedRosterRead({ realmId: OTHER_REALM });
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
-    // The records were made again from that cache's company, and the gate finds the family through the row's record.
-    const now = await identityNow(a.session.id);
+    // The records were made again from that cache's company, so the record the session chose no longer counts: the
+    // gate sends it to choose again, and the family it may enter is the one the person's row names now.
+    const now = await identityAfterChoosingAgain(a.session.id);
     expect(await loadMyFamily(ctxOf(now))).toMatchObject({ name: "Alderquist Family", rosterReadAt: readAt.toISOString(), me: { name: "Ansgar Alderquist" } });
     expect((await loadRosterPage()).roster).not.toBeNull();
   });
@@ -513,7 +516,7 @@ describe("Family", () => {
     await syncAppRecords();
     const unnamed = [await recordOfCustomer("ZZ-UNNAMED-1", "family"), await recordOfCustomer("ZZ-UNNAMED-2", "family")];
     await db.update(family).set({ active: true }).where(inArray(family.id, unnamed));
-    await db.update(parentAuthSession).set({ familyQboId: "ZZ-UNNAMED-2" }).where(eq(parentAuthSession.id, a.session.id));
+    await db.update(parentAuthSession).set({ familyId: unnamed[1]! }).where(eq(parentAuthSession.id, a.session.id));
     const who = await identityNow(a.session.id);
     expect(who.families.map((f) => String(f.familyId))).toEqual([String(a.identity.familyId), ...unnamed.map(String)]);
     expect(String(who.familyId)).toBe(String(unnamed[1]));

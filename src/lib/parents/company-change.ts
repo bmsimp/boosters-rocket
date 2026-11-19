@@ -64,6 +64,8 @@ export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toReal
     await tx.update(guardian).set({ status: "disabled", disabledReason: "company_changed", statusBeforeDisable: g.status as "invited" | "active", updatedAt: new Date() })
       .where(eq(guardian.id, g.id));
   }
+  // Every session, and every change of sign-in address below, names the app's own family it chose or was asked in:
+  // they go here, before clearAppRecords() removes the families (their restrict keys would stop it).
   const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
   const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
   // A change of sign-in address names the record it would change: another company's customer now (email-change.ts).

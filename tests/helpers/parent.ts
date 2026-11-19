@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { familyMoney, parentAuthSession, setting, type StoredInvoice } from "@/lib/db/schema";
 import { resolveParentSession, type ParentIdentity } from "@/lib/auth/resolve";
+import { chooseFamily } from "@/lib/parents/family-choice";
 import { formatMoney } from "@/lib/money/cents";
 import { getRosterSource, SOURCE_KEY } from "@/lib/roster/source";
 import { seedGuardian, seedParent, seedParentSession } from "./db";
@@ -154,11 +155,13 @@ export async function seedSignedInParent(spec: ParentFamilySpec = FAMILY_A): Pro
   ]);
   const person = await seedParent({ name: spec.parent.name, email: spec.parent.email, phone: spec.parent.phone, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: spec.family.qboId, status: "active", isPrimary: true, sourceQboId: spec.parent.qboId });
-  const session = await seedParentSession(person.authUserId, { familyQboId: spec.family.qboId });
-  // The link and the session name the family: the app's own records follow, as the reconcile that made the link would.
-  // Before the session is resolved: the gate lets a parent into a family only through the row's active family record.
+  // The link names the family: the app's own records follow, as the reconcile that made the link would. Before the
+  // session is made: it stores the row's own family record, as the sign-in does, and the gate lets a parent into a
+  // family only through that active record.
   await syncAppRecords();
-  const state = await resolveParentSession({ id: session.id, userId: person.authUserId, familyQboId: spec.family.qboId });
+  const session = await seedParentSession(person.authUserId, { familyQboId: spec.family.qboId });
+  const [stored] = await db.select({ familyId: parentAuthSession.familyId }).from(parentAuthSession).where(eq(parentAuthSession.id, session.id));
+  const state = await resolveParentSession({ id: session.id, userId: person.authUserId, familyId: stored?.familyId ?? null });
   if (state.status !== "ok") throw new Error(`seedSignedInParent: the portal would not sign ${spec.parent.name} in to ${spec.family.name} (session state "${state.status}")`);
   return { identity: state.identity, spec, session, markers: markersOf(spec, state.identity, session) };
 }
@@ -229,8 +232,8 @@ export async function seedParentIn(o: { familyQboId: string; name: string; email
   await seedParentSettings(SIGNINS_ON);
   const person = await seedParent({ name: o.name, email: o.email, phone: o.phone ?? null, welcomedAt: new Date() });
   await seedGuardian({ parentId: person.id, familyQboId: o.familyQboId, status: "active", isPrimary: true, sourceQboId: o.sourceQboId ?? null });
-  const session = await seedParentSession(person.authUserId, { familyQboId: o.familyQboId });
   await syncAppRecords();
+  const session = await seedParentSession(person.authUserId, { familyQboId: o.familyQboId });
   return { identity: await identityNow(session.id), session };
 }
 
@@ -241,7 +244,24 @@ export async function seedParentIn(o: { familyQboId: string; name: string; email
 export async function identityNow(sessionId: string): Promise<ParentIdentity> {
   const [s] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, sessionId));
   if (!s) throw new Error(`identityNow: there is no parent session ${sessionId}`);
-  const state = await resolveParentSession({ id: s.id, userId: s.userId, familyQboId: s.familyQboId });
+  const state = await resolveParentSession({ id: s.id, userId: s.userId, familyId: s.familyId });
   if (state.status !== "ok") throw new Error(`identityNow: the portal would not sign this session in (session state "${state.status}")`);
   return state.identity;
+}
+
+/**
+ * The identity of a seeded session once it has chosen its family again. The session stores the app's own family record
+ * it chose; when a test makes that record stop counting (the roster comes to name another company, so the person's row
+ * names the record made from it), the gate sends the session back to the chooser, as it would the parent. This chooses,
+ * through the portal's own chooseFamily(), the one family the person may still enter, and throws for anything else.
+ */
+export async function identityAfterChoosingAgain(sessionId: string): Promise<ParentIdentity> {
+  const [s] = await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, sessionId));
+  if (!s) throw new Error(`identityAfterChoosingAgain: there is no parent session ${sessionId}`);
+  const state = await resolveParentSession({ id: s.id, userId: s.userId, familyId: s.familyId });
+  if (state.status !== "choose") throw new Error(`identityAfterChoosingAgain: the session is not at the chooser (session state "${state.status}")`);
+  if (state.families.length !== 1) throw new Error(`identityAfterChoosingAgain: the person may enter ${state.families.length} families, not one`);
+  const chosen = await chooseFamily({ sessionId, parentId: state.parentId, guardianId: state.families[0]!.guardianId, ip: null });
+  if (!chosen) throw new Error("identityAfterChoosingAgain: the portal refused the family the chooser offered");
+  return identityNow(sessionId);
 }

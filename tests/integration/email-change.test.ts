@@ -25,14 +25,14 @@ import FamilyDetailsPage from "@/app/(parent)/family/details/page";
 import FamilyEmailPage from "@/app/(parent)/family/email/page";
 import ConfirmEmailPage from "@/app/(parent)/family/email/[token]/page";
 import { inQuickBooks, ofType, qbCustomer, seedContactFamilies, under } from "../helpers/contact";
-import { resetDb, seedGuardian, seedParent, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { resetDb, seedGuardian, seedParent, seedParentSession, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { emailChangeToken, seedEmailChange } from "../helpers/email-change";
 import { CHENOWETH, RIVERA, connectCompany } from "../helpers/money";
-import { seedParentIn } from "../helpers/parent";
+import { identityNow, seedParentIn } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
-import { NO_CHANGES, appRecordsByCustomer, whatAFreshRunWouldChange } from "../helpers/app-records";
+import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -82,13 +82,16 @@ describe("asking for the change", () => {
     for (const m of outbox) for (const s of [RIVERA.family.name, RIVERA.parent.name, CHENOWETH.family.name, CHENOWETH.parent.email, R_PARENT, C_PARENT]) expect(`${m.subject}${m.text}${m.html}`).not.toContain(s);
 
     const [row] = await requests();
-    expect(row).toMatchObject({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyQboId: R_FAMILY, recordQboId: R_PARENT, newEmail: NEW, usedAt: null });
+    // Asked in the session's own family, the app's record: no QuickBooks id of the family is stored. The record it would
+    // change is still QuickBooks'.
+    expect(row).toMatchObject({ parentId: r.identity.parentId, guardianId: r.identity.guardianId, familyId: r.identity.familyId, recordQboId: R_PARENT, newEmail: NEW, usedAt: null });
+    expect(row).not.toHaveProperty("familyQboId");
     expect(row!.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(row!.tokenHash).not.toContain(token);
     expect(Math.abs(row!.expiresAt.getTime() - (Date.now() + 24 * 3_600_000))).toBeLessThan(60_000);
     // Asked, and audited without the token.
     const log = await audits();
-    expect(log).toEqual([{ action: "parent.email.request", targetId: R_PARENT, before: { email: RIVERA.parent.email }, after: { email: NEW } }]);
+    expect(log).toEqual([{ action: "parent.email.request", targetId: R_PARENT, before: { email: RIVERA.parent.email }, after: { email: NEW, familyId: String(r.identity.familyId) } }]);
     expect(JSON.stringify(log)).not.toContain(token);
     // Nothing else: QuickBooks isn't asked, the address and the session are as they were.
     expect(stub.calls).toHaveLength(0);
@@ -250,7 +253,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     const saved = (await audits()).filter((a) => a.action === "parent.email.save");
     // The reconcile changed the address in place, and that signed the person out itself (parent.email.changed).
     expect(saved).toEqual([{ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
-      after: { email: NEW, field: NEW, portal: "reconciled", emailChanged: 1, ended: 0, granted: 0, sessionsEnded: 0 } }]);
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "reconciled", emailChanged: 1, ended: 0, granted: 0, sessionsEnded: 0 } }]);
     expect((await audits()).map((a) => a.action)).toContain("parent.email.changed");
     // The app's own records followed the change in its transaction (src/lib/families/in-step.ts): the sign-in is in its
     // family and linked to its own record, and a fresh run finds nothing to change.
@@ -463,7 +466,7 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     expect((await requests())[0]!.usedAt).not.toBeNull();
     expect(await rosterRefreshAsked()).toBe(true);
     expect((await audits()).at(-1)).toEqual({ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
-      after: { email: NEW, field: NEW, portal: "refresh_asked", code: "busy", sessionsEnded: 1 } });
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "refresh_asked", code: "busy", sessionsEnded: 1 } });
   }, 30_000);
 
   it("a refresh that stored a later version while the confirmation waited keeps it: the answer's older one is not written over it", async () => {
@@ -527,6 +530,9 @@ describe("confirming with a token that isn't the session's own: one refusal, not
       expired: { expiresAt: new Date(Date.now() - 1000) },
       used: { usedAt: new Date(Date.now() - 1000) },
       underAnotherFamily: { guardianId: c.identity.guardianId, familyQboId: C_FAMILY },
+      // The session's own link, but asked in another family (the app's record of Chenoweth's family).
+      inAnotherFamily: { familyQboId: C_FAMILY },
+      inNoFamily: { familyQboId: null },
       underAnotherLink: { guardianId: c.identity.guardianId },
       fromBefore: { guardianId: null, familyQboId: null, recordQboId: null },
     };
@@ -540,6 +546,32 @@ describe("confirming with a token that isn't the session's own: one refusal, not
     expect(stub.calls).toEqual([]);
     expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
     expect(await sessionsOf(r.identity.parentId)).toHaveLength(1);
+  });
+
+  it("a change asked in family A can't be confirmed from the same person's session in family B: refused as any other link, nothing sent, nothing changed", async () => {
+    const { r } = await seedContactFamilies(stub);
+    // Rivera's parent asks in the Rivera family, then is made a parent of the Chenoweth family too and signs in to it.
+    asParent(r.identity);
+    expect(await asking(NEW)).toMatchObject({ ok: true });
+    const token = linkTo(NEW);
+    await seedGuardian({ parentId: r.identity.parentId, familyQboId: C_FAMILY, status: "active", sourceQboId: C_PARENT });
+    await syncAppRecords();
+    const [u] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId));
+    const inB = await identityNow((await seedParentSession(u!.id, { familyQboId: C_FAMILY })).id);
+    expect(inB.familyId).not.toBe(r.identity.familyId);
+    const before = copyOf(stub.customers);
+    const rows = await requests();
+    asParent(inB);
+    expect(await findMyEmailChange(ctxOf(inB), token)).toEqual({ state: "gone" });
+    expect(await confirmEmailChangeAction(token)).toEqual({ ok: false, errors: [EMAIL_COPY.linkNoGood] });
+    expect(stub.calls).toEqual([]);
+    expect(stub.customers).toEqual(before);
+    // The request is as it was, unused and in family A; the person's address and sessions are as they were.
+    expect(await requests()).toEqual(rows);
+    expect(rows).toEqual([expect.objectContaining({ familyId: r.identity.familyId, usedAt: null })]);
+    expect((await person(r.identity.parentId)).email).toBe(RIVERA.parent.email);
+    expect(await sessionsOf(r.identity.parentId)).toHaveLength(2);
+    expect((await audits()).filter((x) => x.action === "parent.email.save.failed").map((x) => x.after)).toEqual([{ code: "bad_link" }]);
   });
 
   it("a request that names a record not the session's own is refused, spent, and nothing is sent for either record", async () => {

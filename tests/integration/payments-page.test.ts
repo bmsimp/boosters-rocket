@@ -20,7 +20,7 @@ import { buyoutTitleOf, loadMyBuyoutInvoices } from "@/lib/money/my-buyout-invoi
 import { BUYOUT_ITEM } from "../helpers/buyouts";
 import { resetDb } from "../helpers/db";
 import { ageMoney, CHENOWETH, connectCompany, invoiceQueries, moneyRow, RIVERA, stubInvoice as inv } from "../helpers/money";
-import { FAMILY_A, FAMILY_B, identityNow, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { FAMILY_A, FAMILY_B, identityAfterChoosingAgain, MONEY_REALM, moneyMarkers, seedFamilyMoney, seedSignedInParent, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedShape } from "../helpers/roster-cache";
 import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
@@ -237,9 +237,9 @@ describe("the Payments page", () => {
     const there = await recordOfCustomer(RIVERA.family.qboId, "family");
     await db.update(familyMoney).set({ familyId: there });
     expect((await db.select().from(familyMoney)).map((m) => m.realmId)).toEqual([MONEY_REALM]);
-    // The session as the gate resolves it now: the sync left the first company's record inactive and moved the
-    // guardian row to the record linked in this one.
-    const now = await identityNow(r.session.id);
+    // The sync left the first company's record inactive and moved the guardian row to the record linked in this one:
+    // the session stored the first record, so the gate has it choose again, and it enters the family its row names now.
+    const now = await identityAfterChoosingAgain(r.session.id);
     expect(String(now.familyId)).toBe(String(there));
     asParent(now);
     const html = await renderPage(PaymentsPage);

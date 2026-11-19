@@ -3,14 +3,14 @@ import { asParent, asParentChoosing, asRefusedParent, asStaff, redirectOf, rende
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, role, roleAssignment, roleRule, signatureRequest, signedFormEvidence } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, parentAuthSession, role, roleAssignment, roleRule, signatureRequest, signedFormEvidence } from "@/lib/db/schema";
 import { GET as parentDownload } from "@/app/(parent)/forms/[id]/signed/route";
 import { GET as staffDownload } from "@/app/staff/(app)/forms/evidence/[id]/[file]/route";
 import FormsPage from "@/app/(parent)/forms/page";
 import FormPage from "@/app/(parent)/forms/[id]/page";
 import { findMySignedPdf, mySignedDownloads } from "@/lib/forms/my-evidence";
 import { resetDb, seedStaff } from "../helpers/db";
-import { seedTwoFamilies, type SeededParent } from "../helpers/parent";
+import { identityNow, seedTwoFamilies, type SeededParent } from "../helpers/parent";
 import { familyRecord, studentRecord } from "../helpers/volunteer";
 
 /**
@@ -123,8 +123,8 @@ describe("a parent downloads their own family's signed form", () => {
 
 describe("a signed form kept while the family had no QuickBooks link", () => {
   // Kept with no company and no copy, as the evidence job keeps it for a family with no link
-  // (signed-forms-evidence.test.ts). The families are linked here: until the session carries the app's own family
-  // (stage 3), a parent's family is found through its link, so this is that form after the family was linked.
+  // (signed-forms-evidence.test.ts). In the first case the families are linked again since; in the second the
+  // family still has no link at all, and its parent signs in to it by the app's own family the session stores.
   const keptWithNoLink = (evidenceId: string) => db.update(signedFormEvidence).set({ realmId: null, familyQboId: null, subjectQboId: null }).where(eq(signedFormEvidence.id, evidenceId));
 
   it("is the family's own to list and download, and nobody else's: another family's id is the same 404", async () => {
@@ -150,6 +150,42 @@ describe("a signed form kept while the family had no QuickBooks link", () => {
     asParent(b.identity);
     expect(Buffer.compare(Buffer.from(await (await askParent(b.forms!.ids.complete)).arrayBuffer()), b.forms!.evidence.sealed)).toBe(0);
     expect((await askParent(a.forms!.ids.complete)).status).toBe(404);
+  });
+
+  it("is listed and downloaded by a parent signed in to a family with no QuickBooks link at all, and another family's is the same 404", async () => {
+    await keptWithNoLink(a.forms!.evidence.id);
+    // A's family loses its link, removed by hand, and the records are not brought into step after: the family record
+    // stays active with no link, as a family the app owns may be. Its students keep theirs; nothing here reads them.
+    const familyA = a.identity.familyId;
+    await db.delete(accountingLink).where(eq(accountingLink.familyId, familyA));
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.familyId, familyA))).toEqual([]);
+    expect((await db.select({ active: family.active }).from(family).where(eq(family.id, familyA)))[0]).toEqual({ active: true });
+    // The session names the family record, never a QuickBooks id (the session slice, migrations 0037 and 0038). The
+    // guardian row's QuickBooks family is changed too, as a later slice drops that column: a gate that still matched a
+    // session to a row by a QuickBooks family would find no row, so this half proves the session slice with the other two.
+    expect((await db.select({ familyId: parentAuthSession.familyId }).from(parentAuthSession).where(eq(parentAuthSession.id, a.session.id)))[0])
+      .toEqual({ familyId: familyA });
+    await db.update(guardian).set({ familyQboId: "NO-CUSTOMER-A" }).where(eq(guardian.id, a.identity.guardianId));
+    // The gate signs the parent in to it from the session, which names the family record: no link is asked for.
+    const signedIn = await identityNow(a.session.id);
+    expect(signedIn).toMatchObject({ familyId: familyA, guardianId: a.identity.guardianId });
+    asParent(signedIn);
+    const list = await renderPage(FormsPage);
+    expect(list).toContain(`/forms/${a.forms!.ids.complete}/signed`);
+    expect(list.match(/\/signed"/g)).toHaveLength(1);
+    for (const m of [b.forms!.ids.complete, ...b.markers]) expect(list).not.toContain(m);
+    const res = await askParent(a.forms!.ids.complete);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(Buffer.compare(Buffer.from(await res.arrayBuffer()), a.forms!.evidence.sealed)).toBe(0);
+    // Another family's signed form, an unknown id and B's family record answer the same 404, with no bytes.
+    const answers = [];
+    for (const id of [b.forms!.ids.complete, NOBODY, String(b.identity.familyId)]) {
+      const r = await askParent(id);
+      answers.push({ status: r.status, body: await r.text(), cache: r.headers.get("cache-control") });
+    }
+    expect(answers).toEqual(Array.from({ length: 3 }, () => ({ status: 404, body: "Not found", cache: "no-store" })));
+    expect(await findMySignedPdf({ ...signedIn, ip: null }, b.forms!.ids.complete)).toBeNull();
   });
 });
 

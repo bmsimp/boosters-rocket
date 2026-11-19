@@ -18,7 +18,8 @@ import { recordOfCustomer } from "../helpers/app-records";
  * id, changes nothing.
  */
 const HOSTILE: unknown[] = ["//evil.example", "/\\evil.example", "https://evil.example/", "/staff/roster", "/api/auth/parent/sign-out", "/setup", "/%2F%2Fevil.example", ["/display"], 7, new FormData()];
-const sessionFamily = async (p: SeededParent) => (await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, p.session.id)))[0]!.familyQboId;
+/** The app's family record a parent's session has chosen, or null. */
+const sessionFamily = async (p: SeededParent) => (await db.select().from(parentAuthSession).where(eq(parentAuthSession.id, p.session.id)))[0]!.familyId;
 const refusals = async () => (await db.select().from(auditLog)).filter((r) => r.action === "signin.refused");
 
 describe("the page a parent asked for", () => {
@@ -120,9 +121,9 @@ describe("the page a parent asked for", () => {
 
     it("lands on the page asked for once a family is chosen", async () => {
       asParentChoosing(a.identity);
-      await db.update(parentAuthSession).set({ familyQboId: null }).where(eq(parentAuthSession.id, a.session.id));
+      await db.update(parentAuthSession).set({ familyId: null }).where(eq(parentAuthSession.id, a.session.id));
       expect(await redirectOf(chooseFamilyAction(a.identity.guardianId, "/payments"))).toBe("/payments");
-      expect(await sessionFamily(a)).toBe(a.spec.family.qboId);
+      expect(await sessionFamily(a)).toBe(a.identity.familyId);
       expect(await redirectOf(chooseFamilyAction(a.identity.guardianId))).toBe("/");
     });
 
@@ -152,13 +153,13 @@ describe("the page a parent asked for", () => {
       // The return path can't be used to say which family either: another family's id there is only a path that is dropped or kept.
       asParent(a.identity);
       expect(await redirectOf(chooseFamilyAction(a.identity.guardianId, `/${b.spec.family.qboId}`))).toBe(`/${b.spec.family.qboId}`);
-      expect(await sessionFamily(a)).toBe(a.spec.family.qboId);
-      expect(await sessionFamily(b)).toBe(b.spec.family.qboId);
+      expect(await sessionFamily(a)).toBe(a.identity.familyId);
+      expect(await sessionFamily(b)).toBe(b.identity.familyId);
     });
 
     it("is refused without a parent session, whatever it is given", async () => {
       await expect(chooseFamilyAction(a.identity.guardianId, "/payments")).rejects.toThrow("Not allowed");
-      expect(await sessionFamily(a)).toBe(a.spec.family.qboId);
+      expect(await sessionFamily(a)).toBe(a.identity.familyId);
     });
   });
 });
