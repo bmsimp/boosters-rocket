@@ -218,8 +218,8 @@ export const parentSigninToken = pgTable("parent_signin_token", {
  * A device remembered as having passed the second step of a sign-in, for a person (the sign-in release): the keyed
  * hash of the token its cookie holds, never the token; renewed by use (`last_used_at`, `expires_at`). It goes with the
  * person. The daily clean-up deletes one past its expiry. Nothing makes one yet (slice SI-3b will); since slice SI-2
- * everything that ends all of a person's sign-in deletes them already (blocking, sign-ins switched off, the
- * change-of-company clear, and a password reset).
+ * blocking, sign-ins switched off, the change-of-company clear and a password reset delete them. Closing a person's
+ * last membership leaves them until the sign-in release's choice 10 is decided (src/lib/parents/sessions.ts).
  */
 export const parentDevice = pgTable("parent_device", {
   id: uuid("id").primaryKey().defaultRandom(),

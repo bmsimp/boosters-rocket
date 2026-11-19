@@ -4,7 +4,8 @@
 // answer's size says nothing either; the rest of the hash is compared here. Nothing of the password, its hash or the
 // suffix is logged, thrown, kept or sent anywhere else, and the function never throws: when the service can't answer
 // (unreachable, slow, or an answer it doesn't understand) the password could not be checked, and the spec's rule is
-// that it is then taken and its audit row says it was not checked. Nothing calls it yet (slice SI-1).
+// that it is then taken and its audit row says it was not checked. Called by choosePasswordFromLink()
+// (./password-set.ts), the set-up and reset links' form, since slice SI-2.
 import "server-only";
 import { createHash } from "node:crypto";
 import { breachEndpoints } from "./breach-endpoints";

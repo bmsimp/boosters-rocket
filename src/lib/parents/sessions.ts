@@ -48,12 +48,17 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * person's row (`parent`), then what hangs on the person, in this order: their email change requests, their sign-in
  * codes, their set-up and reset links (`parent_signin_token`), their password (the `credential` row of
  * `parent_auth_account`), their remembered devices (`parent_device`), their sessions. Links are made since the sign-in
- * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet, but everything that ends all of a
- * person's sign-in deletes both already, in that place. So:
- * - choosePasswordFromLink() (password-set.ts) takes the row FOR UPDATE, then for a reset deletes the unused codes, then
- *   spends its link (the link's row FOR UPDATE), then replaces or inserts the password, then for a reset forgets the
- *   devices and ends the sessions; mintSigninLink() takes the row FOR UPDATE, then replaces the unused link of its
- *   purpose;
+ * release's slice SI-2 (mintSigninLink(), signin-links.ts); nothing makes a device yet. Blocking, sign-ins switched off,
+ * the change-of-company clear and a password reset delete both, in that place; closing a person's last membership
+ * (closeMembership(), membership.ts) ends their sessions but leaves their unused links and devices, which no longer let
+ * them in (linkVerdict() asks for a row that counts), until the lead's choice 10 of the sign-in release is decided. So:
+ * - choosePasswordFromLink() (password-set.ts) takes the row FOR UPDATE, then, as its re-check, its link's row FOR
+ *   UPDATE, and only then, for a reset, deletes the unused codes; then it spends the link, replaces or inserts the
+ *   password, and for a reset forgets the devices and ends the sessions. That one link ahead of the codes is the one
+ *   step out of the order above, and is safe because nothing else takes both without the person's row first: every
+ *   writer of a person's links holds that row, and the code check of signin-codes.ts touches no link. A new writer of
+ *   both that does not take the person's row first must take the link before the codes too. mintSigninLink() takes the row FOR UPDATE, then replaces the unused link
+ *   of its purpose;
  * - confirmMyEmailChange() (email-change.ts) takes both address locks and the row FOR UPDATE, spends its request and
  *   changes the address, then deletes the person's other requests, then their unused codes, then their sessions, and
  *   only then, in a savepoint, the roster lock and the app's records;
