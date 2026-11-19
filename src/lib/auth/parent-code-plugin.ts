@@ -37,5 +37,18 @@ export const parentCodePlugin = () => ({
       const done = await finishParentSignin(ctx, { parentId: r.parentId, email: ctx.body.email, proof: { codeId: r.codeId }, ip, next: ctx.body.next });
       return ctx.json(done.ok ? { ok: true, next: done.next } : { ok: false, error: "rejected" });
     }),
+    // A set-up link's sign-in (the sign-in release, slice SI-3a): the link form's action has set the password and holds
+    // the proof of what it spent (choosePasswordFromLink(), password-set.ts), and finishes the sign-in here, through the
+    // same finish, by auth.api from portal code (signInFromLink(), parent-link-signin.ts). Server only: it has no path,
+    // so the router serves it to nobody (tests/integration/parent-door.test.ts lists every reachable path), and nothing a
+    // browser sends reaches its body. The parent lands on their page or the chooser.
+    finishLinkSignin: createAuthEndpoint.serverOnly({
+      method: "POST",
+      body: z.object({ parentId: z.string(), email: z.string(), linkId: z.string(), credentialId: z.string(), credentialUpdatedAt: z.number() }),
+    }, async (ctx) => {
+      const b = ctx.body;
+      const proof = { link: { linkId: b.linkId, credentialId: b.credentialId, credentialUpdatedAt: new Date(b.credentialUpdatedAt) } };
+      return ctx.json(await finishParentSignin(ctx, { parentId: b.parentId, email: b.email, proof, ip: ipOf(ctx) }));
+    }),
   },
 }) satisfies BetterAuthPlugin;

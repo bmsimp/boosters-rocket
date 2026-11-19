@@ -236,20 +236,22 @@ describe("the page a link opens, and its action, refuse every unusable link alik
 describe("setting a password from a link", () => {
   beforeEach(async () => { await resetDb(); mode = "answer"; fromIp(IP); });
 
-  it("a set-up link inserts one credential row that verifies, spends the link and ends nothing", async () => {
+  it("a set-up link inserts one credential row that verifies, spends the link, ends nothing and, at Standard, signs in", async () => {
     const { ana, row } = await seedAna();
     await seedParentSession(ana.authUserId, { familyId: row.familyId });
     await seedDevice(ana.id);
     await seedCode(ana.id);
     const token = await mintLink(ana.id, "setup");
-    expect(await choose("setup", token)).toEqual({ ok: true, message: PASSWORD_COPY.set });
+    // At Standard (the level a club has until an Admin chooses Strict) the set-up signs Ana in: one family, so home
+    // (slice SI-3a; tests/integration/password-link-signin.test.ts).
+    expect(await choose("setup", token)).toEqual({ ok: true, message: PASSWORD_COPY.signingIn, next: "/" });
     const creds = await credentialRows(ana.authUserId);
     expect(creds).toHaveLength(1);
     expect(creds[0]).toMatchObject({ providerId: "credential", accountId: ana.authUserId, userId: ana.authUserId });
     expect(await verifyPassword({ hash: creds[0]!.password!, password: GOOD })).toBe(true);
     expect((await linkRows(ana.id))[0]!.usedAt).not.toBeNull();
-    // A set-up ends nothing: the session, the device and the code stay.
-    expect(await db.select().from(parentAuthSession)).toHaveLength(1);
+    // A set-up ends nothing: the session, the device and the code stay, beside the session it signed in with.
+    expect(await db.select().from(parentAuthSession)).toHaveLength(2);
     expect(await db.select().from(parentDevice)).toHaveLength(1);
     expect(await db.select().from(signinCode)).toHaveLength(1);
     const [set] = await audits("parent.password.set");
@@ -353,7 +355,7 @@ describe("setting a password from a link", () => {
   it("takes a password the breach check couldn't check, and says so in its audit row and the Health mark", async () => {
     const { ana } = await seedAna();
     mode = "down";
-    expect(await choose("setup", await mintLink(ana.id, "setup"))).toEqual({ ok: true, message: PASSWORD_COPY.set });
+    expect(await choose("setup", await mintLink(ana.id, "setup"))).toEqual({ ok: true, message: PASSWORD_COPY.signingIn, next: "/" });
     expect((await audits("parent.password.set"))[0]!.after).toEqual({ purpose: "setup", replaced: false, breachChecked: false, breachNotChecked: "bad_answer" });
     expect(await readBreachMark()).toMatchObject({ answeredAt: null, failedAt: expect.any(String), failure: "bad_answer", failedLast: true });
     // The mark holds times and a code only.

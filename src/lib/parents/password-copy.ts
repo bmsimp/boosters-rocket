@@ -18,6 +18,18 @@ export const PASSWORD_COPY = {
   tooLong: `That password is too long. Please use at most ${PASSWORD_MAX} characters.`,
   breached: "That password has appeared in a known data breach on another site, so it isn't safe to use here. Please choose another: a few unrelated words together, ones you haven't used anywhere else, make a strong one.",
   set: "Your password is set.",
+  /** A set-up that signed the parent in (the club's level is Standard): the form goes on to their page. */
+  signingIn: "Your password is set. Signing you in…",
+  /** The link to where a signed-in parent goes, should the page not move on by itself. */
+  continueIn: "Continue",
+  // The page "Set up or reset my password" (src/app/sign-in/password; slice SI-3a). Its answer is one sentence for
+  // every address and every outcome: it never says whether an address is known, has a password, or was mailed.
+  askTitle: "Set up or reset my password",
+  askLede: "Enter the email address you sign in with. We'll email you a link to set up your password, or to choose a new one if you've forgotten it.",
+  askButton: "Email me a link",
+  askAnswer: "If that address can sign in here, we've emailed it a link. It can take a minute, and the link works once. Check your spam folder too.",
+  /** Under Strict, to everyone, before and after asking: nothing is mailed on request for now, so a guardian asks the club. */
+  askStrict: "If you can't sign in, please ask the club. They'll help you set up or reset your password.",
   /** What the form says when the action itself couldn't be reached or threw: try again, nothing about why. */
   failed: "That didn't go through. Please try again in a moment.",
 } as const;

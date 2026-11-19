@@ -12,6 +12,8 @@ import path from "node:path";
 const root = path.resolve(__dirname, "../..");
 const FINISH = "src/lib/auth/parent-signin-finish.ts";
 const PLUGIN = "src/lib/auth/parent-code-plugin.ts";
+/** Where the Set-Cookie of a sign-in finished on the server is copied onto a server action's answer (an action has no endpoint of its own). */
+const COPY = "src/lib/auth/parent-link-signin.ts";
 
 const files = readdirSync(path.join(root, "src"), { recursive: true }).map((f) => `src/${String(f).replaceAll("\\", "/")}`)
   .filter((f) => /\.(ts|tsx|mts|js|mjs)$/.test(f));
@@ -52,13 +54,13 @@ describe("one way in", () => {
   it("the finish is called only by the parent code plugin's endpoints", () => {
     const callers = files.filter((f) => f !== FINISH && /\bfinishParentSignin\s*\(/.test(code(read(f))));
     expect(callers, `Only ${PLUGIN} may call finishParentSignin() (AGENTS.md, "Sign-in release").`).toEqual([PLUGIN]);
-    // The code door finishes through it.
-    expect(code(read(PLUGIN)).match(/\bfinishParentSignin\s*\(/g)).toHaveLength(1);
+    // The code door and the set-up link's server-only endpoint both finish through it.
+    expect(code(read(PLUGIN)).match(/\bfinishParentSignin\s*\(/g)).toHaveLength(2);
   });
 
   it("the Set-Cookie of a sign-in is copied onto a server action's answer in one place only", () => {
     const copiers = files.filter((f) => /\bgetSetCookie\s*\(|\bparseSetCookieHeader\s*\(/.test(code(read(f))));
-    expect(copiers).toEqual([]);
+    expect(copiers).toEqual([COPY]);
   });
 
   it("the finish still makes the session, asks signinStands() and completeParentSignin(), and sets the cookie, in that order", () => {
