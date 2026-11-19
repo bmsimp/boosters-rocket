@@ -197,6 +197,24 @@ describe("a family's page brings the portal's own records into line with what Qu
     expect(await renderPage(RosterEntryPage, { params: { id: await idOf("10") } })).not.toContain("Change the student Leo Rivera");
     expect(await renderPage(RosterEntryPage, { params: { id: await idOf("20") } })).toContain("Change the student Leo Rivera");
   });
+
+  it("a student QuickBooks has under a family that isn't the app's: said so, and only moves to the app's own families are offered, which are sent", async () => {
+    // A family made in QuickBooks alone has no record since slice 9c.
+    stub.customers.push({ Id: "70", DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
+    Object.assign(stub.customers.find((c) => c.Id === "12")!, { ParentRef: { value: "70" }, SyncToken: "1" });
+    expect((await refreshRoster(WORKER)).ok).toBe(true);
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    const changes = html.slice(html.indexOf("Change the student Leo Rivera"));
+    expect(changes).toContain("QuickBooks has Leo Rivera under Okafor Family, which isn&#x27;t one of the portal&#x27;s own active families");
+    expect(html).not.toContain("but the portal still holds them in this family");
+    const moveTo = changes.slice(0, changes.indexOf("</select>"));
+    expect(moveTo).toContain('<option value="10">Rivera Family</option>');
+    expect(moveTo).toContain('<option value="20">Chen Family</option>');
+    expect(moveTo).not.toContain('value="70"');
+    expect(await moveAction(tag, "12", "1", "10")).toMatchObject({ ok: true });
+    expect(posts().length).toBe(1);
+    expect((await db.select().from(student).where(eq(student.id, await recordOfCustomer("12", "student"))))[0]).toMatchObject({ familyId: await recordOfCustomer("10", "family") });
+  });
 });
 
 describe("the roster pages offer the changes the shape allows, to staff who may make them", () => {

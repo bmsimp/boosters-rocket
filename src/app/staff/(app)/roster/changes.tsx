@@ -119,7 +119,8 @@ export type Elsewhere = { name: string; customer: Cust; familyQboId: string; fam
  * only for a family whose own record is active in the portal; a student whose record is inactive (`inactiveRecords`,
  * by customer) is offered nothing that would send. A student whose record is this family's but whom QuickBooks has
  * under another family (`elsewhere`) is offered the move to that family, which sends nothing and brings the record,
- * with what follows a move, into line.
+ * with what follows a move, into line; when that family isn't one of `families` (the app's own active families, active
+ * in QuickBooks), the record can't follow it there, and the move offered is one sent to QuickBooks, to one of them.
  */
 export function FamilyChanges({ shape, family, families, edit, cover, inactiveRecords, elsewhere }: {
   shape: Extract<MembershipShape, { kind: "layered" }>; family: Family; families: { qboId: string; name: string }[]; edit: Edit; cover: { family: Covered; under: Covered[] } | null;
@@ -153,6 +154,16 @@ export function FamilyChanges({ shape, family, families, edit, cover, inactiveRe
         const version = edit.versions.get(s.customer.qboId);
         if (version === undefined) return null;
         if (edit.blocked.has(s.customer.qboId)) return <Notice key={s.customer.qboId} tone="info" live="none">A change to {s.name} is waiting to reach QuickBooks, so nothing else can be changed for now.</Notice>;
+        // The family QuickBooks has them under isn't one of the portal's own active families (made in QuickBooks alone,
+        // or inactive there or here): the record can't follow them there, so the move offered is one sent to
+        // QuickBooks, to one of the portal's families, this one included (prepare() in src/lib/roster/writes.ts).
+        if (!families.some((x) => x.qboId === s.familyQboId)) return (
+          <details key={s.customer.qboId} className="more"><summary>Change the student {s.name}</summary>
+            <p>QuickBooks has {s.name} under {s.familyName}, which isn&apos;t one of the portal&apos;s own active families, so the portal&apos;s own record of them can&apos;t follow them there. Moving them here sends the move to QuickBooks: back to this family puts QuickBooks in line with the portal, and to another family their record, forms, places on shifts still to come and buy-outs go with them.</p>
+            {families.length > 0 ? <MoveForm families={families} act={moveAction.bind(null, edit.rosterTag, s.customer.qboId, version)} />
+              : <Notice tone="info" live="none">The portal has no active family to move them to.</Notice>}
+          </details>
+        );
         return (
           <details key={s.customer.qboId} className="more"><summary>Change the student {s.name}</summary>
             <p>QuickBooks has {s.name} under {s.familyName}, but the portal still holds them in this family. Moving them to {s.familyName} here sends nothing to QuickBooks: the portal&apos;s own record moves, and their forms, places on shifts still to come and buy-outs follow as they do for any move.</p>

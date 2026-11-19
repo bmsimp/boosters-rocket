@@ -354,7 +354,7 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
 
 /** What staff can do once a roster change QuickBooks may have made is given up, by what it was. */
 const GIVEN_UP_NEXT: Partial<Record<QueuedWrite["op"], string>> = {
-  move: "To bring the portal's own record into line, open the family's page and move the student to the family QuickBooks has them in: nothing is sent, and the record, forms and places follow.",
+  move: "To bring the portal's own record into line, open the family's page and move the student to the family QuickBooks has them in: nothing is sent, and the record, forms and places follow. If that family isn't one of the portal's own, the page offers a move to one that is instead, which is sent to QuickBooks.",
   deactivate: "To bring the portal's own record into line, open the family's page and make them inactive there: nothing is sent when QuickBooks has them inactive already.",
   rename: "To bring the portal's own record into line, rename it on the family's page to the name QuickBooks has: nothing is sent.",
   create: "A new customer QuickBooks made has no record in the portal: look for it in QuickBooks.",

@@ -83,6 +83,7 @@ export const WRITE_COPY = {
   inactiveHere: "That is inactive in the portal, so nothing was sent to QuickBooks.",
   notOursToAdd: "That family isn't one of the portal's own active families, so nobody can be added to it.",
   elsewhere: "QuickBooks has this student under another family than the portal does, so nothing was sent. On this page, move them to the family QuickBooks has them in first, which sends nothing and brings the portal's own record there; then move them on if they belong somewhere else.",
+  elsewhereNotOurs: "QuickBooks has this student under a family that isn't one of the portal's own active families, so the portal's own record can't follow them there and nothing was sent. Move them to one of the portal's families on this page instead: that move is sent to QuickBooks, and their record goes with it.",
 } as const;
 
 /** A family is made inactive only with everyone under it: the refusal names the button as the family's page does. */
@@ -300,8 +301,15 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       const [held] = studentRecord === null ? [] : await tx.select({ familyId: student.familyId }).from(student).where(eq(student.id, studentRecord));
       const recordFrom = held?.familyId ? await customerOfFamily(held.familyId, tx) : null;
       const apart = recordFrom !== null && recordFrom !== where.familyQboId;
+      // Whether the record can follow QuickBooks: the family QuickBooks has them under is one of the app's own active
+      // families, active in QuickBooks. When it isn't (a family customer made in QuickBooks alone has no record since
+      // slice 9c, or it or its record is inactive), the record has nowhere to follow to, so a move to one of the app's
+      // own families is sent instead, as any move is, and the record goes with it from the family the portal holds it in.
+      const canFollow = apart && byId.get(where.familyQboId!)?.active === true
+        && (await familyActiveOf(tx, await familyLinkedTo(where.familyQboId!, tx))) === true;
       if (ask.toFamilyQboId === where.familyQboId && !apart) return no(ALREADY_THERE);
-      if (ask.toFamilyQboId !== where.familyQboId && apart) return no(WRITE_COPY.elsewhere);
+      if (ask.toFamilyQboId === where.familyQboId && !canFollow) return no(WRITE_COPY.elsewhereNotOurs);
+      if (ask.toFamilyQboId !== where.familyQboId && canFollow) return no(WRITE_COPY.elsewhere);
       if (!byId.get(ask.toFamilyQboId)!.active) return no("That family is inactive in QuickBooks, so nobody can be moved to it.");
       // Only into one of the app's own active families: since stage 3's slice 9c a family customer added in QuickBooks
       // has no record, and a move into it would leave the student's record, and their forms and places, in the old one.
@@ -311,7 +319,13 @@ async function prepare(ask: WriteAsk, rosterTag: string): Promise<Prepared> {
       if (await waitingFor(ask.toFamilyQboId)) return no(WRITE_COPY.waiting);
       // QuickBooks has them in that family already, and the portal's own record is in another: nothing is sent, and the
       // record follows, from the family the portal holds them in, with a move's follow-ups (recordFollows()).
-      if (apart) return done({ op: "move", role: "student", qboId: record.qboId, syncToken: ask.syncToken, fromFamilyQboId: recordFrom!, toFamilyQboId: ask.toFamilyQboId }, recordFrom, null, "moved");
+      if (canFollow) return done({ op: "move", role: "student", qboId: record.qboId, syncToken: ask.syncToken, fromFamilyQboId: recordFrom!, toFamilyQboId: ask.toFamilyQboId }, recordFrom, null, "moved");
+      // Under a family that isn't the app's: the move is sent, filed under the family the record is in. Its follow-ups go
+      // from that family when the record moves on with it; a move back to the record's own family moves no record, so
+      // they go from the family QuickBooks had them under (where the record holds nothing, so nothing of the record's own
+      // family is given up).
+      if (apart) return done({ op: "move", role: "student", qboId: record.qboId, syncToken: ask.syncToken,
+        fromFamilyQboId: ask.toFamilyQboId === recordFrom ? where.familyQboId! : recordFrom!, toFamilyQboId: ask.toFamilyQboId }, recordFrom);
       return done({ op: "move", role: "student", qboId: record.qboId, syncToken: ask.syncToken, fromFamilyQboId: where.familyQboId!, toFamilyQboId: ask.toFamilyQboId }, where.familyQboId);
     }
     if (!allowed(deactivateOf(where.role))) return no(WRITE_COPY.notOffered);

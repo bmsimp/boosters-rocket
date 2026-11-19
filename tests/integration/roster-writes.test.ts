@@ -425,6 +425,42 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: false, errors: ["The student is in that family already, so there was nothing to change."] });
     });
 
+    it("a student QuickBooks has under a family that isn't the app's: the record can't follow there, and a move to one of the app's families is sent, the record going with it", async () => {
+      const rivera = await recordOfCustomer("10", "family"), chen = await recordOfCustomer("20", "family"), leo = await recordOfCustomer("12", "student");
+      const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
+      const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
+      const requestId = await seedRequest({ requirementId, familyQboId: "10", subjectQboId: "12", state: "waiting", envelopeId: "envelope_leookafor" });
+      // A family made in QuickBooks alone, which has no record since slice 9c, and Leo moved under it there.
+      stub.customers.push({ Id: "70", DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
+      Object.assign(inStub("12"), { ParentRef: { value: "70" }, SyncToken: "1" });
+      expect((await refreshRoster(WORKER)).ok).toBe(true);
+      expect(await studentRow(leo)).toMatchObject({ familyId: rivera });
+      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "70" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.elsewhereNotOurs] });
+      expect(posts()).toEqual([]);
+      // To another of the app's families: sent, and the record, with its forms, goes from the family the portal held it in.
+      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "20" }, tag, op)).toEqual({ ok: true, message: "Moved in QuickBooks." });
+      expect(sent()).toEqual([{ Id: "12", SyncToken: "1", sparse: true, ParentRef: { value: "20" }, Job: true, BillWithParent: true }]);
+      expect(await studentRow(leo)).toMatchObject({ familyId: chen, active: true });
+      expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "20" });
+      expect((await auditsOf("roster.student.move.followed")).map((a) => a.after)).toEqual([expect.objectContaining({ fromFamilyQboId: "10", toFamilyQboId: "20" })]);
+    });
+
+    it("a student QuickBooks has under a family that isn't the app's, moved back to the family the portal holds them in: sent, and the record and its forms stay", async () => {
+      const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
+      const season = await seedSeason({ name: "Fall", steps: [{ name: "Forms" }] });
+      const requirementId = await seedFormRequirement({ stepId: season.stepIds.Forms!, title: "Medical release", appliesTo: "student", form: null });
+      const requestId = await seedRequest({ requirementId, familyQboId: "10", subjectQboId: "12", state: "waiting", envelopeId: "envelope_leoback" });
+      stub.customers.push({ Id: "70", DisplayName: "Okafor Family", Active: true, SyncToken: "0", CustomerTypeRef: { value: "1" } });
+      Object.assign(inStub("12"), { ParentRef: { value: "70" }, SyncToken: "1" });
+      expect((await refreshRoster(WORKER)).ok).toBe(true);
+      expect(await askRosterWrite({ op: "move", qboId: "12", syncToken: "1", toFamilyQboId: "10" }, tag, op)).toEqual({ ok: true, message: "Moved in QuickBooks." });
+      expect(sent()).toEqual([{ Id: "12", SyncToken: "1", sparse: true, ParentRef: { value: "10" }, Job: true, BillWithParent: true }]);
+      expect(await cached("12")).toMatchObject({ parentQboId: "10" });
+      expect(await studentRow(leo)).toMatchObject({ familyId: rivera, active: true });
+      expect(await requestByCustomer(requestId)).toMatchObject({ familyQboId: "10", state: "waiting" });
+      expect((await auditsOf("roster.student.move.followed")).map((a) => a.after)).toEqual([expect.objectContaining({ fromFamilyQboId: "70", toFamilyQboId: "10" })]);
+    });
+
     it("nothing is sent for a family or student whose own record is inactive in the portal", async () => {
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
       await db.update(family).set({ active: false }).where(eq(family.id, rivera));
