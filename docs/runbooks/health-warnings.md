@@ -72,7 +72,8 @@ installation with. `docker compose ps` shows what is running, and `docker compos
     with why and what QuickBooks has now. Decide which is right: **Send the portal's value** to put the portal's in
     QuickBooks (it reads QuickBooks first, and sends nothing if the name there changed again since the page was
     shown), or **Give up** to leave QuickBooks as it is. Renaming the record again on its family's page also takes the
-    place of the refused change.
+    place of the refused change, and is the way out for a name QuickBooks refused as taken: such a row offers no
+    **Send the portal's value**, and nor does one whose customer QuickBooks has inactive.
   - That some of the portal's requests "didn't answer as the portal expects", the last time an Admin ran **Check the
     portal's requests** (the line's link; Settings, QuickBooks). QuickBooks answered one of the portal's requests in a
     way the portal wasn't written for. Open the page: each such row says what it found and what it means for the club.

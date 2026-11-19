@@ -11,7 +11,7 @@ import { Notice } from "@/app/components/notice";
 import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, linkMadeStudentAction, sendPortalValueAction, tryAgainAction } from "../roster/write-actions";
-import { keptRefusalWords, portalValueStamp } from "@/lib/roster/writes";
+import { keptRefusalWords, portalValueStamp, TAKEN_NAME_KEPT } from "@/lib/roster/writes";
 import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { BuyoutsToLook } from "./buyouts";
 import { CustomersWithNoFamily } from "./no-family";
@@ -72,6 +72,8 @@ function Writes({ items, caption, canChange, mayLink }: { items: QueueView[]; ca
  * and, for staff who may change families, "Send the portal's value" (bound to what the row showed, sealed so a value the
  * form sends back that isn't it is refused) and "Give up". A refused change is never tried again by itself.
  */
+/** Why a refused rename of a customer QuickBooks has inactive isn't offered "Send the portal's value". */
+const INACTIVE_IN_QUICKBOOKS = "QuickBooks has this customer inactive, and the portal never makes a customer active again, so the portal's name isn't sent: give it up here, or make the customer active in QuickBooks first.";
 function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean }) {
   const columns: Column<QueueView>[] = [
     { key: "what", header: "Change", rowHeader: true, cell: (i) => <>{i.words}<span className="when">{waitingWords(i)}</span></> },
@@ -80,9 +82,14 @@ function Refused({ items, canChange }: { items: QueueView[]; canChange: boolean 
     { key: "family", header: "Family", cell: (i) => (i.familyId ? <Link href={familyPage(i.familyId)}>Open the family</Link> : "None") },
     ...(canChange ? [{ key: "do", header: "What you can do", quiet: true, cell: (i: QueueView) => {
       const shown = i.holds ?? "";
+      // Offered only where it can go through: a name QuickBooks refused as taken is renamed on the family's page instead
+      // (which takes its place), and a customer QuickBooks has inactive is never made active again by the portal.
+      const instead = i.mayResend ? null : i.lastCode === "fault_6240" ? TAKEN_NAME_KEPT : INACTIVE_IN_QUICKBOOKS;
       return (
         <div className="row-actions">
-          <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, shown, portalValueStamp(i.id, shown))} />
+          {instead === null
+            ? <OneButton label="Send the portal's value" pendingLabel="Reading QuickBooks, then sending…" act={sendPortalValueAction.bind(null, i.id, shown, portalValueStamp(i.id, shown))} />
+            : <p className="hint">{instead}</p>}
           <details className="more"><summary>Give up</summary>
             <p className="hint">The portal keeps its own value, and QuickBooks keeps what it has.</p>
             <TextAction field="Why? (kept in the audit log)" label="Give up" pendingLabel="Giving up…" maxLength={500} multiline act={giveUpAction.bind(null, i.id)} />

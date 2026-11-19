@@ -636,6 +636,10 @@ export async function applyWritten(w: RosterWrite, answer: Record<string, unknow
         await upsertFromAnswer(tx, answer, await getShape(tx));
         if (w.op === "move") ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause }, o));
         appRecord = await changeOwnRecord(tx, w, targetId, { realmId: o.realmId, linkedBy: o.linkedBy, studentId: o.filed?.studentId, familyId: o.filed?.familyId, syncedToken: answerToken });
+        // A student saved first, now linked, leaves no refused create of theirs behind (stage 3's slice 9e).
+        if (appRecord?.kind === "student" && "linked" in appRecord) {
+          await replaceRefusedCreates(tx, asAppStudentId(appRecord.studentId), { op: "create", customerQboId: targetId, ...(o.queueId ? { queueId: o.queueId } : {}) }, o);
+        }
         aligned = await alignAfterWrite(tx, w, o.realmId, answerToken);
         if (w.op === "deactivate" && w.role === "family") { await askForRosterRefresh(tx); refreshAsked = true; }
       } else if (ours) {
@@ -693,8 +697,10 @@ async function alignLink(tx: Tx, kind: "family" | "student", customerId: string,
  * After an update QuickBooks took (or one the queue found made), the record's link takes the version QuickBooks now
  * holds (`token`: the answer's, or the cache row it was found as), only when what was sent carried the link's own
  * version (`syncToken` equal to the link's), or was a rename resent with a version read live after its name read as
- * the portal held it (`checked`). A move or make-inactive sent with a page's version that differs, the family action's
- * last step (sent with a version just read) and a parent's change leave it. A create's link takes it in changeOwnRecord().
+ * the portal held it (`checked`). A move or make-inactive sent with a page's version that differs from the link's
+ * leaves it, and so does the family action's last step when the version it just read differs (one that happens to
+ * equal the link's is a send that carried the link's own version, by the same rule); a parent's change has no link. A
+ * create's link takes it in changeOwnRecord(). The queue aligns a change it finds made only when it was sent.
  */
 export async function alignAfterWrite(tx: Tx, w: RosterWrite, realmId: string, token: string | null): Promise<boolean> {
   if (w.op === "create") return false;
@@ -1331,6 +1337,7 @@ export async function linkStudentMadeAfterGivingUp(rawQueueId: string, rosterTag
     const [row] = await tx.select({ syncToken: qboCustomer.syncToken }).from(qboCustomer).where(eq(qboCustomer.qboId, made.customerQboId));
     const [link] = await tx.insert(accountingLink).values({ system: QUICKBOOKS, realmId: source, customerId: made.customerQboId, studentId, origin: "confirmed", linkedBy: o.staffUserId,
       ...(row ? { syncedToken: row.syncToken, syncedAt: new Date() } : {}) }).returning({ id: accountingLink.id });
+    await replaceRefusedCreates(tx, studentId, { op: "link_after_giving_up", customerQboId: made.customerQboId, queueId: item.id }, o);
     await writeAudit({ actor: o.actor, action: "roster.student.linked_after_giving_up", permission: o.permission, ip: o.ip, targetType: "student", targetId: String(studentId),
       after: { studentId: String(studentId), familyId: String(s.familyId), customerQboId: made.customerQboId, queueId: item.id, linkId: link!.id } }, tx);
     return { ok: true, message: `${recordNameWords(s.name, "student")} is linked to “${made.name}” in QuickBooks. Nothing was sent to QuickBooks.` };
@@ -1633,10 +1640,8 @@ async function createAndLinkHolding(familyId: string, typeQboId: string | null, 
     const offer = freeName(name.name, [...p.taken, ...sentNames]);
     if (offer) return stop(at, i, "name_taken", `“${name.name}” is already a name in QuickBooks, and every name there must be different, so ${said} wasn't made there. Rename them on this page, for instance to “${offer}”, then press “Create in QuickBooks and link” again.`, false);
     const write: CreateWrite = { op: "create", role: "student", name: name.name, typeQboId: p.studentTypeId!, familyQboId: familyCustomer!, email: null };
-    // This create takes the place of a refused one of the same student (stage 3's slice 9e), closed as given up first.
-    await db.transaction(async (tx) => {
-      if (await lockRosterAs(tx, rosterTagOf(p.realmId))) await replaceRefused(tx, and(eq(writeQueue.studentId, s.id), isStudentCreate), { op: "create_in_quickbooks_and_link", studentId: String(s.id) }, o);
-    });
+    // A refused create of the same student (stage 3's slice 9e) is taken over by this one once QuickBooks has made it and
+    // the student is linked (applyWritten(), or the found-done path after a lost answer): one that fails leaves it kept.
     const sent = await sendCreateStep(write, { familyId: p.familyId, studentId: s.id }, said, p.realmId, o);
     if (!sent.ok) return stop(at, i, sent.code, sent.words, sent.maybe);
     if (!sent.cached) return stop(at, i, "not_linked_yet", `QuickBooks made ${said}, but the portal links the two only after its next read of QuickBooks, usually within a few minutes.`, true);
@@ -1784,6 +1789,8 @@ const NOT_AS_SHOWN = "That didn't go through. Reload the page and try again.";
 const NO_LONGER_REFUSED = "That is no longer kept as refused: it was sent, given up, or replaced by a later change. Reload the page.";
 const RECORD_MOVED_ON = "The portal's own record changed since this was kept (renamed, moved, made inactive or unlinked), so nothing was sent. Reload the page.";
 const INACTIVE_THERE = "QuickBooks has that customer inactive, so nothing was sent: the portal never makes a customer active again.";
+/** Why a rename QuickBooks refused as a taken name (6240) isn't sent again: a later rename to a free name takes its place. */
+export const TAKEN_NAME_KEPT = "QuickBooks refused that name as taken, so it isn't sent again as it is: rename the record on its family's page to a free name, which takes the place of this change.";
 /** The code of a rename whose link held no version, and whose live read found the name changed in QuickBooks. */
 export const NO_LINK_VERSION = "no_link_version";
 /** The code of a rename whose cache showed another name than the portal's before it was sent, and whose live read found it so. */
@@ -1873,8 +1880,13 @@ export async function tryRename(w: RenameWrite, realmId: string, o: { mayWait: b
  */
 export function keptRefusalWords(code: string | null, holds: string | null): string {
   const now = holds ? ` QuickBooks has “${holds}” now.` : "";
-  if (code === "fault_5010" || code === "moved_on" || code === NO_LINK_VERSION || code === NAME_DIFFERS) {
+  if (code === "fault_5010" || code === "moved_on" || code === NO_LINK_VERSION) {
     return `Someone changed the name in QuickBooks since the portal last sent it, so the portal's name wasn't sent over it.${now}`;
+  }
+  // The cache showed another name than the portal's before this change: an edit made in QuickBooks, or an earlier
+  // change of the portal's that never reached it (refused, given up). Which, the portal can't tell, so it says neither.
+  if (code === NAME_DIFFERS) {
+    return `QuickBooks still has another name than the one the portal had before this change (someone may have renamed it there, or an earlier change from the portal never reached it), so the portal's name wasn't sent over it.${now}`;
   }
   if (code === "fault_6240") return "That name is already used in QuickBooks (by another customer, a vendor or an employee), and every name there must be different.";
   const kind = code === null ? "refused" : classify(code).kind;
@@ -1910,6 +1922,14 @@ async function replaceRefused(tx: Tx, which: SQL | undefined, replacedBy: Record
       before: { state: "refused", code: r.lastCode }, after: { state: "given_up", replacedBy } }, tx);
   }
   return rows.map((r) => r.id);
+}
+/**
+ * A student just linked to a customer (a create QuickBooks took, at once or found made, or one staff confirmed): every
+ * refused create of that student is taken over by it (the lead's decision 4), closed as given up, audited, in the
+ * caller's transaction. Only once the link is made, so a create that then fails leaves the refusal kept.
+ */
+export async function replaceRefusedCreates(tx: Tx, studentId: AppStudentId, replacedBy: Record<string, unknown>, o: { actor: Actor; ip: string | null; permission?: string }): Promise<string[]> {
+  return replaceRefused(tx, and(eq(writeQueue.studentId, studentId), isStudentCreate), replacedBy, o);
 }
 const renamesOf = (customer: string) => and(eq(writeQueue.targetQboId, customer), sql`${writeQueue.request}->>'op' = 'rename'`);
 
@@ -2128,28 +2148,36 @@ const stampHolds = (itemId: string, shown: string, stamp: string) => {
   return got.length === want.length && timingSafeEqual(got, want);
 };
 
-/** A refused item finished: done, audited, in the caller's transaction, only while it is still refused. */
-async function refusedDoneIn(tx: Tx, item: QueueRow, how: "sent" | "found", resultQboId: string | null, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
+/**
+ * A refused item finished: done, audited, in the caller's transaction, only while it is still in the state `from`:
+ * `refused` for one QuickBooks was found to hold already, `waiting` for one "Send the portal's value" put back on the
+ * queue for its send (given up meanwhile, it stays given up).
+ */
+async function refusedDoneIn(tx: Tx, item: QueueRow, from: "refused" | "waiting", how: "sent" | "found", resultQboId: string | null, o: { actor: Actor; ip: string | null; permission?: string }): Promise<void> {
   const [still] = await tx.update(writeQueue).set({ state: "done", resultQboId, tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
+    .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, from))).returning({ id: writeQueue.id });
   if (!still) return;
   await writeAudit({ actor: o.actor, action: "roster.write.done", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
-    before: { state: "refused", tries: item.tries, code: item.lastCode }, after: { state: "done", how, tries: item.tries + 1, ...(resultQboId ? { resultQboId } : {}) } }, tx);
+    before: { state: from, tries: item.tries, code: item.lastCode }, after: { state: "done", how, tries: item.tries + 1, ...(resultQboId ? { resultQboId } : {}) } }, tx);
 }
 
 /**
  * "Send the portal's value", on the Reconciliation page, for a refused item (a holder of Roster.Family.ReadWrite with
  * Roster.Read): `shown` is what the row showed of QuickBooks, held to its stamp (portalValueStamp()). Under the roster
  * lock: the item still refused, its record still linked to that customer and active, the portal's value still what the
- * item asks (for a taken name, 6240, only once the record has been renamed since, and then its current name), QuickBooks
- * connected to the roster's company, nothing waiting for the customer; for a student's create, the student active and
- * unlinked in an active family linked to the customer it was asked under, its current name free. A rename then reads
- * the record live: inactive there, nothing is sent (it never makes a customer active); the portal's value there
- * already, the item is done; a name other than the row showed, nothing is sent and the row shows the newer one (into
- * the cache); otherwise the portal's value is sent with the live version, whatever it is, on purpose
- * (`roster.write.sent_again`, beside the send's own row). Taken: done, the link aligned with the answer. Refused again:
- * still refused, with the new code. Not reached: still refused, said in words. A lost answer: waiting, `sent`, holding
- * what was sent, so the found-done path finishes it after a roster read and it is never sent with another version.
+ * item asks, QuickBooks connected to the roster's company, nothing waiting for the customer; never a rename QuickBooks
+ * refused as a taken name (6240): any later rename of the record takes its place, so the page offers none. For a
+ * student's create, the student active and unlinked in an active family linked to the customer it was asked under,
+ * its current name free (a taken name included, once they were renamed in the portal). A rename then reads the record
+ * live: inactive there, nothing is sent (it never makes a customer active); the portal's value there already, the item
+ * is done; a name other than the row showed, nothing is sent and the row shows the newer one (into the cache);
+ * otherwise the portal's value is sent with the live version, whatever it is, on purpose, its `was` the name the row
+ * showed. For the send the item goes back on the queue, `waiting` and `sent`, holding what is sent
+ * (`roster.write.sent_again`, beside the send's own row), so everything a queued try's answer meets holds for it: given
+ * up meanwhile, it stays given up and nothing is linked or aligned; an answer the portal can't take in leaves it waiting
+ * to be finished. Taken: done, the link aligned with the answer. Refused again: refused, as it was asked, with the new
+ * code. Not reached: refused, as it was, said in words. A lost answer: waiting, `sent`, so the found-done path finishes
+ * it after a roster read, and a later try sends it again only while QuickBooks still has the name the row showed.
  */
 export async function sendPortalValue(rawItemId: string, shown: string, stamp: string, o: WriteOp & { staffUserId: string }): Promise<WriteResult> {
   if (!isUuid(rawItemId) || !stampHolds(rawItemId, shown, stamp)) return refuse(NOT_AS_SHOWN);
@@ -2188,10 +2216,10 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
       if (!rec || !rec.active || linked !== w.qboId) return no(RECORD_MOVED_ON);
       // Offered only while the cache has the customer active: the portal never makes a customer active again.
       if (!cache.find((c) => c.qboId === w.qboId)?.active) return no(INACTIVE_THERE);
-      const takenName = item.lastCode === "fault_6240";
-      if (takenName ? rec.name === null || rec.name === w.name : rec.name !== w.name) {
-        return no(takenName ? "QuickBooks refused that name as taken: rename the record on its family's page first, which takes the place of this change." : RECORD_MOVED_ON);
-      }
+      // A name QuickBooks refused as taken (6240) is never sent again as it is: renaming the record on its family's page
+      // to a free name takes the place of this change (renameLinked() closes it), so the page offers no press for it.
+      if (item.lastCode === "fault_6240") return no(TAKEN_NAME_KEPT);
+      if (rec.name !== w.name) return no(RECORD_MOVED_ON);
       const name = checkName(rec.name!);
       if (!name.ok) return no(name.error);
       const offer = freeName(name.name, await namesTaken(tx, cache, w.qboId));
@@ -2227,16 +2255,40 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
     if (!live.active) return refuse(INACTIVE_THERE);
     if (live.name === write.name) {
       const found = write.qboId;
-      await db.transaction(async (tx) => { if (await lockRosterAs(tx, rosterTagOf(realmId))) await refusedDoneIn(tx, item, "found", found, o); });
+      await db.transaction(async (tx) => { if (await lockRosterAs(tx, rosterTagOf(realmId))) await refusedDoneIn(tx, item, "refused", "found", found, o); });
       return { ok: true, message: "QuickBooks has the portal's name already, so nothing was sent. The change is done." };
     }
     // Nothing is ever sent over a value nobody was shown: the row is drawn again with what QuickBooks has now.
     if (live.name !== shown) return { ok: false, errors: [`QuickBooks changed again since this page was shown: it has “${live.name ?? ""}” now. Nothing was sent. Reload the page to see it, then send the portal's name if it is still wanted.`] };
-    write = { ...write, syncToken: live.syncToken, checked: true };
+    // Sent with the live version, on purpose, over the name the staff member was shown: that name is what a later try
+    // compares QuickBooks' with (`was`), should this answer be lost, so the queue sends it again only while it still reads so.
+    write = { ...write, syncToken: live.syncToken, checked: true, was: shown };
   }
   const sent = write;
-  await writeAudit({ actor: o.actor, action: "roster.write.sent_again", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
-    before: { state: "refused", code: item.lastCode }, after: { op: sent.op, role: sent.role, name: sent.name, ...(sent.op === "rename" ? { syncToken: sent.syncToken } : {}) } });
+  // For its send the item goes back on the queue, marked as maybe made before it goes (as the worker marks a create),
+  // holding what is sent: staff who give it up while it is on its way leave it given up whatever QuickBooks answers
+  // (applyWritten()'s rule for a queued try: nothing linked or aligned for it), a send cut off midway is looked for after
+  // the next roster read and never sent again with another version, and an answer the portal can't take in leaves this
+  // item waiting to be finished (holdForTheQueue()), never a second one beside it.
+  const moved = await db.transaction(async (tx): Promise<"moved" | "roster" | "gone"> => {
+    if (!(await lockRosterAs(tx, rosterTagOf(realmId)))) return "roster";
+    const [still] = await tx.update(writeQueue).set({ state: "waiting", sent: true, request: sent, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000), updatedAt: new Date() })
+      .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
+    if (!still) return "gone";
+    await writeAudit({ actor: o.actor, action: "roster.write.sent_again", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
+      before: { state: "refused", code: item.lastCode }, after: { state: "waiting", sent: true, op: sent.op, role: sent.role, name: sent.name, ...(sent.op === "rename" ? { syncToken: sent.syncToken } : {}) } }, tx);
+    return "moved";
+  });
+  if (moved === "roster") return refuse(WRITE_COPY.noRoster);
+  if (moved === "gone") return refuse(NO_LONGER_REFUSED);
+  /** Kept refused again, as it was asked, while it still waits for this send (given up meanwhile, it stays so): `code`, QuickBooks' new refusal; null when nothing reached it. */
+  const backToRefused = (code: string | null) => db.transaction(async (tx) => {
+    const [still] = await tx.update(writeQueue).set({ state: "refused", sent: item.sent, request: item.request, nextTryAt: null, lastCode: code === null ? item.lastCode : short(code),
+      tries: code === null ? item.tries : item.tries + 1, lastTriedAt: code === null ? item.lastTriedAt : new Date(), updatedAt: new Date() })
+      .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
+    if (still) await writeAudit({ actor: o.actor, action: "roster.write.kept_refused", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
+      before: { state: "waiting", code: item.lastCode }, after: { op: sent.op, role: sent.role, code: short(code ?? item.lastCode ?? ""), state: "refused", ...(code === null ? { reached: false } : {}) } }, tx);
+  });
   let answer: Record<string, unknown>;
   try {
     answer = await sendWrite(sent, realmId, { mayWait: false });
@@ -2244,28 +2296,30 @@ async function sendAgainHolding(itemId: string, shown: string, o: WriteOp & { st
     if (!(e instanceof QboError)) throw e;
     const failure = classify(e.code);
     if (failure.kind === "retry" && failure.sent) {
-      // Possibly made: on the queue as `sent`, holding what this press sent, looked for after the next roster read.
+      // Possibly made: it stays on the queue as `sent`, holding what this press sent, looked for after the next roster read.
       await db.transaction(async (tx) => {
         await askForRosterRefresh(tx);
-        const [still] = await tx.update(writeQueue).set({ state: "waiting", sent: true, request: sent, lastCode: short(e.code), tries: item.tries + 1, lastTriedAt: new Date(),
-          nextTryAt: new Date(Date.now() + 60_000), updatedAt: new Date() }).where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
+        const [still] = await tx.update(writeQueue).set({ lastCode: short(e.code), tries: item.tries + 1, lastTriedAt: new Date(), nextTryAt: new Date(Date.now() + 60_000), updatedAt: new Date() })
+          .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "waiting"))).returning({ id: writeQueue.id });
         if (still) await writeAudit({ actor: o.actor, action: "roster.write.queued", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
           before: { state: "refused" }, after: { op: sent.op, role: sent.role, code: short(e.code), sent: true } }, tx);
       });
       return { ok: true, queued: true, message: "The portal can't tell yet whether QuickBooks took it: its answer didn't arrive. The roster is read again within a few minutes to see, and the portal finishes it then without sending it twice." };
     }
-    if (failure.kind === "retry") return refuse("QuickBooks couldn't take it just now, so nothing was changed there. The change is still kept here: try again in a few minutes.");
-    await db.transaction(async (tx) => {
-      const [still] = await tx.update(writeQueue).set({ lastCode: short(e.code), tries: item.tries + 1, lastTriedAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(writeQueue.id, item.id), eq(writeQueue.state, "refused"))).returning({ id: writeQueue.id });
-      if (still) await writeAudit({ actor: o.actor, action: "roster.write.kept_refused", permission: o.permission, ip: o.ip, targetType: "write_queue", targetId: item.id,
-        before: { state: "refused", code: item.lastCode }, after: { op: sent.op, role: sent.role, code: short(e.code), state: "refused" } }, tx);
-    });
+    if (failure.kind === "retry") {
+      await backToRefused(null);
+      return refuse("QuickBooks couldn't take it just now, so nothing was changed there. The change is still kept here: try again in a few minutes.");
+    }
+    await backToRefused(e.code);
     return refuse(`QuickBooks refused it again: ${keptRefusalWords(e.code, null)} The change is still kept on this page.`);
   }
   const resultQboId = typeof answer.Id === "string" ? answer.Id.slice(0, 64) : null;
-  const { cached } = await applyWritten(sent, answer, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, linkedBy: o.staffUserId, filed,
-    auditExtra: { queueId: item.id, sentAgain: true }, inside: (tx) => refusedDoneIn(tx, item, "sent", resultQboId, o) });
+  const { cached } = await applyWritten(sent, answer, { realmId, actor: o.actor, ip: o.ip, permission: o.permission, queueId: item.id, linkedBy: o.staffUserId, filed,
+    auditExtra: { sentAgain: true }, inside: (tx) => refusedDoneIn(tx, item, "waiting", "sent", resultQboId, o) });
+  const [after] = await db.select({ state: writeQueue.state }).from(writeQueue).where(eq(writeQueue.id, item.id));
+  if (after?.state === "given_up") {
+    return { ok: true, message: "QuickBooks took it, but the change was given up on this page while it was on its way, so it stays given up and nothing in the portal was changed or linked for it." };
+  }
   const what = sent.op === "rename" ? "QuickBooks has the portal's name now" : "QuickBooks has the student now";
   return { ok: true, message: cached ? `Sent: ${what}${sent.op === "rename" ? "" : ", linked to their record here"}.`
     : `Sent: ${what}. The portal finishes it on its side after its next read of QuickBooks, usually within a few minutes.` };

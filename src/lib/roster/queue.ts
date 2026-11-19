@@ -12,13 +12,13 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster } from "./refresh";
 import { getRosterSource, ROSTER_JOB } from "./source";
 import { lockRosterAs, rosterTagOf } from "@/lib/seasons/roster-lock";
-import { afterStudentMoved, alignAfterWrite, applyWritten, changeOwnRecord, madeAfterGivingUp, owedBy, REFRESH_ASK_KEY, sendWrite, tryRename, type MadeAfterGivingUp,
-  type OwnRecordChange } from "./writes";
+import { afterStudentMoved, alignAfterWrite, applyWritten, changeOwnRecord, madeAfterGivingUp, owedBy, REFRESH_ASK_KEY, replaceRefusedCreates, sendWrite, tryRename,
+  type MadeAfterGivingUp, type OwnRecordChange } from "./writes";
 import { afterFailedTry, beforeResend, classify } from "./write-rules";
 import { isBuyoutWrite, sendBuyoutWrite } from "@/lib/buyouts/writes";
 import { formatMoney } from "@/lib/money/cents";
 import { customerOfFamily, familyLinkedTo, linksOf } from "@/lib/families/links";
-import type { AppFamilyId } from "@/lib/families/ids";
+import { asAppStudentId, type AppFamilyId } from "@/lib/families/ids";
 
 export const WRITE_QUEUE_JOB = "roster.write_queue";
 /** How long a try may hold an item before another wake may take it: longer than one send takes. */
@@ -262,10 +262,15 @@ async function foundDone(item: Item, w: RosterWrite, qboId: string): Promise<Fou
         ({ tell } = await afterStudentMoved(tx, { studentQboId: w.qboId, fromFamilyQboId: w.fromFamilyQboId, toFamilyQboId: w.toFamilyQboId, cause: `roster.write.found#${w.qboId}` },
           { actor: WORKER_ACTOR, ip: null }));
       }
-      // The link takes the version of the cache row it was found as, by the rule an answer's takes (its answer was lost).
+      // The link takes the version of the cache row it was found as, by the rule an answer's takes, only for a change the
+      // portal sent (its answer was lost): one found made without a send (a make-inactive QuickBooks shows done already,
+      // a name it holds already) was made by someone else, whose version the portal never aligned with.
       const [row] = await tx.select({ syncToken: qboCustomer.syncToken }).from(qboCustomer).where(eq(qboCustomer.qboId, qboId));
       appRecord = await changeOwnRecord(tx, w, qboId, { realmId: item.realmId, linkedBy: item.askedBy, studentId: item.studentId, familyId: item.familyId, syncedToken: row?.syncToken ?? null });
-      await alignAfterWrite(tx, w, item.realmId, row?.syncToken ?? null);
+      if (appRecord?.kind === "student" && "linked" in appRecord) {
+        await replaceRefusedCreates(tx, asAppStudentId(appRecord.studentId), { op: "create", customerQboId: qboId, queueId: item.id }, { actor: WORKER_ACTOR, ip: null });
+      }
+      if (item.sent) await alignAfterWrite(tx, w, item.realmId, row?.syncToken ?? null);
     }
     await markDone(item, "found", qboId, item.tries, tx, appRecord);
     return "done";
@@ -354,6 +359,12 @@ export type QueueView = {
   finishing: boolean;
   /** For a refused rename: the name the roster cache holds for its customer, what QuickBooks has now (null: none, or not a rename). */
   holds: string | null;
+  /**
+   * Whether "Send the portal's value" can go through for a refused item, as the cache shows it: not for a rename
+   * QuickBooks refused as a taken name (a later rename takes its place) or of a customer the cache has inactive (the
+   * portal never makes one active again). The press checks it all again.
+   */
+  mayResend: boolean;
 };
 
 /** The codes of an item QuickBooks took that the portal still has to finish on its side (QueueView.finishing). */
@@ -399,7 +410,9 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
       customer === null ? undefined : sql`${writeQueue.request}->>'toFamilyQboId' = ${customer}`));
   const rows = await db.select().from(writeQueue).where(where).orderBy(desc(writeQueue.createdAt));
   if (!rows.length) return [];
-  const names = new Map((await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName }).from(qboCustomer)).map((c) => [c.qboId, c.name]));
+  const customers = await db.select({ qboId: qboCustomer.qboId, name: qboCustomer.displayName, active: qboCustomer.active }).from(qboCustomer);
+  const names = new Map(customers.map((c) => [c.qboId, c.name]));
+  const activeHere = new Set(customers.filter((c) => c.active).map((c) => c.qboId));
   const families = [...new Set(rows.map((r) => r.familyId).filter((f): f is AppFamilyId => f !== null))];
   // A family's page stands for an active record, linked or not (stage 3's slice 9d), and for an inactive one the roster
   // still lists through its link: an item is linked to its record's page whenever that page may stand.
@@ -412,6 +425,7 @@ export async function loadOpenWrites(o: { familyId?: AppFamilyId; showAmounts?: 
     familyId: r.familyId !== null && withPage.has(String(r.familyId)) ? r.familyId : null,
     finishing: r.state !== "refused" && r.sent && r.lastCode !== null && FINISHING_CODES.has(r.lastCode),
     holds: r.state === "refused" && r.request.op === "rename" ? names.get(r.request.qboId) ?? null : null,
+    mayResend: r.state === "refused" && (r.request.op !== "rename" || (r.lastCode !== "fault_6240" && activeHere.has(r.request.qboId))),
   }));
 }
 
@@ -495,6 +509,11 @@ export async function giveUpIn(tx: Tx, id: string, note: string, o: QueueOp): Pr
     before: { state: item.state, tries: item.tries, code: item.lastCode, op: item.request.op }, after: { state: "given_up", note } }, tx);
   // A change QuickBooks refused (stage 3's slice 9e) was never made there: the portal keeps its own value.
   if (item.state === "refused") return { ok: true as const, message: refusedGivenUpWords(item) };
+  // A rename saved in the portal first (stage 3's slice 9e) left the portal holding the new name already: renaming it
+  // back to QuickBooks' name would undo the portal's value, which a change that didn't get through never does.
+  if (item.request.op === "rename" && savedFirst(item, item.request)) {
+    return { ok: true as const, message: "Given up. Nothing more will be sent for it. The portal keeps the name it saved. QuickBooks has it only if a try got through, which the roster's copy of QuickBooks shows after its next read; if it didn't, the two names differ: renaming the record again on its family's page sends a name, or rename it in QuickBooks." };
+  }
   // Since stage 3's slice 9c no roster read changes the app's own records: a roster change QuickBooks did make is in its
   // copy of the roster after the next read, but the portal's own family or student keeps what it had, until staff bring
   // it into line from the family's page (a move or a make-inactive QuickBooks has already sends nothing there).

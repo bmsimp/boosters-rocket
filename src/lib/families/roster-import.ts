@@ -154,7 +154,7 @@ async function importInto(tx: Tx, one: OneFamily | undefined): Promise<OneFamily
   const changeExisting = one === undefined;
   // A new link starts aligned with its customer's version in the cache (`synced_token`, stage 3's slice 9e), as
   // migration 0041 filled every link: the customer staff confirmed, or the roster carried over. None for a customer the
-  // cache doesn't hold. A link that exists is never changed here.
+  // cache doesn't hold. A link that exists keeps its version, but a guardian's link moved to another customer takes that one's.
   const tokenOf = new Map((await tx.select({ qboId: qboCustomer.qboId, syncToken: qboCustomer.syncToken }).from(qboCustomer)).map((c) => [c.qboId, c.syncToken]));
   const alignedAt = new Date();
   const aligned = (customerId: string) => (tokenOf.has(customerId) ? { syncedToken: tokenOf.get(customerId)!, syncedAt: alignedAt } : {});
@@ -211,7 +211,8 @@ async function importInto(tx: Tx, one: OneFamily | undefined): Promise<OneFamily
     const had = linkOfRow.get(guardianId);
     if (!had) { newLinks.push([guardianId, customerId]); continue; }
     if (had.customerId === customerId) continue;
-    await tx.update(accountingLink).set({ customerId, linkedAt: new Date(), updatedAt: new Date() }).where(eq(accountingLink.id, had.id));
+    // Now another customer's link, it holds that customer's version from the cache (or none), never the old one's.
+    await tx.update(accountingLink).set({ customerId, linkedAt: new Date(), ...(tokenOf.has(customerId) ? aligned(customerId) : { syncedToken: null, syncedAt: null }), updatedAt: new Date() }).where(eq(accountingLink.id, had.id));
     changes.memberships.relinked++;
   }
   await inChunks(newLinks, (rows) => tx.insert(accountingLink).values(rows.map(([guardianId, customerId]) => ({ system: QUICKBOOKS, realmId: realmId!, customerId, guardianId, ...linkedAs, ...aligned(customerId) }))));
