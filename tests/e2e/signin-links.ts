@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import type postgres from "postgres";
+import { DEVICE_COOKIE, E2E_SIGNIN, deviceTokenHash } from "./signin-seed";
 
 /**
  * A set-up or reset link for Zelda (the parent scripts/seed-e2e.ts seeds), made the way src/lib/parents/signin-links.ts
@@ -7,7 +8,10 @@ import type postgres from "postgres";
  * `signin-link:<purpose>:<token>`, one unused per person and purpose. This is test tooling only, as
  * tests/e2e/parent-session.ts reproduces the session cookie's signature: it works because the e2e run knows the test
  * secret. scripts/seed-e2e.ts makes none, so a spec that makes one removes it after (removeZeldaLinks()), with any
- * password it set, and leaves the seed as it found it for the next pass.
+ * password it set, and leaves the seed as it found it for the next pass. Since the sign-in release's slice SI-3b the
+ * seed gives Zelda a password (tests/e2e/signin-seed.ts) and a remembered device: a spec that needs her with no password
+ * takes her row away first (takeZeldaPassword()) and puts it back after (removeZeldaLinks(), which restores it), and
+ * removes the devices its sign-ins remembered (removeZeldaDevicesMadeHere()).
  */
 export type LinkPurpose = "setup" | "reset";
 export const ZELDA_EMAIL = "zelda@example.com";
@@ -46,9 +50,39 @@ export async function removeZeldaSessionsMadeHere(sql: postgres.Sql): Promise<vo
             AND user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
 }
 
-/** Removes every link of Zelda's and her password, which the seed gives her none of. */
+const ZELDA_USER = (sql: postgres.Sql) => sql`(SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
+/** The seeded password's hash, kept while a spec has taken Zelda's row away (one worker runs the specs, one at a time). */
+let seededHash: string | null = null;
+
+/**
+ * Takes Zelda's password away, so she has none (a set-up link works only then), keeping the seed's hash to put back. The
+ * hash is read from her row, so nothing here hashes the password itself.
+ */
+export async function takeZeldaPassword(sql: postgres.Sql): Promise<void> {
+  const rows = await sql`DELETE FROM parent_auth_account WHERE provider_id = 'credential' AND user_id = ${ZELDA_USER(sql)} RETURNING password`;
+  if (rows[0]?.password && seededHash === null) seededHash = rows[0].password as string;
+}
+
+/**
+ * Removes every link of Zelda's and any password a spec set, and puts the seed's password back (E2E_SIGNIN.password),
+ * so the next spec and the next pass find her as the seed left her.
+ */
 export async function removeZeldaLinks(sql: postgres.Sql): Promise<void> {
   await sql`DELETE FROM parent_signin_token WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`;
-  await sql`DELETE FROM parent_auth_account WHERE provider_id = 'credential'
-            AND user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
+  await sql`DELETE FROM parent_auth_account WHERE provider_id = 'credential' AND user_id = ${ZELDA_USER(sql)}`;
+  if (seededHash !== null) {
+    await sql`INSERT INTO parent_auth_account (id, account_id, provider_id, user_id, password)
+              SELECT gen_random_uuid()::text, u.id, 'credential', u.id, ${seededHash} FROM parent_auth_user u
+              WHERE u.parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`;
+  }
 }
+
+/** Removes the devices a spec's sign-ins remembered for Zelda, keeping the one the seed gave her. */
+export async function removeZeldaDevicesMadeHere(sql: postgres.Sql): Promise<void> {
+  await sql`DELETE FROM parent_device WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})
+            AND token_hash <> ${deviceTokenHash(E2E_SIGNIN.zeldaDevice)}`;
+}
+
+/** The cookie of Zelda's seeded remembered device, for context.addCookies(). */
+export const zeldaDeviceCookie = (baseURL: string) => ({ name: DEVICE_COOKIE.name, value: E2E_SIGNIN.zeldaDevice, domain: new URL(baseURL).hostname,
+  path: DEVICE_COOKIE.path, httpOnly: true, sameSite: "Lax" as const, secure: false });

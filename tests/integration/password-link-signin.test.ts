@@ -15,7 +15,6 @@ import { cookieFromActions, cookiesSetByActions, fromBrowser } from "../helpers/
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, family, guardian, parent, parentAuthSession, parentSigninToken } from "@/lib/db/schema";
-import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getParentState } from "@/lib/auth/identity";
 import { signInFromLink } from "@/lib/auth/parent-link-signin";
 import { choosePasswordFromLink, type LinkSignin } from "@/lib/parents/password-set";
@@ -24,15 +23,17 @@ import { blockPerson } from "@/lib/parents/people";
 import { PARENT_SESSION_COOKIE_SECONDS } from "@/lib/parents/sessions";
 import { signinStands } from "@/lib/parents/signin-codes";
 import { choosePasswordAction } from "@/app/sign-in/password-actions";
-import { env } from "@/env";
 import { resetDb, seedGuardianInFamily, seedParent, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
-import { mintLink, seedPassword } from "../helpers/signin-links";
+import { deviceRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
+import { signInThroughDoor } from "../helpers/parent-door";
+import { hashDeviceToken, DEVICE_LIFE_MS } from "@/lib/parents/devices";
 
 /**
  * A set-up link signs the parent in (the sign-in release, slice SI-3a): once its password is set while the club's level
  * is Standard, through the one finish every sign-in goes through (src/lib/auth/parent-signin-finish.ts), with the cookie
- * the code door sets. Under Strict, and for a reset, nobody is signed in.
+ * the door sets. Since slice SI-3b it also remembers the device it was used on and marks the session strong, since the
+ * link proved the mailbox and its form set the password. Under Strict, and for a reset, nobody is signed in.
  */
 const IP = "203.0.113.30";
 const GOOD = "correct horse battery staple, the club's own";
@@ -42,7 +43,8 @@ const REFUSED = { ok: false, errors: [PASSWORD_COPY.linkNoGood] };
 const choose = (token: string, purpose: "setup" | "reset" = "setup", password = GOOD) => choosePasswordAction(purpose, token, password, password);
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const sessions = () => db.select().from(parentAuthSession);
-const sessionCookies = () => cookiesSetByActions().filter((c) => c.name.startsWith("br_parent"));
+const sessionCookies = () => cookiesSetByActions().filter((c) => c.name.startsWith("br_parent") && c.name.endsWith(".session_token"));
+const deviceCookies = () => cookiesSetByActions().filter((c) => c.name.startsWith("br_parent") && c.name.endsWith(".device"));
 
 let server: Server;
 beforeAll(async () => {
@@ -106,23 +108,43 @@ describe("a set-up link signs the parent in", () => {
     expect(sessionCookies()).toHaveLength(1);
     expect(mine!.options).toMatchObject({ maxAge: PARENT_SESSION_COOKIE_SECONDS, path: "/", httpOnly: true, sameSite: "lax" });
 
-    // Ben signs in by code at the door itself; his cookie is the one to match.
+    // Ben signs in by password and code at the door itself; his cookies are the ones to match.
     const ben = await seedParent({ name: "Ben", email: "ben@example.com" });
     await seedGuardianInFamily({ parentId: ben.id, familyQboId: "F9" });
-    const auth = await getParentAuth();
-    const post = (path: string, body: unknown) => auth.handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
-      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", origin: env.APP_URL, "cf-connecting-ip": IP } }));
-    await post("/portal-code/send", { email: "ben@example.com" });
-    await vi.waitFor(() => expect(outbox).toHaveLength(1));
-    const code = /sign-in code: (\d{6})/.exec(outbox[0]!.subject)![1]!;
-    const res = await post("/portal-code/verify", { email: "ben@example.com", code });
-    const door = res.headers.getSetCookie().find((c) => c.startsWith(`${mine!.name}=`))!;
-    const attrs = new Map(door.split(";").slice(1).map((a) => a.trim().split("=")).map(([k, v]): [string, string | true] => [k!.toLowerCase(), v ?? true]));
-    expect(Number(attrs.get("max-age"))).toBe(mine!.options.maxAge);
-    expect(attrs.get("path")).toBe(mine!.options.path);
-    expect(attrs.get("httponly")).toBe(true);
-    expect(String(attrs.get("samesite")).toLowerCase()).toBe(mine!.options.sameSite);
-    expect(attrs.has("secure")).toBe(mine!.options.secure === true);
+    const { res } = await signInThroughDoor(outbox, "ben@example.com", { headers: { "cf-connecting-ip": IP } });
+    const [myDevice] = deviceCookies();
+    expect(deviceCookies()).toHaveLength(1);
+    for (const copied of [mine!, myDevice!]) {
+      const door = res.headers.getSetCookie().find((c) => c.startsWith(`${copied.name}=`))!;
+      const attrs = new Map(door.split(";").slice(1).map((a) => a.trim().split("=")).map(([k, v]): [string, string | true] => [k!.toLowerCase(), v ?? true]));
+      expect(Number(attrs.get("max-age"))).toBe(copied.options.maxAge);
+      expect(attrs.get("path")).toBe(copied.options.path);
+      expect(attrs.get("httponly")).toBe(true);
+      expect(String(attrs.get("samesite")).toLowerCase()).toBe(copied.options.sameSite);
+      expect(attrs.has("secure")).toBe(copied.options.secure === true);
+    }
+  });
+
+  it("remembers the device it was used on: one device row, its cookie copied onto the answer, and the session marked strong", async () => {
+    const { ana } = await seedAna();
+    const before = Date.now();
+    expect(await choose(await mintLink(ana.id, "setup"))).toEqual({ ok: true, message: PASSWORD_COPY.signingIn, next: "/" });
+    const rows = await deviceRows(ana.id);
+    expect(rows).toHaveLength(1);
+    const [cookie] = deviceCookies();
+    expect(deviceCookies()).toHaveLength(1);
+    // The cookie holds the token; the row only its keyed hash; neither is in any audit row.
+    expect(hashDeviceToken(cookie!.value)).toBe(rows[0]!.tokenHash);
+    expect(cookie!.options).toMatchObject({ path: "/api/auth/parent", httpOnly: true, sameSite: "lax", maxAge: DEVICE_LIFE_MS / 1000 });
+    const all = JSON.stringify(await db.select().from(auditLog));
+    expect(all).not.toContain(cookie!.value);
+    expect(all).not.toContain(rows[0]!.tokenHash);
+    expect(await audits("signin.device_remembered")).toEqual([expect.objectContaining({ actorId: ana.id, targetId: ana.id, after: expect.objectContaining({ deviceId: rows[0]!.id }) })]);
+    const [session] = await sessions();
+    expect(session!.strongAt).not.toBeNull();
+    expect(session!.strongAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    // No pending step was held, so none is cleared.
+    expect(cookiesSetByActions().filter((c) => c.name.endsWith(".signin_step"))).toEqual([]);
   });
 
   it("at Strict, the password is set and nobody is signed in", async () => {
@@ -133,12 +155,15 @@ describe("a set-up link signs the parent in", () => {
     expect((await db.select().from(guardian))[0]!.status).toBe("invited");
   });
 
-  it("a reset signs nobody in, at Standard too", async () => {
+  it("a reset signs nobody in, at Standard too, remembers no device and forgets every one", async () => {
     const { ana } = await seedAna();
     await seedPassword(ana.authUserId, OTHER);
+    await seedDevice(ana.id); await seedDevice(ana.id);
     expect(await choose(await mintLink(ana.id, "reset"), "reset")).toEqual({ ok: true, message: PASSWORD_COPY.set });
     expect(await sessions()).toEqual([]);
     expect(sessionCookies()).toEqual([]);
+    expect(deviceCookies()).toEqual([]);
+    expect(await deviceRows(ana.id)).toEqual([]);
   });
 
   it("two submits of one set-up link at once make at most one session", async () => {
@@ -158,33 +183,33 @@ describe("a set-up link's sign-in is refused when something changed since the se
   it("signinStands() takes a link's proof: it stands as set, and not after a block, a change of address, a reset or the link gone", async () => {
     const { ana } = await seedAna();
     const s = await setWithProof(await mintLink(ana.id, "setup"));
-    expect(await signinStands(ana.id, s.email, IP, s.proof)).toBe(true);
+    expect(await signinStands(ana.id, s.email, IP, { link: s.proof })).toBe(true);
     const reasons = async () => (await audits("signin.refused")).map((r) => (r.after as { reason: string }).reason);
 
     // A reset made since replaces the password row's write: the proof no longer matches.
     await choose(await mintLink(ana.id, "reset"), "reset", OTHER);
-    expect(await signinStands(ana.id, s.email, IP, s.proof)).toBe(false);
+    expect(await signinStands(ana.id, s.email, IP, { link: s.proof })).toBe(false);
     expect(await reasons()).toEqual(["password_changed"]);
 
     await resetDb();
     const b = await seedAna();
     const sb = await setWithProof(await mintLink(b.ana.id, "setup"));
     await db.update(parent).set({ email: "ana.new@example.com" }).where(eq(parent.id, b.ana.id));
-    expect(await signinStands(b.ana.id, sb.email, IP, sb.proof)).toBe(false);
+    expect(await signinStands(b.ana.id, sb.email, IP, { link: sb.proof })).toBe(false);
     expect(await reasons()).toEqual(["address_changed"]);
 
     await resetDb();
     const c = await seedAna();
     const sc = await setWithProof(await mintLink(c.ana.id, "setup"));
     await blockPerson(c.ana.id, "reason", staff);
-    expect(await signinStands(c.ana.id, sc.email, IP, sc.proof)).toBe(false);
+    expect(await signinStands(c.ana.id, sc.email, IP, { link: sc.proof })).toBe(false);
     expect(await reasons()).toEqual(["blocked"]);
 
     await resetDb();
     const d = await seedAna();
     const sd = await setWithProof(await mintLink(d.ana.id, "setup"));
     await db.delete(parentSigninToken);
-    expect(await signinStands(d.ana.id, sd.email, IP, sd.proof)).toBe(false);
+    expect(await signinStands(d.ana.id, sd.email, IP, { link: sd.proof })).toBe(false);
     expect(await reasons()).toEqual(["link_gone"]);
   });
 

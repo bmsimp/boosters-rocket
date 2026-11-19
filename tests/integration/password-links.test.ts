@@ -294,17 +294,21 @@ describe("setting a password from a link", () => {
     const old = await seedCode(ana.id, { usedAt: new Date(Date.now() - CODE_TTL_MS - 60_000) });
     await seedCode(ana.id, { code: "123456" });
     const token = await mintLink(ana.id, "reset");
-    // The code door's first step (src/lib/auth/parent-code-plugin.ts): the code is right, and spent.
-    const spent = await verifySigninCode("ana@example.com", "123456", IP);
+    // The password she signed in with, as the password step read it, and the code door's first step
+    // (src/lib/auth/parent-code-plugin.ts): the code is right, and spent.
+    const [cred] = await credentialRows(ana.authUserId);
+    const password = { credentialId: cred!.id, credentialUpdatedAt: cred!.updatedAt };
+    const spent = await verifySigninCode({ parentId: ana.id, email: "ana@example.com" }, "123456", IP);
     if (!spent.ok) expect.fail(`the code was refused: ${JSON.stringify(spent)}`);
     // The reset commits before the door makes its session: there is no session to end yet.
     expect(await choose("reset", token)).toEqual({ ok: true, message: PASSWORD_COPY.set });
     expect((await audits("parent.password.set"))[0]!.after).toMatchObject({ purpose: "reset", codesDeleted: 1, sessionsEnded: 0 });
     expect((await db.select().from(signinCode)).map((c) => c.id)).toEqual([old]);
-    // Then the door makes the session, and its last check, which reads the code it spent again, refuses it.
+    // Then the door makes the session, and its last check refuses it: the password it proved was replaced (and the code
+    // it spent is gone too, which the check reads when the password still stands: signin-codes.test.ts).
     await seedParentSession(ana.authUserId);
-    expect(await signinStands(ana.id, "ana@example.com", IP, spent.codeId)).toBe(false);
-    expect((await audits("signin.refused")).at(-1)).toMatchObject({ targetId: ana.id, after: { reason: "code_gone" }, ip: IP });
+    expect(await signinStands(ana.id, "ana@example.com", IP, { password, codeId: spent.codeId })).toBe(false);
+    expect((await audits("signin.refused")).at(-1)).toMatchObject({ targetId: ana.id, after: { reason: "password_changed" }, ip: IP });
   });
 
   it("two submits at once for one link set the password once", async () => {

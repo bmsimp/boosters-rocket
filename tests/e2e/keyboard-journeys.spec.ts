@@ -8,6 +8,8 @@ import { PARENT_SESSION_FAMILY, parentSessionCookie } from "./parent-session";
 import { E2E_VOLUNTEER } from "./volunteer-seed";
 import { E2E_EMAIL, emailTokenHash } from "./email-seed";
 import { codeFor } from "./journey-helpers";
+import { E2E_SIGNIN } from "./signin-seed";
+import { removeZeldaDevicesMadeHere } from "./signin-links";
 
 /**
  * The parent journeys docs/accessibility-checks.md walked by hand, walked here by the keyboard alone: Tab, Shift+Tab,
@@ -33,7 +35,8 @@ test.beforeAll(async () => {
   expect((seeded?.value as { port?: number } | undefined)?.port, "the mail port in the seeded settings; seed again with this run's E2E_MAIL_PORT").toBe(e2eMailPort());
   sink = await startMailSink({ secure: true, port: e2eMailPort(), key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
 });
-test.afterAll(async () => { await sink.close(); await sql.end(); });
+// Journey 1 remembers this browser's device for Zelda (slice SI-3b): it goes after, keeping the seed's.
+test.afterAll(async () => { await removeZeldaDevicesMadeHere(sql); await sink.close(); await sql.end(); });
 
 /** Everything a Tab stop on the way showed wrong: no ring, or left under something fixed. Checked at the end of each step. */
 let ringProblems: string[] = [];
@@ -150,21 +153,27 @@ test("a parent's journeys by keyboard alone: sign in, Home to Payments, a form, 
       WHERE s.shift_id = ${E2E_VOLUNTEER.openShift} AND l.customer_id = 'E2E-FAMILY')`;
   sink.messages.length = 0;
 
-  await test.step("1. signs in with an emailed code: Enter sends it, the code field takes the focus, Enter signs in", async () => {
+  await test.step("1. signs in with a password and an emailed code: the email, the password, the button, then the code field, Enter signs in", async () => {
     await page.goto("/sign-in");
-    // The sign-in page's bar has nothing in it to skip: the first stop is the email field.
+    // The sign-in page's bar has nothing in it to skip: the first stop is the email field, then the password, then the button.
     await page.keyboard.press("Tab");
     await expect(page.getByLabel("Email")).toBeFocused();
     await page.keyboard.type("zelda@example.com");
+    await page.keyboard.press("Tab");
+    await expect(page.getByLabel("Password")).toBeFocused();
+    await page.keyboard.type(E2E_SIGNIN.password);
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("status")).toContainText("we've sent a 6-digit code");
+    // A browser the portal doesn't know for her: the code step, its field taking the focus.
+    await expect(page.getByRole("status")).toContainText("enter the 6-digit code we've emailed you");
     await expect(page.getByLabel("6-digit code")).toBeFocused();
     // A wrong code is said as an alert, and the focus stays in the field to try again. The page's own alert, by its
     // words: Next.js keeps an empty role=alert of its own on every page (its route announcer), which a bare
     // getByRole("alert") finds at once, while the button still says Checking… and a second Enter is ignored.
     await page.keyboard.type("000000");
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("main").getByRole("alert")).toHaveText("That code didn't work. Check the newest email from us, or request a new code.");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText("That code didn't work. Check the newest email from us and try again, or start again with your email and password.");
     await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible(); // no longer Checking…
     await expect(page.getByLabel("6-digit code")).toBeFocused();
     await page.keyboard.press("ControlOrMeta+A");

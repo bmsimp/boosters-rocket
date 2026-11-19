@@ -16,11 +16,16 @@ function html(b: Brand, paragraphs: string[], big?: string): string {
 }
 const text = (lines: string[]) => `${lines.join("\n\n")}\n`;
 
-export function signinCodeMessage(b: Brand, to: string, code: string): MailMessage {
+/**
+ * The second step of a sign-in on a new device (the sign-in release, slice SI-3b): the code is sent only after the right
+ * password, so a reader who didn't just sign in is told someone may know their password, and where to set a new one
+ * (`passwordPage`: APP_URL and /sign-in/password). The subject carries the code (tests/e2e/journey-helpers.ts reads it).
+ */
+export function signinCodeMessage(b: Brand, to: string, code: string, o: { passwordPage: string }): MailMessage {
   const lines = [
     `Your ${b.clubName} sign-in code is ${code}.`,
-    "It expires in 10 minutes.",
-    "If you didn't ask for this code, you can ignore this email. Nobody can sign in without it.",
+    "It expires in 10 minutes. We send it after your password was entered correctly on a device we don't know yet. Nobody can sign in there without it.",
+    `If you didn't just sign in, don't share this code: someone may know your password. Set a new one from "Set up or reset my password" at ${o.passwordPage}`,
   ];
   return { to, subject: `Your ${b.clubName} sign-in code: ${code}`, text: text(lines), html: html(b, lines, code) };
 }

@@ -1,7 +1,12 @@
+// The emailed code: since the sign-in release's slice SI-3b, a sign-in's second step on a device the portal doesn't
+// remember, and never a way in by itself. A code is sent only after the right password (/portal-password/check), or
+// again for a pending step (/portal-code/resend), and checked only for the person a pending step names
+// (/portal-code/check): src/lib/auth/parent-code-plugin.ts and parent-signin-step.ts. Its own rules stay as spec §1 made
+// them: 6 digits, 10 minutes, 5 tries, one code a minute, and the limits per address and per IP address.
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { parent, parentAuthAccount, parentAuthUser, parentSigninToken, signinCode } from "@/lib/db/schema";
+import { parent, parentAuthAccount, parentAuthUser, parentDevice, parentSigninToken, signinCode } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { normalizeEmail } from "@/lib/setup/state";
 import { env } from "@/env";
@@ -21,57 +26,96 @@ export const generateSigninCode = () => String(randomInt(0, 1_000_000)).padStart
 export const hashSigninCode = (parentId: string, code: string) =>
   createHmac("sha256", env.BETTER_AUTH_SECRET).update(`signin-code:${parentId}:${code}`).digest("hex");
 
-type Refusal = "unknown_email" | "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off";
-const anon = (label: string): Actor => ({ door: "parent", id: null, label });
+/**
+ * The password a sign-in was proved with: the person's `credential` row of `parent_auth_account` that the password was
+ * checked against, by its id and its `updated_at`. The last check reads it again (signinStands()): a password set or
+ * reset since refuses the sign-in (`password_changed`). It never reaches the browser but inside the signed pending step.
+ */
+export type PasswordProof = { credentialId: string; credentialUpdatedAt: Date };
+
+/**
+ * What a set-up link's sign-in spent, as the transaction that set its password read and wrote it under the person's
+ * lock (choosePasswordFromLink(), password-set.ts): the link's own row, now spent, and the `credential` row the set
+ * wrote, by its id and the `updated_at` it was given. It never reaches the browser.
+ */
+export type LinkSigninProof = { linkId: string; credentialId: string; credentialUpdatedAt: Date };
+
+/**
+ * What a sign-in proved, and the only three ways in (the sign-in release, slice SI-3b): a password and an emailed code
+ * (the code's row id, verifySigninCode()), a password and a device the portal remembers for the person (the device's
+ * row id), or a set-up link (choosePasswordFromLink()). There is no proof of a code alone: a code signs nobody in.
+ */
+export type SigninProof = { password: PasswordProof; codeId: string } | { password: PasswordProof; deviceId: string } | { link: LinkSigninProof };
+
+/** Who a pending step names (src/lib/auth/parent-signin-step.ts): the person, the address the password was proved with, and that password. */
+export type StepPerson = { parentId: string; email: string; password: PasswordProof };
+
+type Refusal = "blocked" | "no_enabled_guardian" | "rate_limited" | "mail_failed" | "signins_off" | "address_changed" | "password_changed";
+const ANON: Actor = { door: "parent", id: null, label: null };
 /**
  * The per-IP limit, or "taken" when the visitor's address is unknown. With no address (CLIENT_IP_HEADER is none, or the
  * proxy doesn't send the header) every visitor would share one count, and one visitor could use up the whole club's
  * sign-ins. The limits per email address and per code still hold.
  */
-const takeIpLimit = (kind: "code_send_ip" | "code_check_ip", ip: string | null, now: Date): Promise<RateLimitTake> =>
+export const takeIpLimit = (kind: "code_send_ip" | "code_check_ip" | "password_try_ip", ip: string | null, now: Date): Promise<RateLimitTake> =>
   ip === null ? Promise.resolve("taken") : takeRateLimit(kind, ip, now);
-const DONE: { delivery: Promise<void> } = { delivery: Promise.resolve() };
+const DONE = { delivery: Promise.resolve(), ended: false };
+const ENDED = { delivery: Promise.resolve(), ended: true };
 
-async function refuse(reason: Refusal, label: string, who: { id: string; email: string } | null, ip: string | null, extra: Record<string, unknown> = {}) {
-  await writeAudit({ actor: who ? parentActor(who) : anon(label), action: "signin.code_refused", targetType: who ? "parent" : undefined,
+/** One `signin.code_refused` row: against the person, or, over a limit per IP address, naming nobody. */
+async function refuse(reason: Refusal, who: { id: string; email: string } | null, ip: string | null, extra: Record<string, unknown> = {}) {
+  await writeAudit({ actor: who ? parentActor(who) : ANON, action: "signin.code_refused", targetType: who ? "parent" : undefined,
     targetId: who?.id, after: { reason, ...extra }, ip });
 }
 
-/** A full window is audited once (rate-limit.ts): later refusals in the same window are refused the same way, unrecorded. */
-async function refuseOverLimit(take: Exclude<RateLimitTake, "taken">, label: string, ip: string | null, extra: { limit: string }) {
-  if (take === "first_refusal") await refuse("rate_limited", label, null, ip, extra);
+/** The `credential` row of the person by its id, as it stands: its `updated_at`, or null when it is gone. */
+async function credentialNow(q: Pick<typeof db, "select">, parentId: string, credentialId: string): Promise<Date | null> {
+  // The column is read through sql<Date>: the Better Auth tables are built by one generic function (schema.ts), and
+  // drizzle's inferred type of this column comes out as never.
+  const rows = await q.select({ updatedAt: sql<Date>`${parentAuthAccount.updatedAt}`.mapWith(parentAuthAccount.updatedAt) }).from(parentAuthAccount)
+    .where(and(eq(parentAuthAccount.id, credentialId), eq(parentAuthAccount.providerId, "credential"),
+      inArray(parentAuthAccount.userId, q.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, parentId)))));
+  return rows[0]?.updatedAt ?? null;
 }
+const samePassword = (stored: Date | null, proof: PasswordProof) => stored !== null && stored.getTime() === proof.credentialUpdatedAt.getTime();
 
 /**
- * Spec §1. Decides, stores the code and returns; the email goes out in `delivery`. The caller answers the parent with
- * the same sentence whatever happened here and must not await `delivery`.
+ * The second step's code, for the person a right password or a pending step names (never a typed address): decided,
+ * stored, and mailed in `delivery`, which the caller must not await; its answer to the browser never says what happened
+ * here. In order: the limit per IP address (skipped with no address), the limit per address (`code_send_email`,
+ * counted under the person's own address), mail working, the door open, the person not blocked and with a row that
+ * counts; then, under the person's lock (lockedPerson()), their address still the one the password was proved with and
+ * their password still the one it was checked against, and the resend wait (one code a minute); then the code, which
+ * replaces their unused one. `ended` says the step can't go on (blocked, the address or the password changed, no row
+ * that counts, sign-ins off), and the caller clears the pending step. Each refusal is `signin.code_refused` with its
+ * reason (over a limit, once per full window); a code mailed is `signin.code_sent`.
  */
-export async function requestSigninCode(rawEmail: string, ip: string | null, now = new Date()): Promise<{ delivery: Promise<void> }> {
-  const email = normalizeEmail(rawEmail);
-  const label = email ?? rawEmail.trim().toLowerCase().slice(0, 254);
+export async function sendSecondStepCode(person: StepPerson, ip: string | null, now = new Date()): Promise<{ delivery: Promise<void>; ended: boolean }> {
+  const email = person.email;
+  const who = { id: person.parentId, email };
   // The IP limit comes first, so no refusal below it (mail not working included) can be repeated without limit.
   const byIp = await takeIpLimit("code_send_ip", ip, now);
-  if (byIp !== "taken") { await refuseOverLimit(byIp, label, ip, { limit: "ip" }); return DONE; }
-  if (!(await mailWorking())) { await refuse("mail_failed", label, null, ip, { detail: "mail_not_working" }); return DONE; }
-  if (parentDoorClosed(await getParentSettings())) { await refuse("signins_off", label, null, ip); return DONE; }
-  if (!email) { await refuse("unknown_email", label, null, ip); return DONE; }
+  if (byIp !== "taken") { if (byIp === "first_refusal") await refuse("rate_limited", null, ip, { limit: "ip" }); return DONE; }
   const byEmail = await takeRateLimit("code_send_email", email, now);
-  if (byEmail !== "taken") { await refuseOverLimit(byEmail, email, ip, { limit: "email" }); return DONE; }
-  const [p] = await db.select().from(parent).where(eq(parent.email, email));
-  if (!p) { await refuse("unknown_email", email, null, ip); return DONE; }
-  if (p.blocked) { await refuse("blocked", email, p, ip); return DONE; }
-  if ((await enterableGuardianRows(p.id)).length === 0) { await refuse("no_enabled_guardian", email, p, ip); return DONE; }
+  if (byEmail !== "taken") { if (byEmail === "first_refusal") await refuse("rate_limited", who, ip, { limit: "email" }); return DONE; }
+  if (!(await mailWorking())) { await refuse("mail_failed", who, ip, { detail: "mail_not_working" }); return DONE; }
+  if (parentDoorClosed(await getParentSettings())) { await refuse("signins_off", who, ip); return ENDED; }
+  const [p] = await db.select().from(parent).where(eq(parent.id, person.parentId));
+  if (!p || p.email !== email) { await refuse("address_changed", who, ip); return ENDED; }
+  if (p.blocked) { await refuse("blocked", who, ip); return ENDED; }
+  if ((await enterableGuardianRows(p.id)).length === 0) { await refuse("no_enabled_guardian", who, ip); return ENDED; }
 
   const code = generateSigninCode();
   const stored = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`booster.signin_code:${p.id}`}))`);
-    // `p` was read before this transaction, and a roster refresh or staff may be changing the person's address right
-    // now. The address is read again under a lock (lockedPerson): a change under way finishes first and is seen here,
-    // and one that starts later waits for this code to be stored and then deletes it. The code is mailed to the
-    // address read here and to no other, so it can never go to an address the person no longer has.
+    // `p` was read before this transaction, and staff or the parent may be changing the person's address right now.
+    // The address is read again under a lock (lockedPerson): a change under way finishes first and is seen here, and one
+    // that starts later waits for this code to be stored and then deletes it. The code is mailed to the address read
+    // here and to no other, so it can never go to an address the person no longer has.
     const live = await lockedPerson(tx, p.id);
     if (!live || live.email !== email) return "moved" as const;
     if (live.blocked) return "blocked" as const;
+    if (!samePassword(await credentialNow(tx, p.id, person.password.credentialId), person.password)) return "password" as const;
     const [last] = await tx.select({ createdAt: signinCode.createdAt }).from(signinCode).where(eq(signinCode.parentId, p.id))
       .orderBy(desc(signinCode.createdAt)).limit(1);
     if (last && now.getTime() - last.createdAt.getTime() < RESEND_AFTER_MS) return "resend" as const;
@@ -80,41 +124,51 @@ export async function requestSigninCode(rawEmail: string, ip: string | null, now
       .returning({ id: signinCode.id });
     return { id: row!.id, to: live.email };
   });
-  // The address is nobody's any more as far as this request can tell: the same refusal as an address never on file.
-  if (stored === "moved") { await refuse("unknown_email", email, null, ip); return DONE; }
-  if (stored === "blocked") { await refuse("blocked", email, p, ip); return DONE; }
-  if (stored === "resend") { await refuse("rate_limited", email, p, ip, { limit: "resend" }); return DONE; }
+  if (stored === "moved") { await refuse("address_changed", who, ip); return ENDED; }
+  if (stored === "blocked") { await refuse("blocked", who, ip); return ENDED; }
+  if (stored === "password") { await refuse("password_changed", who, ip); return ENDED; }
+  if (stored === "resend") { await refuse("rate_limited", who, ip, { limit: "resend" }); return DONE; }
 
+  const passwordPage = `${env.APP_URL.replace(/\/+$/, "")}/sign-in/password`;
   const delivery = (async () => {
-    const r = await sendMail(signinCodeMessage(await currentBrand(), stored.to, code), { purpose: "signin_code", actor: parentActor(p), ip });
+    const r = await sendMail(signinCodeMessage(await currentBrand(), stored.to, code, { passwordPage }), { purpose: "signin_code", actor: parentActor(p), ip });
     if (r.ok) {
       await writeAudit({ actor: parentActor(p), action: "signin.code_sent", targetType: "parent", targetId: p.id,
         after: { expiresAt: new Date(now.getTime() + CODE_TTL_MS).toISOString() }, ip });
     } else {
       await db.delete(signinCode).where(eq(signinCode.id, stored.id)); // nobody got it, so nobody may use it
-      await refuse("mail_failed", email, p, ip);
+      await refuse("mail_failed", who, ip);
     }
   })().catch(() => undefined); // every failure above is already audited; nothing here may surface to the caller
-  return { delivery };
+  return { delivery, ended: false };
 }
 
-/** A right code, spent: the person, and the code's own row, which the last check of the sign-in reads again (signinStands()). */
-export type VerifyResult = { ok: true; parentId: string; codeId: string } | { ok: false; reason: "rejected" | "rate_limited" };
-const REJECTED: VerifyResult = { ok: false, reason: "rejected" };
+/**
+ * A right code, spent: the code's own row, which the last check of the sign-in reads again (signinStands()). A refusal
+ * says whether the pending step has ended (`ended`: its code's tries used up, the person blocked or gone from their
+ * address, sign-ins off), so the caller clears it.
+ */
+export type VerifyResult = { ok: true; codeId: string } | { ok: false; reason: "rejected" | "rate_limited"; ended: boolean };
+const REJECTED: VerifyResult = { ok: false, reason: "rejected", ended: false };
+const REJECTED_ENDED: VerifyResult = { ok: false, reason: "rejected", ended: true };
 
-/** Spec §1. Single use, 10 minutes, 5 wrong tries, 180 checks per IP per 15 minutes. */
-export async function verifySigninCode(rawEmail: string, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
-  const email = normalizeEmail(rawEmail);
-  const label = email ?? rawEmail.trim().toLowerCase().slice(0, 254);
+/**
+ * Spec §1, for the person a pending step names (never a typed address). Single use, 10 minutes, 5 wrong tries, 180
+ * checks per IP address per 15 minutes. Each refusal is audited (`signin.code_expired`, `signin.code_wrong`,
+ * `signin.refused`), and the caller answers it as one refusal.
+ */
+export async function verifySigninCode(step: { parentId: string; email: string }, rawCode: string, ip: string | null, now = new Date()): Promise<VerifyResult> {
   const byIp = await takeIpLimit("code_check_ip", ip, now);
   if (byIp !== "taken") {
-    await refuseOverLimit(byIp, label, ip, { limit: "check_ip" });
-    return { ok: false, reason: "rate_limited" };
+    if (byIp === "first_refusal") await refuse("rate_limited", null, ip, { limit: "check_ip" });
+    return { ok: false, reason: "rate_limited", ended: false };
   }
-  const expired = (who: { id: string; email: string } | null, reason: "no_code" | "expired" | "too_many_tries") =>
-    writeAudit({ actor: who ? parentActor(who) : anon(label), action: "signin.code_expired", targetType: who ? "parent" : undefined, targetId: who?.id, after: { reason }, ip });
-  const [p] = email ? await db.select().from(parent).where(eq(parent.email, email)) : [];
-  if (!p) { await expired(null, "no_code"); return REJECTED; }
+  const who = { id: step.parentId, email: step.email };
+  const [p] = await db.select().from(parent).where(eq(parent.id, step.parentId));
+  if (!p || p.email !== normalizeEmail(step.email)) {
+    await writeAudit({ actor: parentActor(who), action: "signin.refused", targetType: "parent", targetId: step.parentId, after: { reason: "address_changed" }, ip });
+    return REJECTED_ENDED;
+  }
   const code = rawCode.replace(/[\s-]/g, "");
 
   const outcome = await db.transaction(async (tx) => {
@@ -131,65 +185,78 @@ export async function verifySigninCode(rawEmail: string, rawCode: string, ip: st
     await tx.update(signinCode).set({ usedAt: now }).where(eq(signinCode.id, row.id));
     return { spent: row.id } as const;
   });
-  if (outcome === "no_code" || outcome === "expired" || outcome === "too_many_tries") { await expired(p, outcome); return REJECTED; }
+  if (outcome === "no_code" || outcome === "expired" || outcome === "too_many_tries") {
+    await writeAudit({ actor: parentActor(p), action: "signin.code_expired", targetType: "parent", targetId: p.id, after: { reason: outcome }, ip });
+    return outcome === "too_many_tries" ? REJECTED_ENDED : REJECTED;
+  }
   if ("wrong" in outcome) {
     await writeAudit({ actor: parentActor(p), action: "signin.code_wrong", targetType: "parent", targetId: p.id, after: { try: outcome.wrong }, ip });
-    return REJECTED;
+    return (outcome.wrong ?? 0) >= CODE_MAX_TRIES ? REJECTED_ENDED : REJECTED;
   }
   // The code was right; the person must still be allowed in now (they may have been blocked or removed since it was
-  // sent). Whether the address is still theirs is settled last of all, once the session exists (signinStands).
+  // sent). Whether the address and the password are still theirs is settled last of all, once the session exists
+  // (signinStands).
   const [fresh] = await db.select().from(parent).where(eq(parent.id, p.id));
   const reason = parentDoorClosed(await getParentSettings()) ? "signins_off"
     : !fresh || fresh.blocked ? "blocked" : (await enterableGuardianRows(p.id)).length === 0 ? "no_enabled_guardian" : null;
   if (reason) {
     await writeAudit({ actor: parentActor(p), action: "signin.refused", targetType: "parent", targetId: p.id, after: { reason }, ip });
-    return REJECTED;
+    return REJECTED_ENDED;
   }
-  return { ok: true, parentId: p.id, codeId: outcome.spent };
+  return { ok: true, codeId: outcome.spent };
 }
 
 /**
- * What a set-up link's sign-in spent, as the transaction that set its password read and wrote it under the person's
- * lock (choosePasswordFromLink(), password-set.ts): the link's own row, now spent, and the `credential` row the set
- * wrote, by its id and the `updated_at` it was given. It never reaches the browser.
+ * A code posted with no pending step this server signed (or one past its end): it signs nobody in, whatever the code.
+ * Counted against the check's limit per IP address, as a check is, so it can't be repeated without limit, and audited
+ * `signin.refused` (`no_pending_step`), naming nobody, at most once per full window when over the limit.
  */
-export type LinkSigninProof = { linkId: string; credentialId: string; credentialUpdatedAt: Date };
+export async function refuseCodeWithoutStep(ip: string | null, now = new Date()): Promise<"rejected" | "rate_limited"> {
+  const byIp = await takeIpLimit("code_check_ip", ip, now);
+  if (byIp !== "taken") {
+    if (byIp === "first_refusal") await refuse("rate_limited", null, ip, { limit: "check_ip" });
+    return "rate_limited";
+  }
+  await writeAudit({ actor: ANON, action: "signin.refused", after: { reason: "no_pending_step" }, ip });
+  return "rejected";
+}
 
 /**
  * The last check of a sign-in, made once the session row exists: the address the sign-in was proved with is still the
- * person's, they are not blocked, and what the sign-in spent still stands. Read under the lock an address change, a
+ * person's, they are not blocked, and what the sign-in proved still stands. Read under the lock an address change, a
  * block or a password reset waits for (lockedPerson), and after the session is stored, so there is no moment in which a
  * session proved with a replaced address, or before a reset, can slip through. A change that committed first is seen
  * here and the caller removes the session; a change that comes later ends the person's sessions itself, and by then
- * this one is stored where it can see it. What the sign-in spent is one of two things:
- * - a code (`proof` is the code's row id, from verifySigninCode()): it is still there. A reset deletes the person's
- *   codes spent within a code's life (choosePasswordFromLink(), password-set.ts), so a code spent before a reset that
- *   committed first is gone here (`code_gone`); the daily clean-up keeps a spent code until a code's life has passed
- *   since it was spent (cleanUp(), cleanup.ts), so it never takes one this soon.
- * - a set-up link (a LinkSigninProof, from the transaction that set the password with it): the link's row is still
- *   there and spent (`link_gone` otherwise), and the person's `credential` row is still the one that transaction wrote,
- *   by its id and its `updated_at` (`password_changed` otherwise): a reset, or a staff reset, that committed between the
- *   set and this check has replaced the password, and the session made from the old one is refused here.
+ * this one is stored where it can see it. For every kind of proof, the person's `credential` row is still the one the
+ * password was checked against, or the set-up link wrote, by its id and its `updated_at` (`password_changed`
+ * otherwise): a reset, or a staff reset, that committed since has replaced the password. Then what else it spent:
+ * - a code (from verifySigninCode()): its row is still there. A reset deletes the person's codes spent within a code's
+ *   life (choosePasswordFromLink(), password-set.ts), so a code spent before a reset that committed first is gone here
+ *   (`code_gone`); the daily clean-up keeps a spent code until a code's life has passed since it was spent (cleanUp(),
+ *   cleanup.ts), so it never takes one this soon.
+ * - a remembered device: its row is still there, the person's and unexpired (`device_gone` otherwise: a block, a reset
+ *   or anything else that ends all of a person's sign-in forgets every device).
+ * - a set-up link: the link's row is still there and spent (`link_gone` otherwise).
  * Every refusal is audited `signin.refused` with its short reason, and the caller answers it as one refusal.
  */
-export async function signinStands(parentId: string, rawEmail: string, ip: string | null, proof: string | LinkSigninProof): Promise<boolean> {
+export async function signinStands(parentId: string, rawEmail: string, ip: string | null, proof: SigninProof, now = new Date()): Promise<boolean> {
   const email = normalizeEmail(rawEmail);
   const seen = await db.transaction(async (tx) => {
     const live = await lockedPerson(tx, parentId);
-    if (typeof proof === "string") {
-      const [code] = await tx.select({ id: signinCode.id }).from(signinCode).where(and(eq(signinCode.id, proof), eq(signinCode.parentId, parentId)));
+    const password = "link" in proof ? proof.link : proof.password;
+    if (!samePassword(await credentialNow(tx, parentId, password.credentialId), password)) return { live, spent: "password_changed" as const };
+    if ("codeId" in proof) {
+      const [code] = await tx.select({ id: signinCode.id }).from(signinCode).where(and(eq(signinCode.id, proof.codeId), eq(signinCode.parentId, parentId)));
       return { live, spent: code !== undefined ? null : "code_gone" as const };
     }
+    if ("deviceId" in proof) {
+      const [device] = await tx.select({ id: parentDevice.id }).from(parentDevice)
+        .where(and(eq(parentDevice.id, proof.deviceId), eq(parentDevice.parentId, parentId), gt(parentDevice.expiresAt, now)));
+      return { live, spent: device !== undefined ? null : "device_gone" as const };
+    }
     const [link] = await tx.select({ usedAt: parentSigninToken.usedAt }).from(parentSigninToken)
-      .where(and(eq(parentSigninToken.id, proof.linkId), eq(parentSigninToken.parentId, parentId)));
-    // The column is read through sql<Date>: the Better Auth tables are built by one generic function (schema.ts), and
-    // drizzle's inferred type of this column comes out as never.
-    const passwords = await tx.select({ updatedAt: sql<Date>`${parentAuthAccount.updatedAt}`.mapWith(parentAuthAccount.updatedAt) }).from(parentAuthAccount)
-      .where(and(eq(parentAuthAccount.id, proof.credentialId), eq(parentAuthAccount.providerId, "credential"),
-        inArray(parentAuthAccount.userId, tx.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, parentId)))));
-    const stored = passwords[0]?.updatedAt;
-    const samePassword = stored !== undefined && stored.getTime() === proof.credentialUpdatedAt.getTime();
-    return { live, spent: !samePassword ? "password_changed" as const : !link || link.usedAt === null ? "link_gone" as const : null };
+      .where(and(eq(parentSigninToken.id, proof.link.linkId), eq(parentSigninToken.parentId, parentId)));
+    return { live, spent: !link || link.usedAt === null ? "link_gone" as const : null };
   });
   const { live } = seen;
   if (live && email && live.email === email && !live.blocked && seen.spent === null) return true;

@@ -1,22 +1,20 @@
 import { safeReturnPath } from "@/lib/auth/return-path";
 
 /**
- * The code step, kept on the device while its code can still work. A parent leaves the portal to read the code in
- * their mail; a phone may reload an installed app when they come back, and without this they would be asked for their
- * address again, and a second request inside a minute is refused. Kept: the address they typed, when the code was
- * asked for, and the page they were heading to. Nothing the portal knows about anyone: the page never learns whether
- * the address is on file. It is removed on sign-in and on "Use a different email", and dropped once the code's life
- * is over.
+ * The code step, kept on the device while its code can still work (open question 29). A parent leaves the portal to
+ * read the code in their mail; a phone may reload an installed app when they come back, and without this they would be
+ * asked for their password again. Kept: when the code was asked for, and the page they were heading to. Not the
+ * address: since the sign-in release's slice SI-3b the server holds the person and the address in the pending step
+ * (a signed cookie, src/lib/auth/parent-signin-step.ts), which lives exactly as long. It is removed on sign-in and on
+ * "Start again", and dropped once the code's life is over.
  *
  * localStorage, not sessionStorage: an installed app that is reloaded starts a new session. No imports from the server
  * side: the sign-in form (a client component) uses this file.
  */
 export const CODE_STEP_KEY = "booster.signin.code-step";
-/** The code's own life (CODE_TTL_MS in src/lib/parents/signin-codes.ts; tests/unit/code-step.test.ts keeps the two equal). */
+/** The code's own life, and the pending step's (CODE_TTL_MS in src/lib/parents/signin-codes.ts; tests/unit/code-step.test.ts keeps the two equal). */
 export const CODE_STEP_LIFE_MS = 10 * 60 * 1000;
-const MAX_EMAIL = 320;
-
-export type CodeStep = { email: string; sentAt: number; next: string | null };
+export type CodeStep = { sentAt: number; next: string | null };
 export type CodeStepStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 /** The browser's store, or null where it is switched off (some private modes throw on touching it). */
@@ -33,18 +31,17 @@ export function clearCodeStep(store: CodeStepStore | null): void {
 }
 
 /**
- * The step to pick up, or null. What is stored is read as untrusted: anything but an address and a time within the
- * code's life is removed, and the return path is checked again, like every other time it is read.
+ * The step to pick up, or null. What is stored is read as untrusted: anything but a time within the code's life is
+ * removed, and the return path is checked again, like every other time it is read.
  */
 export function loadCodeStep(store: CodeStepStore | null, now: number): CodeStep | null {
   try {
     const raw = store?.getItem(CODE_STEP_KEY);
     if (!raw) return null;
-    const v = JSON.parse(raw) as { email?: unknown; sentAt?: unknown; next?: unknown } | null;
-    const live = typeof v?.email === "string" && v.email.length > 0 && v.email.length <= MAX_EMAIL
-      && typeof v.sentAt === "number" && Number.isFinite(v.sentAt) && v.sentAt <= now && now - v.sentAt < CODE_STEP_LIFE_MS;
+    const v = JSON.parse(raw) as { sentAt?: unknown; next?: unknown } | null;
+    const live = typeof v === "object" && v !== null && typeof v.sentAt === "number" && Number.isFinite(v.sentAt) && v.sentAt <= now && now - v.sentAt < CODE_STEP_LIFE_MS;
     if (!live) { clearCodeStep(store); return null; }
-    return { email: v.email as string, sentAt: v.sentAt as number, next: safeReturnPath(v.next) };
+    return { sentAt: v!.sentAt as number, next: safeReturnPath(v!.next) };
   } catch {
     clearCodeStep(store);
     return null;

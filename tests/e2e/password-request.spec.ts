@@ -4,14 +4,16 @@ import { readFileSync } from "node:fs";
 import postgres from "postgres";
 import { startMailSink, type MailSink } from "../helpers/mail-sink";
 import { e2eMailPort } from "./run-config";
-import { askedAddressHash, linkTokenHash, removeZeldaLinks, removeZeldaSessionsMadeHere, ZELDA_EMAIL } from "./signin-links";
+import { askedAddressHash, linkTokenHash, removeZeldaDevicesMadeHere, removeZeldaLinks, removeZeldaSessionsMadeHere, takeZeldaPassword, ZELDA_EMAIL } from "./signin-links";
 
 /**
  * "Set up or reset my password" in the browser (the sign-in release, slice SI-3a): followed from /sign-in, asked for
  * Zelda's address, answered in its one sentence, the set-up link read from the mail sink and opened, a long random
  * password set (it passes the breach check whether the real service answers or not), and Zelda signed in on the
- * chooser (she has two families). An address nobody holds gets the same words and no mail. After each test Zelda's
- * password, links and the sessions made here go, and the asks' counts, so the seed is as it was for the next pass.
+ * chooser (she has two families). An address nobody holds gets the same words and no mail. The seed's password of
+ * Zelda's is taken away first (a person with none is mailed a set-up link); after each test her links, the password
+ * set, the sessions and devices made here go, the seed's password is put back, and the asks' counts go, so the seed is
+ * as it was for the next pass.
  */
 const sql = postgres(process.env.DATABASE_URL!);
 const NOBODY = "nobody-asks@example.com";
@@ -23,10 +25,11 @@ test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
   sink = await startMailSink({ secure: true, port: e2eMailPort(), key: readFileSync(".e2e/sink-key.pem", "utf8"), cert: readFileSync(".e2e/sink-cert.pem", "utf8") });
 });
-test.beforeEach(async () => { sink.messages.length = 0; started = new Date(); });
+test.beforeEach(async () => { sink.messages.length = 0; started = new Date(); await takeZeldaPassword(sql); });
 test.afterEach(async () => {
   await removeZeldaLinks(sql);
   await removeZeldaSessionsMadeHere(sql);
+  await removeZeldaDevicesMadeHere(sql);
   await sql`DELETE FROM rate_limit_event WHERE kind = 'password_ask_email' AND subject IN (${askedAddressHash(ZELDA_EMAIL)}, ${askedAddressHash(NOBODY)})`;
   await sql`DELETE FROM rate_limit_event WHERE kind = 'password_ask_ip' AND at >= ${started}`;
 });

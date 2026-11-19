@@ -232,8 +232,8 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     : `The latest sign-ins have no address: the proxy in front of the portal doesn't send the header ${env.CLIENT_IP_HEADER}. Set CLIENT_IP_HEADER in the server's env file to the header it does send (.env.example lists them).`;
   lines.push(parents.signin
     ? addressNote && env.CLIENT_IP_HEADER !== "none"
-      ? { key: "parents", title: "Parent sign-ins", state: "attention", word: "Needs attention", says: "On. Parents sign in with a code sent to their email.", times: [], notes: [addressNote], fix: null }
-      : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
+      ? { key: "parents", title: "Parent sign-ins", state: "attention", word: "Needs attention", says: "On. Parents sign in with their email and password, and on a device the portal doesn't know yet, a code sent to their email.", times: [], notes: [addressNote], fix: null }
+      : { key: "parents", title: "Parent sign-ins", state: "ok", word: "On", says: "On. Parents sign in with their email and password, and on a device the portal doesn't know yet, a code sent to their email.", times: [], notes: addressNote ? [addressNote] : [], fix: null }
     : { key: "parents", title: "Parent sign-ins", state: "off", word: "Off", times: [], notes: [], fix: { href: "/staff/settings/parents", label: "Open parent sign-ins" },
       says: "Off. No parent can sign in until an Admin switches them on." });
 

@@ -403,6 +403,12 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/auth/parent-signin-finish.ts",
   "src/lib/auth/parent-link-signin.ts",
   "src/lib/auth/session-cookie-copy.ts",
+  // What the door's password and code steps run (slice SI-3b): the password check, which reads one person from an
+  // address anyone can type, the second step's rule, remembered devices, and the pending step's and device's cookies.
+  "src/lib/parents/password-signin.ts",
+  "src/lib/parents/second-step-rule.ts",
+  "src/lib/parents/devices.ts",
+  "src/lib/auth/parent-signin-step.ts",
 ];
 
 /**

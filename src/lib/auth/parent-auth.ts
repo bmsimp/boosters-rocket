@@ -12,7 +12,8 @@ import { clientAddress, stampingHandler } from "./client-address";
 /**
  * Every Better Auth route a parent doesn't need. Several write (/update-user, the revoke routes, /unlink-account) and
  * none of them is audited, so they answer 404 (Better Auth matches these exactly, before routing). Left reachable:
- * /get-session, /sign-out, /portal-code/send, /portal-code/verify, /ok, /error, and two routes with a path parameter
+ * /get-session, /sign-out, the portal's own door (/portal-password/check, /portal-code/resend, /portal-code/check), /ok,
+ * /error, and two routes with a path parameter
  * that can't be listed and can't act here: /callback/:id has no provider to call back to, and /reset-password/:token
  * only redirects with a reset row of Better Auth's own verification table, which the portal never writes (since the
  * sign-in release's slice SI-2 a person may have a password, but it is set and reset by the portal's own links,
@@ -26,7 +27,8 @@ export const PARENT_DISABLED_PATHS = [
   "/link-social", "/list-accounts", "/unlink-account", "/refresh-token", "/get-access-token", "/account-info",
 ];
 
-// The portal's own email-code door (spec §1); the External ID door is gone.
+// The portal's own door: a password and, on a new device, an emailed code (spec §1 and the sign-in release, slice
+// SI-3b); the External ID door is gone.
 function buildParentAuth() {
   return betterAuth({
     appName: "Booster Rocket",
@@ -40,13 +42,14 @@ function buildParentAuth() {
     emailAndPassword: { enabled: false },
     disabledPaths: PARENT_DISABLED_PATHS,
     // A cheap in-memory cap per IP and path in front of the database limits (signin-codes.ts), so a flood is turned
-    // away before it reaches Postgres. Better Auth turns its limiter on only when NODE_ENV is production; that default
+    // away before it reaches Postgres (one per endpoint of the door, parent-code-plugin.ts). Better Auth turns its limiter on only when NODE_ENV is production; that default
     // is kept, so the integration tests don't meet it. A minute here allows what the database allows in 15 minutes
     // (RATE_LIMITS in src/lib/parents/rate-limit.ts), so this cap is never the first one a room full of parents on one
     // Wi-Fi address meets: 20 a minute turned the twenty-first parent of a registration night away.
     rateLimit: { customRules: {
-      "/portal-code/send": { window: 60, max: RATE_LIMITS.code_send_ip.max },
-      "/portal-code/verify": { window: 60, max: RATE_LIMITS.code_check_ip.max },
+      "/portal-password/check": { window: 60, max: RATE_LIMITS.password_try_ip.max },
+      "/portal-code/resend": { window: 60, max: RATE_LIMITS.code_send_ip.max },
+      "/portal-code/check": { window: 60, max: RATE_LIMITS.code_check_ip.max },
     } },
     account: { accountLinking: { enabled: false } },
     // The visitor's address comes from the portal's one reading of it (client-address.ts), not from a header named here.

@@ -108,7 +108,7 @@ describe("mail settings", () => {
     await sendTestMail("admin@example.org", o);
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}));
     box.fail = "The mail server didn't accept the message (EENVELOPE 550).";
-    const m = signinCodeMessage({ clubName: "FZN", color: "#5b2a86" }, "ana@example.com", "482913");
+    const m = signinCodeMessage({ clubName: "FZN", color: "#5b2a86" }, "ana@example.com", "482913", { passwordPage: "https://portal.example.org/sign-in/password" });
     expect(await sendMail(m, { purpose: "signin_code" })).toEqual({ ok: false, error: "The mail server didn't accept the message (EENVELOPE 550)." });
     const failed = (await db.select().from(auditLog)).filter((a) => a.action === "mail.failed");
     expect(failed).toHaveLength(1);

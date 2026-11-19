@@ -11,21 +11,22 @@ vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw Object.as
 
 import { db } from "@/lib/db/client";
 import { auditLog, parentAuthSession } from "@/lib/db/schema";
-import { getParentAuth } from "@/lib/auth/parent-auth";
 import { chooseFamilyAction } from "@/app/choose-family/actions";
 import ChooseFamily from "@/app/choose-family/page";
 import { renderToStaticMarkup } from "react-dom/server";
 import { eq } from "drizzle-orm";
 import { guardian } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
-import { env } from "@/env";
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
+// Signed in through the door, as a browser is: the password, then the code it mails (the sign-in release, slice SI-3b).
+import { signInThroughDoor } from "../helpers/parent-door";
 
-async function post(path: string, body: unknown) {
-  return (await getParentAuth()).handler(new Request(`${env.APP_URL}/api/auth/parent${path}`, {
-    method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", origin: env.APP_URL, "cf-connecting-ip": "203.0.113.31" },
-  }));
+/** Ana signed in through the door; the browser's cookie is then her session's. */
+async function signInAna() {
+  const r = await signInThroughDoor(state.outbox, "ana@example.com", { headers: { "cf-connecting-ip": "203.0.113.31" } });
+  expect(r.body.ok).toBe(true);
+  state.cookie = r.cookie;
 }
 const redirectOf = async (p: Promise<unknown>) => { try { await p; return null; } catch (e) { return (e as { url?: string }).url ?? String(e); } };
 
@@ -35,10 +36,7 @@ describe("chooseFamilyAction", () => {
   it("the chooser says 'more than one family' only when there is more than one to choose from", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
-    await post("/portal-code/send", { email: "ana@example.com" });
-    await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
-    const res = await post("/portal-code/verify", { email: "ana@example.com", code: /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]! });
-    state.cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
+    await signInAna();
     const two = renderToStaticMarkup(await ChooseFamily());
     expect(two).toContain("more than one family");
     expect(two.match(/<button class="btn"/g)).toHaveLength(2);
@@ -61,11 +59,7 @@ describe("chooseFamilyAction", () => {
   it("refuses anything but a uuid, leaves the session's family alone and records only a short string sent", async () => {
     const a = await seedParent({ name: "Ana", email: "ana@example.com" });
     const first = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" }); const second = await seedGuardianInFamily({ parentId: a.id, familyQboId: "F2" });
-    await post("/portal-code/send", { email: "ana@example.com" });
-    await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
-    const code = /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]!;
-    const res = await post("/portal-code/verify", { email: "ana@example.com", code });
-    state.cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
+    await signInAna();
     expect(await redirectOf(chooseFamilyAction(first.id))).toBe("/");
 
     const marker = "x".repeat(10_000);
@@ -92,10 +86,7 @@ describe("chooseFamilyAction", () => {
     // A row a change of company closed: another company's family, and no family record of the portal's (family_id null).
     const earlier = await seedGuardian({ parentId: a.id, familyQboId: "OLD-F", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
     expect(earlier.familyId).toBeNull();
-    await post("/portal-code/send", { email: "ana@example.com" });
-    await vi.waitFor(() => expect(state.outbox).toHaveLength(1));
-    const res = await post("/portal-code/verify", { email: "ana@example.com", code: /sign-in code: (\d{6})/.exec(state.outbox[0]!.subject)![1]! });
-    state.cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]!).filter((c) => c.startsWith("br_parent")).join("; ");
+    await signInAna();
     expect(await redirectOf(chooseFamilyAction(first.id))).toBe("/");
     // The second row closes while the session is open: the chooser's button for it, posted now, is refused.
     await db.update(guardian).set({ status: "disabled", disabledReason: "removed", statusBeforeDisable: "active" }).where(eq(guardian.id, second.id));
