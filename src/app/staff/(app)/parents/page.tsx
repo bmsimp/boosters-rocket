@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { requireStaffPage } from "@/lib/guards";
-import { heldReview, listPeople, type PersonRow } from "@/lib/parents/directory";
+import { listPeople, type PersonRow } from "@/lib/parents/directory";
 import { getParentSettings } from "@/lib/parents/settings";
 import { LocalTime } from "@/app/components/local-time";
 import { DataTable } from "@/app/components/data-table";
 import { Notice } from "@/app/components/notice";
 import { StateWords } from "@/app/components/state-words";
-import { HoldForm, NoteAction } from "./forms";
-import { decideHoldAction, reverseHoldAction } from "./actions";
 
 export const metadata = { title: "Parents" };
 export const dynamic = "force-dynamic";
@@ -32,51 +30,12 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
   await requireStaffPage("Parents.ReadWrite");
   const sp = await searchParams;
   const typed = (typeof sp.q === "string" ? sp.q : "").slice(0, 100);
-  const [review, people, settings] = await Promise.all([heldReview(), listPeople(typed), getParentSettings()]);
+  const [people, settings] = await Promise.all([listPeople(typed), getParentSettings()]);
   return (
     <main className="wrap single">
       <h1 className="page-title">Parents</h1>
-      <p className="lede">Who can sign in to the portal, and why someone can&apos;t. People come from QuickBooks. A missing parent is added, and a name changed, from the family&apos;s page under Roster, by staff who may change the roster; it is sent to QuickBooks first. Email addresses are changed in QuickBooks, not here, followed by Refresh now on the roster.</p>
+      <p className="lede">Everyone who can sign in to the portal, or once could, and each family they belong to. Who can sign in is kept by the portal itself: a change made in QuickBooks no longer gives anyone a sign-in or ends one.</p>
       {!settings.signin && <Notice tone="warning">{settings.everEnabled ? "Parent sign-ins are switched off, so nobody can sign in right now." : "Parent sign-ins haven't been switched on yet. An Admin does that under Parent sign-ins."}</Notice>}
-
-      <section className="box" aria-labelledby="review-h"><h2 id="review-h">To review ({review.waiting.length})</h2>
-        {/* Addresses are held only while sign-ins are on: before then, say when they will come up (Reconciliation already names them). */}
-        {review.waiting.length === 0 ? (settings.signin
-          ? <Notice tone="done" live="none">Nothing is waiting.</Notice>
-          : <Notice tone="info" live="none">Nothing to review yet. Once parent sign-ins are on, an address that is under more than one family in QuickBooks is held, and comes up here for you to say whether it is one person.</Notice>) : (
-          <>
-            <p>Each address below is under more than one family in QuickBooks. Nobody at that address can sign in to the families marked held until you say whether it is one person. If it is a copying mistake, choose Not the same person and have the records corrected in QuickBooks.</p>
-            <ul className="review-items">{review.waiting.map((h) => (
-              <li key={h.email} className="review-item">
-                <p className="review-address">{h.email}</p>
-                <dl className="details">
-                  <dt>On records named</dt><dd>{h.names.join(", ")}</dd>
-                  <dt>Families</dt>
-                  <dd><ul className="review-families">{h.families.map((f) => (
-                    <li key={f.qboId}>{f.name} <StateWords state={f.held ? "todo" : "done"} words={f.held ? "Held" : "Already approved"} /></li>))}</ul></dd>
-                </dl>
-                <HoldForm email={h.email} familyQboIds={h.families.map((f) => f.qboId)} decide={decideHoldAction} />
-              </li>))}</ul>
-          </>
-        )}
-      </section>
-
-      {review.decided.length > 0 && (
-        <section className="box" aria-labelledby="decided-h"><h2 id="decided-h">Decided</h2>
-          <ul className="review-items">{review.decided.map((d) => (
-            <li key={d.email} className="review-item">
-              <p className="review-address">{d.email}</p>
-              <p>
-                {d.approved.length ? `Same person in ${d.approved.join(", ")}. ` : ""}{d.rejected.length ? `Not the same person in ${d.rejected.join(", ")}. ` : ""}
-                {d.decidedBy ? `Decided by ${d.decidedBy}` : "Decided"}{d.decidedAt ? <> <LocalTime iso={d.decidedAt} /></> : null}{d.note ? `: ${d.note}` : "."}
-              </p>
-              <details className="more"><summary>Reverse this decision</summary>
-                <p>The address is held again for every family, and anyone it let in is signed out of those families.</p>
-                <NoteAction label="Reverse" field="Why? (staff only)" pendingLabel="Reversing…" act={reverseHoldAction.bind(null, d.email)} />
-              </details>
-            </li>))}</ul>
-        </section>
-      )}
 
       <section className="box" aria-labelledby="people-h"><h2 id="people-h">People</h2>
         <form method="get" role="search" className="stack">

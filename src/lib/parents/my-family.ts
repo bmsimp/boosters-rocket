@@ -48,7 +48,7 @@ export type MyFamily = {
 export type MyRecord = {
   qboId: string; parentQboId: string | null; contact: MyContact & { edits: "own" | "family" };
   /**
-   * Which of the addresses in the record's email field sign in through it (./access-rules.ts): the first alone on a
+   * Which of the addresses in the record's email field are the person's through it: the first alone on a
    * parent's or a flat member's record; every one on a family's record in a club with no parent type.
    */
   signsInBy: "first" | "every";
@@ -147,7 +147,7 @@ async function myOwnRecord(ctx: ParentCtx, shape: Shape | null): Promise<{ conta
 
   if (family.typeQboId !== shape.familyTypeId) return null;
   const under = rows.filter((r) => r.parentQboId === familyId && r.active && r.typeQboId !== shape.familyTypeId);
-  // The record a sign-in comes from (src/lib/parents/access-rules.ts): a parent directly under the family, or, when
+  // The record a guardian row came from (its `source_qbo_id`): a parent directly under the family, or, when
   // QuickBooks has no parent type, the family customer itself. A link that names anything else is ignored.
   const mine = shape.parentTypeId === null ? (sourceId === familyId ? family : undefined)
     : under.find((r) => r.qboId === sourceId && r.typeQboId === shape.parentTypeId);

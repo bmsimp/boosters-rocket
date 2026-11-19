@@ -49,16 +49,16 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
   );
 }
 
-/** `detailed` is for staff with `Parents.ReadWrite`: only they see which other family a held address is under, and get links to people. */
+/** `detailed` is for staff with `Parents.ReadWrite`: only they get links to people. */
 function SignIns({ signins, detailed }: { signins: FamilySignin[]; detailed: boolean }) {
   return (
     <section className="box" aria-labelledby="entry-signins-h"><h2 id="entry-signins-h">Portal sign-ins</h2>
-      <p>Who can sign in to the portal for this QuickBooks customer, and why someone can&apos;t.</p>
+      <p>The family&apos;s guardians in the portal, and whether each can sign in.</p>
       {signins.length === 0 ? <Notice tone="info" live="none">Nobody can sign in for it yet.</Notice> : (
         <DataTable caption="Each person, and whether they can sign in" captionHidden rows={signins}
-          rowKey={(s) => `${s.parentId ?? "none"}|${s.sourceQboId ?? "none"}|${s.email ?? ""}`} columns={[
-            { key: "name", header: "Person", rowHeader: true, cell: (s) => (detailed && s.parentId ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
-            { key: "email", header: "Email", cell: (s) => s.email ?? "No email address" },
+          rowKey={(s) => s.guardianId} columns={[
+            { key: "name", header: "Person", rowHeader: true, cell: (s) => (detailed ? <Link href={`/staff/parents/${s.parentId}`}>{s.name}</Link> : s.name) },
+            { key: "email", header: "Email", cell: (s) => s.email },
             { key: "words", header: "Sign-in", cell: (s) => s.words },
           ]} />
       )}
@@ -102,7 +102,7 @@ export default async function RosterEntryPage({ params }: { params: Promise<{ id
   await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "roster.family.read", permission: "Roster.Read",
     targetType: "family", targetId: String(familyId), ip: ctx.ip });
   const detailed = can(ctx.effective, "Parents.ReadWrite");
-  const signins = await familySignins(familyId, { detailed });
+  const signins = await familySignins(familyId);
   const waiting = await loadOpenWrites({ familyId, showAmounts: can(ctx.effective, "Finance.Balance.Read") });
   // Changes are offered to staff who may make them, while QuickBooks is connected: each form carries the record's
   // version and sends QuickBooks ids, so a family the roster lists no customer for is offered none.

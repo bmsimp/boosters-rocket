@@ -47,7 +47,7 @@ export function replaceAddressInField(field: string | null, from: string, to: st
 /**
  * Whether a field already reads as the change made: the new address is in it and the old one is nowhere in it. After
  * a write whose answer was lost, the next try finds this and takes the change as made, rather than sending it again.
- * `firstOnly` is for a record whose sign-in is its first address alone (./access-rules.ts): the new one must be first.
+ * `firstOnly` is for a record whose sign-in is its first address alone (MyRecord.signsInBy, ./my-family.ts): the new one must be first.
  */
 export function fieldHasChange(field: string | null, from: string, to: string, firstOnly: boolean): boolean {
   const old = normalizeEmail(from), next = normalizeEmail(to);

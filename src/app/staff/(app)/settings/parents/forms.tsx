@@ -1,14 +1,11 @@
 "use client";
 import { ActionOutcome } from "@/app/components/notice";
-import { startTransition, useActionState, useState } from "react";
+import { useActionState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 
-// The match row keeps a choice in state, so it uses no form `action`: React resets a form after one, and the select
-// would jump back while state kept the choice (see settings/quickbooks/forms.tsx). A single button with nothing to
-// type may use a form action.
+// A single button with nothing to type may use a form action.
 type Done = { ok: true; message: string } | { ok: false; errors: string[] };
 const failed: Done = { ok: false, errors: [ACTION_FAILED] };
-const noSubmit = (e: { preventDefault: () => void }) => e.preventDefault();
 function Outcome({ state }: { state: Done | null }) {
   if (!state) return null;
   return <ActionOutcome state={state} />;
@@ -21,29 +18,6 @@ export function SwitchButton({ label, pendingLabel, quiet, act }: { label: strin
     <form action={run} className="stack">
       <Outcome state={state} />
       <button className={quiet ? "btn btn-line" : "btn"} disabled={pending}>{pending ? pendingLabel : label}</button>
-    </form>
-  );
-}
-
-/** One old family: accept the chosen counterpart, or reject. The select is state, so a refusal keeps the choice. */
-export function MatchRow({ oldId, suggested, families, decide }: {
-  oldId: string; suggested: string | null; families: { qboId: string; name: string }[];
-  decide: (oldFamilyQboId: string, newFamilyQboId: string | null) => Promise<Done>;
-}) {
-  const [choice, setChoice] = useState(suggested ?? "");
-  const [state, run, pending] = useActionState(async (_: Done | null, to: string | null) => safely(() => decide(oldId, to), failed), null);
-  return (
-    <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>The same family in the connected company</span>
-        <select value={choice} onChange={(e) => setChoice(e.target.value)}>
-          <option value="">Choose a family</option>
-          {families.map((f) => <option key={f.qboId} value={f.qboId}>{f.name}</option>)}
-        </select></label>
-      <Outcome state={state} />
-      <div className="row-actions">
-        <button type="button" className="btn" disabled={pending || !choice} onClick={() => startTransition(() => run(choice))}>Accept</button>
-        <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run(null))}>No match</button>
-      </div>
     </form>
   );
 }

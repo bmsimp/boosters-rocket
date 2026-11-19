@@ -17,9 +17,6 @@ import { quickbooksProblems } from "@/lib/quickbooks/health";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { runDueJobs, lastWake, TOKEN_JOB } from "@/lib/jobs/runner";
 import * as welcomeModule from "@/lib/parents/welcome";
-import * as noticeModule from "@/lib/parents/review-notice";
-import * as companyChangeModule from "@/lib/parents/company-change";
-import { getPreviousCompany, PREVIOUS_COMPANY_KEY } from "@/lib/parents/company-change";
 import { workerToken } from "@/lib/jobs/worker-token";
 import { ROSTER_JOB } from "@/lib/roster/refresh";
 import { POST, GET } from "@/app/api/internal/worker/route";
@@ -118,35 +115,14 @@ describe("scheduled jobs", () => {
     } finally { spy.mockRestore(); logs.forEach((l) => l.mockRestore()); }
   });
 
-  it("a review-notice step that throws is recorded as failed and the other jobs still run", async () => {
-    await seedConnected(stub);
-    const spy = vi.spyOn(noticeModule, "sendReviewNotice").mockRejectedValueOnce(new Error("secret-detail-from-the-notice"));
-    const logs = (["log", "info", "warn", "error"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}));
-    try {
-      const r = await runDueJobs();
-      expect(r).toEqual({ ran: [{ job: "parents.review_notice", ok: false }, { job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
-      expect(JSON.stringify(logs.map((l) => l.mock.calls))).not.toContain("secret-detail");
-    } finally { spy.mockRestore(); logs.forEach((l) => l.mockRestore()); }
-  });
-
-  it("deletes the previous company's snapshot once it is 90 days old, and says so", async () => {
-    await db.insert(setting).values({ key: PREVIOUS_COMPANY_KEY, value: { realmId: "1111", newRealmId: "2222", at: new Date().toISOString(), families: [], approvals: [] } });
-    expect(await runDueJobs(hours(89 * 24))).toEqual({ ran: [] });
-    expect(await getPreviousCompany()).not.toBeNull();
-    expect(await runDueJobs(hours(91 * 24))).toEqual({ ran: [{ job: "parents.snapshot_expiry", ok: true }] });
-    expect(await getPreviousCompany()).toBeNull();
-    expect((await db.select().from(auditLog)).filter((r) => r.action === "settings.parents.save").map((r) => r.after)).toEqual([{ previousCompany: "deleted", reason: "expired" }]);
-  });
-
-  it("a snapshot-expiry step that throws is recorded as failed and the other jobs still run", async () => {
-    await seedConnected(stub);
-    const spy = vi.spyOn(companyChangeModule, "expirePreviousCompany").mockRejectedValueOnce(new Error("secret-detail-from-the-snapshot"));
-    const logs = (["log", "info", "warn", "error"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}));
-    try {
-      const r = await runDueJobs();
-      expect(r).toEqual({ ran: [{ job: "parents.snapshot_expiry", ok: false }, { job: TOKEN_JOB, ok: true }, { job: ROSTER_JOB, ok: true }] });
-      expect(JSON.stringify(logs.map((l) => l.mock.calls))).not.toContain("secret-detail");
-    } finally { spy.mockRestore(); logs.forEach((l) => l.mockRestore()); }
+  // The held-address review's notice and the previous company's snapshot went with the review (stage 3 of the
+  // app-owned families spec): no wake sends the one or expires the other, and a snapshot an older portal stored is left.
+  it("runs no review notice and no snapshot expiry, and leaves a stored snapshot as it is", async () => {
+    const snapshot = { key: "parents.previous_company", value: { realmId: "1111", newRealmId: "2222", at: new Date().toISOString(), families: [], approvals: [] } };
+    await db.insert(setting).values(snapshot);
+    expect(await runDueJobs(hours(91 * 24))).toEqual({ ran: [] });
+    expect((await db.select().from(setting)).filter((x) => x.key === snapshot.key).map((x) => x.value)).toEqual([snapshot.value]);
+    expect((await db.select().from(auditLog)).filter((x) => x.action === "settings.parents.save" || x.action === "parent.review_notice.sent")).toEqual([]);
   });
 
   it("an unexpected error in the token job is recorded as a fixed failure and the roster job still runs", async () => {

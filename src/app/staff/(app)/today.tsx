@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { reviewWaiting } from "@/lib/parents/review-notice";
 import { queueCounts } from "@/lib/roster/queue";
 import { formsToChase, shiftsToFill, SOON_DAYS } from "@/lib/staff-home/today";
 import { StateWords } from "@/app/components/state-words";
@@ -13,16 +12,13 @@ type Item = { key: string; words: string; detail: string; href: string; link: st
  * with the way to it. Each kind is read only for staff who hold its permission, and only counts are read. With nothing
  * waiting the box says so in one calm line.
  */
-export async function TodayBox({ reviews, writes, forms, shifts }: { reviews: boolean; writes: boolean; forms: boolean; shifts: boolean }) {
-  const [held, queue, chase, fill] = await Promise.all([
-    reviews ? reviewWaiting() : 0,
+export async function TodayBox({ writes, forms, shifts }: { writes: boolean; forms: boolean; shifts: boolean }) {
+  const [queue, chase, fill] = await Promise.all([
     writes ? queueCounts() : null,
     forms ? formsToChase() : null,
     shifts ? shiftsToFill() : null,
   ]);
   const items: Item[] = [];
-  if (held > 0) items.push({ key: "reviews", words: count(held, "address to review", "addresses to review"),
-    detail: `Nobody at ${held === 1 ? "that address" : "those addresses"} can sign in until someone decides.`, href: "/staff/parents", link: "Open Parents" });
   if (queue && queue.stuck > 0) items.push({ key: "stuck", words: count(queue.stuck, "change stuck on its way to QuickBooks", "changes stuck on their way to QuickBooks"),
     detail: "The worker won't try again until someone asks, or gives up and makes the change in QuickBooks.", href: "/staff/reconciliation", link: "Open Reconciliation" });
   if (queue && queue.waiting > 0) items.push({ key: "waiting", words: count(queue.waiting, "change waiting to reach QuickBooks", "changes waiting to reach QuickBooks"),

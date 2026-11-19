@@ -84,9 +84,9 @@ type Mine = { record: MyRecord; email: string };
  * as QuickBooks has it now, whatever the cache still says: the one asked for, still active, still where the cache has
  * it (one moved to another family is not theirs to change), still of a customer type that makes it theirs (a parent's
  * record made a Family is another family to the portal), and its email field must still hold the address they
- * signed in with, by the rule that gave them the sign-in (./access-rules.ts): the first address on a parent's own
- * record, any address on a family's. When the club takes a parent's address off a record, the next roster read ends
- * that sign-in; until it does, nothing the record holds now is shown to them, and they change none of it.
+ * signed in with, by the rule that gave them the sign-in (their record's, my-family.ts): the first address on a parent's own
+ * record, any address on a family's. When the club takes a parent's address off a record, nothing the record holds now
+ * is shown to them, and they change none of it (their sign-in is the app's own, and stays).
  */
 function formOf(customer: Record<string, unknown> | null, { record, email }: Mine): { ok: true; form: ContactForm } | Failed {
   if (!customer || customer.Id !== record.qboId) return failed("bad_answer");

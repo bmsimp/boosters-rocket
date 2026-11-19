@@ -13,14 +13,12 @@ import { auditLog, guardian, heldAddress, parent, parentAuthSession, parentAuthU
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
 import { refreshRoster } from "@/lib/roster/refresh";
 import { loadRosterPage, rosterEntry } from "@/lib/roster/queries";
-import { runReconcile } from "../helpers/reconcile";
 import { getParentSettings } from "@/lib/parents/settings";
 import { familySignins, getPerson, listPeople } from "@/lib/parents/directory";
-import { expirePreviousCompany, getPreviousCompany, PREVIOUS_COMPANY_KEY } from "@/lib/parents/company-change";
 import { resetDb, seedGuardian, seedParent, seedParentSession } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
 import { startQboStub, seedConnected, fznCompany, type QboStub } from "../helpers/qbo-stub";
-import { recordOfCustomer } from "../helpers/app-records";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -29,6 +27,8 @@ afterAll(() => stub.close());
 const admin = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: "203.0.113.9" };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
 const setRosterSourceForTest = (realmId: string) => db.transaction((tx) => setRosterSource(tx, realmId));
+/** The setting the previous-company snapshot was kept in, before it was retired with the match review. */
+const SNAPSHOT_KEY = "parents.previous_company";
 const OLD_LABEL = "A family in the previous QuickBooks company";
 /** Leo's link closed before the switch (no active students), under family 30 through customer 31. */
 const seedClosedLeo = async () => {
@@ -43,14 +43,20 @@ describe("connecting a different QuickBooks company", () => {
     await resetDb(); stub.reset();
     await seedShape(); await seedParentSettings({ ...SIGNINS_ON, welcome: true }); await seedCache(OLD);
     await setRosterSourceForTest("1111");
+    // The people and their memberships, as the portal holds them: Ana in both families, Mei in one, all signed in before.
+    const welcomedAt = new Date("2026-11-01T12:00:00Z");
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com", welcomedAt });
+    const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com", welcomedAt });
+    await seedGuardian({ parentId: ana.id, familyQboId: "12", sourceQboId: "13" });
+    await seedGuardian({ parentId: ana.id, familyQboId: "20", sourceQboId: "21" });
+    await seedGuardian({ parentId: mei.id, familyQboId: "20", sourceQboId: "22" });
+    // A held address left from before the review was retired: nothing reads or writes the table any more.
     await db.insert(heldAddress).values({ email: "ana@example.com", approvedFamilyQboIds: ["12", "20"], note: "Both hers." });
-    await runReconcile({ cause: "test" });
-    await db.update(guardian).set({ status: "active" });
-    await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z"), welcomeOwed: false });
+    await syncAppRecords();
   });
 
   it("closes every link, signs parents out, switches sign-ins and welcomes off, and keeps the people", async () => {
-    const [u] = await db.select().from(parentAuthUser);
+    const [u] = await db.select().from(parentAuthUser).where(eq(parentAuthUser.email, "ana@example.com"));
     await seedParentSession(u!.id, { familyQboId: "12" });
     expect(await clearRosterOfOtherCompany("2222", admin)).toBe(true);
     const links = await db.select().from(guardian);
@@ -61,8 +67,10 @@ describe("connecting a different QuickBooks company", () => {
     expect((await db.select().from(parent)).map((p) => p.name).sort()).toEqual(["Ana Rivera", "Mei Chen"]);
     const [row] = await audits("parent.access.cleared");
     expect(row).toMatchObject({ door: "staff", actorLabel: "admin@club.org", ip: "203.0.113.9" });
-    expect(row!.after).toMatchObject({ reason: "different_company", links: 3, people: 2, sessionsEnded: 1, holdsDeleted: 1, welcomesCleared: 2, closedLinksMarked: 0, codesDeleted: 0 });
-    expect(row!.after).not.toHaveProperty("snapshotReplaced");
+    expect(row!.after).toMatchObject({ reason: "different_company", fromRealmId: "1111", toRealmId: "2222", links: 3, people: 2, sessionsEnded: 1, welcomesCleared: 2,
+      closedLinksMarked: 0, codesDeleted: 0 });
+    expect(row!.after).not.toHaveProperty("holdsDeleted");
+    expect(row!.after).not.toHaveProperty("familiesKept");
   });
 
   it("marks a link that had closed before the switch as the old company's too, keeping what it was before it closed", async () => {
@@ -71,37 +79,35 @@ describe("connecting a different QuickBooks company", () => {
     const [row] = await db.select().from(guardian).where(eq(guardian.id, link.id));
     expect(row).toMatchObject({ status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active", familyQboId: "30", sourceQboId: "31" });
     expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ links: 3, closedLinksMarked: 1 });
-    expect((await getPreviousCompany())!.families.map((f) => f.qboId)).toEqual(["12", "20"]);     // the snapshot is of the links that were open
   });
 
-  it("never hands a closed old-company link's person to a stranger who has the same IDs in the new company", async () => {
+  it("writes no snapshot of the old company and leaves the retired held addresses as they were", async () => {
+    const held = await db.select().from(heldAddress);
+    await clearRosterOfOtherCompany("2222", admin);
+    expect(await db.select().from(setting).where(eq(setting.key, SNAPSHOT_KEY))).toEqual([]);
+    expect(await db.select().from(heldAddress)).toEqual(held);
+    // A second change of company finds nothing open, and still keeps nothing of the first.
+    await clearRosterOfOtherCompany("3333", admin);
+    expect((await audits("parent.access.cleared"))[1]!.after).toMatchObject({ links: 0, fromRealmId: "2222", toRealmId: "3333" });
+    expect(await db.select().from(setting).where(eq(setting.key, SNAPSHOT_KEY))).toEqual([]);
+  });
+
+  it("gives nobody a sign-in from the new company's customers, even under the old IDs and addresses", async () => {
     const { leo, link } = await seedClosedLeo();
     await clearRosterOfOtherCompany("2222", admin);
+    expect((await db.select().from(parent)).every((p) => p.welcomedAt === null && !p.welcomeOwed)).toBe(true);
+    // The new company happens to reuse the old IDs, with the old addresses on them.
     await seedShape();
-    await seedCache([fam("30", "Stranger Family"), par("31", "Stranger", "30", "stranger@example.com")]);
+    await seedCache([fam("12", "Stranger Family"), par("13", "Someone Else", "12", "ana@example.com"), fam("30", "Rivera Family"), par("31", "Leo Rivera", "30", "leo@example.com"),
+      par("32", "Stranger", "30", "stranger@example.com")]);
     await seedParentSettings(SIGNINS_ON);
-    await runReconcile({ cause: "test" });
-    const [still] = await db.select().from(parent).where(eq(parent.id, leo.id));
-    expect(still).toMatchObject({ email: "leo@example.com", name: "Leo Rivera" });
-    const [stranger] = await db.select().from(parent).where(eq(parent.email, "stranger@example.com"));
-    expect(stranger!.id).not.toBe(leo.id);
-    expect(await db.select().from(guardian).where(eq(guardian.parentId, stranger!.id)))
-      .toEqual([expect.objectContaining({ familyQboId: "30", sourceQboId: "31", status: "invited" })]);
+    await setRosterSourceForTest("2222");
+    await syncAppRecords();
+    expect((await db.select().from(guardian)).filter((l) => l.status !== "disabled")).toEqual([]);
+    expect(await db.select().from(parent).where(eq(parent.email, "stranger@example.com"))).toEqual([]);
+    expect((await db.select().from(parent).where(eq(parent.id, leo.id)))[0]).toMatchObject({ email: "leo@example.com", name: "Leo Rivera" });
     expect((await db.select().from(guardian).where(eq(guardian.id, link.id)))[0]).toMatchObject({ status: "disabled", disabledReason: "company_changed" });
-    expect(await audits("parent.email.changed")).toEqual([]);
-  });
-
-  it("reuses a closed old-company link whose address reappears under the same IDs only as a new invited link", async () => {
-    const { leo, link } = await seedClosedLeo();
-    await clearRosterOfOtherCompany("2222", admin);
-    await seedShape();
-    await seedCache([fam("30", "Rivera Family"), par("31", "Leo Rivera", "30", "leo@example.com")]);
-    await seedParentSettings(SIGNINS_ON);
-    await runReconcile({ cause: "test" });
-    const [row] = await db.select().from(guardian).where(eq(guardian.id, link.id));
-    expect(row).toMatchObject({ parentId: leo.id, status: "invited", disabledReason: null, statusBeforeDisable: null });
-    const granted = (await audits("parent.access.granted")).filter((a) => a.targetId === link.id);
-    expect(granted.at(-1)!.after).toMatchObject({ status: "invited", reopenedFrom: "company_changed" });
+    for (const action of ["parent.create", "parent.access.granted", "parent.email.changed"]) expect(await audits(action)).toEqual([]);
   });
 
   it("deletes every unused sign-in code", async () => {
@@ -113,21 +119,14 @@ describe("connecting a different QuickBooks company", () => {
     expect((await audits("parent.access.cleared"))[0]!.after).toMatchObject({ codesDeleted: 1 });
   });
 
-  it("says so when a second company change replaces an earlier snapshot", async () => {
-    await clearRosterOfOtherCompany("2222", admin);
-    await clearRosterOfOtherCompany("3333", admin);
-    expect((await audits("parent.access.cleared"))[1]!.after).toMatchObject({ snapshotReplaced: true, links: 0 });
-    expect(await getPreviousCompany()).toMatchObject({ realmId: "2222", newRealmId: "3333", families: [] });
-  });
-
   it("keeps the old company's links out of the new company's roster pages, and labels them on the person's page", async () => {
     const [ana] = await db.select().from(parent).where(eq(parent.email, "ana@example.com"));
     await clearRosterOfOtherCompany("2222", admin);
     await seedConnected(stub, { realmId: "2222" });
     await seedShape();
     await seedCache([fam("12", "Stranger Family"), par("13", "Someone Else", "12", "stranger@example.com")]);
-    expect(await familySignins(await recordOfCustomer("12", "family"), { detailed: true })).toEqual([]);
-    expect(await familySignins(await recordOfCustomer("20", "family"), { detailed: false })).toEqual([]); // a record the old links never name
+    expect(await familySignins(await recordOfCustomer("12", "family"))).toEqual([]);
+    expect(await familySignins(await recordOfCustomer("20", "family"))).toEqual([]); // a record the old links never name
     const page = await loadRosterPage();
     expect(page.roster).not.toBeNull();
     expect(page.attention.filter((a) => a.rule === "signin_unknown" || a.rule === "inactive_with_signin")).toEqual([]);
@@ -151,54 +150,15 @@ describe("connecting a different QuickBooks company", () => {
     const worker = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
     expect(await refreshRoster(worker)).toMatchObject({ ok: false, reason: "failed", error: expect.stringContaining("(roster_company)") });
     expect(await db.select().from(guardian)).toEqual(guardiansBefore);
-    expect(await getPreviousCompany()).toBeNull();
     expect(await audits("parent.access.cleared")).toEqual([]);
     expect(await audits("roster.cleared")).toEqual([]);
     expect((await db.select().from(setting).where(eq(setting.key, "roster.source")))[0]!.value).toEqual({ realmId: "1111" });
     expect(await audits("roster.refresh")).toEqual([]);
   });
 
-
-  it("forgets every approval and every welcome, so nothing from the old company applies to the new one by accident", async () => {
-    await clearRosterOfOtherCompany("2222", admin);
-    expect(await db.select().from(heldAddress)).toEqual([]);
-    expect((await db.select().from(parent)).every((p) => p.welcomedAt === null && !p.welcomeOwed)).toBe(true);
-    // The new company happens to reuse the old IDs for other families, with the same address under two of them.
-    await seedShape();
-    await seedCache([fam("12", "Stranger Family"), par("13", "Someone Else", "12", "ana@example.com"), fam("20", "Another Family"), par("21", "Other", "20", "ana@example.com")]);
-    await seedParentSettings(SIGNINS_ON);
-    await runReconcile({ cause: "test" });
-    expect((await db.select().from(guardian)).filter((l) => l.status !== "disabled")).toEqual([]);   // held: the old approval is gone
-  });
-
-  it("saves a snapshot of the old company's families, people and approvals", async () => {
-    await clearRosterOfOtherCompany("2222", admin);
-    const snap = await getPreviousCompany();
-    expect(snap).toMatchObject({ realmId: "1111", newRealmId: "2222", approvals: [{ email: "ana@example.com", familyQboIds: ["12", "20"] }] });
-    expect(snap!.families.map((f) => [f.qboId, f.name, f.people.map((p) => p.email), f.decision])).toEqual([
-      ["12", "Rivera Family", ["ana@example.com"], null], ["20", "Chen Family", ["ana@example.com", "mei@example.com"], null]]);
-    expect(snap!.families[0]!.people[0]!.welcomedAt).toBe("2026-11-01T12:00:00.000Z");
-  });
-
   it("does none of it when the same company is connected again", async () => {
     expect(await clearRosterOfOtherCompany("1111", admin)).toBe(false);
     expect((await db.select().from(guardian)).every((l) => l.status === "active")).toBe(true);
-    expect(await getPreviousCompany()).toBeNull();
-  });
-
-  it("deletes the snapshot after 90 days, or when an Admin says so, and audits it", async () => {
-    await clearRosterOfOtherCompany("2222", admin);
-    expect(await expirePreviousCompany(new Date(Date.now() + 89 * 86_400_000))).toBe(false);
-    expect(await expirePreviousCompany(new Date(Date.now() + 91 * 86_400_000))).toBe(true);
-    expect(await getPreviousCompany()).toBeNull();
-    expect((await audits("settings.parents.save")).at(-1)!.after).toEqual({ previousCompany: "deleted", reason: "expired" });
-  });
-
-  it("still deletes a snapshot it can't read, 90 days after it was last written", async () => {
-    await db.insert(setting).values({ key: PREVIOUS_COMPANY_KEY, value: { broken: true } });
-    expect(await expirePreviousCompany(new Date(Date.now() + 89 * 86_400_000))).toBe(false);
-    expect(await expirePreviousCompany(new Date(Date.now() + 91 * 86_400_000))).toBe(true);
-    expect(await db.select().from(setting).where(eq(setting.key, PREVIOUS_COMPANY_KEY))).toEqual([]);
-    expect((await audits("settings.parents.save")).at(-1)!.after).toEqual({ previousCompany: "deleted", reason: "expired" });
+    expect(await audits("parent.access.cleared")).toEqual([]);
   });
 });

@@ -15,13 +15,12 @@ import { refreshRoster } from "@/lib/roster/refresh";
 import { askRosterWrite, WRITE_COPY } from "@/lib/roster/writes";
 import { saveShape, ROSTER_LOCK } from "@/lib/roster/shape";
 import { clearRosterOfOtherCompany } from "@/lib/roster/source";
-import { reconcileAccess } from "@/lib/parents/reconcile";
 import * as inStep from "@/lib/families/in-step";
 import { customerOfFamily, customerOfStudent, familyLinkedTo, studentLinkedTo } from "@/lib/families/links";
-import { resetDb } from "../helpers/db";
+import { resetDb, seedGuardian, seedParent } from "../helpers/db";
 import { FZN_SHAPE, startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
-import { asOp, connectRoster, REALM, staffWith, WORKER } from "../helpers/roster-writes";
+import { asOp, connectRoster, REALM, seedAnaRivera, staffWith, WORKER } from "../helpers/roster-writes";
 import { seedEvent, seedSignup } from "../helpers/volunteer";
 import { NO_CHANGES, appRecordRows, appRecordsByCustomer, recordIds, whatAFreshRunWouldChange } from "../helpers/app-records";
 
@@ -49,6 +48,7 @@ const keptEvery = (before: Record<string, string>, now: Record<string, string>) 
 describe("after a roster read", () => {
   it("each family and student of the cache has one record and one link, each sign-in is in its family, and its own record is linked", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     const ana = await anasLink();
     expect(ana).toMatchObject({ familyQboId: "10", sourceQboId: "11", status: "invited" });
@@ -74,6 +74,7 @@ describe("after a roster read", () => {
 
   it("a second read changes nothing, and its audit row says nothing of them", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     const before = await appRecordRows();
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
@@ -82,27 +83,29 @@ describe("after a roster read", () => {
     expect((await audits("roster.refresh")).at(-1)!.after).not.toHaveProperty("appRecords");
   });
 
-  it("is made whether or not parent sign-ins are on, and the reconcile that opens a sign-in puts it in its family", async () => {
+  it("is made whether or not parent sign-ins are on, and a guardian row added later is put in its family by the next step", async () => {
     await connectRoster(stub);
     expect((await appRecordsByCustomer()).families.map((f) => f.customer)).toEqual(["10", "20", "40"]);
     expect(await db.select().from(guardian)).toEqual([]);
-    await seedParentSettings(SIGNINS_ON);
-    const r = await withTheRosterLock((tx) => reconcileAccess(tx, { cause: "test" }));
-    expect(r.appRecords).toMatchObject({ memberships: { linked: 1, pointed: 1 } });
-    const ana = await anasLink();
+    // Nothing makes a sign-in from QuickBooks: Ana is written as the portal holds her.
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    const row = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
+    const r = await withTheRosterLock((tx) => inStep.keepAppRecordsInStep(tx));
+    expect(r).toMatchObject({ memberships: { linked: 1, pointed: 1 } });
     const got = await appRecordsByCustomer();
-    expect(got.memberships).toEqual([{ guardianId: ana.id, family: "10" }]);
-    expect(got.links.filter((l) => l.kind === "membership")).toMatchObject([{ customer: "11", guardianId: ana.id }]);
+    expect(got.memberships).toEqual([{ guardianId: row.id, family: "10" }]);
+    expect(got.links.filter((l) => l.kind === "membership")).toMatchObject([{ customer: "11", guardianId: row.id }]);
     expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
   });
 
-  it("a sign-in that closes stays in its family and keeps the link to the record it came from", async () => {
+  it("a guardian whose record goes inactive in QuickBooks keeps their open row, in its family, and the link to the record it came from", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     Object.assign(inStub("11"), { Active: false, SyncToken: "1" });
     expect(await refreshRoster(WORKER)).toMatchObject({ ok: true });
     const ana = await anasLink();
-    expect(ana).toMatchObject({ status: "disabled", disabledReason: "inactive" });
+    expect(ana).toMatchObject({ status: "invited", disabledReason: null });
     const got = await appRecordsByCustomer();
     expect(got.memberships).toEqual([{ guardianId: ana.id, family: "10" }]);
     expect(got.links.filter((l) => l.kind === "membership")).toMatchObject([{ customer: "11", guardianId: ana.id }]);
@@ -111,6 +114,7 @@ describe("after a roster read", () => {
 
   it("keeps the records, inactive and named from what the portal last knew, of customers the cache no longer returns", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     const ids = await recordIds();
     // Leo has a place on a shift; then his family's customers leave the roster QuickBooks sends.
@@ -136,6 +140,7 @@ describe("after a roster read", () => {
 
   it("a failure in bringing the records into step is the roster read's own code, and leaves everything as it was", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     const before = await appRecordRows();
     vi.spyOn(inStep, "keepAppRecordsInStep").mockRejectedValueOnce(new inStep.AppRecordsFailed("The portal's own family records couldn't be brought up to date."));
@@ -191,6 +196,7 @@ describe("a staff roster write keeps them in step, in its own transaction, and s
 
   it("a new membership shape is followed in the transaction that saves it, and keeps every record when it is changed back", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     const before = await recordIds();
     // The family and student types swapped, as an Admin might by mistake, and then swapped back.
@@ -218,6 +224,7 @@ describe("another company", () => {
   // never read over this one's: the seasons keep their records against these families.
   it("a roster read of a different company is refused, and every record and link stays as it was", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     const before = await appRecordRows();
     const OTHER = "9130000000000002";
@@ -231,6 +238,7 @@ describe("another company", () => {
 
   it("connecting a different company leaves the new tables empty and every sign-in in no family", async () => {
     await seedParentSettings(SIGNINS_ON);
+    await seedAnaRivera();
     await connectRoster(stub);
     expect(await clearRosterOfOtherCompany("9130000000000002", { actor: WORKER.actor, ip: null })).toBe(true);
     expect(await db.select().from(family)).toEqual([]);

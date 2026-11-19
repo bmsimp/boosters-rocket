@@ -6,8 +6,6 @@ import { connectionView } from "@/lib/quickbooks/connection";
 import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
-import { sendReviewNotice } from "@/lib/parents/review-notice";
-import { expirePreviousCompany } from "@/lib/parents/company-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "./marks";
@@ -45,19 +43,6 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
     if (welcomes.sent + welcomes.failed > 0) ran.push({ job: "parents.welcome", ok: welcomes.failed === 0 });
   } catch {
     ran.push({ job: "parents.welcome", ok: false });
-  }
-  // The review notice is guarded the same way: it needs mail and the roster cache, not a live QuickBooks connection.
-  try {
-    const notice = await sendReviewNotice(now);
-    if (notice.sent > 0) ran.push({ job: "parents.review_notice", ok: true });
-  } catch {
-    ran.push({ job: "parents.review_notice", ok: false });
-  }
-  // The previous company's snapshot goes 90 days after a company change; guarded like the steps above.
-  try {
-    if (await expirePreviousCompany(now)) ran.push({ job: "parents.snapshot_expiry", ok: true });
-  } catch {
-    ran.push({ job: "parents.snapshot_expiry", ok: false });
   }
   // The daily clean-up needs neither mail nor QuickBooks. It is in the job history every day, and in this wake's answer
   // only when it removed something or failed, so a quiet day stays quiet in the worker's log. What has expired is

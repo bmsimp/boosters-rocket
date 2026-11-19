@@ -1,6 +1,5 @@
 import type { MembershipShape } from "./shape";
 import type { Cust, Roster } from "./model";
-import type { AccessFlagRule } from "@/lib/parents/access-rules";
 import type { AppFamilyId } from "@/lib/families/ids";
 
 /**
@@ -8,7 +7,7 @@ import type { AppFamilyId } from "@/lib/families/ids";
  * record's customer through its family link in the roster's company (`customerQboId`; null when it has none).
  */
 export type SignIn = { guardianId: string; familyId: AppFamilyId | null; customerQboId: string | null; name: string; email: string; status: "invited" | "active" | "disabled" };
-export type AttentionRule = "family_no_parent" | "family_no_student" | "not_under_family" | "family_is_sub" | "no_email" | "same_email" | "signin_unknown" | "inactive_with_signin" | AccessFlagRule;
+export type AttentionRule = "family_no_parent" | "family_no_student" | "not_under_family" | "family_is_sub" | "no_email" | "same_email" | "signin_unknown" | "inactive_with_signin";
 export type AttentionItem = { rule: AttentionRule; qboId: string | null; name: string; detail: string };
 
 const item = (rule: AttentionRule, c: Cust, detail: string): AttentionItem => ({ rule, qboId: c.qboId, name: c.displayName, detail });

@@ -1,4 +1,4 @@
-// When a guardian can no longer sign for a family: staff blocked the person, or the reconcile closed their link to the
+// When a guardian can no longer sign for a family: staff blocked the person, or their membership was closed (closeMembership()) for the
 // family. A document already made for them keeps them as a Documenso recipient with a working signing token (the
 // portal handed it to their page), and readAndStore() would count their signature or decline for the family. So the
 // family's unfinished forms that still wait for that guardian's signature are reset to not opened, in the caller's

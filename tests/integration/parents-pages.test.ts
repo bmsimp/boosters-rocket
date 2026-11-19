@@ -20,10 +20,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { prerender } from "react-dom/static";
 import { db } from "@/lib/db/client";
 import { eq } from "drizzle-orm";
-import { auditLog, guardian, heldAddress, jobRun, parent, role, roleAssignment, roleRule } from "@/lib/db/schema";
+import { auditLog, guardian, jobRun, parent, role, roleAssignment, roleRule } from "@/lib/db/schema";
 import { recordNameWords } from "@/lib/families/words";
 import { AccessDenied } from "@/lib/guards";
-import { runReconcile } from "../helpers/reconcile";
 import { loadRosterPage } from "@/lib/roster/queries";
 import { ROSTER_JOB, setRosterSource } from "@/lib/roster/source";
 import ParentsPage from "@/app/staff/(app)/parents/page";
@@ -31,11 +30,11 @@ import PersonPage from "@/app/staff/(app)/parents/[id]/page";
 import RosterEntryPage from "@/app/staff/(app)/roster/[id]/page";
 import StaffHome from "@/app/staff/(app)/page";
 import ChooseFamily from "@/app/choose-family/page";
-import { decideHoldAction, reverseHoldAction, blockAction, unblockAction, resendWelcomeAction } from "@/app/staff/(app)/parents/actions";
-import { recordOfCustomer } from "../helpers/app-records";
-import { resetDb, seedGuardian, seedStaff } from "../helpers/db";
+import { blockAction, unblockAction, resendWelcomeAction } from "@/app/staff/(app)/parents/actions";
+import { recordOfCustomer, syncAppRecords } from "../helpers/app-records";
+import { resetDb, seedGuardian, seedParent, seedStaff } from "../helpers/db";
 import { seedCache, seedShape, seedParentSettings, SIGNINS_ON, fam, par } from "../helpers/roster-cache";
-import { rowNamed } from "../helpers/table";
+import { rowNamed, tableRows } from "../helpers/table";
 
 const audits = async (action: string) => (await db.select().from(auditLog)).filter((r) => r.action === action);
 const thrown = async (p: Promise<unknown>) => (await p.catch((e: { url?: string; notFound?: boolean }) => e)) as { url?: string; notFound?: boolean };
@@ -50,6 +49,10 @@ const familyPage = async (customer: string) => renderToStaticMarkup(await Roster
 // Its text-node separators (<!-- -->) are dropped, as renderToStaticMarkup would not write them.
 const staffHome = async () => (await new Response((await prerender(await StaffHome())).prelude).text()).replaceAll("<!-- -->", "");
 const BROWSER = "That didn't go through. Reload the page and try again.";
+/** The words an old row closed by the retired held-address review carries. */
+const HELD_WORDS = "Can't sign in: the address was under more than one family, and held for staff to review";
+/** The roster flags the sign-in rules from QuickBooks made, retired with them. */
+const RETIRED_FLAGS = ["bad_email", "many_addresses", "name_differs", "held_address", "family_no_signin", "same_address_in_family"];
 
 describe("the staff pages for parents", () => {
   let registrar: Awaited<ReturnType<typeof seedStaff>>, reader: Awaited<ReturnType<typeof seedStaff>>;
@@ -59,7 +62,14 @@ describe("the staff pages for parents", () => {
     await resetDb(); await seedShape(); await seedParentSettings(SIGNINS_ON); await seedCache(ALL);
     await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
     await db.insert(jobRun).values({ job: ROSTER_JOB, startedBy: "worker", finishedAt: new Date(), outcome: "ok" });
-    await runReconcile({ cause: "test" });
+    // The people as the portal holds them: Ana, invited to the Rivera family; Sam, whose two rows the retired
+    // held-address review closed, and which stay closed with their words.
+    const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+    await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: "invited" });
+    const sam = await seedParent({ name: "Shared Sam", email: "sam@example.com" });
+    await seedGuardian({ parentId: sam.id, familyQboId: "10", sourceQboId: "13", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
+    await seedGuardian({ parentId: sam.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "held", statusBeforeDisable: "invited" });
+    await syncAppRecords();
     registrar = await seedStaff({ email: "reg@club.org", name: "Reg Istrar" });
     reader = await seedStaff({ email: "reader@club.org", name: "Rae Der" });
     const [parents] = await db.insert(role).values({ key: "parents", name: "Parents" }).returning();
@@ -70,204 +80,150 @@ describe("the staff pages for parents", () => {
     await db.insert(roleAssignment).values({ roleId: roster!.id, staffUserId: reader.id });
     as(registrar);
   });
+  const anaRow = async () => (await db.select().from(parent).where(eq(parent.email, "ana@example.com")))[0]!;
 
   it("refuses the Parents pages and every action without Parents.ReadWrite", async () => {
     as(reader);
-    const [ana] = await db.select().from(parent);
+    const ana = await anaRow();
     expect((await thrown(ParentsPage({ searchParams: Promise.resolve({}) }))).url).toBe("/refused");
-    expect((await thrown(PersonPage({ params: Promise.resolve({ id: ana!.id }) }))).url).toBe("/refused");
-    await expect(decideHoldAction("sam@example.com", "same_person", ["10", "20"], "note")).rejects.toBeInstanceOf(AccessDenied);
-    await expect(reverseHoldAction("sam@example.com", "note")).rejects.toBeInstanceOf(AccessDenied);
-    await expect(blockAction(ana!.id, "reason")).rejects.toBeInstanceOf(AccessDenied);
-    await expect(unblockAction(ana!.id)).rejects.toBeInstanceOf(AccessDenied);
-    await expect(resendWelcomeAction(ana!.id)).rejects.toBeInstanceOf(AccessDenied);
+    expect((await thrown(PersonPage({ params: Promise.resolve({ id: ana.id }) }))).url).toBe("/refused");
+    await expect(blockAction(ana.id, "reason")).rejects.toBeInstanceOf(AccessDenied);
+    await expect(unblockAction(ana.id)).rejects.toBeInstanceOf(AccessDenied);
+    await expect(resendWelcomeAction(ana.id)).rejects.toBeInstanceOf(AccessDenied);
     expect(await audits("parent.read")).toEqual([]);
   });
 
-  it("lists what is waiting with both families and the names on the records, as text", async () => {
+  it("lists people, and nothing to review: the held-address review is gone, and an old held row reads in words", async () => {
     const html = await parentsPage();
-    expect(html).toContain("To review (1)");
-    expect(html).toContain("sam@example.com");
-    expect(html).toContain("Rivera Family");
+    for (const gone of ["To review", "Decided", "Same person", "Not the same person", "Reverse this decision"]) expect(html).not.toContain(gone);
+    expect(rowNamed(html, "Shared Sam")).toEqual(["Shared Sam", "sam@example.com", "Never", "Not sent yet",
+      `Rivera Family: ${HELD_WORDS}Chen <b>Family</b>: ${HELD_WORDS}`]);
     expect(html).toContain("Chen &lt;b&gt;Family&lt;/b&gt;");
     expect(html).not.toContain("<b>Family</b>");
-    expect(html).toContain("Same person");
-    expect(html).toContain("Not the same person");
   });
 
-  it("lists people and finds them, and says where names and addresses are changed", async () => {
+  it("lists people and finds them, and says who can sign in is the portal's own", async () => {
     const html = await parentsPage();
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Can sign in (hasn&#x27;t yet)");
-    expect(html).toContain("Email addresses are changed in QuickBooks, not here");
+    expect(html).toContain("a change made in QuickBooks no longer gives anyone a sign-in or ends one");
+    expect(html).not.toContain("Email addresses are changed in QuickBooks");
     expect(rowNamed(html, "Ana Rivera")).toEqual(["Ana Rivera", "ana@example.com", "Never", "Not sent yet", "Rivera Family: Can sign in (hasn't yet)"]);
     expect(await parentsPage("zzz")).toContain("Nobody matches");
-    const [ana] = await db.select().from(parent);
-    await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") });
-    await db.insert(auditLog).values({ door: "parent", actorId: ana!.id, actorLabel: ana!.email, action: "signin", targetType: "parent", targetId: ana!.id, at: new Date("2026-11-05T12:00:00Z") });
+    const ana = await anaRow();
+    await db.update(parent).set({ welcomedAt: new Date("2026-11-01T12:00:00Z") }).where(eq(parent.id, ana.id));
+    await db.insert(auditLog).values({ door: "parent", actorId: ana.id, actorLabel: ana.email, action: "signin", targetType: "parent", targetId: ana.id, at: new Date("2026-11-05T12:00:00Z") });
     const dated = await parentsPage();
     expect(dated).toContain('<time dateTime="2026-11-05T12:00:00.000Z" title="2026-11-05T12:00:00.000Z">');
     expect(dated).toContain('Sent <time dateTime="2026-11-01T12:00:00.000Z" title="2026-11-01T12:00:00.000Z">');
     expect(rowNamed(dated, "Ana Rivera")!.slice(2, 4)).toEqual([expect.stringMatching(/^2026-11-05/), expect.stringMatching(/^Sent 2026-11-01/)]);
   });
 
-  it("deciding and reversing go through the actions, and the page follows", async () => {
-    expect(await decideHoldAction("sam@example.com", "same_person", ["10", "20"], "Sam confirmed by phone.")).toEqual({ ok: true, message: "Saved. They can sign in to each of those families now." });
-    expect(await parentsPage()).toContain("Nothing is waiting");
-    expect((await audits("parent.hold.decided"))[0]).toMatchObject({ actorId: registrar.id, permission: "Parents.ReadWrite", ip: "203.0.113.40" });
-    expect(await decideHoldAction("sam@example.com", "same_person", ["10", "20"], "Again.")).toEqual({ ok: false, errors: ["That address isn't held any more. Reload the page."] });
-    expect(await decideHoldAction("sam@example.com", "same_person", ["10", "20"], "  ")).toEqual({ ok: false, errors: ["Add a short note saying how you know."] });
-    expect(await reverseHoldAction("sam@example.com", "Wrong after all.")).toEqual({ ok: true, message: "Reversed. The address is held again." });
-    expect(await parentsPage()).toContain("To review (1)");
-  });
-
-  it("refuses a decision on a different set of families than the address is under now", async () => {
-    expect(await decideHoldAction("sam@example.com", "same_person", ["10"], "Sam confirmed by phone.")).toEqual({ ok: false, errors: ["That address has changed since this page loaded. Reload the page and look again."] });
-    expect(await decideHoldAction("sam@example.com", "not_same", ["10", "20", "30"], "Sam confirmed by phone.")).toEqual({ ok: false, errors: ["That address has changed since this page loaded. Reload the page and look again."] });
-    expect(await audits("parent.hold.decided")).toEqual([]);
-  });
-
   it("refuses arguments no page sends, without touching the database", async () => {
-    const decide = decideHoldAction as (...a: unknown[]) => Promise<unknown>;
     const refused = { ok: false, errors: [BROWSER] };
-    for (const args of [
-      ["sam@example.com", "same_person", "10,20", "Sam confirmed by phone."],
-      ["sam@example.com", "same_person", { 0: "10", 1: "20", length: 2 }, "Sam confirmed by phone."],
-      ["sam@example.com", "same_person", ["10", 20], "Sam confirmed by phone."],
-      ["sam@example.com", "same_person", ["10", "x".repeat(65)], "Sam confirmed by phone."],
-      ["sam@example.com", "same_person", Array.from({ length: 51 }, (_, i) => String(i)), "Sam confirmed by phone."],
-      [["sam@example.com"], "same_person", ["10", "20"], "Sam confirmed by phone."],
-      ["sam@example.com", "maybe", ["10", "20"], "Sam confirmed by phone."],
-      ["sam@example.com", "same_person", ["10", "20"], { note: "x" }],
-      ["sam@example.com", "same_person", ["10", "20"], "x".repeat(2001)],
-    ]) expect(await decide(...args)).toEqual(refused);
-    const [ana] = await db.select().from(parent);
+    const ana = await anaRow();
     const loose = (f: unknown) => f as (...a: unknown[]) => Promise<unknown>;
-    expect(await loose(reverseHoldAction)(42, "note")).toEqual(refused);
-    expect(await loose(reverseHoldAction)("sam@example.com", "x".repeat(2001))).toEqual(refused);
-    expect(await loose(blockAction)({ id: ana!.id }, "reason")).toEqual(refused);
+    expect(await loose(blockAction)({ id: ana.id }, "reason")).toEqual(refused);
     expect(await loose(blockAction)("x".repeat(65), "reason")).toEqual(refused);
     expect(await loose(blockAction)("not-an-id", "reason")).toEqual(refused);
-    expect(await loose(blockAction)(ana!.id, "x".repeat(2001))).toEqual(refused);
-    expect(await loose(unblockAction)([ana!.id])).toEqual(refused);
+    expect(await loose(blockAction)(ana.id, "x".repeat(2001))).toEqual(refused);
+    expect(await loose(unblockAction)([ana.id])).toEqual(refused);
     expect(await loose(resendWelcomeAction)(null)).toEqual(refused);
-    expect(await db.select().from(heldAddress)).toMatchObject([{ email: "sam@example.com", approvedFamilyQboIds: [], rejectedFamilyQboIds: [] }]);
-    expect((await db.select().from(parent))[0]).toMatchObject({ blocked: false });
-    // The setup's reconcile wrote the create, hold and grant rows; nothing else may have been written.
-    const fromSetup = new Set(["parent.create", "parent.hold.opened", "parent.access.granted"]);
-    expect((await db.select().from(auditLog)).filter((r) => r.action.startsWith("parent.") && !fromSetup.has(r.action))).toEqual([]);
+    expect((await db.select().from(parent)).every((p) => !p.blocked)).toBe(true);
+    expect((await db.select().from(auditLog)).filter((r) => r.action.startsWith("parent."))).toEqual([]);
     expect(revalidated.count).toBe(0);
   });
 
   it("a person's page shows their families and is recorded as a read", async () => {
-    const [ana] = await db.select().from(parent);
-    const html = await personPage(ana!.id);
+    const ana = await anaRow();
+    const html = await personPage(ana.id);
     expect(html).toContain("Ana Rivera");
     expect(html).toContain("Rivera Family");
     // The family's page by its app record: the membership's own family.
     expect(html).toContain(`href="/staff/roster/${await recordOfCustomer("10", "family")}"`);
     expect(html).toContain("Resend welcome email");
     expect(html).toContain("Block");
-    expect(await audits("parent.read")).toEqual([expect.objectContaining({ actorId: registrar.id, permission: "Parents.ReadWrite", targetType: "parent", targetId: ana!.id })]);
+    expect(html).not.toContain("followed by Refresh now on the roster");
+    expect(await audits("parent.read")).toEqual([expect.objectContaining({ actorId: registrar.id, permission: "Parents.ReadWrite", targetType: "parent", targetId: ana.id })]);
     expect((await thrown(PersonPage({ params: Promise.resolve({ id: "not-an-id" }) }))).notFound).toBe(true);
     expect((await thrown(PersonPage({ params: Promise.resolve({ id: "00000000-0000-4000-8000-00000000dead" }) }))).notFound).toBe(true);
     expect(await audits("parent.read")).toHaveLength(1); // an unknown ID records no read
   });
 
   it("names a link from a previous QuickBooks company without looking up or linking its old family ID", async () => {
-    const [ana] = await db.select().from(parent);
+    const ana = await anaRow();
     // "20" is that company's ID; in the connected company it names Chen <b>Family</b>, which is not where this link came from.
-    await seedGuardian({ parentId: ana!.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
-    const html = await personPage(ana!.id);
+    await seedGuardian({ parentId: ana.id, familyQboId: "20", sourceQboId: "21", status: "disabled", disabledReason: "company_changed", statusBeforeDisable: "active" });
+    const html = await personPage(ana.id);
     expect(html).toContain("A family in the previous QuickBooks company");
     expect(html).not.toContain('href="/staff/roster/20"');
     expect(html).not.toContain(`href="/staff/roster/${await recordOfCustomer("20", "family")}"`);
     expect(html).not.toContain("Chen");
-    const people = (await parentsPage("ana")).split('id="people-h"')[1]!; // To review above it names Chen as Sam's other family
+    const people = (await parentsPage("ana")).split('id="people-h"')[1]!;
     expect(people).toContain("A family in the previous QuickBooks company: Can&#x27;t sign in: a different QuickBooks company was connected");
     expect(people).not.toContain("Chen");
   });
 
   it("blocks with a reason and unblocks, through the actions", async () => {
-    const [ana] = await db.select().from(parent);
-    expect(await blockAction(ana!.id, "  ")).toEqual({ ok: false, errors: ["Say why, in a few words. Only staff see it."] });
-    expect(await blockAction(ana!.id, "Custody order on file.")).toEqual({ ok: true, message: "Blocked. They are signed out and can't get a code." });
-    const html = await personPage(ana!.id);
+    const ana = await anaRow();
+    expect(await blockAction(ana.id, "  ")).toEqual({ ok: false, errors: ["Say why, in a few words. Only staff see it."] });
+    expect(await blockAction(ana.id, "Custody order on file.")).toEqual({ ok: true, message: "Blocked. They are signed out and can't get a code." });
+    const html = await personPage(ana.id);
     expect(html).toContain("Blocked");
     expect(html).toContain("Custody order on file.");
     expect(html).toContain("Unblock");
-    expect(await unblockAction(ana!.id)).toEqual({ ok: true, message: "Unblocked." });
+    expect(await unblockAction(ana.id)).toEqual({ ok: true, message: "Unblocked." });
     const refreshed = revalidated.count;
     // Not blocked: nothing changes, and the page is not rendered again, so no further read is recorded.
-    expect(await unblockAction(ana!.id)).toEqual({ ok: true, message: "This person isn't blocked." });
+    expect(await unblockAction(ana.id)).toEqual({ ok: true, message: "This person isn't blocked." });
     expect(revalidated.count).toBe(refreshed);
     expect(await audits("parent.unblock")).toHaveLength(1);
     expect(await blockAction("00000000-0000-4000-8000-00000000dead", "Custody order on file.")).toEqual({ ok: false, errors: ["That person isn't in the portal any more."] });
   });
 
-  it("says, before parent sign-ins are on, that held addresses come up for review once they are", async () => {
-    await resetDb(); await seedShape(); await seedParentSettings({ signin: false, everEnabled: false }); await seedCache(ALL);
-    await db.transaction((tx) => setRosterSource(tx, "9130000000000001"));
-    await runReconcile({ cause: "test" });
-    registrar = await seedStaff({ email: "reg@club.org", name: "Reg Istrar" });
-    const [parents] = await db.insert(role).values({ key: "parents", name: "Parents" }).returning();
-    await db.insert(roleRule).values({ roleId: parents!.id, kind: "include", pattern: "Parents.*" });
-    await db.insert(roleAssignment).values({ roleId: parents!.id, staffUserId: registrar.id });
-    as(registrar);
-    const html = await parentsPage();
-    expect(html).toContain("To review (0)");
-    expect(html).toContain("Nothing to review yet. Once parent sign-ins are on, an address that is under more than one family in QuickBooks is held, and comes up here for you to say whether it is one person.");
-    expect(html).not.toContain("Nothing is waiting");
-    // Once they are on, the same address is held and listed.
-    await seedParentSettings(SIGNINS_ON);
-    await runReconcile({ cause: "test" });
-    expect(await parentsPage()).toContain("To review (1)");
-  });
-
   it("a resend is refused while parent sign-ins are switched off", async () => {
-    const [ana] = await db.select().from(parent);
+    const ana = await anaRow();
     await seedParentSettings({ signin: false });
-    expect(await resendWelcomeAction(ana!.id)).toEqual({ ok: false, errors: ["This person can't sign in to any family right now, so no email was sent."] });
-    const html = await personPage(ana!.id);
+    expect(await resendWelcomeAction(ana.id)).toEqual({ ok: false, errors: ["This person can't sign in to any family right now, so no email was sent."] });
+    const html = await personPage(ana.id);
     expect(html).toContain("Parent sign-ins are switched off, so no welcome can be sent.");
     expect(html).not.toContain("Resend welcome email");
   });
 
-  it("a family's roster page shows each sign-in's standing; only Parents.ReadWrite sees the other family and gets links", async () => {
-    const [ana] = await db.select().from(parent);
+  it("a family's roster page lists the family's guardian rows, open and closed, in words; only Parents.ReadWrite gets links", async () => {
+    const ana = await anaRow();
     const detailed = await familyPage("10");
-    expect(detailed).toContain("Held: this address is also under Chen &lt;b&gt;Family&lt;/b&gt;");
-    expect(detailed).toContain(`href="/staff/parents/${ana!.id}"`);
+    const box = detailed.slice(detailed.indexOf('id="entry-signins-h"'), detailed.indexOf("</section>", detailed.indexOf('id="entry-signins-h"')));
+    expect(box).toContain("Can sign in (hasn&#x27;t yet)");
+    expect(box).toContain(HELD_WORDS.replaceAll("'", "&#x27;"));
+    expect(box).not.toContain("Chen");
+    expect(box).toContain(`href="/staff/parents/${ana.id}"`);
     as(reader);
     const plain = await familyPage("10");
     expect(plain).toContain("Can sign in (hasn&#x27;t yet)");
-    expect(plain).toContain("Held: this address is also under another family");
     expect(plain).not.toContain("Chen");
     expect(plain).not.toContain("/staff/parents/");
   });
 
-  // Server rendering never reports a repeated key; the key's parts (the source ID) are checked in parents-directory.test.ts.
-  it("lists two same-named people with no address in one family as two rows", async () => {
-    await seedCache([...ALL, par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null)]);
-    await runReconcile({ cause: "test" });
+  it("lists no sign-in worked out from QuickBooks: a parent record with no address, or with one, is no row of its own", async () => {
+    await seedCache([...ALL, par("14", "Pat Rivera", "10", null), par("15", "Pat Rivera", "10", null), par("16", "Quinn Rivera", "10", "quinn@example.com")]);
     const html = await familyPage("10");
-    const rows = [...html.matchAll(/<tr role="row">([\s\S]*?)<\/tr>/g)].map((m) => m[1]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
-    expect(rows.filter((r) => r === "Pat Rivera Email No email address Sign-in Can&#x27;t sign in: no email address in QuickBooks")).toHaveLength(2);
+    const box = html.slice(html.indexOf('id="entry-signins-h"'), html.indexOf("</section>", html.indexOf('id="entry-signins-h"')));
+    for (const gone of ["Pat Rivera", "Quinn Rivera", "No email address", "no email address in QuickBooks"]) expect(box).not.toContain(gone);
+    expect(tableRows(box).map((r) => r[0])).toEqual(["Ana Rivera", "Shared Sam"]);
   });
 
-  it("the staff home tells people who can act that something is waiting, and nobody else", async () => {
-    expect(await staffHome()).toContain("1 address to review");
+  it("the staff home says nothing of addresses to review, to anyone", async () => {
+    expect(await staffHome()).not.toContain("to review");
     as(reader);
     const plain = await staffHome();
     expect(plain).toContain("Hi, Rae");
     expect(plain).not.toContain("to review");
   });
 
-  it("Needs attention on the roster lists the new kinds without naming a held address's families", async () => {
+  it("Needs attention on the roster no longer lists the sign-in rules' flags from QuickBooks", async () => {
     const page = await loadRosterPage();
-    expect(page.attention.map((a) => a.rule)).toEqual(expect.arrayContaining(["held_address", "family_no_signin"]));
-    const held = page.attention.find((a) => a.rule === "held_address")!;
-    expect(`${held.name}${held.detail}`).not.toMatch(/Rivera|Chen|sam@example\.com/);
+    expect(page.attention.filter((a) => (RETIRED_FLAGS as string[]).includes(a.rule))).toEqual([]);
   });
 
   it("the family chooser names each family from its app record, says so for one it doesn't know, and sends no QuickBooks id", async () => {

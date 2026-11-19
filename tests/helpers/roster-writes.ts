@@ -10,11 +10,25 @@ import { getRosterSource } from "@/lib/roster/source";
 import { customerOfFamily } from "@/lib/families/links";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { familyRecord, studentRecord } from "./volunteer";
-import { seedStaff } from "./db";
+import { seedGuardian, seedParent, seedStaff } from "./db";
+import { syncAppRecords } from "./app-records";
 import { fznCompany, FZN_SHAPE, seedConnected, type QboStub } from "./qbo-stub";
 
 export const WORKER = { startedBy: "worker", actor: { door: "system" as const, id: null, label: "worker" }, ip: null };
 export const REALM = "9130000000000001";
+
+/**
+ * Ana Rivera as the portal holds her, beside fznCompany()'s parent record of hers (customer 11, under the Rivera
+ * Family, 10): the person, her sign-in account and an invited guardian row in that family from that record, written
+ * directly (since stage 3 of the app-owned families spec nothing makes a sign-in from QuickBooks). With a roster read
+ * before or after, her row is in the Rivera family's record and linked to customer 11.
+ */
+export async function seedAnaRivera(o: { status?: "invited" | "active" } = {}) {
+  const ana = await seedParent({ name: "Ana Rivera", email: "ana@example.com" });
+  const row = await seedGuardian({ parentId: ana.id, familyQboId: "10", sourceQboId: "11", status: o.status ?? "invited" });
+  await syncAppRecords();
+  return { ana, row };
+}
 
 /**
  * The stub holds an FZN-shaped company (fznCompany(), unless `company` is given), QuickBooks is connected to it, the

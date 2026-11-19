@@ -46,7 +46,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <dt>Last signed in</dt><dd>{p.lastSigninAt ? <LocalTime iso={p.lastSigninAt} /> : "Never"}</dd>
           <dt>Welcome email</dt><dd>{p.welcomedAt ? <>Sent <LocalTime iso={p.welcomedAt} /></> : p.welcomeOwed ? "Waiting to be sent" : "Not sent"}</dd>
         </dl>
-        <p className="hint">The name and email address come from QuickBooks. Staff who may change the roster can rename a parent from their family&apos;s page under Roster; an email address is changed in QuickBooks, followed by Refresh now on the roster.</p>
+        <p className="hint">The name and sign-in email are the portal&apos;s own. A parent changes their own sign-in email from the Family page; a change made in QuickBooks doesn&apos;t change them.</p>
       </section>
 
       <section className="box" aria-labelledby="pw-h"><h2 id="pw-h">Welcome email</h2>
@@ -65,7 +65,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           </>
         ) : (
           <>
-            <p>Blocking signs this person out of every family at once and stops sign-in codes. They aren&apos;t told. Use it for a custody matter or misuse; a family that has left is handled by making it inactive in QuickBooks.</p>
+            <p>Blocking signs this person out of every family at once and stops sign-in codes. They aren&apos;t told. Use it for a custody matter or misuse.</p>
             <NoteAction label="Block" field="Why? (staff only)" pendingLabel="Blocking…" act={blockAction.bind(null, p.parentId)} />
           </>
         )}
