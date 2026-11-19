@@ -388,6 +388,7 @@ describe("requirements", () => {
 
     // Someone on the list who has since left the roster stays on it when the list is saved again.
     await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "22"));
+    await syncAppRecords(); // as the roster read that saw it does: the list is checked against the app's active students
     expect(await setCoverageAction(fitting, TAG, "chosen", [leo])).toMatchObject({ ok: true });
     expect((await covered()).map((c) => c.subjectQboId).sort()).toEqual(["12", "22"]);
 

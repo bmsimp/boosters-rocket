@@ -5,6 +5,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, guardian, heldAddress, parent, qboCustomer, staffUser, type DisabledReason, type GuardianStatus } from "@/lib/db/schema";
 import { familyLabel } from "@/app/components/family-label";
 import type { AppFamilyId } from "@/lib/families/ids";
+import { customerOfFamily } from "@/lib/families/links";
 import type { HeldAddress } from "./access-rules";
 import { loadDecision } from "./reconcile";
 
@@ -91,22 +92,24 @@ export async function getPerson(parentId: string): Promise<PersonDetail | null> 
 }
 
 /**
- * The **Portal sign-ins** box on a family's roster page: the people linked to the family, and (once sign-ins are on)
- * the QuickBooks candidates who have no link because the rules refused them. `detailed` is for staff with
- * `Parents.ReadWrite`: only they are told which other family a held address is under (spec §4).
+ * The **Portal sign-ins** box on a family's roster page: the people whose membership is in the family's own record
+ * (`guardian.family_id`), and (once sign-ins are on) the QuickBooks candidates who have no link because the rules
+ * refused them, which the rules name by the family's customer (its family link; none for a family that has none).
+ * `detailed` is for staff with `Parents.ReadWrite`: only they are told which other family a held address is under (spec §4).
  */
-export async function familySignins(familyQboId: string, o: { detailed: boolean }): Promise<FamilySignin[]> {
-  const [links, loaded] = await Promise.all([
-    // A link from a previous company only shares this family's ID: it is not one of this family's sign-ins.
+export async function familySignins(familyId: AppFamilyId, o: { detailed: boolean }): Promise<FamilySignin[]> {
+  const [links, loaded, familyQboId] = await Promise.all([
+    // A link from a previous company is in no family's record (its family_id is null): it is not one of this family's sign-ins.
     db.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
-      .where(and(eq(guardian.familyQboId, familyQboId), sql`${guardian.disabledReason} is distinct from 'company_changed'`)),
+      .where(and(eq(guardian.familyId, familyId), sql`${guardian.disabledReason} is distinct from 'company_changed'`)),
     loadDecision(),
+    customerOfFamily(familyId),
   ]);
   const others = (email: string | null) => (!o.detailed || !email ? null
     : loaded?.decision.held.find((h) => h.email === email)?.families.filter((f) => f.qboId !== familyQboId).map((f) => f.name) ?? null);
   const out: FamilySignin[] = links.map(({ g, p }) => ({ parentId: p.id, sourceQboId: g.sourceQboId, name: p.name, email: p.email,
     ...accessWords({ status: g.status, reason: g.disabledReason, blocked: p.blocked, otherFamilies: others(p.email) }) }));
-  if (loaded?.settings.signin) {
+  if (loaded?.settings.signin && familyQboId !== null) {
     // A denial is already shown when a link in this family is owned by its address; one with no address can only be
     // matched by the QuickBooks record it came from.
     const owners = new Set(links.map(({ p }) => p.email));

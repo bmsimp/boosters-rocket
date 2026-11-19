@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { buildRoster, type Cust } from "@/lib/roster/model";
 import { needsAttention, type SignIn } from "@/lib/roster/attention";
+import { asAppFamilyId } from "@/lib/families/ids";
 
 const c = (qboId: string, displayName: string, typeQboId: string | null, parentQboId: string | null = null, extra: Partial<Cust> = {}): Cust =>
   ({ qboId, displayName, active: true, parentQboId, typeQboId, email: null, phone: null, ...extra });
 const layered = { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "2" } as const;
-const signIn = (familyQboId: string, status: SignIn["status"] = "active", email = "p@example.com"): SignIn => ({ guardianId: `g-${familyQboId}-${email}`, familyQboId, name: "P", email, status });
+/** A sign-in whose membership's family record is linked to this customer (`customerQboId`). */
+const signIn = (customerQboId: string, status: SignIn["status"] = "active", email = "p@example.com"): SignIn =>
+  ({ guardianId: `g-${customerQboId}-${email}`, familyId: asAppFamilyId(`family-of-${customerQboId}`), customerQboId, name: "P", email, status });
 const rules = (customers: Cust[], shape: Parameters<typeof buildRoster>[0] = layered, signIns: SignIn[] = []) =>
   needsAttention(buildRoster(shape, customers), shape, signIns).map((a) => `${a.rule}:${a.qboId ?? a.name}`).sort();
 
@@ -57,6 +60,14 @@ describe("Needs attention", () => {
   it("a portal sign-in whose QuickBooks ID isn't a family or a member", () => {
     expect(rules(tidy, layered, [signIn("POC-FAMILY-1"), signIn("11")])).toEqual(["signin_unknown:P", "signin_unknown:P"]);
     expect(rules([c("12", "Leo", "3", null, { email: "l@example.com" })], { kind: "flat", memberTypeIds: ["3"] }, [signIn("12"), signIn("99")])).toEqual(["signin_unknown:P"]);
+  });
+  it("goes by the customer of the sign-in's family record: none at all is unknown, and a family record with no customer is the portal's own", () => {
+    const noRecord: SignIn = { ...signIn("10"), familyId: null, customerQboId: null };
+    const [unknown] = needsAttention(buildRoster(layered, tidy), layered, [noRecord]);
+    expect(unknown).toEqual({ rule: "signin_unknown", qboId: null, name: "P", detail: "This portal sign-in isn't attached to any family the portal keeps." });
+    expect(rules(tidy, layered, [{ ...noRecord, status: "disabled" }])).toEqual([]);
+    // A family the app keeps with no QuickBooks customer (none exists until families are made in the portal) is nothing to tidy in QuickBooks.
+    expect(rules(tidy, layered, [{ ...signIn("10"), customerQboId: null }])).toEqual([]);
   });
   it("an inactive family that still has a sign-in that isn't disabled", () => {
     const company = [c("40", "Old Family", "1", null, { active: false })];

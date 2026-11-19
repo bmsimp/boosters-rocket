@@ -34,8 +34,7 @@ export async function formsToChase(now: Date = new Date()): Promise<{ sealingLat
     formsWaiting(now), evidenceHealth(now), loadMatrix({ formId: null, state: null, search: "" }), clubToday(now),
   ]);
   const horizon = addDays(today, SOON_DAYS);
-  // Without a roster nobody is listed under a form, so nothing is counted as unsigned.
-  const due = matrix?.families ? matrix.allForms.filter((f) => f.dueOn !== null && f.dueOn <= horizon && f.counts.needed > f.counts.signed) : [];
+  const due = matrix ? matrix.allForms.filter((f) => f.dueOn !== null && f.dueOn <= horizon && f.counts.needed > f.counts.signed) : [];
   return {
     sealingLate: waiting.sealingLate, evidenceLate: evidence.late,
     dueSoon: { forms: due.length, unsigned: due.reduce((sum, f) => sum + f.counts.needed - f.counts.signed, 0) },

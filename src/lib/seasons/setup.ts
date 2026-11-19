@@ -342,7 +342,6 @@ export async function setCoverage(requirementId: string, rosterTag: string, cove
     // Under the roster lock, and against the company the page was shown: the list is checked against the roster it is kept with.
     if (!(await lockRosterAs(tx, rosterTag))) return refuse(ROSTER_MOVED);
     const families = covers === "chosen" ? await loadSeasonFamilies() : [];
-    if (families === null) return refuse("The roster can't be shown right now, so a list can't be chosen. Check QuickBooks under Roster.");
     const [r] = await tx.select().from(requirement).where(eq(requirement.id, requirementId)).for("update");
     if (!r) return refuse(GONE);
     const before = await tx.select({ familyId: requirementCover.familyId, studentId: requirementCover.studentId }).from(requirementCover).where(eq(requirementCover.requirementId, r.id));

@@ -35,7 +35,6 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
 
       {overview && (
         <>
-          {!overview.roster && <Notice tone="warning">The roster can&apos;t be shown right now, so nobody is listed under any requirement. Check QuickBooks under Roster.</Notice>}
           <section className="box" aria-labelledby="season-h"><h2 id="season-h">{overview.season.name}</h2>
             <Notice tone="info" live="none">{overview.season.isCurrent ? "The current season." : "Not the current season: parents don't see it."}</Notice>
             {overview.steps.length === 0 && <Notice tone="info" live="none">This season has no steps yet.</Notice>}
@@ -48,7 +47,7 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
                   { key: "title", header: "Requirement", rowHeader: true, cell: (r) => <Link href={`/staff/seasons/progress/${r.id}`}>{r.title}</Link> },
                   { key: "required", header: "Required", cell: (r) => (r.required ? "Required" : "Optional") },
                   { key: "asked", header: "Asked of", cell: (r) => (r.appliesTo === "family" ? "Each family" : "Each student") },
-                  { key: "done", header: "Done", numeric: true, cell: (r) => (overview.roster ? tally(r.counts) : "") },
+                  { key: "done", header: "Done", numeric: true, cell: (r) => tally(r.counts) },
                 ]} />
               )}
             </section>

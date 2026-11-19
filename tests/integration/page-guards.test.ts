@@ -121,10 +121,10 @@ const ROUTE_HANDLERS: Record<string, string> = {
  * A parent page reads through a query that takes ctx.familyQboId and returns that family alone.
  */
 const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string }[] = [
-  { module: "@/lib/roster/queries", names: "all", why: "loadRosterPage() and rosterEntry() load every family in the club" },
+  { module: "@/lib/roster/queries", names: "all", why: "loadRosterPage(), rosterFamilies() and rosterEntry() load every family in the club" },
   { module: "@/lib/parents/directory", names: ["listPeople", "getPerson", "heldReview", "familySignins"], why: "they return other families' names, or a block reason (see the note at the top of the module)" },
   { module: "@/lib/seasons/setup", names: "all", why: "a requirement's chosen list names other families and students" },
-  { module: "@/lib/seasons/subjects", names: "all", why: "loadSubjects() loads every family in the club" },
+  { module: "@/lib/seasons/subjects", names: "all", why: "loadSeasonFamilies() loads every family in the club" },
   { module: "@/lib/seasons/staff-progress", names: "all", why: "it reads every family's ticks and waivers, with the reasons" },
   { module: "@/lib/seasons/everyone", names: "all", why: "the season's reads for every family at once: every chosen list, tick and waiver with its reason" },
   { module: "@/lib/money/balances", names: "all", why: "loadBalances() loads every family's money" },

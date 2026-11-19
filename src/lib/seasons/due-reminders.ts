@@ -104,7 +104,7 @@ async function owedToday(due: { kind: DueKind; days: number; dueOn: string }[]) 
     .orderBy(asc(seasonStep.position), asc(requirement.position), asc(requirement.createdAt));
   if (rows.length === 0) return [];
   const families = await loadSeasonFamilies();
-  if (!families || families.length === 0) return [];
+  if (families.length === 0) return [];
   const covers = await everyCover(rows.filter((x) => x.r.covers === "chosen").map((x) => x.r.id));
   const requirements = rows.map((x) => toRequirement(x.r, covers.get(x.r.id) ?? []));
   const payments = requirements.some((r) => r.kind === "payment");

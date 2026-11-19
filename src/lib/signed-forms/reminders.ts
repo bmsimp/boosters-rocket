@@ -16,7 +16,7 @@ import { getStoredMailConfig } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
 import { calendarDayIn, getClubSettings } from "@/lib/settings/club";
 // The season and the requests both name the app's own families and students (stage 2 of the app-owned families spec):
-// the roster is turned into those records once, by loadSeasonFamilies(), and guardians are a family's by their
+// the families are the app's active ones, read once, by loadSeasonFamilies(), and guardians are a family's by their
 // membership of its record (guardian.family_id).
 import { subjectOfRequest } from "@/lib/forms/requests";
 import { everyCover, everyRecorded } from "@/lib/seasons/everyone";
@@ -59,7 +59,7 @@ async function owedReminders(scope: ReminderScope | null, requirementIds: string
   }
   if (scope?.kind === "form") forms = forms.filter((f) => f.row.id === scope.requirementId);
   const families = await loadSeasonFamilies();
-  if (!families || forms.length === 0) return { owed: [], forms: [] };
+  if (forms.length === 0) return { owed: [], forms: [] };
   const ids = forms.map((f) => f.row.id);
   const [covers, waivers, requests] = await Promise.all([
     everyCover(ids),
