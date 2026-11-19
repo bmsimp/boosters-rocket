@@ -9,6 +9,9 @@ import { resetDb, seedGuardian, seedGuardianInFamily, seedParent, seedParentSess
 import { seedParentSettings, storeShape } from "../helpers/roster-cache";
 import { saveShape } from "@/lib/roster/shape";
 import { studentsRuleInForce } from "@/lib/parents/sessions";
+import { hashLinkToken } from "@/lib/parents/signin-links";
+import { parentDevice, parentSigninToken } from "@/lib/db/schema";
+import { credentialRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 
 const admin = { actor: { door: "staff" as const, id: "00000000-0000-4000-8000-000000000001", label: "admin@club.org" }, ip: "203.0.113.9", permission: "Settings.Parents.ReadWrite" };
 const audits = async (action: string) => (await db.select().from(auditLog).orderBy(auditLog.id)).filter((r) => r.action === action);
@@ -76,6 +79,22 @@ describe("the parent switches", () => {
     await setSignins(false, admin);
     expect(await db.select().from(signinCode)).toHaveLength(1);              // only the used one remains
     expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: false, codesDeleted: 1 });
+  });
+
+  it("switching off deletes every unused set-up and reset link and forgets every device, keeps passwords, and counts them", async () => {
+    await seedWorkingMail(); const { ana } = await seedAna(); await setSignins(true, admin);
+    const ben = await seedParent({ name: "Ben Ortiz", email: "ben@example.com" });
+    await seedPassword(ana.authUserId, "a password long enough to keep");
+    const used = await mintLink(ana.id, "setup");
+    await db.update(parentSigninToken).set({ usedAt: new Date() }).where(eq(parentSigninToken.tokenHash, hashLinkToken("setup", used)));
+    await mintLink(ana.id, "reset");
+    await mintLink(ben.id, "setup");
+    await seedDevice(ben.id);
+    expect(await setSignins(false, admin)).toEqual({ ok: true });
+    expect((await db.select().from(parentSigninToken)).map((r) => r.usedAt !== null)).toEqual([true]);
+    expect(await db.select().from(parentDevice)).toEqual([]);
+    expect(await credentialRows(ana.authUserId)).toHaveLength(1);
+    expect((await audits("settings.parents.save")).at(-1)!.after).toMatchObject({ signin: false, linksDeleted: 2, devicesForgotten: 1 });
   });
 
   it("switching off signs every parent out; the rows stay as they were", async () => {

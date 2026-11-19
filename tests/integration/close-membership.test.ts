@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parentAuthSession } from "@/lib/db/schema";
+import { auditLog, guardian, parentAuthSession, parentDevice } from "@/lib/db/schema";
 import { closeMembership } from "@/lib/parents/membership";
 import { resetDb, seedGuardianInFamily, seedParent, seedParentSession } from "../helpers/db";
+import { credentialRows, linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 
 /**
  * closeMembership() (src/lib/parents/membership.ts) asked without the reconcile's `stillOpenElsewhere`: it asks the
@@ -58,5 +59,27 @@ describe("closeMembership() with no stillOpenElsewhere", () => {
     await seedParentSession(ana.authUserId, { familyQboId: null });
     expect(await close(f2)).toEqual({ wasOpen: true, sessionsEnded: 2 });
     expect(await sessionsOf(ana.authUserId)).toEqual([]);
+  });
+
+  it("keeps the person's unused links and devices while another row is open, and deletes them, keeping the password, once the last open row closes", async () => {
+    const ana = await seedParent({ name: "Ana", email: "ana@example.com" });
+    const f1 = await seedGuardianInFamily({ parentId: ana.id, familyQboId: "F1" }), f2 = await seedGuardianInFamily({ parentId: ana.id, familyQboId: "F2" });
+    await seedPassword(ana.authUserId, "a password long enough to keep");
+    await mintLink(ana.id, "reset");
+    await seedDevice(ana.id);
+    const devices = () => db.select().from(parentDevice).where(eq(parentDevice.parentId, ana.id));
+
+    await close(f1);
+    expect(await linkRows(ana.id)).toHaveLength(1);
+    expect(await devices()).toHaveLength(1);
+
+    // The lead's choice 10 of the sign-in release: the last open row closed ends all of the person's sign-in but the password.
+    await close(f2);
+    expect(await linkRows(ana.id)).toEqual([]);
+    expect(await devices()).toEqual([]);
+    expect(await credentialRows(ana.authUserId)).toHaveLength(1);
+    const ended = await db.select().from(auditLog).where(eq(auditLog.action, "parent.access.ended"));
+    expect(ended.find((r) => r.targetId === f1.id)!.after).not.toHaveProperty("linksDeleted");
+    expect(ended.find((r) => r.targetId === f2.id)!.after).toMatchObject({ linksDeleted: 1, devicesForgotten: 1 });
   });
 });

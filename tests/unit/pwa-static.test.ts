@@ -97,6 +97,16 @@ describe("response headers (next.config.ts)", () => {
       "content-security-policy": "default-src 'self'; script-src 'self'; frame-ancestors 'none'",
     });
   });
+  it("the pages a set-up or reset link opens send no referrer at all, by a rule after the one for every answer", async () => {
+    const all = await rules();
+    for (const source of ["/sign-in/set-up/:token", "/sign-in/reset/:token"]) {
+      const at = all.findIndex((r) => r.source === source);
+      expect(at, source).toBeGreaterThan(all.findIndex((r) => r.source === "/:path*"));
+      expect(of(all[at]!), source).toEqual({ "referrer-policy": "no-referrer" });
+    }
+    // Nothing else replaces the rule for every answer.
+    expect(all.map((r) => r.source)).toEqual(["/:path*", "/sw.js", "/sign-in/set-up/:token", "/sign-in/reset/:token"]);
+  });
   it("does not say what the server is built with, and sends /favicon.ico to the club's icon", async () => {
     expect(nextConfig.poweredByHeader).toBe(false);
     expect(await nextConfig.rewrites!()).toEqual([{ source: "/favicon.ico", destination: "/icons/favicon.png" }]);

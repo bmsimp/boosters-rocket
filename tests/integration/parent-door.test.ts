@@ -9,7 +9,8 @@ import { fromBrowser } from "../helpers/page-request";
 
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parent, parentAuthSession, parentAuthUser, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentAuthVerification, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
+import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getParentState } from "@/lib/auth/identity";
 import { resolveParentSession } from "@/lib/auth/resolve";
@@ -392,11 +393,38 @@ describe("the parent door", () => {
     const auth = await getParentAuth();
     const reachable = ["/get-session", "/sign-out", "/portal-code/send", "/portal-code/verify", "/ok", "/error"];
     // Path-parameter routes can't be listed in disabledPaths (it matches exact paths). Neither can do anything here:
-    // there are no social providers to call back to, and there's no password to reset.
+    // there are no social providers to call back to, and /reset-password/:token only redirects with a reset row of
+    // Better Auth's own verification table, which the portal never writes: a person's password is set and reset by the
+    // portal's own links (src/lib/parents/signin-links.ts), and the routes that would use it answer 404 (below).
     const parameterized = ["/callback/:id", "/reset-password/:token"];
     const paths = Object.values(auth.api).map((e) => (e as { path?: string }).path).filter((p): p is string => !!p);
     const disabled = new Set(auth.options.disabledPaths ?? []);
     expect(paths.filter((p) => !disabled.has(p)).sort()).toEqual([...reachable, ...parameterized].sort());
+  });
+
+  it("keeps Better Auth's password routes shut for a person who has a password", async () => {
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const password = "the right password, long enough";
+    await db.insert(parentAuthAccount).values({ id: crypto.randomUUID(), accountId: a.authUserId, providerId: "credential", userId: a.authUserId, password: await hashPassword(password) });
+    const signIn = await post("/sign-in/email", { email: "ana@example.com", password });
+    expect(signIn.status).toBe(404);
+    expect(cookieFrom(signIn)).toBe("");
+    const reset = await post("/reset-password", { newPassword: "a new password, long enough", token: "anything" });
+    expect(reset.status).toBe(404);
+    for (const path of ["/request-password-reset", "/change-password", "/verify-password"]) {
+      expect([path, (await post(path, { email: "ana@example.com", password, currentPassword: password, newPassword: "another one, long enough" })).status]).toEqual([path, 404]);
+    }
+    // The one reachable route with a token in its path finds no reset row to act on: the portal never writes one.
+    const auth = await getParentAuth();
+    const callback = await auth.handler(new Request(`${env.APP_URL}/api/auth/parent/reset-password/anything?callbackURL=${encodeURIComponent(`${env.APP_URL}/sign-in`)}`,
+      { headers: { origin: env.APP_URL, "cf-connecting-ip": IP } }));
+    expect(callback.status).not.toBe(200);
+    expect(callback.headers.get("location") ?? "").not.toContain("token=anything");
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    expect(await db.select().from(parentAuthVerification)).toEqual([]);
+    // The password is the portal's as it was: one credential row, unchanged.
+    const [cred] = await db.select().from(parentAuthAccount).where(eq(parentAuthAccount.userId, a.authUserId));
+    expect(await verifyPassword({ hash: cred!.password!, password })).toBe(true);
   });
 
   it("records a sign-out through /sign-out against the person", async () => {

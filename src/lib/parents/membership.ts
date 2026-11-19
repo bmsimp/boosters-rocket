@@ -1,17 +1,19 @@
 // Closing one membership: a guardian row stops letting its person sign in for its family. Since the reconcile that
 // closed rows for what QuickBooks held went (stage 3 of the app-owned families spec), its one caller is staff's "remove
 // a guardian" (removeGuardian(), ./guardians.ts, stage 3's slice 7b), with the reason `removed`. It is not for parent
-// code. It changes nothing but the row, the person's unused email change requests and sign-in codes, their sessions,
-// the family's forms still waiting on them and the audit row, all in the caller's transaction. The caller holds the
-// person's row (`parent`) and then the guardian row FOR UPDATE before it calls: what this touches after them (the
-// requests, then the codes, then the sessions) comes later in the one order ./sessions.ts gives (lockedPerson()).
+// code. It changes nothing but the row, the person's unused email change requests, and, once no open row is left,
+// their unused sign-in codes, unused set-up and reset links and remembered devices, their sessions, the family's forms
+// still waiting on them and the audit row, all in the caller's transaction. The caller holds the person's row
+// (`parent`) and then the guardian row FOR UPDATE before it calls: what this touches after them (the requests, then the
+// codes, then the links, then the devices, then the sessions) comes later in the one order ./sessions.ts gives
+// (lockedPerson()).
 import { eq, and, isNull, ne } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
 import { guardian, parentEmailChange, type DisabledReason } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { formsForGoneSigner } from "@/lib/forms/signer-gone";
-import { deleteUnusedSigninCodes, endFamilySessions, endParentSessions } from "./sessions";
+import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endFamilySessions, endParentSessions, forgetDevices } from "./sessions";
 
 /**
  * Deletes the person's unused email change requests asked in `familyId` (none for a row that names no family record),
@@ -49,9 +51,10 @@ export type CloseMembership = {
 
 /**
  * Closes one membership: the row becomes `disabled` with its reason and the status it had (`statusBeforeDisable`), the
- * person's unused email change requests asked in the row's family record go (every unused request, and every unused
- * sign-in code, when no open row is left), so a link or code sent before the close can't work after a reinstate or a
- * new add within its life; the person's sessions that chose the row's family record end (none for a row that names no family record: no session can
+ * person's unused email change requests asked in the row's family record go (every unused request, every unused
+ * sign-in code and every unused set-up and reset link, and every remembered device is forgotten, when no open row is
+ * left: the lead's choice 10 of the sign-in release; the password stays), so a link or code sent before the close can't
+ * work after a reinstate or a new add within its life; the person's sessions that chose the row's family record end (none for a row that names no family record: no session can
  * have chosen one, since the gate lets a session into a family only through its person's row naming it), and all their
  * sessions when no open row is left; when the row was open, the family's unfinished forms still waiting on them start
  * again (formsForGoneSigner(), by the row's own `family_id`); and `parent.access.ended` is written. In that order, in the caller's transaction, which must hold the row locked. Returns
@@ -67,11 +70,14 @@ export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMember
   Object.assign(row, set);
   const openElsewhere = o.stillOpenElsewhere ? o.stillOpenElsewhere()
     : (await tx.select({ id: guardian.id }).from(guardian).where(and(eq(guardian.parentId, row.parentId), ne(guardian.status, "disabled"))).limit(1)).length > 0;
-  // What hangs on the person, in the order ./sessions.ts gives (lockedPerson()): requests, then codes, then sessions. A
-  // link asked for in this family, or once nothing is left open any request and code, must not work again should the
-  // row be reinstated, or the person added again, within its life.
+  // What hangs on the person, in the order ./sessions.ts gives (lockedPerson()): requests, then codes, then links, then
+  // devices, then sessions. A link asked for in this family, or once nothing is left open any request, code, set-up or
+  // reset link, must not work again should the row be reinstated, or the person added again, within its life; and a
+  // device remembered before asks for the second step again.
   const requestsDeleted = await deleteUnusedRequests(tx, row.parentId, openElsewhere ? row.familyId : "all");
   if (!openElsewhere) await deleteUnusedSigninCodes(row.parentId, tx);
+  const linksDeleted = openElsewhere ? 0 : await deleteUnusedSigninLinks(row.parentId, tx);
+  const devicesForgotten = openElsewhere ? 0 : await forgetDevices(row.parentId, tx);
   let sessionsEnded = row.familyId === null ? 0 : await endFamilySessions(row.parentId, row.familyId, tx);
   if (!openElsewhere) sessionsEnded += await endParentSessions(row.parentId, tx);
   // A document already made for them keeps a working signing link: their unfinished forms for this family start again.
@@ -80,6 +86,6 @@ export async function closeMembership(tx: Tx, row: MembershipRow, o: CloseMember
   await writeAudit({ actor: o.actor, action: "parent.access.ended", permission: o.permission, targetType: "guardian", targetId: row.id, ip: o.ip ?? null,
     before: o.dropSource ? { status: was, sourceQboId: droppedSource } : { status: was },
     after: { parentId: row.parentId, familyId: row.familyId === null ? null : String(row.familyId), familyQboId: row.familyQboId, reason: o.reason, sessionsEnded,
-      ...(requestsDeleted ? { requestsDeleted } : {}), ...(formsReset ? { formsReset } : {}), ...(o.cause === undefined ? {} : { cause: o.cause }), ...(o.note === undefined ? {} : { note: o.note }) } }, tx);
+      ...(requestsDeleted ? { requestsDeleted } : {}), ...(linksDeleted ? { linksDeleted } : {}), ...(devicesForgotten ? { devicesForgotten } : {}), ...(formsReset ? { formsReset } : {}), ...(o.cause === undefined ? {} : { cause: o.cause }), ...(o.note === undefined ? {} : { note: o.note }) } }, tx);
   return { wasOpen, sessionsEnded };
 }

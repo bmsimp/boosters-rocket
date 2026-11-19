@@ -23,6 +23,8 @@ const PROOF_OF_CONCEPT = "docs/runbooks/poc-linuxdev.md";
 const SCANNED = [
   ...walk("deploy"),
   ...walk("docs/runbooks").filter((f) => f !== PROOF_OF_CONCEPT),
+  // The club's own CI runner: what a club copies to a machine of its own names no machine either.
+  ...walk("ci"),
   ".github/workflows/release.yml",
   ".github/dependabot.yml",
 ];
@@ -38,6 +40,7 @@ const SITES: Record<string, string> = {
   "docs.documenso.com": "Documenso's own documentation",
   "caddyserver.com": "the proxy's own documentation (deploy/Caddyfile)",
   "smtp.office365.com": "Microsoft 365's SMTP server, for Documenso's account mail (mail.md)",
+  "pwnedpasswords.com": "the password breach service the server must reach (health-warnings.md, Password breach check)",
 };
 const TLDS = "com|org|net|io|dev|app|co|us|uk|ca|au|de|eu|fr|nl|edu|gov|info|biz|me|xyz|site|online|tech|ai|cloud|club|school|team|tv|cc|ly|gg|in|link|page|run|host|systems|network";
 const HOST = new RegExp(`\\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(?:${TLDS})\\b`, "gi");
@@ -94,7 +97,8 @@ describe("the installation, the runbooks and the release name no host and hold n
     expect(SCANNED).toEqual(expect.arrayContaining(["deploy/compose.yml", "deploy/compose.build.yml", "deploy/.env.example", "deploy/Caddyfile",
       "deploy/initdb/10-databases.sql", "docs/runbooks/first-install.md", "docs/runbooks/intuit.md", "docs/runbooks/mail.md", "docs/runbooks/documenso.md",
       "docs/runbooks/backups.md", "docs/runbooks/updates.md", "docs/runbooks/restore.md", "docs/runbooks/quickbooks-reconnect.md",
-      "docs/runbooks/health-warnings.md", "docs/runbooks/before-the-first-family.md", ".github/workflows/release.yml", ".github/dependabot.yml"]));
+      "docs/runbooks/health-warnings.md", "docs/runbooks/before-the-first-family.md", "ci/runner/README.md", "ci/runner/compose.yml", "ci/runner/Dockerfile",
+      ".github/workflows/release.yml", ".github/dependabot.yml"]));
     expect(SCANNED).not.toContain(PROOF_OF_CONCEPT);
   });
 

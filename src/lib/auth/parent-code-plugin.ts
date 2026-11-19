@@ -39,10 +39,11 @@ export const parentCodePlugin = () => ({
       const [u] = await db.select({ id: parentAuthUser.id }).from(parentAuthUser).where(eq(parentAuthUser.parentId, r.parentId));
       const user = u ? await ctx.context.internalAdapter.findUserById(u.id) : null;
       if (!user) return ctx.json({ ok: false, error: "rejected" });
-      // The session is stored before the last check and before anything is audited as a sign-in, so an address change
-      // or a block that lands at this moment cannot leave a session behind (signinStands).
+      // The session is stored before the last check and before anything is audited as a sign-in, so an address change,
+      // a block or a password reset that lands at this moment cannot leave a session behind (signinStands, which reads
+      // the code this sign-in spent again: a reset deletes it).
       const session = await ctx.context.internalAdapter.createSession(user.id, false, { familyId: null });
-      if (!(await signinStands(r.parentId, ctx.body.email, ip))) {
+      if (!(await signinStands(r.parentId, ctx.body.email, ip, r.codeId))) {
         await ctx.context.internalAdapter.deleteSession(session.token);
         return ctx.json({ ok: false, error: "rejected" });
       }

@@ -6,8 +6,10 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, parentAuthSession, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, parent, parentAuthSession, parentDevice, parentSigninToken, signinCode } from "@/lib/db/schema";
 import { blockPerson, unblockPerson } from "@/lib/parents/people";
+import { hashLinkToken } from "@/lib/parents/signin-links";
+import { credentialRows, linkRows, mintLink, seedDevice, seedPassword } from "../helpers/signin-links";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
 
@@ -32,6 +34,22 @@ describe("blocking and unblocking", () => {
     expect(await unblockPerson(p.id, o)).toEqual({ ok: true, changed: true });
     expect((await db.select().from(parent))[0]!.blocked).toBe(false);
     expect(await actions()).toEqual(["parent.block", "parent.unblock"]);
+  });
+
+  it("blocking deletes the unused set-up and reset links and forgets every device, keeps the password, and counts them", async () => {
+    const p = await seedParent({ name: "Ana" });
+    await seedGuardian({ parentId: p.id, familyQboId: "F1", status: "active" });
+    await seedPassword(p.authUserId, "a password long enough to keep");
+    const used = await mintLink(p.id, "setup");
+    await db.update(parentSigninToken).set({ usedAt: new Date() }).where(eq(parentSigninToken.tokenHash, hashLinkToken("setup", used)));
+    await mintLink(p.id, "reset");
+    await seedDevice(p.id); await seedDevice(p.id);
+    expect(await blockPerson(p.id, "Custody order on file.", o)).toEqual({ ok: true, sessionsEnded: 0 });
+    // The used link stays until the daily clean-up; the unused one and both devices go.
+    expect((await linkRows(p.id)).map((r) => r.purpose)).toEqual(["setup"]);
+    expect(await db.select().from(parentDevice)).toEqual([]);
+    expect(await credentialRows(p.authUserId)).toHaveLength(1);
+    expect((await audits("parent.block"))[0]!.after).toMatchObject({ blocked: true, sessionsEnded: 0, linksDeleted: 1, devicesForgotten: 2 });
   });
 
   it("blocking records who, when and why; unblocking clears them; the reason is audited", async () => {

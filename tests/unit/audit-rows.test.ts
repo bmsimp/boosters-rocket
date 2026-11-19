@@ -27,6 +27,7 @@ const NOT_AUDITED: Record<string, string> = {
   // Caches for the Health page: what an outside service last answered, or what a job last did.
   "src/lib/forms/settings.ts#patchStatus": "a cache: when Documenso last answered, failed or sent a webhook, for the Health page",
   "src/lib/jobs/marks.ts#markJob": "a cache: when the volunteer reminders and the buy-out check last ran, and their counts, for the Health page; what they send or change is audited",
+  "src/lib/parents/breach-mark.ts#markBreachCheck": "a cache: when the password breach service last answered or failed, with a short code, for the Health page; each password chosen is audited (parent.password.set, with whether it was checked)",
   // Rows a page load makes so that something has an id: nothing is sent or signed.
   "src/lib/forms/my-forms.ts#loadMyForms": "a placeholder: the family's signature requests are made, not opened and with nothing sent, the first time its Forms page is read, so each has an id; the open that makes a document is audited (form.document.create)",
   // A session's own upkeep.

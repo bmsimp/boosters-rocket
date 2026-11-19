@@ -431,6 +431,7 @@ A status that is not part of a box's ordinary text: the QuickBooks and roster no
 ### Form controls
 Every staff form is built from these, and parent forms take them up as they are next designed.
 - **Text fields and text areas:** Label-style label above, a 2px `ink` box, `paper`, min 44px tall, 8px 12px padding. They fill their column and never run past their box, whatever is typed or however long an option is. A text area grows downward only.
+- **Password fields:** a text field (`type="password"`), with the rule said in words above it in `help` and named by the field's `aria-describedby`, in "characters" and never as a promise about a person's count. Choosing a password asks for it twice ("Type it again"), each with `autocomplete="new-password"`, and offers no username. The answer is in words: what is wrong and what to do, or the set line with a tick (`paid-up`) followed by a `.link-line` onward.
 - **Selects:** drawn like a text field, with the arrow drawn in `ink` at the right; the platform's own arrow under forced colors.
 - **Single choice:** the Choice group (below). Native radio lists are not used on new forms.
 - **Check boxes:** a 22px ruled square (2px `ink`, `paper`); checked fills with `club-text` and a `paper` tick. Hover on an unchecked one: `club-tint`. Each sits in a 44px-tall label row.

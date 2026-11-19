@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
-import { guardian, parent, parentAuthSession, parentEmailChange, signinCode } from "@/lib/db/schema";
+import { guardian, parent, parentAuthSession, parentDevice, parentEmailChange, parentSigninToken, signinCode } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getParentSettings, putParentSettings, PARENTS_KEY } from "./settings";
 
@@ -10,15 +10,16 @@ import { getParentSettings, putParentSettings, PARENTS_KEY } from "./settings";
  * Called inside `clearRosterOfOtherCompany`, under the roster lock, as the first part of the clear. QuickBooks IDs are
  * small numbers that mean a different customer in every company, and every guardian row still holds the old company's
  * (`family_qbo_id`, `source_qbo_id`), so every link closes (keeping its old IDs, which nothing matches again), every
- * session, unused code and change of sign-in address goes (each names the app's own family by a `restrict` key, and
- * the app's records go next), "already welcomed" is cleared, and sign-ins and welcomes switch off until an Admin has
+ * session, unused code, unused set-up or reset link, remembered device and change of sign-in address goes (a session and
+ * a change name the app's own family by a `restrict` key, and the app's records go next), "already welcomed" is cleared, and sign-ins and welcomes switch off until an Admin has
  * looked at the new company. Since stage 2 of the app-owned families spec nothing the portal runs reaches this (a
  * different company is refused before the clear); stage 4 decides what a change of company still does to sign-ins.
  */
 export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
   // The rows in the one order every change of a person's sign-in takes them (lockedPerson(), ./sessions.ts): every
   // person's row first, FOR UPDATE in id order (each is touched below: its welcome is cleared, and its links, requests,
-  // codes and sessions go), then the guardian rows, then the requests, the codes and the sessions, in that order.
+  // codes, set-up and reset links, remembered devices and sessions go), then the guardian rows, then the requests, the
+  // codes, the unused set-up and reset links, the devices and the sessions, in that order.
   await tx.select({ id: parent.id }).from(parent).orderBy(parent.id).for("update");
   const open = await tx.select({ g: guardian, p: parent }).from(guardian).innerJoin(parent, eq(parent.id, guardian.parentId))
     .where(ne(guardian.status, "disabled")).orderBy(guardian.id).for("update", { of: guardian });
@@ -36,6 +37,8 @@ export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toReal
   // sign-in address also names the record it would change: another company's customer now (email-change.ts).
   await tx.delete(parentEmailChange);
   const codes = await tx.delete(signinCode).where(isNull(signinCode.usedAt)).returning({ id: signinCode.id });
+  const links = await tx.delete(parentSigninToken).where(isNull(parentSigninToken.usedAt)).returning({ id: parentSigninToken.id });
+  const devices = await tx.delete(parentDevice).returning({ id: parentDevice.id });
   const ended = await tx.delete(parentAuthSession).returning({ id: parentAuthSession.id });
   const welcomed = await tx.update(parent).set({ welcomedAt: null, updatedAt: new Date() }).where(isNotNull(parent.welcomedAt)).returning({ id: parent.id });
   await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null });
@@ -45,5 +48,5 @@ export async function clearParentAccess(tx: Tx, o: { fromRealmId: string; toReal
     before: { signin: before.signin, welcome: before.welcome },
     after: { reason: "different_company", fromRealmId: o.fromRealmId, toRealmId: o.toRealmId, signin: false, welcome: false, links: open.length,
       closedLinksMarked: closedMarked.length, people: new Set(open.map((r) => r.p.id)).size, sessionsEnded: ended.length, codesDeleted: codes.length,
-      welcomesCleared: welcomed.length } }, tx);
+      linksDeleted: links.length, devicesForgotten: devices.length, welcomesCleared: welcomed.length } }, tx);
 }

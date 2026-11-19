@@ -14,7 +14,7 @@ vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", 
 
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, guardian, parent, parentAuthSession, parentAuthUser, parentEmailChange, qboConnection, qboCustomer, rateLimitEvent, signinCode } from "@/lib/db/schema";
+import { auditLog, guardian, parent, parentAuthSession, parentAuthUser, parentDevice, parentEmailChange, qboConnection, qboCustomer, rateLimitEvent, signinCode } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { EMAIL_COPY, confirmMyEmailChange, findMyEmailChange } from "@/lib/parents/email-change";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
@@ -33,6 +33,7 @@ import { startQboStub, type QboStub } from "../helpers/qbo-stub";
 import { holdTheRosterLock } from "../helpers/reconcile";
 import { addToCache, seedParentSettings, seedShape, stu } from "../helpers/roster-cache";
 import { NO_CHANGES, appRecordsByCustomer, syncAppRecords, whatAFreshRunWouldChange } from "../helpers/app-records";
+import { linkRows, mintLink, seedDevice } from "../helpers/signin-links";
 
 let stub: QboStub;
 beforeAll(async () => { stub = await startQboStub(); stubBase.url = stub.base; });
@@ -214,6 +215,10 @@ describe("confirming: QuickBooks first, then the portal", () => {
   it("own Parent record: the one address is changed in QuickBooks, then the person, and the old address signs in nowhere", async () => {
     const { r, c } = await seedContactFamilies(stub);
     await aCode(r.identity.parentId);
+    // A set-up and a reset link mailed to the old address, and a device remembered for it.
+    await mintLink(r.identity.parentId, "setup");
+    await mintLink(r.identity.parentId, "reset");
+    await seedDevice(r.identity.parentId);
     asParent(r.identity);
     await asking(NEW);
     const token = linkTo(NEW);
@@ -240,9 +245,11 @@ describe("confirming: QuickBooks first, then the portal", () => {
     expect(await person(r.identity.parentId)).toMatchObject({ email: NEW, name: RIVERA.parent.name });
     expect((await db.select().from(parentAuthUser).where(eq(parentAuthUser.parentId, r.identity.parentId)))[0]!.email).toBe(NEW);
     expect(await db.select({ status: guardian.status, sourceQboId: guardian.sourceQboId }).from(guardian).where(eq(guardian.parentId, r.identity.parentId))).toEqual([{ status: "active", sourceQboId: R_PARENT }]);
-    // The old address signs in nowhere: no session, no code.
+    // The old address signs in nowhere: no session, no code, no set-up or reset link, and no device remembered for it.
     expect(await sessionsOf(r.identity.parentId)).toEqual([]);
     expect(await codesOf(r.identity.parentId)).toEqual([]);
+    expect(await linkRows(r.identity.parentId)).toEqual([]);
+    expect(await db.select().from(parentDevice).where(eq(parentDevice.parentId, r.identity.parentId))).toEqual([]);
     // The other family is untouched.
     expect(await sessionsOf(c.identity.parentId)).toHaveLength(1);
     expect((await person(c.identity.parentId)).email).toBe(CHENOWETH.parent.email);
@@ -253,7 +260,7 @@ describe("confirming: QuickBooks first, then the portal", () => {
     const saved = (await audits()).filter((a) => a.action === "parent.email.save");
     // One row says it all: the cache took QuickBooks' answer, and the person's address changed, signing them out.
     expect(saved).toEqual([{ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
-      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "cached", app: "changed", sessionsEnded: 1 } }]);
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "cached", app: "changed", sessionsEnded: 1, linksDeleted: 2, devicesForgotten: 1 } }]);
     // Nothing decided access from QuickBooks: no sign-in was opened, moved or closed, and no address was changed by a rule.
     for (const action of ["parent.email.changed", "parent.access.granted", "parent.access.moved", "parent.access.ended", "parent.hold.opened"]) {
       expect((await audits()).map((a) => a.action)).not.toContain(action);
@@ -526,7 +533,7 @@ describe("confirming: what goes wrong changes nothing in the portal", () => {
     expect((await requests())[0]!.usedAt).not.toBeNull();
     expect(await rosterRefreshAsked()).toBe(true);
     expect((await audits()).at(-1)).toEqual({ action: "parent.email.save", targetId: R_PARENT, before: { email: RIVERA.parent.email, field: RIVERA.parent.email },
-      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "refresh_asked", code: "busy", app: "changed", sessionsEnded: 1 } });
+      after: { email: NEW, familyId: String(r.identity.familyId), field: NEW, portal: "refresh_asked", code: "busy", app: "changed", sessionsEnded: 1, linksDeleted: 0, devicesForgotten: 0 } });
   }, 30_000);
 
   it("a refresh that stored a later version while the confirmation waited keeps it: the answer's older one is not written over it", async () => {

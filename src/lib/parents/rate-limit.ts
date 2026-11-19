@@ -3,7 +3,8 @@ import { db } from "@/lib/db/client";
 import { rateLimitEvent } from "@/lib/db/schema";
 
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
-  | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent";
+  | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
+  | "password_link_ip" | "password_link_token";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -15,6 +16,14 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   code_send_email: { max: 3, windowMs: WINDOW_MS },
   code_send_ip: { max: 60, windowMs: WINDOW_MS },
   code_check_ip: { max: 180, windowMs: WINDOW_MS },
+  // Choosing a password from a set-up or reset link (password-set.ts). A token is 32 random bytes, so it can't be
+  // guessed: the limit per token only bounds the tries one link takes (a password too short, or found in a breach, is
+  // tried again) and the breach-service calls and password hashes one link can cause; 10 is far more than choosing a
+  // password takes. The limit per IP address stops a flood only, set as the code request's is (code_send_ip), since a
+  // registration night may have a room of parents choosing passwords on the school's one address. With no address it
+  // is not applied, as with the codes.
+  password_link_ip: { max: 60, windowMs: WINDOW_MS },
+  password_link_token: { max: 10, windowMs: WINDOW_MS },
   // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
   // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
   // from QuickBooks each time, so that is bounded too, well above what editing takes.

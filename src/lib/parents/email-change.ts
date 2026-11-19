@@ -27,7 +27,7 @@ import { fieldHasChange, fieldSignsIn, replaceAddressInField } from "./email-fie
 import { loadMyRecord, loadMyRecordForMyEmailChange, type MyRecord } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { askForRosterRefresh } from "./refresh-ask";
-import { deleteUnusedSigninCodes, endParentSessions, enterableGuardianRows, lockEmail, parentActor } from "./sessions";
+import { deleteUnusedSigninCodes, deleteUnusedSigninLinks, endParentSessions, enterableGuardianRows, forgetDevices, lockEmail, parentActor } from "./sessions";
 import { getParentSettings } from "./settings";
 
 /** How long the link mailed to the new address works. */
@@ -367,9 +367,10 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
   const lockWait = Math.max(1, Math.floor(o.lockWaitMs ?? LOCK_WAIT_MS));
   const finish = () => db.transaction(async (tx): Promise<"changed" | "taken" | null> => {
     // The person first, in the order ./sessions.ts gives (lockedPerson()): both addresses, then the person's row, then
-    // what hangs on the person, their email change requests, sign-in codes and sessions, in that order. An ask, a
-    // block, the switches, the daily clean-up and the change-of-company clear take the same rows in the same order, so
-    // none of them can wait on this one while it waits on them. The roster comes last, and is waited for a few seconds
+    // what hangs on the person, their email change requests, sign-in codes, set-up and reset links, remembered devices
+    // and sessions, in that order. An ask, a block, the switches, the daily clean-up and the change-of-company
+    // clear take the same rows in the same order, so none of them can wait on this one while it
+    // waits on them. The roster comes last, and is waited for a few seconds
     // at most: the clear (clearParentAccess()) holds the roster lock as it takes the people's rows, though nothing the
     // portal runs reaches it until stage 4.
     for (const address of [oldEmail, newEmail].sort()) await lockEmail(tx, address);
@@ -381,13 +382,17 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     // signs in with it as before, though QuickBooks now holds the new one (the audit row says so, for staff to put the
     // record right). The parent is told the outcome, never why.
     const taken = await heldByAnother(tx, newEmail, ctx.parentId);
-    let sessionsEnded = 0;
+    let sessionsEnded = 0, linksDeleted = 0, devicesForgotten = 0;
     if (!taken) {
       await tx.update(parent).set({ email: newEmail, updatedAt: new Date() }).where(eq(parent.id, ctx.parentId));
       await tx.update(parentAuthUser).set({ email: newEmail, updatedAt: new Date() }).where(eq(parentAuthUser.parentId, ctx.parentId));
-      // Another link asked for before this one must not work, nor a code sent to the old address.
+      // Another link asked for before this one must not work, nor a code, set-up link or reset link sent to the old
+      // address; and every device remembered for the old address asks for the second step again (open question 36).
+      // The password stays.
       await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
       await deleteUnusedSigninCodes(ctx.parentId, tx);
+      linksDeleted = await deleteUnusedSigninLinks(ctx.parentId, tx);
+      devicesForgotten = await forgetDevices(ctx.parentId, tx);
       // Every session was proved with the old address: the person signs in again, with the new one.
       sessionsEnded = await endParentSessions(ctx.parentId, tx);
     }
@@ -414,7 +419,7 @@ export async function confirmMyEmailChange(ctx: ParentCtx, token: unknown, o: { 
     if (portal !== "cached") await askForRosterRefresh(tx);
     await audit(tx, taken
       ? { field: answer?.field ?? null, portal, ...(code ? { code } : {}), app: "address_taken", quickbooks: "holds_new_address" }
-      : { field: answer?.field ?? null, portal, ...(code ? { code } : {}), app: "changed", sessionsEnded });
+      : { field: answer?.field ?? null, portal, ...(code ? { code } : {}), app: "changed", sessionsEnded, linksDeleted, devicesForgotten });
     return taken ? "taken" : "changed";
   });
 
