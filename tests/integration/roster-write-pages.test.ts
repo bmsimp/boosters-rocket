@@ -203,6 +203,13 @@ describe("making a family inactive from its page: one action, the amount of a ba
 describe("a family's page brings the portal's own records into line with what QuickBooks has, sending nothing", () => {
   beforeEach(async () => { asStaff(await staffWith("registrar@club.org", ["Roster.Read", "Roster.Family.ReadWrite"])); });
 
+  it("a student with a move QuickBooks refused that the portal kept is offered no make-inactive, and the page says why", async () => {
+    await seedQueued({ op: "move", role: "student", qboId: "12", syncToken: "0", fromFamilyQboId: "10", toFamilyQboId: "20" }, { state: "refused", code: "fault_6000", nextTryAt: null });
+    const html = await renderPage(RosterEntryPage, { params: { id: await idOf("10") } });
+    expect(html).not.toContain("Make Leo Rivera inactive");
+    expect(html).toContain("A move of Leo Rivera that QuickBooks didn&#x27;t take is kept on the Reconciliation page");
+  });
+
   it("a student QuickBooks has inactive while their record is active: making them inactive in the portal is offered", async () => {
     Object.assign(stub.customers.find((c) => c.Id === "12")!, { Active: false, SyncToken: "1" });
     expect((await refreshRoster(WORKER)).ok).toBe(true);

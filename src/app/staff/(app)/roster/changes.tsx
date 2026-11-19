@@ -176,13 +176,15 @@ export function CreateInQuickBooks({ familyId, name, noun, unlinked, students, t
 }
 
 /**
- * What the forms of a family's page are given: the roster tag, each customer's version (for a move, a make-inactive and
- * a parent's rename), the customers a change waits for, the family record's app id (for a new student), and each linked
- * record by its customer (`records`: the family's or member's own, and each student's), whose rename is saved in the
- * portal first and starts from the portal's own name.
+ * What the forms of a family's page are given: the roster tag, each customer's version (sent only by a Parent
+ * customer's rename and make-inactive, which go to QuickBooks first; stage 3's slice 9g), the customers a change waits
+ * for, the family record's app id (for a new student and the family action), and each linked record by its customer
+ * (`records`: the family's or member's own, and each student's), whose rename is saved in the portal first and whose
+ * make-inactive is sent by its kind and app id. `keptMoves`: the customers of students with a move QuickBooks refused
+ * that the portal kept, who aren't made inactive until it is sent or given up.
  */
 export type Edit = { rosterTag: string; versions: Map<string, string>; blocked: Set<string>; familyId: string;
-  records: Map<string, { kind: "family" | "student"; id: string; name: string }> };
+  records: Map<string, { kind: "family" | "student"; id: string; name: string }>; keptMoves?: Set<string> };
 
 /**
  * Rename and make inactive, for one record: offered only when the shape allows it and nothing is waiting for it. Making
@@ -203,9 +205,10 @@ function RecordChanges({ who, c, rename, deactivate, warning, edit, extra, follo
         act={renameLinkedAction.bind(null, edit.rosterTag, record.kind, record.id)} />
         : <NameForm field="New name" label="Rename" pendingLabel="Renaming in QuickBooks…" initial={c.displayName} act={renameParentAction.bind(null, edit.rosterTag, c.qboId, version)} />)}
       {extra}
-      {deactivate && c.active && <DeactivateForm label={`Make ${c.displayName} inactive`} warning={warning}
+      {deactivate && record?.kind === "student" && edit.keptMoves?.has(c.qboId) ? <Notice tone="info" live="none">A move of {c.displayName} that QuickBooks didn&apos;t take is kept on the Reconciliation page, so they can&apos;t be made inactive until it is sent or given up there.</Notice>
+        : deactivate && c.active && <DeactivateForm label={`Make ${c.displayName} inactive`} warning={warning}
         act={record ? deactivateLinkedAction.bind(null, edit.rosterTag, record.kind, record.id) : deactivateAction.bind(null, edit.rosterTag, c.qboId, version)} />}
-      {deactivate && !c.active && follow && record && <DeactivateForm label={`Make ${c.displayName} inactive in the portal`}
+      {deactivate && !c.active && follow && record && !(record.kind === "student" && edit.keptMoves?.has(c.qboId)) && <DeactivateForm label={`Make ${c.displayName} inactive in the portal`}
         warning={`QuickBooks has ${c.displayName} inactive already, but the portal's own record is still active. This sends nothing to QuickBooks and makes the portal's record inactive too.`}
         act={deactivateLinkedAction.bind(null, edit.rosterTag, record.kind, record.id)} />}
     </details>
