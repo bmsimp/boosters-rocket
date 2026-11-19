@@ -541,7 +541,7 @@ work another. Any time before the pilot.
     make-inactive as an amount owed does, before anything is sent; it has to be used or refunded in QuickBooks first.
     Whatever QuickBooks refuses is still told in words.
 18. The lead's choice, not the owner's (2026-11-17): when a family is made inactive, its own last write is sent with
-    the version QuickBooks has just after its students and parents were made inactive, read again at that moment,
+    the version QuickBooks has just after its students and parents were made inactive, read again at that moment
     (QuickBooks may raise a family's version when a customer under it changes). Since stage 3's slice 9g no step
     carries the page's version: a student is sent with their link's own, anyone else with the one just read, and a
     stale answer is settled by reading whether QuickBooks has them inactive. The write changes only whether it is
