@@ -9,7 +9,9 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
     api: { sandbox: stubBase.url, production: stubBase.url } }) };
 });
 
+import { createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { env } from "@/env";
 import { db } from "@/lib/db/client";
 import { auditLog, buyout, familyMoney, writeQueue } from "@/lib/db/schema";
 import { BUYOUT_COPY, confirmMyBuyout } from "@/lib/buyouts/writes";
@@ -27,6 +29,7 @@ import { seedFamilyMoney, seedParentIn, type SeededParent } from "../helpers/par
 import { startQboStub, STUB_PAID_VOID_FAULT, type QboStub } from "../helpers/qbo-stub";
 import { BUYOUT_ITEM, buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedCheckIn, seedEvent, seedOutsideCredit, seedShift, seedSignup } from "../helpers/volunteer";
+import { addToCache, stu } from "../helpers/roster-cache";
 import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
 
 let stub: QboStub;
@@ -129,6 +132,36 @@ describe("choosing to pay instead of volunteering (v1 spec §11.5)", () => {
     expect(await confirmBuyoutAction(req, "family", now.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.already] });
     expect(invoicePosts()).toHaveLength(1);
     expect(await buyoutsOf(FAMILY)).toHaveLength(1);
+  });
+
+  it("refuses a quote stamped the old way, by the QuickBooks ids it billed, with the price-changed words and nothing queued", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ amount: 2, unitCents: 5000 });
+    const now = await shown(p, req);
+    // The stamp a page drawn before the session carried the app's family was given: it sealed the family's customer.
+    const old = createHmac("sha256", env.BETTER_AUTH_SECRET).update(`buyout-quote:${FAMILY}|${req}|${FAMILY}|${BUYOUT_ITEM}|5000|2|10000`).digest("base64url").slice(0, 22);
+    expect(old).not.toBe(now.stamp);
+    asParent(p.identity);
+    expect(await confirmBuyoutAction(req, "family", old)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$100.00")] });
+    expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect(posts()).toEqual([]);
+  });
+
+  it("refuses a student's key that has come to name another student since the page was shown, never billing the wrong one", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ appliesTo: "student", amount: 2, unitCents: 5000 });
+    // Romilly's choice as her page showed it: the second of the family's students by name.
+    const romilly = await shown(p, req, "s2");
+    expect(romilly.who).toBe(RIVERA.students[1]!.name);
+    // A student joins the family whose name comes first: the keys now follow the new list, and "s2" names Rafferty.
+    await addToCache([stu("7019", "Abner Riverquill", FAMILY)]);
+    expect((await shown(p, req, "s2")).who).toBe(RIVERA.students[0]!.name);
+    asParent(p.identity);
+    expect(await confirmBuyoutAction(req, "s2", romilly.stamp)).toEqual({ ok: false, errors: [BUYOUT_COPY.changed("$100.00")] });
+    expect(await buyoutsOf(FAMILY)).toEqual([]);
+    expect(await db.select().from(writeQueue)).toEqual([]);
+    expect(posts()).toEqual([]);
   });
 
   it("refuses a price staff changed since the page was shown, a buy-out switched off, and a requirement already met", async () => {

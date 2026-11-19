@@ -5,9 +5,9 @@ type Msg = { to: string; subject: string; text: string; html: string; attachment
 const mail = vi.hoisted(() => ({ outbox: [] as Msg[] }));
 vi.mock("@/lib/mail/senders", () => ({ SMTP_PASSWORD_AAD: "mail:smtp-password", buildSender: async () => async (m: Msg) => { mail.outbox.push(m); } }));
 
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family as familyTable, qboCustomer, requirement, setting, volunteerCredit, volunteerShift, volunteerSignup } from "@/lib/db/schema";
+import { accountingLink, auditLog, family as familyTable, qboCustomer, requirement, setting, volunteerCredit, volunteerShift, volunteerSignup } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import type { ParentCtx } from "@/lib/guards";
 import { clearRosterOfOtherCompany, setRosterSource } from "@/lib/roster/source";
@@ -444,6 +444,26 @@ describe("a session whose family record is inactive", () => {
     expect(await loadMyCredit(ctx)).toEqual([]);
     expect(await snapshot()).toBe(before);
     expect(mail.outbox).toEqual([]);
+  });
+});
+
+describe("a family with no link to QuickBooks", () => {
+  it("still sees its places and its credit, and signs its own students up: volunteering reads the family's own records", async () => {
+    const { a, b } = await seedTwoFamilies();
+    const before = await loadMyVolunteering(ctxOf(a.identity));
+    const credit = await loadMyCredit(ctxOf(a.identity));
+    expect(before.signups.length).toBeGreaterThan(0);
+    // The family's link and its students' links are gone (from stage 3 a family may have none).
+    const students = await Promise.all(FAMILY_A.students.map((s) => studentId(s.qboId)));
+    await db.delete(accountingLink).where(or(eq(accountingLink.familyId, a.identity.familyId), inArray(accountingLink.studentId, students)));
+    expect(await loadMyVolunteering(ctxOf(a.identity))).toEqual(before);
+    expect(await loadMyCredit(ctxOf(a.identity))).toEqual(credit);
+    const { shifts: [shift] } = await seedEvent({ inDays: 41, shifts: [{ places: 3 }] });
+    const view = (await loadShiftForMe(ctxOf(a.identity), shift!.id))!;
+    expect(view.choices.map((c) => c.label)).toEqual([`Me (${FAMILY_A.parent.name})`, AURELIO!.name, AZALEA!.name]);
+    expect((await signUpForShift(ctxOf(a.identity), shift!.id, String(students[0]))).ok).toBe(true);
+    expect(await live()).toEqual(expect.arrayContaining([expect.objectContaining({ shiftId: shift!.id, familyId: a.identity.familyId, studentId: students[0] })]));
+    for (const marker of b.markers) expect(JSON.stringify(view)).not.toContain(marker);
   });
 });
 

@@ -17,7 +17,7 @@ import { startDocumensoStub, type DocumensoStub, type StubEnvelope } from "../he
 import { connectForms, formSetting, groupOf, requestCustomers, requestNow, seedConsent, seedFormRequirement } from "../helpers/forms";
 import { FAMILY_A, FAMILY_B, seedParentIn, seedSignedInParent, type SeededParent } from "../helpers/parent";
 import { seedSeason } from "../helpers/season";
-import { recordOfCustomer, subjectColumns } from "../helpers/app-records";
+import { recordOfCustomer, subjectColumns, syncAppRecords } from "../helpers/app-records";
 import { moveFamilyInCache, moveInCache } from "../helpers/roster-cache";
 
 /**
@@ -239,6 +239,7 @@ describe("signing a form", () => {
 
     // The student is renamed in QuickBooks, and a guardian's name is corrected.
     await db.update(qboCustomer).set({ displayName: "Aurelio Alderquist-Reyes" }).where(eq(qboCustomer.qboId, student.qboId));
+    await syncAppRecords(); // as the roster read that brought the new name in leaves the student's record
     await db.update(parent).set({ name: "Astrid Alderquist-Reyes" }).where(eq(parent.id, other.parentId));
     tokenIn(await open(ctx, id));
     const second = stub.documentFor(id)!;
@@ -250,6 +251,7 @@ describe("signing a form", () => {
     // One guardian signs; then the name changes again. The document stays: a signed name is not rewritten.
     stub.sign(second.id, FAMILY_A.parent.email);
     await db.update(qboCustomer).set({ displayName: "Aurelio A. Reyes" }).where(eq(qboCustomer.qboId, student.qboId));
+    await syncAppRecords();
     expect((await open(ctx, id)).step).toEqual({ kind: "waiting", signedByYou: true });
     await seedConsent(id, { parentId: other.parentId, name: "Astrid", email: other.email });
     expect(tokenIn(await open(other, id))).toBe(second.recipients.find((r) => r.email === other.email)!.token);
