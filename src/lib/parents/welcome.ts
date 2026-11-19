@@ -21,8 +21,9 @@ export const WELCOME_RETRY_MS = 15 * 60_000;
 export const REFUSED_RETRY_MS = 24 * 60 * 60_000;
 /**
  * How much life a set-up link the person already holds must have left for the worker's welcome to say it still works
- * and carry none: with less, it might run out before they read the mail, so the welcome carries a new link, which takes
- * its place once the mail has gone. The check after the send holds it to the same.
+ * and carry none, or for the press's mail to be skipped for it: with less, it might run out before they read the mail,
+ * so the mail carries a new link, which takes its place once the mail has gone. The check after the send holds the
+ * earlier-link welcome to the same.
  */
 export const EARLIER_LINK_MIN_LIFE_MS = 24 * 60 * 60_000;
 const WELCOME_ACTOR: Actor = { door: "system", id: null, label: "welcome" };
@@ -128,7 +129,7 @@ type Kind = { worker: true } | { worker: false };
  * person who holds a set-up link that still works, which goes with no new link and says that one still works. Otherwise
  * why not: for a resend, the refusals as before; for the worker, nothing to send now (`quiet`: switched off, no longer
  * owed, blocked, no row that counts or no sign-in account since the claim; it stays as it is), a press mail skipped for
- * a password chosen since or a set-up link that still works (`skipped`, its row written), or a mail to someone whose
+ * a password chosen since or a set-up link that still works for a day (`skipped`, its row written), or a mail to someone whose
  * set-up link from another sender is on its way, or a press mail to someone sent a set-up link a moment ago (`wait`,
  * still owed). A resend is refused (`on_its_way`) while another set-up link is on its way to the person (the worker's
  * welcome, an ask on "Set up or reset my password"), and for RESEND_AFTER_MS after the portal last mailed them one
@@ -142,7 +143,8 @@ type Prepared =
  * The person's set-up links as a welcome reads them under the person's lock: one held on its way, made less than
  * RESEND_AFTER_MS ago (another sender's mail is going; a link held longer ago belongs to a send the portal never came
  * back to), one that still works (unused and not expired, however old), and whether one that works has at least
- * EARLIER_LINK_MIN_LIFE_MS left (`lastsADay`: the worker's welcome may say it still works only then).
+ * EARLIER_LINK_MIN_LIFE_MS left (`lastsADay`: the worker's welcome may say it still works, and the press's mail be
+ * skipped for it, only then).
  */
 async function setupLinks(tx: Tx, parentId: string, now: Date): Promise<{ onItsWay: boolean; works: boolean; lastsADay: boolean }> {
   const rows = await tx.select({ usedAt: parentSigninToken.usedAt, expiresAt: parentSigninToken.expiresAt }).from(parentSigninToken)
@@ -206,9 +208,11 @@ async function prepare(parentId: string, kind: Kind, by: Sender): Promise<Prepar
       // The resend wait of the request page: a set-up link sent a moment ago may be in the mailbox unused, and the
       // press's mail would replace it. It waits, owed, for a later wake.
       if (await linkSentWithin(tx, { parentId: live.id, purpose: "setup", now, withinMs: RESEND_AFTER_MS })) return { go: false, why: "wait" };
-      // A set-up link that still works, made longer ago (asked for since the press): they have one to choose a password
-      // with, and the press's mail would only replace it. It isn't sent.
-      if (links.works) {
+      // A set-up link that still works for a day or more (EARLIER_LINK_MIN_LIFE_MS, the earlier-link welcome's bar),
+      // made longer ago (asked for since the press): they have one to choose a password with, and the press's mail would
+      // only replace it. It isn't sent. One with less life left might run out before they use it: the press's mail then
+      // holds a new link below, which takes its place only once the mail has gone.
+      if (links.lastsADay) {
         await tx.update(parent).set({ welcomeOwed: false, welcomeTriedAt: null, updatedAt: new Date() }).where(eq(parent.id, live.id));
         await writeAudit({ actor: by.actor, action: "parent.welcome.skipped", targetType: "parent", targetId: live.id, after: { to: live.email, mail, reason: "has_live_link" }, ip: by.ip }, tx);
         return { go: false, why: "skipped" };
@@ -350,12 +354,14 @@ async function send(parentId: string, p: Extract<Prepared, { go: true }>, by: Se
  * rest of the batch to go) ends the wake's batch, and while the last welcome the worker tried to send failed (its
  * counts-only mark, WELCOME_MARK, ../jobs/marks.ts), a wake tries one person, not five; the first that goes brings back
  * the batch of five at the next wake. The Health page's parents line says when welcome emails are waiting for that
- * reason. A person whose address was refused is tried again a day later, not every fifteen minutes (holdOffRefused()).
+ * reason. A person whose address was refused is tried again a day later, not every fifteen minutes (holdOffRefused()),
+ * except in a wake that began throttled, which can't tell a refusal from the mail failing (finishWake()).
  */
 export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: number; failed: number }> {
   if (!(await welcomesOn()) || !(await mailWorking())) return { sent: 0, failed: 0 };
   const canBe = await canBeSent();
-  const batch = failedLast(await readMark(WELCOME_MARK)) ? 1 : WELCOME_BATCH;
+  const throttled = failedLast(await readMark(WELCOME_MARK));
+  const batch = throttled ? 1 : WELCOME_BATCH;
   const due = await db.select().from(parent).where(and(canBe, pastBackOff(now)))
     .orderBy(asc(parent.createdAt), asc(parent.id)).limit(batch);
   let sent = 0, failed = 0, mailFailed = 0;
@@ -377,7 +383,7 @@ export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: 
     }
   } finally {
     // Also when a later person's turn threw: what this wake did is marked, so a send that went lifts the throttle.
-    await finishWake(now, { sent, refused, mailFailed, linkNotInPlace: failed - mailFailed - refused.length });
+    await finishWake(now, { throttled, sent, refused, mailFailed, linkNotInPlace: failed - mailFailed - refused.length });
   }
   return { sent, failed };
 }
@@ -389,13 +395,17 @@ export async function sendOwedWelcomes(now: Date = new Date()): Promise<{ sent: 
  * send that went (handed over, `sent` or `linkNotInPlace`) clears it. A server may refuse relaying to every address
  * with no enhanced code that says so, which refusedThisRecipient() can't tell from a bad address: a wake that sent to
  * nobody and had two or more refused is taken for the mail failing (marked failed, so the throttle starts and the
- * Health note shows), and its refused people keep the claim's fifteen-minute back-off like any mail failure; otherwise
- * each is held off a day. Never throws: it runs after the wake's own error, if any.
+ * Health note shows), and its refused people keep the claim's fifteen-minute back-off like any mail failure. A wake that
+ * began throttled (the mark said the last send failed) tries one person, so that check can't fire in it: its refused
+ * person keeps the fifteen-minute back-off too, since the mail may be what refused them, and holding each one tried off
+ * a day would leave everyone waiting a day once the mail is mended while the Health note said one a minute was tried.
+ * Otherwise each refused person is held off a day. Never throws: it runs after the wake's own error, if any.
  */
-async function finishWake(claimedAt: Date, w: { sent: number; refused: string[]; mailFailed: number; linkNotInPlace: number }): Promise<void> {
+async function finishWake(claimedAt: Date, w: { throttled: boolean; sent: number; refused: string[]; mailFailed: number; linkNotInPlace: number }): Promise<void> {
   const handedOver = w.sent + w.linkNotInPlace;
   const refusalsAreTheMail = handedOver === 0 && w.refused.length >= 2;
-  if (!refusalsAreTheMail) await holdOffRefused(w.refused, claimedAt).catch(() => undefined); // not held off: tried again after the claim's back-off
+  // Not held off: tried again after the claim's back-off.
+  if (!refusalsAreTheMail && !w.throttled) await holdOffRefused(w.refused, claimedAt).catch(() => undefined);
   if (handedOver + w.mailFailed + w.refused.length === 0) return;
   if (handedOver === 0 && w.mailFailed === 0 && !refusalsAreTheMail) return; // one refused address, and nothing else
   await markJob(WELCOME_MARK, { counts: { sent: w.sent, recipientRefused: w.refused.length, linkNotInPlace: w.linkNotInPlace },

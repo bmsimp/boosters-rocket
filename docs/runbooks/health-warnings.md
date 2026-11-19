@@ -199,7 +199,8 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
     sending account that may not send to other domains) shows this note, and the Outgoing mail line says "Needs
     attention" with the error, `EENVELOPE` and the server's code. The test email may have gone to an address the
     server delivers itself. Mend the mail settings or the account at your mail provider so it may send to any address,
-    send a test email to an outside address, and the welcomes go again.
+    send a test email to an outside address, and the welcomes go again. While this note shows, nobody the worker
+    tries is held back a day for being refused, so the welcomes start again within a few minutes of the mail working.
   - **One address the mail server refuses** (a mailbox that doesn't exist, or one that is full) is not mail failing
     and doesn't show this: the others still go, that person's `parent.welcome.failed` row in the audit log says
     `recipientRefused`, and the worker tries them again a day later, not every fifteen minutes. If two or more are

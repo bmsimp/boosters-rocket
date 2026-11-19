@@ -208,6 +208,11 @@ describe("welcome emails", () => {
     // Like any mail failure, the five keep the claim's fifteen-minute back-off, not a day's.
     expect((await db.select().from(parent)).filter((p) => p.welcomeTriedAt !== null && p.welcomeTriedAt.getTime() > Date.now())).toEqual([]);
     expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 1 }); // one person a wake now
+    // The throttled wake's one refused person (Parent 6) is not held off a day either: a wake of one can't tell a
+    // refusal from the mail failing, so once the mail is mended nobody waits a day.
+    const [sixth] = await db.select().from(parent).where(eq(parent.name, "Parent 6"));
+    expect(sixth!.welcomeTriedAt).not.toBeNull();
+    expect((await db.select().from(parent)).filter((p) => p.welcomeTriedAt !== null && p.welcomeTriedAt.getTime() > Date.now())).toEqual([]);
     sink.rejectRecipient = null;
     expect(await sendOwedWelcomes(new Date(Date.now() + WELCOME_RETRY_MS + 1000))).toEqual({ sent: 1, failed: 0 }); // still one, and it goes
     expect(failedLast(await readMark(WELCOME_MARK))).toBe(false);
@@ -223,8 +228,13 @@ describe("welcome emails", () => {
     expect(await sendOwedWelcomes()).toEqual({ sent: 0, failed: 1 }); // one person a wake: Bounce, the oldest
     expect(failedLast(await readMark(WELCOME_MARK))).toBe(true);
     expect(sink.messages).toEqual([]);
+    // Refused in a wake that began throttled, Bounce keeps the claim's fifteen-minute back-off, not a day's.
+    const [bounce] = await db.select().from(parent).where(eq(parent.id, bad.id));
+    expect(bounce!.welcomeTriedAt!.getTime()).toBeLessThanOrEqual(Date.now());
     expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 }); // still one a wake; Fine goes, and that clears it
     expect(failedLast(await readMark(WELCOME_MARK))).toBe(false);
+    // So Bounce is tried again once the fifteen minutes pass, not a day on.
+    expect(await sendOwedWelcomes(new Date(Date.now() + WELCOME_RETRY_MS + 1000))).toEqual({ sent: 0, failed: 1 });
   });
 
   it("a wake that throws after a send still marks what it did", async () => {
@@ -820,6 +830,21 @@ describe("welcome emails", () => {
     expect(await linkVerdict("setup", fresh!)).toMatchObject({ ok: true, link: { parentId: p.id } });
     expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: false });
     expect((await audits("parent.welcome.sent")).map((r) => (r.after as { link: string }).link)).toEqual(["setup"]);
+  });
+
+  it("a press mail to someone whose set-up link, asked for since the press, has less than a day left goes with a new link, which takes its place once the mail has gone", async () => {
+    await seedParentSettings({ welcome: true });
+    const p = await person("Welcomed Before", { welcomedAt: new Date("2026-01-01T00:00:00Z") });
+    expect(await oweSetupMails(admin)).toEqual({ ok: true, owed: 1 });
+    const earlier = await linkWithLeft(p.id, EARLIER_LINK_MIN_LIFE_MS - HOUR);
+    expect(await sendOwedWelcomes()).toEqual({ sent: 1, failed: 0 });
+    expect(await audits("parent.welcome.skipped")).toEqual([]);
+    expect(mailText(sink.messages[0]!.raw)).toMatch(/Subject: Choose your password for /);
+    const [fresh] = setupTokensIn(sink.messages[0]!.raw);
+    expect(await linkVerdict("setup", fresh!)).toMatchObject({ ok: true, link: { parentId: p.id } });
+    expect(await linkVerdict("setup", earlier)).toMatchObject({ ok: false });
+    expect((await audits("parent.welcome.sent")).map((r) => r.after)).toEqual([{ to: p.email, mail: "choose_password", link: "setup" }]);
+    expect(await owedNames()).toEqual([]);
   });
 
   it("the check after the send holds the earlier link to the same day: one with less left by then leaves the person owed, and the next try carries a new link", async () => {
