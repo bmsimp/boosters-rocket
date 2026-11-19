@@ -458,6 +458,9 @@ describe("a refused change blocks nothing, and leaves only by the ways it may", 
   });
 
   it("a make-inactive the worker finds QuickBooks has already, without sending it, leaves the link's version", async () => {
+    // The worker reads what the customer owes before a make-inactive (owedBy()), and QuickBooks always answers a
+    // customer read with its Balance: the stub carries one only with this switch, or the read is `no_balance` and stuck.
+    stub.quirks.balances = true;
     await seedQueued({ op: "deactivate", role: "student", qboId: "12", syncToken: "0" });
     inStub("12").Active = false; inStub("12").SyncToken = "5";
     expect((await refreshRoster(WORKER)).ok).toBe(true);
