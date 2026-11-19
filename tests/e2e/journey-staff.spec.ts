@@ -107,6 +107,9 @@ test("a staff member's session: the roster, a season, volunteering, forms, money
     await row.getByLabel("Why? (staff only)").fill("Walk e2e: added by the walk");
     await row.getByRole("button", { name: "Remove", exact: true }).click();
     await expect(signins.getByRole("row").filter({ hasText: GUARDIAN.email })).toContainText("Can't sign in: removed by staff");
+    // The answer outlives the swap of Remove for Reinstate, and the focus, whose button went, is on it.
+    await expect(signins.getByRole("row").filter({ hasText: GUARDIAN.email }).getByRole("status")).toContainText("Removed. They can't sign in to this family any more");
+    await expect(page.locator(":focus")).toContainText("Removed.");
     await expect(signins.getByRole("button", { name: `Reinstate ${GUARDIAN.name}` })).toBeVisible();
     await expect(page.locator("main")).not.toContainText("Walk e2e: added by the walk");
     const made = await sql`SELECT action, after FROM audit_log WHERE id > ${since} AND action IN ('parent.create', 'parent.access.granted', 'parent.access.ended') ORDER BY id`;

@@ -1,5 +1,5 @@
 "use client";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { ACTION_FAILED, safely } from "@/app/components/action-error";
 import { ActionOutcome } from "@/app/components/notice";
 
@@ -35,6 +35,43 @@ export function OneButton({ label, pendingLabel, act }: { label: string; pending
       <Outcome state={state} />
       <button className="btn btn-line" disabled={pending}>{pending ? pendingLabel : label}</button>
     </form>
+  );
+}
+
+/**
+ * Remove or reinstate one guardian row (./guardian-change.tsx). One component for both, kept mounted across the change
+ * (the row's key is its guardian row's id), so the answer stays on the page when the action's refresh swaps Remove for
+ * Reinstate or back, and the focus, whose button is gone, moves to that answer.
+ */
+export function GuardianChangeControls({ name, open, reinstatable, remove, reinstate }: {
+  name: string; open: boolean; reinstatable: boolean; remove: (note: string) => Promise<Done>; reinstate: () => Promise<Done>;
+}) {
+  const [note, setNote] = useState("");
+  const [state, run, pending] = useActionState(async (_: Done | null, what: "remove" | "reinstate") => {
+    const r = await safely(() => (what === "remove" ? remove(note) : reinstate()), failed);
+    if (r.ok) setNote("");
+    return r;
+  }, null);
+  const said = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (state?.ok) said.current?.focus(); }, [state]);
+  if (!state && !open && !reinstatable) return null;
+  return (
+    <div className="stack">
+      {state ? <div ref={said} tabIndex={-1}><ActionOutcome state={state} /></div> : null}
+      {open ? (
+        <details className="more"><summary>Remove<span className="visually-hidden"> {name}</span></summary>
+          <p>They can&apos;t sign in to this family any more, and are signed out of it at once, whatever the family owes. Forms still waiting for their signature start again.</p>
+          <form onSubmit={noSubmit} className="stack">
+            <label className="field"><span>Why? (staff only)</span><textarea rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+            <button type="button" className="btn btn-line" disabled={pending} onClick={() => startTransition(() => run("remove"))}>{pending ? "Removing…" : "Remove"}</button>
+          </form>
+        </details>
+      ) : reinstatable ? (
+        <form action={() => run("reinstate")} className="stack">
+          <button className="btn btn-line" disabled={pending}>{pending ? "Reinstating…" : `Reinstate ${name}`}</button>
+        </form>
+      ) : null}
+    </div>
   );
 }
 
