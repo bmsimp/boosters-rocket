@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { asParent, pageOutcome, type Page } from "../helpers/signed-in";
+import { eq } from "drizzle-orm";
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db/client";
 import { accountingLink, family, signedFormEvidence, signedFormFile } from "@/lib/db/schema";
-import { findMySignedPdf } from "@/lib/forms/my-evidence";
+import { findMySignedPdf, mySignedDownloads } from "@/lib/forms/my-evidence";
 import { resetDb } from "../helpers/db";
 import { seedTwoFamilies, FAMILY_A, type SeededParent } from "../helpers/parent";
 import { fakePdf } from "../helpers/forms";
@@ -90,5 +91,29 @@ describe("an earlier company's signed forms", () => {
       if (pdf) expect(Buffer.compare(pdf, archivedPdf), id).not.toBe(0);
     }
     for (const id of archivedIds) expect(await findMySignedPdf(ctx, id)).toBeNull();
+  });
+
+  it("refuses family A's own form while its evidence is another company's or archived, and gives it while it was kept with no company", async () => {
+    const ctx = { ...a.identity, ip: null };
+    const id = a.forms!.ids.complete, evidenceId = a.forms!.evidence.id;
+    const [was] = await db.select().from(signedFormEvidence).where(eq(signedFormEvidence.id, evidenceId));
+    const set = (values: Partial<typeof signedFormEvidence.$inferInsert>) => db.update(signedFormEvidence).set(values).where(eq(signedFormEvidence.id, evidenceId));
+    try {
+      expect(await findMySignedPdf(ctx, id)).not.toBeNull();
+      // Another company's, though it names A's own request and A's own family: refused, by request and family alike.
+      await set({ realmId: "ANOTHER-COMPANY-REALM" });
+      expect(await findMySignedPdf(ctx, id)).toBeNull();
+      expect(await mySignedDownloads(ctx, [id])).toEqual(new Map());
+      // Kept while A had no QuickBooks link: no company and no copy, found by A's request and A's family alone.
+      await set({ realmId: null, familyQboId: null, subjectQboId: null });
+      expect(Buffer.compare((await findMySignedPdf(ctx, id))!, a.forms!.evidence.sealed)).toBe(0);
+      expect([...(await mySignedDownloads(ctx, [id])).keys()]).toEqual([id]);
+      // The same, archived by a change of company: cut from its request and family, and refused.
+      await set({ earlierCompanyAt: new Date(), requestId: null, familyId: null, studentId: null });
+      expect(await findMySignedPdf(ctx, id)).toBeNull();
+      expect(await mySignedDownloads(ctx, [id])).toEqual(new Map());
+    } finally {
+      await set({ realmId: was!.realmId, familyQboId: was!.familyQboId, subjectQboId: was!.subjectQboId, earlierCompanyAt: null, requestId: was!.requestId, familyId: was!.familyId, studentId: was!.studentId });
+    }
   });
 });

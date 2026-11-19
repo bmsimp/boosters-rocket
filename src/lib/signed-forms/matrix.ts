@@ -3,7 +3,7 @@
 // own row. It reads every family, so it is a list (not audited, as the roster list is not) and never imported by
 // parent code (STAFF_ONLY_IMPORTS in tests/integration/page-guards.test.ts).
 import "server-only";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { requirement, season, seasonStep, signatureRequest, signedFormEvidence, type FormReminders, type FormSetting } from "@/lib/db/schema";
 import { getRosterSource } from "@/lib/roster/source";
@@ -15,6 +15,7 @@ import { isCovered, type SubjectId } from "@/lib/seasons/progress";
 import { toRequirement } from "@/lib/seasons/recorded";
 import { loadSeasonFamilies, type SeasonFamily } from "@/lib/seasons/subjects";
 import { subjectOfRequest } from "@/lib/forms/requests";
+import { currentEvidence } from "@/lib/forms/evidence-company";
 import { CELL_WORDS, FILTER_STATES, REMINDABLE_STATES, cellState, type CellState } from "./rules";
 
 export type MatrixForm = {
@@ -81,9 +82,9 @@ export async function loadMatrix(filter: MatrixFilter): Promise<Matrix | null> {
     getRosterSource(),
   ]);
   const complete = requests.filter((r) => r.state === "complete").map((r) => r.id);
-  // Evidence is matched by request and by the company the cache holds now: never an earlier company's.
-  const evidence = complete.length && realmId !== null ? await db.select({ id: signedFormEvidence.id, requestId: signedFormEvidence.requestId }).from(signedFormEvidence)
-    .where(and(inArray(signedFormEvidence.requestId, complete), eq(signedFormEvidence.realmId, realmId), isNull(signedFormEvidence.earlierCompanyAt))) : [];
+  // Evidence is matched by request, the current company's (or kept with none, for a family with no link): never an earlier company's.
+  const evidence = complete.length ? await db.select({ id: signedFormEvidence.id, requestId: signedFormEvidence.requestId }).from(signedFormEvidence)
+    .where(and(inArray(signedFormEvidence.requestId, complete), currentEvidence(realmId))) : [];
   const waived = new Set(waivers.map((w) => `${w.requirementId}|${String(w.subjectId)}`));
   const requirements = formRows.map((f) => toRequirement(f.row, covers.get(f.row.id) ?? []));
 

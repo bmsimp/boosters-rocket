@@ -121,6 +121,38 @@ describe("a parent downloads their own family's signed form", () => {
   });
 });
 
+describe("a signed form kept while the family had no QuickBooks link", () => {
+  // Kept with no company and no copy, as the evidence job keeps it for a family with no link
+  // (signed-forms-evidence.test.ts). The families are linked here: until the session carries the app's own family
+  // (stage 3), a parent's family is found through its link, so this is that form after the family was linked.
+  const keptWithNoLink = (evidenceId: string) => db.update(signedFormEvidence).set({ realmId: null, familyQboId: null, subjectQboId: null }).where(eq(signedFormEvidence.id, evidenceId));
+
+  it("is the family's own to list and download, and nobody else's: another family's id is the same 404", async () => {
+    await keptWithNoLink(a.forms!.evidence.id);
+    await keptWithNoLink(b.forms!.evidence.id);
+    asParent(a.identity);
+    const ctx = { ...a.identity, ip: null };
+    const res = await askParent(a.forms!.ids.complete);
+    expect(res.status).toBe(200);
+    expect(Buffer.compare(Buffer.from(await res.arrayBuffer()), a.forms!.evidence.sealed)).toBe(0);
+    expect([...(await mySignedDownloads(ctx, [a.forms!.ids.complete, b.forms!.ids.complete, NOBODY])).entries()]).toEqual([[a.forms!.ids.complete, 1]]);
+    expect(await findMySignedPdf(ctx, b.forms!.ids.complete)).toBeNull();
+    const answers = [];
+    for (const id of [b.forms!.ids.complete, NOBODY]) {
+      const r = await askParent(id);
+      answers.push({ status: r.status, body: await r.text(), cache: r.headers.get("cache-control") });
+    }
+    expect(answers).toEqual([{ status: 404, body: "Not found", cache: "no-store" }, { status: 404, body: "Not found", cache: "no-store" }]);
+    const list = await renderPage(FormsPage);
+    expect(list).toContain(`/forms/${a.forms!.ids.complete}/signed`);
+    expect(list).not.toContain(b.forms!.ids.complete);
+    // B's own is B's alone.
+    asParent(b.identity);
+    expect(Buffer.compare(Buffer.from(await (await askParent(b.forms!.ids.complete)).arrayBuffer()), b.forms!.evidence.sealed)).toBe(0);
+    expect((await askParent(a.forms!.ids.complete)).status).toBe(404);
+  });
+});
+
 describe("staff download a signed form's evidence", () => {
   it("checks the session and Forms.Signature.Read first, then audits the read before sending the bytes", async () => {
     const reader = await withRole("reader@club.org", ["Forms.Signature.Read"]);
