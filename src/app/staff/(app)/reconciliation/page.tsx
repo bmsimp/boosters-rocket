@@ -12,6 +12,7 @@ import { WorthALook } from "../balances/worth-a-look";
 import { OneButton, TextAction } from "../seasons/forms";
 import { giveUpAction, tryAgainAction } from "../roster/write-actions";
 import { BuyoutsToLook } from "./buyouts";
+import { CustomersWithNoFamily } from "./no-family";
 import { familyPage } from "@/app/staff/(app)/family-pages";
 
 export const metadata = { title: "Reconciliation" };
@@ -60,7 +61,8 @@ function Writes({ items, caption, canChange }: { items: QueueView[]; caption: st
 
 /**
  * What doesn't line up between the portal and QuickBooks, in one place (v1 spec §6.3, §8.3): staff changes still
- * waiting to reach QuickBooks or stuck, the roster's Needs attention list, and, for staff who may see money, the
+ * waiting to reach QuickBooks or stuck, the roster's Needs attention list, for staff who may link families to
+ * accounting the customers no family is linked to (stage 3's slice 10), and, for staff who may see money, the
  * families whose QuickBooks balance isn't what their invoices add up to. It lists many families, so opening it is not
  * audited as a read of one; each family's own page is. Names are QuickBooks text, shown as text only.
  */
@@ -69,6 +71,8 @@ export default async function ReconciliationPage() {
   const money = can(ctx.effective, "Finance.Balance.Read");
   const [writes, roster, balances] = await Promise.all([loadOpenWrites({ showAmounts: money }), loadRosterPage(), money ? loadBalances() : Promise.resolve(null)]);
   const canChange = can(ctx.effective, "Roster.Family.ReadWrite");
+  // Customers no family is linked to, with "Create a family from this": only for staff who may link families to accounting.
+  const linking = can(ctx.effective, "Accounting.Link.ReadWrite");
   const stuck = writes.filter((w) => w.state === "stuck"), waiting = writes.filter((w) => w.state === "waiting");
   // The customers with a family page (the roster's families, or members in flat books), each by its family record, found
   // through the family kind of link in one lookup for the list: a customer with none links nowhere.
@@ -93,6 +97,8 @@ export default async function ReconciliationPage() {
       </section>
 
       <BuyoutsToLook showAmounts={money} canChange={canChange} />
+
+      {linking && <CustomersWithNoFamily />}
 
       <section className="box" aria-labelledby="attention-h"><h2 id="attention-h">Needs attention in the roster{roster.attention.length ? ` (${roster.attention.length})` : ""}</h2>
         {!roster.roster ? <Notice tone="warning" live="none">The roster can&apos;t be shown right now. <Link href="/staff/roster">Open the roster</Link> to see why.</Notice>
