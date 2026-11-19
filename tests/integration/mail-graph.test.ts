@@ -114,9 +114,14 @@ describe("Graph sender", () => {
       const e = await send(msg).catch((x: unknown) => x);
       expect(e).toBeInstanceOf(MailSendError);
       expect((e as Error).message).toBe("Microsoft Graph didn't accept the message (HTTP 400).");
+      expect((e as MailSendError).recipientRefused).toBe(false);
     }
     reply = (s) => (s.url.includes("/oauth2/") ? okGraph(s) : { status: 400, body: { error: { code: "ErrorInvalidRecipients" } } });
-    await expect(send(msg)).rejects.toThrow("Microsoft Graph didn't accept the message (ErrorInvalidRecipients).");
+    const refused = await send(msg).catch((x: unknown) => x);
+    expect(refused).toBeInstanceOf(MailSendError);
+    expect((refused as Error).message).toBe("Microsoft Graph didn't accept the message (ErrorInvalidRecipients).");
+    // The address itself refused: not a failure of the mail (sendOwedWelcomes() goes on with the others).
+    expect((refused as MailSendError).recipientRefused).toBe(true);
   });
 
   it("reports a refused token with its AADSTS code", async () => {

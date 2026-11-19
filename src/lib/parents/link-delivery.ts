@@ -8,7 +8,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
 import { parent, parentAuthAccount, parentAuthUser, parentSigninToken } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
-import { sendMail } from "@/lib/mail/send";
+import { sendMail, type SendOutcome } from "@/lib/mail/send";
 import type { MailMessage, MailPurpose } from "@/lib/mail/types";
 import { env } from "@/env";
 import { dropHeldLink, putHeldLinkInPlace, type LinkPurpose } from "./signin-links";
@@ -52,11 +52,12 @@ export type HeldLink = { linkId: string; purpose: LinkPurpose; token: string; to
 export type DeliveryCheck = (tx: Tx, live: LinkPerson | null) => Promise<string | null>;
 
 /**
- * What became of a delivery: the mail was not handed over (the held link is removed, the earlier one still works); or it
+ * What became of a delivery: the mail was not handed over (the held link is removed, the earlier one still works;
+ * `recipientRefused` when the server refused the address itself, SendOutcome); or it
  * was, and the link is in place (the person's one live link of its purpose), or it was not put in place, with the reason
  * of its `link_not_sent` row (a reason of the check, `superseded`, `changed_while_mailing`, `not_put_in_place`).
  */
-export type Delivered = { handedOver: false; error: string } | { handedOver: true; inPlace: true } | { handedOver: true; inPlace: false; reason: string };
+export type Delivered = { handedOver: false; error: string; recipientRefused?: true } | { handedOver: true; inPlace: true } | { handedOver: true; inPlace: false; reason: string };
 
 /** Why a mail wasn't handed over when the message itself couldn't be written (the club's name not read, say): a fixed sentence, as a send failure's is. */
 const NOT_WRITTEN = "The email couldn't be written.";
@@ -86,10 +87,10 @@ async function notSent(l: HeldLink, o: Options, reason: string, tx: Tx) {
  */
 export async function deliverHeldLink(l: HeldLink, o: Options): Promise<Delivered> {
   const sent = await (async () => sendMail(await o.message(), { purpose: o.purpose, actor: o.actor, ip: o.ip }))()
-    .catch(() => ({ ok: false as const, error: NOT_WRITTEN }));
+    .catch((): SendOutcome => ({ ok: false, error: NOT_WRITTEN }));
   if (!sent.ok) {
     await forgetUnsentLink(l, o, "mail_failed").catch(() => undefined);
-    return { handedOver: false, error: sent.error };
+    return { handedOver: false, error: sent.error, ...(sent.recipientRefused ? { recipientRefused: true as const } : {}) };
   }
   try {
     return await putLinkInPlace(l, o).catch((e: unknown) => { if (worthAnotherTry(e)) return putLinkInPlace(l, o); throw e; });

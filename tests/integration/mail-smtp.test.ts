@@ -83,5 +83,16 @@ describe("SMTP sender", () => {
     expect(e).toBeInstanceOf(MailSendError);
     expect((e as Error).message).toBe("The mail server refused the username or password.");
     expect(sink.logins).toEqual([{ user: "sender", ok: false }]);
+    expect((e as MailSendError).recipientRefused).toBe(false); // the mail's own problem, not the address's
+  });
+
+  it("marks a 550 to RCPT TO as the one address refused, not the mail failing", async () => {
+    sink = await startMailSink({ secure: true, ...tls });
+    sink.rejectRecipient = "ana@example.com";
+    const e = await sender(sink.port, "tls")(msg).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(MailSendError);
+    expect((e as Error).message).toBe("The mail server didn't accept the message (EENVELOPE 550).");
+    expect((e as MailSendError).recipientRefused).toBe(true);
+    expect(sink.messages).toHaveLength(0);
   });
 });

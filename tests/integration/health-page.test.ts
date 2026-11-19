@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, buyout, jobRun, qboConnection, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
+import { auditLog, buyout, family, jobRun, qboConnection, role, roleAssignment, roleRule, setting, writeQueue } from "@/lib/db/schema";
 import HealthPage from "@/app/staff/(app)/health/page";
 import QuickBooksSettingsPage from "@/app/staff/(app)/settings/quickbooks/page";
 import QuickBooksSetupPage from "@/app/staff/(app)/settings/quickbooks/setup/page";
@@ -33,7 +33,7 @@ import { noteApiOk } from "@/lib/forms/settings";
 import { MONEY_JOB } from "@/lib/money/run-keys";
 import { DUE_REMINDERS_KEY } from "@/lib/seasons/due-reminders";
 import { BREACH_MARK, markBreachCheck, readBreachMark } from "@/lib/parents/breach-mark";
-import { resetDb, seedParent, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
+import { resetDb, seedGuardianInFamily, seedParent, seedStaff, seedWorkingMail, untilALockIsAwaited } from "../helpers/db";
 import { connectForms } from "../helpers/forms";
 import { seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedParentSettings, SIGNINS_ON } from "../helpers/roster-cache";
@@ -327,19 +327,28 @@ describe("the health page", () => {
 
   it("says when welcome emails are waiting because mail is failing, and stops once a welcome goes", async () => {
     await seedParentSettings({ ...SIGNINS_ON, welcome: true });
-    await seedParent({ name: "Owed One", welcomeOwed: true });
+    const owedOne = await seedParent({ name: "Owed One", welcomeOwed: true });
+    const row = await seedGuardianInFamily({ parentId: owedOne.id, familyQboId: "10", status: "invited" });
+    // Owed but with no guardian row, so no wake tries them: not counted.
+    await seedParent({ name: "Owed No Row", welcomeOwed: true });
     const parents = async () => line(await healthReport(NOW), "parents");
     expect(await parents()).toMatchObject({ state: "ok", notes: [] });
     // The worker's last welcome failed: while it is so, it tries one person a wake (sendOwedWelcomes()).
-    await markJob(WELCOME_MARK, { counts: { sent: 0, linkNotInPlace: 0 }, failed: 1 });
+    await markJob(WELCOME_MARK, { counts: { sent: 0, recipientRefused: 0, linkNotInPlace: 0 }, failed: 1 });
     const waiting = await parents();
     expect(waiting).toMatchObject({ state: "attention", word: "Needs attention", fix: { href: "/staff/settings/mail" } });
     expect(waiting.notes).toEqual(["Welcome emails are waiting because mail is failing: 1 person is owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five."]);
+    // Their family made inactive: they stay owed but can't sign in, so no wake tries anyone and the mark stays failed,
+    // yet nobody is waiting to be sent to, and the note goes.
+    await db.update(family).set({ active: false }).where(eq(family.id, row.familyId!));
+    expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
+    await db.update(family).set({ active: true }).where(eq(family.id, row.familyId!));
+    expect((await parents()).notes).toHaveLength(1);
     // Nobody owed, or welcome emails off: nothing is waiting.
     await seedParentSettings({ ...SIGNINS_ON, welcome: false });
     expect(await parents()).toMatchObject({ state: "ok", notes: [] });
     await seedParentSettings({ ...SIGNINS_ON, welcome: true });
-    await markJob(WELCOME_MARK, { counts: { sent: 1, linkNotInPlace: 0 }, failed: 0 });
+    await markJob(WELCOME_MARK, { counts: { sent: 1, recipientRefused: 0, linkNotInPlace: 0 }, failed: 0 });
     expect(await parents()).toMatchObject({ state: "ok", notes: [], fix: null });
   });
 

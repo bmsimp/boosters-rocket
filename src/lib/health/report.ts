@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, jobRun, parent, requirement, season, seasonStep } from "@/lib/db/schema";
+import { auditLog, jobRun, requirement, season, seasonStep } from "@/lib/db/schema";
 import { lastWake } from "@/lib/jobs/runner";
 import { CLEANUP_JOB } from "@/lib/jobs/cleanup";
 import { failedLast, readMark, WELCOME_MARK } from "@/lib/jobs/marks";
@@ -11,6 +11,7 @@ import { loadRosterPage } from "@/lib/roster/queries";
 import { queueCounts } from "@/lib/roster/queue";
 import { mailFailing, mailSummary } from "@/lib/mail/settings";
 import { getParentSettings } from "@/lib/parents/settings";
+import { welcomesToSend } from "@/lib/parents/welcome";
 import { readBreachMark, type BreachMark } from "@/lib/parents/breach-mark";
 import { BREACH_TIMEOUT_MS, type BreachNotChecked } from "@/lib/parents/breach-check";
 import { apiFailing as formsApiFailing, formsSummary } from "@/lib/forms/settings";
@@ -236,9 +237,9 @@ export async function healthReport(now: Date = new Date()): Promise<HealthLine[]
     : `The latest sign-ins have no address: the proxy in front of the portal doesn't send the header ${env.CLIENT_IP_HEADER}. Set CLIENT_IP_HEADER in the server's env file to the header it does send (.env.example lists them).`;
   // Welcome emails waiting because mail is failing: the last welcome the worker tried to send failed, and while that is
   // so it tries one person a wake, not five (sendOwedWelcomes(), src/lib/parents/welcome.ts; its mark, WELCOME_MARK).
-  const [welcomeMark, owedRows] = await Promise.all([readMark(WELCOME_MARK),
-    db.select({ id: parent.id }).from(parent).where(and(eq(parent.welcomeOwed, true), eq(parent.blocked, false)))]);
-  const owed = owedRows.length;
+  // It counts only the people the worker can send to (welcomesToSend(): owed, not blocked, and able to sign in), so the
+  // note goes once none is left to send to, even though no wake has tried anyone since the failure.
+  const [welcomeMark, owed] = await Promise.all([readMark(WELCOME_MARK), welcomesToSend()]);
   const welcomesNote = parents.signin && parents.welcome && failedLast(welcomeMark) && owed > 0
     ? `Welcome emails are waiting because mail is failing: ${owed === 1 ? "1 person is" : `${owed} people are`} owed a welcome or a link to choose a password, and the last one the worker tried to send failed. Until a send works, it tries one person a minute instead of five.`
     : null;

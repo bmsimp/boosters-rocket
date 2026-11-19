@@ -5,8 +5,16 @@ export const attachmentBytes = (a: MailAttachment): Buffer => (typeof a.content 
 export type MailMessage = { to: string; subject: string; text: string; html: string; attachments?: MailAttachment[] };
 /** Sends one message; throws MailSendError. */
 export type MailSender = (m: MailMessage) => Promise<void>;
-/** A send failure. The message is a fixed sentence plus the provider's error code: safe to show staff and to audit, never the body. */
-export class MailSendError extends Error {}
+/**
+ * A send failure. The message is a fixed sentence plus the provider's error code: safe to show staff and to audit, never
+ * the body. `recipientRefused`: the server took the connection and the sender but refused this one address for good
+ * (SMTP's 5xx to RCPT TO, Graph's ErrorInvalidRecipients): the address's problem, not the mail's own, so a batch of mail
+ * to other people goes on (sendOwedWelcomes(), src/lib/parents/welcome.ts).
+ */
+export class MailSendError extends Error {
+  readonly recipientRefused: boolean;
+  constructor(message: string, recipientRefused = false) { super(message); this.recipientRefused = recipientRefused; }
+}
 export type SmtpSecurity = "starttls" | "tls";
 export type StoredMailConfig =
   | { method: "graph"; mailbox: string }

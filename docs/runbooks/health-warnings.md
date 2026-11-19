@@ -192,7 +192,10 @@ The emails the worker sends the day before each volunteer shift, and 14 and 3 da
 - **"Needs attention"**, with "Welcome emails are waiting because mail is failing: ...". The last welcome email (or
   link to choose a password) the worker tried to send failed, so until one goes it tries one person a minute instead of
   five, and the people counted wait their turn. Mend the mail first: the [Outgoing mail](#outgoing-mail) line, and
-  [outgoing mail](mail.md). The first welcome that goes clears it, and the rest go out five a minute again.
+  [outgoing mail](mail.md). The first welcome that goes clears it, and the rest go out five a minute again. Only
+  people who can sign in now are counted. One address the mail server refuses (a mailbox that doesn't exist) is not
+  mail failing and never shows this: the others still go, and that person's `parent.welcome.failed` row in the audit
+  log says `recipientRefused`. Check the address with the family.
 
 ## Password breach check
 
