@@ -179,11 +179,14 @@ What the page can't do is walk the portal's own screens. Do these in the sandbox
    **Pass:** the change goes from Waiting to done on its own, and QuickBooks has it once, not twice.
    **If not:** note the change and what Reconciliation said; [Health page warnings](health-warnings.md#quickbooks) says
    what to do with a stuck one.
-9. **A student moved in QuickBooks itself.** Give a test student an unsigned form and a place on a shift still to come,
-   then in QuickBooks move the student under another test family, and press **Refresh** on the Roster page.
-   **Pass:** the new family's Forms page offers the student's form to sign; the old family's guardian gets "Your place
-   has been freed" for the shift; the audit log shows "What follows a student who moved to another family was
-   recorded" with the cause `roster.refresh#` and a number. **If not:** note what each family's pages show.
+9. **A student moved from the portal, then in QuickBooks itself.** Give a test student an unsigned form and a place on
+   a shift still to come, then move the student under another test family from their family's page in the portal.
+   **Pass:** QuickBooks shows the student under the new family; the new family's Forms page offers the student's form
+   to sign; the old family's guardian gets "Your place has been freed" for the shift; the audit log shows "What
+   follows a student who moved to another family was recorded" with the cause `roster.student.move#` and a number.
+   Then move the student back in QuickBooks itself and press **Refresh** on the Roster page: the portal still has them
+   in the new family (a change made in QuickBooks no longer changes the portal's families), and nobody is mailed.
+   **If not:** note what each family's pages show.
 10. **Closing a buy-out sends nothing.** With a refused or flagged buy-out on Reconciliation, choose **Close this
     buy-out**, give a reason and **Close it**; then open the family's **Its volunteer buy-outs** page.
     **Pass:** the page says how the buy-out ended, the family can choose again, and in QuickBooks no invoice was made,
@@ -485,8 +488,9 @@ work another. Any time before the pilot.
    and its labels ("Signed forms", "Volunteer credit", "Reconciliation"); setup asks for the club before the first
    Admin; a role saved from the checklist no longer takes up new permissions by itself.
 7. A buy-out is billed in the company's home currency with no due date sent; credit earned after a buy-out still counts
-   toward the requirement but doesn't lower the invoice; the daily check voids, through the queue, a per-student
-   buy-out invoice whose student was moved in QuickBooks (rather than only flagging it).
+   toward the requirement but doesn't lower the invoice; a student moved in QuickBooks is no longer followed (stage 3's
+   slice 9c): their forms, places and per-student buy-out stay with the family the portal holds them in, and nothing is
+   voided, until staff move them from the portal, which voids an unpaid per-student invoice through the queue.
 8. Any guardian of a family can check in another guardian's own place ("Check everyone in").
 9. Checking in from inside the installed app: decided on 2026-11-16 (the roadmap): scanning the shift's code with the
    phone's camera stays the way, and on an iPhone that opens Safari. Native apps may come later.
