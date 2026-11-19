@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { requireStaffPage } from "@/lib/guards";
 import { writeAudit } from "@/lib/audit/log";
 import { RECORD_KEY, loadEvidence } from "@/lib/signed-forms/evidence";
+import { recordNameWords } from "@/lib/families/words";
 import { LocalTime } from "../../../../../components/local-time";
 import { DataTable } from "../../../../../components/data-table";
 import { Notice } from "../../../../../components/notice";
@@ -16,7 +17,8 @@ const sizeWords = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n 
 /**
  * One signed form's evidence (v1 spec §9.4): who signed and when, the consents, the template and its last-changed time,
  * the hashes, and a download of each kept file. A staff read of one family's signed form: audited
- * (forms.evidence.read) before anything is shown. Evidence from an earlier QuickBooks company opens here too, from the
+ * (forms.evidence.read) before anything is shown. Evidence kept with no QuickBooks company (a family with no link) is
+ * current, and shows no QuickBooks number. Evidence from an earlier QuickBooks company opens here too, from the
  * archive, by the names it kept.
  */
 export default async function EvidencePage({ params }: { params: Promise<{ id: string }> }) {
@@ -31,7 +33,7 @@ export default async function EvidencePage({ params }: { params: Promise<{ id: s
   return (
     <main className="wrap single">
       <h1 className="page-title">{e.formTitle}</h1>
-      <p className="lede">Signed for {e.subjectName ?? e.subjectQboId}{e.familyName && e.subjectKind === "student" ? `, of ${e.familyName}` : ""}{e.seasonName ? ` · ${e.seasonName}` : ""}. <Link href="/staff/forms">Back to signed forms</Link></p>
+      <p className="lede">Signed for {e.subjectName ?? e.subjectQboId ?? recordNameWords(null, e.subjectKind)}{e.familyName && e.subjectKind === "student" ? `, of ${e.familyName}` : ""}{e.seasonName ? ` · ${e.seasonName}` : ""}. <Link href="/staff/forms">Back to signed forms</Link></p>
       {view.earlier && <Notice tone="info">This form was signed under a QuickBooks company that is no longer connected. It is kept as the club&apos;s record, by the names it had then; families don&apos;t see it.</Notice>}
       {e.mismatchAt && <Notice tone="warning" live="alert">A later fetch from Documenso gave one of these files a different hash, on <LocalTime iso={e.mismatchAt.toISOString()} />. The first copy is the one kept here.</Notice>}
 
