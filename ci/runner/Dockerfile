@@ -1,7 +1,7 @@
 # A GitHub Actions runner for this repository's CI, on a club's own machine (ci/runner/README.md).
 # GitHub's own runner image, plus what .github/workflows/ci.yml and release.yml expect of ubuntu-latest that it lacks:
-# shellcheck, PowerShell (pwsh), the docker compose plugin and the GitHub CLI (gh). Node, pnpm and Playwright's browser
-# come from the workflow's own steps. Every version and checksum is pinned here and bumped by hand (no Dependabot entry).
+# shellcheck, PowerShell (pwsh), the docker compose plugin, the GitHub CLI (gh) and libatomic1, without which the Node
+# that actions/setup-node downloads doesn't start. Node, pnpm and Playwright's browser come from the workflow's own steps. Every version and checksum is pinned here and bumped by hand (no Dependabot entry).
 FROM ghcr.io/actions/actions-runner:2.338.2@sha256:6d0b2d80d80f143f77dcb676e50920100bbb547e39e883454d57f45ab8c31300
 
 ARG PWSH_VERSION=7.7.0
@@ -14,7 +14,7 @@ ARG COMPOSE_SHA256=sha256:b8840f5008c447f41fce0a57ae3adeab42c89b1eb6e6012524bcab
 USER root
 RUN set -eu; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates shellcheck; \
+    apt-get install -y --no-install-recommends ca-certificates libatomic1 shellcheck; \
     curl -fsSLo /tmp/pwsh.deb "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/powershell_${PWSH_VERSION}-1.deb_amd64.deb"; \
     echo "${PWSH_SHA256#sha256:}  /tmp/pwsh.deb" | sha256sum -c -; \
     curl -fsSLo /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.deb"; \
