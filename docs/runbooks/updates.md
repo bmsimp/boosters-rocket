@@ -43,10 +43,13 @@ if you use this installation's proxy.
 
 1. `docker compose ps`: `app` and `documenso` say `healthy`, `migrate` says `Exited (0)`. If `migrate` failed,
    `docker compose logs migrate` says why, and the app was not started on a database it couldn't bring up to date.
-   One reason is the backup check, below. Another is a change the database refuses: its message starts with
-   "Migration ... stopped, and changed nothing". Every change of one update is made together or not at all, so
-   when one stops, none of them is kept and the database is exactly as the version you were running left it. Keep
-   it as it is, report the message, and run the previous version until a fix comes ([Going back](#going-back)).
+   One reason is the backup check, below. Another is a change the database refuses: the log shows a line starting
+   "migration failed: Failed query", followed by the change itself, in which you'll find the words "Migration ...
+   stopped, and changed nothing". The reason, with how many rows it is about, is in the database's own log:
+   `docker compose logs db` shows it as an `ERROR:` line with those same words. Every change of one update is made
+   together or not at all, so when one stops, none of them is kept and the database is exactly as the version you
+   were running left it. Keep it as it is, report both logs' lines, and run the previous version until a fix comes
+   ([Going back](#going-back)).
 2. Sign in as an Admin and open **Health**: **Version** names the new version, and every line reads as it did before
    ([Health page warnings](health-warnings.md) for any that doesn't).
 3. Open the portal as a parent would (a test family): Home, Payments, Forms.
