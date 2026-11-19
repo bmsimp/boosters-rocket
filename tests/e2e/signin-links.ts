@@ -50,31 +50,40 @@ export async function removeZeldaSessionsMadeHere(sql: postgres.Sql): Promise<vo
             AND user_id = (SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
 }
 
-const ZELDA_USER = (sql: postgres.Sql) => sql`(SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
-/** The seeded password's hash, kept while a spec has taken Zelda's row away (one worker runs the specs, one at a time). */
-let seededHash: string | null = null;
+const ZELDA_USER = (sql: postgres.Sql | postgres.TransactionSql) => sql`(SELECT id FROM parent_auth_user WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL}))`;
+/**
+ * Where the seed's password row waits while a spec has taken it away: the same row under a provider nothing in the
+ * portal reads (every read of a password asks for `credential`). It is kept in the database, not in this module, so
+ * the restore works from any worker process: one restarted after a failure, or a pass whose specs never took it (the
+ * phone pass runs parent-a11y.spec.ts's afterAll with every test skipped).
+ */
+const KEPT = "e2e-kept-credential";
 
 /**
- * Takes Zelda's password away, so she has none (a set-up link works only then), keeping the seed's hash to put back. The
- * hash is read from her row, so nothing here hashes the password itself.
+ * Takes Zelda's password away, so she has none (a set-up link works only then), keeping the seed's row to put back.
+ * Taken twice without a restore, the first kept row stays the seed's, and whatever row she has now goes.
  */
 export async function takeZeldaPassword(sql: postgres.Sql): Promise<void> {
-  const rows = await sql`DELETE FROM parent_auth_account WHERE provider_id = 'credential' AND user_id = ${ZELDA_USER(sql)} RETURNING password`;
-  if (rows[0]?.password && seededHash === null) seededHash = rows[0].password as string;
+  await sql.begin(async (tx) => {
+    const [kept] = await tx`SELECT 1 FROM parent_auth_account WHERE provider_id = ${KEPT} AND user_id = ${ZELDA_USER(tx)}`;
+    if (kept) await tx`DELETE FROM parent_auth_account WHERE provider_id = 'credential' AND user_id = ${ZELDA_USER(tx)}`;
+    else await tx`UPDATE parent_auth_account SET provider_id = ${KEPT} WHERE provider_id = 'credential' AND user_id = ${ZELDA_USER(tx)}`;
+  });
 }
 
 /**
- * Removes every link of Zelda's and any password a spec set, and puts the seed's password back (E2E_SIGNIN.password),
- * so the next spec and the next pass find her as the seed left her.
+ * Removes every link of Zelda's and, when a spec took her password away, any password a spec set since, putting the
+ * seed's row back (E2E_SIGNIN.password), so the next spec and the next pass find her as the seed left her. When nothing
+ * was taken her row is the seed's and is left alone.
  */
 export async function removeZeldaLinks(sql: postgres.Sql): Promise<void> {
   await sql`DELETE FROM parent_signin_token WHERE parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`;
-  await sql`DELETE FROM parent_auth_account WHERE provider_id = 'credential' AND user_id = ${ZELDA_USER(sql)}`;
-  if (seededHash !== null) {
-    await sql`INSERT INTO parent_auth_account (id, account_id, provider_id, user_id, password)
-              SELECT gen_random_uuid()::text, u.id, 'credential', u.id, ${seededHash} FROM parent_auth_user u
-              WHERE u.parent_id = (SELECT id FROM parent WHERE email = ${ZELDA_EMAIL})`;
-  }
+  await sql.begin(async (tx) => {
+    const [kept] = await tx`SELECT 1 FROM parent_auth_account WHERE provider_id = ${KEPT} AND user_id = ${ZELDA_USER(tx)}`;
+    if (!kept) return;
+    await tx`DELETE FROM parent_auth_account WHERE provider_id = 'credential' AND user_id = ${ZELDA_USER(tx)}`;
+    await tx`UPDATE parent_auth_account SET provider_id = 'credential' WHERE provider_id = ${KEPT} AND user_id = ${ZELDA_USER(tx)}`;
+  });
 }
 
 /** Removes the devices a spec's sign-ins remembered for Zelda, keeping the one the seed gave her. */
