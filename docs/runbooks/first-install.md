@@ -60,7 +60,10 @@ Documenso seals every signed form with a certificate of the club's own. Follow
    - `CLIENT_IP_HEADER`: `x-forwarded-for` if you will use this installation's own proxy (step 5). With a proxy of your
      own, see [A proxy of your own](#a-proxy-of-your-own) below.
    - Every password and secret: make each one with `openssl rand -hex 32` and paste it in. `SETTINGS_ENCRYPTION_KEY` is
-     the one exception: make it with `openssl rand -base64 32`. Never reuse one value for two lines.
+     the one exception: make it with `openssl rand -base64 32`. Never reuse one value for two lines. Keep
+     `SETTINGS_ENCRYPTION_KEY` safe: it also seals parents' authenticator apps, so losing it, or changing it without
+     keeping the old one as `SETTINGS_ENCRYPTION_KEY_PREVIOUS`, loses every parent's app (they sign in with a backup
+     code or ask the club).
    - `DOCUMENSO_SIGNING_CERTIFICATE`: `/srv/booster-rocket/documenso-signing.p12`, and `DOCUMENSO_SIGNING_PASSPHRASE`
      its passphrase.
    - `DOCUMENSO_SMTP_*`: Documenso's own account mail ([outgoing mail](mail.md#documensos-account-mail)).
