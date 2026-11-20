@@ -25,6 +25,7 @@ import { numberedWhereRepeated } from "@/lib/parents/my-family-names";
 import { billingAddressOf, detailKey } from "@/lib/parents/contact-fields";
 import { contactAgeFrom, contactSendsMayGo, contactSendsSince } from "@/lib/parents/take-in-setting";
 import { whoseDetails } from "@/lib/parents/my-family";
+import { CONTACT_REPLACED_NOTE, type DetailsOf } from "@/lib/parents/contact-queue";
 import { formsForMovedStudent } from "@/lib/forms/moved";
 import { volunteerForMovedStudent } from "@/lib/volunteer/moved-student";
 import { buyoutsForMovedStudent } from "@/lib/buyouts/moved";
@@ -2232,7 +2233,11 @@ const unreadKept = (code: string) => `${BALANCE_UNREAD}:${code}`;
 /** Whether a kept code is a balance that couldn't be read (BALANCE_UNREAD). */
 export const balanceUnread = (code: string | null) => code !== null && code.startsWith(BALANCE_UNREAD);
 /** How long a change saved first is the at-once try's before the worker may take it: longer than one try takes. */
-const SAVED_LEASE_MS = 60_000;
+/**
+ * How long a change saved first is held for the try its saver makes at once after the commit, before the worker may
+ * take it (queueSaved(), and a staff member's change of a guardian's details since stage 3's slice 11c: QueueAs).
+ */
+export const SAVED_LEASE_MS = 60_000;
 const short = (code: string) => code.slice(0, 40);
 
 /**
@@ -2721,7 +2726,7 @@ export async function closeEarlierContacts(tx: Tx, item: Pick<QueueRow, "id" | "
     .where(and(sameContactRecord(w), inArray(writeQueue.state, ["waiting", "stuck", "refused"]), ne(writeQueue.id, item.id), sql`${writeQueue.createdAt} < ${item.createdAt.toISOString()}::timestamptz`));
   const covered = earlier.filter((r) => r.request.op === "contact" && (["phone", "address"] as const).every((f) => (r.request as ContactWrite).change[f] === undefined || w.change[f] !== undefined));
   if (!covered.length) return;
-  const rows = await tx.update(writeQueue).set({ state: "given_up", note: "Replaced by a later change to the same details.", nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
+  const rows = await tx.update(writeQueue).set({ state: "given_up", note: CONTACT_REPLACED_NOTE, nextTryAt: null, finishedAt: new Date(), updatedAt: new Date() })
     .where(and(inArray(writeQueue.id, covered.map((r) => r.id)), inArray(writeQueue.state, ["waiting", "stuck", "refused"])))
     .returning({ id: writeQueue.id, state: writeQueue.state, lastCode: writeQueue.lastCode });
   for (const r of rows) {
@@ -4464,8 +4469,9 @@ export function guardianSentWords(sent: readonly GuardianSent[], op: "grant" | "
 /**
  * Where QuickBooks stands for each of these guardian rows, in words, for a family's Portal sign-ins box and a person's
  * page: their own Parent customer (active or not), a change waiting or kept on the Reconciliation page, a customer of
- * their name under the family not linked to them (item 2(a)), or nothing sent for this club's books or this family.
- * `name` is the person's name. None for a closed row with nothing kept.
+ * their name under the family not linked to them (item 2(a)), or nothing sent for this club's books or this family;
+ * then, since stage 3's slice 11c, a change of their phone or mailing address waiting, stuck or kept there, in words of
+ * its own (contactStanding()). `name` is the person's name. None for a closed row with nothing kept.
  */
 export async function guardianStandings(rows: readonly { guardianId: string; familyId: AppFamilyId | null; name: string; open: boolean }[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
@@ -4473,35 +4479,240 @@ export async function guardianStandings(rows: readonly { guardianId: string; fam
   return db.transaction(async (tx) => {
     for (const r of rows) {
       const items = await itemsOfRow(tx, r.guardianId, ["waiting", "stuck", "refused"]);
-      const kept = items.find((i) => i.state === "refused"), open = items.find((i) => i.state !== "refused");
-      if (open) { out.set(r.guardianId, open.state === "stuck" ? "A change to their Parent customer is stuck: see the Reconciliation page." : "A change to their Parent customer is waiting to reach QuickBooks."); continue; }
-      if (kept) {
-        out.set(r.guardianId, kept.request.op === "deactivate" ? "Their Parent customer was left active in QuickBooks (kept: see the Reconciliation page)."
-          : kept.request.op === "create" ? "No Parent customer was made for them (kept: see the Reconciliation page)." : "Their Parent customer's new name didn't reach QuickBooks (kept: see the Reconciliation page).");
-        continue;
-      }
-      const b = await guardianBooks(tx, r.familyId);
-      if (!b.ok) {
-        out.set(r.guardianId, b.why === "books" ? "Nothing is sent to QuickBooks for a guardian in this club's books."
-          : b.why === "family" ? "Nothing is sent to QuickBooks for them: this family isn't linked to an active family there."
-            // Nothing is sent later for what wasn't sent then: say so, never "for now" (no reconnect queues a create).
-            : "Nothing is sent to QuickBooks for them while QuickBooks isn't connected to the roster's company, or its customer types don't match the club's setup. Nothing that wasn't sent is sent later by itself: the mapping screen will offer to link a Parent customer to them.");
-        continue;
-      }
-      const own = await ownParentCustomer(tx, r.guardianId, b);
-      if (own.is === "own") { out.set(r.guardianId, own.active ? `Linked to their own Parent customer “${own.name}”.` : `Their own Parent customer “${own.name}” is inactive in QuickBooks; the portal never makes it active again.`); continue; }
-      if (own.is === "not_own") { out.set(r.guardianId, "Linked to a customer that isn't their own Parent customer under this family, so nothing is sent for them."); continue; }
-      if (!r.open) continue;
-      const like = namedUnder(b, r.name);
-      const elsewhere = like ? null : await ownNamedElsewhere(tx, b, r.guardianId, r.name);
-      // An open row with no link and nothing on the queue has nothing coming (added while nothing could be sent, or its
-      // create given up): nothing makes one later by itself.
-      out.set(r.guardianId, like ? `QuickBooks has a customer named “${like.displayName}” under this family that isn't linked to them.`
-        : elsewhere !== null ? `QuickBooks already has their record under ${elsewhere}, and takes a name once, so none is made under this family.`
-          : "No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.");
+      const said = [await parentCustomerStanding(tx, r, items.filter((i) => i.request.op !== "contact")), contactStanding(items.filter((i) => i.request.op === "contact"))]
+        .filter((w): w is string => w !== null);
+      if (said.length) out.set(r.guardianId, said.join(" "));
     }
     return out;
   });
+}
+/** guardianStandings()' words for one row's own Parent customer, from its items that aren't a change of its details. */
+async function parentCustomerStanding(tx: Tx, r: { guardianId: string; familyId: AppFamilyId | null; name: string; open: boolean }, items: QueueRow[]): Promise<string | null> {
+  const kept = items.find((i) => i.state === "refused"), open = items.find((i) => i.state !== "refused");
+  if (open) return open.state === "stuck" ? "A change to their Parent customer is stuck: see the Reconciliation page." : "A change to their Parent customer is waiting to reach QuickBooks.";
+  if (kept) {
+    return kept.request.op === "deactivate" ? "Their Parent customer was left active in QuickBooks (kept: see the Reconciliation page)."
+      : kept.request.op === "create" ? "No Parent customer was made for them (kept: see the Reconciliation page)." : "Their Parent customer's new name didn't reach QuickBooks (kept: see the Reconciliation page).";
+  }
+  const b = await guardianBooks(tx, r.familyId);
+  if (!b.ok) {
+    return b.why === "books" ? "Nothing is sent to QuickBooks for a guardian in this club's books."
+      : b.why === "family" ? "Nothing is sent to QuickBooks for them: this family isn't linked to an active family there."
+        // Nothing is sent later for what wasn't sent then: say so, never "for now" (no reconnect queues a create).
+        : "Nothing is sent to QuickBooks for them while QuickBooks isn't connected to the roster's company, or its customer types don't match the club's setup. Nothing that wasn't sent is sent later by itself: the mapping screen will offer to link a Parent customer to them.";
+  }
+  const own = await ownParentCustomer(tx, r.guardianId, b);
+  if (own.is === "own") return own.active ? `Linked to their own Parent customer “${own.name}”.` : `Their own Parent customer “${own.name}” is inactive in QuickBooks; the portal never makes it active again.`;
+  if (own.is === "not_own") return "Linked to a customer that isn't their own Parent customer under this family, so nothing is sent for them.";
+  if (!r.open) return null;
+  const like = namedUnder(b, r.name);
+  const elsewhere = like ? null : await ownNamedElsewhere(tx, b, r.guardianId, r.name);
+  // An open row with no link and nothing on the queue has nothing coming (added while nothing could be sent, or its
+  // create given up): nothing makes one later by itself.
+  return like ? `QuickBooks has a customer named “${like.displayName}” under this family that isn't linked to them.`
+    : elsewhere !== null ? `QuickBooks already has their record under ${elsewhere}, and takes a name once, so none is made under this family.`
+      : "No Parent customer in QuickBooks is linked to them, and none is being made: the mapping screen will offer to link one.";
+}
+/** Which of a guardian's details a contact change sends, in words. */
+const detailsWhat = (w: Pick<ContactWrite, "change">) =>
+  w.change.phone !== undefined && w.change.address !== undefined ? "phone and mailing address" : w.change.phone !== undefined ? "phone" : "mailing address";
+/**
+ * guardianStandings()' words for one row's changes of the guardian's phone and mailing address (stage 3's slice 11c):
+ * one waiting (or stuck) to reach their record in QuickBooks, else one the portal kept; null for none. Never the values,
+ * and never what QuickBooks holds: Reconciliation's compare view shows both, audited.
+ */
+function contactStanding(items: QueueRow[]): string | null {
+  const item = items.find((i) => i.state !== "refused") ?? items.find((i) => i.state === "refused");
+  if (!item || item.request.op !== "contact") return null;
+  const what = detailsWhat(item.request);
+  if (item.state === "stuck") return `A change to their ${what} is stuck: see the Reconciliation page.`;
+  if (item.state === "waiting") return `A change to their ${what} is waiting to reach QuickBooks.`;
+  return `A change to their ${what} didn't reach QuickBooks (kept: see the Reconciliation page).`;
+}
+
+/**
+ * The kept change of a guardian's phone and mailing address (a `refused` contact item) of each of these rows whose
+ * record still stands (the row open, in the active family record it is filed under: compareContact()'s rule), by row:
+ * the item a person's page links Reconciliation's compare view to (stage 3's slice 11c). The newest, where several.
+ */
+export async function keptContactsOf(guardianIds: readonly string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!guardianIds.length) return out;
+  const rows = await db.select({ id: writeQueue.id, request: writeQueue.request, familyId: writeQueue.familyId, rowFamily: guardian.familyId, status: guardian.status, active: family.active })
+    .from(writeQueue).innerJoin(guardian, sql`${guardian.id}::text = ${writeQueue.request}->>'guardianId'`).innerJoin(family, eq(family.id, guardian.familyId))
+    .where(and(eq(writeQueue.state, "refused"), sql`${writeQueue.request}->>'op' = 'contact'`, inArray(guardian.id, [...guardianIds]))).orderBy(desc(writeQueue.createdAt));
+  for (const r of rows) {
+    const g = guardianOf(r.request);
+    if (g === null || out.has(g) || r.status === "disabled" || !r.active || r.familyId === null || String(r.familyId) !== String(r.rowFamily)) continue;
+    out.set(g, r.id);
+  }
+  return out;
+}
+
+/* ---- Staff change a guardian's phone and mailing address (stage 3's slice 11c; app-owned families spec section 9,
+   open questions 6 and 10, Appendix B) ----
+   Staff save a person's details on the person's page, or a family's (books with no parent type) on the family's page,
+   through the parent's own save (saveDetails(), src/lib/parents/contact-edits.ts), which queues each change in its
+   transaction as a parent's are (queueContactChange()), held for the at-once try (QueueAs: the lease of a change saved
+   first, asked by the staff member). After the commit, sendContactSaved() tries each at once, by the one path every try
+   takes (trySavedItem()), under the item's lock tried and never waited for, with the guardian writes' wait for the
+   roster lock: anything not sent at once is left for the worker, once its lease has run out. The portal's details stand
+   whatever QuickBooks does. */
+
+/** What a staff member's save is answered with beside what became of each record (contactSavedWords()). */
+export const STAFF_DETAILS_COPY = {
+  savedPerson: "Saved. These are their phone and mailing address in the portal now.",
+  savedFamily: "Saved. These are the family's phone and mailing address in the portal now, for every guardian of the family.",
+  unchanged: "Those are the details the portal holds already, so nothing was changed.",
+  changed: "These details changed while you were editing (the parent, or someone else here, saved them meanwhile), so nothing was saved. Here they are as they stand now: make your change again if it is still needed.",
+  whoseChanged: "Whose details these are changed while you were editing (the club's membership shape was saved: in books with parents of their own they are each person's, otherwise each family's), so nothing was saved. Reload the page.",
+} as const;
+
+/**
+ * What became of one record a staff member's save goes to (sendContactSaved()), by the family it is under: `nothing`,
+ * nothing was queued for it; `held`, the item's lock was held (someone sending it, or a change to the same record), so
+ * nothing was sent and it waits for the worker; `roster`, the roster lock wasn't free within the wait, the same;
+ * `replaced`, given up with nothing sent as a newer change has taken its place and carries it (`superseded`, or a later
+ * save closed it meanwhile); `stopped`, given up with nothing sent as its record is no longer the one it is for (`note`,
+ * its reason, in words); `given_up`, given up meanwhile otherwise; else trySavedItem()'s outcome.
+ */
+export type ContactGot = { is: "nothing" } | { is: "held" } | { is: "roster" } | { is: "replaced" } | { is: "stopped"; note: string } | SavedTry;
+export type ContactSent = { familyName: string; itemId: string | null; write: ContactWrite | null; got: ContactGot };
+
+/** The notes a contact change is given up with when its record is no longer the one it is for (giveUpContact(), and a guardian's removal). */
+const CONTACT_RECORD_NOTES = new Set<string>([...Object.entries(CONTACT_STOP_NOTES).flatMap(([k, v]) => (k === "superseded" ? [] : [v])), "The guardian was removed in the portal."]);
+/** What a contact item that isn't waiting now holds, told from its row and never guessed (sendContactSaved()). */
+async function contactHeld(itemId: string): Promise<ContactGot> {
+  const [r] = await db.select().from(writeQueue).where(eq(writeQueue.id, itemId));
+  if (!r) return { is: "given_up" };
+  if (r.state === "done") return { is: "done", cached: true };
+  if (r.state === "refused") return { is: "refused", code: r.lastCode ?? "", holds: null };
+  if (r.state === "stuck") return { is: "stuck", code: r.lastCode ?? "" };
+  if (r.state === "waiting") return { is: "waiting", sent: r.sent };
+  if (r.note === CONTACT_REPLACED_NOTE || r.note === CONTACT_STOP_NOTES.superseded) return { is: "replaced" };
+  if (r.note !== null && CONTACT_RECORD_NOTES.has(r.note)) return { is: "stopped", note: r.note };
+  return { is: "given_up" };
+}
+
+/**
+ * The records a staff member's save of `of` goes to, each by the family it is under (the person's open memberships in
+ * active family records, by row; or the family itself), with the item queued for each where there is one. An item
+ * queued for a membership the list no longer has (closed between the save and this) is kept too, by its family.
+ */
+async function contactPlaces(of: DetailsOf, items: readonly QueueRow[]): Promise<{ familyName: string; item: QueueRow | null }[]> {
+  const nameOf = async (ids: AppFamilyId[]) => new Map((ids.length ? await db.select({ id: family.id, name: family.name }).from(family).where(inArray(family.id, ids)) : [])
+    .map((f) => [String(f.id), recordNameWords(f.name, "family")]));
+  if (of.kind === "family") {
+    const names = await nameOf([of.familyId]);
+    const item = items.find((i) => i.request.op === "contact" && guardianOf(i.request) === null) ?? null;
+    return [{ familyName: names.get(String(of.familyId)) ?? recordNameWords(null, "family"), item }];
+  }
+  const rows = await db.select({ id: guardian.id, familyId: guardian.familyId }).from(guardian).innerJoin(family, eq(family.id, guardian.familyId))
+    .where(and(eq(guardian.parentId, of.parentId), ne(guardian.status, "disabled"), eq(family.active, true))).orderBy(asc(guardian.id));
+  const names = await nameOf([...new Set([...rows.flatMap((r) => (r.familyId === null ? [] : [r.familyId])), ...items.flatMap((i) => (i.familyId === null ? [] : [i.familyId]))])]);
+  const named = (id: AppFamilyId | null) => (id === null ? undefined : names.get(String(id))) ?? recordNameWords(null, "family");
+  const placed = rows.map((r) => ({ familyName: named(r.familyId), item: items.find((i) => guardianOf(i.request) === r.id) ?? null }));
+  const left = items.filter((i) => !placed.some((p) => p.item?.id === i.id)).map((i) => ({ familyName: named(i.familyId), item: i }));
+  return [...placed, ...left];
+}
+
+/**
+ * The at-once tries of a staff member's save of a guardian's phone and mailing address (stage 3's slice 11c, the lead's
+ * decision 3), after the save's commit and never inside it: for each record the save goes to (contactPlaces()), the item
+ * queued for it (`itemIds`, saveDetails()'s), read again, then, holding the item's lock (whileItemHeld(), tried and
+ * never waited for: held by someone else, nothing is sent and the item waits for the worker, which takes it once its
+ * lease has run out), the roster lock waited for at most the guardian writes' three seconds (rosterFreeWithin(): past
+ * that nothing is sent, the item is never marked as sent, and the worker takes it), then one try by the one path every
+ * try takes (trySavedItem()), so the gate (contactSendsMayGo()), the record's checks (contactStops()), the comparison
+ * (tryContact()), the version and the stale settle are the worker's. An item that is no longer waiting when it is read,
+ * or that the try finds given up, is told from what its row holds (contactHeld()). `rosterWaitMs` is for tests.
+ */
+export async function sendContactSaved(of: DetailsOf, itemIds: readonly string[], op: GuardianOp & { staffUserId: string }, o: { rosterWaitMs?: number } = {}): Promise<ContactSent[]> {
+  const items = itemIds.length ? await db.select().from(writeQueue).where(inArray(writeQueue.id, [...itemIds])) : [];
+  const out: ContactSent[] = [];
+  for (const { familyName, item } of await contactPlaces(of, items)) {
+    if (!item || item.request.op !== "contact") { out.push({ familyName, itemId: null, write: null, got: { is: "nothing" } }); continue; }
+    const write = item.request;
+    const at = { familyName, itemId: item.id, write };
+    if (item.state !== "waiting") { out.push({ ...at, got: await contactHeld(item.id) }); continue; }
+    const tried = await whileItemHeld(item, async (): Promise<SavedTry | "roster"> => {
+      if (!(await rosterFreeWithin(o.rosterWaitMs ?? GUARDIAN_ROSTER_WAIT_MS))) return "roster";
+      return trySavedItem(item, write, { by: "at_once", linkedBy: op.staffUserId, actor: op.actor, ip: op.ip, permission: op.permission });
+    });
+    const got: ContactGot = tried === null || tried === FAMILY_HELD ? { is: "held" } : tried === "roster" ? { is: "roster" }
+      : tried.is === "given_up" && tried.why === "superseded" ? { is: "replaced" } : tried.is === "given_up" ? await contactHeld(item.id) : tried;
+    out.push({ ...at, got });
+  }
+  return out;
+}
+
+/**
+ * What became of each record a staff member's save of a guardian's details goes to, in words (one sentence per family:
+ * the person's own record under each family they are a guardian of, or the family's own record), with the answer's
+ * status as the other changes saved first use it (`waiting`, information; `attention`, needs attention; none when each
+ * is in QuickBooks, or nothing was sent for it), and the kept items a reader who may open Reconciliation's compare view
+ * is linked to (`compare`). Never a promise that QuickBooks will hold the details: what was done, and what is left to
+ * the worker. `whose`: a person's details, or a family's. `mayCompare`: the reader may open the compare view; otherwise
+ * `whoCompares` says who can. Names are the portal's own, as text.
+ */
+export function contactSavedWords(sent: readonly ContactSent[], whose: "person" | "family", o: { mayCompare: boolean; whoCompares: string }):
+  { sentences: string[]; status?: "waiting" | "attention"; compare: string[] } {
+  const sentences: string[] = [];
+  const compare: string[] = [];
+  let waiting = false, attention = false;
+  for (const s of sent) {
+    const rec = whose === "person" ? `their record under ${s.familyName}` : `${s.familyName}'s record`;
+    const got = s.got;
+    switch (got.is) {
+      case "nothing":
+        sentences.push(whose === "person" ? `Nothing was sent to QuickBooks for their membership of ${s.familyName}: the “In QuickBooks” column says where QuickBooks stands for it.`
+          : `Nothing was sent to QuickBooks for ${s.familyName}.`);
+        break;
+      case "done":
+        sentences.push(got.cached ? `QuickBooks has them on ${rec} now.` : `QuickBooks took them for ${rec}; the portal's copy of QuickBooks shows them after its next read.`);
+        break;
+      case "found":
+        sentences.push(`QuickBooks held them on ${rec} already, so nothing was sent.`);
+        break;
+      case "not_yet":
+        waiting = true;
+        sentences.push(`Nothing was sent to ${rec} yet: the portal is still waiting for its read of the phones and mailing addresses QuickBooks holds (the first since this version was installed, or since the membership shape was last saved). They are sent once that read is done, usually within a few minutes, and you'll find them on the Reconciliation page until then.`);
+        break;
+      case "waiting":
+        waiting = true;
+        sentences.push(got.sent ? `The portal can't tell yet whether QuickBooks took them for ${rec}: its answer didn't arrive. The portal finishes it after its next read of QuickBooks, and you'll find it on the Reconciliation page until then.`
+          : `Sending them to ${rec} is waiting to reach QuickBooks: the portal tries again in a minute, then less often, and you'll find it on the Reconciliation page.`);
+        break;
+      case "held":
+        waiting = true;
+        sentences.push(`Nothing was sent to ${rec} just now: a change to it is being sent to QuickBooks at this moment. The portal tries them shortly, and you'll find them on the Reconciliation page until then.`);
+        break;
+      case "roster":
+        waiting = true;
+        sentences.push(`Nothing was sent to ${rec} just now: the portal is reading the roster from QuickBooks. The portal tries them shortly, and you'll find them on the Reconciliation page until then.`);
+        break;
+      case "replaced":
+        waiting = true;
+        sentences.push(`Nothing was sent to ${rec} from this save: a newer change to these details, saved meanwhile, has taken its place and carries them. The portal sends that one on, and the Reconciliation page lists it if it doesn't go through.`);
+        break;
+      case "stopped":
+        attention = true;
+        sentences.push(`Nothing was sent to ${rec}: ${got.note.charAt(0).toLowerCase()}${got.note.slice(1)}`);
+        break;
+      case "refused": {
+        attention = true;
+        const may = o.mayCompare && s.itemId !== null;
+        if (may) compare.push(s.itemId!);
+        sentences.push(`They didn't reach ${rec} in QuickBooks. ${keptContactWords(got.code, s.write ?? undefined)} It is kept on the Reconciliation page: ${may ? "compare the two there, from the link below." : o.whoCompares}`);
+        break;
+      }
+      case "stuck": case "not_reached": case "given_up":
+        attention = true;
+        sentences.push(`Sending them to ${rec} didn't go through: see the Reconciliation page.`);
+        break;
+    }
+  }
+  return { sentences, ...(attention ? { status: "attention" as const } : waiting ? { status: "waiting" as const } : {}), compare };
 }
 
 /**

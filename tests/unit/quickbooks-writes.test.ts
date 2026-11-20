@@ -51,8 +51,9 @@ const SAVE = "saveMyContact";
 const MAY_SAVE = [CONTACT_EDITS, "src/app/(parent)/family/details/actions.ts"];
 /**
  * Everything the contact edits may export. Beside the parent's own save, the one save of a person's or a family's
- * details (saveDetails(), stage 3's slice 11b), which only the parent's save calls until S11c adds staff; a third
- * exported function would be another way to change a person's details.
+ * details (saveDetails(), stage 3's slice 11b), which the parent's save calls and, since stage 3's slice 11c, the staff
+ * actions of a person's page and a family's page; a third exported function would be another way to change a person's
+ * details.
  */
 const CONTACT_EDITS_EXPORTS = ["CONTACT_COPY", "ContactView", "SaveContactResult", "loadMyContact", SAVE, "saveDetails", "SaveDetailsOutcome"];
 /** Every write the client sends, by its function's name: the contact edits name none of them (stage 3's slice 11a). */
@@ -123,6 +124,13 @@ const MAY_ROSTER_DEACTIVATE = [ROSTER_WRITER, "src/app/staff/(app)/roster/write-
  */
 const GUARDIAN_SENDS = ["queueForGuardian", "sendGuardianSaved"];
 const MAY_GUARDIAN_SEND = [ROSTER_WRITER, "src/lib/parents/guardians.ts", "src/lib/parents/people.ts"];
+/**
+ * A staff member's change of a guardian's phone and mailing address (stage 3's slice 11c): saved through the one save
+ * (saveDetails()), then tried at once after its commit, through the module's own try of a change saved first. Named
+ * only by the module itself and the two staff actions that save details: a person's page's and a family's page's.
+ */
+const CONTACT_SEND = "sendContactSaved";
+const MAY_CONTACT_SEND = [ROSTER_WRITER, "src/app/staff/(app)/parents/actions.ts", "src/app/staff/(app)/roster/write-actions.ts"];
 /** One try of a change saved first, whoever makes it (at once, the press, the queue's worker), settling its own queue item. */
 const SAVED_TRY = "trySavedItem";
 const MAY_SAVED_TRY = [ROSTER_WRITER, "src/lib/roster/queue.ts"];
@@ -564,6 +572,7 @@ describe("what the portal writes to QuickBooks, and who may send each", () => {
       expect(naming(ROSTER_DEACTIVATE), `${ROSTER_DEACTIVATE} makes a linked record inactive in QuickBooks. A new caller is a decision for a slice brief.`).toEqual([...MAY_ROSTER_DEACTIVATE].sort());
       expect(naming(SAVED_TRY), `${SAVED_TRY} sends a change saved first and settles its queue item. A new caller is a decision for a slice brief.`).toEqual([...MAY_SAVED_TRY].sort());
       for (const name of GUARDIAN_SENDS) expect(naming(name), `${name} queues or sends a guardian's Parent customer change. A new caller is a decision for a slice brief.`).toEqual([...MAY_GUARDIAN_SEND].sort());
+      expect(naming(CONTACT_SEND), `${CONTACT_SEND} sends a staff member's change of a guardian's details at once. A new caller is a decision for a slice brief.`).toEqual([...MAY_CONTACT_SEND].sort());
     });
 
     it("refuse a body that could carry another field", () => {

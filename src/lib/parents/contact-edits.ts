@@ -4,7 +4,9 @@
 // QuickBooks or the roster cache: since stage 3's slice 11b the save queues each change, in its own transaction, to be
 // sent on by the write queue's worker (./contact-queue.ts), and the parent waits on none of it. Privacy: whose details are decided from the session's
 // ParentCtx and nothing else (ctx.parentId, or ctx.familyId). Nothing a browser sends ever names a person, a family or a
-// customer: the form carries the new values and the version it was shown, never an id. This module is in the
+// customer: the form carries the new values and the version it was shown, never an id. Since stage 3's slice 11c staff
+// change a person's or a family's details through the same save (saveDetails()), from their own pages' actions, which
+// decide whose details they are from the page's record, checked on the server. This module is in the
 // staff-only import scan (tests/integration/page-guards.test.ts), and names none of the client's writes
 // (tests/unit/quickbooks-writes.test.ts).
 import "server-only";
@@ -15,7 +17,7 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { getShape } from "@/lib/roster/shape";
 import { fieldErrors, formVersion, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
-import { queueContactChange, type DetailsOf } from "./contact-queue";
+import { queueContactChange, type DetailsOf, type QueueAs } from "./contact-queue";
 import { readMyDetails, type MyContact, type MyDetails } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { parentActor } from "./sessions";
@@ -98,7 +100,7 @@ const detailsOf = (v: ContactValues, change: Change): ContactDetails => auditVal
  * saved (`errors`); `none`, there is no such row (a family whose record is not active).
  */
 export type SaveDetailsOutcome =
-  | { is: "saved"; current: ContactForm; queued: number }
+  | { is: "saved"; current: ContactForm; queued: number; queueIds: string[] }
   | { is: "unchanged"; current: ContactForm }
   | { is: "stale"; current: ContactForm | null }
   | { is: "invalid"; errors: string[] }
@@ -108,7 +110,9 @@ export type SaveDetailsOutcome =
  * The one save of a person's or a family's phone and mailing address in the portal (stage 3's slices 11a and 11b):
  * `of`, whose details (a person's id, or an app family's id with the details the family's), from the caller and never
  * from a browser; `form`, the values and the version it was drawn at, read already (parseContactForm()); `o`, who saves,
- * and the permission they use, where there is one. Called only by saveMyContact() in this slice (S11c adds staff).
+ * and the permission they use, where there is one. Called by saveMyContact() and, since stage 3's slice 11c, by the
+ * staff actions of a person's page and a family's page, which give `o.queueAs` (QueueAs, ./contact-queue.ts) so their
+ * items wait for the at-once try they make after the commit, and use the new items' ids (`queueIds`) for it.
  *
  * What changed is found by comparing the form with the details at the form's version. If the version is not the one
  * the row holds now, or was drawn for the other row (`p:` for a person's, `f:` for a family's), nothing is saved (v1 spec
@@ -121,9 +125,9 @@ export type SaveDetailsOutcome =
  * (queueContactChange(), ./contact-queue.ts: the own Parent customer of each of the person's open memberships, or the
  * family's own linked customer), and `parent.details.save` (before and after, only what changed, and the items queued,
  * `queueIds`). Nothing is sent here, and nothing here waits on QuickBooks or on a lock a sender holds: the write queue's
- * worker sends each at its next wake.
+ * worker sends each at its next wake (a staff member's once its lease has run out, if their at-once try didn't).
  */
-export async function saveDetails(of: DetailsOf, form: ContactForm, o: { actor: Actor; ip: string | null; permission?: string }): Promise<SaveDetailsOutcome> {
+export async function saveDetails(of: DetailsOf, form: ContactForm, o: { actor: Actor; ip: string | null; permission?: string; queueAs?: QueueAs }): Promise<SaveDetailsOutcome> {
   const whose = of.kind === "family" ? "family" : "person";
   const formAt = (h: { values: ContactValues; version: number }): ContactForm => ({ values: h.values, version: formVersion(whose, h.version) });
   const before = await heldBy(of);
@@ -152,14 +156,14 @@ export async function saveDetails(of: DetailsOf, form: ContactForm, o: { actor: 
       now: detailsOf(now, { phone: true, address: true }) as Required<ContactDetails> }, o);
     await writeAudit({ actor: o.actor, action: "parent.details.save", permission: o.permission, ...targetOf(of),
       before: auditValues(before.values, change), after: { ...auditValues(values, change), ...(queueIds.length ? { queueIds } : {}) }, ip: o.ip }, tx);
-    return { version: rows[0]!.version, queued: queueIds.length };
+    return { version: rows[0]!.version, queueIds };
   });
   if (saved === null) {
     // Saved meanwhile (another device, or another parent of the family): the details as they stand now.
     const current = await heldBy(of);
     return { is: "stale", current: current ? formAt(current) : null };
   }
-  return { is: "saved", current: { values: now, version: formVersion(whose, saved.version) }, queued: saved.queued };
+  return { is: "saved", current: { values: now, version: formVersion(whose, saved.version) }, queued: saved.queueIds.length, queueIds: saved.queueIds };
 }
 
 /**
