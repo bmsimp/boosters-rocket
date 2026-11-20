@@ -13,7 +13,7 @@ import { family, parent } from "@/lib/db/schema";
 import { writeAudit } from "@/lib/audit/log";
 import type { ParentCtx } from "@/lib/guards";
 import { getShape } from "@/lib/roster/shape";
-import { fieldErrors, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
+import { fieldErrors, formVersion, parseContactForm, sameAddress, samePhone, type ContactForm, type ContactValues } from "./contact-fields";
 import { readMyDetails, type MyContact, type MyDetails } from "./my-family";
 import { takeRateLimit } from "./rate-limit";
 import { parentActor } from "./sessions";
@@ -28,7 +28,7 @@ export const CONTACT_COPY = {
 } as const;
 
 const actorOf = (ctx: ParentCtx) => parentActor({ id: ctx.parentId, email: ctx.email });
-const formOf = (d: MyDetails): ContactForm => ({ values: d.values, version: String(d.version) });
+const formOf = (d: MyDetails): ContactForm => ({ values: d.values, version: formVersion(d.whose, d.version) });
 /** The audit row's target: the person, or the app's family whose details they are. */
 const targetOf = (ctx: ParentCtx, whose: MyDetails["whose"]) =>
   whose === "family" ? { targetType: "family", targetId: String(ctx.familyId) } : { targetType: "parent", targetId: ctx.parentId };
@@ -77,7 +77,8 @@ const columnsOf = (v: ContactValues, change: Change) => ({
  * read whole (parseContactForm) and holds no id.
  *
  * What changed is found by comparing what the browser sent with the details as the form showed them, which are the
- * portal's values at the form's version. If the version is not the one the row holds now, nothing is saved: the parent
+ * portal's values at the form's version. If the version is not the one the row holds now, or was drawn for the other
+ * row (the person's details where the shape now makes them the family's, or the other way round), nothing is saved: the parent
  * is told the details changed and given them as they stand (v1 spec §6.3). Otherwise only the fields that differ are
  * checked for length and characters (fieldErrors): a value taken in from QuickBooks can be longer than the portal lets
  * a parent type, and a parent who changes their phone is not asked to fix a city they never touched. When any part of
@@ -106,7 +107,10 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown): Promise<Sav
   const shape = await getShape();
   const before = await readMyDetails(ctx, shape);
   if (!before) return refuse("no_record", [CONTACT_COPY.askTheClub]);
-  if (String(before.version) !== version) return refuse("stale", [CONTACT_COPY.changed], before.whose, formOf(before));
+  // The version names whose details the form was drawn for as well as their version: a form drawn for the person's
+  // details that comes back after a shape save made them the family's (or the other way round) is not this row's,
+  // whatever its number, and is answered as details changed while editing.
+  if (formVersion(before.whose, before.version) !== version) return refuse("stale", [CONTACT_COPY.changed], before.whose, formOf(before));
   const errors = fieldErrors(values, before.values);
   if (errors.length) return refuse("invalid", errors, before.whose);
 
@@ -133,6 +137,6 @@ export async function saveMyContact(ctx: ParentCtx, input: unknown): Promise<Sav
   }
   const current: ContactForm = { values: { ...before.values, ...(change.phone ? { phone: values.phone } : {}),
     ...(change.address ? { line1: values.line1, line2: values.line2, city: values.city, region: values.region, postalCode: values.postalCode, country: values.country } : {}) },
-  version: String(saved) };
+  version: formVersion(before.whose, saved) };
   return { ok: true, message: before.whose === "family" ? CONTACT_COPY.savedFamily : CONTACT_COPY.saved, current };
 }

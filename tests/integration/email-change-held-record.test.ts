@@ -81,7 +81,7 @@ describe("a record whose email field reads as the parent's own unconfirmed chang
     // What the pages are given to show: the portal's own details, and no record of theirs, so nothing of the record reaches a component.
     expect((await loadMyFamily(ctx()))?.me).toEqual({ name: r.identity.name, email: OLD, phone: RIVERA.parent.phone, edits: "own" });
     expect(await loadMyRecord(ctx())).toBeNull();
-    expect(await loadMyContact(ctx())).toMatchObject({ state: "ok", form: { values: { phone: RIVERA.parent.phone }, version: "0" } });
+    expect(await loadMyContact(ctx())).toMatchObject({ state: "ok", form: { values: { phone: RIVERA.parent.phone }, version: "p:0" } });
     expect(await canChangeMyEmail(ctx())).toBe(false);
     asParent(r.identity);
     for (const page of [FamilyPage, FamilyDetailsPage]) {
@@ -97,8 +97,8 @@ describe("a record whose email field reads as the parent's own unconfirmed chang
   it("given to another person by the club, a save changes the portal's own details and nothing of the record", async () => {
     await recordReads(Q);
     asParent(r.identity);
-    const result = await saveDetailsAction(contactForm({ ...shownTo(RIVERA), line1: "", city: "", region: "", postalCode: "", phone: "512-555-0999" }, "0"));
-    expect(result).toMatchObject({ ok: true, current: { values: { phone: "512-555-0999" }, version: "1" } });
+    const result = await saveDetailsAction(contactForm({ ...shownTo(RIVERA), line1: "", city: "", region: "", postalCode: "", phone: "512-555-0999" }, "p:0"));
+    expect(result).toMatchObject({ ok: true, current: { values: { phone: "512-555-0999" }, version: "p:1" } });
     expect((await db.select({ phone: parent.phone }).from(parent).where(eq(parent.id, r.identity.parentId)))[0]!.phone).toBe("512-555-0999");
     // Nothing was asked of QuickBooks, and nothing changed there or in the cache.
     expect(stub.apiCalls().filter((c) => c.path.includes("/customer"))).toEqual([]);

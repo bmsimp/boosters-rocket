@@ -43,7 +43,7 @@ const SHOWN: ContactValues = { ...NO_DETAILS, phone: RIVERA.parent.phone };
 const NO_PARENT_TYPE = { kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null } as const;
 const audits = () => db.select().from(auditLog).orderBy(asc(auditLog.id));
 const ctxOf = (identity: ParentIdentity) => ({ ...identity, ip: null });
-const save = (values: ContactValues, version = "0", extra: Record<string, string | Blob> = {}) => saveDetailsAction(contactForm(values, version, extra));
+const save = (values: ContactValues, version = "p:0", extra: Record<string, string | Blob> = {}) => saveDetailsAction(contactForm(values, version, extra));
 /** Nothing at all was asked of QuickBooks, and nothing of the roster cache changed. */
 async function nothingSentOrCached(cacheBefore: unknown) {
   expect(stub.apiCalls()).toEqual([]);
@@ -59,9 +59,9 @@ describe("a parent saves their phone and address in the portal", () => {
     asParent(r.identity);
     fromIp("203.0.113.77");
     expect(await loadMyContact(ctxOf(r.identity))).toEqual({ state: "ok",
-      me: { name: RIVERA.parent.name, email: RIVERA.parent.email, phone: RIVERA.parent.phone, edits: "own" }, form: { values: SHOWN, version: "0" } });
+      me: { name: RIVERA.parent.name, email: RIVERA.parent.email, phone: RIVERA.parent.phone, edits: "own" }, form: { values: SHOWN, version: "p:0" } });
     const result = await save({ ...SHOWN, phone: NEW_PHONE });
-    expect(result).toEqual({ ok: true, message: CONTACT_COPY.saved, current: { values: { ...SHOWN, phone: NEW_PHONE }, version: "1" } });
+    expect(result).toEqual({ ok: true, message: CONTACT_COPY.saved, current: { values: { ...SHOWN, phone: NEW_PHONE }, version: "p:1" } });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...SHOWN, phone: NEW_PHONE }, version: 1 });
     // The family's own details, for books with no parent type, are not touched.
     expect(await familyDetails(r.identity.familyId)).toEqual({ values: NO_DETAILS, version: 0 });
@@ -81,7 +81,7 @@ describe("a parent saves their phone and address in the portal", () => {
   it("the address is saved as one, and the audit row holds it before and after", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
-    expect(await save({ phone: SHOWN.phone, ...NEW_ADDRESS })).toEqual({ ok: true, message: CONTACT_COPY.saved, current: { values: { phone: SHOWN.phone, ...NEW_ADDRESS }, version: "1" } });
+    expect(await save({ phone: SHOWN.phone, ...NEW_ADDRESS })).toEqual({ ok: true, message: CONTACT_COPY.saved, current: { values: { phone: SHOWN.phone, ...NEW_ADDRESS }, version: "p:1" } });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { phone: SHOWN.phone, ...NEW_ADDRESS }, version: 1 });
     const [row] = await db.select().from(parent).where(eq(parent.id, r.identity.parentId));
     expect(row).toMatchObject({ addressLine1: "7 Kestrel Way", addressLine2: "Unit B", addressCountry: null }); // an empty field is stored as null
@@ -95,8 +95,8 @@ describe("a parent saves their phone and address in the portal", () => {
     const { r } = await seedContactFamilies(stub);
     await setPersonDetails(r.identity.parentId, NEW_ADDRESS, 3);
     asParent(r.identity);
-    const result = await save({ ...NO_DETAILS, line1: "9 Plover Place" }, "3");
-    expect(result).toMatchObject({ ok: true, current: { values: { phone: "", line1: "9 Plover Place", city: "" }, version: "4" } });
+    const result = await save({ ...NO_DETAILS, line1: "9 Plover Place" }, "p:3");
+    expect(result).toMatchObject({ ok: true, current: { values: { phone: "", line1: "9 Plover Place", city: "" }, version: "p:4" } });
     const [row] = await db.select().from(parent).where(eq(parent.id, r.identity.parentId));
     expect(row).toMatchObject({ phone: null, addressLine1: "9 Plover Place", addressCity: null, contactVersion: 4 });
     expect((await audits())[0]).toMatchObject({ before: { phone: RIVERA.parent.phone, address: { line1: "7 Kestrel Way" } }, after: { phone: "", address: { line1: "9 Plover Place", city: "" } } });
@@ -105,7 +105,7 @@ describe("a parent saves their phone and address in the portal", () => {
   it("saving what the portal already has changes nothing and writes no audit row", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
-    expect(await save({ ...SHOWN, phone: `  ${SHOWN.phone} ` })).toEqual({ ok: true, message: CONTACT_COPY.nothingChanged, current: { values: SHOWN, version: "0" } });
+    expect(await save({ ...SHOWN, phone: `  ${SHOWN.phone} ` })).toEqual({ ok: true, message: CONTACT_COPY.nothingChanged, current: { values: SHOWN, version: "p:0" } });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: SHOWN, version: 0 });
     expect(await audits()).toEqual([]);
   });
@@ -114,11 +114,11 @@ describe("a parent saves their phone and address in the portal", () => {
     await seedContactFamilies(stub);
     const added = await seedParentIn({ familyQboId: R_FAMILY, name: "Hollis Handmade", email: "hollis.handmade@family-r.example" });
     asParent(added.identity);
-    expect(await loadMyContact(ctxOf(added.identity))).toMatchObject({ state: "ok", me: { name: "Hollis Handmade", edits: "own" }, form: { values: NO_DETAILS, version: "0" } });
+    expect(await loadMyContact(ctxOf(added.identity))).toMatchObject({ state: "ok", me: { name: "Hollis Handmade", edits: "own" }, form: { values: NO_DETAILS, version: "p:0" } });
     const page = await renderPage(FamilyDetailsPage);
     expect(page).toContain("<form");
     expect(page).toContain("These are the details the club uses to reach you.");
-    expect(await save({ ...NO_DETAILS, phone: NEW_PHONE, ...NEW_ADDRESS })).toMatchObject({ ok: true, current: { version: "1" } });
+    expect(await save({ ...NO_DETAILS, phone: NEW_PHONE, ...NEW_ADDRESS })).toMatchObject({ ok: true, current: { version: "p:1" } });
     expect(await personDetails(added.identity.parentId)).toEqual({ values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: 1 });
     // The family's own parent keeps theirs.
     const [rivera] = await db.select().from(parent).where(eq(parent.email, RIVERA.parent.email));
@@ -134,15 +134,15 @@ describe("a parent saves their phone and address in the portal", () => {
     const inRivera = await identityNow(r.session.id);
     expect(inRivera.families).toHaveLength(2);
     asParent(inRivera);
-    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toMatchObject({ ok: true, current: { version: "1" } });
+    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toMatchObject({ ok: true, current: { version: "p:1" } });
     // The same person, viewing the other family: the same details, at the version the save left them.
     await db.update(parentAuthSession).set({ familyId: await recordOfCustomer("7210", "family") }).where(eq(parentAuthSession.id, r.session.id));
     const inCedar = await identityNow(r.session.id);
     expect(String(inCedar.familyId)).not.toBe(String(inRivera.familyId));
-    expect(await loadMyContact(ctxOf(inCedar))).toMatchObject({ state: "ok", form: { values: { phone: NEW_PHONE }, version: "1" } });
+    expect(await loadMyContact(ctxOf(inCedar))).toMatchObject({ state: "ok", form: { values: { phone: NEW_PHONE }, version: "p:1" } });
     expect((await loadMyFamily(ctxOf(inCedar)))!.me).toEqual({ name: RIVERA.parent.name, email: RIVERA.parent.email, phone: NEW_PHONE, edits: "own" });
     asParent(inCedar);
-    expect(await save({ ...SHOWN, phone: NEW_PHONE, ...NEW_ADDRESS }, "1")).toMatchObject({ ok: true, current: { version: "2" } });
+    expect(await save({ ...SHOWN, phone: NEW_PHONE, ...NEW_ADDRESS }, "p:1")).toMatchObject({ ok: true, current: { version: "p:2" } });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: 2 });
     for (const familyId of [inRivera.familyId, inCedar.familyId]) expect(await familyDetails(familyId)).toEqual({ values: NO_DETAILS, version: 0 });
     expect(stub.apiCalls()).toEqual([]);
@@ -154,12 +154,12 @@ describe("a parent saves their phone and address in the portal", () => {
     const second = await seedParentIn({ familyQboId: R_FAMILY, name: "Remy Riverquill", email: "remy.riverquill@family-r.example", phone: "512-555-0111" });
     await setFamilyDetails(c.identity.familyId, { phone: "737-555-0999", line1: "48 Cormorant Court", city: "Cedar Park" }, 2);
     asParent(r.identity);
-    expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", me: { name: RIVERA.parent.name, edits: "family", phone: null }, form: { values: NO_DETAILS, version: "0" } });
+    expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", me: { name: RIVERA.parent.name, edits: "family", phone: null }, form: { values: NO_DETAILS, version: "f:0" } });
     let page = await renderPage(FamilyDetailsPage);
     expect(page).toContain("These are the details the club uses to reach your family. Every parent in your family shares them, so a change here changes them for all of you.");
     for (const theirs of ["737-555-0999", "48 Cormorant Court", "Cedar Park"]) expect(page, theirs).not.toContain(theirs);
-    expect(await save({ ...NO_DETAILS, phone: NEW_PHONE, ...NEW_ADDRESS })).toEqual({ ok: true, message: CONTACT_COPY.savedFamily,
-      current: { values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: "1" } });
+    expect(await save({ ...NO_DETAILS, phone: NEW_PHONE, ...NEW_ADDRESS }, "f:0")).toEqual({ ok: true, message: CONTACT_COPY.savedFamily,
+      current: { values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: "f:1" } });
     expect(await familyDetails(r.identity.familyId)).toEqual({ values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: 1 });
     // The person's own row keeps its phone; the other family's details are as they were.
     expect(await personDetails(r.identity.parentId)).toEqual({ values: SHOWN, version: 0 });
@@ -170,8 +170,8 @@ describe("a parent saves their phone and address in the portal", () => {
     page = await renderPage(FamilyDetailsPage);
     expect(page).toContain(`value="${NEW_PHONE}"`);
     expect(page).not.toContain("512-555-0111");
-    expect(await save({ ...NO_DETAILS, phone: "512-555-0333" })).toEqual({ ok: false, errors: [CONTACT_COPY.changed],
-      current: { values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: "1" } });
+    expect(await save({ ...NO_DETAILS, phone: "512-555-0333" }, "f:0")).toEqual({ ok: false, errors: [CONTACT_COPY.changed],
+      current: { values: { phone: NEW_PHONE, ...NEW_ADDRESS }, version: "f:1" } });
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -184,7 +184,7 @@ describe("a parent saves their phone and address in the portal", () => {
     const other = await seedParentIn({ familyQboId: "7420", name: "Other Member", email: "other@flat.example", sourceQboId: "7420" });
     await setFamilyDetails(other.identity.familyId, { phone: "512-555-0155", line1: "1 Elsewhere Row" });
     asParent(m.identity);
-    expect(await save({ ...NO_DETAILS, line1: "3 Wren Row", city: "Pflugerville", region: "TX" })).toMatchObject({ ok: true, message: CONTACT_COPY.savedFamily, current: { version: "1" } });
+    expect(await save({ ...NO_DETAILS, line1: "3 Wren Row", city: "Pflugerville", region: "TX" }, "f:0")).toMatchObject({ ok: true, message: CONTACT_COPY.savedFamily, current: { version: "f:1" } });
     expect(await familyDetails(m.identity.familyId)).toEqual({ values: { ...NO_DETAILS, line1: "3 Wren Row", city: "Pflugerville", region: "TX" }, version: 1 });
     expect(await familyDetails(other.identity.familyId)).toEqual({ values: { ...NO_DETAILS, phone: "512-555-0155", line1: "1 Elsewhere Row" }, version: 0 });
     const page = await renderPage(FamilyDetailsPage);
@@ -217,21 +217,45 @@ describe("details saved while the parent was editing are never overwritten (v1 s
     await setPersonDetails(r.identity.parentId, { phone: "512-555-0333" }, 1);
     asParent(r.identity);
     const result = await save({ ...SHOWN, ...NEW_ADDRESS });
-    expect(result).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: { ...SHOWN, phone: "512-555-0333" }, version: "1" } });
+    expect(result).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: { ...SHOWN, phone: "512-555-0333" }, version: "p:1" } });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...SHOWN, phone: "512-555-0333" }, version: 1 });
     expect((await audits()).map((a) => ({ action: a.action, targetType: a.targetType, targetId: a.targetId, before: a.before, after: a.after }))).toEqual([
       { action: "parent.details.save.failed", targetType: "parent", targetId: r.identity.parentId, before: null, after: { code: "stale" } }]);
     expect(revalidatedPaths()).toEqual([]);
     // Edited again from the current values, with the version they came with, it saves.
-    expect(await save({ ...SHOWN, phone: "512-555-0333", ...NEW_ADDRESS }, "1")).toMatchObject({ ok: true, current: { version: "2" } });
+    expect(await save({ ...SHOWN, phone: "512-555-0333", ...NEW_ADDRESS }, "p:1")).toMatchObject({ ok: true, current: { version: "p:2" } });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { phone: "512-555-0333", ...NEW_ADDRESS }, version: 2 });
+  });
+
+  it("a form drawn for one row's details is never saved onto the other's after a shape save, whatever their versions", async () => {
+    const { r } = await seedContactFamilies(stub);
+    // Both rows at version 1, with details of their own: the person's shown, the family's not.
+    await setPersonDetails(r.identity.parentId, { phone: "512-555-0601", line1: "1 Person Path", city: "Austin" }, 1);
+    await setFamilyDetails(r.identity.familyId, { phone: "512-555-0602", line1: "2 Family Way", city: "Buda" }, 1);
+    const person = await personDetails(r.identity.parentId), theFamily = await familyDetails(r.identity.familyId);
+    asParent(r.identity);
+    expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", form: { values: person.values, version: "p:1" } });
+    // An Admin saves a shape with no parent type while the parent edits: the details are now the family's.
+    await storeShape(NO_PARENT_TYPE);
+    expect(await save({ ...person.values, city: "Round Rock" }, "p:1")).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: theFamily.values, version: "f:1" } });
+    expect(await familyDetails(r.identity.familyId)).toEqual(theFamily);
+    expect(await personDetails(r.identity.parentId)).toEqual(person);
+    // And back: a form drawn for the family's details is not saved onto the person's.
+    await db.delete(rateLimitEvent);
+    expect(await loadMyContact(ctxOf(r.identity))).toMatchObject({ state: "ok", form: { values: theFamily.values, version: "f:1" } });
+    await storeShape(); // a shape with a parent type again
+    expect(await save({ ...theFamily.values, city: "Kyle" }, "f:1")).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: person.values, version: "p:1" } });
+    expect(await personDetails(r.identity.parentId)).toEqual(person);
+    expect(await familyDetails(r.identity.familyId)).toEqual(theFamily);
+    expect((await audits()).map((a) => [a.action, a.after])).toEqual([["parent.details.save.failed", { code: "stale" }], ["parent.details.save.failed", { code: "stale" }]]);
+    expect(stub.apiCalls()).toEqual([]);
   });
 
   it("two saves from forms shown the same version: the first is kept, the second is told and shown it", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
-    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toMatchObject({ ok: true, current: { version: "1" } });
-    expect(await save({ ...SHOWN, city: "Buda" })).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: { ...SHOWN, phone: NEW_PHONE }, version: "1" } });
+    expect(await save({ ...SHOWN, phone: NEW_PHONE })).toMatchObject({ ok: true, current: { version: "p:1" } });
+    expect(await save({ ...SHOWN, city: "Buda" })).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: { ...SHOWN, phone: NEW_PHONE }, version: "p:1" } });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...SHOWN, phone: NEW_PHONE }, version: 1 });
   });
 });
@@ -291,11 +315,13 @@ describe("what the browser sends is checked, and how often", () => {
   it("refuses anything that isn't the form: a file for a field, a version that isn't one, a missing field, something that isn't a form at all", async () => {
     const { r } = await seedContactFamilies(stub);
     asParent(r.identity);
-    const without = contactForm(SHOWN, "0"); without.delete("city");
-    const twice = contactForm(SHOWN, "0"); twice.append("phone", NEW_PHONE);
+    const without = contactForm(SHOWN, "p:0"); without.delete("city");
+    const twice = contactForm(SHOWN, "p:0"); twice.append("phone", NEW_PHONE);
     const attempts: unknown[] = [
-      contactForm(SHOWN, "0", { phone: new Blob(["512-555-0222"]) }), contactForm(SHOWN, ""), contactForm(SHOWN, "0 or 1=1"), contactForm(SHOWN, "1e3"), without,
-      { ...SHOWN, phone: NEW_PHONE, version: "0" }, null, "phone=512-555-0222", [contactForm(SHOWN, "0")],
+      contactForm(SHOWN, "p:0", { phone: new Blob(["512-555-0222"]) }), contactForm(SHOWN, ""), contactForm(SHOWN, "p:0 or 1=1"), contactForm(SHOWN, "p:1e3"), without,
+      // A bare number (a page drawn before the version named whose details it carries), and a prefix that names nobody.
+      contactForm(SHOWN, "0"), contactForm(SHOWN, "x:0"), contactForm(SHOWN, "p:"),
+      { ...SHOWN, phone: NEW_PHONE, version: "p:0" }, null, "phone=512-555-0222", [contactForm(SHOWN, "p:0")],
     ];
     for (const attempt of attempts) {
       await db.delete(rateLimitEvent);
@@ -312,8 +338,8 @@ describe("what the browser sends is checked, and how often", () => {
     asParent(r.identity);
     const max = RATE_LIMITS.contact_save_parent.max;
     expect(max).toBeLessThanOrEqual(10);
-    for (let i = 0; i < max; i++) expect(await save({ ...SHOWN, phone: `512-555-03${10 + i}` }, String(i))).toMatchObject({ ok: true });
-    for (let i = 0; i < 3; i++) expect(await save({ ...SHOWN, phone: "512-555-0399" }, String(max))).toEqual({ ok: false, errors: [CONTACT_COPY.tooMany] });
+    for (let i = 0; i < max; i++) expect(await save({ ...SHOWN, phone: `512-555-03${10 + i}` }, `p:${i}`)).toMatchObject({ ok: true });
+    for (let i = 0; i < 3; i++) expect(await save({ ...SHOWN, phone: "512-555-0399" }, `p:${max}`)).toEqual({ ok: false, errors: [CONTACT_COPY.tooMany] });
     expect(await personDetails(r.identity.parentId)).toEqual({ values: { ...SHOWN, phone: `512-555-03${10 + max - 1}` }, version: max });
     const log = await audits();
     expect(log.map((a) => a.action)).toEqual([...Array.from({ length: max }, () => "parent.details.save"), "parent.details.save.failed"]);
@@ -351,20 +377,21 @@ describe("whose details come from the session and nothing else (v1 spec §12)", 
     for (const [shape, whose] of [[null, "person"], [NO_PARENT_TYPE, "family"]] as const) {
       if (shape) await storeShape(shape);
       const theirs = whose === "person" ? theirPerson : theirFamily;
+      const v = (n: number) => `${whose === "person" ? "p" : "f"}:${n}`;
       const mineNow = () => (whose === "person" ? personDetails(a.identity.parentId) : familyDetails(a.identity.familyId));
       // B's values with B's version, B's ids beside them: B's version is not A's, so nothing is saved, and what comes
       // back is A's own details, with nothing of B in it.
       for (const id of ids) {
         await db.delete(rateLimitEvent);
-        const refused = await save(theirs.values, String(theirs.version), naming(id));
-        expect(refused, `${whose} ${id}`).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: (await mineNow()).values, version: String((await mineNow()).version) } });
+        const refused = await save(theirs.values, v(theirs.version), naming(id));
+        expect(refused, `${whose} ${id}`).toEqual({ ok: false, errors: [CONTACT_COPY.changed], current: { values: (await mineNow()).values, version: v((await mineNow()).version) } });
         for (const marker of b.markers) expect(JSON.stringify(refused), marker).not.toContain(marker);
         await theirsUnchanged();
       }
       // B's values at A's own version, every id of B's beside them: they land in A's own details as text, and B's are as they were.
       await db.delete(rateLimitEvent);
       const before = await mineNow();
-      expect(await save({ ...theirs.values, line2: ids.join(" ") }, String(before.version), naming(b.identity.parentId))).toMatchObject({ ok: true });
+      expect(await save({ ...theirs.values, line2: ids.join(" ") }, v(before.version), naming(b.identity.parentId))).toMatchObject({ ok: true });
       expect(await mineNow()).toEqual({ values: { ...theirs.values, line2: ids.join(" ") }, version: before.version + 1 });
       await theirsUnchanged();
     }
@@ -373,7 +400,7 @@ describe("whose details come from the session and nothing else (v1 spec §12)", 
 
   it("refuses anyone who is not a signed-in parent with a family chosen, the same way whatever the reason", async () => {
     const { r } = await seedContactFamilies(stub);
-    const form = () => contactForm({ ...SHOWN, phone: NEW_PHONE }, "0");
+    const form = () => contactForm({ ...SHOWN, phone: NEW_PHONE }, "p:0");
     await expect(saveDetailsAction(form())).rejects.toThrow("Not allowed");
     asParentChoosing(r.identity);
     await expect(saveDetailsAction(form())).rejects.toThrow("Not allowed");

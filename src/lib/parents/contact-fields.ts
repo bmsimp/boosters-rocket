@@ -6,8 +6,11 @@
 export type ContactValues = { phone: string; line1: string; line2: string; city: string; region: string; postalCode: string; country: string };
 export type ContactField = keyof ContactValues;
 /**
- * What the form shows and sends back: the values, and the version they were read at (the person's or the family's
- * `contact_version`, as digits), so that a change saved meanwhile is noticed and not overwritten.
+ * What the form shows and sends back: the values, and the version they were read at, which says whose details they are
+ * and that row's `contact_version`: `p:<n>` for the person's own, `f:<n>` for the family's (formVersion()). A change
+ * saved meanwhile is noticed and not overwritten, and so is a form drawn for the person's details that comes back after
+ * the membership shape made them the family's, or the other way round: the two rows count their versions apart, so a
+ * number alone could match the other row's.
  */
 export type ContactForm = { values: ContactValues; version: string };
 
@@ -16,7 +19,9 @@ export type ContactForm = { values: ContactValues; version: string };
  * this was written, so these are chosen to sit at or under what QuickBooks is known to take: 30 for a phone number
  * (the limit QuickBooks itself reports for one), and for the address well under its 500 a line, 255 for a city,
  * state or country and 30 for a postal code. The owner's sandbox check confirms a phone of 30 characters is accepted
- * (CUSTOMER_UPDATE in src/lib/quickbooks/client.ts). A value QuickBooks still refuses is reported as such, not saved.
+ * (CUSTOMER_UPDATE in src/lib/quickbooks/client.ts). Since stage 3's slice 11a the values are the portal's own and
+ * nothing on the parent's save is sent to QuickBooks (S11b sends each change on); a value the take-in brought from
+ * QuickBooks can be longer than these (fieldErrors()).
  */
 export const CONTACT_FIELDS: readonly { name: ContactField; label: string; max: number }[] = [
   { name: "phone", label: "Phone", max: 30 },
@@ -38,7 +43,10 @@ const MAX_SENT = 2_000;
 const range = (from: number, to: number) => `${String.fromCodePoint(from)}-${String.fromCodePoint(to)}`;
 const REORDERS = `${range(0x202a, 0x202e)}${range(0x2066, 0x2069)}`;
 const NOT_SAVED = new RegExp(`[\\p{Cc}${range(0x2028, 0x2029)}${REORDERS}]`, "u");
-const VERSION = /^\d{1,20}$/;
+const VERSION = /^[pf]:\d{1,20}$/;
+
+/** The version a form carries for details read at `version` from the person's row or the family's. */
+export const formVersion = (whose: "person" | "family", version: number): string => `${whose === "family" ? "f" : "p"}:${version}`;
 
 /** What ends a line: the control characters that do, and the line and paragraph separators. */
 const BREAKS = `\\n\\r\\u000b\\u000c\\u0085${range(0x2028, 0x2029)}`;
@@ -116,9 +124,10 @@ export function parseContactForm(input: unknown): ParsedContact {
  * What is wrong with the fields the parent changed, in the form's order: too long, or a character that is never
  * saved. Markup is not refused: it is text, stored as text and shown as text.
  *
- * `shown` is what the form was shown (the record as QuickBooks has it). A field that still holds that is not checked:
- * it is QuickBooks' own value, which can be longer than the portal lets a parent type, and a parent who is changing
- * their phone can't be asked to shorten a city they never touched. With `shown` null every field is checked.
+ * `shown` is what the form was shown (the portal's own values at the form's version). A field that still holds that is
+ * not checked: it may be a value the take-in brought from QuickBooks, which can be longer than the portal lets a parent
+ * type, and a parent who is changing their phone can't be asked to shorten a city they never touched. With `shown` null
+ * every field is checked.
  */
 export function fieldErrors(values: ContactValues, shown: ContactValues | null): string[] {
   const errors: string[] = [];
