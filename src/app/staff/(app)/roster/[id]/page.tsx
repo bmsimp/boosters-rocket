@@ -48,7 +48,8 @@ function People({ id, title, noun, people, contact, empty }: { id: string; title
     { key: "name", header: noun, rowHeader: true, cell: (p) => p.name },
     ...(contact ? [
       { key: "email", header: "Email", cell: (p: Person) => p.customer?.email ?? "No email address" },
-      // QuickBooks' own copy, from the roster cache: since stage 3's slice 11a the phone a parent sees and changes is the portal's.
+      // QuickBooks' own copy, from the roster cache: since stage 3's slice 11a the phone a parent sees and changes is the
+      // portal's, and since slice 11b each change of it is sent on to this record after the save (or kept on Reconciliation).
       { key: "phone", header: "Phone in QuickBooks", cell: (p: Person) => p.customer?.phone ?? "No phone number" },
     ] : []),
     { key: "status", header: "In QuickBooks", cell: (p) => p.standing ?? standing(p.customer) },

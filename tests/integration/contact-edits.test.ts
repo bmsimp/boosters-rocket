@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { asParent, asParentChoosing, asStaff, fromIp, renderPage, revalidatedPaths } from "../helpers/signed-in";
 
-// A parent's phone and address are the portal's own (stage 3's slice 11a): nothing here is sent to QuickBooks. The stub
-// is connected anyway, so a request that was sent would be seen (stub.apiCalls()), never reach Intuit.
+// A parent's phone and address are the portal's own (stage 3's slice 11a): the save sends nothing to QuickBooks, and
+// only queues each change for the worker to send on (slice 11b, tests/integration/contact-sent-on.test.ts). The stub is
+// connected anyway, so a request that was sent would be seen (stub.apiCalls()), never reach Intuit.
 const stubBase = vi.hoisted(() => ({ url: "" }));
 vi.mock("@/lib/quickbooks/endpoints", async (original) => {
   const m = await original<typeof import("@/lib/quickbooks/endpoints")>();
@@ -12,7 +13,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, parent, parentAuthSession, qboCustomer, rateLimitEvent } from "@/lib/db/schema";
+import { auditLog, family, parent, parentAuthSession, qboCustomer, rateLimitEvent, writeQueue } from "@/lib/db/schema";
 import type { ParentIdentity } from "@/lib/auth/resolve";
 import { CONTACT_COPY, loadMyContact } from "@/lib/parents/contact-edits";
 import { loadMyFamily } from "@/lib/parents/my-family";
@@ -87,7 +88,7 @@ describe("a parent saves their phone and address in the portal", () => {
     expect(row).toMatchObject({ addressLine1: "7 Kestrel Way", addressLine2: "Unit B", addressCountry: null }); // an empty field is stored as null
     const none = { line1: "", line2: "", city: "", region: "", postalCode: "", country: "" };
     expect((await audits()).map((a) => ({ action: a.action, before: a.before, after: a.after }))).toEqual([
-      { action: "parent.details.save", before: { address: none }, after: { address: NEW_ADDRESS } }]);
+      { action: "parent.details.save", before: { address: none }, after: { address: NEW_ADDRESS, queueIds: [expect.any(String)] } }]);
     expect(stub.apiCalls()).toEqual([]);
   });
 
@@ -372,6 +373,9 @@ describe("whose details come from the session and nothing else (v1 spec §12)", 
       expect(await personDetails(b.identity.parentId)).toEqual(theirPerson);
       expect(await familyDetails(b.identity.familyId)).toEqual(theirFamily);
       for (const row of await audits()) expect([String(a.identity.familyId), a.identity.parentId, null]).toContain(row.targetId);
+      // Nothing is queued to be sent to any record of B's (stage 3's slice 11b).
+      const queued = await db.select().from(writeQueue);
+      expect(queued.filter((q) => String(q.familyId) === String(b.identity.familyId) || ids.includes(q.targetQboId ?? ""))).toEqual([]);
     };
     asParent(a.identity);
     for (const [shape, whose] of [[null, "person"], [NO_PARENT_TYPE, "family"]] as const) {

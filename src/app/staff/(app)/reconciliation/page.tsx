@@ -88,8 +88,8 @@ const NOT_OFFERED: Record<NonNullable<QueueView["notOffered"]>, string> = {
  * words say only that QuickBooks holds other details.
  */
 const contactDetails = (i: QueueView) => (i.details === null ? null : <>
-  <span className="when">QuickBooks has: {i.details.quickbooks}.</span>
-  <span className="when">The portal has: {i.details.portal}.</span>
+  <span className="when">{`QuickBooks has: ${i.details.quickbooks}.`}</span>
+  <span className="when">{`The portal has: ${i.details.portal}.`}</span>
 </>);
 
 /** Why "Send the portal's value" isn't offered for a refused item, by what it was: a guardian's taken name is the person's to rename (stage 3's slice 9h). */

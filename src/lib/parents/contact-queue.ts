@@ -70,9 +70,9 @@ const pick = (d: ContactDetails, fields: readonly Field[]): ContactDetails =>
  * membership that is kept refused, or waiting or stuck and never sent (`sent` false, conditioned in the update itself,
  * so a sender that has marked one as maybe sent keeps it; one a sender holds locked at this moment is left alone, read
  * as one that may have been sent), is closed as given up (`roster.write.replaced`), and the new item carries the newest
- * values of every field any of them changed and the oldest before-value of each, so it always says what QuickBooks last
- * held by the portal's knowledge. One that may have been sent is left to finish, and the new item also accepts what it
- * asked for as what QuickBooks may hold (`orWas`). It takes no roster lock and no "being sent" lock, and waits for none.
+ * values of every field any of them changed and the oldest before-value of each among every open change of the record,
+ * so it always says what QuickBooks last held by the portal's knowledge. One that may have been sent is left to finish,
+ * and the new item also accepts what it asked for as what QuickBooks may hold (`orWas`). It takes no roster lock and no "being sent" lock, and waits for none.
  */
 export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change: ContactDetails; was: ContactDetails; now: Required<ContactDetails> }, o: { actor: Actor; ip: string | null }): Promise<string[]> {
   const found = await targetsOf(tx, of);
@@ -98,11 +98,14 @@ export async function queueContactChange(tx: Tx, of: DetailsOf, saved: { change:
           before: { state: r.state, code: r.lastCode }, after: { state: "given_up", replacedBy: { op: "contact" } } }, tx);
       } else maybeSent.push(w);
     }
-    // Every field this save or a replaced change asked for, at the portal's value now; each before-value the oldest.
+    // Every field this save or a replaced change asked for, at the portal's value now; each before-value the oldest of
+    // every open change of the record (one that may have been sent included: what QuickBooks held before it, if it never
+    // landed), else the portal's value before this save.
     const fields = FIELDS.filter((f) => saved.change[f] !== undefined || replaced.some((w) => w.change[f] !== undefined));
     const was: ContactDetails = {};
+    const oldestFirst = open.map((r) => r.request as ContactWrite);
     for (const f of fields) {
-      const first = replaced.find((w) => w.was[f] !== undefined);
+      const first = oldestFirst.find((w) => w.was[f] !== undefined);
       const value = first ? first.was[f] : saved.was[f];
       if (value !== undefined) Object.assign(was, { [f]: value });
     }
