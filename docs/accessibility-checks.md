@@ -23,7 +23,7 @@ in the page's order, and a page the keyboard can't Tab out of; and after each ac
 | 6. The details form | Family, Update my details and Back to Family by keyboard. The form itself is not: the run can't reach QuickBooks, so the page shows only its note (below). |
 | 7. The email change | The seeded session is stamped as proved just now and put back after (asking again, the sign-in release's slice SI-5a, is journey 10). An address with no "@" keeps the focus in the field; the good one is announced with the focus left on Send me a link; on the emailed link's page, the refused Yes keeps the focus with its alert. |
 | 8. The Display page | Each choice group is one stop and the arrow keys choose (Dark sets `data-theme="dark"`, Match my device takes it off); Contrast, Text size and Motion follow, then Sign out, which signs out. |
-| 10. Sign-in settings: asking again | From Family, "Sign-in settings" by Tab and Enter; the password field, then Continue; Enter puts the focus in the code field; a wrong code is an alert with the focus left in the field; the emailed code by Enter, and the thank-you takes the focus; then New password, New password again, Change my password (never pressed) and Sign out everywhere (never pressed); Tab then leaves the page. The seeded session's `strong_at` and the spent code are put back after. |
+| 10. Sign-in settings: asking again | From Family, "Sign-in settings" by Tab and Enter; the password field, then Continue; Enter puts the focus in the code field; a wrong code is an alert with the focus left in the field; the emailed code by Enter, and the thank-you takes the focus; then New password, New password again, Change my password (never pressed) and Sign out everywhere (never pressed); Tab then leaves the page. The seeded session's `strong_at` is put back after, and the codes the journey made are deleted (the seed has none). |
 
 Still walked only by hand, or not at all, because the browser run can't reach the service: agreeing to sign and the
 signing frame (journey 3's second half, against the local Documenso as in step 6), saving the phone and address form
@@ -175,17 +175,23 @@ can't reach QuickBooks, so no buy-out is made there).
 
 ### 10. Sign-in settings: asking again before a change (`/family/sign-in`, and `/family/email` the same way)
 
-Added with the sign-in release's slice SI-5a; walked by `tests/e2e/keyboard-journeys.spec.ts`, not yet by hand.
+Added with the sign-in release's slice SI-5a. Journey 10 of `tests/e2e/keyboard-journeys.spec.ts` walks what is marked
+"walked"; the rest is how the page is built, walked neither by the spec nor by hand yet.
 
-- Order: the club bar, then the password box (Your password, Continue), Sign out everywhere, Back to Family. The
-  address a password manager files the password under is a hidden `username` field, never a stop.
-- Continue moves to the code step, whose field takes the focus; Start again goes back to the password field. A wrong
-  password or code is an alert, with the focus left where it was (the busy button is `aria-disabled`).
-- Once proved, "Thank you, that's you. You can make the change now." takes the focus and the change form follows it:
-  New password, New password again, Change my password. A change that is made, and "Sign out everywhere", replace
-  their form with what happened, which takes the focus, and a Sign in button: the parent is signed out everywhere.
-- On `/family/email` the same asking comes before the new address field, and a person with no password is offered
-  "Email me a link to choose a password" instead.
+- Walked: the order: the club bar, then the password box (Your password, Continue), Sign out everywhere, Back to
+  Family. The address a password manager files the password under is a hidden `username` field, never a stop.
+- Walked: Continue moves to the code step, whose field takes the focus (and is described by the words that a code was
+  emailed); a wrong code is an alert, with the focus left in the field (the busy button is `aria-disabled`).
+- Walked: once proved, "Thank you, that's you. You can make the change now." takes the focus and the change form
+  follows it: New password, New password again, Change my password (never pressed), then Sign out everywhere (never
+  pressed).
+- Not walked yet: Start again goes back to the password field; a wrong password is an alert with the focus left in the
+  field.
+- Not walked yet: a change that is made, and "Sign out everywhere", replace every form of the page with what happened,
+  which takes the focus, and the way to sign in again (Sign in; with no password yet, Choose a password): the parent is
+  signed out everywhere. The spec never presses either, so the seeded session lives on.
+- Not walked yet: on `/family/email` the same asking comes before the new address field, and a person with no password
+  is offered "Email me a link to choose a password" instead.
 
 ### On a phone: the tab bar and the focus
 
