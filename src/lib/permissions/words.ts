@@ -31,7 +31,7 @@ export const PERMISSION_WORDS: Record<Permission, string> = {
   "Forms.Signature.Read": "See who has signed each form, and download signed forms",
   "Forms.Signature.ReadWrite": "Remind guardians to sign, and start an unfinished form again",
   "Volunteer.Credit.ReadWrite": "Add, remove and correct a family's volunteer credit",
-  "Accounting.Link.ReadWrite": "Link families to accounting: make a family in the portal from a QuickBooks customer no family is linked to",
+  "Accounting.Link.ReadWrite": "Link families to accounting: see every family's link to the books, with every family's guardians' names and sign-in addresses, and make a family in the portal from a QuickBooks customer no family is linked to",
 };
 
 /** The areas of the checklist, in the order the Roles page shows them. Each grantable permission is in exactly one. */

@@ -96,7 +96,18 @@ export async function requireStaffPage(permission?: Permission): Promise<StaffCt
   redirect((await hasStaffSession()) ? "/refused" : "/staff/sign-in");
 }
 
-export type ParentSessionCtx = { parentId: string; sessionId: string; ip: string | null };
+/**
+ * A second permission a staff page needs beside the one its guard checked (a role written with patterns can hold one
+ * without the other): refused as the guard refuses, with the same `access.refused` row naming the permission missing,
+ * then the one generic refusal page.
+ */
+export async function requireStaffAlso(ctx: StaffCtx, permission: Permission): Promise<void> {
+  if (can(ctx.effective, permission)) return;
+  await writeAudit({ actor: { door: "staff", id: ctx.staffUserId, label: ctx.email }, action: "access.refused", permission, ip: ctx.ip });
+  redirect("/refused");
+}
+
+export type ParentSessionCtx ={ parentId: string; sessionId: string; ip: string | null };
 
 /** For the family chooser: a signed-in parent, whether or not a family is chosen yet. */
 export function parentSessionAction<A extends unknown[], R>(fn: (ctx: ParentSessionCtx, ...args: A) => Promise<R>) {

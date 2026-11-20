@@ -11,6 +11,7 @@ const SEASONS = 'href="/staff/seasons"', PROGRESS = 'href="/staff/seasons/progre
 const BALANCES = 'href="/staff/balances"', VOLUNTEERING = 'href="/staff/volunteer"', SETTINGS = 'href="/staff/settings"';
 const RECONCILIATION = 'href="/staff/reconciliation"', CREDIT = 'href="/staff/volunteer/credit"', SIGNED = 'href="/staff/forms"';
 const ROLES = 'href="/staff/roles"', AUDIT = 'href="/staff/audit"', STAFF = 'href="/staff/people"';
+const LINKS = 'href="/staff/links"';
 
 async function staffWith(...patterns: string[]) {
   const s = await seedStaff({ email: "helper@club.org", name: "Hal Helper" });
@@ -45,7 +46,7 @@ describe("the staff menu", () => {
     await asAdmin();
     expect(await entries()).toEqual([
       "Home",
-      "Families: Roster, Parents",
+      "Families: Roster, Parents, Accounting links",
       "Season: Seasons, Progress, Signed forms, Volunteering, Volunteer credit",
       "Money: Balances, Reconciliation",
       "Settings",
@@ -120,6 +121,17 @@ describe("the staff menu", () => {
     expect(nav).toContain(RECONCILIATION);
   });
 
+  it("shows Accounting links only to someone who holds both the linking permission and Roster.Read, as the page asks", async () => {
+    await staffWith("Accounting.Link.ReadWrite", "Roster.Read");
+    expect(await entries()).toEqual(["Home", "Families: Roster, Accounting links", "Money: Reconciliation"]);
+    await resetDb();
+    await staffWith("Accounting.Link.ReadWrite");
+    expect(await menu()).not.toContain(LINKS);
+    await resetDb();
+    await staffWith("Roster.Read");
+    expect(await menu()).not.toContain(LINKS);
+  });
+
   it("shows Volunteer credit only to someone who may change credit, even without the events", async () => {
     await staffWith("Volunteer.Credit.ReadWrite");
     expect(await entries()).toEqual(["Home", "Season: Volunteer credit"]);
@@ -155,6 +167,7 @@ describe("the staff menu", () => {
     expect(await current("/staff/volunteer/credit/10")).toEqual(["/staff/volunteer/credit"]);
     expect(await current("/staff/forms/evidence/0b0f2a8e-0000-4000-8000-000000000001")).toEqual(["/staff/forms"]);
     expect(await current("/staff/reconciliation")).toEqual(["/staff/reconciliation"]);
+    expect(await current("/staff/links")).toEqual(["/staff/links"]);
     // Every settings page is under the one Settings entry.
     for (const path of ["/staff/settings", "/staff/settings/forms", "/staff/settings/parents/setup", "/staff/settings/club/edit"]) {
       expect(await current(path), path).toEqual(["/staff/settings"]);

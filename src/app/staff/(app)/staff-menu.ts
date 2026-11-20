@@ -13,6 +13,8 @@ const groups: { label: string; links: Rule[] }[] = [
   { label: "Families", links: [
     { href: "/staff/roster", label: "Roster", when: holds("Roster.Read") },
     { href: "/staff/parents", label: "Parents", when: holds("Parents.ReadWrite") },
+    // The page is the linking permission's, and checks Roster.Read itself: a role written with patterns may hold one alone.
+    { href: "/staff/links", label: "Accounting links", when: (e) => can(e, "Accounting.Link.ReadWrite") && can(e, "Roster.Read") },
   ] },
   { label: "Season", links: [
     // Two entries: someone who only ticks names off (Season.Progress.*) can't open the set-up pages.
