@@ -128,8 +128,8 @@ export function AuthenticatorBox({ email, app, proved, hasPassword, strict }: { 
           <path d={setup.qr.path} fill="black" />
         </svg>
         <div>
-          <p id="app-key-label">{COPY.appKey}</p>
-          <code className="app-key" aria-labelledby="app-key-label">{setup.key}</code>
+          <p>{COPY.appKey}</p>
+          <code className="app-key">{setup.key}</code>
         </div>
         <CopyButton text={setup.key.replace(/ /g, "")} label={COPY.copyKey} />
         <form className="stack" onSubmit={(e) => { e.preventDefault(); void confirm(); }}>

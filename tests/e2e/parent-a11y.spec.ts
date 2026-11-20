@@ -6,6 +6,8 @@ import { addressOf, isDynamic, parentRoutes } from "./parent-routes";
 import { PARAMS } from "./parent-params";
 import { MIN_TARGET, focusStop, layoutProblems } from "./a11y-checks";
 import { mintZeldaLink, NO_SUCH_LINK, removeZeldaLinks, takeZeldaPassword, type LinkPurpose } from "./signin-links";
+import { E2E_SIGNIN } from "./signin-seed";
+import { clearZeldaCounts, keepZeldaProof, removeZeldaSecondSteps, setUpAppOnPage, setZeldaProof } from "./authenticator-steps";
 
 /**
  * Every page a parent sees, in every display mode, at a phone's width and a desktop's (step 6 of the roadmap; PRODUCT.md:
@@ -62,7 +64,15 @@ const summary = (text: string | undefined) => (text ?? "").replace(/\s+/g, " ").
  * a set-up or reset link made for Zelda just before the page is opened (tests/e2e/signin-links.ts), its token added to
  * the end of `address`; the links are removed after the run, so the seed is as it was.
  */
-type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose };
+type Target = { label: string; address: string; signedIn: boolean; deviceStore?: Record<string, string>; status?: number; link?: LinkPurpose; app?: AppState };
+/**
+ * A state of the "Authenticator app" box of /family/sign-in that only presses reach (the sign-in release, slice SI-6b):
+ * the set-up shown (the QR code, the key and its copy press, the code field), the backup codes shown once, the box with
+ * the app on, and asking again for the app's code. Nobody seeded has an app: it is set up for Zelda through the page's
+ * own presses each time the page is opened (prepareApp()), in a session stamped as proved just now, and removed after,
+ * her session's proof and her counts put back as they were (tests/e2e/authenticator-steps.ts).
+ */
+type AppState = "setup" | "codes" | "on" | "asked";
 
 /** The parent pages, from disk. A dynamic one is opened with its `own` params: the seeded family's thing. */
 function parentTargets(): Target[] {
@@ -101,7 +111,15 @@ const BEFORE_SIGN_IN: Target[] = [
   { label: "not found, signed out", address: "/no-such-page", signedIn: false, status: 404 },
 ];
 
-const TARGETS = [...parentTargets(), ...BEFORE_SIGN_IN];
+/** The authenticator app's states (AppState), on /family/sign-in, which parentTargets() checks as the seeded session sees it. */
+const APP_TARGETS: Target[] = [
+  { label: "/family/sign-in (authenticator app being set up)", address: "/family/sign-in", signedIn: true, app: "setup" },
+  { label: "/family/sign-in (backup codes shown)", address: "/family/sign-in", signedIn: true, app: "codes" },
+  { label: "/family/sign-in (authenticator app on)", address: "/family/sign-in", signedIn: true, app: "on" },
+  { label: "/family/sign-in (asking again for the app's code)", address: "/family/sign-in", signedIn: true, app: "asked" },
+];
+
+const TARGETS = [...parentTargets(), ...APP_TARGETS, ...BEFORE_SIGN_IN];
 
 /** The pages under src/app/sign-in, from disk: "set-up/[token]/page.tsx" is "/sign-in/set-up/[token]". */
 const signInRoutes = () => parentRoutes("src/app/sign-in").map((route) => (route === "/" ? "/sign-in" : `/sign-in${route}`));
@@ -114,11 +132,35 @@ test("every page under src/app/sign-in is opened here", () => {
 
 test.skip(({ viewport }) => (viewport?.width ?? 0) < 760, "one pass, in the desktop project, at its own widths: the phone project would repeat it");
 test.describe.configure({ timeout: 120_000 });
-test.afterAll(async () => { await removeZeldaLinks(sql); await sql.end(); });
+let putProofBack: () => Promise<void> = async () => undefined;
+test.afterAll(async () => { await removeZeldaLinks(sql); await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack(); await sql.end(); });
 // A run cut off in the gold pass leaves the club gold: put the seeded color back first.
 test.beforeAll(async () => {
   await sql`UPDATE setting SET value = jsonb_set(value, '{color}', to_jsonb(${SEEDED_COLOR}::text)) WHERE key = 'club' AND value->>'color' = ${GOLD}`;
+  // A run cut off with an app set up for Zelda leaves it: nobody seeded has one.
+  await removeZeldaSecondSteps(sql);
+  putProofBack = await keepZeldaProof(sql);
 });
+
+/** Brings the open /family/sign-in to an app state (AppState) by the page's own presses, as a parent would. */
+async function prepareApp(page: Page, state: AppState) {
+  const box = page.getByRole("region", { name: "Authenticator app" });
+  if (state === "setup") {
+    await box.getByRole("button", { name: "Set up an authenticator app", exact: true }).click();
+    await expect(box.getByRole("img", { name: "QR code to scan with your authenticator app" })).toBeVisible();
+    return;
+  }
+  await setUpAppOnPage(page, box);
+  if (state === "codes") return;
+  // Asking again is drawn for a session with no recent proof: it is taken away before the page is drawn again.
+  if (state === "asked") await setZeldaProof(sql, false);
+  await page.reload();
+  await expect(box.getByText("Your authenticator app is set up.")).toBeVisible();
+  if (state === "on") return;
+  await box.getByLabel("Your password").fill(E2E_SIGNIN.password);
+  await box.getByRole("button", { name: "Continue" }).click();
+  await expect(box.getByLabel("Code from your authenticator app, or a backup code")).toBeVisible();
+}
 
 /** Opens a target in a context of its own, as the seeded parent or nobody, and waits for its fonts. */
 async function open(browser: Browser, target: Target, width: number): Promise<{ page: Page; close: () => Promise<void> }> {
@@ -137,12 +179,19 @@ async function open(browser: Browser, target: Target, width: number): Promise<{ 
   // A set-up link works only for a person with no password: the seed's of Zelda's is taken away for it, and put back
   // after the spec (removeZeldaLinks()). A reset link works with it, or without.
   if (target.link === "setup") await takeZeldaPassword(sql);
+  // An app state starts from none, in a session proved just now, with no count of an earlier opening in the way.
+  if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await setZeldaProof(sql, true); }
   const address = target.link ? `${target.address}${await mintZeldaLink(sql, target.link)}` : target.address;
   const res = await page.goto(address);
   expect(res?.status(), `${target.label} answered ${res?.status()} at ${address}: it can't be checked with the seeded data. `
     + `A dynamic parent page needs its ids in PARAMS (tests/e2e/parent-params.ts).`).toBe(target.status ?? 200);
+  if (target.app) await prepareApp(page, target.app);
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  return { page, close: () => context.close() };
+  const close = async () => {
+    await context.close();
+    if (target.app) { await removeZeldaSecondSteps(sql); await clearZeldaCounts(sql); await putProofBack(); }
+  };
+  return { page, close };
 }
 
 /** Draws the page in a mode: the Display page's attributes on <html>, and the media features that match them. */
