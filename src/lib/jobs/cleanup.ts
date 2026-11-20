@@ -52,6 +52,7 @@ export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "sig
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
   parent_auth_user: "Better Auth's parent accounts", parent_auth_account: "Better Auth's parent accounts",
+  parent_auth_passkey: "a guardian's own passkeys, kept until they remove one (SI-7b) or a staff reset removes them (SI-9), and gone with the person; the passkey library's challenges live in parent_auth_verification, deleted when expired",
   setting: "the portal's settings, replaced in place; only a retired feature's (RETIRED_SETTINGS) is deleted",
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",

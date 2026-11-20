@@ -1367,3 +1367,35 @@ export const parentAuthUser = parentAuth.user;
 export const parentAuthSession = parentAuth.session;
 export const parentAuthAccount = parentAuth.account;
 export const parentAuthVerification = parentAuth.verification;
+
+/**
+ * A guardian's passkeys (the sign-in release, slice SI-7a; section 6 of the app-owned families spec, "Passkeys
+ * anywhere", and open questions 24, 30 and 35): the parent door's alone, beside its Better Auth tables and not through
+ * authTables(), so the staff door has none. Its columns are the ones @better-auth/passkey's model names, under the
+ * library's own JavaScript names, which its drizzle adapter matches by (`credentialID` above all): `public_key` is the
+ * COSE public key, standard base64 (`base64.encode()` of @better-auth/utils); `credential_id` the credential's id,
+ * base64url as the browser sends it (unique here: one credential is one row, the portal's own rule, where the library
+ * marks it indexed only); `counter` the signature counter, written by the library itself after each verified
+ * assertion; `transports` comma-joined. `last_used_at` is the portal's alone (the library neither writes nor returns
+ * it, as with the session's `strong_at`), set when a passkey signs someone in (src/lib/parents/passkeys.ts, the only
+ * portal module that reads or writes this table). A passkey belongs to APP_URL's host (the relying party id): a club
+ * that changes its address leaves them unusable. Kept until the guardian removes one (SI-7b) or a staff reset removes
+ * them all (SI-9), and gone with the person's sign-in account; nothing else that ends a person's sign-in removes it.
+ */
+export const parentAuthPasskey = pgTable("parent_auth_passkey", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  publicKey: text("public_key").notNull(),
+  userId: text("user_id").notNull().references(() => parentAuthUser.id, { onDelete: "cascade" }),
+  credentialID: text("credential_id").notNull(),
+  counter: integer("counter").notNull(),
+  deviceType: text("device_type").notNull(),
+  backedUp: boolean("backed_up").notNull(),
+  transports: text("transports"),
+  createdAt: created(),
+  aaguid: text("aaguid"),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+}, (t) => [
+  index("parent_auth_passkey_user_ix").on(t.userId),
+  uniqueIndex("parent_auth_passkey_credential_id_uq").on(t.credentialID),
+]);
