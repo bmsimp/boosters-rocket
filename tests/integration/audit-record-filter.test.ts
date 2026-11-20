@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/lib/db/client";
 import { desc, eq, inArray, or } from "drizzle-orm";
-import { accountingLink, accountingLinkEnded, auditLog, student } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, auditLog, guardian, student } from "@/lib/db/schema";
 import { asAppFamilyId } from "@/lib/families/ids";
 import { writeAudit } from "@/lib/audit/log";
 import { auditExportScope, auditPage, parseAuditFilters } from "@/lib/audit/query";
 import { setRosterSource } from "@/lib/roster/source";
-import { resetDb } from "../helpers/db";
+import { resetDb, seedParent } from "../helpers/db";
 import { fam, seedCache, seedShape, stu } from "../helpers/roster-cache";
 import { recordOfCustomer } from "../helpers/app-records";
 import { seedSeason } from "../helpers/season";
@@ -364,5 +364,16 @@ describe("the audit page's filter for a customer a family was linked to and anot
   it("finds an unlink under the family and under each student whose link it ended", async () => {
     expect(await tagged(`student:${leo}`)).toEqual(["rivera-unlinked"]);
     expect(await tagged(leo)).toEqual(["rivera-unlinked"]);
+  });
+
+  it("never bounds a student's window by a guardian row's ended link to the same customer", async () => {
+    // A guardian row of the Chens whose own link to 12 ended before Leo's did: a guardian row is neither kind, so Leo's
+    // window for 12 still has no lower bound, and a row naming 12 from before it is still Leo's.
+    const kit = await seedParent({ name: "Kit Chen", email: "kit@example.com" });
+    const [row] = await db.insert(guardian).values({ parentId: kit.id, familyId: asAppFamilyId(chen), status: "invited" }).returning();
+    await db.insert(accountingLinkEnded).values({ id: "00000000-0000-4000-8000-0000000000c1", system: "quickbooks", realmId: REALM, customerId: "12", guardianId: row!.id,
+      origin: "carried_over", linkedAt: ago(500), linkedBy: null, endedAt: ago(150), endedBy: "00000000-0000-4000-8000-0000000000aa", endedHow: "unlinked" });
+    await rowAt(ago(200), "season.progress.family.read", "qbo_customer", "12", { after: { tag: "leo-old" } });
+    expect(await tagged(`student:${leo}`)).toEqual(["leo-old", "rivera-unlinked"]);
   });
 });

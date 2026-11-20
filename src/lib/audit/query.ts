@@ -119,21 +119,28 @@ async function customersOfRecord(record: AuditFilters["record"]): Promise<Record
     : sql`(${t.familyId}::text = ${id} or ${t.studentId}::text = ${id})`);
   // The record's link that is, and its links that were (stage 4's slice M3b: an unlink moves them to accounting_link_ended).
   const [live, ended] = await Promise.all([
-    db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId, linkedAt: accountingLink.linkedAt }).from(accountingLink)
+    db.select({ customerId: accountingLink.customerId, familyId: accountingLink.familyId }).from(accountingLink)
       .where(and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId), ofRecord(accountingLink))),
-    db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, linkedAt: accountingLinkEnded.linkedAt, endedAt: accountingLinkEnded.endedAt })
+    db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, endedAt: accountingLinkEnded.endedAt })
       .from(accountingLinkEnded).where(and(eq(accountingLinkEnded.system, QUICKBOOKS), eq(accountingLinkEnded.realmId, realmId), ofRecord(accountingLinkEnded))),
   ]);
   const mine = [...live.map((l) => ({ ...l, endedAt: null as Date | null })), ...ended];
   if (mine.length === 0) return { id, kind: type, families: [], students: [] };
-  // Each customer's other records of the same kind whose links to it ended: the latest that ended before this record's
-  // link was made bounds its window from below (rows about the customer written then were that other record's).
+  // Each customer's other records of the same kind (a family's or a student's, never a guardian row's) whose links to
+  // it ended: the latest that ended before this record's link bounds its window from below (rows about the customer
+  // written then were that other record's). Two records of one kind are never linked to one customer at once (the
+  // unique indexes accounting_link_family_customer_uq and _student_customer_uq), so every other record's link to it
+  // ended before this record's live link was made, and before this record's ended link ended exactly when it ended
+  // first: the bound compares ended_at with ended_at, never with linked_at, which a link takes from its transaction's
+  // start, before it waited for the roster lock.
   const others = ended.length === 0 && (await db.select({ id: accountingLinkEnded.id }).from(accountingLinkEnded).limit(1)).length === 0 ? []
-    : await db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, endedAt: accountingLinkEnded.endedAt }).from(accountingLinkEnded)
+    : await db.select({ customerId: accountingLinkEnded.customerId, familyId: accountingLinkEnded.familyId, studentId: accountingLinkEnded.studentId, endedAt: accountingLinkEnded.endedAt })
+      .from(accountingLinkEnded)
       .where(and(eq(accountingLinkEnded.system, QUICKBOOKS), eq(accountingLinkEnded.realmId, realmId), inArray(accountingLinkEnded.customerId, [...new Set(mine.map((l) => l.customerId))]),
         sql`coalesce(${ofRecord(accountingLinkEnded)}, false) = false`));
   const windowsOf = (asFamily: boolean): Window[] => mine.filter((l) => (l.familyId !== null) === asFamily).map((l) => {
-    const before = others.filter((o) => o.customerId === l.customerId && (o.familyId !== null) === asFamily && o.endedAt <= l.linkedAt).map((o) => o.endedAt.getTime());
+    const before = others.filter((o) => o.customerId === l.customerId && (asFamily ? o.familyId !== null : o.studentId !== null) && (l.endedAt === null || o.endedAt < l.endedAt))
+      .map((o) => o.endedAt.getTime());
     return { customerId: l.customerId, from: before.length ? new Date(Math.max(...before)) : null, to: l.endedAt };
   });
   return { id, kind: type, families: windowsOf(true), students: windowsOf(false) };
@@ -141,7 +148,8 @@ async function customersOfRecord(record: AuditFilters["record"]): Promise<Record
 /**
  * One customer a record is or was linked to, and when it was the record's (stage 4's slice M3b): rows naming the customer
  * match only when written after `from` (the latest unlink of another record of the same kind from that customer, before
- * this record's link was made) and at or before `to` (this record's own unlink of it); null bounds nothing. With no ended
+ * this record's link to it ended, or before now for its live link) and at or before `to` (this record's own unlink of
+ * it); null bounds nothing. With no ended
  * link anywhere every window is unbounded, and the filter finds what it found before.
  */
 type Window = { customerId: string; from: Date | null; to: Date | null };
