@@ -14,12 +14,13 @@ export const REMINDER_CLAIM_DAYS = 365;
 export const FINISHED_WRITES_DAYS = 30;
 const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 /**
- * Settings whose feature is gone (stage 3 of the app-owned families spec, slice 7a), so nothing reads, writes or
- * expires them any more: the previous company's people as they were (`parents.previous_company`, names and addresses
- * of a company the club left, promised gone after 90 days) and the review notice's last send (`parents.review_notice`).
- * Their life ended with the feature: the clean-up removes any still stored.
+ * Settings whose feature is gone, so nothing reads, writes or expires them any more: their life ended with the feature,
+ * and the clean-up removes any still stored. None is listed now: the two the retired reviews left (the previous
+ * company's snapshot, `parents.previous_company`, and the review notice's mark, `parents.review_notice`) were deleted
+ * by migration 0046, with the reviews' tables. A feature retired later lists its setting's key here, and adds back a
+ * test that a listed key is deleted and counted (`retiredSettings`): while the list is empty that delete runs nowhere.
  */
-export const RETIRED_SETTINGS = ["parents.previous_company", "parents.review_notice"] as const;
+export const RETIRED_SETTINGS: readonly string[] = [];
 
 export type CleanupCounts = {
   staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; rememberedDevices: number; rateLimitEvents: number;
@@ -53,8 +54,6 @@ export const KEPT_TABLES: Record<string, string> = {
   auth_provider: "the staff sign-in set-up", provider_certificate: "the staff sign-in set-up, rotated by an Admin",
   staff_user: "staff accounts, removed by an Admin", role: "roles", role_rule: "roles", role_assignment: "roles",
   parent: "the people who sign in to the portal: the app's own records", guardian: "each person's membership of a family, open or closed: the app's own records",
-  held_address: "retired with the held-address review (stage 3 of the app-owned families spec): neither read nor written, kept until a later slice drops it",
-  family_match: "retired with the match review (stage 3 of the app-owned families spec): neither read nor written, kept until a later slice drops it",
   qbo_connection: "the one QuickBooks connection", qbo_customer_type: "the roster cache, replaced by each refresh", qbo_customer: "the roster cache, replaced by each refresh",
   qbo_item: "QuickBooks' products and services, replaced each time staff read the list; emptied on a change of company",
   season: "seasons are history", season_step: "seasons are history", requirement: "seasons are history", requirement_cover: "seasons are history",
@@ -179,7 +178,8 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const verifications = n(await tx.delete(staffAuthVerification).where(lt(staffAuthVerification.expiresAt, now)).returning({ id: staffAuthVerification.id }))
     + n(await tx.delete(parentAuthVerification).where(lt(parentAuthVerification.expiresAt, now)).returning({ id: parentAuthVerification.id }));
 
-  const retiredSettings = n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
+  const retiredSettings = RETIRED_SETTINGS.length === 0 ? 0
+    : n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
 
   return { staffSessions, parentSessions, signinCodes, signinLinks, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
 }

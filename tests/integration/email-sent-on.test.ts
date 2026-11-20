@@ -76,7 +76,7 @@ type Who = { parentId: string; authUserId: string; guardianId: string; familyId:
 async function confirm(who: Who, to: string) {
   const [me] = await db.select({ email: parent.email }).from(parent).where(eq(parent.id, who.parentId));
   const session = await seedParentSession(who.authUserId, { familyId: who.familyId });
-  const { token } = await seedEmailChange({ parentId: who.parentId, guardianId: who.guardianId, familyId: who.familyId, recordQboId: null, newEmail: to });
+  const { token } = await seedEmailChange({ parentId: who.parentId, guardianId: who.guardianId, familyId: who.familyId, newEmail: to });
   const ctx: ParentCtx = { door: "parent", parentId: who.parentId, sessionId: session.id, guardianId: who.guardianId, familyId: who.familyId, name: who.name, email: me!.email,
     families: [], ip: null };
   return confirmMyEmailChange(ctx, token);
@@ -207,7 +207,7 @@ describe("the confirm queues the new address for each record of the person's (it
     const mei = await seedParent({ name: "Mei Chen", email: "mei@example.com" });
     const meiRow = await seedGuardian({ parentId: mei.id, familyQboId: "20", sourceQboId: "21", status: "active" });
     await syncAppRecords();
-    const { token } = await seedEmailChange({ parentId: mei.id, guardianId: meiRow.id, familyId: chen, recordQboId: "21", newEmail: "mei.new@example.com" });
+    const { token } = await seedEmailChange({ parentId: mei.id, guardianId: meiRow.id, familyId: chen, newEmail: "mei.new@example.com" });
     const session = await seedParentSession(a.ana.authUserId, { familyId: rivera });
     const ctx: ParentCtx = { door: "parent", parentId: a.ana.id, sessionId: session.id, guardianId: a.row.id, familyId: rivera, name: "Ana Rivera", email: OLD, families: [], ip: null };
     expect(await confirmMyEmailChange(ctx, token)).toEqual({ ok: false, errors: [EMAIL_COPY.linkNoGood] });

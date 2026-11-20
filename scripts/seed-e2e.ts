@@ -343,11 +343,10 @@ async function main() {
           VALUES ('e2e-parent-session', 'e2e-parent-session-token', ${zelda!.id}, ${(await zeldaIn("E2E-FAMILY")).familyId}, now() + interval '7 days')`;
   // A change of sign-in address Zelda asked for and hasn't confirmed, under her link to the Quetzalcoatl family, and a
   // used one under her link to the second family (tests/e2e/email-seed.ts: fixed tokens, so the specs can open them).
-  // Their records' ids are not numbers: confirming is refused before anything is sent (tests/e2e/family-email.spec.ts).
-  for (const [key, family, record, used] of [["own", "E2E-FAMILY", "E2E-P1", false], ["other", "E2E-FAMILY-2", "E2E-P2", true]] as const) {
+  for (const [key, family, used] of [["own", "E2E-FAMILY", false], ["other", "E2E-FAMILY-2", true]] as const) {
     const link = await zeldaIn(family);
-    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, record_qbo_id, new_email, token_hash, expires_at, used_at)
-            VALUES (${p!.id}, ${link.id}, ${link.familyId}, ${record}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
+    await sql`INSERT INTO parent_email_change (parent_id, guardian_id, family_id, new_email, token_hash, expires_at, used_at)
+            VALUES (${p!.id}, ${link.id}, ${link.familyId}, ${E2E_EMAIL[key].newEmail}, ${emailTokenHash(E2E_EMAIL[key].token)}, now() + interval '7 days', ${used ? new Date() : null})`;
   }
   // The season's chosen lists, ticks and waivers, the volunteer sign-ups, the form requests and evidence, the buy-outs and
   // each family's stored figures, by the app's own record of each customer, of the kind each names it as, in the roster's

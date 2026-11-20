@@ -99,9 +99,8 @@ export async function requestMyEmailChange(ctx: ParentCtx, input: unknown): Prom
     // The person's row first, as every change of a person's sign-in does: two asks at once end with one live request.
     await tx.select({ id: parent.id }).from(parent).where(eq(parent.id, ctx.parentId)).for("update");
     await tx.delete(parentEmailChange).where(and(eq(parentEmailChange.parentId, ctx.parentId), isNull(parentEmailChange.usedAt)));
-    // The request is asked in the session's own family (the app's family record the gate gave it). It names no
-    // QuickBooks record (`record_qbo_id` stays null, read by nothing): the address is the person's.
-    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId, recordQboId: null,
+    // The request is asked in the session's own family (the app's family record the gate gave it).
+    await tx.insert(parentEmailChange).values({ parentId: ctx.parentId, guardianId: ctx.guardianId, familyId: ctx.familyId,
       newEmail: email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + EMAIL_CHANGE_TTL_MS) });
     await writeAudit({ actor, action: "parent.email.request", targetType: "parent", targetId: ctx.parentId, before: { email: ctx.email },
       after: { email, familyId: String(ctx.familyId) }, ip: ctx.ip }, tx);

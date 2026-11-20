@@ -432,7 +432,7 @@ describe("staff manage a family's guardians", () => {
       const changes = async () => (await db.select().from(parentEmailChange).where(eq(parentEmailChange.parentId, ana.id))).map((c) => [c.newEmail, c.usedAt === null ? "unused" : "used"]).sort();
       const codes = async () => (await db.select().from(signinCode).where(eq(signinCode.parentId, ana.id))).length;
       // A change asked in Chen's family, and a code: removing her from Rivera's leaves both, as Chen's row is still open.
-      await seedEmailChange({ parentId: ana.id, guardianId: inChen!.id, familyId: chen, recordQboId: null, newEmail: "ana.chen@example.com" });
+      await seedEmailChange({ parentId: ana.id, guardianId: inChen!.id, familyId: chen, newEmail: "ana.chen@example.com" });
       await code();
       await removeGuardian(inRivera!.id, "Not hers.", staffOp);
       expect(await changes()).toEqual([["ana.chen@example.com", "unused"]]);
@@ -440,14 +440,14 @@ describe("staff manage a family's guardians", () => {
       // Back in Rivera's, a change asked there: removing her from Rivera's again ends it, and leaves the code.
       await db.delete(parentEmailChange).where(eq(parentEmailChange.parentId, ana.id));
       await reinstateGuardian(inRivera!.id, staffOp);
-      await seedEmailChange({ parentId: ana.id, guardianId: inRivera!.id, familyId: rivera, recordQboId: null, newEmail: "ana.rivera@example.com" });
-      await seedEmailChange({ parentId: ana.id, guardianId: inRivera!.id, familyId: rivera, recordQboId: null, newEmail: "ana.old@example.com", usedAt: new Date() });
+      await seedEmailChange({ parentId: ana.id, guardianId: inRivera!.id, familyId: rivera, newEmail: "ana.rivera@example.com" });
+      await seedEmailChange({ parentId: ana.id, guardianId: inRivera!.id, familyId: rivera, newEmail: "ana.old@example.com", usedAt: new Date() });
       await removeGuardian(inRivera!.id, "Not hers.", staffOp);
       expect(await changes()).toEqual([["ana.old@example.com", "used"]]);
       expect(await codes()).toBe(1);
       expect((await audits("parent.access.ended")).map((a) => a.after)).toContainEqual(expect.objectContaining({ familyId: String(rivera), requestsDeleted: 1 }));
       // Her last open row: an unused change asked in any family goes, and her unused code; a used one stays.
-      await seedEmailChange({ parentId: ana.id, guardianId: inChen!.id, familyId: rivera, recordQboId: null, newEmail: "ana.elsewhere@example.com" });
+      await seedEmailChange({ parentId: ana.id, guardianId: inChen!.id, familyId: rivera, newEmail: "ana.elsewhere@example.com" });
       await removeGuardian(inChen!.id, "Moved away.", staffOp);
       expect(await changes()).toEqual([["ana.old@example.com", "used"]]);
       expect(await codes()).toBe(0);
