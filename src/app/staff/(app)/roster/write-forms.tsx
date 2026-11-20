@@ -105,26 +105,6 @@ export function CreateAndLinkForm({ types, act }: { types: { qboId: string; name
   );
 }
 
-/** A new parent: their name, and their own email address, kept on their QuickBooks record (it gives them no sign-in). */
-export function ParentForm({ act }: { act: (name: string, email: string) => Promise<WriteResult> }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [state, run, pending] = useActionState(async (_: WriteResult | null, asked: string) => {
-    const r = await safely(() => act(asked, email), failed);
-    if (r.ok) { setName(""); setEmail(""); }
-    return r;
-  }, null);
-  const send = (asked: string) => startTransition(() => run(asked));
-  return (
-    <form onSubmit={noSubmit} className="stack">
-      <label className="field"><span>The parent&apos;s name, as QuickBooks will show it</span><input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></label>
-      <label className="field"><span>Their own email address</span><input type="email" maxLength={100} autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-      <Outcome state={state} pending={pending} onOffer={(offer) => { setName(offer); send(offer); }} />
-      <button type="button" className="btn btn-line" disabled={pending} onClick={() => send(name)}>{pending ? "Adding in QuickBooks…" : "Add the parent"}</button>
-    </form>
-  );
-}
-
 /** Another family for a student, chosen from the portal's own active families: the form sends the family's app id (stage 3's slice 9f). */
 export function MoveForm({ families, act }: { families: { id: string; name: string }[]; act: (toFamilyId: string) => Promise<WriteResult> }) {
   const [to, setTo] = useState("");

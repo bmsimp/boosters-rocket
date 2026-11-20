@@ -212,7 +212,7 @@ type Live = { ok: true; field: string | null; version: string } | { ok: false; c
 /**
  * The email field and version of a customer QuickBooks sent, when it is still this person's record as the roster has
  * it: the one asked for, active, under the same family, of a type that makes it theirs. One moved, made inactive or
- * retyped is not theirs to change, whatever the cache still says (as for the phone and address, ./contact-edits.ts).
+ * retyped is not theirs to change, whatever the cache still says (the rule ownRecordIn() in ./my-family.ts gives the cache).
  */
 function liveOf(customer: Record<string, unknown> | null, record: MyRecord): Live {
   if (!customer || customer.Id !== record.qboId) return { ok: false, code: "bad_answer" };
@@ -284,6 +284,10 @@ class NotFinished extends Error { constructor(readonly why: "session_ended" | "b
  * told the portal can't tell yet, as after a lost answer: the request is still live, so opening the link again finds
  * the change made in QuickBooks, sends nothing, and finishes the app's side, before or after the refresh asked for has
  * run (loadMyRecordForMyEmailChange()), until the link expires.
+ *
+ * The person's password, and (since the sign-in release's slice SI-6a) their authenticator app and backup codes, stay
+ * as they are: a change of sign-in email forgets remembered devices and keeps the app (open question 36; passkeys too,
+ * from SI-7).
  *
  * A token is spent when the change is made, or when it can never succeed. After a failure that changed nothing
  * (QuickBooks out of reach or busy, the record changed meanwhile, an answer the portal can't tell about) it works

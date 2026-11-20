@@ -10,9 +10,9 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 
 import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, parent, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, qboConnection, qboCustomer, setting, student, writeQueue } from "@/lib/db/schema";
 import type { AppFamilyId, AppStudentId } from "@/lib/families/ids";
-import { addFamily, askFamilyInactive, askRosterWrite, CREDIT_BALANCE, coverStamp, deactivateLinked, familyCover, familyHereWords, LINKED_DEACTIVATE, moveStudent, PLACE_DIFFERS, REFRESH_ASK_KEY,
+import { addFamily, askFamilyInactive, askRosterWrite, CREDIT_BALANCE, GUARDIAN_HERE, coverStamp, deactivateLinked, familyCover, familyHereWords, LINKED_DEACTIVATE, moveStudent, PLACE_DIFFERS, REFRESH_ASK_KEY,
   WRITE_COPY } from "@/lib/roster/writes";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { refreshRoster } from "@/lib/roster/refresh";
@@ -103,28 +103,6 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(sent()).toEqual([{ DisplayName: "Rosa Rivera", CustomerTypeRef: { value: "3" }, ParentRef: { value: "10" }, Job: true, BillWithParent: true }]);
     const made = stub.customers.find((c) => c.DisplayName === "Rosa Rivera")!;
     expect(await cached(made.Id as string)).toMatchObject({ parentQboId: "10", typeQboId: "3", email: null });
-  });
-
-  it("adds a parent with their own email address, billed apart; the portal makes them no sign-in from it", async () => {
-    await seedParentSettings(SIGNINS_ON);
-    const r = await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email: " Luis@Example.COM ", typeQboId: null }, tag, op);
-    expect(r.ok).toBe(true);
-    expect(sent()).toEqual([{ DisplayName: "Luis Rivera", CustomerTypeRef: { value: "2" }, ParentRef: { value: "10" }, Job: true, BillWithParent: false,
-      PrimaryEmailAddr: { Address: "luis@example.com" } }]);
-    const made = stub.customers.find((c) => c.DisplayName === "Luis Rivera")!;
-    expect(await cached(made.Id as string)).toMatchObject({ email: "luis@example.com", typeQboId: "2" });
-    // Who signs in is the portal's own list of guardians (stage 3 of the app-owned families spec): a parent added in
-    // QuickBooks is given none, whatever the switches say.
-    expect(await db.select().from(parent).where(eq(parent.email, "luis@example.com"))).toEqual([]);
-    expect(await db.select().from(guardian)).toEqual([]);
-  });
-
-  it("refuses a parent with no usable address, before anything is sent", async () => {
-    for (const email of [null, "", "not an address"]) {
-      const r = await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email, typeQboId: null }, tag, op);
-      expect(r).toEqual({ ok: false, errors: [expect.stringContaining("own email address")] });
-    }
-    expect(posts()).toEqual([]);
   });
 
   it("renames with the version the page was shown, sending the name alone", async () => {
@@ -251,11 +229,12 @@ describe("staff change the roster in QuickBooks, and the cache follows QuickBook
     expect(posts()).toEqual([]);
   });
 
-  it("makes a parent inactive in QuickBooks: the portal's own sign-in for them stays", async () => {
+  it("a guardian's own Parent customer isn't changed from its QuickBooks form (stage 3's slice 9h); the portal's own sign-in for them stays", async () => {
     await seedParentSettings(SIGNINS_ON);
     const { ana } = await seedAnaRivera();
-    const r = await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op);
-    expect(r.ok).toBe(true);
+    // Ana's row is linked to customer 11: it is changed through her (removing her, renaming her), never by its form.
+    expect(await askRosterWrite({ op: "deactivate", qboId: "11", syncToken: "0" }, tag, op)).toEqual({ ok: false, errors: [GUARDIAN_HERE] });
+    expect(posts()).toEqual([]);
     expect((await db.select().from(guardian).where(eq(guardian.parentId, ana.id)))[0]).toMatchObject({ status: "invited", disabledReason: null });
     expect(await enterableGuardianRows(ana.id)).toHaveLength(1);
     expect((await db.select().from(auditLog)).filter((a) => a.action === "parent.access.ended")).toEqual([]);
@@ -295,13 +274,6 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       expect((await auditsOf("roster.customer.create"))[0]!.after).toMatchObject({ appRecord: { kind: "student", studentId: String(link!.studentId),
         familyId: String(await recordOfCustomer("10", "family")), made: true } });
       expect(await whatAFreshRunWouldChange()).toEqual(NO_CHANGES);
-    });
-
-    it("a new parent: no record and no sign-in, and the audit row names none", async () => {
-      const before = await appRecordRows();
-      await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email: "luis@example.com", typeQboId: null }, tag, op);
-      expect(await appRecordRows()).toEqual(before);
-      expect((await auditsOf("roster.customer.create"))[0]!.after).not.toHaveProperty("appRecord");
     });
 
     it("a rename: the family's or the student's record takes the new name; a parent's changes no record", async () => {
@@ -524,7 +496,6 @@ describe("each write QuickBooks took changes the app's own record too, in its tr
       const rivera = await recordOfCustomer("10", "family"), leo = await recordOfCustomer("12", "student");
       await db.update(family).set({ active: false }).where(eq(family.id, rivera));
       expect(await askRosterWrite({ op: "create", role: "student", name: "Rosa Rivera", familyQboId: "10", email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOursToAdd] });
-      expect(await askRosterWrite({ op: "create", role: "parent", name: "Luis Rivera", familyQboId: "10", email: "luis@example.com", typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOursToAdd] });
       expect(await askRosterWrite({ op: "rename", qboId: "10", syncToken: "0", name: "Rivera-Diaz Family" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
       expect(await askRosterWrite({ op: "rename", qboId: "11", syncToken: "0", name: "Ana M. Rivera" }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
       expect((await inactivate("10", await stampFor("10"), op)).result).toEqual({ ok: false, errors: [WRITE_COPY.inactiveHere] });
@@ -1115,7 +1086,7 @@ describe("what QuickBooks refuses, or can't be asked, is said and not queued; wh
   it("nobody is added to, or moved into, a family whose own change is still waiting", async () => {
     tag = await connectRoster(stub);
     await seedQueued({ op: "deactivate", role: "family", qboId: "20", syncToken: "0" });
-    expect(await askRosterWrite({ op: "create", role: "parent", name: "Wen Chen", familyQboId: "20", email: "wen@example.com", typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
+    expect(await askRosterWrite({ op: "create", role: "student", name: "Wen Chen", familyQboId: "20", email: null, typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     expect(await move("12", "20")).toEqual({ ok: false, errors: [WRITE_COPY.waiting] });
     expect(posts()).toEqual([]);
     await db.update(writeQueue).set({ state: "given_up" });
@@ -1151,9 +1122,8 @@ describe("every id the page sends is looked up on the roster, in the role the ch
 });
 
 describe("each membership shape allows what it allows (v1 spec §6.1)", () => {
-  it("layered with no parent type: no parent can be added; students can", async () => {
+  it("layered with no parent type: students can be added", async () => {
     tag = await connectRoster(stub, { shape: { kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null } });
-    expect(await askRosterWrite({ op: "create", role: "parent", name: "Luis", familyQboId: "10", email: "luis@example.com", typeQboId: null }, tag, op)).toEqual({ ok: false, errors: [WRITE_COPY.notOffered] });
     expect((await askRosterWrite({ op: "create", role: "student", name: "Rosa Rivera", familyQboId: "10", email: null, typeQboId: null }, tag, op)).ok).toBe(true);
   });
 

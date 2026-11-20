@@ -46,7 +46,8 @@ all of it has loaded.
    (the same release as the backup was taken on, or a newer one).
 2. Put back `deploy/.env` as it was, and the signing certificate at the path it names (with `chown 1001` and
    `chmod 400`, as in [Documenso](documenso.md#1-make-the-signing-certificate)). Don't make new secrets: the backup needs
-   the old `SETTINGS_ENCRYPTION_KEY` and database passwords.
+   the old `SETTINGS_ENCRYPTION_KEY` and database passwords. Without the old key every parent's authenticator app is
+   lost too: they sign in with a backup code or ask the club.
 3. Copy the two backup files into `BACKUP_DIR`.
 4. Start only the database: `docker compose up -d db`, and wait until `docker compose ps` says `healthy`. It makes the
    two empty databases and their roles, with the passwords in `.env`.

@@ -59,13 +59,14 @@ export function SignInSettingsFrame({ children }: { children: ReactNode }) {
 
 /**
  * Asking again (src/lib/parents/asking-again.ts): before a change of how the parent signs in, a session that hasn't
- * proved itself in the last 10 minutes is asked for the password, then for the code it emails. `proved` is what the
+ * proved itself in the last 10 minutes is asked for the password, then for the code it emails, or (since slice SI-6a,
+ * when the server's answer says so) the code of the parent's authenticator app or a backup code. `proved` is what the
  * page read for this session; `children` is the change itself, drawn once proved. Given only what it shows: the address
  * (for a password manager's username field) and the words of its lede. Between the two steps it keeps the stamp the
  * server answered with, which names nothing, and sends it back with the code.
  */
 export function AskAgain({ email, proved, lede, children }: { email: string; proved: boolean; lede: string; children: ReactNode }) {
-  const [step, setStep] = useState<"password" | "code" | "proved" | "arrived">(proved ? "proved" : "password");
+  const [step, setStep] = useState<"password" | "code" | "app" | "proved" | "arrived">(proved ? "proved" : "password");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [stamp, setStamp] = useState("");
@@ -88,7 +89,8 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
     const r = await safely(() => askAgainPasswordAction(password), { ok: false as const, errors: [COPY.failed] });
     setBusy(false);
     if (!r.ok) { setErrors(r.errors); return; }
-    moved.current = true; setStamp(r.stamp); setPassword(""); setCode(""); setStep("code");
+    // The server says which second step: the code it emailed, or (slice SI-6a) the parent's authenticator app.
+    moved.current = true; setStamp(r.stamp); setPassword(""); setCode(""); setStep(r.step === "app" ? "app" : "code");
   };
   const checkCode = async () => {
     setBusy(true); setErrors(null);
@@ -114,11 +116,16 @@ export function AskAgain({ email, proved, lede, children }: { email: string; pro
       </form>
     );
   }
+  // The app's step takes a backup code in the same field, so its keyboard is a text one, not digits alone.
+  const app = step === "app";
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void checkCode(); }}>
-      <p role="status" id={sentId}>{COPY.codeSent}</p>
-      <label className="field"><span>{COPY.code}</span>
-        <input ref={field} name="code" aria-describedby={sentId} inputMode="numeric" autoComplete="one-time-code" maxLength={9} required value={code} onChange={(e) => setCode(e.target.value)} />
+      <p role="status" id={sentId}>{app ? COPY.appAsked : COPY.codeSent}</p>
+      <label className="field"><span>{app ? COPY.appCode : COPY.code}</span>
+        {app
+          ? <input ref={field} name="code" aria-describedby={sentId} inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+            autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />
+          : <input ref={field} name="code" aria-describedby={sentId} inputMode="numeric" autoComplete="one-time-code" maxLength={9} required value={code} onChange={(e) => setCode(e.target.value)} />}
       </label>
       {errors && <Errors errors={errors} />}
       <button className="btn" aria-disabled={busy || undefined}>{busy ? COPY.checking : COPY.confirm}</button>

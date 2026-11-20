@@ -159,6 +159,8 @@ const STAFF_ONLY_IMPORTS: { module: string; names: string[] | "all"; why: string
   { module: "@/lib/families/roster-import", names: "all", why: "the import of the app's own records from the roster: it reads every family's customers, sign-ins and records (its one caller under src/ is src/lib/roster/no-family.ts, since stage 3's slice 10)" },
   { module: "@/lib/roster/no-family", names: "all", why: "the customers no family is linked to read every customer of the roster cache, and 'Create a family from this' makes a family of any of them" },
   { module: "@/lib/parents/guardians", names: "all", why: "staff add, remove and reinstate guardians: it gives any address a sign-in for any family" },
+  { module: "@/lib/parents/people", names: "all", why: "staff block and rename people: a rename starts sends to QuickBooks for each membership's Parent customer (stage 3's slice 9h)" },
+  { module: "@/lib/parents/contact-take-in", names: "all", why: "the take-in of contact details reads every person, guardian row, family and cached customer at once (stage 3's slice 11a)" },
 ];
 
 describe("every page guards itself", () => {
@@ -418,6 +420,12 @@ const PARENT_CODE_ELSEWHERE = [
   "src/lib/parents/asking-again.ts",
   "src/lib/parents/reask-rule.ts",
   "src/lib/parents/signin-settings-copy.ts",
+  // The authenticator app and backup codes as the second step, at the door's /portal-app/check and in asking again
+  // (slice SI-6a): the time-based code, the backup codes' form and hash, and the one module that reads and writes the
+  // person's app and codes. Each reads the one person a pending step or a session names.
+  "src/lib/parents/totp.ts",
+  "src/lib/parents/backup-codes.ts",
+  "src/lib/parents/authenticator.ts",
 ];
 
 /**

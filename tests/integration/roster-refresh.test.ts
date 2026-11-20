@@ -12,6 +12,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, jobRun, qboCustomer, qboCustomerType, setting } from "@/lib/db/schema";
 import { refreshRoster, ROSTER_JOB, ROSTER_LOCK } from "@/lib/roster/refresh";
 import { saveShape, getShape, SHAPE_KEY } from "@/lib/roster/shape";
+import { TAKE_IN_KEY } from "@/lib/parents/contact-take-in";
 import { resetDb, untilALockIsAwaited } from "../helpers/db";
 import { startQboStub, seedConnected, fznCompany, FZN_SHAPE, type QboStub } from "../helpers/qbo-stub";
 
@@ -71,6 +72,66 @@ describe("the roster refresh", () => {
     expect(c["11"]).toMatchObject({ email: "ana@example.com", phone: "555-0101" });
     expect(c["30"]).toMatchObject({ displayName: "Lincoln High", email: null, phone: null });
     expect(c["60"]).toMatchObject({ displayName: "No Type At All", email: null, phone: null }); // no type, so no shape can name it
+  });
+
+  it("keeps the billing address only for customers the shape names, as the parent's form shows one, and a shape save drops it", async () => {
+    const billTo = { Line1: "12 Oak St\nRear door", Line2: "Unit 4", Line3: "c/o Rivera", City: "Austin", CountrySubDivisionCode: "TX", PostalCode: "78701", Country: "USA" };
+    stub.customers = stub.customers.map((c) => (c.Id === "11" || c.Id === "30" ? { ...c, BillAddr: billTo } : c));
+    await saveShape(FZN_SHAPE, staffOp);
+    await refreshRoster(worker);
+    const shown = { addressLine1: "12 Oak St, Rear door", addressLine2: "Unit 4, c/o Rivera", addressCity: "Austin", addressRegion: "TX", addressPostalCode: "78701", addressCountry: "USA" };
+    const none = { addressLine1: null, addressLine2: null, addressCity: null, addressRegion: null, addressPostalCode: null, addressCountry: null };
+    let c = await customers();
+    expect(c["11"]).toMatchObject(shown);
+    expect(c["30"]).toMatchObject({ displayName: "Lincoln High", ...none }); // a School: the shape doesn't name it
+    expect(c["10"]).toMatchObject(none); // no address in QuickBooks: nothing kept, never an empty string
+    // A shape that stops naming the Parent type drops the address with the email and phone, before any refresh runs.
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
+    c = await customers();
+    expect(c["11"]).toMatchObject({ email: null, phone: null, ...none });
+  });
+
+  it("marks, for the take-in of contact details, that this build's read kept the billing addresses, and only a successful read while it waits", async () => {
+    const takeIn = async () => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value as Record<string, unknown> | undefined;
+    await saveShape(FZN_SHAPE, staffOp);
+    // No setting (a database migration 0044 never wrote it into): nothing is made.
+    await refreshRoster(worker);
+    expect(await takeIn()).toBeUndefined();
+    const after = new Date(Date.now() - 60_000).toISOString();
+    await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after } });
+    // A failed read marks nothing.
+    stub.oddRosterAnswer = { customers: { QueryResponse: "nothing" } };
+    expect(await refreshRoster(worker)).toMatchObject({ ok: false });
+    expect(await takeIn()).toEqual({ after });
+    stub.oddRosterAnswer = null;
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    const run = await lastRun();
+    expect(await takeIn()).toEqual({ after, addressesReadAt: run.startedAt.toISOString() });
+    // Once the take-in has run, a read changes nothing of its setting.
+    const done = { after, addressesReadAt: run.startedAt.toISOString(), doneAt: new Date().toISOString() };
+    await db.update(setting).set({ value: done }).where(eq(setting.key, TAKE_IN_KEY));
+    await refreshRoster(worker);
+    expect(await takeIn()).toEqual(done);
+  });
+
+  it("marks nothing for the take-in from a read made under a shape that doesn't hold, and a shape save withdraws the mark", async () => {
+    const takeIn = async () => (await db.select({ value: setting.value }).from(setting).where(eq(setting.key, TAKE_IN_KEY)))[0]?.value as Record<string, unknown> | undefined;
+    const after = new Date(Date.now() - 60_000).toISOString();
+    await db.insert(setting).values({ key: TAKE_IN_KEY, value: { after } });
+    // No shape at all: the read keeps nobody's contact details, so it marks nothing.
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await takeIn()).toEqual({ after });
+    // A shape naming a Parent type QuickBooks doesn't have: that type's rows keep nothing either.
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: "GONE" }, staffOp);
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await takeIn()).toEqual({ after });
+    // A shape that holds: the read marks it.
+    await saveShape(FZN_SHAPE, staffOp);
+    expect(await refreshRoster(worker)).toMatchObject({ ok: true });
+    expect(await takeIn()).toEqual({ after, addressesReadAt: (await lastRun()).startedAt.toISOString() });
+    // A shape save, before any read under it: the mark goes in the save's own transaction.
+    await saveShape({ kind: "layered", familyTypeId: "1", studentTypeId: "3", parentTypeId: null }, staffOp);
+    expect(await takeIn()).toEqual({ after });
   });
 
   it("stores a customer QuickBooks sends twice once, and counts what it stored", async () => {

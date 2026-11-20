@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { existsSync } from "node:fs";
+import { E2E_DETAILS } from "./details-seed";
 import { parentSessionCookie } from "./parent-session";
 import { PARENT_DIR } from "./parent-routes";
 import { PARENT_NAV } from "../../src/app/components/parent-nav";
@@ -36,11 +37,11 @@ test("Home greets the parent and shows what the family owes, its students and th
   const students = page.getByRole("region", { name: "Your students" });
   await expect(students.locator(".who b")).toHaveText(STUDENTS);
   const details = page.getByRole("region", { name: "Your details" });
-  await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
+  // Her phone is the portal's own (stage 3's slice 11a), and nothing says it came from QuickBooks.
+  await expect(details.locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
   await expect(details).toContainText("You can change your phone and mailing address yourself. The club changes your name and email for you. Ask the club and they'll update it.");
   await expect(details.getByRole("link", { name: "Update my details" })).toHaveAttribute("href", "/family/details");
-  await expect(page.locator(".roster-asof")).toContainText("From the club's QuickBooks, as of");
-  await expect(page.locator(".roster-asof time")).toBeVisible();
+  await expect(page.locator(".roster-asof")).toHaveCount(0);
 
   // No placeholder, nothing that has no data yet, and nothing of her second family.
   await expect(page.getByRole("main")).not.toContainText(/will show here|grade|Wolfgang|Second Family/i);
@@ -76,7 +77,7 @@ test("Family shows the same students and details, the account, and the way to sw
   await expect(page).toHaveTitle(/^Family · /);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quetzalcoatl Family");
   await expect(page.getByRole("region", { name: "Your students" }).getByRole("listitem")).toHaveText(STUDENTS);
-  await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
+  await expect(page.getByRole("region", { name: "Your details" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com", E2E_DETAILS.phone]);
   await expect(page.getByRole("region", { name: "Your account" }).locator("dd")).toHaveText(["Zelda Quetzalcoatl", "zelda@example.com"]);
 
   // She is in two families: the page says so and names only the one she is looking at. The chooser lists them.

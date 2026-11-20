@@ -5,6 +5,18 @@ import type { AppFamilyId, AppStudentId } from "../families/ids";
 
 const created = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updated = () => timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
+/**
+ * A mailing address, one nullable text column per field of the form (ContactValues, src/lib/parents/contact-fields.ts):
+ * on a person and a family the portal's own (stage 3's slice 11a), and in the roster cache QuickBooks' billing address.
+ */
+const mailingAddress = () => ({
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  addressCity: text("address_city"),
+  addressRegion: text("address_region"),
+  addressPostalCode: text("address_postal_code"),
+  addressCountry: text("address_country"),
+});
 
 /** Key/value runtime settings (club name, color, monogram, …). */
 export const setting = pgTable("setting", {
@@ -63,12 +75,22 @@ export type GuardianStatus = "invited" | "active" | "disabled";
 export type DisabledReason = "no_active_students" | "removed" | "inactive" | "family_inactive" | "no_email" | "held" | "address_changed" | "not_in_quickbooks" | "company_changed";
 const DISABLED_REASONS = ["no_active_students", "removed", "inactive", "family_inactive", "no_email", "held", "address_changed", "not_in_quickbooks", "company_changed"] as const;
 
-/** One record per parent, whatever families they're in (spec §2). Everything refers to the id, never to the email. */
+/**
+ * One record per parent, whatever families they're in (spec §2). Everything refers to the id, never to the email.
+ * `phone` and the mailing address (`address_*`) are the person's own contact details, the portal's own since stage 3's
+ * slice 11a (migration 0044, which cleared the phones an earlier migration had copied): one set, whatever families the
+ * person is in, shown and changed on /family/details in books with a parent type (src/lib/parents/contact-edits.ts).
+ * Filled once from the person's own QuickBooks records by the take-in (src/lib/parents/contact-take-in.ts); nothing
+ * QuickBooks holds changes them after that. `contact_version` is raised by every change of either: 0 means nobody
+ * has ever set them, which is what the take-in fills.
+ */
 export const parent = pgTable("parent", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   email: text("email").notNull(), // stored trimmed + lower-cased
   phone: text("phone"),
+  ...mailingAddress(),
+  contactVersion: integer("contact_version").notNull().default(0),
   blocked: boolean("blocked").notNull().default(false),
   blockedAt: timestamp("blocked_at", { withTimezone: true }),
   blockedBy: uuid("blocked_by"),                       // staff_user.id
@@ -96,12 +118,18 @@ export const parent = pgTable("parent", {
  * cache (a member, in flat books), or by a staff member's new family or member once QuickBooks made its customer.
  * Named and made active or inactive by the app alone since stage 3's slice 9c (a staff rename or make-inactive sent to
  * QuickBooks changes it too); what QuickBooks holds changes nothing here. Its QuickBooks customer is in its link
- * (`accounting_link`).
+ * (`accounting_link`). `phone`, the mailing address (`address_*`) and `contact_version` are the family's own contact
+ * details, the portal's own since stage 3's slice 11a, for books with no parent type (flat, or layered with no parent
+ * type: open question 6), where every guardian of the family shares them; as on `parent`, filled once by the take-in
+ * and 0 until anyone sets them.
  */
 export const family = pgTable("family", {
   id: uuid("id").primaryKey().defaultRandom().$type<AppFamilyId>(),
   name: text("name"),                                 // QuickBooks text, shown as text only; null when the portal never knew one
   active: boolean("active").notNull(),
+  phone: text("phone"),
+  ...mailingAddress(),
+  contactVersion: integer("contact_version").notNull().default(0),
   createdAt: created(),
   updatedAt: updated(),
 });
@@ -261,6 +289,44 @@ export const parentDevice = pgTable("parent_device", {
   index("parent_device_parent_ix").on(t.parentId),
 ]);
 
+/**
+ * A person's authenticator app (the sign-in release, slice SI-6a; open questions 24, 25 and 35 of the app-owned
+ * families spec): at most one per person, being set up or in force. The secret it makes its codes from, sealed with the
+ * portal's own box (secretBox(), src/lib/crypto/secret-box.ts, under SETTINGS_ENCRYPTION_KEY, its key id beside it),
+ * bound to this row and person, so a copy moved to another row or person doesn't open; never the secret itself.
+ * `confirmed_at` is null while a set-up is unfinished, and the app is in force, a second step, only once it is set.
+ * `last_used_step` is the newest 30-second step a code was taken for, null until one is: a code is taken only for a
+ * newer step, so it works once. Read and written only by src/lib/parents/authenticator.ts. It goes with the person; the
+ * daily clean-up deletes an unfinished set-up older than its life (AUTHENTICATOR_SETUP_LIFE_MS). Since SI-6a it is a
+ * second step at the door and in asking again; SI-6b sets it up on the sign-in settings and turns it off, and the
+ * staff reset (SI-9) removes it. Nothing else that ends a person's sign-in removes it.
+ */
+export const parentAuthenticator = pgTable("parent_authenticator", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  secretCiphertext: text("secret_ciphertext").notNull(),
+  secretKeyId: text("secret_key_id").notNull(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  createdAt: created(),
+}, (t) => [uniqueIndex("parent_authenticator_parent_uq").on(t.parentId)]);
+
+/**
+ * A person's backup codes (the sign-in release, slice SI-6a; open question 25): each works once as a second step in
+ * place of the authenticator app (and, from SI-7, a passkey). Only the keyed hash of a code is stored (hashBackupCode(),
+ * src/lib/parents/backup-codes.ts), never the code; a code is spent by setting `used_at`. Read and written only by
+ * src/lib/parents/authenticator.ts; made (ten at a time, shown once) by SI-6b. It goes with the person. The daily
+ * clean-up deletes a spent one once a code's life has passed since it was spent, as a spent sign-in code is kept: the
+ * sign-in that spent it reads it again at its last check (signinStands(), signin-codes.ts).
+ */
+export const parentBackupCode = pgTable("parent_backup_code", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  parentId: uuid("parent_id").notNull().references(() => parent.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  createdAt: created(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+}, (t) => [index("parent_backup_code_parent_ix").on(t.parentId)]);
+
 /** One row per counted event; rate-limit.ts counts rows in a sliding window (spec §1 Rate limits). */
 export const rateLimitEvent = pgTable("rate_limit_event", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -368,8 +434,10 @@ export const qboCustomerType = pgTable("qbo_customer_type", {
 });
 
 /**
- * A reference copy of QuickBooks' customers (spec §2). Never a source of truth. Email and phone are kept only for
- * customers whose type the membership shape names.
+ * A reference copy of QuickBooks' customers (spec §2). Never a source of truth. Email, phone and the billing address
+ * (`address_*`, kept since stage 3's slice 11a, read as the parent's form once showed it) are kept only for customers
+ * whose type the membership shape names. Nothing a parent sees reads them: the take-in read the address once
+ * (src/lib/parents/contact-take-in.ts), and stage 4's differences will compare them.
  */
 export const qboCustomer = pgTable("qbo_customer", {
   qboId: text("qbo_id").primaryKey(),
@@ -379,6 +447,7 @@ export const qboCustomer = pgTable("qbo_customer", {
   typeQboId: text("type_qbo_id"),
   email: text("email"),
   phone: text("phone"),
+  ...mailingAddress(),
   syncToken: text("sync_token").notNull(),
   qboUpdatedAt: timestamp("qbo_updated_at", { withTimezone: true }),
   refreshedAt: timestamp("refreshed_at", { withTimezone: true }).notNull().defaultNow(),
@@ -476,7 +545,7 @@ export type RosterRole = "family" | "student" | "parent" | "member";
  * create holds the customer type it was given. The app's records the item is filed under are the row's own columns.
  */
 export type RosterWrite =
-  | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null }
+  | { op: "create"; role: RosterRole; name: string; typeQboId: string; familyQboId: string | null; email: string | null; guardianId?: string }
   /**
    * A rename: `was`, for a linked family, member or student (saved in the portal first since stage 3's slice 9e), the
    * portal's own name of the record before this change, which a stale answer's live read is compared with (a parent's,
@@ -485,7 +554,7 @@ export type RosterWrite =
    * name read as the portal held it (or by "Send the portal's value", whose `was` is then the name its row showed, which
    * a later try compares QuickBooks' with), so its answer aligns the link. Neither is sent.
    */
-  | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string; checked?: true }
+  | { op: "rename"; role: RosterRole; qboId: string; syncToken: string; name: string; was: string; checked?: true; guardianId?: string }
   /**
    * A move of a linked student, saved in the portal first since stage 3's slice 9f (moveStudent()): `syncToken` is the
    * student link's own version (empty when it has none, and then nothing is sent before a live read);
@@ -507,8 +576,11 @@ export type RosterWrite =
    * was sent with the version a live read just showed (a link with none, a customer with no link of its own in the
    * family action, or a resend after a stale answer whose read showed the customer still active and with no balance),
    * so its answer aligns the link. Neither is sent but the version.
+   * `guardianId`, on a parent's create, rename or make-inactive (stage 3's slice 9h): the `guardian` row (a membership)
+   * whose own Parent customer it makes or changes, saved in the portal first. Never sent; an item queued before that
+   * slice names none and goes on as before, linking nothing.
    */
-  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string; checked?: true };
+  | { op: "deactivate"; role: RosterRole | "other"; qboId: string; syncToken: string; checked?: true; guardianId?: string };
 /**
  * A volunteer buy-out's write to QuickBooks (v1 spec §11.5, src/lib/buyouts/writes.ts), kept in `write_queue.request`
  * beside the roster writes: the invoice made for one buy-out, and its void. Every id is a QuickBooks id of the company

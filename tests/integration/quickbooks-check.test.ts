@@ -74,9 +74,11 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     expect(invoicePosts.every((b) => b.EmailStatus === "NotSet")).toBe(true);
     expect(r).toMatchObject({ environment: "sandbox", writes: true, realmId: REALM, outcome: "passed", stopCode: null });
     // Two families, a student and a parent, all named for the check, and one invoice: every one closed.
-    // The name already in use made nothing: its row is closed with no id.
+    // The name already in use made nothing: its row is closed with no id. So did the parent of the same name under the
+    // second family, which this stub (as QuickBooks is understood to) refuses as a name in use (stage 3's slice 9h).
     const all = await recordsOf(r.id), made = all.filter((m) => m.qboId !== null);
-    expect(all.filter((m) => m.qboId === null).map((m) => [m.kind, m.lastCode, m.closedAt !== null])).toEqual([["family", "fault_6240", true]]);
+    expect(all.filter((m) => m.qboId === null).map((m) => [m.kind, m.lastCode, m.closedAt !== null]).sort()).toEqual([["family", "fault_6240", true], ["parent", "fault_6240", true]]);
+    expect(byKey.duplicate_name_other_parent).toMatchObject({ outcome: "learned", learned: { code: "fault_6240" } });
     expect(made.map((m) => m.kind).sort()).toEqual(["family", "family", "invoice", "invoice", "parent", "student"]);
     expect(made.every((m) => m.closedAt !== null)).toBe(true);
     expect(checkCustomers()).toHaveLength(4);
@@ -97,6 +99,18 @@ describe("the check of the portal's requests against an Intuit sandbox company (
     expect(await audits("quickbooks.check.start")).toHaveLength(1);
     const [end] = await audits("quickbooks.check.end");
     expect(end!.after).toMatchObject({ outcome: "passed", notAsExpected: 0, made: 6, open: 0 });
+  });
+
+  it("shows a step a run was made before as not part of that run, never as stopped (stage 3's slice 9h)", async () => {
+    await checkCompany(stub);
+    expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
+    // A run stored before the check learned the step holds no result for it.
+    const { run: r } = await lastRun();
+    await db.update(qboCheckRun).set({ results: r.results.filter((x) => x.key !== "duplicate_name_other_parent") }).where(eq(qboCheckRun.id, r.id));
+    asStaff(admin);
+    const html = await renderPage(CheckRequestsPage);
+    expect(html).toContain("Not part of this run: the check learned this request after it ran.");
+    expect(html).not.toContain("the check stopped before it got here");
   });
 
   it("keeps no QuickBooks text but its own names: no family's name, amount or address", async () => {
@@ -195,6 +209,31 @@ function changeAlongside(s: QboStub, marker: string, sub = false, student = fals
     if (target) target.GivenName = "Changed in QuickBooks";
   };
 }
+
+describe("a parent of the same name under another family (stage 3's slice 9h)", () => {
+  it("is learned either way: refused as a name in use above, taken here, and then made inactive before family B", async () => {
+    await checkCompany(stub);
+    stub.quirks.namesUnderParent = true;
+    expect(await run()).toMatchObject({ ok: true, outcome: "passed" });
+    const { run: r, byKey } = await lastRun();
+    expect(byKey.duplicate_name_other_parent).toMatchObject({ outcome: "learned", learned: { code: "accepted" } });
+    const made = (await recordsOf(r.id)).filter((m) => m.qboId !== null);
+    expect(made.filter((m) => m.kind === "parent")).toHaveLength(2);
+    expect(made.every((m) => m.closedAt !== null)).toBe(true);
+    // Two parents of one name, one under each check family, both inactive, and both families after them.
+    const parents = checkCustomers().filter((c) => String(c.DisplayName).endsWith(" parent"));
+    expect(parents).toHaveLength(2);
+    expect(new Set(parents.map((c) => (c.ParentRef as { value: string }).value)).size).toBe(2);
+    expect(checkCustomers().every((c) => c.Active === false)).toBe(true);
+    // Every write went to a record the check made, or made one.
+    const mine = new Set(made.map((m) => m.qboId));
+    for (const p of posts()) {
+      const body = JSON.parse(p.body) as { Id?: string; ParentRef?: { value: string } };
+      if (body.Id !== undefined) expect(mine.has(body.Id), p.body).toBe(true);
+      if (body.ParentRef) expect(mine.has(body.ParentRef.value)).toBe(true);
+    }
+  });
+});
 
 describe("each request read as not answering as the portal expects", () => {
   it.each(CASES)("$name", async ({ set, fails }) => {

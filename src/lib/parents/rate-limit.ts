@@ -5,7 +5,7 @@ import { rateLimitEvent } from "@/lib/db/schema";
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
   | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip" | "password_try_email" | "password_try_device"
-  | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent";
+  | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent" | "second_step_parent";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -59,11 +59,20 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   // (password_try_ip), the code's limits (code_send_*, code_check_ip and its five tries) are the door's, and the set-up
   // link offered here is the request page's (password_ask_*).
   password_reask_parent: { max: 5, windowMs: WINDOW_MS },
+  // An authenticator app's code or a backup code as the second step (verifySecondFactor(), signin-codes.ts; the sign-in
+  // release, slice SI-6a), at the door and in asking again, counted per person, the one a pending step or a stamp names
+  // (never a typed address: only a right password makes either). A six-digit code has a million values and three are
+  // live at once (a step either way), so 5 wrong tries in 15 minutes, as the emailed code's 5 tries, keeps a guess
+  // at about one in sixty thousand a quarter of an hour; a right code gives its place back (giveBackRateLimit()), so a
+  // parent's own codes never use one up, and so does a try whose app's secret won't open (no guess was possible), so it
+  // never shuts the parent out of their backup codes. Taken before the person's app or codes are read, so tries sent at once can't
+  // slip past. The per-IP flood stop is the code check's (code_check_ip).
+  second_step_parent: { max: 5, windowMs: WINDOW_MS },
   password_change_parent: { max: 10, windowMs: 60 * 60 * 1000 },
   signin_settings_parent: { max: 10, windowMs: 60 * 60 * 1000 },
-  // A parent's own phone and address (contact-edits.ts), counted per person. Each save is a write to the club's
-  // QuickBooks, and nobody changes their address more than a few times an hour. Opening the edit page reads the record
-  // from QuickBooks each time, so that is bounded too, well above what editing takes.
+  // A parent's own phone and address (contact-edits.ts), counted per person: nobody changes their address more than a
+  // few times an hour. Since stage 3's slice 11a opening the edit page reads the portal alone and takes no count, so
+  // contact_open_parent is unused (S12 removes it).
   contact_save_parent: { max: 6, windowMs: 60 * 60 * 1000 },
   contact_open_parent: { max: 30, windowMs: WINDOW_MS },
   // Opening a form to sign, and checking how one stands (src/lib/forms/signing.ts), counted per person: each asks the
@@ -107,8 +116,13 @@ export async function takeRateLimit(kind: RateLimitKind, subject: string, now = 
   return (await takeRateLimitPlace(kind, subject, now)).take;
 }
 
-/** A place taken in a window: the event's row, which giveBackRateLimit() can give back, or null when nothing was counted. */
-export type RateLimitPlace = { take: RateLimitTake; placeId: number | null };
+/**
+ * A place taken in a window: the event's row, which giveBackRateLimit() can give back, or null when nothing was counted;
+ * and, for a place taken, its number among the window's live events (`number`, 1 for the first), counted under the
+ * limit's lock in the transaction that took it, so tries made at once each get their own (a try's audit row,
+ * verifySecondFactor()).
+ */
+export type RateLimitPlace = { take: RateLimitTake; placeId: number | null; number?: number };
 
 /** As takeRateLimit(), with the row of the event it counted, for a caller that may give the place back. */
 export async function takeRateLimitPlace(kind: RateLimitKind, subject: string, now = new Date()): Promise<RateLimitPlace> {
@@ -122,7 +136,7 @@ export async function takeRateLimitPlace(kind: RateLimitKind, subject: string, n
     const [{ n }] = (await tx.select({ n: count() }).from(rateLimitEvent).where(live)) as [{ n: number }];
     if (n < max) {
       const [row] = await tx.insert(rateLimitEvent).values({ kind, subject, at: now }).returning({ id: rateLimitEvent.id });
-      return { take: "taken" as const, placeId: row!.id };
+      return { take: "taken" as const, placeId: row!.id, number: n + 1 };
     }
     const [oldest] = await tx.select({ id: rateLimitEvent.id, refusalAudited: rateLimitEvent.refusalAudited }).from(rateLimitEvent)
       .where(live).orderBy(asc(rateLimitEvent.at), asc(rateLimitEvent.id)).limit(1);

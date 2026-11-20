@@ -4,6 +4,7 @@ import { familyMoney, formReminderClaim, formReminderRound, jobRun, parent, pare
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { RATE_LIMITS, type RateLimitKind } from "@/lib/parents/rate-limit";
 import { CODE_TTL_MS, RESEND_AFTER_MS } from "@/lib/parents/signin-codes";
+import { cleanUpSecondSteps, secondStepPeopleToClean } from "@/lib/parents/authenticator";
 
 export const CLEANUP_JOB = "cleanup.daily";
 /** Job history is kept this long. The newest run of each job, and its newest run that worked, are kept whatever their age. */
@@ -22,13 +23,15 @@ const CLEANUP_ACTOR: Actor = { door: "system", id: null, label: "worker" };
 export const RETIRED_SETTINGS = ["parents.previous_company", "parents.review_notice"] as const;
 
 export type CleanupCounts = {
-  staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; rememberedDevices: number; rateLimitEvents: number;
+  staffSessions: number; parentSessions: number; signinCodes: number; signinLinks: number; unfinishedAuthenticators: number; spentBackupCodes: number; rememberedDevices: number; rateLimitEvents: number;
   emailChanges: number; familyMoney: number; jobRuns: number; reminderClaims: number; writeQueue: number; verifications: number; retiredSettings: number;
 };
 const WORDS: Record<keyof CleanupCounts, [string, string]> = {
   staffSessions: ["expired staff session", "expired staff sessions"], parentSessions: ["expired parent session", "expired parent sessions"],
   signinCodes: ["sign-in code", "sign-in codes"],
   signinLinks: ["used or expired password link", "used or expired password links"],
+  unfinishedAuthenticators: ["unfinished authenticator app set-up", "unfinished authenticator app set-ups"],
+  spentBackupCodes: ["used backup code", "used backup codes"],
   rememberedDevices: ["expired remembered device", "expired remembered devices"],
   rateLimitEvents: ["rate-limit record", "rate-limit records"],
   emailChanges: ["expired email change", "expired email changes"], familyMoney: ["set of figures for a family no longer in the roster", "sets of figures for families no longer in the roster"],
@@ -44,7 +47,7 @@ const WORDS: Record<keyof CleanupCounts, [string, string]> = {
  * leaves alone, with why. A new table must join one list (tests/integration/cleanup.test.ts fails until it does); one
  * whose rows expire gets its delete below and a boundary test.
  */
-export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "parent_signin_token", "parent_device", "rate_limit_event", "parent_email_change", "family_money", "job_run",
+export const CLEANED_TABLES = ["staff_auth_session", "parent_auth_session", "signin_code", "parent_signin_token", "parent_authenticator", "parent_backup_code", "parent_device", "rate_limit_event", "parent_email_change", "family_money", "job_run",
   "form_reminder_claim", "form_reminder_round", "requirement_reminder", "write_queue", "staff_auth_verification", "parent_auth_verification"] as const;
 export const KEPT_TABLES: Record<string, string> = {
   staff_auth_user: "Better Auth's staff accounts", staff_auth_account: "Better Auth's staff accounts",
@@ -98,6 +101,10 @@ export function describeCleanup(c: CleanupCounts): string {
  * - A person's set-up and reset links (`parent_signin_token`) spent more than a code's life ago (CODE_TTL_MS), or never
  *   spent and past their expiry: a link works once, and only before it expires, and until a code's life has passed since it was spent,
  *   the set-up link's sign-in that spent it reads it again at its last check (signinStands(), signin-codes.ts).
+ * - An authenticator app's set-up (`parent_authenticator`) never confirmed and older than AUTHENTICATOR_SETUP_LIFE_MS
+ *   (authenticator.ts): an app in force is never deleted by age. A backup code (`parent_backup_code`) spent more than
+ *   a code's life ago (CODE_TTL_MS), as a spent code is kept: the sign-in that spent it reads it again at its last
+ *   check (signinStands(), signin-codes.ts). An unspent backup code never expires.
  * - Remembered devices (`parent_device`) past their expiry: a device is remembered only until then, renewed by use.
  * - Rate-limit records older than their kind's window (rate-limit.ts counts only those inside it): the sign-in limits
  *   and the limits on a parent's own contact edits, each kind by its own window.
@@ -120,8 +127,9 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
   const n = (rows: unknown[]) => rows.length;
   const staffSessions = n(await tx.delete(staffAuthSession).where(lt(staffAuthSession.expiresAt, now)).returning({ id: staffAuthSession.id }));
   // What hangs on a person goes in the order src/lib/parents/sessions.ts gives (lockedPerson()): the rows of everyone
-  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their set-up and reset links
-  // and remembered devices (the sign-in release's, which hang on the person as a code does), then their sessions. So the
+  // it touches first, FOR UPDATE in id order, then their requests, then their codes, then their set-up and reset links,
+  // their authenticator apps and backup codes (since SI-6a) and remembered devices (the sign-in release's, which hang on
+  // the person as a code does), then their sessions. So the
   // clean-up never waits on a person's change of address while that change waits on it.
   const requestGone = lt(parentEmailChange.expiresAt, now);
   // A spent code stays for a code's life after it was spent: the code door's last check (signinStands()) reads it again,
@@ -142,12 +150,14 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
     inArray(parent.id, tx.select({ id: parentEmailChange.parentId }).from(parentEmailChange).where(requestGone)),
     inArray(parent.id, tx.select({ id: signinCode.parentId }).from(signinCode).where(codeGone)),
     inArray(parent.id, tx.select({ id: parentSigninToken.parentId }).from(parentSigninToken).where(linkGone)),
+    ...secondStepPeopleToClean(tx, now, CODE_TTL_MS).map((people) => inArray(parent.id, people)),
     inArray(parent.id, tx.select({ id: parentDevice.parentId }).from(parentDevice).where(deviceGone)),
     inArray(parent.id, tx.select({ id: parentAuthUser.parentId }).from(parentAuthUser).innerJoin(parentAuthSession, eq(parentAuthSession.userId, parentAuthUser.id)).where(sessionGone)),
   )).orderBy(parent.id).for("update");
   const emailChanges = n(await tx.delete(parentEmailChange).where(requestGone).returning({ id: parentEmailChange.id }));
   const signinCodes = n(await tx.delete(signinCode).where(codeGone).returning({ id: signinCode.id }));
   const signinLinks = n(await tx.delete(parentSigninToken).where(linkGone).returning({ id: parentSigninToken.id }));
+  const { unfinishedSetups: unfinishedAuthenticators, spentBackupCodes } = await cleanUpSecondSteps(tx, now, CODE_TTL_MS);
   const rememberedDevices = n(await tx.delete(parentDevice).where(deviceGone).returning({ id: parentDevice.id }));
   const parentSessions = n(await tx.delete(parentAuthSession).where(sessionGone).returning({ id: parentAuthSession.id }));
 
@@ -188,7 +198,7 @@ export async function cleanUp(tx: Tx, now: Date = new Date()): Promise<CleanupCo
 
   const retiredSettings = n(await tx.delete(setting).where(inArray(setting.key, [...RETIRED_SETTINGS])).returning({ key: setting.key }));
 
-  return { staffSessions, parentSessions, signinCodes, signinLinks, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
+  return { staffSessions, parentSessions, signinCodes, signinLinks, unfinishedAuthenticators, spentBackupCodes, rememberedDevices, rateLimitEvents, emailChanges, familyMoney: money, jobRuns, reminderClaims, writeQueue: writes, verifications, retiredSettings };
 }
 
 /**

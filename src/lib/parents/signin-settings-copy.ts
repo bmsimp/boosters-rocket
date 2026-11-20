@@ -86,6 +86,11 @@ export const SIGNIN_SETTINGS_COPY = {
   checking: "Checking…",
   codeSent: "We've emailed you a 6-digit code. Enter it here to go on. It can take a minute. Check your spam folder too.",
   code: "6-digit code",
+  /** Asking again of a guardian with an authenticator app (slice SI-6a): nothing is emailed; the app's code or a backup code. */
+  appAsked: "Enter the 6-digit code from your authenticator app to go on. If you don't have your phone with you, enter one of your backup codes instead.",
+  appCode: "Code from your authenticator app, or a backup code",
+  /** One answer for a wrong or used app code or backup code, and a step that has ended or that this page never began. */
+  appRejected: "That code didn't work. Enter the newest code from your authenticator app, or a backup code you haven't used yet, or start again with your password.",
   confirm: "Confirm",
   startAgain: "Start again",
   /** One answer for every refusal of the password, but too many tries: nothing tells the reasons apart. */

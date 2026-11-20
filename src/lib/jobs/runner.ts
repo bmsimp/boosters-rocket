@@ -7,6 +7,7 @@ import { QboError } from "@/lib/quickbooks/endpoints";
 import { refreshRoster, ROSTER_JOB } from "@/lib/roster/refresh";
 import { sendOwedWelcomes } from "@/lib/parents/welcome";
 import { rosterRefreshAsked } from "@/lib/parents/refresh-ask";
+import { TAKE_IN_JOB, takeInAsksForARead, takeInContactDetails } from "@/lib/parents/contact-take-in";
 import { CLEANUP_JOB, removedInAll, runCleanup } from "./cleanup";
 import { BUYOUT_CHECK_MARK, markJob, REMINDERS_MARK } from "./marks";
 import { MONEY_JOB } from "@/lib/money/sweep";
@@ -85,6 +86,15 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
   } catch {
     ran.push({ job: DUE_REMINDERS_JOB, ok: false });
   }
+  // A guardian's phone and mailing address taken into the portal, once, after the first successful roster read by this
+  // build since migration 0044 (src/lib/parents/contact-take-in.ts). It reads the roster cache and asks QuickBooks nothing, so it
+  // goes before the connection check, at the wake after that read. Guarded like the steps above; in this wake's answer
+  // only on the wake it ran.
+  try {
+    if ((await takeInContactDetails()).ran) ran.push({ job: TAKE_IN_JOB, ok: true });
+  } catch {
+    ran.push({ job: TAKE_IN_JOB, ok: false });
+  }
   const conn = await connectionView();
   // Not connected, or connected but only an Admin connecting again can fix it: nothing to run, nothing to record,
   // except that a read of every family under way is ended, saying how far it got.
@@ -102,8 +112,12 @@ export async function runDueJobs(now: Date = new Date()): Promise<{ ran: { job: 
       ran.push({ job: TOKEN_JOB, ok: false });
     }
   }
-  // Daily, or sooner when a parent's change of sign-in address went to QuickBooks while the roster was busy (refresh-ask.ts).
-  if ((await due(ROSTER_JOB, now)) || (await rosterRefreshAsked(now))) {
+  // Daily, or sooner when a parent's change of sign-in address went to QuickBooks while the roster was busy (refresh-ask.ts),
+  // or while the take-in of contact details waits for a read that keeps the billing addresses: at the first wake of this
+  // build, whatever the build before it answered, then at most once an hour (takeInAsksForARead(), asked first so that
+  // every read made while it waits counts toward its hour).
+  const forTakeIn = await takeInAsksForARead(now);
+  if (forTakeIn || (await due(ROSTER_JOB, now)) || (await rosterRefreshAsked(now))) {
     const r = await refreshRoster({ startedBy: "worker", actor: WORKER_ACTOR, ip: null });
     if (r.ok || r.reason === "failed") ran.push({ job: ROSTER_JOB, ok: r.ok });
   }

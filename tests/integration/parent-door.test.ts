@@ -9,7 +9,7 @@ import { fromBrowser } from "../helpers/page-request";
 
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentAuthVerification, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
+import { auditLog, family, guardian, parent, parentAuthAccount, parentAuthenticator, parentAuthSession, parentBackupCode, parentAuthUser, parentAuthVerification, rateLimitEvent, signinCode, student } from "@/lib/db/schema";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { getParentAuth } from "@/lib/auth/parent-auth";
 import { getParentState } from "@/lib/auth/identity";
@@ -26,7 +26,8 @@ import { asAppFamilyId, type AppFamilyId } from "@/lib/families/ids";
 // open row naming an active family record.
 import { resetDb, seedParent, seedGuardian, seedGuardianInFamily, seedParentSession, seedWorkingMail } from "../helpers/db";
 // Every sign-in goes through the door as a browser's does: the password, then the code it mails (the sign-in release, slice SI-3b).
-import { DOOR_IP, DOOR_PASSWORD, codeMailed, codeStep, cookieNamed, passwordStep, postDoor, signInThroughDoor } from "../helpers/parent-door";
+import { DOOR_IP, DOOR_PASSWORD, appStep, codeMailed, codeStep, cookieNamed, passwordStep, postDoor, signInThroughDoor } from "../helpers/parent-door";
+import { appCode, seedAuthenticator, seedBackupCodes } from "../helpers/authenticator";
 import { seedCode, seedPassword } from "../helpers/signin-links";
 import { SIGNINS_ON, seedParentSettings, storeShape } from "../helpers/roster-cache";
 
@@ -132,6 +133,32 @@ describe("the parent door", () => {
       expect([path, r.status]).toEqual([path, 404]);
     }
     expect(await db.select().from(parentAuthSession)).toEqual([]);
+  });
+
+  it("signs nobody in at /portal-app/check with no pending step, a forged one, another person's, or a code for a person with no app", async () => {
+    // The sign-in release, slice SI-6a: the app's step is a fourth endpoint, guarded by the same pending step.
+    const a = await seedParent({ name: "Ana", email: "ana@example.com" }); await seedGuardianInFamily({ parentId: a.id, familyQboId: "F1" });
+    const b = await seedParent({ name: "Ben", email: "ben@example.com" }); await seedGuardianInFamily({ parentId: b.id, familyQboId: "F2" });
+    await seedPassword(a.authUserId, DOOR_PASSWORD);
+    await seedPassword(b.authUserId, DOOR_PASSWORD);
+    const app = await seedAuthenticator(a.id);
+    const [backup] = await seedBackupCodes(a.id, 1);
+    // Ben has no app: his right password asks for the emailed code, and his pending step is his alone.
+    const { body, pending: bens } = await passwordStep("ben@example.com");
+    expect(body).toEqual({ ok: true, step: "code" });
+    const name = bens.split("=")[0]!;
+    const forged = Buffer.from(JSON.stringify({ p: a.id, e: "ana@example.com", c: "x", u: Date.now(), x: Date.now() + 60_000 })).toString("base64url");
+    for (const cookie of ["", `${name}=${forged}`, `${name}=${encodeURIComponent(`${forged}.${"A".repeat(43)}=`)}`, bens]) {
+      for (const code of [appCode(app.secret), backup!]) {
+        const r = await appStep(code, cookie);
+        expect([cookie, code, r.body]).toEqual([cookie, code, { ok: false, error: "rejected" }]);
+        expect(cookieNamed(r.res, "session_token")).toBe("");
+      }
+    }
+    expect(await db.select().from(parentAuthSession)).toEqual([]);
+    // Nothing of Ana's was spent by any of it.
+    expect((await db.select().from(parentAuthenticator))[0]).toMatchObject({ lastUsedStep: null });
+    expect((await db.select().from(parentBackupCode))[0]).toMatchObject({ usedAt: null });
   });
 
   it("with one family, goes straight in, activates invited rows and audits the sign-in with the family", async () => {
@@ -376,10 +403,12 @@ describe("the parent door", () => {
     expect((o.session as { cookieCache?: { enabled?: boolean } } | undefined)?.cookieCache?.enabled ?? false).toBe(false);
     expect(o.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-booster-client-ip"]); // written by the portal itself: tests/integration/client-address.test.ts
     expect(o.emailAndPassword?.enabled).toBe(false);
-    // In front of the database limits, an in-memory cap per IP on the door's three routes (on when NODE_ENV is production).
+    // In front of the database limits, an in-memory cap per IP on the door's four routes (on when NODE_ENV is production;
+    // /portal-app/check since slice SI-6a, under the code check's own limit per IP, code_check_ip).
     // A minute of it allows what the database allows in 15, so it is never the first limit a full room meets.
     expect(o.rateLimit?.customRules).toEqual({
       "/portal-password/check": { window: 60, max: 180 }, "/portal-code/resend": { window: 60, max: 60 }, "/portal-code/check": { window: 60, max: 180 },
+      "/portal-app/check": { window: 60, max: 180 },
     });
     expect((o.rateLimit as { enabled?: boolean } | undefined)?.enabled).toBeUndefined(); // Better Auth's default: on only in production
   });
@@ -424,7 +453,8 @@ describe("the parent door", () => {
 
   it("leaves a parent only the endpoints the portal uses", async () => {
     const auth = await getParentAuth();
-    const reachable = ["/get-session", "/sign-out", "/portal-password/check", "/portal-code/resend", "/portal-code/check", "/ok", "/error"];
+    // The door's four endpoints: since slice SI-6a, /portal-app/check takes an authenticator app's code or a backup code.
+    const reachable = ["/get-session", "/sign-out", "/portal-password/check", "/portal-code/resend", "/portal-code/check", "/portal-app/check", "/ok", "/error"];
     // Path-parameter routes can't be listed in disabledPaths (it matches exact paths). Neither can do anything here:
     // there are no social providers to call back to, and /reset-password/:token only redirects with a reset row of
     // Better Auth's own verification table, which the portal never writes: a person's password is set and reset by the

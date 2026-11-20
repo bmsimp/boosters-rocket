@@ -96,7 +96,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - requestMyEmailChange() takes the row FOR UPDATE, then (since slice SI-5a) reads the asking session's `strong_at`
  *   unlocked, refusing unless it proved itself within the window, then replaces the person's unused request;
  * - blockPerson() (people.ts) takes the row FOR UPDATE, then deletes the unused requests, then the codes, then the
- *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE and touches nothing that hangs on it;
+ *   unused links, then the devices, then the sessions; renamePerson() (people.ts) takes the row FOR UPDATE, then the
+ *   roster lock shared (at most three seconds, as the guardian writes below), and touches nothing that hangs on it;
  * - the staff writes of guardians.ts take the parents' settings lock shared first (setSignins() and setWelcome() take
  *   it before the people they touch), then the person's locks, and only then the roster lock shared, as the email
  *   confirm takes the roster after the person's locks: a write that held the roster lock while it waited for a person
@@ -109,7 +110,10 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  *   removeGuardian() and reinstateGuardian() take the row FOR UPDATE (no address lock: the address isn't changed or
  *   claimed), then the roster lock, then the guardian row FOR UPDATE, and removeGuardian() then deletes the person's
  *   unused requests, then, when it closes their last open row, their unused codes, links and devices, then ends
- *   sessions, through closeMembership() (membership.ts). Each waits for the
+ *   sessions, through closeMembership() (membership.ts). Since stage 3's slice 9h each also queues its guardian's
+ *   Parent customer change in that transaction, after the roster lock, and sends nothing in it: every send is after the
+ *   commit, holding only the guardian row's "being sent" advisory lock, taken before the transaction and only ever
+ *   tried, never waited for. Each waits for the
  *   roster lock at most three seconds, as the confirm does, and gives up changing nothing: a roster read holds it
  *   through its whole QuickBooks read, and the person's row must not be held that long, since a code request waits for
  *   it (FOR KEY SHARE, below);
@@ -135,7 +139,8 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - the second step's code (sendSecondStepCode(), signin-codes.ts, since slice SI-3b) calls this, then reads the
  *   password unlocked, before it touches a code; and a sign-in's strong step (recordStrongSignin(), devices.ts), after
  *   completeParentSignin(), calls this, then makes or renews the person's device, then updates the session row (stamping
- *   `strong_at` for a new device only: a code's or a set-up link's sign-in): the person's row, their devices, their sessions;
+ *   `strong_at` for every sign-in that proved a second step, on a new device or a renewed one): the person's row, their
+ *   devices, their sessions;
  * - asking again (askAgainCode(), asking-again.ts, since slice SI-5a), once the door's own checks have taken the code,
  *   calls this, then stamps `strong_at` on the session that asked and no other: the person's row, their sessions;
  * - a password change in sign-in settings (changeMyPassword(), signin-settings.ts, since SI-5a) takes the row FOR
@@ -152,7 +157,17 @@ export async function renewParentSession(s: { id: string; expiresAt: Date }, now
  * - forgetting a device in sign-in settings (forgetMyDevice() and forgetMyOtherDevices(), signin-settings.ts, since
  *   SI-5b) takes the row FOR UPDATE, reads the session's `strong_at` unlocked under it, then deletes the device, or every
  *   device but the session's own (which sets `device_id` null on the sessions that named them), and touches no session
- *   otherwise.
+ *   otherwise;
+ * - a person's authenticator app and backup codes (`parent_authenticator`, `parent_backup_code`, since slice SI-6a,
+ *   read and written only by authenticator.ts): a try at the second step (verifySecondFactor(), signin-codes.ts) calls
+ *   this, then reads the password and the person's newest "Sign out everywhere" row, then takes the app's code (its
+ *   `last_used_step`, sealing the secret again under the current key when it was sealed under the one before) or spends
+ *   a backup code by one conditional update each; a sign-in's last check (signinStands()) reads them, and that newest
+ *   row, unlocked under the person's row; the clean-up deletes them
+ *   after the person's rows and links, before the devices. Nothing that ends all of a person's sign-in removes them (a
+ *   block, a reset, a password change, Sign out everywhere, a change of sign-in email, sign-ins switched off, a change
+ *   of company, a last membership closed: each keeps them as it keeps the password). A later writer that takes them
+ *   (SI-6b's set-up and turning off, SI-9's staff reset) takes them after the person's row and before their devices.
  */
 export async function lockedPerson(tx: Tx, parentId: string): Promise<{ email: string; blocked: boolean } | null> {
   const [p] = await tx.select({ email: parent.email, blocked: parent.blocked }).from(parent).where(eq(parent.id, parentId)).for("key share");

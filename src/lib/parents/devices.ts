@@ -71,8 +71,15 @@ export async function deviceOfAddress(email: string, device: string | { deviceId
 
 /** The device cookie to set: its token, and when the device's row ends. */
 export type DeviceCookie = { token: string; expiresAt: Date };
-/** What a strong sign-in remembers: a new device (a code's or a set-up link's sign-in), or the remembered one it used, by its row and its cookie's token. */
-export type StrongDevice = { remember: true } | { deviceId: string; token: string | null };
+/**
+ * What a strong sign-in remembers: the device of a sign-in that proved a second step itself (an emailed code's, an
+ * authenticator app's or a backup code's (since SI-6a), or a set-up link's), with the token of the browser's device
+ * cookie, if any (`token`), or the remembered one it used, by its row and its cookie's token. With `remember`, a cookie
+ * naming a live remembered device of this same person renews that row (as a remembered device's sign-in does), so a
+ * browser asked for the second step again (under Strict, where no remembered device stands in for it) stays one
+ * device; any other cookie, or none, makes a new one.
+ */
+export type StrongDevice = { remember: true; token?: string | null } | { deviceId: string; token: string | null };
 
 class Undone extends Error {}
 
@@ -81,11 +88,14 @@ class Undone extends Error {}
  * src/lib/auth/parent-signin-finish.ts, after completeParentSignin() and before the session cookie): one transaction,
  * in the order above lockedPerson() (./sessions.ts): the person's row (FOR KEY SHARE, which a block waits for), their
  * devices, their sessions. It reads that the person is not blocked and the session row still exists, and otherwise
- * writes nothing; then, for a new device, makes a `parent_device` row (a new token, only its hash stored, 90 days)
- * audited `signin.device_remembered`, or, for a remembered one, moves its row's last use and expiry on, audited
+ * writes nothing; then, for a sign-in that proved a second step, makes a `parent_device` row (a new token, only its hash
+ * stored, 90 days) audited `signin.device_remembered`, unless the browser's device cookie names a live device of this
+ * same person (since SI-6a's second read: under Strict an app holder is asked for the app on a remembered device too),
+ * whose row is renewed instead, as below, so one browser stays one device; or, for a remembered one, moves its row's last use and expiry on, audited
  * `signin.device_used` (refused when the row is gone, or no longer the cookie's); then sets the session's `device_id` to
- * that device's row (since SI-5b, for every proof), and, for a new device only (a code's or a set-up link's sign-in,
- * which proved the password and a second step), its `strong_at` to now. A sign-in
+ * that device's row (since SI-5b, for every proof), and, for every sign-in that proved the password and a second step
+ * (an emailed code's, an app's, a backup code's or a set-up link's, on a new device or on the renewed one above), its
+ * `strong_at` to now. A password-only sign-in
  * on a remembered device leaves it as it is: it proved only the password at that moment, the device standing in for the
  * code, and a change of how the parent signs in asks for the second step itself (asking-again.ts; the lead's decision
  * of SI-5a, which reverses SI-3b's stamp for it). Its session row is still updated, so a session ended meanwhile is
@@ -106,7 +116,20 @@ export async function recordStrongSignin(o: { parentId: string; email: string; s
       if (!session) { refused = "session_ended"; throw new Undone(); }
       let made: DeviceCookie;
       let deviceId: string;
-      if ("remember" in o.device) {
+      // A sign-in that proved a second step on a browser whose cookie names a live device of this person: that row,
+      // renewed by use, and no copy of it (the second step asked for on a remembered device: under Strict).
+      const known = "remember" in o.device && isDeviceToken(o.device.token) ? o.device.token : null;
+      const [renewed] = known
+        ? await tx.update(parentDevice).set({ lastUsedAt: now, expiresAt })
+          .where(and(eq(parentDevice.parentId, o.parentId), eq(parentDevice.tokenHash, hashDeviceToken(known)), gt(parentDevice.expiresAt, now)))
+          .returning({ id: parentDevice.id })
+        : [];
+      if (known && renewed) {
+        await writeAudit({ actor, action: "signin.device_used", targetType: "parent", targetId: o.parentId,
+          after: { deviceId: renewed.id, expiresAt: expiresAt.toISOString() }, ip: o.ip }, tx);
+        made = { token: known, expiresAt };
+        deviceId = renewed.id;
+      } else if ("remember" in o.device) {
         const token = randomBytes(DEVICE_TOKEN_BYTES).toString("base64url");
         const [row] = await tx.insert(parentDevice).values({ parentId: o.parentId, tokenHash: hashDeviceToken(token), createdAt: now, lastUsedAt: now, expiresAt })
           .returning({ id: parentDevice.id });
@@ -128,8 +151,9 @@ export async function recordStrongSignin(o: { parentId: string; email: string; s
         deviceId = row.id;
       }
       // Last, in the lock order: the session. A session ended since the read above takes the device's write back with it.
-      // `strong_at` is set only for a sign-in that proved the password and a second step itself: the emailed code, or a
-      // set-up link (a new device). A sign-in on a remembered device proved only the password at that moment, so its
+      // `strong_at` is set only for a sign-in that proved the password and a second step itself (`remember`: the emailed
+      // code, the app, a backup code or a set-up link), on a new device or on the one its cookie named and the branch
+      // above renewed. A password-only sign-in on a remembered device proved only the password at that moment, so its
       // session keeps `strong_at` as it is (null, being new) and opens no window for a change (asking-again.ts).
       // `device_id` (since SI-5b) names the device the session was made on, whichever the proof: the session's renewal
       // renews it while the session is used (renewParentSession(), ./sessions.ts), and the sign-in settings mark it.

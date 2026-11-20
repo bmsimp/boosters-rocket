@@ -12,7 +12,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { createElement } from "react";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db/client";
-import { accountingLink, auditLog, family, guardian, parentAuthSession, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
+import { accountingLink, auditLog, family, guardian, parent, parentAuthSession, qboConnection, qboCustomer, setting } from "@/lib/db/schema";
 import { resolveParentSession } from "@/lib/auth/resolve";
 import { recordNameWords } from "@/lib/families/words";
 import type { ParentIdentity } from "@/lib/auth/resolve";
@@ -56,16 +56,15 @@ afterAll(() => stub.close());
 beforeEach(async () => { await resetDb(); stub.reset(); });
 
 describe("loadMyFamily: one family from the app's own records, for its own parent", () => {
-  it("returns the family's name, its students by name, the parent's own record and when the roster was read", async () => {
+  it("returns the family's name, its students by name, and the parent's name, sign-in address and phone as the portal holds them", async () => {
     const { a, b } = await seedTwoFamilies();
-    const readAt = await seedRosterRead();
+    await seedRosterRead();
     expect(await loadMyFamily(ctxOf(a.identity))).toEqual({
       name: "Alderquist Family",
       // Each student by their own app record, the id Home matches a standing by, and no QuickBooks id.
       students: [{ id: await recordOfCustomer(FAMILY_A.students[0]!.qboId, "student"), name: "Aurelio Alderquist" },
         { id: await recordOfCustomer(FAMILY_A.students[1]!.qboId, "student"), name: "Azalea Alderquist" }],
       me: { name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone, edits: "own" },
-      rosterReadAt: readAt.toISOString(),
     });
     // Each parent gets their own family and not a string of the other's.
     for (const [mine, theirs] of [[a, b], [b, a]] as const) {
@@ -75,9 +74,12 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
     }
   });
 
-  it("says nothing about when the roster was read until a refresh has succeeded", async () => {
+  it("shows the phone the portal holds for the person, whatever the roster cache holds of their record (stage 3's slice 11a)", async () => {
     const a = await seedSignedInParent();
-    expect((await loadMyFamily(ctxOf(a.identity)))?.rosterReadAt).toBeNull();
+    await db.update(qboCustomer).set({ phone: "512-555-0999" }).where(eq(qboCustomer.qboId, FAMILY_A.parent.qboId));
+    expect((await loadMyFamily(ctxOf(a.identity)))!.me).toEqual({ name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone, edits: "own" });
+    await db.update(parent).set({ phone: null }).where(eq(parent.id, a.identity.parentId));
+    expect((await loadMyFamily(ctxOf(a.identity)))!.me).toEqual({ name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: null, edits: "own" });
   });
 
   it("finds the family row by its ID, wherever it comes in the rows", async () => {
@@ -113,16 +115,18 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
     expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ students: [] });
   });
 
-  it("with no parent type, the family customer is the parent's own record", async () => {
+  it("with no parent type, the details are the family's, shared by every guardian of it", async () => {
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
     await addToCache([fam("NP-FAM", "Noparent Family", { email: "home@noparent.example, work@noparent.example", phone: "512-555-0199" }), stu("NP-S1", "Nico Noparent", "NP-FAM"),
       par("NP-P1", "Nora Noparent", "NP-FAM", "nora@noparent.example")]);
-    const fromFamily = await seedParentIn({ familyQboId: "NP-FAM", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "NP-FAM" });
+    const fromFamily = await seedParentIn({ familyQboId: "NP-FAM", name: "Noparent Family", email: "home@noparent.example", phone: "512-555-0101", sourceQboId: "NP-FAM" });
+    await db.update(family).set({ phone: "512-555-0199" }).where(eq(family.id, fromFamily.identity.familyId));
+    // The person's own phone is not shown: in books with no parent type the family's is the one they share.
     expect(await loadMyFamily(ctxOf(fromFamily.identity))).toEqual({ name: "Noparent Family", students: [{ id: await recordOfCustomer("NP-S1", "student"), name: "Nico Noparent" }],
-      me: { name: "Noparent Family", email: "home@noparent.example, work@noparent.example", phone: "512-555-0199", edits: "family" }, rosterReadAt: null });
-    // A link that names a record the shape doesn't call a parent is not the person's own record.
-    const stale = await seedParentIn({ familyQboId: "NP-FAM", name: "Nora Noparent", email: "nora@noparent.example", sourceQboId: "NP-P1" });
-    expect((await loadMyFamily(ctxOf(stale.identity)))!.me).toBeNull();
+      me: { name: "Noparent Family", email: "home@noparent.example", phone: "512-555-0199", edits: "family" } });
+    // Another guardian of the family, whatever record their row names, shares them.
+    const other = await seedParentIn({ familyQboId: "NP-FAM", name: "Nora Noparent", email: "nora@noparent.example", sourceQboId: "NP-P1" });
+    expect((await loadMyFamily(ctxOf(other.identity)))!.me).toEqual({ name: "Nora Noparent", email: "nora@noparent.example", phone: "512-555-0199", edits: "family" });
   });
 
   it("in a flat club the member is its own family: its own record, no students, nothing under it", async () => {
@@ -133,34 +137,34 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
       { qboId: "FLAT-M2", displayName: "Other Member", typeQboId: "M", email: "other@flat.example" },
     ]);
     const m = await seedParentIn({ familyQboId: "FLAT-M1", name: "Marisol Thackeray", email: "marisol@flat.example", sourceQboId: "FLAT-M1" });
+    // The member's details are the family's own record's: none until the take-in or a guardian sets them.
     expect(await loadMyFamily(ctxOf(m.identity))).toEqual({ name: "Marisol Thackeray", students: null,
-      me: { name: "Marisol Thackeray", email: "marisol@flat.example", phone: "512-555-0144", edits: "family" }, rosterReadAt: null });
+      me: { name: "Marisol Thackeray", email: "marisol@flat.example", phone: null, edits: "family" } });
+    await db.update(family).set({ phone: "512-555-0144" }).where(eq(family.id, m.identity.familyId));
+    expect((await loadMyFamily(ctxOf(m.identity)))!.me).toMatchObject({ phone: "512-555-0144", edits: "family" });
     // A customer that isn't a member type is not a family in a flat club: its record is inactive, so nobody is let in to it.
     expect(await gateOf("FLAT-SUB", "tobias@flat.example")).toEqual({ status: "none" });
   });
 
-  it("takes the parent's own record only from their own link, and only when it sits in their family", async () => {
+  it("gives the person their own details whatever record their row names, and none of another family's", async () => {
     const { a, b } = await seedTwoFamilies();
     const link = (sourceQboId: string | null) => db.update(guardian).set({ sourceQboId }).where(eq(guardian.id, a.identity.guardianId));
-    const me = async (identity = a.identity) => {
-      const got = await loadMyFamily(ctxOf(identity));
+    const mine = { name: "Ansgar Alderquist", email: FAMILY_A.parent.email, phone: FAMILY_A.parent.phone, edits: "own" };
+    const me = async () => {
+      const got = await loadMyFamily(ctxOf(a.identity));
       for (const marker of b.markers) expect(JSON.stringify(got)).not.toContain(marker);
       return got!.me;
     };
-    expect(await me()).toMatchObject({ name: "Ansgar Alderquist" });
-    // Family B's parent, family B itself, a student of their own family, an ID that names nothing, a link made by hand.
+    expect(await me()).toEqual(mine);
+    // Family B's parent, family B itself, a student of their own family, an ID that names nothing, a link made by hand:
+    // the details are the person's own in the portal, so what the row names changes nothing of them.
     for (const source of [FAMILY_B.parent.qboId, FAMILY_B.family.qboId, FAMILY_A.students[0]!.qboId, FAMILY_A.family.qboId, "NO-SUCH-CUSTOMER", null]) {
       await link(source);
-      expect(await me(), `a link that names ${source}`).toBeNull();
+      expect(await me(), `a link that names ${source}`).toEqual(mine);
     }
-    // Their own record, inactive: QuickBooks has renamed it, and it is not shown.
-    await link(FAMILY_A.parent.qboId);
-    await db.update(qboCustomer).set({ active: false, displayName: "Ansgar Alderquist (deleted)" }).where(eq(qboCustomer.qboId, FAMILY_A.parent.qboId));
-    expect(await me()).toBeNull();
-    // A context that names family B's link, or B's person, beside family A: nothing of B comes back.
-    await db.update(qboCustomer).set({ active: true, displayName: "Ansgar Alderquist" }).where(eq(qboCustomer.qboId, FAMILY_A.parent.qboId));
-    expect(await me({ ...a.identity, guardianId: b.identity.guardianId })).toBeNull();
-    expect(await me({ ...a.identity, parentId: b.identity.parentId })).toBeNull();
+    // Their own record inactive and renamed in the cache: nothing of it is shown.
+    await db.update(qboCustomer).set({ active: false, displayName: "Ansgar Alderquist (deleted)", phone: "512-555-0998" }).where(eq(qboCustomer.qboId, FAMILY_A.parent.qboId));
+    expect(await me()).toEqual(mine);
     expect(await db.select().from(auditLog)).toEqual([]);
   });
 
@@ -197,27 +201,28 @@ describe("loadMyFamily: one family from the app's own records, for its own paren
   it("still shows the last roster when QuickBooks is disconnected", async () => {
     const a = await seedSignedInParent();
     await seedConnected(stub, { realmId: REALM });
-    const readAt = await seedRosterRead({ realmId: OTHER_REALM });
+    await seedRosterRead({ realmId: OTHER_REALM });
     await db.update(qboConnection).set({ realmId: null, refreshTokenCiphertext: null, refreshTokenKeyId: null, accessTokenCiphertext: null, accessTokenKeyId: null });
     // The records were made again from that cache's company, so the record the session chose no longer counts: the
     // gate sends it to choose again, and the family it may enter is the one the person's row names now.
     const now = await identityAfterChoosingAgain(a.session.id);
-    expect(await loadMyFamily(ctxOf(now))).toMatchObject({ name: "Alderquist Family", rosterReadAt: readAt.toISOString(), me: { name: "Ansgar Alderquist" } });
+    expect(await loadMyFamily(ctxOf(now))).toMatchObject({ name: "Alderquist Family", me: { name: "Ansgar Alderquist" } });
     expect((await loadRosterPage()).roster).not.toBeNull();
   });
 
-  it("keeps the parent's own QuickBooks record back when there is no membership shape, or it names a customer type QuickBooks no longer has", async () => {
+  it("shows the portal's own details when there is no membership shape, or it names a customer type QuickBooks no longer has: the shape says only whose", async () => {
     const a = await seedSignedInParent();
     await seedRosterRead();
-    // The family and its students are the app's own records, shown whatever the shape; what QuickBooks holds of the
-    // parent is read by the shape, and not while it can't be trusted.
+    await db.update(family).set({ phone: "512-555-0177" }).where(eq(family.id, a.identity.familyId));
+    // The family, its students and the details are the app's own records, shown whatever the shape; the shape says
+    // only whether the books have a parent type, and so whether the details are the person's or the family's.
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "GONE", parentTypeId: "P" });
-    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", me: null });
+    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", me: { phone: FAMILY_A.parent.phone, edits: "own" } });
     expect((await loadRosterPage()).roster).toBeNull();
     await seedShape({ kind: "flat", memberTypeIds: ["F", "GONE"] });
-    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", students: null, me: null });
+    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", students: null, me: { phone: "512-555-0177", edits: "family" } });
     await db.delete(setting).where(eq(setting.key, "membership.shape"));
-    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", students: null, me: null });
+    expect(await loadMyFamily(ctxOf(a.identity))).toMatchObject({ name: "Alderquist Family", students: null, me: { phone: FAMILY_A.parent.phone, edits: "own" } });
     expect((await loadRosterPage()).roster).toBeNull();
   });
 });
@@ -239,8 +244,9 @@ describe("Home", () => {
     // No placeholder, and nothing that has no data yet: no forms counts, no part or grade. (The season is
     // tests/integration/seasons-parent.test.ts.)
     expect(html).not.toMatch(/will show here|\bforms\b|grade/i);
-    // The roster has not been read by a refresh yet, so the page doesn't say when it was.
+    // The details are the portal's own: nothing says they came from QuickBooks (stage 3's slice 11a).
     expect(html).not.toContain("roster-asof");
+    expect(html).not.toContain("your contact details");
   });
 
   it("shows what the family owes first, under the family's name, with the way to the Payments page", async () => {
@@ -324,11 +330,15 @@ describe("Home", () => {
     expect(html).not.toContain("Ask the club");
   });
 
-  it("says when the roster was last read, once it has been", async () => {
+  it("says nothing of QuickBooks about the details once the roster has been read either: they are the portal's own", async () => {
     const a = await seedSignedInParent();
-    const readAt = await seedRosterRead();
+    await seedRosterRead();
     asParent(a.identity);
-    expect(await renderPage(ParentHome)).toMatch(new RegExp(`QuickBooks, as of <time datetime="${readAt.toISOString()}"`, "i"));
+    for (const page of [ParentHome, FamilyPage]) {
+      const html = await renderPage(page);
+      expect(html).not.toContain("roster-asof");
+      expect(html).not.toMatch(/From the club&#x27;s QuickBooks, as of <time[^>]*>[^<]*<\/time>: your contact details/);
+    }
   });
 
   it("records nothing: a parent viewing their own family is not audited", async () => {
@@ -350,10 +360,11 @@ describe("Home", () => {
     for (const name of A_STUDENTS) expect(html).not.toContain(name);
   });
 
-  it("layered with no parent type: the family customer's record is the details, and a household is greeted without a name", async () => {
+  it("layered with no parent type: the family's details are shown, and a household is greeted without a name", async () => {
     await seedShape({ kind: "layered", familyTypeId: "F", studentTypeId: "S", parentTypeId: null });
     await addToCache([fam("NP-FAM", "Noparent Family", { email: "home@noparent.example", phone: "512-555-0199" }), stu("NP-S1", "Nico Noparent", "NP-FAM")]);
     const p = await seedParentIn({ familyQboId: "NP-FAM", name: "Noparent Family", email: "home@noparent.example", sourceQboId: "NP-FAM" });
+    await db.update(family).set({ phone: "512-555-0199" }).where(eq(family.id, p.identity.familyId));
     asParent(p.identity);
     const html = await renderPage(ParentHome);
     expect(html).toContain(`<h1 class="page-title">Hi</h1>`);
@@ -361,13 +372,14 @@ describe("Home", () => {
     expect(html).toContain(`<dd class="num">512-555-0199</dd>`);
   });
 
-  it("flat: the member's own record, and no students box", async () => {
+  it("flat: the member's own details, and no students box", async () => {
     await seedShape({ kind: "flat", memberTypeIds: ["M"] });
     await addToCache([
       { qboId: "FLAT-M1", displayName: "Thackeray, Marisol", typeQboId: "M", email: "marisol@flat.example", phone: "512-555-0144" },
       { qboId: "FLAT-SUB", displayName: "Tobias Thackeray", typeQboId: "S", parentQboId: "FLAT-M1" },
     ]);
     const m = await seedParentIn({ familyQboId: "FLAT-M1", name: "Thackeray, Marisol", email: "marisol@flat.example", sourceQboId: "FLAT-M1" });
+    await db.update(family).set({ phone: "512-555-0144" }).where(eq(family.id, m.identity.familyId));
     asParent(m.identity);
     for (const page of [ParentHome, FamilyPage]) {
       const html = await renderPage(page);
@@ -379,15 +391,18 @@ describe("Home", () => {
     expect(await renderPage(ParentHome)).toContain("Hi, Marisol</h1>");
   });
 
-  it("a sign-in with no QuickBooks record shows the name and address the portal knows, and no phone", async () => {
+  it("a guardian with no QuickBooks record sees the details the portal holds for them, and the way to change them", async () => {
     await seedShape();
     await addToCache([fam("HM-FAM", "Handmade Family"), stu("HM-S1", "Hugo Handmade", "HM-FAM")]);
     const p = await seedParentIn({ familyQboId: "HM-FAM", name: "Hester Handmade", email: "hester@handmade.example", phone: "512-555-0111" });
     asParent(p.identity);
     const html = await renderPage(ParentHome);
     expect(html).toContain("<b>Hugo Handmade</b>");
-    expect(html).toContain("<dt>Name</dt><dd>Hester Handmade</dd><dt>Email</dt><dd>hester@handmade.example</dd></dl>");
-    expect(html).not.toContain("Phone");
+    expect(html).toContain(`<dt>Name</dt><dd>Hester Handmade</dd><dt>Email</dt><dd>hester@handmade.example</dd><dt>Phone</dt><dd class="num">512-555-0111</dd></dl>`);
+    expect(html).toContain(`<a class="btn btn-line" href="/family/details">Update my details</a>`);
+    // With no phone set, none is shown.
+    await db.update(parent).set({ phone: null }).where(eq(parent.id, p.identity.parentId));
+    expect(await renderPage(ParentHome)).toContain("<dt>Name</dt><dd>Hester Handmade</dd><dt>Email</dt><dd>hester@handmade.example</dd></dl>");
   });
 
   it("a family with no active student says so, calmly", async () => {
@@ -455,18 +470,19 @@ describe("Home", () => {
       par("H-PAR", `Hana ${SCRIPT}`, "H-FAM", `hana@hostile.example, "><b>bold</b>`, { phone: `555<svg onload=alert(3)>` }),
       stu("H-STU", `Hal ${IMG}`, "H-FAM"),
     ]);
-    const p = await seedParentIn({ familyQboId: "H-FAM", name: `Hana ${SCRIPT}`, email: "hana@hostile.example", sourceQboId: "H-PAR" });
+    // Her phone is the portal's own (taken in from that record once): markup there is text too.
+    const p = await seedParentIn({ familyQboId: "H-FAM", name: `Hana ${SCRIPT}`, email: "hana@hostile.example", phone: `555<svg onload=alert(3)>`, sourceQboId: "H-PAR" });
     asParent(p.identity);
     for (const page of [ParentHome, FamilyPage]) {
       const html = await renderPage(page);
       expect(html).toContain("&lt;img src=x onerror=alert(1)&gt; Family");
       expect(html).toContain("<b>Hal &lt;img src=x onerror=alert(1)&gt;</b>");
       expect(html).toContain("Hana &lt;script&gt;alert(2)&lt;/script&gt;");
-      expect(html).toContain("&lt;b&gt;bold&lt;/b&gt;");
       expect(html).toContain("555&lt;svg onload=alert(3)&gt;");
       expect(html).not.toMatch(/<img|<script|<svg|<b>bold/);
-      // The QuickBooks address is text, not a link.
+      // The address is text, not a link, and only her sign-in address is shown: nothing else of the record's email field.
       expect(html).not.toContain("mailto:hana");
+      expect(html).not.toContain("bold");
     }
     const frame = await renderPage(ParentLayout, { children: createElement("main", null, "the page") });
     expect(frame).not.toMatch(/<img|<script>alert/);
@@ -476,7 +492,7 @@ describe("Home", () => {
 describe("Family", () => {
   it("shows the same students and details, and the account the portal signs the parent in with", async () => {
     const { a, b } = await seedTwoFamilies();
-    const readAt = await seedRosterRead();
+    await seedRosterRead();
     asParent(a.identity);
     const html = await renderPage(FamilyPage);
     expect(html).toContain(`<h1 class="page-title">Alderquist Family</h1>`);
@@ -484,7 +500,7 @@ describe("Family", () => {
     expect(html).toContain(`<dd class="num">${FAMILY_A.parent.phone}</dd>`);
     expect(html).toContain("Your account");
     expect(html).toContain(`How you sign in to the portal</p><dl class="details"><dt>Name</dt><dd>Ansgar Alderquist</dd><dt>Email</dt><dd>${FAMILY_A.parent.email}</dd></dl>`);
-    expect(html).toMatch(new RegExp(`QuickBooks, as of <time datetime="${readAt.toISOString()}"`, "i"));
+    expect(html).not.toContain("roster-asof");
     // One family: nothing about switching.
     expect(html).not.toMatch(/Your families|choose-family/);
     for (const marker of b.markers) expect(html).not.toContain(marker);

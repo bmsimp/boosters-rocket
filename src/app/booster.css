@@ -363,10 +363,6 @@ ul.stack { list-style: none; padding: 0; }
 dl.details dd { min-width: 0; overflow-wrap: anywhere; }
 .home-head .page-title, .family-page .page-title, .students .who, .money > h2 { overflow-wrap: anywhere; }
 
-/* Where the students and details come from, and when they were read. */
-.roster-asof { font-size: 0.875rem; color: var(--ink-2); }
-main.wrap.single > .roster-asof { margin-top: var(--s4); max-width: 760px; }
-
 /* Home: the head (the greeting), then the boxes. The family's name is the money box's heading. */
 .home-head .page-title { margin-top: var(--s4); }
 @media (min-width: 760px) {

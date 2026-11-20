@@ -11,6 +11,10 @@ describe("the second step a right password asks for", () => {
     expect(secondStepFor({ level, hasSecondFactor })).toEqual(wanted);
   });
 
+  it("never asks an authenticator app holder for the emailed code, at either level (open question 24; slice SI-6a)", () => {
+    for (const level of ["standard", "strict"] as const) expect(secondStepFor({ level, hasSecondFactor: true })).toEqual({ step: "second_factor" });
+  });
+
   it("never asks for the emailed code under Strict", () => {
     for (const hasSecondFactor of [false, true]) expect(secondStepFor({ level: "strict", hasSecondFactor }).step).not.toBe("emailed_code");
   });

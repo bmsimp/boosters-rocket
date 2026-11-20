@@ -8,8 +8,9 @@ export type StepLevel = "standard" | "strict";
 /**
  * The second step to ask for, or none and why (the reason goes in the `signin.password_refused` row only):
  * - `emailed_code`: a 6-digit code mailed to the person's sign-in address (signin_code, ./signin-codes.ts);
- * - `second_factor`: the person's own second factor, an authenticator app or a passkey, which slices SI-6 and SI-7
- *   build; nothing asks for it yet, since its caller passes `hasSecondFactor: false` until then.
+ * - `second_factor`: the person's own second factor: since slice SI-6a their authenticator app in force (its code or a
+ *   backup code, /portal-app/check), which the password step reads (hasAuthenticator(), ./authenticator.ts); SI-7 adds
+ *   passkeys.
  */
 export type SecondStep = { step: "emailed_code" | "second_factor" } | { step: null; reason: "strict_no_factor" };
 

@@ -214,9 +214,17 @@ screen and the differences. Nobody's sign-in changes because of what it reads.
 - Only staff add guardians. A parent cannot invite a second guardian.
 - Staff remove a guardian from a family. The owner, on 2026-11-18: "a removed guardian loses portal access at once;
   their Parent record in QuickBooks is made inactive only under the balance rule". So removing ends the guardian's
-  access to that family in the app at once, whatever the family owes; making their Parent record inactive in
-  QuickBooks, refused while anyone owes, comes with the source move. *(Built in the app in stage 3's slice 7b, with
-  add, reinstate and a change of name; the QuickBooks half waits for slice S9.)*
+  access to that family in the app at once, whatever the family owes; their own Parent record in QuickBooks is made
+  inactive only when its own balance allows (any balance on it, owed or a credit, or one that can't be read, leaves it
+  as it is, kept on Reconciliation, for the mapping screen to show as a difference). This is the owner's decision of
+  2026-11-18, corrected here from "refused while anyone owes": it is the guardian's own Parent record's balance that
+  decides, not the family's. *(Built in the app in stage 3's slice 7b, with add, reinstate and a change of name; the
+  QuickBooks half is built in slice 9h: an added guardian gets a Parent customer of their own under a linked family,
+  where the books have a parent type, unless QuickBooks already has a customer of their name there, or the person's
+  own Parent customer of that name under another family of theirs (one person, one name: until the check of the
+  portal's requests shows QuickBooks takes a name twice, the portal takes it that QuickBooks takes a name once, so a
+  guardian of two families has their record under the first, the lead's decision); a rename follows to it, giving the
+  new name to one record of theirs; a removal makes it inactive by the rule above.)*
 - Adding, removing and reinstating a guardian take the permission that changes a family (`Roster.Family.ReadWrite`), not
   the one that sees parents: anyone who can change families can give an address a parent's view of one (its invoices,
   its forms, a buy-out to confirm), and every such grant is audited with who made it *(the lead's choice in stage 3's

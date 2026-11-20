@@ -61,6 +61,7 @@ import SignInPage from "@/app/sign-in/page";
 import { resetDb, seedGuardianInFamily, seedParent, seedStaff, seedWorkingMail } from "../helpers/db";
 import { SIGNINS_ON, seedParentSettings } from "../helpers/roster-cache";
 import { mintLink, seedPassword } from "../helpers/signin-links";
+import { seedAuthenticator } from "../helpers/authenticator";
 
 /**
  * "Set up or reset my password" (the sign-in release, slice SI-3a): a visitor types an address and is always answered
@@ -186,6 +187,23 @@ describe("asking for a set-up or reset link", () => {
       expect(await db.select().from(parentSigninToken), name).toEqual([]);
       expect((await reasons()).map((r) => r.reason), name).toEqual(c.reasons);
     }
+  });
+
+  it("under Strict, mails a reset to a guardian with an authenticator app in force, and still none to one whose set-up is unfinished (slice SI-6a)", async () => {
+    await seedParentSettings({ ...SIGNINS_ON, level: "strict" }); await seedWorkingMail();
+    const { withPassword } = await seedEveryone();
+    const fay = await seedParent({ name: "Fay", email: "fay@example.com" });
+    await seedGuardianInFamily({ parentId: fay.id, familyQboId: "F1" });
+    await seedPassword(fay.authUserId, "a phrase Fay chose some time ago");
+    await seedAuthenticator(withPassword.id);
+    await seedAuthenticator(fay.id, { confirmed: false });
+    expect(await ask("ben@example.com")).toEqual(ANSWER);
+    expect(await ask("fay@example.com")).toEqual(ANSWER);
+    await vi.waitFor(() => expect(outbox).toHaveLength(1));
+    await untilPutInPlace(1);
+    expect(outbox[0]!.to).toBe("ben@example.com");
+    expect(linkIn(outbox[0]!)![1]).toBe("reset");
+    expect(await reasons()).toEqual([{ outcome: "reset", link: "on_its_way" }, { outcome: "none", reason: "strict_no_factor" }]);
   });
 
   it("answers anything that isn't an address of a sane length, uncounted and unrecorded", async () => {
