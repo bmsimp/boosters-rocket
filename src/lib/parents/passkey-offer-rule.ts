@@ -73,11 +73,13 @@ export function declineCounts(f: OfferFacts, now: Date): boolean {
 }
 
 /**
- * Whether the offer is drawn now: the session may add a passkey with one tap (mayAddPasskey(): sign-ins on, not
- * blocked, a row that counts, a password chosen, a proof within the window), the person holds no passkey (the portal
- * can't tell whether this device holds one of theirs; a holder adds another on Sign-in settings), and a "Not now"
- * would count.
+ * Whether the offer is drawn now: the session is still at its sign-in (atSignin(): made within the window, its sign-in
+ * proved a second step, that proof still within the window), the session may add a passkey with one tap
+ * (mayAddPasskey(): sign-ins on, not blocked, a row that counts, a password chosen, a proof within the window), the
+ * person holds no passkey (the portal can't tell whether this device holds one of theirs; a holder adds another on
+ * Sign-in settings), and a "Not now" would count. The window is read here, not in declineCounts(): the box is drawn
+ * only at sign-in, but an answer to it is kept whenever it comes.
  */
 export function offerDue(f: OfferFactsAll, now: Date): boolean {
-  return f.mayAdd && f.passkeys === 0 && declineCounts(f, now);
+  return atSignin(f, now) && f.mayAdd && f.passkeys === 0 && declineCounts(f, now);
 }
