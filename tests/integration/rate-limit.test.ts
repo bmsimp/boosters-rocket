@@ -63,7 +63,7 @@ describe("database rate limits", () => {
     // registration night (spec §1 Rate limits). All in 15 minutes.
     const window = { windowMs: 15 * 60 * 1000 };
     const { contact_save_parent, contact_open_parent, form_open_parent, volunteer_checkin_parent, volunteer_signup_parent, email_request_parent, email_confirm_parent, buyout_parent,
-      password_reask_parent, password_change_parent, signin_settings_parent, ...signIn } = RATE_LIMITS;
+      password_reask_parent, password_change_parent, signin_settings_parent, signin_reset_person, ...signIn } = RATE_LIMITS;
     expect(signIn).toEqual({ code_send_email: { max: 3, ...window }, code_send_ip: { max: 60, ...window }, code_check_ip: { max: 180, ...window },
       // Choosing a password from a set-up or reset link (src/lib/parents/password-set.ts): a flood per IP address, as
       // the code request's, and the tries one link may take (a token can't be guessed).
@@ -108,5 +108,9 @@ describe("database rate limits", () => {
     expect(password_reask_parent).toEqual({ max: 5, ...window });
     expect(password_change_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
     expect(signin_settings_parent).toEqual({ max: 10, windowMs: 60 * 60 * 1000 });
+    // An Admin's reset of a parent's sign-in (src/lib/parents/signin-reset.ts; the sign-in release, slice SI-9a), counted
+    // per person reset: each ends every session of one person and mails their address, so three a day is far more than
+    // a genuine need, and one mailbox can't be flooded. Never per Admin: resetting several parents is the expected case.
+    expect(signin_reset_person).toEqual({ max: 3, windowMs: 24 * 60 * 60 * 1000 });
   });
 });

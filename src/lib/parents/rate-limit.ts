@@ -5,7 +5,8 @@ import { rateLimitEvent } from "@/lib/db/schema";
 export type RateLimitKind = "code_send_email" | "code_send_ip" | "code_check_ip" | "contact_save_parent" | "contact_open_parent" | "form_open_parent"
   | "volunteer_checkin_parent" | "volunteer_signup_parent" | "email_request_parent" | "email_confirm_parent" | "buyout_parent"
   | "password_link_ip" | "password_link_token" | "password_ask_email" | "password_ask_ip" | "password_try_email" | "password_try_device"
-  | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent" | "second_step_parent";
+  | "password_try_ip" | "password_reask_parent" | "password_change_parent" | "signin_settings_parent" | "second_step_parent"
+  | "signin_reset_person";
 const WINDOW_MS = 15 * 60 * 1000;
 /**
  * Guessing is stopped per code (5 tries, 10 minutes: signin-codes.ts) and per address (3 codes in 15 minutes). The two
@@ -72,6 +73,13 @@ export const RATE_LIMITS: Record<RateLimitKind, { max: number; windowMs: number 
   second_step_parent: { max: 5, windowMs: WINDOW_MS },
   password_change_parent: { max: 10, windowMs: 60 * 60 * 1000 },
   signin_settings_parent: { max: 10, windowMs: 60 * 60 * 1000 },
+  // An Admin's reset of a parent's sign-in (resetSignin(), signin-reset.ts; the sign-in release, slice SI-9a), counted
+  // per person reset, by their id. Each reset ends every session of one person and mails their address, so three in a
+  // day is far more than a genuine need (a mail that failed and was tried again, a second call), and the bound keeps
+  // one mailbox from being flooded and one person's sign-in from being torn down again and again by a mistaken or
+  // stolen Admin session. Per person, never per Admin: an Admin who resets several parents after a change of the
+  // portal's address is the expected case (a later slice, SI-9b, is the better tool for that).
+  signin_reset_person: { max: 3, windowMs: 24 * 60 * 60 * 1000 },
   // A parent's own phone and address (contact-edits.ts), counted per person: nobody changes their address more than a
   // few times an hour. Since stage 3's slice 11a opening the edit page reads the portal alone and takes no count, so
   // contact_open_parent is unused (S12 removes it).
