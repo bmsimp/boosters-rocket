@@ -55,14 +55,22 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 /** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
-const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. The link can't be removed in the portal yet, so check it is the right household.";
+const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
 
 /**
- * What a carried-over Rivera Family's opening says of Confirm this link since slice M3a2, as the text of the page reads
- * it: Leo Rivera's carried-over link to the student customer under the family goes with it, and the press.
+ * What a carried-over Rivera Family's opening says of Confirm this link since slice M3a2, and of Unlink from the books
+ * since slice M3b, as the text of the page reads it: Leo Rivera's carried-over link to the student customer under the
+ * family goes with the confirm; the unlink ends the family's link to its customer (as the books' copy names it), Leo's
+ * link and Ana Rivera's own link; then both presses.
  */
-const RIVERA_REVIEW = "Confirm this link records it as checked by you, so it no longer reads as carried over. Nothing is sent to the books."
-  + "Confirmed with it, each carried over to a student customer directly under this customer:Leo RiveraConfirm this link: Rivera Family";
+const riveraPresses = (customer = "Rivera Family") => "Confirm this link records it as checked by you, so it no longer reads as carried over. Nothing is sent to the books."
+  + "Confirmed with it, each carried over to a student customer directly under this customer:Leo Rivera"
+  + `Unlink from the booksUnlinking ends this family's link to “${customer}”, with the link of its student Leo Rivera, and a guardian's own link to a Parent customer. Nothing is sent to the books, and the customer stays there as it is.`
+  + "Its guardians then read that the club hasn't connected their payments to the portal yet, with no invoices, Pay or buy-out offer, until it is linked again, and its stored figures are forgotten at once."
+  + " The family, its students, guardians, sign-ins, season, volunteering and forms stay as they are."
+  + " It isn't unlinked while a buy-out of the family or its students isn't settled, or while a change of it waits on Reconciliation."
+  + "To link it again, use this page, with Confirm or Pick a different customer once its row shows them. “Create in QuickBooks and link” on its page would make a second customer in the books."
+  + "Confirm this link: Rivera FamilyUnlink from the books: Rivera Family";
 
 /** Customers added or changed in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
@@ -428,7 +436,7 @@ describe("the page", () => {
     const rivera = rowNamed(html, "Rivera Family")!;
     expect(rivera.slice(0, 3)).toEqual(["Rivera Family", "ana@example.com", "Rivera FamilyNo email address"]);
     expect(rivera[3]).toMatch(/^Carried overCarried over from the roster by the portal, on .+\. Nobody has confirmed it since\.$/);
-    expect(rivera[4]).toBe("Students and guardians: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + RIVERA_REVIEW);
+    expect(rivera[4]).toBe("Students and guardians: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera" + riveraPresses());
     const patel = rowNamed(html, "The Patels")!;
     expect(patel.slice(1)).toEqual(["asha@example.com", "Patel Familyasha@example.com",
       "SuggestedA guardian's sign-in address matches: asha@example.com, on this customer.",
@@ -772,10 +780,13 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(rowNamed(html, "Riveras")![4]).toContain(`The family's name. In the portal: “Riveras”. In the books: “Rivera Family”. ${kept} See the change on Reconciliation`);
     expect(rowNamed(html, "Chen Family")![4]).toContain("Where Leo Rivera is. In the portal: In this family. In the books: Under Rivera Family in QuickBooks. Waiting to reach QuickBooks. See the change on Reconciliation");
     expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(3);
-    // No button but the filter's own and, since slice M3a2, each carried-over row's Confirm this link; nothing of money.
-    expect(html.split("<button").length - 1).toBe(3);
+    // No button but the filter's own, since slice M3a2 each carried-over row's Confirm this link, and since slice M3b each
+    // linked row's Unlink from the books; nothing of money but each unlink's own words of what the guardians then read.
+    expect(html.split("<button").length - 1).toBe(5);
     expect(html.split("Confirm this link<span").length - 1).toBe(2);
-    expect(html).not.toContain("invoices");
+    expect(html.split("Unlink from the books<span").length - 1).toBe(2);
+    expect(html.split("invoices").length - 1).toBe(2);
+    expect(html.split("with no invoices, Pay or buy-out offer").length - 1).toBe(2);
   });
 
   it("says a stuck item, one QuickBooks took that the portal has to finish, a waiting student's create and a kept guardian's create each in the queue's words", async () => {
@@ -866,7 +877,7 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(html).toContain("In the books: “&lt;b&gt;Bold&lt;/b&gt; Rivera”.");
     expect(html).toContain("<details class=\"more\"><summary>Students, guardians and differences<span class=\"visually-hidden\">: Rivera Family</span></summary>");
     expect(rowNamed(html, "Rivera Family")![4]).toBe("Students, guardians and differences: Rivera FamilyStudents:Leo Rivera: linked to Leo RiveraGuardians:Ana Rivera (ana@example.com): linked to Ana Rivera"
-      + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”." + RIVERA_REVIEW);
+      + "Where the portal and the books differ:The family's name. In the portal: “Rivera Family”. In the books: “<b>Bold</b> Rivera”." + riveraPresses("<b>Bold</b> Rivera"));
     // The books' values are the portal's copy from its last read, said with its time; the page settles nothing.
     expect(whole).toContain("against its copy of the books, from its last read of them on ");
     expect(whole).toContain("and settles none of it.");

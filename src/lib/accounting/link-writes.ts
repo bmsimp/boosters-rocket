@@ -13,22 +13,23 @@
 // finish), so holding it exclusively keeps every one of them out while the press reads the guardians, the students and
 // the cache and writes the links. Reading the guardians to work the suggestion out again takes no row lock either.
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db, type Tx } from "@/lib/db/client";
-import { accountingLink, family, writeQueue } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, buyout, family, guardian, requirement, student, writeQueue } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { asAppFamilyId, QUICKBOOKS, type AppFamilyId } from "@/lib/families/ids";
 import { clearLeftUnlinked } from "@/lib/families/left-unlinked";
 import { recordNameWords } from "@/lib/families/words";
+import { forgetFamilyMoney } from "@/lib/money/family-money";
 import { isQboId } from "@/lib/quickbooks/client";
-import { handful, type AimedAt } from "@/lib/roster/no-family";
-import { familyCreateWaiting, NO_FAMILY_CUSTOMER } from "@/lib/roster/writes";
+import { handful, noFamilyPool, type AimedAt } from "@/lib/roster/no-family";
+import { blocksOthers, familyCreateWaiting, NO_FAMILY_CUSTOMER, recordSendingFree } from "@/lib/roster/writes";
 import { isUuid } from "@/lib/seasons/ids";
 import { lockRosterAs, ROSTER_MOVED } from "@/lib/seasons/roster-lock";
 import { BULK_MAX, bulkKeys, readCustomerAims, readLinkBasics, REVIEW_LEFT_WORDS, suggestedRowsShown, type LinkBasics, type LinksState, type ReviewLeftWhy } from "./mapping";
 import { pairKeys, type Proposals } from "./proposals";
 import { isStatusKey, linkStanding, SEARCH_MAX, type StatusKey } from "./status";
-import { bulkStampHolds, isChosen, linkStampHolds, reviewStampHolds, type Chosen } from "./stamp";
+import { bulkStampHolds, isChosen, linkStampHolds, reviewStampHolds, unlinkStampHolds, type Chosen } from "./stamp";
 
 export type LinkOp = { actor: Actor; ip: string | null; permission: string; staffUserId: string };
 export type LinkDone = { ok: true; message: string } | { ok: false; errors: string[] };
@@ -59,10 +60,16 @@ export const LINK_COPY = {
   bulkSending: (family: string) => `${family}, one of the families this list shows, is being made in the books at this moment, so nothing was linked. Try again in a minute: the list is shown again as it is now.`,
   reviewChanged: `This family's link has changed since the page was drawn (it is no longer carried over to the same customer, or one of its students' links was added, removed or changed), so nothing was confirmed. ${AGAIN} Look it over, then press again.`,
   reviewNotStanding: `The customer this family is linked to isn't a family at the top of the books now, or isn't in the books' copy at all, so the link wasn't confirmed. ${AGAIN}`,
+  notLinkedNow: `This family isn't linked to a customer in the books now, so nothing was unlinked. ${AGAIN}`,
+  unlinkChanged: `This family's links have changed since the page was drawn (its own link, or one of its students' links, was made, ended or changed), so nothing was unlinked. ${AGAIN} Look it over, then press again.`,
+  buyoutUnsettled: (n: number, titles: string) => `${n === 1 ? "A buy-out" : `${n} buy-outs`} of this family or its students (${titles}) ${n === 1 ? "isn't" : "aren't"} settled yet: ${n === 1 ? "its invoice is" : "their invoices are"} on the family's customer in the books, and nobody could reach ${n === 1 ? "it" : "them"} from the portal once the family is unlinked, so nothing was unlinked. Once the daily check has marked ${n === 1 ? "it" : "each"} paid, the guardian has switched back, or staff have closed it on the Reconciliation page where it may be closed, the family can be unlinked. ${AGAIN}`,
+  unlinkMoving: (n: number) => `${n === 1 ? "A student's move" : `${n} students' moves`} into or out of this family ${n === 1 ? "is" : "are"} waiting, stuck or kept on the Reconciliation page, so nothing was unlinked. Once ${n === 1 ? "it has" : "they have"} gone through, or been given up there, try again. ${AGAIN}`,
+  unlinkWaiting: (n: number) => `${n === 1 ? "A change" : `${n} changes`} for this family, its students or its guardians ${n === 1 ? "is" : "are"} waiting, stuck or kept on the Reconciliation page, so nothing was unlinked: ${n === 1 ? "it names" : "they name"} the customers this link ties the family to. Once ${n === 1 ? "it has" : "they have"} gone through, or been given up there, try again. ${AGAIN}`,
+  unlinkBusy: `This family, one of its students or one of its guardians is being changed in the books at this moment, so nothing was unlinked. Try again in a minute. ${AGAIN}`,
   no_company: `The portal hasn't read the club's books yet, so nothing was linked. ${AGAIN}`,
   other_company: `QuickBooks is connected to a different company than the one the roster was read from, so nothing was linked. An Admin can see why under Settings, QuickBooks. ${AGAIN}`,
   no_shape: `The membership shape isn't chosen, or names a customer type the books no longer have, so the portal can't tell which customers are families. Nothing was linked. An Admin can choose it under Settings, QuickBooks. ${AGAIN}`,
-} as const satisfies Record<string, string | ((family: string) => string)> & Record<Exclude<LinksState, "listed">, string>;
+} as const satisfies Record<string, string | ((...words: never[]) => string)> & Record<Exclude<LinksState, "listed">, string>;
 
 /** The unique indexes a confirm may meet, the last line against a wrong link: a family's, and a student's. */
 const FAMILY_UQ = new Set(["accounting_link_family_customer_uq", "accounting_link_family_uq"]);
@@ -337,7 +344,7 @@ export function bulkConfirmedWords(s: { families: string[]; students: number; re
  * link the portal carried over from the roster. In one transaction under the roster lock held exclusively with the
  * page's tag, from reads made in it: the family active (locked); its family link of the records' company (locked)
  * still the one the page showed and still `carried_over`; the state `listed`; the customer standing (linkStanding():
- * Customer gone and Not a family now are slice M3b's); the student links it confirms worked out again (reviewOf():
+ * a Customer gone or Not a family now row offers Unlink from the books instead, slice M3b); the student links it confirms worked out again (reviewOf():
  * each carried-over student link of the family's active records to a customer the roster lists directly under the
  * family's customer) and sealing to the page's stamp. Then the family link and those student links become `confirmed`,
  * by the staff member, at the press's time (`linked_at`), with `synced_token` and `synced_at` as they were: a review
@@ -386,6 +393,142 @@ export function reviewedWords(s: { family: string; customer: string; confirmed: 
   if (s.confirmed.length) parts.push(`Confirmed with it, as ${s.confirmed.length === 1 ? "its student's link" : "its students' links"}: ${list(s.confirmed)}.`);
   if (s.left.length) parts.push(`Left carried over: ${list(s.left.map((l) => `${l.name} (${REVIEW_LEFT_WORDS[l.why]})`))}.`);
   parts.push("Nothing was sent to the books.");
+  return parts.join(" ");
+}
+
+/** A buy-out that isn't settled (the owner's choice 3 for slice M3b, recommended and awaiting his word): an unlink is refused while one stands. */
+const UNSETTLED_BUYOUT = ["being_invoiced", "invoiced", "being_voided", "stuck"] as const;
+/** A queue item that holds an unlink back: waiting, stuck, or kept (`refused`). */
+const OPEN_ITEM = ["waiting", "stuck", "refused"] as const;
+
+/**
+ * Unlink from the books (stage 4's slice M3b; section 4, "Every link, unlink, import and alignment is audited"; open
+ * question 13, "an admin picks again"): ends a linked family's link to its customer in the books, with every link of its
+ * student records (active or inactive, whatever customer each names, so a later link pairs its students afresh) and of
+ * its guardian rows (open or closed), and clears each of its guardian rows' `family_qbo_id`, so a family later linked
+ * to that customer never finds the rows as its own and a removed guardian can be reinstated whatever the family is
+ * linked to next. Its stored figures are forgotten at once (forgetFamilyMoney()). Sends nothing to the books; the
+ * customer stays there as it is. A relink is this, then a link as Confirm or Pick a different customer makes it: nothing
+ * is restored.
+ *
+ * In one transaction, under the roster lock held exclusively with the page's tag: the family record locked and active;
+ * the state `listed`; its family link of the records' company locked and the one the page showed; its student records'
+ * links and its guardian rows' links locked; the stamp (unlinkStamp(): the family, the link, its customer and the
+ * student links) sealing to what is read now. Then, refused keeping nothing: a buy-out of the family or its students
+ * not settled (being invoiced, invoiced whatever the stored figures say, being voided or stuck: the owner's choice 3,
+ * recommended and awaiting his word), so nobody is left with an unpaid invoice they can't reach; a student's move into
+ * or out of it, or any other change that blocks others (blocksOthers) filed under it or a student record of it, naming
+ * one of its guardian rows, or targeting one of the customers its links name, waiting, stuck or kept; and the family's
+ * "being made" or "being sent" lock, or the "being sent" lock of a student record or guardian row of it, held (each tried
+ * shared, held to the transaction's end). A parent's change of their details or sign-in email refuses nothing: its own
+ * next try gives it up unsent, as its family is no longer linked (`family_off`). Then each link is moved to
+ * `accounting_link_ended` as it was (its id, origin, `linked_at`, `linked_by`) with the press's time, the staff member
+ * and `unlinked`, and deleted; the guardian rows' `family_qbo_id` set null; the money row deleted under the family's
+ * money lock, after the roster lock (the one order: nothing that holds the money lock takes the roster lock); and one
+ * `accounting.link.remove` row. Nothing else: no record made, renamed, moved or made inactive, no guardian row opened,
+ * closed or moved, `source_qbo_id` left, no session, sign-in, season, volunteering or forms record, the roster cache,
+ * the queue or a paid buy-out touched.
+ */
+export async function unlinkFamily(raw: { familyId: unknown; linkId: unknown; stamp: unknown }, rosterTag: string, o: LinkOp): Promise<LinkDone> {
+  const { familyId: rawFamily, linkId: rawLink, stamp } = raw;
+  if (!isUuid(rawFamily) || !isUuid(rawLink) || typeof stamp !== "string") return no(LINK_COPY.notFromPage);
+  const familyKey = rawFamily.toLowerCase(), linkKey = rawLink.toLowerCase();
+  const familyId = asAppFamilyId(familyKey);
+  return db.transaction(async (tx): Promise<LinkDone> => {
+    if (!(await lockRosterAs(tx, rosterTag))) return no(ROSTER_MOVED);
+    const [f] = await tx.select({ name: family.name, active: family.active }).from(family).where(eq(family.id, familyId)).for("update");
+    if (!f || !f.active) return no(LINK_COPY.familyGone);
+    const b = await readLinkBasics(tx);
+    if (b.state !== "listed") return no(LINK_COPY[b.state]);
+    const realmId = b.realm!;
+    const ofRealm = and(eq(accountingLink.system, QUICKBOOKS), eq(accountingLink.realmId, realmId));
+    const [link] = await tx.select().from(accountingLink).where(and(eq(accountingLink.familyId, familyId), ofRealm)).for("update");
+    if (!link) return no(LINK_COPY.notLinkedNow);
+    if (link.id !== linkKey) return no(LINK_COPY.unlinkChanged);
+    const records = await tx.select({ id: student.id, name: student.name }).from(student).where(eq(student.familyId, familyId));
+    const rows = await tx.select({ id: guardian.id }).from(guardian).where(eq(guardian.familyId, familyId));
+    const studentIds = records.map((r) => r.id), rowIds = rows.map((r) => r.id);
+    const studentLinks = studentIds.length === 0 ? [] : await tx.select().from(accountingLink).where(and(inArray(accountingLink.studentId, studentIds), ofRealm))
+      .orderBy(asc(accountingLink.id)).for("update");
+    const guardianLinks = rowIds.length === 0 ? [] : await tx.select().from(accountingLink).where(and(inArray(accountingLink.guardianId, rowIds), ofRealm))
+      .orderBy(asc(accountingLink.id)).for("update");
+    if (!unlinkStampHolds(familyKey, link.id, link.customerId, studentLinks.map((l) => l.id), stamp)) return no(LINK_COPY.unlinkChanged);
+
+    // Buy-outs first, locked, so a create or a void being finished at this moment is waited for and seen as it ends
+    // (it takes the buy-out's row before the family's money row, as this does).
+    const theirs = await tx.select({ id: buyout.id, state: buyout.state, title: requirement.title }).from(buyout).innerJoin(requirement, eq(buyout.requirementId, requirement.id))
+      .where(studentIds.length === 0 ? eq(buyout.familyId, familyId) : or(eq(buyout.familyId, familyId), inArray(buyout.studentId, studentIds)))
+      .orderBy(asc(buyout.id)).for("update", { of: buyout });
+    const unsettled = theirs.filter((x) => (UNSETTLED_BUYOUT as readonly string[]).includes(x.state));
+    if (unsettled.length > 0) return no(LINK_COPY.buyoutUnsettled(unsettled.length, list([...new Set(unsettled.map((x) => `“${x.title}”`))].sort())));
+    const paidKept = theirs.filter((x) => x.state === "paid").length;
+
+    // The queue: a move into or out of the family, then any other change that blocks others and names it.
+    const customers = [...new Set([link.customerId, ...studentLinks.map((l) => l.customerId), ...guardianLinks.map((l) => l.customerId)])];
+    const open = inArray(writeQueue.state, [...OPEN_ITEM]);
+    const moves = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, sql`${writeQueue.request}->>'op' = 'move'`, or(eq(writeQueue.familyId, familyId),
+      sql`${writeQueue.request}->>'toFamilyId' = ${familyKey}`, sql`${writeQueue.request}->>'fromFamilyQboId' = ${link.customerId}`, sql`${writeQueue.request}->>'toFamilyQboId' = ${link.customerId}`)));
+    if (moves.length > 0) return no(LINK_COPY.unlinkMoving(moves.length));
+    const others = await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, blocksOthers, or(eq(writeQueue.familyId, familyId),
+      studentIds.length === 0 ? undefined : inArray(writeQueue.studentId, studentIds),
+      rowIds.length === 0 ? undefined : inArray(sql<string>`${writeQueue.request}->>'guardianId'`, rowIds),
+      inArray(writeQueue.targetQboId, customers))));
+    if (others.length > 0) return no(LINK_COPY.unlinkWaiting(others.length));
+    const making = await familyCreateWaiting(tx, familyId);
+    if (making === "queued") return no(LINK_COPY.unlinkWaiting(1));
+    if (making === "sending") return no(LINK_COPY.unlinkBusy);
+    for (const id of [familyKey, ...studentIds.map(String), ...rowIds]) if (!(await recordSendingFree(tx, id))) return no(LINK_COPY.unlinkBusy);
+    // A parent's change of their details or sign-in email filed under the family: it refuses nothing, and is said.
+    const details = (await tx.select({ id: writeQueue.id }).from(writeQueue).where(and(open, eq(writeQueue.familyId, familyId),
+      sql`${writeQueue.request}->>'op' in ('contact', 'email')`))).length;
+
+    // The links move to the history as they were, then go; then the rows' customer, the money, and the audit row.
+    const endedAt = new Date();
+    const ended = [link, ...studentLinks, ...guardianLinks];
+    await tx.insert(accountingLinkEnded).values(ended.map((l) => ({ id: l.id, system: l.system, realmId: l.realmId, customerId: l.customerId, familyId: l.familyId,
+      studentId: l.studentId, guardianId: l.guardianId, origin: l.origin, linkedAt: l.linkedAt, linkedBy: l.linkedBy, endedAt, endedBy: o.staffUserId, endedHow: "unlinked" as const })));
+    await tx.delete(accountingLink).where(inArray(accountingLink.id, ended.map((l) => l.id)));
+    const cleared = (await tx.update(guardian).set({ familyQboId: null, updatedAt: endedAt })
+      .where(and(eq(guardian.familyId, familyId), isNotNull(guardian.familyQboId))).returning({ id: guardian.id })).length;
+    const moneyForgotten = await forgetFamilyMoney(tx, familyId);
+    await writeAudit({ actor: o.actor, action: "accounting.link.remove", permission: o.permission, ip: o.ip, targetType: "family", targetId: familyKey,
+      before: { link: { id: link.id, customerQboId: link.customerId, realmId: link.realmId, origin: link.origin, linkedAt: link.linkedAt.toISOString(), linkedBy: link.linkedBy },
+        studentLinks: studentLinks.map((l) => ({ id: l.id, studentId: String(l.studentId), customerQboId: l.customerId, origin: l.origin })),
+        guardianLinks: guardianLinks.map((l) => ({ id: l.id, guardianId: l.guardianId, customerQboId: l.customerId })) },
+      after: { familyId: familyKey, customerQboId: link.customerId, realmId: link.realmId, endedAt: endedAt.toISOString(),
+        studentLinksEnded: studentLinks.map((l) => ({ studentId: String(l.studentId), customerQboId: l.customerId })),
+        guardianLinksEnded: guardianLinks.length, guardianRowsCleared: cleared, moneyForgotten, paidBuyoutsKept: paidKept } }, tx);
+
+    // Whether Reconciliation lists the customer among those with no family now: the pool worked out again without the links ended.
+    const familyLinked = new Set([...b.familyOfCustomer.keys()].filter((c) => c !== link.customerId));
+    const endedStudents = new Set(studentLinks.map((l) => l.customerId));
+    const studentLinked = new Set([...b.studentLinked].filter((c) => !endedStudents.has(c)));
+    const listed = b.roster !== null && noFamilyPool(b.roster, b.customers, b.creates, { familyLinked, studentLinked }).some((c) => c.qboId === link.customerId);
+    const nameOf = new Map(records.map((r) => [String(r.id), r.name]));
+    return { ok: true, message: unlinkedWords({ family: recordNameWords(f.name, "family"), customer: b.customerById.get(link.customerId)?.displayName ?? null,
+      students: studentLinks.map((l) => recordNameWords(nameOf.get(String(l.studentId)) ?? null, "student")), guardianLinks: guardianLinks.length,
+      paidKept, listedWithNoFamily: listed, details }) };
+  });
+}
+
+/**
+ * What staff read after an unlink, each sentence true by the code: the link ended and those of the students (by name)
+ * and guardians (a count) with it; the figures forgotten and what the guardians read now (loadFamilyMoney()'s
+ * `notConnected`); the paid buy-outs kept, "Paid instead" by their own state; a parent's changes of their details on
+ * their way, given up at their next try (`family_off`); that nothing was sent and the customer stays; that the row now
+ * shows what the page suggests for it; and, where the customer is in the pool now, that Reconciliation lists it.
+ */
+export function unlinkedWords(s: { family: string; customer: string | null; students: string[]; guardianLinks: number; paidKept: number; listedWithNoFamily: boolean; details: number }): string {
+  const parts = [s.customer === null ? `${s.family} is no longer linked to its customer in the books, which the books' copy doesn't hold now.` : `${s.family} is no longer linked to “${s.customer}” in the books.`];
+  if (s.students.length) parts.push(`${s.students.length === 1 ? "Its student's link ended with it" : "Its students' links ended with it"}: ${list(s.students)}.`);
+  if (s.guardianLinks > 0) parts.push(s.guardianLinks === 1 ? "A guardian's own link to a Parent customer ended with it too." : `${s.guardianLinks} guardians' own links to Parent customers ended with it too.`);
+  parts.push("Its stored figures were forgotten, and its guardians now read that the club hasn't connected their payments to the portal yet, with no invoices, Pay or buy-out offer, until it is linked again.");
+  if (s.paidKept > 0) parts.push(s.paidKept === 1 ? "Its paid buy-out is kept, and still reads Paid instead." : `Its ${s.paidKept} paid buy-outs are kept, and still read Paid instead.`);
+  if (s.details > 0) parts.push(s.details === 1 ? "A guardian's change of their details on its way to the books is given up at its next try, as the family is no longer linked."
+    : `${s.details} changes of guardians' details on their way to the books are given up at their next try, as the family is no longer linked.`);
+  parts.push("Nothing was sent to the books, and the customer stays there as it is.");
+  parts.push("Its row on this page now shows what the page suggests for it: link it again there, with Confirm or Pick a different customer.");
+  if (s.listedWithNoFamily) parts.push("Reconciliation now lists the customer under Customers with no family, where “Create a family from this” would make a second family, unless this page suggests it for a family.");
   return parts.join(" ");
 }
 

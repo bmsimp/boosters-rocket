@@ -54,7 +54,7 @@ const qc = (Id: string, DisplayName: string, typeId: string | null, extra: Recor
 const under = (id: string) => ({ ParentRef: { value: id }, Job: true });
 const mail = (address: string) => ({ PrimaryEmailAddr: { Address: address } });
 /** What the links page says beside every Confirm (src/app/staff/(app)/links/page.tsx), as the text of the page reads it. */
-const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. The link can't be removed in the portal yet, so check it is the right household.";
+const LINK_EFFECT = "Once linked, this family's guardians see this customer's open invoices and Pay links, and those of the students and parents the books hold directly under it, the next time they open Home or Payments, and a pay-instead choice for the family bills it. A link can be removed again on this page, with Unlink from the books in the family's row, but its guardians may have seen those invoices by then, so check it is the right household.";
 /** Customers added in QuickBooks, then read by a roster read (which makes no record of them). */
 async function readAgain(...customers: ReturnType<typeof qc>[]) {
   stub.customers.push(...customers);
@@ -649,7 +649,7 @@ describe("who may press, and the page", () => {
     expect(part).toContain("This page also suggests this customer for, or lists it as a possible customer of, The Patels.");
     expect(part).toContain("Left with no record in the portal, of the student customers under it in the books:");
     expect(part).toContain("Confirm<span class=\"visually-hidden\">: The Quiets</span>");
-    // What the link does on the parents' side, and that it can't be removed here yet; Patel Family has no Parent customer under it.
+    // What the link does on the parents' side, and how it is removed again; Patel Family has no Parent customer under it.
     expect(part).toContain(`<p>${LINK_EFFECT.replaceAll("'", "&#x27;")}</p>`);
     expect(part).toContain("<p>The books hold no Parent customers directly under it.</p>");
     // Refused as plain notices: a family not on the list, a Suggested row (no pick), a customer not in the pool.

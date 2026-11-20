@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireStaffActionAlso, staffAction, type StaffCtx } from "@/lib/guards";
-import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, undoLeaveUnlinked, type LinkDone } from "@/lib/accounting/link-writes";
+import { confirmAllSuggested, leaveUnlinked, LINK_COPY, linkFamilyToCustomer, reviewCarriedOver, undoLeaveUnlinked, unlinkFamily, type LinkDone } from "@/lib/accounting/link-writes";
 import { BULK_MAX } from "@/lib/accounting/mapping";
 import { isStatusKey, SEARCH_MAX } from "@/lib/accounting/status";
 import { isChosen } from "@/lib/accounting/stamp";
@@ -9,7 +9,7 @@ import { isChosen } from "@/lib/accounting/stamp";
 // The accounting links screen's presses (stage 4's slice M3a; src/lib/accounting/link-writes.ts): Confirm (a Suggested
 // row's customer, a Several possible row's candidate, or one picked from the customers no family is linked to), Leave
 // unlinked and Undo; since slice M3a2, Confirm all exact email matches and Confirm this link (a carried-over link
-// confirmed as reviewed). Each needs the linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
+// confirmed as reviewed); since slice M3b, Unlink from the books. Each needs the linking permission, Accounting.Link.ReadWrite (not Admin-only), and also
 // Roster.Read, the page's own, checked here first and refused as the guard refuses (requireStaffActionAlso()). A server
 // action can be called with any values, not only the ones its page sends: each argument is checked here for its type
 // and size, and everything about the family, the customer and the students is checked again in the library, under the
@@ -68,5 +68,19 @@ export const reviewLinkAction = staffAction(P, async (ctx: StaffCtx, familyId: s
   if (!str(familyId, ID_MAX) || !str(linkId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
   const r = await reviewCarriedOver({ familyId, linkId, stamp }, rosterTag, op(ctx));
   again();
+  return r;
+});
+
+/**
+ * Unlink from the books (slice M3b): the family's app id, its family link's id, the roster tag and the stamp. No
+ * customer or student comes from the browser: the library reads the links again under the roster lock.
+ */
+export const unlinkAction = staffAction(P, async (ctx: StaffCtx, familyId: string, linkId: string, rosterTag: string, stamp: string): Promise<LinkDone> => {
+  await requireStaffActionAlso(ctx, "Roster.Read");
+  if (!str(familyId, ID_MAX) || !str(linkId, ID_MAX) || !str(rosterTag, TAG_MAX) || !str(stamp, STAMP_MAX)) return NOT_FROM_PAGE;
+  const r = await unlinkFamily({ familyId, linkId, stamp }, rosterTag, op(ctx));
+  // An unlink changes the family's page, the Families pages, Balances and every staff page that lists families.
+  if (r.ok) revalidatePath("/", "layout");
+  else again();
   return r;
 });

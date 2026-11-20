@@ -4449,7 +4449,16 @@ export async function guardianCustomers(customers: readonly string[], familyId: 
  * no Parent customer is made under a family whose customers are being made inactive (stage 3's slice 9h).
  */
 export async function familySendingFree(tx: Tx, familyId: AppFamilyId): Promise<boolean> {
-  const [r] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${sql.raw(String(SENDING_LOCK))}, hashtext(${String(familyId)}::text)) as locked`)) as unknown as { locked: boolean }[];
+  return recordSendingFree(tx, String(familyId));
+}
+/**
+ * Whether nobody holds this record's "being sent" lock at this moment (a family's, a student's or a guardian row's: one
+ * key shape, by the record's id, whileSending(), lockOfItem()): tried shared, and held so to the end of the caller's
+ * transaction. It changes nothing. An unlink (stage 4's slice M3b, src/lib/accounting/link-writes.ts) tries it for the
+ * family, each of its student records and each of its guardian rows.
+ */
+export async function recordSendingFree(tx: Tx, recordId: string): Promise<boolean> {
+  const [r] = (await tx.execute(sql`select pg_try_advisory_xact_lock_shared(${sql.raw(String(SENDING_LOCK))}, hashtext(${recordId}::text)) as locked`)) as unknown as { locked: boolean }[];
   return r?.locked === true;
 }
 /** Whether a guardian's Parent customer change filed under this family is waiting or stuck (askFamilyInactive() refuses meanwhile). */

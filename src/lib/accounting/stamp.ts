@@ -50,3 +50,14 @@ export function reviewStamp(familyId: string, linkId: string, customerId: string
 }
 export const reviewStampHolds = (familyId: string, linkId: string, customerId: string, studentLinkIds: readonly string[], stamp: string): boolean =>
   same(reviewStamp(familyId, linkId, customerId, studentLinkIds), stamp);
+
+/**
+ * Unlink from the books (slice M3b): the family's app id, its family link's id, that link's customer, and the ids of
+ * its student records' links the press ends with it (sorted), sealed in a domain of their own, so neither a review's
+ * stamp nor any other is ever an unlink's.
+ */
+export function unlinkStamp(familyId: string, linkId: string, customerId: string, studentLinkIds: readonly string[]): string {
+  return sealed("accounting-unlink", [familyId.toLowerCase(), linkId.toLowerCase(), customerId, [...studentLinkIds].map((id) => id.toLowerCase()).sort()]);
+}
+export const unlinkStampHolds = (familyId: string, linkId: string, customerId: string, studentLinkIds: readonly string[], stamp: string): boolean =>
+  same(unlinkStamp(familyId, linkId, customerId, studentLinkIds), stamp);
