@@ -15,7 +15,7 @@ import { accountingLink, family, guardian, parent, qboCustomer, writeQueue } fro
 import type { ParentCtx } from "@/lib/guards";
 import type { AppFamilyId } from "@/lib/families/ids";
 import { EMAIL_COPY, confirmMyEmailChange } from "@/lib/parents/email-change";
-import { queueEmailChange } from "@/lib/parents/contact-queue";
+import { EMAIL_ASKED_BY, queueEmailChange } from "@/lib/parents/contact-queue";
 import { removeGuardian } from "@/lib/parents/guardians";
 import { blockPerson, renamePerson } from "@/lib/parents/people";
 import { addStudentToLinked, askFamilyInactive, coverStamp, EMAIL_ALREADY_THERE, EMAIL_DIFFERS, EMAIL_NOT_OFFERED, EMAIL_SUPERSEDED_AT_PRESS, EMAIL_TOO_LONG, emailShown, emailShownUnder,
@@ -107,7 +107,7 @@ describe("the confirm queues the new address for each record of the person's (it
     expect(await confirm(a.who, NEW)).toEqual(DONE(NEW));
     expect(stub.apiCalls()).toEqual([]);
     const [item] = await items();
-    expect(item).toMatchObject({ state: "waiting", sent: false, tries: 0, familyId: rivera, studentId: null, targetQboId: "11", askedBy: null,
+    expect(item).toMatchObject({ state: "waiting", sent: false, tries: 0, familyId: rivera, studentId: null, targetQboId: "11", askedBy: null, askedByLabel: EMAIL_ASKED_BY,
       request: { op: "email", role: "parent", qboId: "11", syncToken: "0", from: OLD, to: NEW, guardianId: a.row.id } });
     expect((item!.request as { orFrom?: unknown }).orFrom).toBeUndefined();
     expect((await auditsOf("parent.email.save"))[0]!.after).toMatchObject({ email: NEW, queueIds: [item!.id] });

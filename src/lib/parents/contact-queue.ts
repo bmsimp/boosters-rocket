@@ -188,6 +188,13 @@ async function emailTargetsOf(tx: Tx, parentId: string): Promise<{ realmId: stri
 }
 
 /**
+ * Who asked, as an email item names it on Reconciliation's and a family's lists ("by the parent"): never the actor's
+ * label, which for a parent is their sign-in address, here the one they have just given up. Those lists write no audit
+ * row and show no address (the lead's decision 5 for slice S11e); the compare view, audited, is where an address is shown.
+ */
+export const EMAIL_ASKED_BY = "the parent";
+
+/**
  * Queues a parent's confirmed change of their sign-in email, in the confirm's own transaction, after the person's
  * address is changed (stage 3's slice S11e; the lead's decision 1): one change saved first (waiting, never sent, its next
  * try now, asked by nobody on staff) for each record it goes to (emailTargetsOf()), filed under the membership's family,
@@ -239,7 +246,7 @@ export async function queueEmailChange(tx: Tx, parentId: string, change: { from:
       ...(orFrom.length ? { orFrom } : {}), ...(t.guardianId !== null ? { guardianId: t.guardianId } : {}) };
     const [item] = await tx.insert(writeQueue).values({
       realmId: found.realmId, request: write, targetQboId: t.qboId, familyId: t.familyId, studentId: null,
-      state: "waiting", sent: false, tries: 0, lastCode: null, nextTryAt: new Date(), askedBy: null, askedByLabel: o.actor.label,
+      state: "waiting", sent: false, tries: 0, lastCode: null, nextTryAt: new Date(), askedBy: null, askedByLabel: EMAIL_ASKED_BY,
     }).returning({ id: writeQueue.id });
     ids.push(item!.id);
   }
