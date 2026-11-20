@@ -10,7 +10,7 @@ vi.mock("@/lib/quickbooks/endpoints", async (original) => {
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import {
-  accountingLink, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, guardian, parentAuthSession, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
+  accountingLink, accountingLinkEnded, auditLog, buyout, family, familyMoney, formReminderClaim, formReminderRound, guardian, parentAuthSession, parentEmailChange, qboConnection, requirementCover, requirementProgress, signatureConsent, signatureRequest,
   signedFormCopy, signedFormEvidence, signedFormFile, student, volunteerCredit, requirementReminder, volunteerReminder, volunteerSignup, writeQueue,
 } from "@/lib/db/schema";
 import { beginConnect, completeConnect, disconnect } from "@/lib/quickbooks/connection";
@@ -65,6 +65,9 @@ describe("connecting a different company after step 5", () => {
     const studentA = await recordOfCustomer(a.spec.students[0]!.qboId, "student");
     await db.insert(writeQueue).values({ realmId: "1111", request: { op: "deactivate", role: "student", qboId: a.spec.students[0]!.qboId, syncToken: "0" }, targetQboId: a.spec.students[0]!.qboId,
       familyId: famA, studentId: studentA, state: "waiting", sent: false });
+    // A link an unlink ended (stage 4's slice M3b), kept for the audit filter: it names the app's family and goes with the links.
+    await db.insert(accountingLinkEnded).values({ id: crypto.randomUUID(), system: "quickbooks", realmId: "1111", customerId: "9001", familyId: famA, origin: "carried_over",
+      linkedAt: new Date(Date.now() - 60_000), endedAt: new Date(), endedBy: null, endedHow: "unlinked" });
     // B's form was kept while B had no QuickBooks link (as the evidence job keeps one since migration 0036): no company
     // and no copy. It is the club's record like any other: archived with the rest and never deleted, since the clear
     // removes the families it names.
@@ -115,6 +118,8 @@ describe("connecting a different company after step 5", () => {
     // Nothing of the earlier company's is left in the app's own records: no link, no family or student, and no sign-in
     // in a family of it.
     expect(await db.select().from(accountingLink)).toEqual([]);
+    expect(await db.select().from(accountingLinkEnded)).toEqual([]);
+    expect((await db.select().from(auditLog).where(eq(auditLog.action, "accounting.links.cleared")))[0]!.after).toMatchObject({ endedLinks: 1 });
     expect(await db.select().from(family)).toEqual([]);
     expect(await db.select().from(student)).toEqual([]);
     expect((await db.select().from(guardian)).map((g) => g.familyId)).toEqual([null, null]);

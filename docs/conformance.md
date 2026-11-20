@@ -32,10 +32,10 @@ QuickBooks, **Check the portal's requests** (`/staff/settings/quickbooks/check`,
 | §13 Audit log | 10 | 1 | 0 | 0 |
 | §14 Operations | 9 | 3 | 0 | 2 |
 | Owner's decisions of 2026-11-14 | 5 | 0 | 0 | 0 |
-| App-owned families: the mapping screen | 14 | 0 | 6 | 0 |
-| **All** | **161** | **5** | **6** | **11** |
+| App-owned families: the mapping screen | 15 | 0 | 5 | 0 |
+| **All** | **162** | **5** | **5** | **11** |
 
-Nothing the v1 spec asks for is missing outright. The six missing rows are the app-owned families spec's mapping screen,
+Nothing the v1 spec asks for is missing outright. The five missing rows are the app-owned families spec's mapping screen,
 which stage 4 is building one slice at a time: each row names the slice that builds it. The five partly built rows, and what each lacks, are listed at the foot
 of this page with a rough size; the changes the step made are under "Fixed in this step", and the roadmap's Known gaps
 are checked one by one after that.
@@ -327,7 +327,7 @@ Section 4 of `docs/superpowers/specs/2026-11-18-app-owned-families-design.md`, "
 | L.14 | Confirm the suggestion, or pick another customer | Built | M3a: Confirm on a Suggested row and on a Several possible row's candidate, and Pick a different customer from the customers no family is linked to (`noFamilyPool()`), one write (`linkFamilyToCustomer()`, `src/lib/accounting/link-writes.ts`) that sends nothing and links the family and the students proposed by name (`proposeStudents()`, `src/lib/accounting/proposals.ts`), under the roster lock with a sealed stamp of what the row showed; the page's chooser and confirm step (`src/app/staff/(app)/links/page.tsx`). `accounting-link-confirm.test.ts`, `tests/unit/accounting-proposals.test.ts` |
 | L.15 | Customers no family is linked to in their own part of the screen | Missing | M6, the reviewed import ("Propose families from the books"). They stay on Reconciliation, which links to the screen and back; since M3a Pick a different customer lists them on the screen as the customers a family may be linked to, but they have no part of their own there |
 | L.16 | The parent record a match was on is linked under the family | Missing | M3c |
-| L.17 | Unlink, and an admin picks again for a customer gone (open question 13) | Missing | M3b |
+| L.17 | Unlink, and an admin picks again for a customer gone (open question 13) | Built | M3b: Unlink from the books in a linked row's opening, for any status of a family with a link, Customer gone and Not a family now among them (`unlinkFamily()`, `unlinkOf()`, `unlinkStamp()` in `src/lib/accounting/`; the ended links kept in `accounting_link_ended`, migration `0047_link_history`; money forgotten by `forgetFamilyMoney()`; refused while a buy-out is unsettled, a blocking change waits, or a lock is held); an admin picks again by unlinking and then linking with Confirm or Pick a different customer (M3a), never by itself; picking a different customer for a linked family in one press is M3b2. `accounting-unlink.test.ts`, `family-money.test.ts` "an unlink and a relink never show a family another link's figures", `buyouts.test.ts` (an unlink refused while a buy-out is unsettled), `balances-pages.test.ts` "counts the families in the portal with no link", `audit-record-filter.test.ts` "a customer a family was linked to and another is linked to now", `parent-isolation.test.ts` "a relinked family", `migrate-link-history.test.ts` |
 | L.18 | Settle a difference: take the books' value, or send the app's | Missing | M4, M5 |
 | L.19 | The optional, reviewed import | Missing | M6 |
 | L.20 | Differences in a guardian's or family's email, phone and mailing address (section 5) | Missing | A later slice, behind an audited view: how those are kept and sent is being rebuilt elsewhere. M2 compares the structural fields only |

@@ -1,6 +1,6 @@
 import { isNotNull } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
-import { accountingLink, family, guardian, student } from "@/lib/db/schema";
+import { accountingLink, accountingLinkEnded, family, guardian, student } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 
 // This module is called from src/lib/roster/source.ts, so it must import nothing from src/lib/roster/.
@@ -16,9 +16,11 @@ import { writeAudit, type Actor } from "@/lib/audit/log";
 export async function clearAppRecords(tx: Tx, o: { fromRealmId: string; toRealmId: string; actor: Actor; ip: string | null }): Promise<void> {
   const memberships = (await tx.update(guardian).set({ familyId: null }).where(isNotNull(guardian.familyId)).returning({ id: guardian.id })).length;
   const links = (await tx.delete(accountingLink).returning({ id: accountingLink.id })).length;
+  // The ended links (stage 4's slice M3b) go with the links, before the families and students their keys name.
+  const endedLinks = (await tx.delete(accountingLinkEnded).returning({ id: accountingLinkEnded.id })).length;
   const students = (await tx.delete(student).returning({ id: student.id })).length;
   const families = (await tx.delete(family).returning({ id: family.id })).length;
-  if (memberships + links + students + families === 0) return;
+  if (memberships + links + endedLinks + students + families === 0) return;
   await writeAudit({ actor: o.actor, action: "accounting.links.cleared", targetType: "accounting_link", ip: o.ip,
-    before: { realmId: o.fromRealmId }, after: { reason: "different_company", realmId: o.toRealmId, links, families, students, memberships } }, tx);
+    before: { realmId: o.fromRealmId }, after: { reason: "different_company", realmId: o.toRealmId, links, endedLinks, families, students, memberships } }, tx);
 }

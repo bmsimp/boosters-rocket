@@ -72,6 +72,7 @@ export const KEPT_TABLES: Record<string, string> = {
   family: "the portal's own families; emptied on a change of company",
   student: "the portal's own students; emptied on a change of company",
   accounting_link: "each family, student and sign-in's link to its QuickBooks customer; emptied on a change of company",
+  accounting_link_ended: "the links an unlink ended, kept for good for the audit page's record filter; emptied on a change of company",
   audit_log: "append-only",
 };
 

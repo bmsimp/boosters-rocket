@@ -186,8 +186,10 @@ export async function studentsRuleInForce(tx?: Tx): Promise<boolean> {
  * at the sign-in's end (completeParentSignin()), and sent no welcome (welcome.ts, through hasRowThatCounts(), the same
  * rule as SQL). A session already open when the rule comes into force, or when a family loses its last active student
  * or goes inactive, is caught on its next request. In the chooser's order, by `family_qbo_id`, then the rows that name
- * no customer (made while their family had no link, stage 3's slice 9d), then by row id, so no linked family's place in
- * the chooser (and its "(1)", "(2)" in myFamilyNames()) moves. Closing a membership
+ * no customer (made while their family had no link, stage 3's slice 9d, or of a family unlinked since: stage 4's slice
+ * M3b clears the rows' copy, and a relink never fills it again), then by row id. So a family's place in the chooser (and
+ * its "(1)", "(2)" in myFamilyNames()) moves only when an unlink sends its rows to the end, and the families after it up
+ * one; nothing else moves it. Closing a membership
  * ends the sessions that chose the row's family record (endFamilySessions()), and every session once no open row is
  * left (membership.ts).
  */

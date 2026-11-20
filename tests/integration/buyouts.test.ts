@@ -18,6 +18,9 @@ import { BUYOUT_COPY, confirmMyBuyout } from "@/lib/buyouts/writes";
 import { loadMyBuyouts } from "@/lib/buyouts/my-buyouts";
 import { loadBuyoutsToLook } from "@/lib/buyouts/staff";
 import { loadFamilyMoney } from "@/lib/money/family-money";
+import { LINK_COPY, unlinkFamily } from "@/lib/accounting/link-writes";
+import { loadAccountingLinks } from "@/lib/accounting/mapping";
+import { currentRosterTag } from "@/lib/seasons/roster-lock";
 import { runWriteQueue } from "@/lib/roster/queue";
 import { describeWrite } from "@/lib/roster/queue";
 import { confirmBuyoutAction, switchBackAction } from "@/app/(parent)/volunteer/pay-instead/actions";
@@ -30,6 +33,7 @@ import { startQboStub, STUB_PAID_VOID_FAULT, type QboStub } from "../helpers/qbo
 import { BUYOUT_ITEM, buyoutFamily, buyoutsOf, queueOf, seedBuyout, seedBuyoutRequirement } from "../helpers/buyouts";
 import { seedCheckIn, seedEvent, seedOutsideCredit, seedShift, seedSignup } from "../helpers/volunteer";
 import { addToCache, stu } from "../helpers/roster-cache";
+import { staffWith } from "../helpers/roster-writes";
 import { SHAPE_KEY } from "@/lib/roster/shape";
 import { recordOfCustomer, subjectColumns, syncAppRecords } from "../helpers/app-records";
 
@@ -737,17 +741,74 @@ describe("how the requirement reads, on the parent's pages", () => {
     expect(page).not.toContain("Volunteer instead");
   });
 
-  // Today's reading, pinned so stage 4 meets it on purpose: until stage 4's slice that unlinks a family (M3b) a linked
-  // family can't lose its link, and that slice decides what a family with a live buy-out and no link reads. The requirement's words go by the buy-out (kept by the app's records),
-  // while the offer, the pay-instead page and the money all need the link, so only the words remain.
-  it("a family that loses its link with a buy-out invoiced still reads 'Buy-out invoiced', with no way to it from Volunteer (stage 4 decides)", async () => {
+  // Stage 4's slice M3b replaced the reading pinned here before ("a family that loses its link with a buy-out invoiced
+  // still reads 'Buy-out invoiced' ... (stage 4 decides)"): an unlink is refused while a buy-out of the family or its
+  // students isn't settled (the owner's choice 3, recommended and awaiting his word), so no family is left with no link
+  // and an unpaid invoice nobody can reach; a paid one is kept and goes on reading "Paid instead" by its own state.
+  const unlinkAsStaff = async (familyId: string) => {
+    const staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    const row = (await loadAccountingLinks()).rows.find((r) => String(r.familyId) === familyId)!;
+    return unlinkFamily({ familyId, linkId: row.unlink!.linkId, stamp: row.unlink!.stamp }, await currentRosterTag(),
+      { actor: { door: "staff", id: staff.id, label: staff.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: staff.id });
+  };
+
+  it("an unlink is refused, keeping nothing, while a buy-out of the family is being invoiced, invoiced, being voided or stuck", async () => {
     const p = await buyoutFamily(stub);
     const req = await seedBuyoutRequirement({ title: "Concession shifts QR78" });
-    await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, invoiceQboId: "9902" });
-    await db.delete(accountingLink).where(eq(accountingLink.familyId, p.identity.familyId));
+    const staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    const op = { actor: { door: "staff" as const, id: staff.id, label: staff.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: staff.id };
+    const familyId = String(p.identity.familyId);
+    for (const state of ["being_invoiced", "invoiced", "being_voided", "stuck"] as const) {
+      const b = await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, state });
+      const row = (await loadAccountingLinks()).rows.find((r) => String(r.familyId) === familyId)!;
+      const links = await db.select().from(accountingLink).orderBy(accountingLink.id);
+      expect(await unlinkFamily({ familyId, linkId: row.unlink!.linkId, stamp: row.unlink!.stamp }, await currentRosterTag(), op), state)
+        .toEqual({ ok: false, errors: [LINK_COPY.buyoutUnsettled(1, "“Concession shifts QR78”")] });
+      expect(await db.select().from(accountingLink).orderBy(accountingLink.id)).toEqual(links);
+      expect(await db.select().from(buyout).where(eq(buyout.id, b.id))).toMatchObject([{ state }]);
+      await db.delete(buyout).where(eq(buyout.id, b.id));
+    }
+    expect(posts()).toEqual([]);
+  });
+
+  it("an unlink is refused, keeping nothing, while a buy-out for one of the family's student records isn't settled, even one another family chose", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ appliesTo: "student", title: "Concession shifts QR80" });
+    const staff = await staffWith("linker@club.org", ["Roster.Read", "Accounting.Link.ReadWrite"]);
+    const op = { actor: { door: "staff" as const, id: staff.id, label: staff.email }, ip: null, permission: "Accounting.Link.ReadWrite", staffUserId: staff.id };
+    const familyId = String(p.identity.familyId);
+    const leo = await recordOfCustomer(STUDENT, "student");
+    // Chosen by the family itself, then by the Chenoweth family for the student whose record is now this family's: the
+    // second is refused by its student record alone (buyout.student_id), its family_id being the other family's.
+    for (const chooser of [FAMILY, "8010"]) {
+      for (const state of ["being_invoiced", "invoiced", "being_voided", "stuck"] as const) {
+        const b = await seedBuyout({ requirementId: req, familyQboId: chooser, subjectQboId: STUDENT, chosenBy: p.identity.parentId, state });
+        expect(b.studentId).toBe(leo);
+        if (chooser !== FAMILY) expect(String(b.familyId)).not.toBe(familyId);
+        const row = (await loadAccountingLinks()).rows.find((r) => String(r.familyId) === familyId)!;
+        const links = await db.select().from(accountingLink).orderBy(accountingLink.id);
+        expect(await unlinkFamily({ familyId, linkId: row.unlink!.linkId, stamp: row.unlink!.stamp }, await currentRosterTag(), op), `${chooser}, ${state}`)
+          .toEqual({ ok: false, errors: [LINK_COPY.buyoutUnsettled(1, "“Concession shifts QR80”")] });
+        expect(await db.select().from(accountingLink).orderBy(accountingLink.id)).toEqual(links);
+        expect(await db.select().from(buyout).where(eq(buyout.id, b.id))).toMatchObject([{ state }]);
+        await db.delete(buyout).where(eq(buyout.id, b.id));
+      }
+    }
+    expect(posts()).toEqual([]);
+  });
+
+  it("with a paid buy-out the unlink goes through: Volunteer reads 'Paid instead' with no pay-instead link, the pay-instead page is Not found, and nothing is posted", async () => {
+    const p = await buyoutFamily(stub);
+    const req = await seedBuyoutRequirement({ title: "Concession shifts QR78" });
+    const paid = await seedBuyout({ requirementId: req, familyQboId: FAMILY, chosenBy: p.identity.parentId, state: "paid", invoiceQboId: "9902" });
+    const r = await unlinkAsStaff(String(p.identity.familyId));
+    expect(r).toMatchObject({ ok: true });
+    expect((r as { message: string }).message).toContain("Its paid buy-out is kept, and still reads Paid instead.");
+    expect(await db.select().from(buyout).where(eq(buyout.id, paid.id))).toEqual([paid]);
+    expect(await db.select().from(accountingLink).where(eq(accountingLink.familyId, p.identity.familyId))).toEqual([]);
     asParent(p.identity);
     const html = await renderPage(VolunteerPage);
-    expect(html).toContain("Buy-out invoiced");
+    expect(html).toContain("Paid instead");
     expect(html).not.toMatch(/\/volunteer\/pay-instead\/|id="pay-h"/);
     const { pageOutcome } = await import("../helpers/signed-in");
     expect(await pageOutcome(PayInsteadPage, { params: { requirementId: req, choice: "family" } })).toEqual({ notFound: true });

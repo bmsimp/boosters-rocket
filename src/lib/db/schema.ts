@@ -166,7 +166,8 @@ export const student = pgTable("student", {
  * "This person is a guardian in this family." Name, email and phone live on the person (`parent`). `family_qbo_id` is
  * the customer the family's link named when the row was made: null for a membership made while its family had no link
  * (stage 3's slice 9d, migration 0040), which is never filled in later, even once the family is linked, and by which
- * nothing finds a family. A person is in a family record at most once (`guardian_family_id_parent_uq`); the old unique
+ * nothing finds a family; an unlink of the family sets it null on every row of the family (stage 4's slice M3b), so a
+ * family later linked to that customer never finds the rows as its own. A person is in a family record at most once (`guardian_family_id_parent_uq`); the old unique
  * index by customer stays, for the rows that name one.
  */
 export const guardian = pgTable("guardian", {
@@ -204,8 +205,9 @@ export const guardian = pgTable("guardian", {
  * member's new family, member or student, stage 3's slice 9c) is `created`, with `linked_by` the staff member who asked;
  * one "Create a family from this" makes (stage 3's slice 10, src/lib/roster/no-family.ts), for a customer no family
  * was linked to and the students under it, is `confirmed`, with `linked_by` the staff member with the linking
- * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it. Nothing deletes one but a change of company, which
- * deletes every row. A lookup always asks for one kind (src/lib/families/links.ts).
+ * permission (Accounting.Link.ReadWrite, not Admin-only) who pressed it. Since stage 4's slice M3b Unlink from the books
+ * moves a family's link, with its student records' and guardian rows' links, to `accounting_link_ended`; nothing else
+ * removes one but a change of company, which deletes every row of both. A lookup always asks for one kind (src/lib/families/links.ts).
  * `synced_token` is the customer's QuickBooks version (its SyncToken) the portal last aligned with, and `synced_at` when
  * (stage 3's slice 9e): set from the answer of a send the portal made that carried the link's own version (or the one
  * resend made after a live read found the field as the portal held it), from a create's answer, from the roster cache
@@ -237,6 +239,40 @@ export const accountingLink = pgTable("accounting_link", {
   uniqueIndex("accounting_link_guardian_uq").on(t.guardianId, t.system, t.realmId),
   check("accounting_link_one_record", sql`num_nonnulls(${t.familyId}, ${t.studentId}, ${t.guardianId}) = 1`),
   check("accounting_link_carried_over_by_nobody", sql`${t.origin} <> 'carried_over' or ${t.linkedBy} is null`),
+]);
+
+/**
+ * A link that was ended, kept for the audit page's record filter (stage 4's slice M3b): the row an `accounting_link` was,
+ * with its own id, origin, `linked_at` and `linked_by`, and when it ended, by whom (staff_user.id, with no foreign key,
+ * as `linked_by` has none) and how (`unlinked`: Unlink from the books on the accounting links screen, which ends a
+ * family's link with every link of its student records and guardian rows, src/lib/accounting/link-writes.ts). No unique
+ * index: a customer may have been several records' in turn, and a record several customers'. Nothing but an unlink writes
+ * it, and nothing but the audit filter (customersOfRecord(), src/lib/audit/query.ts) and a change of company's clear,
+ * which deletes every row (clearAppRecords()), reads it: a link that exists is in `accounting_link`, and every reader of
+ * the links that are reads that table alone.
+ */
+export const accountingLinkEnded = pgTable("accounting_link_ended", {
+  id: uuid("id").primaryKey(),                         // the ended link's own id, so audit rows naming a link id still name a row
+  system: text("system", { enum: ["quickbooks"] }).notNull(),
+  realmId: text("realm_id").notNull(),
+  customerId: text("customer_id").notNull(),
+  familyId: uuid("family_id").references(() => family.id, { onDelete: "cascade" }).$type<AppFamilyId>(),
+  studentId: uuid("student_id").references(() => student.id, { onDelete: "cascade" }).$type<AppStudentId>(),
+  guardianId: uuid("guardian_id").references(() => guardian.id, { onDelete: "cascade" }),
+  origin: text("origin", { enum: ["carried_over", "created", "confirmed"] }).notNull(),
+  linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+  linkedBy: uuid("linked_by"),
+  endedAt: timestamp("ended_at", { withTimezone: true }).notNull(),
+  endedBy: uuid("ended_by"),
+  endedHow: text("ended_how", { enum: ["unlinked"] }).notNull(),
+  createdAt: created(),
+}, (t) => [
+  index("accounting_link_ended_family_ix").on(t.familyId),
+  index("accounting_link_ended_student_ix").on(t.studentId),
+  index("accounting_link_ended_guardian_ix").on(t.guardianId),
+  index("accounting_link_ended_customer_ix").on(t.system, t.realmId, t.customerId),
+  check("accounting_link_ended_one_record", sql`num_nonnulls(${t.familyId}, ${t.studentId}, ${t.guardianId}) = 1`),
+  check("accounting_link_ended_carried_over_by_nobody", sql`${t.origin} <> 'carried_over' or ${t.linkedBy} is null`),
 ]);
 
 /** Sign-in codes (spec §1). Only the hash is stored; only the latest unused code per person exists. */
