@@ -298,6 +298,38 @@ describe("setting it up", () => {
     expect(await placesOf(a.identity.parentId)).toBe(0);
   });
 
+  it("a set-up replaced by a newer one that has itself run out is told it ran out, never to finish it in the other window", async () => {
+    const a = await provedParent();
+    const now = new Date();
+    const first = await started(a.identity, now);
+    const second = await started(a.identity, now);
+    // Both windows are left for longer than a set-up's life: only the newer row is left, and it is past its life.
+    await db.update(parentAuthenticator).set({ createdAt: new Date(now.getTime() - 31 * 60_000) }).where(eq(parentAuthenticator.parentId, a.identity.parentId));
+    expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(first.secret, now), first.stamp, now))
+      .toEqual({ ok: false, errors: [COPY.appSetupGone], setupOver: true });
+    expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(second.secret, now), second.stamp, now))
+      .toEqual({ ok: false, errors: [COPY.appSetupGone], setupOver: true });
+    expect((await audits("parent.authenticator.confirm_refused")).map((r) => r.after)).toEqual([{ reason: "ran_out" }, { reason: "ran_out" }]);
+    expect(await placesOf(a.identity.parentId)).toBe(0);
+    expect((await authenticatorRows(a.identity.parentId)).map((r) => r.confirmedAt)).toEqual([null]);
+  });
+
+  it("a stale stamp sent again and again is told the same words each time, but audited only while the settings' presses take it", async () => {
+    const a = await provedParent();
+    const now = new Date();
+    const first = await started(a.identity, now);
+    await started(a.identity, now);
+    // The two starts took two of the settings' ten presses an hour: eight are left for the stale confirms' audit rows.
+    for (let i = 0; i < 12; i++) {
+      expect(await confirmMyAuthenticator(ctxOf(a.identity), appCode(first.secret, now), first.stamp, now), `press ${i + 1}`)
+        .toEqual({ ok: false, errors: [COPY.appSetupReplaced], setupOver: true });
+    }
+    expect((await audits("parent.authenticator.confirm_refused")).map((r) => r.after)).toEqual(Array.from({ length: 8 }, () => ({ reason: "replaced" })));
+    // None of them kept a place at the door's limit, and nothing was confirmed.
+    expect(await placesOf(a.identity.parentId)).toBe(0);
+    expect((await authenticatorRows(a.identity.parentId)).map((r) => r.confirmedAt)).toEqual([null]);
+  });
+
   it("a stamp that is missing, forged, over-long or another session's is a bad request: uncounted, nothing confirmed", async () => {
     const a = await provedParent();
     const now = new Date();

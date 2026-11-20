@@ -93,16 +93,18 @@ function readSetupStamp(raw: unknown, ctx: Me): Buffer | null {
 
 /**
  * Where the stamped set-up stands, read from the person's one row (authenticatorRowOf()): still the person's unfinished
- * set-up within its life (`current`, with its id); `replaced` by a newer, unfinished one; `finished_elsewhere` (an app
- * is in force, from this set-up or from a newer one); or `ran_out` (no row at all, or this one past its life).
+ * set-up within its life (`current`, with its id); `replaced` by a newer, unfinished one still within its life (there is
+ * something to finish in the other window); `finished_elsewhere` (an app is in force, from this set-up or from a newer
+ * one); or `ran_out` (no row at all, or the unfinished one past its life, whether it is this set-up or a newer one, since
+ * then nothing is left to finish anywhere).
  */
 type SetupStanding = { standing: "current"; id: string } | { standing: keyof typeof SETUP_OVER };
 async function setupStanding(q: Parameters<typeof authenticatorRowOf>[1], ctx: Me, rowMac: Buffer, at: Date): Promise<SetupStanding> {
   const row = await authenticatorRowOf(ctx.parentId, q);
   if (!row) return { standing: "ran_out" };
   if (row.inForce) return { standing: "finished_elsewhere" };
-  if (!sameMac(rowMac, setupMac(ctx, "row", row.id))) return { standing: "replaced" };
   if (row.createdAt.getTime() <= at.getTime() - AUTHENTICATOR_SETUP_LIFE_MS) return { standing: "ran_out" };
+  if (!sameMac(rowMac, setupMac(ctx, "row", row.id))) return { standing: "replaced" };
   return { standing: "current", id: row.id };
 }
 
@@ -184,9 +186,13 @@ export async function startMyAuthenticator(ctx: Me, now?: Date): Promise<SetupAn
  *     its life is answered at once, uncounted, keeping no place in the limit, in its own words with `setupOver` (a newer
  *     set-up started in another window, `appSetupReplaced`; an app in force, finished in another window or by the other
  *     of two confirms at once, `appSetupDoneElsewhere`; none, or this one past its life, `appSetupGone`), audited
- *     `parent.authenticator.confirm_refused` (`reason` `replaced`, `finished_elsewhere` or `ran_out`). This comes before
- *     the window, so a set-up finished in another window is told as such and never as the window run out;
- * (b) the window, read for this session;
+ *     `parent.authenticator.confirm_refused` (`reason` `replaced`, `finished_elsewhere` or `ran_out`) only when one of
+ *     the settings' presses (`signin_settings_parent`) is taken for it, so a stale stamp replayed writes at most ten rows
+ *     an hour (past that it is told the same words, unaudited). This comes before the window, so a set-up finished in
+ *     another window is told as such and never as the window run out;
+ * (b) the window, read for this session; when it has run out, the set-up's standing is read again (nothing holds the
+ *     row between the two reads, and a set-up finished meanwhile leaves this session's proof older than the app), and
+ *     only a set-up still current is answered `appSetupTimedOut`, any other as at (a);
  * (c) the try's place under the person (`second_step_parent`, SI-6a's count, so set-up tries and sign-in tries share its
  *     5 wrong in 15 minutes), taken before the code is checked; its first refusal audited
  *     `parent.authenticator.confirm_refused` (`rate_limited`);
@@ -215,9 +221,21 @@ export async function confirmMyAuthenticator(ctx: Me, code: unknown, stamp: unkn
       after: { reason: standing }, ip: ctx.ip }, tx);
     return standing;
   };
+  // A set-up found over outside the lock is told in its words every time, but audited only while one of the settings'
+  // presses (`signin_settings_parent`) is free and taken for it: a stale stamp sent again and again writes at most that
+  // limit's rows, and still keeps no place at the door's (`second_step_parent`).
+  const overOutside = async (standing: keyof typeof SETUP_OVER) => {
+    if ((await takeRateLimit("signin_settings_parent", ctx.parentId, now)) === "taken") await over(standing);
+    return SETUP_OVER[standing];
+  };
   const before = await setupStanding(db, ctx, rowMac, now ?? new Date());
-  if (before.standing !== "current") return SETUP_OVER[await over(before.standing)];
-  if (!(await sessionProvedRecently(db, ctx, now))) return SETUP_TIMED_OUT;
+  if (before.standing !== "current") return overOutside(before.standing);
+  if (!(await sessionProvedRecently(db, ctx, now))) {
+    // Nothing holds the row between the two reads: a confirm that finished this set-up meanwhile leaves this session's
+    // proof older than the app, so the set-up is read again, and only one still current is told the window ran out.
+    const after = await setupStanding(db, ctx, rowMac, now ?? new Date());
+    return after.standing === "current" ? SETUP_TIMED_OUT : overOutside(after.standing);
+  }
   const place = await takeRateLimitPlace("second_step_parent", ctx.parentId, now);
   if (place.take !== "taken") {
     if (place.take === "first_refusal") {
