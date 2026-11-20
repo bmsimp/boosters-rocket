@@ -6,7 +6,7 @@
 import "server-only";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Tx } from "@/lib/db/client";
-import { family, guardian, writeQueue, type ContactDetails, type RosterWrite } from "@/lib/db/schema";
+import { family, guardian, qboCustomer, writeQueue, type ContactDetails, type RosterWrite } from "@/lib/db/schema";
 import { writeAudit, type Actor } from "@/lib/audit/log";
 import { getShape } from "@/lib/roster/shape";
 import { familyLinkOf, guardianLinksOf, recordsCompany } from "@/lib/families/links";
@@ -29,9 +29,19 @@ type Target = { role: ContactWrite["role"]; qboId: string; syncToken: string; gu
  * person, the own Parent customer of each of their open memberships in an active family record (its guardian link,
  * customerOfGuardian()'s rule, and no other open membership linked to the same customer), in books with a parent type;
  * for a family, its own linked customer (the member's own in flat books), in books with no parent type. A customer
- * whose id isn't digits is never one. Whether each is still the record's own when it is sent is the sender's to check.
+ * whose id isn't digits is never one, nor one the roster cache holds inactive (as slice 9h sends nothing to one: open
+ * question 12), which would only be kept at every save. Whether each is still the record's own when it is sent is the
+ * sender's to check.
  */
 async function targetsOf(tx: Tx, of: DetailsOf): Promise<{ realmId: string; targets: Target[] } | null> {
+  const found = await recordTargetsOf(tx, of);
+  if (found === null || !found.targets.length) return found;
+  const inactive = new Set((await tx.select({ qboId: qboCustomer.qboId }).from(qboCustomer)
+    .where(and(inArray(qboCustomer.qboId, found.targets.map((t) => t.qboId)), eq(qboCustomer.active, false)))).map((c) => c.qboId));
+  return { realmId: found.realmId, targets: found.targets.filter((t) => !inactive.has(t.qboId)) };
+}
+/** targetsOf()'s records, before the roster cache is asked which of their customers it holds inactive. */
+async function recordTargetsOf(tx: Tx, of: DetailsOf): Promise<{ realmId: string; targets: Target[] } | null> {
   const realmId = await recordsCompany(tx);
   if (realmId === null) return null;
   const shape = await getShape(tx);

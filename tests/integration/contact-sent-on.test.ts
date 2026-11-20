@@ -137,6 +137,19 @@ describe("a parent's save queues the change for each record it goes to (items 1 
     expect(posts()).toEqual([]);
   });
 
+  it("nothing is queued for a customer the roster's copy holds inactive, save after save (as nothing is sent to one)", async () => {
+    const a = await ana();
+    await db.update(qboCustomer).set({ active: false }).where(eq(qboCustomer.qboId, "11"));
+    for (const [phone, version] of [[NEW_PHONE, "p:1"], ["512-555-0333", "p:2"]] as const) {
+      expect(await saveDetails({ kind: "person", parentId: a.ana.id }, asSaved({ phone }, version), { actor: parentActor(a.ana.id, "ana@example.com"), ip: null }))
+        .toMatchObject({ is: "saved", queued: 0 });
+    }
+    expect(await items()).toEqual([]);
+    expect(await personDetails(a.ana.id)).toMatchObject({ values: { phone: "512-555-0333" } });
+    await wake();
+    expect(posts()).toEqual([]);
+  });
+
   it("a person in two families: two items, sent to two records; a family made inactive gets none", async () => {
     const a = await ana();
     // Ana's own record in the Chen family too: Mei Chen's customer, 21, stands for it here.
