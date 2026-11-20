@@ -146,6 +146,14 @@ describe("students on one side only", () => {
     const customers = [...company, c("13", "Zoe Rivera", "3", "10")];
     expect(compare(rivera({ students: [student(S3, "Ivy Rivera", null)] }), { shape: NO_STUDENTS, customers }).differences).toEqual([]);
   });
+  it("nothing of students at all with no student type, nor in flat books: no name, no active flag, no inactive record", () => {
+    // Leo's name differs and his customer is inactive; an inactive record's customer is active under the family.
+    const customers = changed("12", { displayName: "Leo M. Rivera", active: false }).map((x) => (x.qboId === "22" ? { ...x, parentQboId: "10" } : x));
+    const f = rivera({ students: [student(S1, "Leo Rivera", "12"), student(S2, "Sam Chen", "22", false)] });
+    expect(compare(f, { customers }).differences.map((d) => d.kind)).toEqual(["name", "active", "active"]); // with a student type
+    expect(compare(f, { customers, shape: NO_STUDENTS }).differences).toEqual([]);
+    expect(compare({ ...f, kind: "member", guardians: [] }, { customers, shape: FLAT }).differences).toEqual([]);
+  });
 });
 
 describe("a student customer under the family whose record the portal has elsewhere", () => {

@@ -105,8 +105,9 @@ export function indexQueue(items: readonly QueueFact[]) {
  * composed accents, trimmed, each run of spaces one), so two names that differ only there, which look alike on the page
  * and which no rename in the portal could change (the portal's name is already in that form), are the same; a
  * difference of case or of any visible character is a difference (nameKey(), which ignores case, is the rule of which
- * names are taken, not this one). A record with no name differs from any name. Students and Parent customers are compared only where the shape has their
- * type, in layered books; a student's place only where it has a student type.
+ * names are taken, not this one). A record with no name differs from any name. Nothing of students (a name, whether
+ * active, a place, one on either side only) is compared unless the shape has a student type, in layered books; nothing
+ * of Parent customers or guardians unless it has a parent type.
  */
 export function differencesOf(o: { shape: MembershipShape; roster: Roster; customers: readonly Cust[]; studentRecords: ReadonlyMap<string, LinkedStudent>;
   guardianLinked: ReadonlySet<string>; queue: readonly QueueFact[] }): (f: FamilyToCompare) => FamilyDifferences {
@@ -124,10 +125,10 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
     if (!sameName(f.name, customer.displayName)) out.push({ kind: "name", of: f.kind, portal: f.name, books: customer.displayName, queue: q.rename.get(customer.qboId) ?? null });
     if (!customer.active) out.push({ kind: "active", of: f.kind, who: recordNameWords(f.name, "family"), portalActive: true, queue: q.deactivate.get(customer.qboId) ?? null });
     const there = listed.get(f.customerId);
-    for (const s of f.students) {
+    for (const s of studentType ? f.students : []) {
       const who = recordNameWords(s.name, "student");
       if (s.customerId === null) {
-        if (s.active && studentType) out.push({ kind: "student_unlinked", who, studentId: s.id, queue: q.studentCreate.get(String(s.id)) ?? null });
+        if (s.active) out.push({ kind: "student_unlinked", who, studentId: s.id, queue: q.studentCreate.get(String(s.id)) ?? null });
         continue;
       }
       const c = byId.get(s.customerId);
@@ -140,10 +141,8 @@ export function differencesOf(o: { shape: MembershipShape; roster: Roster; custo
       }
       if (c !== undefined && !sameName(s.name, c.displayName)) out.push({ kind: "name", of: "student", portal: s.name, books: c.displayName, queue: q.rename.get(c.qboId) ?? null });
       if (c !== undefined && !c.active) out.push({ kind: "active", of: "student", who, portalActive: true, queue: q.deactivate.get(c.qboId) ?? null });
-      if (studentType) {
-        const place = placeOf(s.customerId, f.customerId);
-        if (place.at !== "here" && place.at !== "unknown") out.push({ kind: "place", who, studentId: s.id, place, queue: q.move.get(String(s.id)) ?? null });
-      }
+      const place = placeOf(s.customerId, f.customerId);
+      if (place.at !== "here" && place.at !== "unknown") out.push({ kind: "place", who, studentId: s.id, place, queue: q.move.get(String(s.id)) ?? null });
     }
     let inactiveUnrecorded = 0;
     if (studentType && there !== undefined) {

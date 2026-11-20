@@ -41,7 +41,9 @@ export type CustomerShown = { name: string; email: string | null };
  * - `linked`: made by a staff member's press (`confirmed`: "Create a family from this"; `created`: the portal made the
  *   customer in the books), by `by` (the staff member's name, null when none is named or found) on `at`;
  * - `customer_gone`: the cache holds customers, and the linked one isn't among them (open question 13; the link is kept);
- * - `not_a_family`: the linked customer is there, but isn't an active family at the top of the tree now, for `reasons`;
+ * - `not_a_family`: the linked customer is there, but isn't a family at the top of the tree now (another type, no type,
+ *   or under another customer), for `reasons`, with `inactive` among them when that is so too; a customer that is only
+ *   inactive, otherwise a family, isn't this: its link stands, and being inactive is a difference (slice M2);
  * - `suggested`, `several`, `no_match`: a family with no link, by its guardians' sign-in addresses (src/lib/accounting/match.ts);
  * - `not_checked`: the books can't be checked now (any state but `listed`, for a family with no link; or no link read).
  */
