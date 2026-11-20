@@ -772,8 +772,9 @@ describe("differences, for a link that stands (slice M2)", () => {
     expect(rowNamed(html, "Riveras")![4]).toContain(`The family's name. In the portal: “Riveras”. In the books: “Rivera Family”. ${kept} See the change on Reconciliation`);
     expect(rowNamed(html, "Chen Family")![4]).toContain("Where Leo Rivera is. In the portal: In this family. In the books: Under Rivera Family in QuickBooks. Waiting to reach QuickBooks. See the change on Reconciliation");
     expect(html.split('href="/staff/reconciliation#writes-h"').length - 1).toBe(3);
-    // No button but the filter's own, and nothing of money.
-    expect(html.split("<button").length - 1).toBe(1);
+    // No button but the filter's own and, since slice M3a2, each carried-over row's Confirm this link; nothing of money.
+    expect(html.split("<button").length - 1).toBe(3);
+    expect(html.split("Confirm this link<span").length - 1).toBe(2);
     expect(html).not.toContain("invoices");
   });
 
