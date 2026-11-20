@@ -1,4 +1,4 @@
-import type { BetterAuthPlugin } from "better-auth";
+import type { BetterAuthPlugin, GenericEndpointContext } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
 import { z } from "zod";
 import { clientIpFrom } from "@/lib/request";
@@ -6,12 +6,26 @@ import { refuseCodeWithoutStep, sendSecondStepCode, verifySecondFactor, verifySi
 import { checkPasswordSignin, MOST_TYPED_ADDRESS, MOST_TYPED_PASSWORD } from "@/lib/parents/password-signin";
 import { MAX_RETURN_PATH } from "./return-path";
 import { finishParentSignin } from "./parent-signin-finish";
-import { clearPendingStep, pendingStepEnd, readDeviceToken, readPendingStep, setPendingStep } from "./parent-signin-step";
+import { clearPendingStep, pendingStepEnd, readDeviceToken, readPendingStep, setPendingStep, type PendingStep } from "./parent-signin-step";
 
 type Ctx = { headers?: Headers; request?: Request };
 const ipOf = (ctx: Ctx) => { const h = ctx.headers ?? ctx.request?.headers; return h ? clientIpFrom(h) : null; };
 const REJECTED = { ok: false, error: "rejected" } as const;
 const LIMITED = { ok: false, error: "rate_limited" } as const;
+
+/**
+ * The end of a second step that went through, the emailed code's (/portal-code/check) and, since slice SI-6a, the
+ * authenticator app's or a backup code's (/portal-app/check) alike: the one finish every sign-in goes through, with the
+ * pending step's person and password and what the step spent as the proof; refused, the pending step is cleared, since
+ * what it spent can't be used again.
+ */
+async function finishSecondStep(ctx: GenericEndpointContext, step: PendingStep, spent: { codeId: string } | { authenticatorId: string } | { backupCodeId: string },
+  ip: string | null, next: string | undefined) {
+  const done = await finishParentSignin(ctx, { parentId: step.parentId, email: step.email, ip, next,
+    proof: { password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt }, ...spent } });
+  if (!done.ok) clearPendingStep(ctx);
+  return done.ok ? { ok: true as const, next: done.next } : REJECTED;
+}
 
 /**
  * The portal's parent door (spec §1, and the sign-in release, slice SI-3b). A sign-in is the address and the password,
@@ -96,10 +110,7 @@ export const parentCodePlugin = () => ({
         return ctx.json({ ok: false, error: r.reason });
       }
       // Everything after the code is checked is the one finish every sign-in goes through (parent-signin-finish.ts).
-      const done = await finishParentSignin(ctx, { parentId: step.parentId, email: step.email, ip, next: ctx.body.next,
-        proof: { password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt }, codeId: r.codeId } });
-      if (!done.ok) clearPendingStep(ctx); // the code is spent: the step can't go on
-      return ctx.json(done.ok ? { ok: true, next: done.next } : REJECTED);
+      return ctx.json(await finishSecondStep(ctx, step, { codeId: r.codeId }, ip, ctx.body.next));
     }),
     // The second step of a person with an authenticator app in force (the sign-in release, slice SI-6a): the app's
     // six-digit code, or one of their backup codes, for the pending step's person alone, as /portal-code/check takes the
@@ -116,15 +127,13 @@ export const parentCodePlugin = () => ({
         const why = await refuseCodeWithoutStep(ip, now);
         return ctx.json({ ok: false, error: why });
       }
-      const password = { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt };
-      const r = await verifySecondFactor({ parentId: step.parentId, email: step.email, password }, ctx.body.code, ip, now);
+      const r = await verifySecondFactor({ parentId: step.parentId, email: step.email,
+        password: { credentialId: step.credentialId, credentialUpdatedAt: step.credentialUpdatedAt } }, ctx.body.code, ip, now);
       if (!r.ok) {
         if (r.ended) clearPendingStep(ctx);
         return ctx.json({ ok: false, error: r.reason });
       }
-      const done = await finishParentSignin(ctx, { parentId: step.parentId, email: step.email, ip, next: ctx.body.next, proof: { password, ...r.proof } });
-      if (!done.ok) clearPendingStep(ctx); // the code is spent: the step can't go on
-      return ctx.json(done.ok ? { ok: true, next: done.next } : REJECTED);
+      return ctx.json(await finishSecondStep(ctx, step, r.proof, ip, ctx.body.next));
     }),
     // A set-up link's sign-in (the sign-in release, slice SI-3a): the link form's action has set the password and holds
     // the proof of what it spent (choosePasswordFromLink(), password-set.ts), and finishes the sign-in here, through the
