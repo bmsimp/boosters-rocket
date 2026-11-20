@@ -81,7 +81,11 @@ function parentTargets(): Target[] {
 const BEFORE_SIGN_IN: Target[] = [
   { label: "/sign-in", address: "/sign-in", signedIn: false },
   { label: "/sign-in (code step)", address: "/sign-in", signedIn: false,
-    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null }) } },
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "code" }) } },
+  // The app step (slice SI-6a): the second step of a parent with an authenticator app, its code or a backup code. Nobody
+  // seeded has an app, so the device's kept step draws it; nothing is submitted.
+  { label: "/sign-in (app step)", address: "/sign-in", signedIn: false,
+    deviceStore: { "booster.signin.code-step": JSON.stringify({ sentAt: 0, next: null, kind: "app" }) } },
   { label: "/choose-family", address: "/choose-family", signedIn: true },
   { label: "/refused", address: "/refused", signedIn: false },
   // The pages a set-up or reset link opens: the form, with a live link (never submitted here), and the one message for a

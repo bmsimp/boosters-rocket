@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
-import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep } from "./code-step";
+import { APP_ASKED, APP_CODE_LABEL, APP_REJECTED, CODE_SENT, CODE_REJECTED, CODE_STEP_ENDED, PASSWORD_REJECTED, SIGNIN_LEDE, TOO_MANY_TRIES, signinFailure } from "@/lib/parents/signin-copy";
+import { CODE_STEP_LIFE_MS, clearCodeStep, deviceStore, loadCodeStep, saveCodeStep, type CodeStepKind } from "./code-step";
 
 const BASE = "/api/auth/parent";
 const RESEND_SECONDS = 60;
@@ -14,19 +14,21 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 class HttpStatus extends Error { constructor(readonly status: number) { super(`HTTP ${status}`); } }
 const failure = (e: unknown) => signinFailure(e instanceof HttpStatus ? e.status : null);
 
-type Answer = { ok: boolean; next?: string; step?: "code"; error?: string };
+type Answer = { ok: boolean; next?: string; step?: "code" | "app"; error?: string };
 /** What went wrong, in words, with whether to show the way to set up or reset a password beside it. */
 type Problem = { words: string; passwordLink: boolean };
 
 /**
  * Spec §1 The pages, as the sign-in release's slice SI-3b made them: the email and the password on one form, then, on a
- * device the portal doesn't remember, the 6-digit code it emails. The page never says whether the address is on file.
+ * device the portal doesn't remember, the 6-digit code it emails, or, since slice SI-6a, for a parent with an
+ * authenticator app, the app's code or a backup code (the app step: nothing is emailed, so there is no Resend). The page
+ * never says whether the address is on file.
  * The step between the two is the server's (a signed cookie this component never sets or reads); the device keeps only
- * when the code was asked for and where to go (./code-step.ts). `next` is the page the parent asked for, already checked
+ * when the second step was asked for, which one it is, and where to go (./code-step.ts). `next` is the page the parent asked for, already checked
  * by the sign-in page; the portal checks it again when the sign-in finishes.
  */
 export function PasswordSignIn({ next }: { next: string | null }) {
-  const [step, setStep] = useState<"password" | "code">("password");
+  const [step, setStep] = useState<"password" | CodeStepKind>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -49,14 +51,14 @@ export function PasswordSignIn({ next }: { next: string | null }) {
     const saved = loadCodeStep(deviceStore(), Date.now());
     if (!saved) return;
     /* eslint-disable react-hooks/set-state-in-effect */
-    setStartedAt(saved.sentAt); setSentAt(saved.sentAt); setNow(Date.now()); setStep("code");
+    setStartedAt(saved.sentAt); setSentAt(saved.sentAt); setNow(Date.now()); setStep(saved.kind);
     if (!next) setBack(saved.next);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [next]);
 
   // Once the step's time is over no code can work, so the page goes back to the password step and says so.
   useEffect(() => {
-    if (step !== "code") return;
+    if (step === "password") return;
     const t = setInterval(() => {
       const at = Date.now();
       if (at - startedAt < CODE_STEP_LIFE_MS) { setNow(at); return; }
@@ -66,17 +68,17 @@ export function PasswordSignIn({ next }: { next: string | null }) {
     return () => clearInterval(t);
   }, [step, startedAt, next]);
 
-  const toCodeStep = () => {
+  const toCodeStep = (kind: CodeStepKind) => {
     const t = Date.now();
-    saveCodeStep(deviceStore(), { sentAt: t, next: back });
-    moved.current = true; setStartedAt(t); setSentAt(t); setNow(t); setCode(""); setPassword(""); setStep("code");
+    saveCodeStep(deviceStore(), { sentAt: t, next: back, kind });
+    moved.current = true; setStartedAt(t); setSentAt(t); setNow(t); setCode(""); setPassword(""); setStep(kind);
   };
   const signIn = async () => {
     setBusy(true); setProblem(null);
     try {
       const r = await post<Answer>("/portal-password/check", { email, password, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
-      if (r.ok && r.step === "code") { toCodeStep(); return; }
+      if (r.ok && (r.step === "code" || r.step === "app")) { toCodeStep(r.step); return; }
       // Too many tries is said as such, with no way to a reset: a reset ends every session and doesn't shorten the wait.
       setProblem(r.error === "rate_limited" ? { words: TOO_MANY_TRIES, passwordLink: false } : { words: PASSWORD_REJECTED, passwordLink: true });
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
@@ -95,9 +97,9 @@ export function PasswordSignIn({ next }: { next: string | null }) {
   const check = async () => {
     setBusy(true); setProblem(null);
     try {
-      const r = await post<Answer>("/portal-code/check", { code, ...(back ? { next: back } : {}) });
+      const r = await post<Answer>(step === "app" ? "/portal-app/check" : "/portal-code/check", { code, ...(back ? { next: back } : {}) });
       if (r.ok && r.next) { clearCodeStep(deviceStore()); window.location.assign(r.next); return; }
-      setProblem({ words: r.error === "rate_limited" ? TOO_MANY_TRIES : CODE_REJECTED, passwordLink: false });
+      setProblem({ words: r.error === "rate_limited" ? TOO_MANY_TRIES : step === "app" ? APP_REJECTED : CODE_REJECTED, passwordLink: false });
     } catch (e) { setProblem({ words: failure(e), passwordLink: false }); } finally { setBusy(false); }
   };
   // Starting again keeps nothing of the step it leaves, which on a shared device may have been somebody else's: not the
@@ -129,6 +131,21 @@ export function PasswordSignIn({ next }: { next: string | null }) {
         {shown}
         {/* Busy is aria-disabled, not disabled: a disabled button drops the focus, and the keyboard's place with it. */}
         <button className="btn" aria-disabled={busy || undefined}>{busy ? "Signing in…" : "Sign in"}</button>
+      </form>
+    );
+  }
+  if (step === "app") {
+    // One field for the app's 6-digit code or a backup code, so its keyboard is a text one. No Resend: nothing is emailed.
+    return (
+      <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!busy) void check(); }}>
+        <p role="status" id="app-step-words">{APP_ASKED}</p>
+        <label className="field"><span>{APP_CODE_LABEL}</span>
+          <input ref={field} name="code" aria-describedby="app-step-words" inputMode="text" autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+            autoComplete="one-time-code" maxLength={20} required value={code} onChange={(e) => setCode(e.target.value)} />
+        </label>
+        {shown}
+        <button className="btn" aria-disabled={busy || undefined}>{busy ? "Checking…" : "Confirm"}</button>
+        <button type="button" className="btn btn-line" onClick={startAgain}>Start again</button>
       </form>
     );
   }

@@ -7,7 +7,9 @@
 // (checkPasswordSignin(), password-signin.ts, for the session's own address; a page request carries no device cookie,
 // whose path is /api/auth/parent, so since slice SI-5b the device is the one the session names, `device_id`, and its
 // tries are counted against that device when it is the person's and unexpired, else against the person, `password_reask_parent`),
-// then the emailed code (sendSecondStepCode() for a change, verifySigninCode(), signinStands(), signin-codes.ts). A remembered device is never
+// then the second step: the emailed code (sendSecondStepCode() for a change, verifySigninCode(), signinStands(),
+// signin-codes.ts), or, since slice SI-6a, for a person with an authenticator app in force, the app's code or a backup
+// code, and no code is sent (verifySecondFactor(), signinStands(); open questions 24 and 28). A remembered device is never
 // a second step here: it is the very phone the question's reason speaks of ("a 90-day session on an unlocked phone
 // should not be enough to take the sign-in over"). Nothing here makes a session, sets a cookie or calls the finish: it
 // stamps the `strong_at` of the session that asked, and nothing else. Server only; parent code.
@@ -20,7 +22,8 @@ import { writeAudit } from "@/lib/audit/log";
 import { env } from "@/env";
 import type { ParentCtx } from "@/lib/guards";
 import { MOST_TYPED_PASSWORD, checkPasswordSignin } from "./password-signin";
-import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySigninCode, type PasswordProof, type StepPerson } from "./signin-codes";
+import { CODE_TTL_MS, refuseCodeWithoutStep, sendSecondStepCode, signinStands, verifySecondFactor, verifySigninCode, type PasswordProof, type StepPerson } from "./signin-codes";
+import { hasAuthenticator } from "./authenticator";
 import { lockedPerson, parentActor } from "./sessions";
 import { provedRecently } from "./reask-rule";
 import { SIGNIN_SETTINGS_COPY as COPY } from "./signin-settings-copy";
@@ -115,11 +118,16 @@ async function readStamp(raw: unknown, who: Asker, now: Date): Promise<StepPerso
   return { parentId: who.parentId, email: who.email, password, endsAt: new Date(endsAt) };
 }
 
-/** What a step of asking again answers: the right password gives the stamp to send back with the code. */
-export type AskAgainAnswer = { ok: true; message: string; stamp: string } | { ok: false; errors: string[] };
+/**
+ * What a step of asking again answers: the right password gives the stamp to send back with the code, and which second
+ * step to ask for (`step`): the code it emailed (`code`), or, since slice SI-6a, the person's authenticator app's code
+ * or a backup code (`app`), when nothing is emailed.
+ */
+export type AskAgainAnswer = { ok: true; message: string; stamp: string; step: "code" | "app" } | { ok: false; errors: string[] };
 export type ProvedAnswer = { ok: true; message: string } | { ok: false; errors: string[] };
 const PASSWORD_REFUSED = { ok: false as const, errors: [COPY.passwordRejected] };
 const CODE_REFUSED = { ok: false as const, errors: [COPY.codeRejected] };
+const APP_REFUSED = { ok: false as const, errors: [COPY.appRejected] };
 const TOO_MANY = { ok: false as const, errors: [COPY.tooManyTries] };
 
 /**
@@ -135,7 +143,9 @@ const TOO_MANY = { ok: false as const, errors: [COPY.tooManyTries] };
  * refusal is one answer, and over a limit or turned away by a full wait, the door's words. A right password always
  * sends the code (sendSecondStepCode() for a change, whose mail says so; with its own limits, wait and rows; its mail is
  * not awaited, and the answer never says what became of it), for a step ending CODE_TTL_MS after the password proved right, which the stamp carries.
- * Under Strict the door refuses (`strict_no_factor`), and so nothing is asked again until SI-6 and SI-7.
+ * Since slice SI-6a a person with an authenticator app in force (the door's own read, PasswordCheck.step) is sent no
+ * code: the answer asks for the app's code or a backup code (`step: "app"`), with the same stamp. Under Strict the door
+ * refuses a person with no second factor (`strict_no_factor`), so only an app holder is asked again there.
  */
 export async function askAgainPassword(ctx: Asker, password: unknown, now = new Date()): Promise<AskAgainAnswer> {
   if (typeof password !== "string" || password.length > MOST_TYPED_PASSWORD) return PASSWORD_REFUSED;
@@ -144,27 +154,31 @@ export async function askAgainPassword(ctx: Asker, password: unknown, now = new 
   if (!check.ok) return check.limited ? TOO_MANY : PASSWORD_REFUSED;
   if (check.person.id !== ctx.parentId) return PASSWORD_REFUSED; // one address is one person: never another's
   const endsAt = new Date(check.at.getTime() + CODE_TTL_MS);
+  const stamp = makeStamp({ sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email }, check.password, endsAt);
+  if (check.step === "second_factor") return { ok: true, message: COPY.appAsked, stamp, step: "app" };
   const { delivery } = await sendSecondStepCode({ parentId: ctx.parentId, email: check.person.email, password: check.password, endsAt }, ctx.ip, check.at, "change");
   void delivery;
-  return { ok: true, message: COPY.codeSent, stamp: makeStamp({ sessionId: ctx.sessionId, parentId: ctx.parentId, email: check.person.email }, check.password, endsAt) };
+  return { ok: true, message: COPY.codeSent, stamp, step: "code" };
 }
 
 /**
  * The second step: the code, with the stamp the first step gave. The stamp is read for this session and person
  * (readStamp()); with none, the code signs nothing (refuseCodeWithoutStep(), counted and audited as the door counts a
- * code with no pending step). Then the door's checks, called as they are: verifySigninCode() for the stamp's person and
- * password (its 10 minutes, 5 tries, `code_check_ip` and rows), and signinStands() for that password and code. Then, in
- * one transaction in the order above lockedPerson() (the person's row, then their sessions), the person still at the
- * address and not blocked, and this session's `strong_at` set to now, this session's alone, audited
- * `signin.proved_again`. Every refusal is one answer, and over a limit the door's words.
+ * code with no pending step). Then the door's checks, called as they are: for a person with an authenticator app in
+ * force (since slice SI-6a), verifySecondFactor() for the stamp's person and password (the app's code or a backup code,
+ * with its limits, replay guard and rows), otherwise verifySigninCode() (its 10 minutes, 5 tries, `code_check_ip` and
+ * rows); and signinStands() for that password and what was spent. Then, in one transaction in the order above
+ * lockedPerson() (the person's row, then their sessions), the person still at the address and not blocked, and this
+ * session's `strong_at` set to now, this session's alone, audited `signin.proved_again` with the step that proved it
+ * (`emailed_code`, `authenticator` or `backup_code`). Every refusal is one answer, and over a limit the door's words.
  */
 export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, now = new Date()): Promise<ProvedAnswer> {
   if (typeof code !== "string" || code.length > MOST_SENT_CODE) return CODE_REFUSED;
   const step = await readStamp(stamp, ctx, now);
   if (!step) return (await refuseCodeWithoutStep(ctx.ip, now)) === "rate_limited" ? TOO_MANY : CODE_REFUSED;
-  const verified = await verifySigninCode({ parentId: step.parentId, email: step.email, password: step.password }, code, ctx.ip, now);
-  if (!verified.ok) return verified.reason === "rate_limited" ? TOO_MANY : CODE_REFUSED;
-  if (!(await signinStands(step.parentId, step.email, ctx.ip, { password: step.password, codeId: verified.codeId }, now))) return CODE_REFUSED;
+  const proved = await proveSecondStep(step, code, ctx.ip, now);
+  if (!proved.ok) return proved.limited ? TOO_MANY : proved.app ? APP_REFUSED : CODE_REFUSED;
+  if (!(await signinStands(step.parentId, step.email, ctx.ip, { password: step.password, ...proved.proof }, now))) return proved.app ? APP_REFUSED : CODE_REFUSED;
   const stamped = await db.transaction(async (tx) => {
     const live = await lockedPerson(tx, ctx.parentId);
     if (!live || live.blocked || live.email !== step.email) return false;
@@ -174,8 +188,27 @@ export async function askAgainCode(ctx: Asker, stamp: unknown, code: unknown, no
       .returning({ id: parentAuthSession.id });
     if (rows.length === 0) return false;
     await writeAudit({ actor: parentActor({ id: ctx.parentId, email: live.email }), action: "signin.proved_again", targetType: "parent", targetId: ctx.parentId,
-      after: { step: "emailed_code" }, ip: ctx.ip }, tx);
+      after: { step: proved.step }, ip: ctx.ip }, tx);
     return true;
   });
-  return stamped ? { ok: true, message: COPY.proved } : CODE_REFUSED;
+  return stamped ? { ok: true, message: COPY.proved } : proved.app ? APP_REFUSED : CODE_REFUSED;
+}
+
+/** The second step a stamp's person proved, with what it spent, or a refusal (`app` when it was the app's step that refused). */
+type Proved = { ok: true; app: boolean; step: "emailed_code" | "authenticator" | "backup_code"; proof: { codeId: string } | { authenticatorId: string } | { backupCodeId: string } }
+  | { ok: false; app: boolean; limited: boolean };
+
+/**
+ * The person's own second step, as the door takes it: their authenticator app's code or a backup code when they have an
+ * app in force (verifySecondFactor()), otherwise the emailed code (verifySigninCode()). An app turned on between the
+ * password and the code leaves a code mailed before it to be refused at signinStands() (`second_factor_in_force`).
+ */
+async function proveSecondStep(step: StepPerson, code: string, ip: string | null, now: Date): Promise<Proved> {
+  const who = { parentId: step.parentId, email: step.email, password: step.password };
+  if (await hasAuthenticator(step.parentId)) {
+    const r = await verifySecondFactor(who, code, ip, now);
+    return r.ok ? { ok: true, app: true, step: r.factor, proof: r.proof } : { ok: false, app: true, limited: r.reason === "rate_limited" };
+  }
+  const r = await verifySigninCode(who, code, ip, now);
+  return r.ok ? { ok: true, app: false, step: "emailed_code", proof: { codeId: r.codeId } } : { ok: false, app: false, limited: r.reason === "rate_limited" };
 }

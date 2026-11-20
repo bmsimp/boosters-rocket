@@ -35,6 +35,7 @@ import { seedParentSettings } from "../helpers/roster-cache";
 import { codeMailed } from "../helpers/parent-door";
 import { seedEmailChange } from "../helpers/email-change";
 import { linkRows, mintLink, seedCode, seedDevice, seedPassword } from "../helpers/signin-links";
+import { appCode, authenticatorRows, backupCodeRows, seedAuthenticator, seedBackupCodes, wrongAppCode } from "../helpers/authenticator";
 
 /**
  * A parent's sign-in settings (/family/sign-in; the sign-in release, slice SI-5a): the page, asking again (the door's
@@ -94,7 +95,7 @@ async function passwordThenCode(identity: ParentIdentity): Promise<{ stamp: stri
   asParent(identity);
   const since = outbox.length;
   const first = await askAgainPasswordAction(PROVEN_PASSWORD);
-  expect(first).toEqual({ ok: true, message: COPY.codeSent, stamp: expect.stringMatching(/^\d{13}\.[A-Za-z0-9_-]{43}$/) });
+  expect(first).toEqual({ ok: true, message: COPY.codeSent, stamp: expect.stringMatching(/^\d{13}\.[A-Za-z0-9_-]{43}$/), step: "code" });
   if (!first.ok) throw new Error("unreachable");
   return { stamp: first.stamp, code: await codeMailed(outbox, identity.email, since) };
 }
@@ -201,6 +202,41 @@ describe("asking again", () => {
     expect(JSON.stringify(proved)).not.toContain(stamp);
     // The page is drawn again with the change form.
     expect(await renderPage(SignInSettingsPage)).toMatch(/autocomplete="new-password"/i);
+  });
+
+  it("for a parent with an authenticator app (slice SI-6a): no code is sent, and the app's code or a backup code proves this session alone", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await withPassword(a);
+    const app = await seedAuthenticator(a.identity.parentId);
+    const [backup] = await seedBackupCodes(a.identity.parentId, 1);
+    const other = await seedParentSession(await authUserOf(a.identity.parentId), { familyQboId: FAMILY_A.family.qboId });
+    asParent(a.identity);
+    const first = await askAgainPasswordAction(PROVEN_PASSWORD);
+    expect(first).toEqual({ ok: true, message: COPY.appAsked, stamp: expect.stringMatching(/^\d{13}\.[A-Za-z0-9_-]{43}$/), step: "app" });
+    if (!first.ok) throw new Error("unreachable");
+    expect(await codesOf(a.identity.parentId)).toEqual([]);
+    expect(await audits("signin.code_refused")).toEqual([]);
+    expect((await audits("signin.second_step_asked")).map((r) => r.after)).toEqual([{ step: "second_factor" }]);
+    // A wrong code is the app's one refusal, and stamps nothing.
+    expect(await askAgainCodeAction(first.stamp, wrongAppCode(app.secret))).toEqual({ ok: false, errors: [COPY.appRejected] });
+    expect(await strongAtOf(a.identity.sessionId)).toBeNull();
+    const before = Date.now();
+    expect(await askAgainCodeAction(first.stamp, appCode(app.secret))).toEqual({ ok: true, message: COPY.proved });
+    expect((await strongAtOf(a.identity.sessionId))!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    expect(await strongAtOf(other.id)).toBeNull();
+    // Again, once the proof is gone, with a backup code in place of the app.
+    await db.update(parentAuthSession).set({ strongAt: null }).where(eq(parentAuthSession.id, a.identity.sessionId));
+    const second = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!second.ok) throw new Error("unreachable");
+    expect(await askAgainCodeAction(second.stamp, backup!)).toEqual({ ok: true, message: COPY.proved });
+    expect(await strongAtOf(other.id)).toBeNull();
+    expect((await backupCodeRows(a.identity.parentId))[0]!.usedAt).not.toBeNull();
+    const proved = await audits("signin.proved_again");
+    expect(proved.map((r) => [r.targetId, r.after])).toEqual([[a.identity.parentId, { step: "authenticator" }], [a.identity.parentId, { step: "backup_code" }]]);
+    for (const secret of [app.secret, backup!, first.stamp, second.stamp]) expect(JSON.stringify(await db.select().from(auditLog))).not.toContain(secret);
+    // Nothing was mailed to them: an app holder is never sent the emailed code.
+    await new Promise((r) => setImmediate(r));
+    expect(outbox.filter((m) => m.to === FAMILY_A.parent.email)).toEqual([]);
   });
 
   const counted = (kind: "password_reask_parent" | "password_try_email" | "password_try_device", subject: string) =>
@@ -741,6 +777,43 @@ describe("one parent never reaches another's devices", () => {
 });
 
 describe("one parent never reaches another's sign-in", () => {
+  it("as family A's parent: family B's stamp, app code and backup code, and a second guardian of family A's, spend nothing of theirs and are the one refusal", async () => {
+    // The sign-in release, slice SI-6a: asking again takes an authenticator app's code or a backup code, for the
+    // session's own person alone.
+    const a = await seedSignedInParent(FAMILY_A);
+    const b: SeededParent = await seedSignedInParent(FAMILY_B);
+    const second = await seedParentIn({ familyQboId: FAMILY_A.family.qboId, name: "Sigrid Secondguardian", email: "sigrid.second@family-a.example" });
+    for (const p of [a, b, second]) await withPassword(p);
+    const apps = { b: await seedAuthenticator(b.identity.parentId), second: await seedAuthenticator(second.identity.parentId) };
+    const codes = { b: (await seedBackupCodes(b.identity.parentId, 1))[0]!, second: (await seedBackupCodes(second.identity.parentId, 1))[0]! };
+    const stampOf = async (identity: ParentIdentity) => {
+      asParent(identity);
+      const r = await askAgainPasswordAction(PROVEN_PASSWORD);
+      if (!r.ok || r.step !== "app") throw new Error("the app's step should be asked for");
+      return r.stamp;
+    };
+    const stamps = { b: await stampOf(b.identity), second: await stampOf(second.identity) };
+    const theirs = async () => Promise.all([b.identity, second.identity].map(async (i) => ({
+      app: await authenticatorRows(i.parentId), codes: await backupCodeRows(i.parentId), strongAt: await strongAtOf(i.sessionId),
+    })));
+    const before = await theirs();
+
+    asParent(a.identity);
+    const NO = { ok: false, errors: [COPY.codeRejected] };
+    const tries: [string, string][] = [[stamps.b, codes.b], [stamps.b, appCode(apps.b.secret)], [stamps.second, codes.second], [stamps.second, appCode(apps.second.secret)]];
+    for (const [stamp, code] of tries) expect(await askAgainCodeAction(stamp, code)).toEqual(NO);
+    // A's own stamp (A has no app, so the emailed code is A's step) with their codes: wrong codes of A's own step.
+    const mine = await askAgainPasswordAction(PROVEN_PASSWORD);
+    if (!mine.ok) throw new Error("unreachable");
+    expect(mine.step).toBe("code");
+    for (const code of [codes.b, codes.second, appCode(apps.b.secret)]) expect(await askAgainCodeAction(mine.stamp, code)).toEqual(NO);
+
+    expect(await theirs()).toEqual(before);
+    expect(await strongAtOf(a.identity.sessionId)).toBeNull();
+    expect(await audits("signin.proved_again")).toEqual([]);
+    expect(await audits("signin.second_step")).toEqual([]);
+  });
+
   it("as family A's parent: family B's stamp, a stamp made for a second guardian of family A, and values of the wrong type and size change nothing of theirs, and are the one refusal", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     const b: SeededParent = await seedSignedInParent(FAMILY_B);
