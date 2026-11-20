@@ -21,7 +21,7 @@ import { db } from "@/lib/db/client";
 import { auditLog, parent, parentAuthAccount, parentAuthSession, parentAuthUser, parentDevice } from "@/lib/db/schema";
 import { env } from "@/env";
 import type { ParentIdentity } from "@/lib/auth/resolve";
-import { passkeyOfferFor } from "@/lib/parents/passkey-offer";
+import { declinePasskeyOffer, passkeyOfferFor } from "@/lib/parents/passkey-offer";
 import { PASSKEY_OFFER_COPY as WORDS } from "@/lib/parents/passkey-offer-copy";
 import { SIGNIN_SETTINGS_COPY as COPY } from "@/lib/parents/signin-settings-copy";
 import { takeRateLimit } from "@/lib/parents/rate-limit";
@@ -115,6 +115,37 @@ describe("who Home offers a passkey", () => {
   it("draws nothing for a session made an hour ago that asked again just now", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     await signedInJustNow(a.identity, { madeAt: ago(60 * MINUTE), strongAt: ago(MINUTE) });
+    expect(await offeredOnHome(a.identity)).toBe(false);
+  });
+
+  it("draws nothing for a session made five minutes ago by the password alone that asked again two minutes ago", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await signedInJustNow(a.identity, { madeAt: ago(5 * MINUTE), strongAt: ago(2 * MINUTE) });
+    expect(await offeredOnHome(a.identity)).toBe(false);
+  });
+
+  it("draws nothing for a fresh session whose proof is past the window", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await signedInJustNow(a.identity, { madeAt: ago(MINUTE), strongAt: ago(11 * MINUTE) });
+    expect(await offeredOnHome(a.identity)).toBe(false);
+  });
+
+  it("draws nothing when an authenticator app came into force after the sign-in's proof", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    await signedInJustNow(a.identity);
+    await seedAuthenticator(a.identity.parentId, { createdAt: ago(MINUTE / 2) });
+    expect(await offeredOnHome(a.identity)).toBe(false);
+  });
+
+  it("draws nothing when the session's device has run out, or is another person's", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const b = await seedSignedInParent(FAMILY_B);
+    await signedInJustNow(a.identity);
+    const expired = await seedDevice(a.identity.parentId, { expiresAt: ago(MINUTE) });
+    await db.update(parentAuthSession).set({ deviceId: expired.id }).where(eq(parentAuthSession.id, a.identity.sessionId));
+    expect(await offeredOnHome(a.identity)).toBe(false);
+    const theirs = await seedDevice(b.identity.parentId);
+    await db.update(parentAuthSession).set({ deviceId: theirs.id }).where(eq(parentAuthSession.id, a.identity.sessionId));
     expect(await offeredOnHome(a.identity)).toBe(false);
   });
 
@@ -225,6 +256,50 @@ describe("Not now", () => {
     expect(await stampOf(deviceId!)).toBeNull();
   });
 
+  it("keeps a Not now pressed twelve minutes after signing in, the box still on screen", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { deviceId } = await signedInJustNow(a.identity, { madeAt: ago(12 * MINUTE), strongAt: ago(12 * MINUTE) });
+    asParent(a.identity);
+    expect(await declinePasskeyOfferAction()).toEqual({ ok: true, message: WORDS.declined });
+    expect(await declinesOf(a.identity.parentId)).toBe(1);
+    expect(await stampOf(deviceId!)).not.toBeNull();
+  });
+
+  it("says Home won't ask again to a press after the third, counting nothing more", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { deviceId } = await signedInJustNow(a.identity);
+    await db.update(parent).set({ passkeyOfferDeclines: 3 }).where(eq(parent.id, a.identity.parentId));
+    asParent(a.identity);
+    expect(await declinePasskeyOfferAction()).toEqual({ ok: true, message: WORDS.declinedLast, last: true });
+    expect(await declinesOf(a.identity.parentId)).toBe(3);
+    expect(await stampOf(deviceId!)).toBeNull();
+  });
+
+  it("changes nothing for a blocked person", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const { deviceId } = await signedInJustNow(a.identity);
+    await db.update(parent).set({ blocked: true }).where(eq(parent.id, a.identity.parentId));
+    expect(await declinePasskeyOffer(a.identity)).toEqual({ ok: true, message: WORDS.declined });
+    expect(await declinesOf(a.identity.parentId)).toBe(0);
+    expect(await stampOf(deviceId!)).toBeNull();
+  });
+
+  it("stamps no device that has run out, nor another person's the session names, and counts nothing", async () => {
+    const a = await seedSignedInParent(FAMILY_A);
+    const b = await seedSignedInParent(FAMILY_B);
+    await signedInJustNow(a.identity);
+    const expired = await seedDevice(a.identity.parentId, { expiresAt: ago(MINUTE) });
+    const theirs = await seedDevice(b.identity.parentId);
+    asParent(a.identity);
+    for (const device of [expired.id, theirs.id]) {
+      await db.update(parentAuthSession).set({ deviceId: device }).where(eq(parentAuthSession.id, a.identity.sessionId));
+      expect(await declinePasskeyOfferAction()).toEqual({ ok: true, message: WORDS.declined });
+      expect(await stampOf(device)).toBeNull();
+    }
+    expect(await declinesOf(a.identity.parentId)).toBe(0);
+    expect(await declinesOf(b.identity.parentId)).toBe(0);
+  });
+
   it("is refused over the settings' limit, changing nothing", async () => {
     const a = await seedSignedInParent(FAMILY_A);
     const { deviceId } = await signedInJustNow(a.identity);
@@ -262,12 +337,15 @@ describe("Not now", () => {
   it("a staff reset keeps the count and forgets the stamp with the devices", async () => {
     await seedWorkingMail();
     const a = await seedSignedInParent(FAMILY_A);
-    await signedInJustNow(a.identity);
+    const { deviceId } = await signedInJustNow(a.identity);
     asParent(a.identity);
     expect((await declinePasskeyOfferAction()).ok).toBe(true);
     expect(await declinesOf(a.identity.parentId)).toBe(1);
+    expect(await stampOf(deviceId!)).not.toBeNull();
     expect((await resetSignin(a.identity.parentId, { reason: "Lost every way in; called back on the number we hold.", calledBack: true }, ADMIN)).ok).toBe(true);
+    // The stamped row is gone with every device: the next device the portal meets is a new one, with no stamp.
     expect(await deviceRows(a.identity.parentId)).toEqual([]);
+    expect(await db.select().from(parentDevice).where(eq(parentDevice.id, deviceId!))).toEqual([]);
     expect(await declinesOf(a.identity.parentId)).toBe(1);
   });
 });

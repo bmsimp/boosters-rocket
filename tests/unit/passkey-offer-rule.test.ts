@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOST_DECLINES, OFFER_AGAIN_AFTER_MS, atSignin, declineCounts, deviceDue, offerDue, type OfferFactsAll } from "@/lib/parents/passkey-offer-rule";
+import { MOST_DECLINES, OFFER_AGAIN_AFTER_MS, PROVED_WITH_SIGNIN_MS, atSignin, declineCounts, deviceDue, offerDue, provedAtSignin, type OfferFactsAll } from "@/lib/parents/passkey-offer-rule";
 import { REASK_WINDOW_MS } from "@/lib/parents/reask-rule";
 
 // The passkey offer's rule (the sign-in release, slice SI-8; open question 31): offered only right after a sign-in
@@ -45,6 +45,19 @@ describe("the passkey offer's rule", () => {
     expect(offerDue(due({ sessionMadeAt: ago(60 * 60 * SECOND), strongAt: ago(5 * SECOND) }), NOW)).toBe(false);
   });
 
+  it("offers only a proof made with the sign-in, a minute either way: not one made by asking again minutes after a password-only sign-in", () => {
+    expect(PROVED_WITH_SIGNIN_MS).toBe(60 * SECOND);
+    const made = ago(5 * 60 * SECOND);
+    expect(provedAtSignin({ sessionMadeAt: made, strongAt: new Date(made.getTime() + 60 * SECOND) })).toBe(true);
+    expect(provedAtSignin({ sessionMadeAt: made, strongAt: new Date(made.getTime() + 61 * SECOND) })).toBe(false);
+    expect(provedAtSignin({ sessionMadeAt: made, strongAt: new Date(made.getTime() - 60 * SECOND) })).toBe(true);
+    expect(provedAtSignin({ sessionMadeAt: made, strongAt: new Date(made.getTime() - 61 * SECOND) })).toBe(false);
+    expect(provedAtSignin({ sessionMadeAt: made, strongAt: null })).toBe(false);
+    // Made five minutes ago by the password alone, then asked again on Sign-in settings two minutes ago.
+    expect(offerDue(due({ sessionMadeAt: made, strongAt: ago(2 * 60 * SECOND) }), NOW)).toBe(false);
+    expect(offerDue(due({ sessionMadeAt: made, strongAt: new Date(made.getTime() + 2 * SECOND) }), NOW)).toBe(true);
+  });
+
   it("offers nothing when the session may not add a passkey now", () => {
     expect(offerDue(due({ mayAdd: false }), NOW)).toBe(false);
   });
@@ -79,6 +92,15 @@ describe("the passkey offer's rule", () => {
     expect(declineCounts(due({ device: { offeredAt: ago(DAY) } }), NOW)).toBe(false);
     expect(declineCounts(due({ device: null }), NOW)).toBe(false);
     expect(declineCounts(due({ strongAt: null }), NOW)).toBe(false);
+    // A proof made by asking again later, not with the sign-in: never drawn for it, and not counted.
     expect(declineCounts(due({ sessionMadeAt: ago(REASK_WINDOW_MS + SECOND) }), NOW)).toBe(false);
+  });
+
+  it("counts a Not now pressed after the ten minutes, the box still on screen: the parent's answer is kept", () => {
+    const late = due({ sessionMadeAt: ago(12 * 60 * SECOND), strongAt: ago(12 * 60 * SECOND) });
+    expect(offerDue(late, NOW)).toBe(false);
+    expect(declineCounts(late, NOW)).toBe(true);
+    expect(declineCounts({ ...late, declines: 3 }, NOW)).toBe(false);
+    expect(declineCounts({ ...late, device: { offeredAt: ago(DAY) } }, NOW)).toBe(false);
   });
 });

@@ -26,16 +26,34 @@ export type OfferFacts = {
 export type OfferFactsAll = OfferFacts & { mayAdd: boolean; passkeys: number };
 
 /**
- * Whether this session is still at its sign-in, as far as the offer goes ("at sign-in only"): made within the window
- * (REASK_WINDOW_MS, no longer ago and not in the future) and proved there, with the password and a second step
- * (`strong_at` set, within the window too). A sign-in on a remembered device proves only the password and stamps
- * nothing, so it is offered nothing: a lasting factor added from a password and a device cookie alone would outlive a
- * password reset. Asking again later on Sign-in settings stamps `strong_at`, but the session is no longer new, so the
- * offer never comes back to Home by it.
+ * How near the session's making its proof must be for the proof to be the sign-in's own: a minute, either way. The
+ * finish makes the session and then, in the same request, stamps `strong_at` for a sign-in that proved a second step
+ * (finishParentSignin(), recordStrongSignin(), devices.ts), a moment apart; asking again on Sign-in settings stamps it
+ * later, and that proof is no sign-in's. Either way, since the two clocks (the database's and the app's) may differ a
+ * little.
+ */
+export const PROVED_WITH_SIGNIN_MS = 60 * 1000;
+
+/**
+ * Whether the session's sign-in itself proved the password and a second step: `strong_at` set (as sessionStrongAt()
+ * reads it) and within PROVED_WITH_SIGNIN_MS of the session's making. A sign-in on a remembered device proves only the
+ * password and stamps nothing, so it is offered nothing, even when the parent asks again on Sign-in settings minutes
+ * later (that stamps `strong_at`, but not at the sign-in): a lasting factor added from a password and a device cookie
+ * alone would outlive a password reset.
+ */
+export function provedAtSignin(f: Pick<OfferFacts, "sessionMadeAt" | "strongAt">): boolean {
+  return f.strongAt !== null && Math.abs(f.strongAt.getTime() - f.sessionMadeAt.getTime()) <= PROVED_WITH_SIGNIN_MS;
+}
+
+/**
+ * Whether this session is still at its sign-in, as far as drawing the offer goes ("at sign-in only"): made within the
+ * window (REASK_WINDOW_MS, no longer ago and not in the future), its sign-in proved a second step (provedAtSignin()),
+ * and that proof still within the window. Asking again later on Sign-in settings stamps `strong_at`, but not at the
+ * sign-in, so the offer never comes back to Home by it.
  */
 export function atSignin(f: Pick<OfferFacts, "sessionMadeAt" | "strongAt">, now: Date): boolean {
   const age = now.getTime() - f.sessionMadeAt.getTime();
-  return age >= 0 && age <= REASK_WINDOW_MS && provedRecently(f.strongAt, now);
+  return age >= 0 && age <= REASK_WINDOW_MS && provedAtSignin(f) && provedRecently(f.strongAt, now);
 }
 
 /** Whether the device the session names may be offered: there, and "Not now" never pressed on it, or at least 30 days ago. */
@@ -46,10 +64,12 @@ export function deviceDue(device: OfferFacts["device"], now: Date): boolean {
 
 /**
  * Whether a press of "Not now" counts (decision 7 of SI-8): read again under the person's row, so two taps, or two
- * tabs, count once. The session at its sign-in, the device due, and fewer than three declines.
+ * tabs, count once. The session's sign-in proved a second step (the only sessions the box is drawn for), the device
+ * due, and fewer than three declines. The session's age is not read: Home draws the box once and leaves it there, and
+ * a parent who reads their mail and answers twelve minutes later has still said no, which grants nothing and is kept.
  */
 export function declineCounts(f: OfferFacts, now: Date): boolean {
-  return atSignin(f, now) && deviceDue(f.device, now) && f.declines < MOST_DECLINES;
+  return provedAtSignin(f) && deviceDue(f.device, now) && f.declines < MOST_DECLINES;
 }
 
 /**
