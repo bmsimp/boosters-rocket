@@ -64,24 +64,33 @@ export type SecondStepMiss = "no_app" | "unreadable" | "wrong" | "replayed";
  * An app's code, taken in the caller's transaction (which writes the try's audit row): the person's app in force, its
  * secret opened, the code matched for the step `now` falls in or the one before or after (matchTotp(), totp.ts), and
  * then taken only for a step newer than the newest one a code was taken for, by one conditional update (`last_used_step`
- * null or older, returning the row), so a code works once in its 30 seconds and two tries at once take it once.
+ * null or older, returning the row), so a code works once in its 30 seconds and two tries at once take it once. A
+ * secret sealed under the key before SETTINGS_ENCRYPTION_KEY was changed is sealed again under the current key by that
+ * same update: an app not used since a change still needs SETTINGS_ENCRYPTION_KEY_PREVIOUS (the runbooks say to keep it).
  */
 export async function takeAuthenticatorCode(tx: Tx, parentId: string, code: string, now: Date): Promise<{ authenticatorId: string } | { miss: SecondStepMiss }> {
   const [row] = await tx.select({ id: parentAuthenticator.id, ciphertext: parentAuthenticator.secretCiphertext, keyId: parentAuthenticator.secretKeyId })
     .from(parentAuthenticator).where(and(eq(parentAuthenticator.parentId, parentId), isNotNull(parentAuthenticator.confirmedAt)));
   if (!row) return { miss: "no_app" };
-  let secret: Buffer | null;
+  const box = secretBox();
+  const aad = authenticatorAad(row.id, parentId);
+  let opened: string;
   try {
-    secret = base32Decode(secretBox().open({ ciphertext: row.ciphertext, keyId: row.keyId }, authenticatorAad(row.id, parentId)));
+    opened = box.open({ ciphertext: row.ciphertext, keyId: row.keyId }, aad);
   } catch (e) {
     if (e instanceof SecretBoxError) return { miss: "unreadable" };
     throw e;
   }
+  const secret = base32Decode(opened);
   if (!secret || secret.length === 0) return { miss: "unreadable" };
   const step = matchTotp(secret, code, now);
   secret.fill(0);
   if (step === null) return { miss: "wrong" };
-  const [taken] = await tx.update(parentAuthenticator).set({ lastUsedStep: step })
+  // A secret sealed under a key since replaced (opened with SETTINGS_ENCRYPTION_KEY_PREVIOUS) is sealed again under the
+  // current key as its code is taken, in the same update, so an app in use stops needing the old key.
+  const resealed = row.keyId === box.currentKeyId ? null : box.seal(opened, aad);
+  const [taken] = await tx.update(parentAuthenticator)
+    .set(resealed ? { lastUsedStep: step, secretCiphertext: resealed.ciphertext, secretKeyId: resealed.keyId } : { lastUsedStep: step })
     .where(and(eq(parentAuthenticator.id, row.id), isNotNull(parentAuthenticator.confirmedAt),
       or(isNull(parentAuthenticator.lastUsedStep), lt(parentAuthenticator.lastUsedStep, step))))
     .returning({ id: parentAuthenticator.id });

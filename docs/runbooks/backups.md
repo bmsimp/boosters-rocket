@@ -24,9 +24,11 @@ Three things are not in the files, and a backup can't bring the portal back with
 somewhere safe that is not this machine (the board's password manager):
 
 1. `deploy/.env`. Its `SETTINGS_ENCRYPTION_KEY` is what reads the QuickBooks connection, the sign-in certificates,
-   the mail password and parents' authenticator apps stored in the portal's database. Losing it, or changing it without
-   keeping the old one as `SETTINGS_ENCRYPTION_KEY_PREVIOUS`, loses every parent's app: they sign in with a backup code
-   or ask the club.
+   the mail password and parents' authenticator apps stored in the portal's database. Losing it loses every parent's
+   app: they sign in with a backup code or ask the club. After changing it, keep the old one as
+   `SETTINGS_ENCRYPTION_KEY_PREVIOUS` for good, and in the safe place too: each app is sealed again under the new key
+   the next time its holder signs in with it, but an app not used since still needs the old key, and a second change
+   (which replaces `SETTINGS_ENCRYPTION_KEY_PREVIOUS`) loses the apps not used since the first.
 2. Documenso's signing certificate (the `.p12` file named by `DOCUMENSO_SIGNING_CERTIFICATE`) and its passphrase.
 3. A copy of the backups themselves: a backup that lives only on the machine it protects is lost with it.
 
